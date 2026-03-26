@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import importlib
@@ -47,11 +25,10 @@ from utils.logger import (
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs, generate_machine_specs
-from utils.utils import (
+from utils.utils_common import (
     detect_rocprof,
     get_panel_alias,
     get_rank,
-    get_submodules,
     get_version,
     get_version_display,
     parse_sets_yaml,
@@ -60,6 +37,7 @@ from utils.utils import (
     resolve_rocm_library_path,
     set_locale_encoding,
 )
+from utils.utils_profile import get_submodules
 
 
 class RocProfCompute:
@@ -555,7 +533,6 @@ class RocProfCompute:
 
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
-        self.__soc[self.__mspec.gpu_arch].post_profiling()
 
     @demarcate
     def run_analysis(self) -> None:

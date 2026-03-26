@@ -605,12 +605,20 @@ bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
   return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) && (rcclParamWarpSpeedAutoMode() != 0);
 }
 
-void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
+ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskColl* info){
+  if(info->useWarpSpeed && comm->nChannels > (MAXCHANNELS)/2){
+    WARN("WarpSpeed does not support more than %d channels. Current number of channels is %d. To avoid hang, run with RCCL_WARP_SPEED_AUTO=0", MAXCHANNELS/2, comm->nChannels);
+    return ncclInvalidArgument;
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
   info->useWarpSpeed = false;
   static bool unrollFactorSet = getenv("RCCL_UNROLL_FACTOR") != nullptr;
-  if(!comm->topo->warpSpeedEnabled) return;
+  if(!comm->topo->warpSpeedEnabled) return ncclSuccess;
   commSetUnrollFactor(comm);  // TODO: reset unroll factor per task rather than per comm
-  if(!rcclCollSupportsRing(info->func)) return;
+  if(!rcclCollSupportsRing(info->func)) return ncclSuccess;
   if (rcclParamWarpSpeedForceEnable() > 0) { // Manual performance mode
     if(info->algorithm != NCCL_ALGO_RING) {
       INFO(NCCL_TUNING, "Overriding %s algorithm with RING for nccl%s at %zu bytes as WarpSpeed is requested and only supports RING", ncclAlgoToString(info->algorithm), ncclFuncToString(info->func), nBytes);
@@ -624,7 +632,7 @@ void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size
     // to allow unroll factor to be reverted to default.
     // This can be changed once per-task unroll factor setting is implemented.
     if(info->algorithm != NCCL_ALGO_RING) {
-      return; // If Ring is not selected, assume it is suboptimal and return
+      return ncclSuccess; // If Ring is not selected, assume it is suboptimal and return
     }
     if(info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
        // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
@@ -637,6 +645,8 @@ void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size
       info->useWarpSpeed = true;
     }
   }
+  NCCLCHECK(validChannelsForWarpSpeed(comm, info));
+  return ncclSuccess;
 }
 
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm) {

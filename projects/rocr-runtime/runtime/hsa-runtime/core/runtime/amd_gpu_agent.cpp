@@ -1321,8 +1321,8 @@ hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& s
         dst_agent.device_type() == core::Agent::kAmdCpuDevice))) {
 
     if (src_agent.device_type() == core::Agent::kAmdCpuDevice) {
-      // Host to Device: Use SDMA engine 0 if available
-      *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_0;
+      // Host to Device: Use SDMA engine 1 if available
+      *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_1;
     } else {
       // Device to Host: Use SDMA engines 1 and 2 if available
       *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_1;
@@ -3865,6 +3865,19 @@ hsa_status_t GpuAgent::AcquireCountedQueue(hsa_queue_type_t type,
 
 hsa_status_t GpuAgent::ReleaseCountedQueue(hsa_queue_t* queue) {
   return queue_pool_.ReleaseQueue(queue);
+}
+
+hsa_status_t GpuAgent::Preload(uint64_t flags) {
+  // By default preload everything; flags are used to skip specific resources
+  if (!(flags & HSA_AMD_AGENT_PRELOAD_SKIP_CLOCK_SYNC)) {
+    CheckClockTicks();
+  }
+
+  if (!(flags & HSA_AMD_AGENT_PRELOAD_SKIP_BLITS)) {
+    PreloadBlits();
+  }
+
+  return HSA_STATUS_SUCCESS;
 }
 
 }  // namespace amd

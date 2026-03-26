@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import copy
@@ -39,14 +17,12 @@ from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
 from utils.logger import console_error, console_log, console_warning
-from utils.utils import (
+from utils.utils_analysis import NS_TO_MS, CallTreeNode, simplify_kernel_name
+from utils.utils_common import (
     METRIC_ID_RE,
-    NS_TO_MS,
-    CallTreeNode,
     convert_metric_id_to_panel_info,
     get_panel_alias,
     get_uuid,
-    simplify_kernel_name,
 )
 
 KERNEL_NAME_WRAP_WIDTH = 40
@@ -256,76 +232,14 @@ def is_roofline_shown(
     return True
 
 
-def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
-    """Display torch operator data in a properly formatted table."""
-    if df is None or df.empty:
-        console_log(f"No data available for operator: {operator_name}")
-        return
-
-    console_log(f"\n{operator_name}")
-    console_log("=" * len(operator_name))
-
-    # Create a copy for display formatting
-    display_df = df.copy()
-
-    # Max display width per column type; Kernel_Name is skipped (show wrapped).
-    column_widths = {
-        "Operator_Name": 40,
-        "Context": 35,
-        "default": 20,  # fallback for all other string columns
-    }
-
-    # Truncate string columns; wrap Kernel_Name (full, no truncation)
-    for col in display_df.columns:
-        if display_df[col].dtype != "object":
-            continue  # skip numeric columns
-        if col == "Kernel_Name":
-            display_df[col] = (
-                display_df[col].astype(str).apply(wrap_kernel_name)
-            )  # wrap full name instead of truncating
-            continue
-        max_width = column_widths.get(
-            col, column_widths["default"]
-        )  # use column-specific width or fallback
-        display_df[col] = (
-            display_df[col]
-            .astype(str)  # ensure type is string before continuing text operations
-            .apply(
-                lambda x: (
-                    string_multiple_lines(
-                        x, max_width, 2
-                    )  # split into at most 2 lines, add "..." if still too long
-                    if len(x) > max_width
-                    else x  # leave short values as-is
-                )
-            )
-        )
-
-    # Reset index for row numbering
-    display_df = display_df.reset_index(drop=True)
-
-    # Use tabulate for consistent formatting (no maxcolwidths: natural column width)
-    table_str = tabulate(
-        display_df,
-        headers=display_df.columns,
-        tablefmt="fancy_grid",
-        showindex=True,
-        floatfmt=".2f",
-    )
-
-    console_log(table_str)
-
-
 def list_torch_operators(
     workload_path: str,
     call_trees: dict[str, CallTreeNode],
 ) -> None:
     """Display PyTorch operators as a unified call tree grouped by source location."""
     if not call_trees:
-        console_warning(
-            "No PyTorch operator data found. "
-            "Please ensure profiling was done with --torch-trace option."
-        )
+        print(f"\nPyTorch Operators in: {workload_path}")
+        print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")

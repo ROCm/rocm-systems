@@ -75,7 +75,7 @@ static void setEventRecordNode() {
 /**
  * Scenario 2
  */
-TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
+HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
   constexpr size_t N = 512;
   size_t memsize = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -205,7 +205,7 @@ TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
 /**
  * Scenario 1
  */
-TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetGet) {
+HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetGet) {
   SECTION("Flag = hipEventDefault") { validateEventWaitNodeSetEvent(hipEventDefault); }
 
   SECTION("Flag = hipEventBlockingSync") { validateEventWaitNodeSetEvent(hipEventBlockingSync); }
@@ -216,7 +216,7 @@ TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetGet) {
 /**
  * Scenario 3
  */
-TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_Negative) {
+HIP_TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event1, event2;

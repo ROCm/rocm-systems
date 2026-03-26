@@ -37,7 +37,7 @@ __device__ __constant__ int globalConst[SIZE];
 
 /* Test verifies hipGraphMemcpyNodeSetParamsFromSymbol API Negative scenarios.
  */
-TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative) {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative) {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int *A_d{nullptr}, *B_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};

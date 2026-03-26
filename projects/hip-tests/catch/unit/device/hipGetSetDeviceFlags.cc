@@ -31,7 +31,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetSetDeviceFlags_NullptrFlag) {
+HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_NullptrFlag) {
   HIP_CHECK_ERROR(hipGetDeviceFlags(nullptr), hipErrorInvalidValue);
 }
 
@@ -67,7 +67,7 @@ std::array<unsigned int, 16> getValidFlags() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetSetDeviceFlags_ValidFlag) {
+HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_ValidFlag) {
   auto validFlags = getValidFlags();
 
   unsigned int flag = 0;
@@ -88,7 +88,7 @@ TEST_CASE(Unit_hipGetSetDeviceFlags_ValidFlag) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetSetDeviceFlags_SetThenGet) {
+HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_SetThenGet) {
   auto validFlags = getValidFlags();
 
   auto devNo = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -119,7 +119,7 @@ TEST_CASE(Unit_hipGetSetDeviceFlags_SetThenGet) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetSetDeviceFlags_Threaded) {
+HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_Threaded) {
   auto validFlags = getValidFlags();
 
   auto devNo = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -169,7 +169,7 @@ TEST_CASE(Unit_hipGetSetDeviceFlags_Threaded) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetDeviceFlags_Positive_Context) {
+HIP_TEST_CASE(Unit_hipGetDeviceFlags_Positive_Context) {
   auto validFlags = getValidFlags();
   const unsigned int flags =
       GENERATE_COPY(from_range(std::begin(validFlags), std::end(validFlags)));
@@ -219,7 +219,7 @@ TEST_CASE(Unit_hipGetDeviceFlags_Positive_Context) {
  *  - Platform specific (NVIDIA)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetSetDeviceFlags_InvalidFlag) {
+HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_InvalidFlag) {
   const unsigned int invalidFlag = GENERATE(0xb011,     // schedule flags should not overlap
                                             0xb101,     // schedule flags should not overlap
                                             0xb110,     // schedule flags should not overlap

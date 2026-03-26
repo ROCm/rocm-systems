@@ -17,7 +17,7 @@
    hipMemAdvise() works with mmap() memory
 */
 
-TEST_CASE(Unit_hipMemAdvise_MmapMem) {
+HIP_TEST_CASE(Unit_hipMemAdvise_MmapMem) {
   int managed = 0, PageableMem = 0;
   INFO(
       "The following are the attribute values related to HMM for"
