@@ -61,7 +61,7 @@ void GDABackend::mlx5_create_qps(int sq_length) {
   inline_threshold = sizeof(gda_mlx5_wqe_inline_data::data);
   for (size_t i = 0; i < mlx5_qps.size(); i++) {
     int err = mlx5dv.create_qp(mlx5_qps[i], context, pd_orig, sq_length);
-    CHECK_ZERO(err, "mlx5_devx_qp::create");
+    CHECK_ZERO(err, "mlx5dv::create_qp");
   }
 }
 
