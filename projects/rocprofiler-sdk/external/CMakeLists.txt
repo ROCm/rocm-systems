@@ -279,7 +279,7 @@ if(ROCPROFILER_BUILD_SQLITE3)
         )
     add_dependencies(rocprofiler-sdk-sqlite3 rocprofiler-sdk-sqlite-build)
 else()
-    find_package(SQLite3 REQUIRED)
+    find_package(SQLite3 REQUIRED MODULE)
     target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE SQLite3::SQLite3)
 endif()
 
