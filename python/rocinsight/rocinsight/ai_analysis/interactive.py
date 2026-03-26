@@ -366,6 +366,90 @@ def _strip_code_preamble(text: str) -> str:
     return text
 
 
+def _apply_search_replace_blocks(original: str, llm_output: str) -> Optional[str]:
+    """Parse <<<<<<< SEARCH / ======= / >>>>>>> REPLACE blocks and apply them.
+
+    Returns the modified file content, or None if parsing fails or a search
+    block is not found in the original.
+    """
+    import re as _re
+
+    # Strip any markdown fencing the LLM might have added
+    fence_match = _re.search(r"```[a-zA-Z]*\n(.*?)```", llm_output, _re.DOTALL)
+    if fence_match:
+        llm_output = fence_match.group(1)
+
+    blocks = _re.split(r"^<<<<<<< SEARCH\s*$", llm_output, flags=_re.MULTILINE)
+    if len(blocks) < 2:
+        return None  # No search/replace blocks found — not in chunk format
+
+    result = original
+    applied = 0
+    for block in blocks[1:]:  # skip text before first SEARCH marker
+        parts = _re.split(r"^=======\s*$", block, maxsplit=1, flags=_re.MULTILINE)
+        if len(parts) != 2:
+            continue
+        search_text = parts[0]
+        replace_parts = _re.split(
+            r"^>>>>>>> REPLACE\s*$", parts[1], maxsplit=1, flags=_re.MULTILINE
+        )
+        if not replace_parts:
+            continue
+        replace_text = replace_parts[0]
+
+        # Strip exactly one leading and one trailing newline from each block
+        # (the markers themselves produce these)
+        if search_text.startswith("\n"):
+            search_text = search_text[1:]
+        if search_text.endswith("\n"):
+            search_text = search_text[:-1]
+        if replace_text.startswith("\n"):
+            replace_text = replace_text[1:]
+        if replace_text.endswith("\n"):
+            replace_text = replace_text[:-1]
+
+        if not search_text:
+            continue
+
+        if search_text not in result:
+            # Try with stripped whitespace on each line (fuzzy match)
+            _stripped_search = "\n".join(l.rstrip() for l in search_text.splitlines())
+            _stripped_result = "\n".join(l.rstrip() for l in result.splitlines())
+            if _stripped_search in _stripped_result:
+                # Find the position in the stripped version and map back
+                idx = _stripped_result.index(_stripped_search)
+                # Count lines up to that position
+                _pre = _stripped_result[:idx]
+                start_line = _pre.count("\n")
+                search_lines = search_text.splitlines()
+                orig_lines = result.splitlines(keepends=True)
+                end_line = start_line + len(search_lines)
+                # Replace those lines
+                replace_lines = replace_text.splitlines(keepends=True)
+                if replace_lines and not replace_lines[-1].endswith("\n"):
+                    replace_lines[-1] += "\n"
+                orig_lines[start_line:end_line] = replace_lines
+                result = "".join(orig_lines)
+                applied += 1
+                continue
+            _print(
+                f"  ⚠  SEARCH block not found in file (block {applied + 1}).",
+                style="yellow",
+            )
+            # Show first 80 chars of the search block for debugging
+            _preview = search_text[:80].replace("\n", "\\n")
+            _print(f"     Looking for: {_preview}...", style="dim")
+            continue
+
+        result = result.replace(search_text, replace_text, 1)
+        applied += 1
+
+    if applied == 0:
+        return None
+    _print(f"  Applied {applied} search/replace block(s).", style="dim")
+    return result
+
+
 def _replace_output_dir(cmd: str, new_dir: str) -> str:
     """Replace the -d <dir> argument in a rocprofv3 command with new_dir."""
     import shlex as _shlex
@@ -4379,28 +4463,29 @@ class WorkflowSession:
             )
             system = (
                 "You are a code transformation engine for AMD GPU source files.\n"
-                "CRITICAL OUTPUT FORMAT — any violation will corrupt the source file and"
-                " prevent compilation:\n"
-                "1. Output RAW SOURCE CODE ONLY. No prose, no markdown, no bullet lists.\n"
-                "2. The very first character of your response must be the first character"
-                " of the source file (typically '/' for a comment or '#' for an include).\n"
-                "3. Do NOT start with explanatory sentences such as 'Here\\'s', 'I\\'ve',"
-                " 'The following', 'Below is', etc.\n"
-                "4. Do NOT use markdown (no **, no backticks, no '- bullet' lists).\n"
-                "5. The response must be a single, complete, compilable source file —"
-                " nothing before the first line of code, nothing after the last.\n"
-                "6. Add a short // inline comment on each changed line explaining why.\n"
-                "7. COMPLETENESS IS MANDATORY. The file MUST compile. If the file is too"
-                " long, make FEWER changes rather than truncating. Every opening brace"
-                " must have a matching closing brace. Every function must be complete."
-                " Copy unchanged sections verbatim — do NOT abbreviate with '...' or"
-                " comments like '// rest unchanged'. The last line of a C/C++ file"
-                " must be a closing brace or newline after one."
+                "OUTPUT FORMAT — use SEARCH/REPLACE blocks (do NOT output the full file):\n\n"
+                "For each change, output a block in this exact format:\n"
+                "<<<<<<< SEARCH\n"
+                "<exact lines from the original file to find>\n"
+                "=======\n"
+                "<replacement lines>\n"
+                ">>>>>>> REPLACE\n\n"
+                "RULES:\n"
+                "1. The SEARCH section must be an EXACT substring of the original file —\n"
+                "   copy it character-for-character including whitespace and comments.\n"
+                "2. Include 2-3 lines of unchanged context around each change so the\n"
+                "   match is unique.\n"
+                "3. Add a short // inline comment on each changed line explaining why.\n"
+                "4. Output ONLY the SEARCH/REPLACE blocks. No prose, no explanations,\n"
+                "   no markdown. Start directly with <<<<<<< SEARCH.\n"
+                "5. Each block is applied independently. Keep blocks small and focused —\n"
+                "   one logical change per block.\n"
+                "6. Do NOT output the full file. Only output the changed sections.\n"
             )
             user = (
                 f"Apply these GPU optimizations to the source file below.\n\n"
                 f"=== OPTIMIZATIONS TO APPLY ===\n{suggestions}\n\n"
-                f"=== SOURCE FILE (return the complete rewritten version) ===\n{original}"
+                f"=== SOURCE FILE ===\n{original}"
             )
             # File rewrites can be large — use a generous timeout (5 min).
             _rewrite_timeout = 300
@@ -4432,18 +4517,27 @@ class WorkflowSession:
                     result = analyzer._call_local(system, user)
             if not result or not result.strip():
                 return None
+
+            # ── Try search/replace chunk format first ───────────────────
+            if "<<<<<<< SEARCH" in result:
+                merged = _apply_search_replace_blocks(original, result)
+                if merged is not None:
+                    return merged
+                _print(
+                    "  ⚠  SEARCH/REPLACE blocks could not be applied.",
+                    style="yellow",
+                )
+                # Fall through to full-file mode
+
+            # ── Full-file fallback ──────────────────────────────────────
             result = _strip_code_preamble(result)
             if not result or not result.strip():
                 return None
 
-            # ── Truncation detection ────────────────────────────────────
-            # LLM output that was cut off mid-line will produce uncompilable
-            # code.  Detect common truncation signals and reject the result
-            # so the user isn't asked to apply a broken file.
+            # Truncation detection for C/C++ full-file output
             _ext = file_path.suffix.lower()
             _is_c_family = _ext in (".cpp", ".c", ".cu", ".hip", ".hpp", ".h", ".cxx")
             if _is_c_family:
-                # Brace balance: opening and closing braces must match
                 _open = result.count("{")
                 _close = result.count("}")
                 if _open != _close:
@@ -4453,7 +4547,6 @@ class WorkflowSession:
                         style="yellow",
                     )
                     return None
-                # Last non-whitespace char should be } or ; or newline for C/C++
                 _last_char = result.rstrip()[-1] if result.rstrip() else ""
                 if _last_char and _last_char not in ("}", ";", ")", "#"):
                     _print(
