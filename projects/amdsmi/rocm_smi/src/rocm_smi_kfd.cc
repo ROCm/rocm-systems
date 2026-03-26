@@ -55,11 +55,38 @@ static bool is_number(const std::string& s);
 static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 
+// Check whether a given PID has /dev/kfd open by scanning its fd links.
+static bool PidHasKfdOpen(const std::string &pid_str) {
+  std::string fd_dir_path = "/proc/" + pid_str + "/fd";
+  DIR *fd_dir = opendir(fd_dir_path.c_str());
+  if (!fd_dir) return false;
+
+  bool found = false;
+  struct dirent *fd_entry;
+  while ((fd_entry = readdir(fd_dir)) != nullptr) {
+    if (fd_entry->d_name[0] == '.') continue;
+    std::string fd_link = fd_dir_path + "/" + fd_entry->d_name;
+    char target[PATH_MAX];
+    ssize_t len = readlink(fd_link.c_str(), target, sizeof(target) - 1);
+    if (len > 0) {
+      target[len] = '\0';
+      if (strcmp(target, "/dev/kfd") == 0) {
+        found = true;
+        break;
+      }
+    }
+  }
+  closedir(fd_dir);
+  return found;
+}
+
 // Detect whether KFD sysfs PIDs are in a different PID namespace from ours.
 // When running inside a container with PID namespace isolation, KFD sysfs
 // reports host PIDs that are not visible in the container's /proc. We detect
 // this by checking whether the first numeric entry under kKFDProcPathRoot
-// corresponds to a process visible in /proc.
+// corresponds to a process visible in /proc that also has /dev/kfd open.
+// A mere PID existence check is insufficient because a different process in
+// the container's namespace could coincidentally share the same PID number.
 static bool IsKfdPidNamespaced() {
   static std::atomic<int> cached{-1};
   int val = cached.load(std::memory_order_acquire);
@@ -77,10 +104,13 @@ static bool IsKfdPidNamespaced() {
     std::string name(de->d_name);
     if (!is_number(name)) continue;
 
-    // Found a numeric KFD proc entry; check if this PID exists in /proc
+    // Found a numeric KFD proc entry; verify the PID both exists in /proc
+    // and actually has /dev/kfd open. If the PID doesn't exist at all, or
+    // exists but belongs to a different process (no /dev/kfd fd), we are
+    // in a different PID namespace.
     std::string proc_path = "/proc/" + name;
     struct stat st;
-    if (stat(proc_path.c_str(), &st) != 0) {
+    if (stat(proc_path.c_str(), &st) != 0 || !PidHasKfdOpen(name)) {
       namespaced = true;
     }
     break;
@@ -110,28 +140,7 @@ static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated
     uint32_t pid = static_cast<uint32_t>(std::stoul(pid_str));
     if (pid == static_cast<uint32_t>(self)) continue;
 
-    std::string fd_dir_path = "/proc/" + pid_str + "/fd";
-    DIR* fd_dir = opendir(fd_dir_path.c_str());
-    if (!fd_dir) continue;
-
-    bool has_kfd = false;
-    struct dirent* fd_entry;
-    while ((fd_entry = readdir(fd_dir)) != nullptr) {
-      if (fd_entry->d_name[0] == '.') continue;
-      std::string fd_link = fd_dir_path + "/" + fd_entry->d_name;
-      char target[PATH_MAX];
-      ssize_t len = readlink(fd_link.c_str(), target, sizeof(target) - 1);
-      if (len > 0) {
-        target[len] = '\0';
-        if (strcmp(target, "/dev/kfd") == 0) {
-          has_kfd = true;
-          break;
-        }
-      }
-    }
-    closedir(fd_dir);
-
-    if (has_kfd) {
+    if (PidHasKfdOpen(pid_str)) {
       if (procs && *num_found < num_allocated) {
         procs[*num_found] = {};
         procs[*num_found].process_id = pid;
