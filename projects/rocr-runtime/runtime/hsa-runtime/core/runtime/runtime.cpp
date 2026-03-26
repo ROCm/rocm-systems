@@ -1266,40 +1266,40 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
 
    char buf[IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH];
    while (1) {
-     os::IPCSocket conn = os::AcceptIPCConnection(ipc_sock_server_fd_);
-     if (conn == os::INVALID_SOCKET_VALUE) continue;
-     MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(conn); });
-     if (os::IPCSocketRead(conn, buf, sizeof(buf)) == -1)
-       continue;
+    os::IPCSocket conn = os::AcceptIPCConnection(ipc_sock_server_fd_);
+    if (conn == os::INVALID_SOCKET_VALUE) continue;
+    MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(conn); });
+    if (os::IPCSocketRead(conn, buf, sizeof(buf)) == -1)
+      continue;
 
-     uint64_t conn_handle = strtoull(buf, NULL, 10);
-     if (conn_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE)
-       break;
+    uint64_t conn_handle = strtoull(buf, NULL, 10);
+    if (conn_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE)
+      break;
 
-     int dmabuf_fd = -1;
-     uint64_t fragOffset;
-     void *ptr = NULL;
-     size_t len = 0;
+    {
+      int dmabuf_fd = -1;
+      uint64_t fragOffset;
+      void *ptr = NULL;
+      size_t len = 0;
+      MAKE_SCOPE_GUARD([&]() { runtime_singleton_->DmaBufClose(dmabuf_fd); })
+      std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+      for (auto& conns : ipc_sock_server_conns_) {
+        if (conn_handle == conns.first) {
+          ptr = reinterpret_cast<void *>(conn_handle);
+          len = conns.second;
+          break;
+        }
+      }
 
-     std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
-     for (auto& conns : ipc_sock_server_conns_) {
-       if (conn_handle == conns.first) {
-         ptr = reinterpret_cast<void *>(conn_handle);
-         len = conns.second;
-         break;
-       }
-     }
+      if (!ptr) continue;
 
-     if (!ptr) continue;
-
-     int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
-     if (err != HSAKMT_STATUS_SUCCESS) continue;
-     err = os::IPCSendHandle(conn, dmabuf_fd);
-     if (err == -1) break;
-     err = os::IPCSocketRead(conn, buf, sizeof(buf));
-     if (err == -1) break;
-     hsa_status_t status = runtime_singleton_->DmaBufClose(dmabuf_fd);
-     if (status != HSA_STATUS_SUCCESS) break;
+      int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
+      if (err != HSAKMT_STATUS_SUCCESS) continue;
+      err = os::IPCSendHandle(conn, dmabuf_fd);
+      if (err == -1) break;
+      err = os::IPCSocketRead(conn, buf, sizeof(buf));
+      if (err == -1) break;
+    }
    }
 
    ipc_sock_server_conns_.clear();
@@ -1451,7 +1451,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         socketName, timeout, retryInterval);
     assert(socket_fd != os::INVALID_SOCKET_VALUE && "Connection to export DMA buffer not made!");
     if (socket_fd == os::INVALID_SOCKET_VALUE) return -1;
-    
+
     std::chrono::seconds rcvtimeout(10);
     os::SetIPCSocketRecvTimeout(socket_fd, rcvtimeout);
 
@@ -1503,14 +1503,11 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       // Store the buffer object handle in allocation map for later use
       if (status == HSAKMT_STATUS_SUCCESS) {
         std::lock_guard<std::shared_mutex> lock(memory_lock_);
-        auto allocation_map_it = allocation_map_.find(*importAddress);
-        if (allocation_map_it == allocation_map_.end()) {
-          allocation_map_it =
-              allocation_map_.emplace(*importAddress,
-                  AllocationRegion(nullptr, *importSize, *importSize,
-                  core::MemoryRegion::AllocateNoFlags)).first;
+        auto [it, inserted] = allocation_map_.try_emplace(
+        *importAddress, nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
+        if (inserted) {
+          it->second.thunk_bo = res.buf_handle;
         }
-        allocation_map_it->second.thunk_bo = res.buf_handle;
       }
       runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
     }
@@ -3726,10 +3723,12 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   status =
       targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent, &shareable_handle, reuse_handle);
   assert(status == HSA_STATUS_SUCCESS);
-  status = core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
-if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS)
     return;
-}
+  status = core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+  if (status != HSA_STATUS_SUCCESS)
+    return;
+  }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;

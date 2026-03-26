@@ -388,7 +388,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server);
 /// @param name Abstract socket name matching the server.
 /// @param timeout Total timeout.
 /// @param retryInterval Sleep interval between retries.
-/// @return Connected IPCSocket handle, or nullptr on failure/timeout.
+/// @return Connected IPCSocket handle, or invalid handle (-1) on failure/timeout.
 IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
                              std::chrono::milliseconds retryInterval);
 
