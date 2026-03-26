@@ -3463,8 +3463,65 @@ class WorkflowSession:
                                 f"  ✓ Alternative applied: {file_path.name}",
                                 style="green",
                             )
-                            _print("  Please recompile to verify.", style="dim")
                             applied = True
+                            # Run the compile-wait loop for the newly applied
+                            # alternative, same as _phase6_apply_direct does
+                            # after its initial LLM rewrite.
+                            _print()
+                            _print(
+                                "  Changes applied. Please recompile your application.",
+                                style=_AMD_RED,
+                            )
+                            _print(
+                                "  Type 'done' when compiled, 'revert' to undo,",
+                                style="dim",
+                            )
+                            _print(
+                                "  'abort' to exit, or paste compilation errors.",
+                                style="dim",
+                            )
+                            _alt_errors: List[str] = []
+                            _alt_action: str = "continue"
+                            while True:
+                                try:
+                                    _resp = _input("  > ").strip()
+                                except EOFError:
+                                    break
+                                _rl = _resp.lower()
+                                if _rl in ("done", "compiled", "ok", "yes", "y", ""):
+                                    _print(
+                                        "  Great — ready to re-profile.",
+                                        style="green",
+                                    )
+                                    break
+                                if _rl in ("revert", "undo", "rollback", "v", "r"):
+                                    # Undo the alternative: restore original_content
+                                    try:
+                                        file_path.write_text(original_content)
+                                        if self._state.edit_history:
+                                            self._state.edit_history.pop()
+                                        self._save_session()
+                                        _print(
+                                            f"  ✓ Reverted: {file_path.name}",
+                                            style="yellow",
+                                        )
+                                    except OSError as _exc:
+                                        _print(
+                                            f"  Revert failed: {_exc}", style="red"
+                                        )
+                                    _alt_action = self._post_revert_menu(
+                                        show_retry=allow_retry
+                                    )
+                                    break
+                                if _rl in ("abort", "cancel", "quit", "exit"):
+                                    _alt_action = "exit"
+                                    break
+                                _alt_errors.append(_resp)
+                                _print(
+                                    "  Error noted. Type 'done' or 'revert'.",
+                                    style="yellow",
+                                )
+                            return _alt_action
                         except OSError as exc:
                             _print(f"  (Write failed: {exc})", style="red")
                     else:

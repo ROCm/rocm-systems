@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""
+Regression tests for _post_revert_llm_analysis alternative-apply compile-wait.
+
+Bug: after the user accepted an LLM-proposed alternative fix, the session
+skipped the compile-wait loop and went straight to the post-revert menu
+([p]/[q]), so the user was never asked to recompile and type 'done'.
+
+Fix: the compile-wait loop is now run inline in _post_revert_llm_analysis
+before returning when the alternative is applied.
+"""
+import contextlib
+import pathlib
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Fixtures / helpers
+# ---------------------------------------------------------------------------
+
+_ANALYSIS_TEXT = (
+    "ANALYSIS:\nThe file was truncated at line 261, leaving braces unclosed.\n\n"
+    "ALTERNATIVE:\nHere is the corrected file:\n```cpp\nint main(){return 0;}\n```"
+)
+_ALT_REWRITE = "int main() { return 0; }\n"
+_ORIGINAL = "int main() { return 1; }\n"
+_FAILED = "int main() { return BROKEN\n"
+
+
+@contextlib.contextmanager
+def _mock_llm(analysis_text: str = _ANALYSIS_TEXT):
+    """Patch LLMAnalyzer (imported inside the method) and _Spinner."""
+    spinner = MagicMock(
+        __enter__=MagicMock(return_value=None),
+        __exit__=MagicMock(return_value=False),
+    )
+    with (
+        # LLMAnalyzer is imported lazily inside the method body
+        patch("rocinsight.ai_analysis.llm_analyzer.LLMAnalyzer", autospec=True) as M,
+        patch(
+            "rocinsight.ai_analysis.interactive._Spinner",
+            return_value=spinner,
+        ),
+    ):
+        M.return_value._call_anthropic.return_value = analysis_text
+        yield
+
+
+def _make_session(tmp_path: pathlib.Path):
+    """Construct a real WorkflowSession with minimal deps mocked out."""
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    # __init__ only needs app_command; it doesn't touch the filesystem.
+    sess = WorkflowSession(
+        app_command="./demo",
+        source_paths=[str(tmp_path)],
+        llm_provider="anthropic",
+        llm_api_key="dummy",
+        trace_dir=str(tmp_path / "traces"),
+    )
+    # Redirect sessions dir so tests don't touch $HOME
+    sess._sessions_dir = tmp_path / "sessions"
+    sess._sessions_dir.mkdir(parents=True, exist_ok=True)
+    sess._session_file = sess._sessions_dir / "test.json"
+    return sess
+
+
+def _run(
+    tmp_path: pathlib.Path,
+    user_inputs: list,
+    alt_rewrite: str = _ALT_REWRITE,
+    analysis_text: str = _ANALYSIS_TEXT,
+):
+    """Drive _post_revert_llm_analysis with mocked LLM + user inputs.
+
+    Returns (action, file_content_after).
+    """
+    sess = _make_session(tmp_path)
+    src = tmp_path / "test.cpp"
+    src.write_text(_ORIGINAL)
+
+    inputs = iter(user_inputs)
+
+    with (
+        _mock_llm(analysis_text),
+        patch("rocinsight.ai_analysis.interactive._input", side_effect=lambda p="": next(inputs)),
+        patch.object(sess, "_llm_rewrite_file", return_value=alt_rewrite),
+        patch.object(sess, "_save_session"),
+    ):
+        action = sess._post_revert_llm_analysis(
+            file_path=src,
+            original_content=_ORIGINAL,
+            failed_content=_FAILED,
+            failure_reason="syntax error at line 261",
+            allow_retry=True,
+        )
+
+    return action, src.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestAlternativeApplyCompileWait:
+    """Compile-wait loop must be shown after the alternative is applied."""
+
+    def test_apply_then_done_returns_continue(self, tmp_path):
+        """
+        Regression: apply alt → type 'done' → must return 'continue'.
+
+        Before the fix this returned the post-revert menu action without
+        ever asking the user to compile.
+        Inputs:
+          "Apply this alternative? [y/N]"   → y
+          "Apply this corrected version? [y/N]" → y
+          compile-wait "> "                 → done
+        """
+        action, _ = _run(tmp_path, ["y", "y", "done"])
+        assert action == "continue"
+
+    def test_apply_then_blank_is_done(self, tmp_path):
+        """Blank input at compile-wait counts as 'done'."""
+        action, _ = _run(tmp_path, ["y", "y", ""])
+        assert action == "continue"
+
+    def test_apply_with_error_output_then_done(self, tmp_path):
+        """User pastes compiler errors then fixes and types 'done'."""
+        action, _ = _run(
+            tmp_path,
+            [
+                "y",                                  # Apply alternative?
+                "y",                                  # Apply corrected version?
+                "multi_gpu_demo.cpp:261: error: expected '}'",  # error pasted
+                "note: to match this '{'",            # more output
+                "done",                               # compiled OK
+            ],
+        )
+        assert action == "continue"
+
+    def test_apply_then_abort_returns_exit(self, tmp_path):
+        """'abort' at compile-wait propagates 'exit'."""
+        action, _ = _run(tmp_path, ["y", "y", "abort"])
+        assert action == "exit"
+
+    def test_apply_then_revert_restores_original(self, tmp_path):
+        """'revert' at compile-wait restores the original file."""
+        sess = _make_session(tmp_path)
+        src = tmp_path / "test.cpp"
+        src.write_text(_ORIGINAL)
+
+        # After revert, _post_revert_menu is shown → [p] = continue
+        inputs = iter(["y", "y", "revert", "p"])
+
+        with (
+            _mock_llm(),
+            patch("rocinsight.ai_analysis.interactive._input", side_effect=lambda p="": next(inputs)),
+            patch.object(sess, "_llm_rewrite_file", return_value=_ALT_REWRITE),
+            patch.object(sess, "_save_session"),
+        ):
+            action = sess._post_revert_llm_analysis(
+                file_path=src,
+                original_content=_ORIGINAL,
+                failed_content=_FAILED,
+                failure_reason="error",
+                allow_retry=True,
+            )
+
+        assert src.read_text() == _ORIGINAL, "File should be restored to original"
+        assert action in ("continue", "exit")
+
+    def test_decline_corrected_version_skips_compile_wait(self, tmp_path):
+        """
+        Declining 'Apply corrected version?' must NOT enter the compile-wait loop.
+        Goes straight to post-revert menu.
+
+        Inputs: y (apply alt?) → n (corrected version?) → p (menu: continue)
+        """
+        action, content = _run(tmp_path, ["y", "n", "p"])
+        assert action == "continue"
+        # File unchanged
+        assert content == _ORIGINAL
+
+    def test_decline_first_offer_skips_compile_wait(self, tmp_path):
+        """Declining 'Apply this alternative?' goes to post-revert menu."""
+        action, content = _run(tmp_path, ["n", "p"])
+        assert action == "continue"
+        assert content == _ORIGINAL
+
+    def test_no_llm_provider_skips_analysis(self, tmp_path):
+        """Without a configured LLM, falls through to post-revert menu."""
+        sess = _make_session(tmp_path)
+        sess._llm_provider = None
+        src = tmp_path / "test.cpp"
+        src.write_text(_ORIGINAL)
+
+        inputs = iter(["p"])
+        with patch("rocinsight.ai_analysis.interactive._input", side_effect=lambda p="": next(inputs)):
+            action = sess._post_revert_llm_analysis(
+                file_path=src,
+                original_content=_ORIGINAL,
+                failed_content=_FAILED,
+                failure_reason="error",
+                allow_retry=True,
+            )
+        assert action == "continue"
