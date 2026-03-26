@@ -154,7 +154,7 @@ class AnalysisContext:
             When True, tier2-tagged sections are loaded even if tier==1.
         bottleneck_type: Primary bottleneck from _build_summary() —
             "compute", "memory_transfer", "latency", or "mixed".
-            Only "compute" triggers the compiler guide tag.
+            "compute" and "memory"/"memory_transfer" both trigger the compiler tag.
         gpu_arch: Detected GPU architecture string e.g. "gfx942".
             Reserved for future per-GPU section filtering.
         custom_prompt: The user's --prompt text, if any.
@@ -213,12 +213,13 @@ def _select_tags(ctx: AnalysisContext) -> set:
     _cp = (ctx.custom_prompt or "").lower()
 
     if ctx.tier == 0:
-        # Source-only: tier1 workflow + source-specific guidance
-        tags.add("tier1")
+        # Source-only: source-specific guidance + compiler flags (common optimization path)
         tags.add("source")
+        tags.add("compiler")
     elif ctx.has_counters or ctx.tier >= 2:
-        # Counter data available: tier2 covers GPU specs + roofline.
-        # Skip tier1 (profiling workflow is less useful once we have counters).
+        # Counter data available: include both tier1 (workflow context) and
+        # tier2 (GPU specs + roofline) for full analysis coverage.
+        tags.add("tier1")
         tags.add("tier2")
     else:
         # Tier 1 trace, no counters.
@@ -227,8 +228,8 @@ def _select_tags(ctx: AnalysisContext) -> set:
         if not _bt or _bt == "mixed":
             tags.add("tier1")
 
-    # compiler: only when compute-bound or user asks about build/compile topics
-    if _bt == "compute" or any(
+    # compiler: when compute- or memory-bound, or user asks about build/compile topics
+    if _bt in ("compute", "memory", "memory_transfer") or any(
         w in _cp for w in ("compiler", "flag", "build", "compile", "register")
     ):
         tags.add("compiler")
