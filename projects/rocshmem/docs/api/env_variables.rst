@@ -133,6 +133,6 @@ control the behavior of rocSHMEM.
         | ``1``: Enabled.
 
     * - | ``ROCSHMEM_GDA_SQ_SIZE``
-        | This enviroment variable sets the length of the SQ for GDA.
+        | This environment variable sets the length of the SQ for GDA.
       - ``4096``
       - | Maximum number of WQEs posted on the SQ
