@@ -1,5 +1,5 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-// SPDX-License-Identifier: MIT
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 // Include amd_smi.hpp first to get proper AMD_SMI_SDMA_SUPPORTED detection
 // based on the actual AMD SMI library version

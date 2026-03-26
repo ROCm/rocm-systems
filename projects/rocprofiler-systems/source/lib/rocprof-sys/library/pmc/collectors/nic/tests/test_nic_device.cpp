@@ -1,5 +1,5 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-// SPDX-License-Identifier: MIT
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include "library/pmc/collectors/nic/device.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/tests/mock_driver.hpp"
