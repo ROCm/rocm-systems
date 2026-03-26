@@ -50,6 +50,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.12
  */
+#if HT_AMD
 HIP_TEST_CASE(Unit_hipGetProcAddress_Positive) {
   void *funcPtr = nullptr;
   hipDriverProcAddressQueryResult status;
@@ -362,6 +363,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress) {
 
   REQUIRE(dlclose(handle) == 0);
 }
+#endif
 
 /**
  * End doxygen group DeviceTest.

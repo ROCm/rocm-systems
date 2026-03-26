@@ -4,16 +4,10 @@
 
 if(UNIX AND BUILD_SHARED_LIBS)
   set(TEST_SRC ${TEST_SRC}
-      complex_loading_behavior.cc)
-  set(AMD_TEST_SRC
+      complex_loading_behavior.cc
       hipApiDynamicLoad.cc
       hipGetProcAddress.cc
-      hipGetProcAddressCompilerOption.cc
-      )
-
-  if(HIP_PLATFORM MATCHES "amd")
-    set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
-  endif()
+      hipGetProcAddressCompilerOption.cc)
 
   hip_add_exe_to_target(NAME dynamicLoading
                       TEST_SRC ${TEST_SRC}

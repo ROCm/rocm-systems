@@ -44,6 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.12
  */
+#if HT_AMD
 HIP_TEST_CASE(Unit_hipGetProcAddress_With_spt_CompilerOption) {
   void *funcPtr_default = nullptr;
   void *funcPtr_legacy = nullptr;
@@ -92,6 +93,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_With_spt_CompilerOption) {
 
   REQUIRE(dlclose(handle) == 0);
 }
+#endif
 
 /**
  * End doxygen group DeviceTest.
