@@ -128,11 +128,11 @@ static constexpr inline auto mlx5_align_page(const T& value) {
 }
 
 struct mlx5_qp_umem_alloc_info {
-  size_t   umem_size       = 0;
-  size_t   wq_size         = 0;
-  size_t   cq_offset       = 0;
-  size_t   qp_dbrec_offset = 0;
-  size_t   cq_dbrec_offset = 0;
+  size_t   umem_size;
+  size_t   wq_size;
+  size_t   cq_offset;
+  size_t   qp_dbrec_offset;
+  size_t   cq_dbrec_offset;
   uint16_t sq_depth;
 
   // WQ always at beginning of umem allocation
@@ -143,9 +143,10 @@ struct mlx5_qp_umem_alloc_info {
   static constexpr size_t qp_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
   static constexpr size_t cq_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
 
-  mlx5_qp_umem_alloc_info(uint16_t sq_depth) : sq_depth{sq_depth} {
+  mlx5_qp_umem_alloc_info(uint16_t sq_depth_requested)
+    : umem_size{0}, wq_size{0}, cq_offset{0}, qp_dbrec_offset{0}, cq_dbrec_offset{0}, sq_depth{0} {
     // round work queue size up to power of 2 WQEBB, then align to cache line size
-    size_t wq_size_initial = mlx5_align_amdgpu_cache_line(bit_ceil(sq_depth) * MLX5_SEND_WQE_BB);
+    size_t wq_size_initial = mlx5_align_amdgpu_cache_line(bit_ceil(sq_depth_requested) * MLX5_SEND_WQE_BB);
     // round up to page size
     umem_size = mlx5_align_page(wq_size_initial + cq_size + qp_dbrec_size + cq_dbrec_size);
     // round back down to a power of 2
