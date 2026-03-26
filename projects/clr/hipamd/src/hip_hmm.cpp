@@ -406,7 +406,7 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
     if (prefetch_loc_idxs[idx] >= count) {
       return hipErrorInvalidValue;
     }
-    if (idx > 0 && prefetch_loc_idxs[idx] < prefetch_loc_idxs[idx - 1]) {
+    if (idx > 0 && prefetch_loc_idxs[idx] <= prefetch_loc_idxs[idx - 1]) {
       return hipErrorInvalidValue;
     }
   }

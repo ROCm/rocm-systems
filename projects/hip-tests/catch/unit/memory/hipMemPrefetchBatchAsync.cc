@@ -350,7 +350,7 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers") {
  * Test Description
  * ------------------------
  *  - Test various invalid prefetchLocIdxs array constraints
- *  - Verify API validates: first element must be 0, monotonic ordering, bounds checking
+ *  - Verify API validates: first element must be 0, strict ordering, bounds checking
  */
 TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints") {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
@@ -390,6 +390,16 @@ TEST_CASE("Unit_hipMemPrefetchBatchAsync_Negative_IndexArrayConstraints") {
 #if HT_AMD
   SECTION("Index array must be monotonically increasing") {
     std::vector<size_t> invalid_indices = {0, 1, 0};
+
+    HIP_CHECK_ERROR(
+        hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(), num_operations,
+                                 locations.data(), invalid_indices.data(), invalid_indices.size(),
+                                 flags, stream_guard.stream()),
+        hipErrorInvalidValue);
+  }
+
+  SECTION("Index array must be strictly increasing") {
+    std::vector<size_t> invalid_indices = {0, 1, 1};
 
     HIP_CHECK_ERROR(
         hipMemPrefetchBatchAsync(managed_ptrs.data(), buffer_sizes.data(), num_operations,

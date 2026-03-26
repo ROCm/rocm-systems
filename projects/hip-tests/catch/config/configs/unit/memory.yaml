@@ -1924,7 +1924,6 @@ memory:
   Unit_hipMemPrefetchBatchAsync_MultiDevice:
     <<: *level_2
     tags: [multigpu, query]
-  Unit_hipMemGetInfo_FreeLessThanTotal: *level_2
   Unit_hipMemGetInfo_FreeLessThanTotal:
     <<: *level_2
     tags: [query]
