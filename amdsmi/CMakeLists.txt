@@ -53,33 +53,25 @@ set(BUILD_DEBIAN_PKGING_FLAG
     "Internal Status Flag to indicate Debian Packaging Build"
 )
 
-## Setup the package version based on git tags.
-set(PKG_VERSION_GIT_TAG_PREFIX "amdsmi_pkg_ver")
-get_version_from_file("include/amd_smi/amdsmi.h" "MAJOR")
-get_version_from_file("include/amd_smi/amdsmi.h" "MINOR")
-get_version_from_file("include/amd_smi/amdsmi.h" "RELEASE")
-set(DEFAULT_VERSION "${MAJOR}.${MINOR}.${RELEASE}")
-get_package_version_number(${DEFAULT_VERSION} ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
-message("Package version: ${PKG_VERSION_STR}")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_BUILD "0")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_HASH "${PKG_VERSION_HASH}")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
-    "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}"
-)
-
-set(DEFAULT_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-update_version_in_file("include/amd_smi/amdsmi.h" ${DEFAULT_VERSION} "#define AMDSMI_LIB_VERSION_" " *" " ")
-
 # Make proper version for appending
 #Prepare final version for the CPACK use
 # Use package version from top-level CMakeLists.txt
 if(NOT DEFINED AMDSMI_PACKAGE_VERSION)
-    set(AMDSMI_PACKAGE_VERSION "1.1.0")  # fallback for standalone build
+    set(AMDSMI_PACKAGE_VERSION "1.1.1")  # fallback for standalone build
 endif()
 set(CPACK_PACKAGE_VERSION "${AMDSMI_PACKAGE_VERSION}")
+
+# Parse AMDSMI_PACKAGE_VERSION as the single source of truth
+get_package_version_number(${AMDSMI_PACKAGE_VERSION})
+message("Package version: ${AMDSMI_PACKAGE_VERSION}")
+set(${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
+set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
+set(${AMD_SMI_LIBS_TARGET}_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
+# Used by configure_file() in py-interface and amdsmi_cli for _version.py, setup.py, pyproject.toml
+set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+
+set(DEFAULT_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+update_version_in_file("include/amd_smi/amdsmi.h" ${DEFAULT_VERSION} "#define AMDSMI_LIB_VERSION_" " *" " ")
 
 # The following default version values should be updated as appropriate for
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
@@ -88,10 +80,8 @@ set(CPACK_PACKAGE_VERSION "${AMDSMI_PACKAGE_VERSION}")
 set(PKG_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
 set(PKG_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(PKG_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
-set(PKG_VERSION_NUM_COMMIT 0)
 
-project(${AMD_SMI_LIBS_TARGET} DESCRIPTION "AMD System Management libraries"
-        HOMEPAGE_URL "https://github.com/ROCm/amdsmi")
+project(${AMD_SMI_LIBS_TARGET} DESCRIPTION "AMD System Management libraries")
 
 # Set default installation prefix to /opt/rocm
 if(NOT CMAKE_INSTALL_PREFIX)
@@ -113,10 +103,13 @@ endif()
 
 include(GNUInstallDirs)
 
+# Force ENABLE_ESMI_LIB ON so that Python scripts can resolve ESMI-related
+# function symbols.  Actual ESMI functionality is not available on this platform.
+set(ENABLE_ESMI_LIB ON)
+add_definitions("-DENABLE_ESMI_LIB=1")
+
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
-option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
-option(BUILD_EXAMPLES "Build examples" OFF)
 
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Enable position independent code for all targets")
@@ -164,10 +157,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow
 # Intentionally leave out -Wsign-promo. It causes spurious warnings.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Woverloaded-virtual -Wreorder")
 
-if(ENABLE_ESMI_LIB)
-    add_definitions("-DENABLE_ESMI_LIB=1")
-endif()
-
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
@@ -189,7 +178,6 @@ add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
-    #add_subdirectory("tests/rocm_smi_test")
     add_subdirectory("tests/amd_smi_test")
     add_subdirectory("tests/python_unittest")
 endif()

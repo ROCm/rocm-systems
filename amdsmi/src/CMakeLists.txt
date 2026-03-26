@@ -29,10 +29,8 @@ set(INC_LIST
     "${PROJECT_SOURCE_DIR}"
 )
 
-# VERSION_* variables should be set by get_version_from_tag
-message("Package version: ${PKG_VERSION_STR}")
-
-set(SO_VERSION_STRING "${MAJOR}.${MINOR}.${RELEASE}")
+message("Package version: ${AMDSMI_PACKAGE_VERSION}")
+set(SO_VERSION_STRING "${AMDSMI_PACKAGE_VERSION}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
@@ -60,7 +58,7 @@ target_include_directories(${AMD_SMI} PUBLIC
                                              "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 ## Set the VERSION and SOVERSION values
-set_property(TARGET ${AMD_SMI} PROPERTY SOVERSION "${MAJOR}")
+set_property(TARGET ${AMD_SMI} PROPERTY SOVERSION "${CPACK_PACKAGE_VERSION_MAJOR}")
 set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
 
 ## If the library is a release, strip the target library
