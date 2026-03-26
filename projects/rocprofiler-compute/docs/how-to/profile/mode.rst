@@ -223,9 +223,9 @@ an Instinct MI210 vs an Instinct MI250.
    Additionally, you will notice a few extra files. An SoC parameters file,
    ``sysinfo.csv``, is created to reflect the target device settings. All
    profiling output is stored in ``log.txt``. Roofline-specific benchmark
-   results are stored in ``roofline.csv`` and roofline plots are outputted into HTMLs as
-   ``empirRoof_gpu-0_[datatype1]_..._[datatypeN].html`` where data types requested through
-   ``--roofline-data-type`` option are listed in the file name.
+   results are stored in ``roofline.csv``. To generate roofline HTML plots,
+   run ``rocprof-compute analyze`` on the profiling output directory
+   (see :doc:`../analyze/mode`).
 
 .. code-block:: shell-session
 
@@ -234,7 +234,9 @@ an Instinct MI210 vs an Instinct MI250.
    total 60
    -rw-r--r-- 1 auser agroup 27937 Mar  1 15:15 log.txt
    drwxr-xr-x 1 auser agroup     0 Mar  1 15:15 perfmon
-   -rw-r--r-- 1 auser agroup 26175 Mar  1 15:15 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup  8725 Mar  1 15:15 pmc_perf_0.csv
+   -rw-r--r-- 1 auser agroup  8850 Mar  1 15:15 pmc_perf_1.csv
+   -rw-r--r-- 1 auser agroup  8600 Mar  1 15:15 pmc_perf_2.csv
    -rw-r--r-- 1 auser agroup  1708 Mar  1 15:17 roofline.csv
    -rw-r--r-- 1 auser agroup   519 Mar  1 15:15 SQ_IFETCH_LEVEL.csv
    -rw-r--r-- 1 auser agroup   456 Mar  1 15:15 SQ_INST_LEVEL_LDS.csv
@@ -284,7 +286,6 @@ Examples:
    $ tree workloads/vcopy
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -312,7 +313,9 @@ Examples:
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -326,7 +329,6 @@ Examples:
    $ tree /tmp/profiles/amd-ryzen/0
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -354,7 +356,9 @@ Examples:
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -369,13 +373,11 @@ of the underlying ``rocprof`` tool. The following formats are supported:
 
 * ``csv`` format:
    * Ask underlying rocprof tool to dump raw performance counter data in csv format.
-   * The generated csv files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
-   * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
+   * The generated csv files across multiple runs of ROCProfiler-SDK are processed and dumped into the workload directory as separate csv files (pmc_perf_0.csv, pmc_perf_1.csv, etc.).
 
 * ``rocpd`` format:
    * Ask underlying rocprof tool to dump raw performance counter data in rocpd format.
-   * Multiple ``rocpd`` database files containing counter collection data are merged into a single csv under the workload folder.
-     After merging, the database files are removed.
+   * Multiple ``rocpd`` database files containing counter collection data are processed into separate csv files (results_0.csv, results_1.csv, etc.) under the workload folder.
    * Use ``--retain-rocpd-output`` profile mode option to preserve the ``rocpd`` database(s) in the workload folder.
      This is useful for custom analysis of profiling data.
 
@@ -685,24 +687,21 @@ Standalone roofline
 Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
 You don't need to include any additional roofline-specific options for roofline analysis.
 If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
-This option checks if there is existing profiling data in the workload directory (``pmc_perf.csv`` and ``roofline.csv``):
+This option checks if there is existing roofline benchmark data in the workload directory (``roofline.csv``):
 
-a) If found, uses the data files with the provided arguments to create another roofline HTML output; otherwise,
+a) If found, skips microbenchmark execution;
 
-b) Profile mode runs but is limited to collecting only roofline performance counters.
+b) Otherwise, profile mode runs microbenchmarks and collects roofline performance counters.
 
 Note that ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
 
-Roofline options
-----------------
+Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
+roofline HTML plots, use ``rocprof-compute analyze`` on the profiling output directory
+(see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
+``--roofline-data-type``) are available in analyze mode.
 
-``--sort <desired_sort>``
-   Allows you to specify whether you would like to overlay top kernel or top
-   dispatch data in your roofline plot.
-
-``-m``, ``--mem-level <cache_level>``
-   Allows you to specify specific levels of cache to include in your roofline
-   plot.
+Roofline options (profile)
+--------------------------
 
 ``--device <gpu_id>``
    Allows you to specify a device ID to collect performance data from when
@@ -712,18 +711,9 @@ Roofline options
    Allows for kernel filtering. Usage is equivalent with the current ``rocprof``
    utility. See :ref:`profiling-kernel-filtering`.
 
-``--roofline-data-type <datatype>``
-   Allows you to specify data types that you want plotted in the roofline HTML output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
-
 .. note::
 
   For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
-
-Each kernel in your ``.html`` roofline plot is automatically distinguished with a unique marker identifiable from the plot's key. The roofline HTML includes an integrated multi-subplot layout with:
-
-1. **Roofline Plot** - Shows performance ceilings and kernel arithmetic intensity points
-2. **Plot Points & Values Table** - Displays AI values, performance metrics, memory/compute bound status, and cache levels for each kernel
-3. **Full Kernel Names Table** - Lists complete kernel names with their corresponding plot markers
 
 
 Roofline only
@@ -734,69 +724,22 @@ The following example demonstrates profiling roofline data only:
 .. code-block:: shell-session
 
    $ rocprof-compute profile --name occupancy --roof-only -- ./tests/occupancy -n 1048576 -b 256
-                                    __                                       _
-   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
-   ...
-   INFO [roofline] Generating pmc_perf.csv (roofline counters only).
-   INFO Rocprofiler-Compute version: 3.3.0
-   INFO Profiler choice: rocprofiler-sdk
-   INFO Path: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
-   INFO Target: MI300X_A1
-   INFO Command: ./tests/occupancy -n 1048576 -b 256
-   INFO Kernel Selection: None
-   INFO Dispatch Selection: None
-   INFO Filtered sections: ['4']
-   INFO
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO Collecting Performance Counters (Roofline Only)
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO
-   INFO [Run 1/3][Approximate profiling time left: pending first measurement...]
-   INFO [profiling] Current input file: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1/perfmon/pmc_perf_0.txt
-   ...
-   INFO [roofline] Checking for roofline.csv in /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
-   INFO [roofline] No roofline data found. Generating...
-   Empirical Roofline Calculation
-   Copyright © 2025  Advanced Micro Devices, Inc. All rights reserved.
-   Total detected GPU devices: 8
-   GPU Device 0 (gfx942) with 304 CUs: Profiling...
-   99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
    ...
 
-
-An inspection of our workload output folder shows ``.html`` plots were generated
+An inspection of our workload output folder shows ``roofline.csv`` was generated
 successfully.
-
-.. warning::
-
-   Deprecation warning: Standalone Roofline Analysis plot output ``empirRoof_gpu-<device ID><datatypes><kernels>.html`` will be auto-generated in analyze mode instead of profile mode in a future release.
 
 .. code-block:: shell-session
 
    $ ls workloads/occupancy/MI300X_A1
    total 48
-   -rw-r--r-- 1 auser agroup 13331 Oct 29 10:33 empirRoof_gpu-0_FP32.html
    drwxr-xr-x 1 auser agroup     0 Oct 29 10:33 perfmon
-   -rw-r--r-- 1 auser agroup  1101 Oct 29 10:33 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup  1101 Oct 29 10:33 pmc_perf_0.csv
    -rw-r--r-- 1 auser agroup  1715 Oct 29 10:33 roofline.csv
    -rw-r--r-- 1 auser agroup   650 Oct 29 10:33 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Oct 29 10:33 timestamps.csv
 
-.. note::
-
-  ROCm Compute Profiler currently captures roofline profiling for all data types, and you can reduce the clutter in the HTML outputs by filtering the data type(s). Selecting multiple data types will overlay the results into the same HTML. To generate results in separate HTML for each data type from the same workload run, you can re-run the profiling command with each data type as long as the ``roofline.csv`` file still exists in the workload folder.
-
-The following image is a sample ``empirRoof_gpu-0_FP32.html`` roofline
-plot.
-
-.. image:: ../../data/profile/sample-roof-plot.jpg
-   :align: center
-   :alt: Sample ROCm Compute Profiler roofline output
-   :width: 800
+To generate roofline HTML plots from this data, see :doc:`../analyze/mode`.
 
 .. _torch-operator-mapping:
 
@@ -1166,9 +1109,9 @@ subdirectory named by its rank to avoid output collisions.
 Example usage
 -------------
 
-Some examples of using multi-rank profiling are: 
+Some examples of using multi-rank profiling are:
 
-* **With** ``--output-directory`` **option:** 
+* **With** ``--output-directory`` **option:**
 
 .. code-block:: shell-session
 
@@ -1184,7 +1127,6 @@ The example above produces:
    $ tree /tmp/mpi_profile/0
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -1212,7 +1154,9 @@ The example above produces:
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -1233,7 +1177,6 @@ The example above produces:
    $ tree ./workloads/laplace_eqn/0
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -1261,7 +1204,9 @@ The example above produces:
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -1280,7 +1225,6 @@ to your output directory. The following example is run on the host ``amd-ryzen``
    $ tree /tmp/mpi_profile/amd-ryzen/0
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -1308,7 +1252,9 @@ to your output directory. The following example is run on the host ``amd-ryzen``
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
