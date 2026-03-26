@@ -39,7 +39,7 @@ __device__ uint32_t QueuePair::reserve_sq(uint64_t activemask, uint32_t num_wqes
   my_sq_prod = __shfl(my_sq_prod, get_first_active_lane_id(activemask));
 
   // wait for that space to be available
-  ionic_quiet_internal(activemask, my_sq_prod + num_wqes - sq_mask);
+  // ionic_quiet_internal(activemask, my_sq_prod + num_wqes - sq_mask);
 
   return my_sq_prod;
 }

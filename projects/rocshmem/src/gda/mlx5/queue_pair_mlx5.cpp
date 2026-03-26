@@ -288,7 +288,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int pe, int32_t length, uintptr_t l
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
     // poll until we have enough WQEBB for all lanes using this QP
-    mlx5_poll_cq_until(qp_lane_count);
+    // mlx5_poll_cq_until(qp_lane_count);
   }
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
@@ -370,7 +370,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(int pe, int32_t length, uintptr
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
     // poll until we have enough WQEBB for all lanes using this QP
-    mlx5_poll_cq_until(qp_lane_count);
+    // mlx5_poll_cq_until(qp_lane_count);
   }
 
   uint64_t* atomic_laddr = nonfetching_atomic;
