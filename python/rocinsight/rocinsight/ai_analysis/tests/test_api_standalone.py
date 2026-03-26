@@ -235,7 +235,7 @@ class TestAnalysisResultSerialization:
         assert "metadata" in d
         assert "recommendations" in d
 
-    def test_to_json_fallback_returns_valid_json(self):
+    def test_to_json_raises_without_raw(self):
         """to_json() raises RuntimeError when _raw is not populated."""
         result = _make_minimal_result()
         # _raw is not attached — raises RuntimeError (correct behavior: caller must use analyze_database())

@@ -153,8 +153,8 @@ class AnalysisContext:
         has_counters: True when PMC counter data is present in the database.
             When True, tier2-tagged sections are loaded even if tier==1.
         bottleneck_type: Primary bottleneck from _build_summary() —
-            "compute", "memory", "latency", "launch", or "mixed".
-            "compute" and "memory" trigger the compiler tag.
+            "compute", "memory_transfer", "latency", or "mixed".
+            Only "compute" triggers the compiler guide tag.
         gpu_arch: Detected GPU architecture string e.g. "gfx942".
             Reserved for future per-GPU section filtering.
         custom_prompt: The user's --prompt text, if any.
@@ -449,8 +449,8 @@ class LLMAnalyzer:
             for i, kernel in enumerate(analysis_data["kernels"], 1):
                 sanitized_kernel = {
                     "kernel_id": f"[KERNEL_{i}]",
-                    "dispatch_count": kernel.get("dispatch_count"),
-                    "pct_total_time": kernel.get("pct_total_time"),
+                    "dispatch_count": kernel.get("calls"),
+                    "pct_total_time": kernel.get("percent_of_total"),
                     "avg_duration_ns": kernel.get("avg_duration_ns"),
                 }
 
@@ -1578,5 +1578,9 @@ Follow the reference guide strictly for analysis methodology and output format."
             return self._call_openai(system_prompt, user_prompt)
         elif self.provider == "local":
             return self._call_local(system_prompt, user_prompt)
+        elif self.provider == "private":
+            return self._call_private(system_prompt, user_prompt)
+        elif self.provider == "claude-code":
+            return self._call_claude_code(system_prompt, user_prompt)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")

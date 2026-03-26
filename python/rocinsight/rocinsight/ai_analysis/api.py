@@ -268,8 +268,9 @@ class AnalysisResult:
         """Serialize to schema-conformant JSON (analysis-output.schema.json v0.1.0).
 
         Delegates to format_analysis_output() to ensure the output matches the
-        normative JSON schema. Falls back to dataclass serialization if raw
-        analysis data is not available.
+        normative JSON schema. Raises RuntimeError if raw analysis data is not
+        available — use analyze_database() to obtain a fully-populated result,
+        or use to_dict() for a non-schema-conformant dict.
         """
         raw = getattr(self, "_raw", None)
         if raw:
