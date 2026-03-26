@@ -63,14 +63,20 @@ i=0
 for svg in $SVG_FILES; do
   CHANNEL=$(basename "$svg" .svg)
   
-  # Extract the content between <svg> and </svg>, excluding the svg tags
-  CONTENT=$(sed -n '/<svg/,/<\/svg>/p' "$svg" | sed '1d;$d' | sed 's/^/    /')
-  
-  cat >> "$OUTPUT_FILE" << CHANNEL_SVG
+  # Extract the content between <svg> and </svg>, excluding the svg tags,
+  # and stream it directly into the merged SVG to avoid storing large data
+  # in a shell variable.
+  {
+    cat << CHANNEL_SVG_START
   <g class="channel-group" id="$CHANNEL" transform="translate(0, $Y_OFFSET)">
-$CONTENT
+CHANNEL_SVG_START
+
+    sed -n '/<svg/,/<\/svg>/p' "$svg" | sed '1d;$d' | sed 's/^/    /'
+
+    cat << CHANNEL_SVG_END
   </g>
-CHANNEL_SVG
+CHANNEL_SVG_END
+  } >> "$OUTPUT_FILE"
 
   Y_OFFSET=$((Y_OFFSET + ${HEIGHTS[$i]} + PADDING))
   ((i++))
