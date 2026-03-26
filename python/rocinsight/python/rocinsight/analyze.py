@@ -41,9 +41,9 @@ from typing import Any, Dict, List, Optional
 try:
     from importlib.metadata import version as _pkg_version
 
-    _ROCPD_VERSION = _pkg_version("rocinsight")
+    _ROCINSIGHT_VERSION = _pkg_version("rocinsight")
 except Exception:
-    _ROCPD_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
+    _ROCINSIGHT_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
 
 from .connection import RocinsightConnection as RocpdImportData, execute_statement
 from .tracelens_port import (
@@ -1646,7 +1646,7 @@ def _format_as_json(
     doc: Dict[str, Any] = {
         "schema_version": "0.1.0",
         "metadata": {
-            "rocpd_version": _ROCPD_VERSION,
+            "rocpd_version": _ROCINSIGHT_VERSION,
             "analysis_version": "0.1.0",  # schema version, not module version
             "database_file": database_path,
             "analysis_timestamp": datetime.now().isoformat(),
@@ -3557,7 +3557,7 @@ def _format_tier0_json(tier0_result: Any) -> str:
     doc: Dict[str, Any] = {
         "schema_version": "0.2.0",
         "metadata": {
-            "rocpd_version": _ROCPD_VERSION,
+            "rocpd_version": _ROCINSIGHT_VERSION,
             "analysis_version": "0.2.0",  # schema version, not module version
             "database_file": None,
             "analysis_timestamp": tier0_result.analysis_timestamp,

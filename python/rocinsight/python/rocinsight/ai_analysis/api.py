@@ -31,9 +31,9 @@ from typing import List, Optional, Dict, Any
 try:
     from importlib.metadata import version as _pkg_version
 
-    _ROCPD_VERSION = _pkg_version("rocinsight")
+    _ROCINSIGHT_VERSION = _pkg_version("rocinsight")
 except Exception:
-    _ROCPD_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
+    _ROCINSIGHT_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
 
 from ..analyze import (
     compute_time_breakdown,
@@ -737,7 +737,7 @@ def _build_analysis_result(
 
     # Build metadata
     metadata = AnalysisMetadata(
-        rocpd_version=_ROCPD_VERSION,
+        rocpd_version=_ROCINSIGHT_VERSION,
         analysis_version="0.1.0",  # schema version, not module version
         database_file=str(database_path),
         analysis_timestamp=datetime.now().isoformat(),
