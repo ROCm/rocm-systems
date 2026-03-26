@@ -3641,6 +3641,11 @@ class WorkflowSession:
         if len(db_files) <= 1:
             return None
         merged_path = str(pathlib.Path(out_dir) / "merged_processes.db")
+        # Remove stale merged file from prior iteration to avoid conflicts
+        try:
+            pathlib.Path(merged_path).unlink(missing_ok=True)
+        except OSError:
+            pass
         try:
             from rocinsight.connection import merge_sqlite_dbs  # type: ignore[import]
 
@@ -3759,6 +3764,12 @@ class WorkflowSession:
                         if _p in ("-d", "--output-path") and _i + 1 < len(_parts):
                             out_dir = _parts[_i + 1]
 
+                    # Exclude any prior merged_processes.db from the input list
+                    # (dir may be reused across iterations)
+                    db_files = [
+                        f for f in db_files
+                        if not f.endswith("merged_processes.db")
+                    ]
                     if len(db_files) > 1:
                         merged = self._merge_per_process_dbs(db_files, out_dir)
                         db_path = merged if merged else db_files[0]
