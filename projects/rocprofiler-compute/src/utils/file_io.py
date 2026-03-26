@@ -81,15 +81,15 @@ def create_df_kernel_top_stats(
     time_unit: str,
     kernel_verbose: int,
     sortby: str = "sum",
-) -> None:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
+
+    Returns:
+        A tuple of (kernel_top_df, dispatch_info_df).
     """
 
     df = df_in["pmc_perf"].copy()
-
-    # Demangle original KernelNames
-    kernel_name_shortener(df, kernel_verbose)
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
@@ -206,6 +206,8 @@ def create_df_kernel_top_stats(
     elif sortby == "kernel":
         grouped = grouped.sort_values("Kernel_Name")
         grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
+
+    return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
 
 @demarcate

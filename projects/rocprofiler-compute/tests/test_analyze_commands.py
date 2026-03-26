@@ -2029,11 +2029,6 @@ def test_list_torch_operators_no_trace_data(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-# =============================================================================
-# PMC top kernel / kernel filter / PC sampling tests
-# =============================================================================
-
-
 @pytest.fixture
 def mock_raw_pmc_for_kernel_top():
     """Create raw_pmc dict with pmc_perf DF for create_df_kernel_top_stats tests."""

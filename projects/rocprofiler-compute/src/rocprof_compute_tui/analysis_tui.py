@@ -16,7 +16,6 @@ from rocprof_compute_tui.utils.tui_utils import (
     process_panels_to_dataframes,
 )
 from utils import file_io, parser, schema
-from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, demarcate
 
 
@@ -53,7 +52,7 @@ class tui_analysis(OmniAnalyze_Base):
         if self.args.spatial_multiplexing:
             workload.raw_pmc = self.spatial_multiplex_merge_counters(workload.raw_pmc)
 
-        file_io.create_df_kernel_top_stats(
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=workload.raw_pmc,
             raw_data_dir=self.path,
             filter_gpu_ids=workload.filter_gpu_ids,
@@ -62,7 +61,8 @@ class tui_analysis(OmniAnalyze_Base):
             time_unit=self.args.time_unit,
             kernel_verbose=self.args.kernel_verbose,
         )
-        kernel_name_shortener(workload.raw_pmc, self.args.kernel_verbose)
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
         parser.load_non_mertrics_table(
             workload=workload, dir_path=self.path, args=self.args
