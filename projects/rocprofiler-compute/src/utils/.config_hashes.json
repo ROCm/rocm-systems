@@ -136,7 +136,7 @@
         "1700_l2_cache.yaml": "e33e5de1c43c26472acc5bd7d2a94af3",
         "1800_l2_cache_per_channel.yaml": "ffbaef1fea16af57b08d1e513cb5a29f",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b",
-        "3000_mem_bw.yaml": "a1769e144d16d4ce9842b76663722967"
+        "3000_mem_bw.yaml": "703fedfca057c3de3084fcd36e4ff6ae"
       }
     }
   }
