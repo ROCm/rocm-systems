@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocm-ai-analysis"
+version = "0.1.0"
+description = "AI-powered performance analysis for AMD GPU traces"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Advanced Micro Devices, Inc."},
+]
+keywords = ["amd", "rocm", "gpu", "profiling", "performance", "analysis", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Hardware",
+]
+
+# Core dependencies: stdlib only (sqlite3, json, argparse, pathlib, etc.)
+dependencies = []
+
+[project.optional-dependencies]
+llm = [
+    "anthropic>=0.18.0",
+    "openai>=1.0.0",
+]
+all = [
+    "rocm-ai-analysis[llm]",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "black",
+]
+
+[project.scripts]
+rocm-ai-analyze = "rocm_ai_analysis.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ROCm/rocprofiler-sdk"
+Documentation = "https://rocm.docs.amd.com/"
+Repository = "https://github.com/ROCm/rocprofiler-sdk"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+rocm_ai_analysis = [
+    "share/*.md",
+    "share/*.png",
+    "docs/*.md",
+    "docs/*.json",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py38"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require a real database (deselect with '-m \"not integration\"')",
+    "requires_anthropic: marks tests that require Anthropic API key",
+    "requires_openai: marks tests that require OpenAI API key",
+]
