@@ -88,6 +88,11 @@ typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/} nccl
 
 /*! @brief      Communicator configuration
     @details    Users can assign value to attributes to specify the behavior of a communicator */
+/* ncclCommRevoke flags */
+#define NCCL_REVOKE_DEFAULT 0x00 /* reserved for future use; must be 0 */
+
+/* Communicator configuration. Users can assign value to attributes to specify the
+ * behavior of a communicator. */
 typedef struct ncclConfig_v22800 {
   /* attributes that users should never touch. */
   size_t size;                 /*!< Should not be touched */
@@ -295,6 +300,22 @@ ncclResult_t pncclCommAbort(ncclComm_t comm);
     @param[in]  key           Key used to order ranks within the same new communicator
     @param[out] newcomm       Pointer to new communicator
     @param[in]  config        Config file for new communicator. May be NULL to inherit from comm */
+/* Revoke a communicator. ncclCommRevoke stops all in-flight operations
+ * and marks communicator state as ncclInProgress. The state will change to ncclSuccess
+ * when the communicator is quiescent; then, management operations (destroy, split,
+ * shrink) can proceed safely. Calling ncclCommFinalize after revoke is invalid.
+ * Additionally, resource sharing via splitShare/shrinkShare is disabled while revoked.
+ * revokeFlags must be NCCL_REVOKE_DEFAULT (0). */
+ncclResult_t  ncclCommRevoke(ncclComm_t comm, int revokeFlags);
+ncclResult_t pncclCommRevoke(ncclComm_t comm, int revokeFlags);
+
+/* Creates one or more communicators from an existing one.
+ * Ranks with the same color will end up in the same communicator.
+ * Within the new communicator, key will be used to order ranks.
+ * NCCL_SPLIT_NOCOLOR as color will indicate the rank will not be part of any group
+ * and will therefore return a NULL communicator.
+ * If config is NULL, the new communicator will inherit the original communicator's
+ * configuration*/
 ncclResult_t  ncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t *newcomm, ncclConfig_t* config);
 /*! @cond       include_hidden */
 ncclResult_t pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t *newcomm, ncclConfig_t* config);
