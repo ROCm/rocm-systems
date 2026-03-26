@@ -39,6 +39,11 @@ option(ROCPDSNA_BUILD_TESTS "Build unit tests" ON)
 option(ROCPDSNA_BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(ROCPDSNA_ENABLE_LOGGING "Enable logging" OFF)
 option(ROCPDSNA_ENABLE_COVERAGE "Enable code coverage" OFF)
+option(ROCPDSNA_USE_SCHEMA_V4 "Use schema v4 (latest) instead of v3" OFF)
+
+if(ROCPDSNA_USE_SCHEMA_V4)
+    add_compile_definitions(ROCPDSNA_USE_SCHEMA_V4)
+endif()
 
 if(ROCPDSNA_BUILD_TESTS)
     enable_testing()

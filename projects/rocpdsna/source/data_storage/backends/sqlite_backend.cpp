@@ -12,35 +12,10 @@
 #include <utility>
 #include <vector>
 
-#if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
-    USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
+
 #    include <rocprofiler-sdk-rocpd/sql.h>
 #    include <rocprofiler-sdk-rocpd/types.h>
-#else
-#    include <regex>
 
-#    include "schema/data_views.hpp"
-#    include "schema/marker_views.hpp"
-#    include "schema/rocpd_tables.hpp"
-#    include "schema/rocpd_views.hpp"
-#    include "schema/summary_views.hpp"
-
-namespace
-{
-enum rocpd_sql_schema_kind_t
-{
-    ROCPD_SQL_SCHEMA_NONE = 0,
-    ROCPD_SQL_SCHEMA_ROCPD_TABLES,
-    ROCPD_SQL_SCHEMA_ROCPD_INDEXES,
-    ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
-    ROCPD_SQL_SCHEMA_LAST,
-};
-}  // namespace
-
-#endif
 
 namespace
 {
@@ -57,13 +32,14 @@ create_directory_for_database_file(const std::string& db_file)
 #if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
     USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
 void
-load_schema_cb(rocpd_sql_engine_t /*unused*/,
-               rocpd_sql_schema_kind_t /*unused*/,
-               rocpd_sql_options_t /*unused*/,
+load_schema_cb(rocpd_sql_engine_t                        /*unused*/,
+               rocpd_sql_schema_kind_t                   /*unused*/,
+               rocpd_sql_options_t                       /*unused*/,
+               rocpd_version_triplet_t                   /*unused*/,
                const rocpd_sql_schema_jinja_variables_t* /*unused*/,
-               const char* /*unused*/,
-               const char* schema_content,
-               void*       user_data)
+               const char*                               /*unused*/,
+               const char*                               schema_content,
+               void*                                     user_data)
 {
     if(user_data == nullptr || schema_content == nullptr)
     {
@@ -90,10 +66,29 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
                                                    uuid.c_str(),
                                                    uuid.c_str() };
 
+    /**
+     * Schema version selection:
+     * - {3, 0, 0}: v3 schema with user_name, call_stack, line_info columns
+     * - {0, 0, 0}: latest schema (v4+) with track_id, timestamp tables
+     *
+     * This must match the writer policy selected in writer_impl.hpp:
+     * - writer_policy_v3 requires {3, 0, 0}
+     * - writer_policy_v4 requires {0, 0, 0}
+     */
     std::string query;
-    auto        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
+    rocpd_version_triplet_t schema_version = {3, 0, 0};
+#ifdef ROCPDSNA_USE_SCHEMA_V4
+    // Use latest schema (v4+) when enabled
+    schema_version = {0, 0, 0};
+    LOG_INFO("SANUJ : Using schema v4 (latest) - track_id and timestamp tables");
+#else
+    // Use v3 schema when v4 is disabled
+    LOG_INFO("Using schema v3 - user_name, call_stack, line_info columns");
+#endif
+    auto status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
                                         schema_kind,
                                         ROCPD_SQL_OPTIONS_NONE,
+                                        schema_version,
                                         &info,
                                         load_schema_cb,
                                         nullptr,
@@ -244,7 +239,6 @@ sqlite_backend::initialize_schema()
         ROCPD_SQL_SCHEMA_ROCPD_TABLES,
         ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
     };
 

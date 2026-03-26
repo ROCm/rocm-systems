@@ -13,6 +13,14 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+
+// Schema-specific type aliases
+#ifdef ROCPDSNA_USE_SCHEMA_V4
+namespace active_schema = rocpdsna::data_storage::schema_v4;
+#else
+namespace active_schema = rocpdsna::data_storage::schema_v3;
+#endif
+
 #include <utility>
 
 namespace rocpdsna
@@ -22,7 +30,7 @@ reader_t::impl::impl(std::unique_ptr<rocpdsna::storage_t> storage)
 : m_storage(std::move(storage))
 , m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
 , m_read_statements(
-      std::make_shared<data_storage::schema_v3::read_statements>(m_backend,
+      std::make_shared<active_schema::read_statements>(m_backend,
                                                                  m_backend->get_uuid()))
 {
     if(!m_storage)
@@ -535,7 +543,7 @@ reader_t::impl::get_all_pmc_infos()
 
 reader_types::timeline_event_list_t
 reader_t::impl::build_timeline_events(
-    const std::vector<data_storage::schema_v3::timeline_event_result>& results,
+    const std::vector<active_schema::timeline_event_result>& results,
     reader_types::event_type_t                                         type)
 {
     reader_types::timeline_event_list_t events;
@@ -634,10 +642,10 @@ reader_t::impl::get_events(const reader_types::event_filter_t& filter)
         filter.time_window.start.has_value() && filter.time_window.end.has_value();
 
     auto query_event_type =
-        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
+        [&](const active_schema::read_statements::timeline_event_statement_set&
                                        stmts,
             reader_types::event_type_t type) {
-            std::vector<data_storage::schema_v3::timeline_event_result> results;
+            std::vector<active_schema::timeline_event_result> results;
             if(has_time)
             {
                 results = stmts
@@ -711,10 +719,10 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
         filter.time_window.start.has_value() && filter.time_window.end.has_value();
 
     auto query_event_type =
-        [&](const data_storage::schema_v3::read_statements::timeline_event_statement_set&
+        [&](const active_schema::read_statements::timeline_event_statement_set&
                                        stmts,
             reader_types::event_type_t type) {
-            std::vector<data_storage::schema_v3::timeline_event_result> results;
+            std::vector<active_schema::timeline_event_result> results;
             if(has_time)
             {
                 results = stmts
@@ -776,12 +784,12 @@ reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
 // Event metadata resolution helpers
 // ============================================================================
 
-std::optional<data_storage::schema_v3::event_id_result>
+std::optional<active_schema::event_id_result>
 reader_t::impl::resolve_event_metadata(const reader_types::timeline_event_t& event)
 {
     auto db_id = event.unique_identifier.id;
 
-    std::vector<data_storage::schema_v3::event_id_result> results;
+    std::vector<active_schema::event_id_result> results;
     switch(event.unique_identifier.type)
     {
         case reader_types::event_type_t::region:
@@ -805,7 +813,7 @@ reader_t::impl::resolve_event_metadata(const reader_types::timeline_event_t& eve
 
 reader_types::event_data_ptr_t
 reader_t::impl::build_event_data(
-    const data_storage::schema_v3::event_id_result& event_meta)
+    const active_schema::event_id_result& event_meta)
 {
     auto event_data             = std::make_shared<reader_types::event_data_t>();
     event_data->stack_id        = event_meta.stack_id.value_or(0);

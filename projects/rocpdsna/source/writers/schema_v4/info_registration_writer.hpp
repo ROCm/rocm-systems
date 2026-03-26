@@ -4,10 +4,10 @@
 #pragma once
 
 #include "writers/info_registration_writer.hpp"
-#include "writers/schema_v3/common_insert_operations.hpp"
+#include "writers/schema_v4/common_insert_operations.hpp"
 #include "writers/writer_context.hpp"
 
-#include "data_storage/schema_v3/insert_statements.hpp"
+#include "data_storage/schema_v4/insert_statements.hpp"
 #include "data_storage/schema_version.hpp"
 
 #include "common/string_conversions.hpp"
@@ -22,7 +22,7 @@
 namespace rocpdsna
 {
 
-namespace
+namespace detail_v4
 {
 
 template <typename Utility, typename Entity>
@@ -37,20 +37,20 @@ is_already_registered(Utility& utility, const Entity& entity)
     return false;
 }
 
-}  // namespace
+}  // namespace detail_v4
 
 template <>
-class info_registration_writer<data_storage::schema_v3_tag>
+class info_registration_writer<data_storage::schema_v4_tag>
 : public info_registration_writer_interface<
-      info_registration_writer<data_storage::schema_v3_tag>>
+      info_registration_writer<data_storage::schema_v4_tag>>
 {
 public:
     explicit info_registration_writer(
         std::shared_ptr<writer_context> ctx,
         std::shared_ptr<
-            data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
-                                                                               stmts,
-        std::shared_ptr<common_insert_operations<data_storage::schema_v3_tag>> common_ops)
+            data_storage::schema_v4::insert_statements<data_storage::sqlite_backend>>
+            stmts,
+        std::shared_ptr<common_insert_operations<data_storage::schema_v4_tag>> common_ops)
     : m_ctx(std::move(ctx))
     , m_stmts(std::move(stmts))
     , m_common_ops(std::move(common_ops))
@@ -59,7 +59,7 @@ public:
     void register_node_info_impl(const writer_types::node_info_t& node_info)
     {
         auto& node_info_utility = m_ctx->registry->node_info();
-        if(is_already_registered(node_info_utility, node_info)) return;
+        if(detail_v4::is_already_registered(node_info_utility, node_info)) return;
 
         m_stmts->node_info_statement()(node_info.node_id,
                                        node_info.hash,
@@ -78,7 +78,7 @@ public:
     void register_process_info_impl(const writer_types::process_info_t& process_info)
     {
         auto& process_info_utility = m_ctx->registry->process_info();
-        if(is_already_registered(process_info_utility, process_info)) return;
+        if(detail_v4::is_already_registered(process_info_utility, process_info)) return;
 
         m_ctx->validator->require_node(process_info.node_id);
 
@@ -104,7 +104,7 @@ public:
     void register_agent_info_impl(const writer_types::agent_info_t& agent_info)
     {
         auto& agent_info_utility = m_ctx->registry->agent_info();
-        if(is_already_registered(agent_info_utility, agent_info)) return;
+        if(detail_v4::is_already_registered(agent_info_utility, agent_info)) return;
 
         m_ctx->validator->require_node(agent_info.node_id)
             .require_process(agent_info.process_id);
@@ -134,10 +134,10 @@ public:
                                         agent_info.unique_id.type_index,
                                         agent_info.uuid,
                                         agent_info.name,
+                                        agent_info.user_name,  // maps to generic_name
                                         agent_info.model_name,
                                         agent_info.vendor_name,
                                         agent_info.product_name,
-                                        agent_info.user_name,
                                         agent_info.extdata);
 
         agent_info_utility.emplace_entity(agent_info.unique_id, primary_key);
@@ -147,7 +147,7 @@ public:
     void register_pmc_info_impl(const writer_types::pmc_info_t& pmc_info)
     {
         auto& pmc_info_utility = m_ctx->registry->pmc_info();
-        if(is_already_registered(pmc_info_utility, pmc_info)) return;
+        if(detail_v4::is_already_registered(pmc_info_utility, pmc_info)) return;
 
         m_ctx->validator->require_node(pmc_info.node_id)
             .require_process(pmc_info.process_id)
@@ -186,7 +186,7 @@ public:
     void register_thread_info_impl(const writer_types::thread_info_t& thread_info)
     {
         auto& thread_info_utility = m_ctx->registry->thread_info();
-        if(is_already_registered(thread_info_utility, thread_info)) return;
+        if(detail_v4::is_already_registered(thread_info_utility, thread_info)) return;
 
         m_ctx->validator->require_node(thread_info.node_id)
             .require_process(thread_info.process_id);
@@ -213,7 +213,7 @@ public:
     void register_stream_info_impl(const writer_types::stream_info_t& stream_info)
     {
         auto& stream_info_utility = m_ctx->registry->stream_info();
-        if(is_already_registered(stream_info_utility, stream_info)) return;
+        if(detail_v4::is_already_registered(stream_info_utility, stream_info)) return;
 
         m_ctx->validator->require_node(stream_info.node_id)
             .require_process(stream_info.process_id);
@@ -236,7 +236,7 @@ public:
     void register_queue_info_impl(const writer_types::queue_info_t& queue_info)
     {
         auto& queue_info_utility = m_ctx->registry->queue_info();
-        if(is_already_registered(queue_info_utility, queue_info)) return;
+        if(detail_v4::is_already_registered(queue_info_utility, queue_info)) return;
 
         m_ctx->validator->require_node(queue_info.node_id)
             .require_process(queue_info.process_id);
@@ -260,7 +260,7 @@ public:
         const writer_types::code_object_info_t& code_object_info)
     {
         auto& code_object_info_utility = m_ctx->registry->code_object_info();
-        if(is_already_registered(code_object_info_utility, code_object_info)) return;
+        if(detail_v4::is_already_registered(code_object_info_utility, code_object_info)) return;
 
         m_ctx->validator->require_node(code_object_info.node_id)
             .require_process(code_object_info.process_id)
@@ -291,7 +291,7 @@ public:
         const writer_types::kernel_symbol_info_t& kernel_symbol_info)
     {
         auto& kernel_symbol_info_utility = m_ctx->registry->kernel_symbol_info();
-        if(is_already_registered(kernel_symbol_info_utility, kernel_symbol_info)) return;
+        if(detail_v4::is_already_registered(kernel_symbol_info_utility, kernel_symbol_info)) return;
 
         m_ctx->validator->require_node(kernel_symbol_info.node_id)
             .require_process(kernel_symbol_info.process_id)
@@ -325,7 +325,7 @@ public:
     void register_track_info_impl(const writer_types::track_info_t& track)
     {
         auto& track_info_utility = m_ctx->registry->track_info();
-        if(is_already_registered(track_info_utility, track)) return;
+        if(detail_v4::is_already_registered(track_info_utility, track)) return;
 
         m_ctx->validator->require_node(track.node_id)
             .validate_optional_process(track.process_id)
@@ -348,57 +348,98 @@ public:
             m_ctx->key_providers->track_info().get_primary_key_value();
 
         m_stmts->track_info_statement()(
-            primary_key, track.node_id, process_pk, thread_pk, string_pk, track.extdata);
+            primary_key,
+            track.node_id,
+            std::nullopt,   // ppid
+            process_pk,
+            thread_pk,
+            std::nullopt,   // agent_id
+            std::nullopt,   // queue_id
+            std::nullopt,   // stream_id
+            string_pk,
+            track.extdata);
 
         track_info_utility.emplace_entity(track, primary_key);
         LOG_TRACE("Registered track info: {}", rocpdsna::to_string(track));
     }
 
-    // =========================================================================
-    // v4+ stub implementations (no-op in v3 - data embedded in JSONB columns)
-    // =========================================================================
-
     /**
-     * @brief Category info stub for v3
-     * @note In v3, categories are stored as strings via register_string()
-     *       The category name is embedded in event extdata if needed.
+     * @brief Register category info (v4+ table)
+     * @note Uses m_common_ops->get_or_insert_category which handles caching
      */
     void register_category_info_impl(const writer_types::category_info_t& category_info)
     {
-        // In v3, we just register the category name as a string
-        m_common_ops->register_string(category_info.name);
-        LOG_TRACE("v3: Category '{}' registered as string (no separate table)", 
-                  category_info.name);
+        // Category info is handled via common_insert_operations cache
+        // Just call get_or_insert_category to register it
+        m_common_ops->ensure_category_registered(category_info.name);
+        LOG_TRACE("Registered category info: id={}, name={}", 
+                  category_info.id, category_info.name);
     }
 
     /**
-     * @brief Address range info stub for v3
-     * @note In v3, address ranges are embedded in call_stack/line_info JSONB
+     * @brief Register address range info (v4+ table)
      */
-    void register_address_range_info_impl(const writer_types::address_range_info_t& /* addr_range */)
+    void register_address_range_info_impl(const writer_types::address_range_info_t& addr_range)
     {
-        // No-op in v3: address range info is embedded in JSONB columns
-        LOG_TRACE("v3: Address range info ignored (embedded in JSONB)");
+        m_ctx->validator->require_node(addr_range.node_id);
+        m_ctx->validator->require_process(addr_range.process_id);
+
+        m_stmts->address_range_info_statement()(addr_range.id,
+                                                addr_range.node_id,
+                                                addr_range.process_id,
+                                                addr_range.address_base,
+                                                addr_range.address_low,
+                                                addr_range.address_high,
+                                                addr_range.extdata);
+
+        LOG_TRACE("Registered address range info: id={}, base={:#x}, low={:#x}, high={:#x}",
+                  addr_range.id, addr_range.address_base, 
+                  addr_range.address_low, addr_range.address_high);
     }
 
     /**
-     * @brief Source code info stub for v3
-     * @note In v3, source code is embedded in line_info JSONB column
+     * @brief Register source code info (v4+ table)
      */
-    void register_source_code_info_impl(const writer_types::source_code_info_t& /* source_code */)
+    void register_source_code_info_impl(const writer_types::source_code_info_t& source_code)
     {
-        // No-op in v3: source code info is embedded in JSONB columns
-        LOG_TRACE("v3: Source code info ignored (embedded in JSONB)");
+        m_ctx->validator->require_node(source_code.node_id);
+        m_ctx->validator->require_process(source_code.process_id);
+
+        m_stmts->source_code_info_statement()(source_code.id,
+                                              source_code.node_id,
+                                              source_code.process_id,
+                                              source_code.address_id,
+                                              source_code.file,
+                                              source_code.line_number,
+                                              source_code.lines,
+                                              source_code.instructions,
+                                              source_code.extdata);
+
+        LOG_TRACE("Registered source code info: id={}, file={}",
+                  source_code.id, 
+                  source_code.file.value_or("<none>"));
     }
 
     /**
-     * @brief PC info stub for v3
-     * @note In v3, PC info is embedded in call_stack/line_info JSONB
+     * @brief Register program counter info (v4+ table)
      */
-    void register_pc_info_impl(const writer_types::pc_info_t& /* pc_info */)
+    void register_pc_info_impl(const writer_types::pc_info_t& pc_info)
     {
-        // No-op in v3: PC info is embedded in JSONB columns
-        LOG_TRACE("v3: PC info ignored (embedded in JSONB)");
+        m_ctx->validator->require_node(pc_info.node_id);
+        m_ctx->validator->require_process(pc_info.process_id);
+
+        m_stmts->pc_info_statement()(pc_info.id,
+                                     pc_info.node_id,
+                                     pc_info.process_id,
+                                     pc_info.function,
+                                     pc_info.address_id,
+                                     pc_info.file,
+                                     pc_info.line,
+                                     pc_info.extdata);
+
+        LOG_TRACE("Registered pc info: id={}, function={}, file={}",
+                  pc_info.id, pc_info.function,
+                  pc_info.file.value_or("<none>"));
     }
 
     void register_string_impl(std::string_view str)
@@ -409,9 +450,9 @@ public:
 private:
     std::shared_ptr<writer_context> m_ctx;
     std::shared_ptr<
-        data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
-                                                                           m_stmts;
-    std::shared_ptr<common_insert_operations<data_storage::schema_v3_tag>> m_common_ops;
+        data_storage::schema_v4::insert_statements<data_storage::sqlite_backend>>
+        m_stmts;
+    std::shared_ptr<common_insert_operations<data_storage::schema_v4_tag>> m_common_ops;
 };
 
 }  // namespace rocpdsna

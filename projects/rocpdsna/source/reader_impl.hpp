@@ -8,7 +8,18 @@
 #include "rocpdsna/storage.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
-#include "data_storage/read_statements.hpp"
+#ifdef ROCPDSNA_USE_SCHEMA_V4
+#include "data_storage/schema_v4/read_statements.hpp"
+#else
+#include "data_storage/schema_v3/read_statements.hpp"
+#endif
+
+// Schema-agnostic type aliases for reader
+#ifdef ROCPDSNA_USE_SCHEMA_V4
+namespace active_reader_schema = rocpdsna::data_storage::schema_v4;
+#else
+namespace active_reader_schema = rocpdsna::data_storage::schema_v3;
+#endif
 #include "entity_utility.hpp"
 
 #include <memory>
@@ -103,16 +114,16 @@ private:
 
     // Resolve event metadata from event-specific table by db_id and type.
     // Returns event_id_result containing event_id + stack_id + call_stack JSON etc.
-    [[nodiscard]] std::optional<data_storage::schema_v3::event_id_result>
+    [[nodiscard]] std::optional<active_reader_schema::event_id_result>
     resolve_event_metadata(const reader_types::timeline_event_t& event);
 
     // Build event_data_t from event_id (queries rocpd_event, parses JSON)
     [[nodiscard]] reader_types::event_data_ptr_t build_event_data(
-        const data_storage::schema_v3::event_id_result& event_meta);
+        const active_reader_schema::event_id_result& event_meta);
 
     // Converts raw SQL results to timeline_event_t, resolving FKs
     [[nodiscard]] reader_types::timeline_event_list_t build_timeline_events(
-        const std::vector<data_storage::schema_v3::timeline_event_result>& results,
+        const std::vector<active_reader_schema::timeline_event_result>& results,
         reader_types::event_type_t                                         type);
 
     // Applies limit/offset to merged event list
@@ -121,7 +132,7 @@ private:
 
     std::unique_ptr<rocpdsna::storage_t>                      m_storage;
     std::shared_ptr<data_storage::sqlite_backend>             m_backend;
-    std::shared_ptr<data_storage::schema_v3::read_statements> m_read_statements;
+    std::shared_ptr<active_reader_schema::read_statements> m_read_statements;
 
     reader_types::node_info_list_t          m_node_info_list;
     reader_types::process_info_list_t       m_process_info_list;

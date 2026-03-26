@@ -84,6 +84,31 @@ using queue_id_t = size_t;
  */
 using track_name_t = std::string_view;
 
+// =============================================================================
+// v4+ ID Types
+// =============================================================================
+
+/*** @brief Category id - unique identifier for an event category  */
+using category_id_t = size_t;
+
+/*** @brief Address range id - unique identifier for an address range  */
+using address_range_id_t = size_t;
+
+/*** @brief Source code id - unique identifier for source code info  */
+using source_code_id_t = size_t;
+
+/*** @brief Program counter id - unique identifier for PC info  */
+using pc_id_t = size_t;
+
+/*** @brief Track id - unique identifier for a track record  */
+using track_id_t = size_t;
+
+/*** @brief Timestamp id - unique identifier for a timestamp record  */
+using timestamp_id_t = size_t;
+
+/*** @brief Event id - unique identifier for an event record  */
+using event_id_t = size_t;
+
 using timestamp_ns_t = size_t;
 
 constexpr std::string_view empty_json = "{}";
@@ -366,6 +391,78 @@ struct kernel_symbol_info_t
     code_object_id_t code_obj_id{};
 };
 
+// =============================================================================
+// Info Tables -Latest version (Category, Address Range, Source Code, PC)
+// =============================================================================
+
+/***
+ * @brief Category info 
+ * @note Maps to rocpd_info_category table. Categories for filtering events
+ */
+struct category_info_t
+{
+    category_id_t    id{};     // Unique category identifier
+    std::string_view name;     // Category name (NOT NULL)
+    std::string_view extdata = empty_json;
+};
+
+/***
+ * @brief Address range info 
+ * @note Maps to rocpd_info_address_range table. Represents a memory address
+ * range within a loaded code object.
+ */
+struct address_range_info_t
+{
+    address_range_id_t id{};
+
+    size_t           address_base{};  // Base load address of code object
+    size_t           address_low{};   // Lower bound (>= base)
+    size_t           address_high{};  // Upper bound (>= low)
+    std::string_view extdata = empty_json;
+
+    node_id_t    node_id{};
+    process_id_t process_id{};
+};
+
+/***
+ * @brief Source code info 
+ * @note Maps to rocpd_info_source_code table. Contains source code lines
+ * and assembly instructions for a code location.
+ */
+struct source_code_info_t
+{
+    source_code_id_t id{};
+
+    std::optional<std::string_view> file;          // Source file path
+    std::optional<size_t>           line_number;   // Starting line number
+    std::string_view                lines        = empty_json;  // Source lines as JSON array
+    std::string_view                instructions = empty_json;  // Assembly as JSON array
+    std::string_view                extdata      = empty_json;
+
+    node_id_t                         node_id{};
+    process_id_t                      process_id{};
+    std::optional<address_range_id_t> address_id;  // Optional FK to address range
+};
+
+/***
+ * @brief Program counter info 
+ * @note Maps to rocpd_info_pc table. Represents a program counter location
+ * with function, file, and line information.
+ */
+struct pc_info_t
+{
+    pc_id_t id{};
+
+    std::string_view                function;      // Function name (NOT NULL)
+    std::optional<std::string_view> file;          // Source file path
+    std::optional<size_t>           line;          // Line number
+    std::string_view                extdata = empty_json;
+
+    node_id_t                         node_id{};
+    process_id_t                      process_id{};
+    std::optional<address_range_id_t> address_id;  // Optional FK to address range
+};
+
 /***
  * @brief Track info
  * @note This is a struct which will be used to identify the track.
@@ -399,11 +496,11 @@ struct track_info_t
  */
 struct arg_data_t
 {
-    size_t           position{};  ///< Argument position (0-indexed)
-    std::string_view type;        ///< Argument type name
-    std::string_view name;        ///< Argument parameter name
+    size_t           position{};  // Argument position (0-indexed)
+    std::string_view type;        // Argument type name
+    std::string_view name;        // Argument parameter name
 
-    std::optional<std::string_view> value;  ///< Serialized argument value
+    std::optional<std::string_view> value;  // Serialized argument value
     std::string_view                extdata = empty_json;
 };
 
@@ -418,15 +515,15 @@ struct arg_data_t
  */
 struct event_data_t
 {
-    std::optional<size_t> stack_id;  ///< Unique identifier for this call stack instance
-    std::optional<size_t> parent_stack_id;  ///< Parent stack ID for nested events
-    std::optional<size_t> correlation_id;   ///< Correlation ID linking related events
+    std::optional<size_t> stack_id;  // Unique identifier for this call stack instance
+    std::optional<size_t> parent_stack_id;  // Parent stack ID for nested events
+    std::optional<size_t> correlation_id;   // Correlation ID linking related events
 
-    shared_types::call_stack_t          call_stack;      ///< Call stack at event time
-    shared_types::source_context_list_t line_info_list;  ///< Source context information
+    shared_types::call_stack_t          call_stack;      // Call stack at event time
+    shared_types::source_context_list_t line_info_list;  // Source context information
 
     std::optional<std::string_view>
-        event_category;  ///< Event category name (e.g., "HIP_API", "HSA_API")
+        event_category;  // Event category name (e.g., "HIP_API", "HSA_API")
     std::string_view extdata = empty_json;
 };
 
@@ -437,14 +534,14 @@ struct event_data_t
  */
 struct region_data_t
 {
-    std::optional<event_data_t> event;  ///< Common event metadata
+    std::optional<event_data_t> event;  // Common event metadata
 
-    timestamp_ns_t   start_timestamp;  ///< Region start time (nanoseconds)
-    timestamp_ns_t   end_timestamp;    ///< Region end time (nanoseconds)
-    std::string_view name;             ///< Region name (e.g., function name, annotation)
+    timestamp_ns_t   start_timestamp;  // Region start time (nanoseconds)
+    timestamp_ns_t   end_timestamp;    // Region end time (nanoseconds)
+    std::string_view name;             // Region name (e.g., function name, annotation)
     std::string_view extdata = empty_json;
 
-    std::vector<arg_data_t> args;  ///< Optional function arguments
+    std::vector<arg_data_t> args;  // Optional function arguments
 };
 
 /***
@@ -454,7 +551,7 @@ struct region_data_t
  */
 struct sample_data_t
 {
-    timestamp_ns_t   timestamp{};  ///< Sample time (nanoseconds)
+    timestamp_ns_t   timestamp{};  // Sample time (nanoseconds)
     track_info_t     track;
     std::string_view extdata = empty_json;
 };
@@ -467,10 +564,10 @@ struct sample_data_t
  */
 struct pmc_event_data_t
 {
-    std::optional<event_data_t> event;    ///< Common event metadata
-    double                      value{};  ///< Counter value
+    std::optional<event_data_t> event;    // Common event metadata
+    double                      value{};  // Counter value
     std::string_view            extdata = empty_json;
-    sample_data_t               sample;  ///< Timestamp information
+    sample_data_t               sample;  // Timestamp information
 };
 
 /***
@@ -481,22 +578,22 @@ struct pmc_event_data_t
  */
 struct kernel_dispatch_data_t
 {
-    std::optional<event_data_t> event;               ///< Common event metadata
-    size_t                      dispatch_id{};       ///< Unique dispatch identifier
-    timestamp_ns_t              start_timestamp{};   ///< Kernel start time (nanoseconds)
-    timestamp_ns_t              end_timestamp{};     ///< Kernel end time (nanoseconds)
-    kernel_symbol_id_t          kernel_symbol_id{};  ///< Kernel symbol id
-    code_object_id_t            code_object_id{};    ///< Code object id
-    size_t private_segment_size{};  ///< Private memory per work-item (bytes)
-    size_t group_segment_size{};    ///< LDS memory per workgroup (bytes)
-    size_t workgroup_size_x{};      ///< Workgroup size in X dimension
-    size_t workgroup_size_y{};      ///< Workgroup size in Y dimension
-    size_t workgroup_size_z{};      ///< Workgroup size in Z dimension
-    size_t grid_size_x{};           ///< Grid size in X dimension
-    size_t grid_size_y{};           ///< Grid size in Y dimension
-    size_t grid_size_z{};           ///< Grid size in Z dimension
+    std::optional<event_data_t> event;               // Common event metadata
+    size_t                      dispatch_id{};       // Unique dispatch identifier
+    timestamp_ns_t              start_timestamp{};   // Kernel start time (nanoseconds)
+    timestamp_ns_t              end_timestamp{};     // Kernel end time (nanoseconds)
+    kernel_symbol_id_t          kernel_symbol_id{};  // Kernel symbol id
+    code_object_id_t            code_object_id{};    // Code object id
+    size_t private_segment_size{};  // Private memory per work-item (bytes)
+    size_t group_segment_size{};    // LDS memory per workgroup (bytes)
+    size_t workgroup_size_x{};      // Workgroup size in X dimension
+    size_t workgroup_size_y{};      // Workgroup size in Y dimension
+    size_t workgroup_size_z{};      // Workgroup size in Z dimension
+    size_t grid_size_x{};           // Grid size in X dimension
+    size_t grid_size_y{};           // Grid size in Y dimension
+    size_t grid_size_z{};           // Grid size in Z dimension
 
-    std::optional<std::string_view> name;  ///< Kernel name (region_name_id nullable)
+    std::optional<std::string_view> name;  // Kernel name (region_name_id nullable)
     std::string_view                extdata = empty_json;
 };
 
@@ -508,17 +605,17 @@ struct kernel_dispatch_data_t
  */
 struct memory_copy_data_t
 {
-    std::optional<event_data_t> event;              ///< Common event metadata
-    timestamp_ns_t              start_timestamp{};  ///< Copy start time (nanoseconds)
-    timestamp_ns_t              end_timestamp{};    ///< Copy end time (nanoseconds)
-    std::optional<agent_unique_id_t> dst_agent_id;  ///< Destination agent id
-    std::optional<size_t>            dst_address;   ///< Destination memory address
-    std::optional<agent_unique_id_t> src_agent_id;  ///< Source agent id
-    std::optional<size_t>            src_address;   ///< Source memory address
-    size_t                           size{};        ///< Transfer size (bytes)
+    std::optional<event_data_t> event;              // Common event metadata
+    timestamp_ns_t              start_timestamp{};  // Copy start time (nanoseconds)
+    timestamp_ns_t              end_timestamp{};    // Copy end time (nanoseconds)
+    std::optional<agent_unique_id_t> dst_agent_id;  // Destination agent id
+    std::optional<size_t>            dst_address;   // Destination memory address
+    std::optional<agent_unique_id_t> src_agent_id;  // Source agent id
+    std::optional<size_t>            src_address;   // Source memory address
+    size_t                           size{};        // Transfer size (bytes)
 
-    std::string_view                name;         ///< Operation name
-    std::optional<std::string_view> region_name;  ///< Region name
+    std::string_view                name;         // Operation name
+    std::optional<std::string_view> region_name;  // Region name
     std::string_view                extdata = empty_json;
 };
 
@@ -529,16 +626,16 @@ struct memory_copy_data_t
  */
 struct memory_alloc_data_t
 {
-    std::optional<event_data_t> event;  ///< Common event metadata
+    std::optional<event_data_t> event;  // Common event metadata
 
     std::optional<std::string_view>
-        type;  ///< Allocation type (e.g., "hipMalloc", "hipHostMalloc")
+        type;  // Allocation type (e.g., "hipMalloc", "hipHostMalloc")
     std::optional<std::string_view>
-                          level;  ///< Memory level (e.g., "device", "host", "managed")
-    timestamp_ns_t        start_timestamp{};  ///< Allocation start time (nanoseconds)
-    timestamp_ns_t        end_timestamp{};    ///< Allocation end time (nanoseconds)
-    std::optional<size_t> address;            ///< Allocated memory address
-    size_t                size{};             ///< Allocation size (bytes)
+                          level;  // Memory level (e.g., "device", "host", "managed")
+    timestamp_ns_t        start_timestamp{};  // Allocation start time (nanoseconds)
+    timestamp_ns_t        end_timestamp{};    // Allocation end time (nanoseconds)
+    std::optional<size_t> address;            // Allocated memory address
+    size_t                size{};             // Allocation size (bytes)
     std::string_view      extdata = empty_json;
 };
 

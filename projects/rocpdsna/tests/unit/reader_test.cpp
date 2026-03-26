@@ -43,8 +43,8 @@ protected:
 
     void TearDown() override
     {
-        m_reader.reset();
-        m_storage.reset();
+       m_reader.reset();
+       m_storage.reset();
     }
 
     std::string                          m_database_path{ ROCPD_DB_PATH };
@@ -466,6 +466,8 @@ TEST_F(reader_test, get_memory_alloc_details_has_correct_values)
     ASSERT_EQ(details->size, 4096);
 }
 
+#ifndef ROCPDSNA_USE_SCHEMA_V4
+// These tests are v3-schema specific (call_stack and line_info are stored differently in v4)
 TEST_F(reader_test, get_memory_alloc_details_has_event_with_call_stack)
 {
     // The inserted memory_allocate event has call_stack JSON with hipMalloc
@@ -533,6 +535,8 @@ TEST_F(reader_test, get_source_context_for_memory_alloc_returns_entry)
     ASSERT_TRUE(context.front().program_counter.has_value());
     ASSERT_EQ(context.front().program_counter->function, "hipMalloc");
 }
+
+#endif  // ROCPDSNA_USE_SCHEMA_V4
 
 TEST_F(reader_test, get_call_stack_returns_empty_for_no_call_stack)
 {
@@ -608,6 +612,8 @@ TEST_F(reader_test, get_correlated_events_finds_related_events)
         ASSERT_GT(ce.unique_identifier.id, 0);
     }
 }
+
+
 
 // ============================================================================
 // Database metadata tests

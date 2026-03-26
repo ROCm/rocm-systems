@@ -8,10 +8,16 @@
 
 #include "rocpdsna/storage.hpp"
 
+#include "data_storage/schema_version.hpp"
 #include "writers/writer_context.hpp"
 #include "writers/writer_policy_traits.hpp"
 
 #include "writers/schema_v3/writer_policy.hpp"
+
+// Only include v4 if explicitly requested
+#ifdef ROCPDSNA_USE_SCHEMA_V4
+#include "writers/schema_v4/writer_policy.hpp"
+#endif
 
 #include <memory>
 
@@ -133,7 +139,20 @@ private:
     std::unique_ptr<typename Policy::pmc_event_writer_t>       m_pmc_event_writer;
 };
 
+/**
+ * @brief Schema version selection
+ *
+ * Controls which database schema version rocpdsna uses:
+ * - Default: Use v3.0.0 schema (compatible with existing tests)
+ * - ROCPDSNA_USE_SCHEMA_V4: Use latest schema (v4+) - EXPERIMENTAL
+ */
+
+/// @brief Active writer policy (compile-time selection)
+#ifdef ROCPDSNA_USE_SCHEMA_V4
+using active_policy_t = writer_policy_v4;
+#else
 using active_policy_t = writer_policy_v3;
+#endif
 
 struct writer_t::impl : writer_impl_core<active_policy_t>
 {
