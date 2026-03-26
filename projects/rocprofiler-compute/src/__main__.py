@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Main entry point for rocprof-compute when run as a module"""
 
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -23,7 +23,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-##############################################################################el
+##############################################################################
 
 import re
 import sys
@@ -48,13 +48,14 @@ except ImportError as e:
 
         from importlib import metadata
 
-        from rocprof_compute_base import RocProfCompute
         from utils.utils import console_error
+
+        from rocprof_compute_base import RocProfCompute
     except ImportError:
         pass
 
 
-def check_version(local_ver, desired_ver, operator) -> bool:
+def check_version(local_ver: str, desired_ver: str, operator: str) -> bool:
     """Check package version strings with simple operators used in companion
     requirements.txt file"""
     ops = {
@@ -74,12 +75,6 @@ def verify_deps() -> None:
     dependencies are not available."""
 
     # Check which version of python is being used
-    if sys.version_info < (3, 8):
-        print(
-            f"[ERROR] Python 3.8 or higher is required to run rocprofiler-compute. "
-            f"The current version is {sys.version_info[0]}.{sys.version_info[1]}."
-        )
-        sys.exit(1)
 
     bindir = str(Path(__file__).resolve().parent)
     deps_locations = ["requirements.txt", "../requirements.txt"]

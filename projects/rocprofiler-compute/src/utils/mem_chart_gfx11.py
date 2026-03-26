@@ -28,7 +28,8 @@ RDNA3.5 Memory Architecture Diagram - CLI Visualization
 =============================================================================
 
 USAGE:
-    python mem_chart_gfx11.py [--data metrics.json] [--debug] [--txt file.txt] [--svg file.svg]
+    python mem_chart_gfx11.py [--data metrics.json] [--debug]
+        [--txt file.txt] [--svg file.svg]
 
 API:
     normalize_mem_chart_metrics(metric_dict) -> flat ordered dict for UIs
@@ -56,7 +57,7 @@ os.environ["COLUMNS"] = "200"
 import argparse
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Union
 
 from rich.console import Console
 from rich.panel import Panel
@@ -66,7 +67,7 @@ from rich.text import Text
 # Keys = ``metric:`` names under each ``metric_table`` in
 # ``analysis_configs/gfx1151/0300_Memory_Chart.yaml`` (tables 301–309), in panel order.
 # Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
-_MEM_CHART_DEFAULT_ROWS: Tuple[Tuple[str, Union[int, float]], ...] = (
+_MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
     ("ICache Requests", 450),
     ("ICache Utilization", 45.2),
@@ -135,10 +136,12 @@ _MEM_CHART_DEFAULT_ROWS: Tuple[Tuple[str, Union[int, float]], ...] = (
     ("Write Returns", 8_000),
 )
 
-MEM_CHART_PANEL_METRIC_KEYS: Tuple[str, ...] = tuple(k for k, _ in _MEM_CHART_DEFAULT_ROWS)
+MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
+    k for k, _ in _MEM_CHART_DEFAULT_ROWS
+)
 
 
-def normalize_mem_chart_metrics(metric_dict: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_mem_chart_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     """Return a single flat map: YAML metric name -> value, panel order.
 
     All keys in ``MEM_CHART_PANEL_METRIC_KEYS`` are present; unknown input keys
@@ -190,7 +193,7 @@ class Edge:
 
 @dataclass
 class AlignedEdgesGroup(RectBlock):
-    edges: List[Edge] = field(default_factory=list)
+    edges: list[Edge] = field(default_factory=list)
     top_padding: int = 0
     compact: bool = False
 
@@ -208,7 +211,7 @@ class AlignedEdgesGroup(RectBlock):
 @dataclass
 class SubBlock:
     label: str
-    attributes: List[str] = field(default_factory=list)
+    attributes: list[str] = field(default_factory=list)
     y_offset: int = 0
     height: int = 5
     show_border: bool = True
@@ -218,7 +221,7 @@ class SubBlock:
 
 @dataclass
 class RegularBlock(RectBlock):
-    sub_blocks: List[SubBlock] = field(default_factory=list)
+    sub_blocks: list[SubBlock] = field(default_factory=list)
     content_text: str = ""
     vertical_position: str = "middle"
     color: str = "blue"
@@ -344,7 +347,7 @@ def format_sci(value: Union[int, float, str, None], precision: int = 2) -> str:
 
 def format_bw_gbps(value: Union[int, float, str, None], precision: int = 1) -> str:
     """
-    Format bandwidth value from Bytes/s to human-readable format (TB/s, GB/s, MB/s, KB/s).
+    Format bandwidth (Bytes/s) to TB/s, GB/s, MB/s, or KB/s.
 
     This function expects value in Bytes/s (raw bytes per second).
 
@@ -375,12 +378,15 @@ def format_bw_gbps(value: Union[int, float, str, None], precision: int = 1) -> s
         return f"{value:.{precision}f} B/s"
 
 
-def get_metric(d: Dict[str, Any], key: str, default: Any = None) -> Any:
+def get_metric(d: dict[str, Any], key: str, default: Any = None) -> Any:  # noqa: ANN401
     return d.get(key, default)
 
 
 def metric_line(
-    label: str, value: Any, unit: str = "%", color: str = "bright_green"
+    label: str,
+    value: Any,  # noqa: ANN401
+    unit: str = "%",
+    color: str = "bright_green",
 ) -> str:
     formatted = format_value(value, unit)
     return f"{label} [{color}]{formatted}[/{color}]"
@@ -400,12 +406,12 @@ def bar(pct: float, w: int = 10) -> str:
 def create_mem_chart_diagram(
     arch: str,
     normal_unit: str,
-    metric_dict: Dict[str, Any],
+    metric_dict: dict[str, Any],
     console: Console,
     show_debug: bool = False,
     compact: bool = False,
 ) -> None:
-    """Create the RDNA3.5 memory architecture diagram with separate TCP, LDS, SQC blocks"""
+    """Create the RDNA3.5 memory diagram (TCP, LDS, SQC blocks)."""
 
     # Extract metrics
     icache_req = get_metric(metric_dict, "ICache Requests")
@@ -474,14 +480,18 @@ def create_mem_chart_diagram(
     std_arrow_len = 8
     std_arrow_left = "<" + "-" * std_arrow_len
     std_arrow_right = "-" * std_arrow_len + ">"
-    std_arrow_both = "<" + "-" * (std_arrow_len - 1) + ">"
+    "<" + "-" * (std_arrow_len - 1) + ">"
 
     kernel_edge_width = 16
     kernel_arrow_left = "<" + "-" * (kernel_edge_width - 1)
     kernel_arrow_right = "-" * (kernel_edge_width - 1) + ">"
     kernel_arrow_both = "<" + "-" * (kernel_edge_width - 2) + ">"
 
-    def fmt_edge(label, value, width=7):
+    def fmt_edge(
+        label: str,
+        value: Any,  # noqa: ANN401
+        width: int = 7,
+    ) -> str:
         label_str = f"{label:<{width}}"
         if value is not None:
             value_str = f": {format_sci(value):>7}"
@@ -526,7 +536,11 @@ def create_mem_chart_diagram(
         f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
         f"[{COLORS['write']}]{fmt_edge('Write', lds_inst_cycles)}[/{COLORS['write']}]",
         f"[{COLORS['write']}]{kernel_arrow_right}[/{COLORS['write']}]",
-        f"[{COLORS['atomic']}]{fmt_edge('Atomic', lds_atomic_insts)}[/{COLORS['atomic']}]",
+        (
+            f"[{COLORS['atomic']}]"
+            f"{fmt_edge('Atomic', lds_atomic_insts)}"
+            f"[/{COLORS['atomic']}]"
+        ),
         f"[{COLORS['atomic']}]{kernel_arrow_both}[/{COLORS['atomic']}]",
         "",
         "",  # 2 empty lines before TCP edges
@@ -561,9 +575,14 @@ def create_mem_chart_diagram(
         height=10,
     )
 
+    lds_bw_line = metric_line("BW", lds_bw, "Bytes/s", COLORS["bw"]) if lds_bw else ""
+    lds_conflict_line = (
+        metric_line("Bank Conflict", lds_bank_conflict, "%", COLORS["stall"])
+        if lds_bank_conflict
+        else ""
+    )
     lds_panel = Panel(
-        f"{metric_line('BW', lds_bw, 'Bytes/s', COLORS['bw']) if lds_bw else ''}\n"
-        f"{metric_line('Bank Conflict', lds_bank_conflict, '%', COLORS['stall']) if lds_bank_conflict else ''}",
+        f"{lds_bw_line}\n{lds_conflict_line}",
         title=f"[bold {COLORS['block']}]LDS[/bold {COLORS['block']}]",
         border_style=COLORS["block"],
         width=20,
@@ -671,7 +690,8 @@ def create_mem_chart_diagram(
         height=30,
     )
 
-    # GL2–GCEA (Graphics Core Efficiency Arbiter) edges — more padding to center vertically
+    # GL2–GCEA (Graphics Core Efficiency Arbiter) edges;
+    # extra padding to center vertically
     gl2_gcea_edges_lines = [
         "",
         "",
@@ -765,9 +785,16 @@ def create_mem_chart_diagram(
 
     console.print(main_layout)
     console.print()
-    console.print(
-        f"[dim]Legend:[/dim] [{COLORS['read']}]<----[/{COLORS['read']}] Read  [{COLORS['write']}]---->[/{COLORS['write']}] Write  [{COLORS['atomic']}]<--->[/{COLORS['atomic']}] Atomic  [{COLORS['util']}]█[/{COLORS['util']}] Util  [{COLORS['hit']}]█[/{COLORS['hit']}] Hit%  [{COLORS['stall']}]█[/{COLORS['stall']}] Stall"
+    legend = (
+        f"[dim]Legend:[/dim] "
+        f"[{COLORS['read']}]<----[/{COLORS['read']}] Read  "
+        f"[{COLORS['write']}]---->[/{COLORS['write']}] Write  "
+        f"[{COLORS['atomic']}]<--->[/{COLORS['atomic']}] Atomic  "
+        f"[{COLORS['util']}]█[/{COLORS['util']}] Util  "
+        f"[{COLORS['hit']}]█[/{COLORS['hit']}] Hit%  "
+        f"[{COLORS['stall']}]█[/{COLORS['stall']}] Stall"
     )
+    console.print(legend)
     console.print()
 
     if show_debug:
@@ -778,7 +805,7 @@ def create_mem_chart_diagram(
         console.print()
 
 
-def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> str:
+def plot_mem_chart(arch: str, normal_unit: str, metric_dict: dict[str, Any]) -> str:
     """Plot the memory chart and return as string.
 
     ``metric_dict`` keys should match ``0300_Memory_Chart.yaml`` (gfx1151), i.e.
@@ -787,19 +814,19 @@ def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> 
     """
 
     class FakeFile:
-        def __init__(self):
+        def __init__(self) -> None:
             self.data = []
 
-        def write(self, s):
+        def write(self, s: str) -> None:
             self.data.append(s)
 
-        def flush(self):
+        def flush(self) -> None:
             pass
 
-        def isatty(self):
+        def isatty(self) -> bool:
             return True
 
-        def getvalue(self):
+        def getvalue(self) -> str:
             return "".join(self.data)
 
     flat = normalize_mem_chart_metrics(metric_dict)
@@ -811,15 +838,15 @@ def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> 
     return fake_file.getvalue()
 
 
-DEFAULT_SAMPLE_METRICS: Dict[str, Union[int, float]] = dict(_MEM_CHART_DEFAULT_ROWS)
+DEFAULT_SAMPLE_METRICS: dict[str, Union[int, float]] = dict(_MEM_CHART_DEFAULT_ROWS)
 
 
-def get_sample_metrics() -> Dict[str, Any]:
+def get_sample_metrics() -> dict[str, Any]:
     """Return sample metrics (flat panel order) for testing or demos."""
     return normalize_mem_chart_metrics(DEFAULT_SAMPLE_METRICS.copy())
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="RDNA3.5 Memory Chart - CLI Visualization"
     )
@@ -841,19 +868,19 @@ def main():
 
     # Create console
     class FakeFile:
-        def __init__(self):
+        def __init__(self) -> None:
             self.data = []
 
-        def write(self, s):
+        def write(self, s: str) -> None:
             self.data.append(s)
 
-        def flush(self):
+        def flush(self) -> None:
             pass
 
-        def isatty(self):
+        def isatty(self) -> bool:
             return True
 
-        def getvalue(self):
+        def getvalue(self) -> str:
             return "".join(self.data)
 
     if args.txt:

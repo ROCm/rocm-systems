@@ -33,7 +33,6 @@ Tests cover:
 4. Memory chart generation
 """
 
-
 from utils import mem_chart_gfx11
 
 # =============================================================================
@@ -439,7 +438,9 @@ class TestPlotMemChart:
         assert "TCP" in result or "L0" in result  # L0 cache
         assert "GL1C" in result  # L1 cache
         assert "GL2C" in result  # L2 cache
-        assert "GCEA" in result  # Graphics Core Efficiency Arbiter (block label in diagram)
+        assert (
+            "GCEA" in result
+        )  # Graphics Core Efficiency Arbiter (block label in diagram)
         assert "DRAM" in result  # System memory
 
     def test_contains_bandwidth_values(self):
@@ -513,7 +514,7 @@ class TestDefaultSampleMetrics:
     """Tests for DEFAULT_SAMPLE_METRICS constant."""
 
     def test_keys_match_mem_chart_panel_yaml(self):
-        """Keys match gfx1151 ``0300_Memory_Chart.yaml`` metric names (MEM_CHART_PANEL_METRIC_KEYS)."""
+        """Keys match gfx1151 Memory Chart YAML (MEM_CHART_PANEL_METRIC_KEYS)."""
         assert set(mem_chart_gfx11.DEFAULT_SAMPLE_METRICS) == set(
             mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS
         )

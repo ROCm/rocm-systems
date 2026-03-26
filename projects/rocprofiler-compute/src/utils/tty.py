@@ -28,11 +28,14 @@ from utils.utils_common import (
 # Bandwidth units that need human-readable formatting
 BW_UNITS = ["Bytes/s", "bytes/s"]
 
+
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
     """True when ``--view table`` was given (plain tables; ignore cli_style)."""
     return getattr(args, "view", None) == "table"
 
+
 KERNEL_NAME_WRAP_WIDTH = 40
+
 
 def wrap_kernel_name(name: str) -> str:
     """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
@@ -683,7 +686,7 @@ def process_table_data(
 
 
 def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
-    """True when every table in the panel is ``cli_style: mem_chart`` (one merged chart)."""
+    """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
     sources = panel.get("data source") or []
     if not sources:
         return False
@@ -804,15 +807,10 @@ def format_table_output(
 
     # mem_chart diagram mode: one merged chart, no per-table titles (3.1, 3.2, …).
     # With --view table, keep titles so tabular output stays navigable.
-    skip_mem_chart_title = (
-        table_config.get("cli_style") == "mem_chart"
-        and not _tty_view_is_table(args)
-    )
-    if (
-        "title" in table_config
-        and table_config["title"]
-        and not skip_mem_chart_title
-    ):
+    skip_mem_chart_title = table_config.get(
+        "cli_style"
+    ) == "mem_chart" and not _tty_view_is_table(args)
+    if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
         content += f"{table_id_str} {table_config['title']}\n"
 
     if args.output_format == "csv" and csv_dir and csv_dir.is_dir():
@@ -1083,7 +1081,7 @@ def show_all(
                     )
 
         # Roofline printing is handled separately above in is_roofline_shown.
-        # When --view table is set, roofline tables (401/402) are rendered as normal tables.
+        # With --view table, roofline tables (401/402) render as normal tables.
         if panel_content and (
             table_config["id"] not in [401, 402] or _tty_view_is_table(args)
         ):

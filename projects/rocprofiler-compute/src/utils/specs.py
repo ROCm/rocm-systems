@@ -41,6 +41,7 @@ from utils.utils_common import get_version
 
 T = TypeVar("T")
 
+
 def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
     """Map LLVM GPU targets that share one SoC and analysis config tree."""
     if gpu_arch is None:

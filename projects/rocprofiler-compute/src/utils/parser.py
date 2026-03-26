@@ -1365,9 +1365,9 @@ class DebugRowTracker:
     """Tracks which (df_id, row_id) pairs have already been debugged."""
 
     def __init__(self) -> None:
-        self._debugged_rows: set[tuple[int, Any]] = set()
+        self._debugged_rows: set[tuple[int, object]] = set()
 
-    def should_show_inputs(self, df_id: int, row_id: Any) -> bool:
+    def should_show_inputs(self, df_id: int, row_id: object) -> bool:
         """Check if this row's inputs should be displayed and mark it as seen."""
         key = (df_id, row_id)
         if key in self._debugged_rows:

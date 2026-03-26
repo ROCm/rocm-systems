@@ -38,7 +38,6 @@ Not registered in CTest (see CMakeLists.txt under "Utils tests"): run manually, 
 import os
 import sys
 from ctypes import (
-    POINTER,
     Structure,
     byref,
     c_double,
@@ -185,7 +184,6 @@ def compile_mega_kernel(kernel_source: str, arch: str) -> tuple:
     hiprtc.hiprtcAddNameExpression(prog, kernel_name)
 
     # Prepare compile options with HIP include paths
-    import os
 
     rocm_path = os.getenv("ROCM_PATH", "/opt/rocm")
     compile_options = [
@@ -195,7 +193,7 @@ def compile_mega_kernel(kernel_source: str, arch: str) -> tuple:
     ]
 
     # Convert to ctypes array
-    from ctypes import c_char_p, POINTER
+    from ctypes import c_char_p
 
     options_array = (c_char_p * len(compile_options))()
     for i, opt in enumerate(compile_options):
@@ -203,7 +201,6 @@ def compile_mega_kernel(kernel_source: str, arch: str) -> tuple:
 
     try:
         # Compile the program with options
-        import ctypes
 
         res = hiprtc._lib.hiprtcCompileProgram(
             prog.handle, len(compile_options), options_array
@@ -214,7 +211,7 @@ def compile_mega_kernel(kernel_source: str, arch: str) -> tuple:
             print(f"Compilation failed for {arch}:")
             print(f"Program log:\n{log}")
             raise hiprtc.HIPRTCError(res)
-    except hiprtc.HIPRTCError as e:
+    except hiprtc.HIPRTCError:
         # Re-raise if already a HIPRTCError (from the check above or elsewhere)
         raise
 
@@ -274,11 +271,13 @@ def run_mega_kernel_test(
             import pytest
 
             pytest.skip(
-                f"Device {device_id} not available (only {device_count} device(s) found)"
+                f"Device {device_id} not available "
+                f"(only {device_count} device(s) found)"
             )
         except ImportError:
             raise RuntimeError(
-                f"Device {device_id} not available (only {device_count} device(s) found)"
+                f"Device {device_id} not available "
+                f"(only {device_count} device(s) found)"
             )
 
     # Set device
@@ -291,7 +290,7 @@ def run_mega_kernel_test(
     print("=" * 80)
     print("AMD GPU MEGA KERNEL UNIT TEST")
     print("=" * 80)
-    print(f"Device Information:")
+    print("Device Information:")
     print(f"  Name:                  {props.name}")
     print(f"  GCN Architecture:      {arch}")
     print(f"  Compute Units:         {props.multiProcessorCount}")
@@ -317,7 +316,7 @@ def run_mega_kernel_test(
     d_results = hip.hipMalloc(sizeof(TestResults))
 
     # Global memory buffers for atomic tests
-    # Must accommodate kernel indexing: global_int[tid % 64 + offset] where offset up to 192
+    # Kernel uses global_int[tid % 64 + offset]; offset up to 192
     # Maximum index: 64 + 192 = 256
     GLOBAL_INT_SIZE = 256
     GLOBAL_FLOAT_SIZE = 256
@@ -367,7 +366,7 @@ def run_mega_kernel_test(
         )
     print(f"MFMA mode: {mfma_mode_names[mfma_mode]}")
 
-    # Initialize device buffers before launch (avoids cross-block race; kernel no longer does memset)
+    # Init device buffers before launch (cross-block race; kernel skips memset)
     h_results_zero = TestResults()
     hip.hipMemcpyHtoD(d_results, byref(h_results_zero), sizeof(TestResults))
     zeros_f = (c_float * GLOBAL_FLOAT_SIZE)()
@@ -395,8 +394,8 @@ def run_mega_kernel_test(
     surf_id = 0
     d_surf_buffer = None
     try:
-        # Texture/surface for Strix (gfx1150/1151/1152): mirror mega_kernel/main.cpp so
-        # tex1Dfetch / surf1Dwrite run and SQ_INSTS_TEX_LOAD / TEX_STORE increment under rocprof.
+        # Strix (gfx1150/1151/1152): mirror mega_kernel/main.cpp for tex/surf
+        # so TEX load/store counters increment under rocprof.
         if _is_strix_rdna35(arch):
             lin_bytes = batch_size * sizeof(c_float)
             res_tex = hip.HIPResourceDesc()
@@ -430,7 +429,7 @@ def run_mega_kernel_test(
         tex_obj = c_ulonglong(tex_id)
         surf_obj = c_ulonglong(surf_id)
 
-        # Prepare kernel arguments (must match _mega_kernel signature in mega_kernel.hip)
+        # Kernel args must match _mega_kernel in mega_kernel.hip
         args = [
             d_results,
             d_global_float,
@@ -730,11 +729,14 @@ def print_test_results(results: TestResults, arch: str):
 
     if total_failed == 0:
         print(
-            f"\n*** OVERALL: PASSED ({total_passed}/{total_passed}, {total_bypassed} bypassed) ***"
+            f"\n*** OVERALL: PASSED "
+            f"({total_passed}/{total_passed}, {total_bypassed} bypassed) ***"
         )
     else:
         print(
-            f"\n*** OVERALL: FAILED ({total_passed}/{total_passed + total_failed}, {total_bypassed} bypassed) ***"
+            f"\n*** OVERALL: FAILED "
+            f"({total_passed}/{total_passed + total_failed}, "
+            f"{total_bypassed} bypassed) ***"
         )
 
     return total_passed, total_failed, total_bypassed
@@ -812,8 +814,12 @@ def test_mega_kernel_gfx1150():
     assert results.warp_shuffle_passed > 0, "Warp shuffle test failed"
     assert results.fp32_arith_passed > 0, "FP32 arithmetic test failed"
     assert results.wmma_f16_passed > 0, "WMMA FP16 test failed"
-    assert results.vmem_tex_load_passed > 0, "Texture load (tex1Dfetch / SQ_INSTS_TEX_LOAD) test failed"
-    assert results.vmem_tex_store_passed > 0, "Texture store (surf1Dwrite / SQ_INSTS_TEX_STORE) test failed"
+    assert results.vmem_tex_load_passed > 0, (
+        "Texture load (tex1Dfetch / SQ_INSTS_TEX_LOAD) test failed"
+    )
+    assert results.vmem_tex_store_passed > 0, (
+        "Texture store (surf1Dwrite / SQ_INSTS_TEX_STORE) test failed"
+    )
 
 
 def test_mega_kernel_current_device():

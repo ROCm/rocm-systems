@@ -21,7 +21,8 @@ from ctypes import (
 
 _lib = ctypes.CDLL(f"{os.getenv('ROCM_PATH', '/opt/rocm')}/lib/libamdhip64.so")
 
-# hipResourceType / hipChannelFormatKind / texture enums (aligned with hip_runtime_api.h)
+# hipResourceType / hipChannelFormatKind / texture enums
+# (aligned with hip_runtime_api.h)
 HIP_RESOURCE_TYPE_LINEAR = 2
 HIP_CHANNEL_FORMAT_KIND_FLOAT = 2
 HIP_FILTER_MODE_POINT = 0
