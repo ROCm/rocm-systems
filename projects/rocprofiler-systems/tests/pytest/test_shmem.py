@@ -5,8 +5,6 @@
 Tests for SHMEM.
 """
 
-# TODO: Verify that this works
-
 from __future__ import annotations
 import re
 import subprocess
@@ -87,7 +85,14 @@ def shmem_validated(rocprof_config) -> tuple[bool, str]:
 
 
 class TestShmem(RocprofsysTest):
-    @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            "baseline",
+            "sampling",
+            pytest.param("sys_run", marks=pytest.mark.rocpd("shmem_env")),
+        ],
+    )
     def test_pingpong(self, mode, shmem_env, shmem_validated, shmem_rules):
         valid, reason = shmem_validated
         if not valid:

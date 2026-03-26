@@ -327,14 +327,7 @@ class SystemCapabilities:
 
     @cached_property
     def oshrun_exec(self) -> Optional[Path]:
-        """Get the path to the oshrun executable.
-
-        Prefers /usr/bin/oshrun (system package) to match oshcc and avoid
-        version mismatch, then falls back to a general PATH search.
-        """
-        system_path = Path("/usr/bin/oshrun")
-        if system_path.is_file() and os.access(system_path, os.X_OK):
-            return system_path
+        """Get the path to the oshrun executable."""
         result = shutil.which("oshrun")
         return Path(result) if result else None
 
