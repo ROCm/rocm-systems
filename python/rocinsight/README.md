@@ -53,8 +53,14 @@ identical to the rocprofiler-sdk version.
 ## Quick Start
 
 ```bash
-# Install (no C++ compiler needed)
-pip install projects/rocinsight
+# Install directly from git — no clone needed, no C++ compiler required
+pip install 'rocinsight @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+
+# With LLM extras
+pip install 'rocinsight[llm] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+
+# Or from a local clone
+pip install python/rocinsight
 
 # Analyze a trace database
 rocinsight analyze -i trace.db
@@ -76,28 +82,44 @@ rocinsight analyze -i trace.db --interactive --llm anthropic
 
 ## Installation
 
-### Option 1: pip (development install, recommended)
+### Option 1: pip from git (recommended — no clone needed)
 
 ```bash
-cd rocm-systems-dev/projects/rocinsight
+# Core (stdlib only — no C++ required)
+pip install 'rocinsight @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+
+# With LLM support (Anthropic + OpenAI)
+pip install 'rocinsight[llm] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+
+# All optional extras
+pip install 'rocinsight[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+
+# Pin to a specific commit
+pip install 'rocinsight @ git+https://github.com/ROCm/rocm-systems.git@<commit>#subdirectory=python/rocinsight'
+```
+
+### Option 2: pip from local clone (development install)
+
+```bash
+cd rocm-systems-dev/python/rocinsight
 pip install -e .                      # Core analysis (stdlib only)
 pip install -e ".[llm]"               # + Anthropic + OpenAI support
 pip install -e ".[all]"               # + rich terminal output
 pip install -e ".[dev]"               # + pytest / flake8 / black
 ```
 
-### Option 2: pip (non-editable)
+### Option 3: pip (non-editable, from super-repo root)
 
 ```bash
-pip install ./projects/rocinsight
+pip install ./python/rocinsight
 ```
 
-### Option 3: CMake (as part of the super-repo build)
+### Option 4: CMake (as part of the super-repo build)
 
 ```bash
 cmake -B build \
       -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-      projects/rocinsight
+      python/rocinsight
 
 cmake --build build
 sudo cmake --install build
@@ -1025,7 +1047,7 @@ ctest --test-dir build -R rocinsight -V
 | **Analysis logic** | Identical | Identical |
 | **LLM providers** | Identical | Identical |
 | **Interactive session** | Identical | Identical |
-| **Installation** | Requires full SDK build | `pip install ./projects/rocinsight` |
+| **Installation** | Requires full SDK build | `pip install ./python/rocinsight` |
 
 All analysis functions, recommendation rules, output formats, LLM integration, and the
 interactive session are **identical** between rocpd and rocinsight — only the database
