@@ -1361,18 +1361,59 @@ def generate_recommendations(
         percent = top_kernel.get("percent_of_total", 0)
         if percent > 50:
             kernel_name = top_kernel.get("name", "unknown")
+            # When counters are available, provide specific guidance based on metrics
+            _hc_metrics = (hardware_counters or {}).get("metrics", {})
+            _gpu_util = _hc_metrics.get("gpu_utilization_percent")
+            _avg_w = _hc_metrics.get("avg_waves")
+            _has_ctr = bool((hardware_counters or {}).get("has_counters", False))
+            if _has_ctr and _gpu_util is not None:
+                if _gpu_util > 90:
+                    _suggestion = (
+                        f"GPU utilization is {_gpu_util:.1f}% — kernel is compute-bound. "
+                        "Optimize the kernel algorithm or reduce instruction count"
+                    )
+                    _actions = [
+                        f"GPU utilization: {_gpu_util:.1f}%, wave occupancy: {_avg_w:.0f} avg — hardware is well-utilized",
+                        "Focus on algorithmic optimization: reduce transcendental calls, use FMA",
+                        "Consider ATT (--att) for instruction-level stall analysis",
+                        "Run rocprof-compute for roofline model and instruction mix breakdown",
+                    ]
+                elif _gpu_util > 70:
+                    _suggestion = (
+                        f"GPU utilization is {_gpu_util:.1f}% — moderate. "
+                        "Check for memory-bound behavior or occupancy limits"
+                    )
+                    _actions = [
+                        f"GPU utilization: {_gpu_util:.1f}%, wave occupancy: {_avg_w:.0f} avg",
+                        "Collect FETCH_SIZE and WRITE_SIZE to check memory bandwidth",
+                        "Check for memory coalescing issues",
+                        "Run rocprof-compute for roofline analysis",
+                    ]
+                else:
+                    _suggestion = (
+                        f"GPU utilization is only {_gpu_util:.1f}% — significant room for improvement"
+                    )
+                    _actions = [
+                        f"GPU utilization: {_gpu_util:.1f}%, wave occupancy: {_avg_w:.0f} avg",
+                        "Low utilization suggests memory-bound or stalled execution",
+                        "Collect FETCH_SIZE and WRITE_SIZE for memory bandwidth analysis",
+                        "Check for excessive synchronization or launch overhead",
+                    ]
+            else:
+                _suggestion = "Profile this kernel with hardware counters to identify its specific bottleneck"
+                _actions = [
+                    "Collect hardware counters to classify compute vs memory bound",
+                    "Check memory access patterns for coalescing issues",
+                    "Analyze instruction mix: VALU, MFMA, load/store ratios",
+                    "Tune occupancy: balance registers, LDS, and block size",
+                ]
             recommendations.append(
                 {
                     "priority": "HIGH",
                     "category": "Compute Bottleneck",
                     "issue": f"Kernel '{kernel_name}' consumes {percent:.1f}% of GPU time",
-                    "suggestion": "Profile this kernel with hardware counters to identify its specific bottleneck",
-                    "actions": [
-                        "Collect hardware counters to classify compute vs memory bound",
-                        "Check memory access patterns for coalescing issues",
-                        "Analyze instruction mix: VALU, MFMA, load/store ratios",
-                        "Tune occupancy: balance registers, LDS, and block size",
-                    ],
+                    "suggestion": _suggestion,
+                    "actions": _actions,
                     "estimated_impact": "Highly dependent on bottleneck type; 20-50% improvement possible",
                     "commands": [
                         {

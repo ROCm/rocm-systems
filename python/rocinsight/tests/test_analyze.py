@@ -206,6 +206,50 @@ def test_rule3_uses_hotspot_name_in_commands():
     assert any("my_matmul" in c.get("full_command", "") for c in cmds)
 
 
+def test_rule3_counter_aware_high_util():
+    """Rule 3 + counters: GPU util > 90% → 'compute-bound' suggestion, not 'collect counters'."""
+    from rocinsight.analyze import generate_recommendations
+
+    hotspots = [_make_hotspot(name="my_kernel", pct=75.0)]
+    hw = {
+        "has_counters": True,
+        "metrics": {"gpu_utilization_percent": 95.0, "avg_waves": 480.0},
+    }
+    recs = generate_recommendations(_empty_breakdown(), hotspots, {}, hardware_counters=hw)
+    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    assert len(matches) == 1
+    assert "compute-bound" in matches[0]["suggestion"]
+    assert "95.0%" in matches[0]["suggestion"]
+    # Should NOT say "collect hardware counters" since they're already collected
+    assert "collect hardware counters" not in matches[0]["suggestion"].lower()
+
+
+def test_rule3_counter_aware_low_util():
+    """Rule 3 + counters: GPU util < 70% → 'significant room for improvement'."""
+    from rocinsight.analyze import generate_recommendations
+
+    hotspots = [_make_hotspot(name="my_kernel", pct=75.0)]
+    hw = {
+        "has_counters": True,
+        "metrics": {"gpu_utilization_percent": 45.0, "avg_waves": 100.0},
+    }
+    recs = generate_recommendations(_empty_breakdown(), hotspots, {}, hardware_counters=hw)
+    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    assert len(matches) == 1
+    assert "significant room" in matches[0]["suggestion"].lower()
+
+
+def test_rule3_no_counters_asks_to_collect():
+    """Rule 3 without counters: falls back to 'collect hardware counters'."""
+    from rocinsight.analyze import generate_recommendations
+
+    hotspots = [_make_hotspot(name="my_kernel", pct=75.0)]
+    recs = generate_recommendations(_empty_breakdown(), hotspots, {})
+    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    assert len(matches) == 1
+    assert "hardware counters" in matches[0]["suggestion"].lower()
+
+
 def test_rule4_many_small_kernels_fires():
     """Rule 4: >1000 total calls with avg <10μs triggers 'Launch Overhead'."""
     from rocinsight.analyze import generate_recommendations
