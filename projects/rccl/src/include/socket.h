@@ -91,11 +91,20 @@ ncclResult_t ncclSocketSetFd(int fd, struct ncclSocket* sock);
 #define NCCL_SOCKET_SEND 0
 #define NCCL_SOCKET_RECV 1
 
+struct ncclSocketOp {
+  int op;
+  struct ncclSocket* sock;
+  void* ptr;
+  int size;
+  int offset;
+};
+
 ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset, int* closed = NULL);
 ncclResult_t ncclSocketWait(int op, struct ncclSocket* sock, void* ptr, int size, int* offset);
 ncclResult_t ncclSocketSend(struct ncclSocket* sock, void* ptr, int size);
 ncclResult_t ncclSocketRecv(struct ncclSocket* sock, void* ptr, int size);
 ncclResult_t ncclSocketSendRecv(struct ncclSocket* sendSock, void* sendPtr, int sendSize, struct ncclSocket* recvSock, void* recvPtr, int recvSize);
+ncclResult_t ncclSocketMultiOp(struct ncclSocketOp* ops, int numOps);
 ncclResult_t ncclSocketTryRecv(struct ncclSocket* sock, void* ptr, int size, int* closed, bool blocking);
 ncclResult_t ncclSocketShutdown(struct ncclSocket* sock, int how);
 ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait = false);

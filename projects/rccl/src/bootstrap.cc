@@ -227,6 +227,20 @@ static ncclResult_t socketSendRecv(struct ncclSocket* sendSock, void* sendData, 
   return ncclSuccess;
 }
 
+static ncclResult_t socketDoubleSendRecv(struct ncclSocketOp ops[4]) {
+  int senderRecvSize1, senderRecvSize2;
+  NCCLCHECK(ncclSocketSendRecv(ops[0].sock, &ops[0].size, sizeof(int), ops[1].sock, &senderRecvSize1, sizeof(int)));
+  NCCLCHECK(ncclSocketSendRecv(ops[2].sock, &ops[2].size, sizeof(int), ops[3].sock, &senderRecvSize2, sizeof(int)));
+  if (senderRecvSize1 > ops[1].size || senderRecvSize2 > ops[3].size) {
+    WARN("Message truncated : received %d,%d bytes instead of %d,%d", senderRecvSize1, senderRecvSize2, ops[1].size, ops[3].size);
+    return ncclInternalError;
+  }
+  ops[1].size = std::min(ops[1].size, senderRecvSize1);
+  ops[3].size = std::min(ops[3].size, senderRecvSize2);
+  NCCLCHECK(ncclSocketMultiOp(ops, 4));
+  return ncclSuccess;
+}
+
 union ringConnectInfo {
   union ncclSocketAddress addr;
   char handle[NCCL_NET_HANDLE_MAXSIZE];
@@ -1012,22 +1026,35 @@ exit:
   if (recvDataHandle) netDereg(net, recvComm, &recvDataHandle);
   return res;
 }
-static ncclResult_t socketRingAllGather(struct ncclSocket* sendSock, struct ncclSocket* recvSock, int rank, int nranks, char* data, int size) {
+static ncclResult_t socketRingAllGather(struct ncclSocket* nextSock, struct ncclSocket* prevSock, int rank, int nranks, char* data, int size) {
   ncclResult_t res = ncclSuccess;
   uint64_t tFirst = 0, tRest = 0;
   /* Simple ring based AllGather
    * At each step i receive data from (rank-i-1) from prev
    * and send previous step's data from (rank-i) to next
    */
-  TRACE(NCCL_BOOTSTRAP, "socketRingAllGather started");
+  TRACE(NCCL_BOOTSTRAP, "socketRingAllGather started: rank=%d nranks=%d", rank, nranks);
+  int totalSteps = nranks / 2;
+  TRACE(NCCL_BOOTSTRAP, "bidirectional bootstrap: totalSteps=%d", totalSteps);
   BOOTSTRAP_PROF_OPEN(tFirst);
-  for (int i = 0; i < nranks - 1; i++) {
-    size_t rslice = (rank - i - 1 + nranks) % nranks;
-    size_t sslice = (rank - i + nranks) % nranks;
-    void* recv_data = data + rslice * size;
-    void* send_data = data + sslice * size;
-    NCCLCHECKGOTO(socketSendRecv(sendSock, send_data, size, recvSock, recv_data, size), res, exit);
-    if (i == 0) {
+  for (int step = 0; step < totalSteps; step++) {
+    bool isFinalUnidirectional = (step == totalSteps - 1) && (nranks % 2 == 0);
+    int sendSliceRing0 = (rank - step + nranks) % nranks;
+    int recvSliceRing0 = (rank - step - 1 + nranks) % nranks;
+    int sendSliceRing1 = (rank + step) % nranks;
+    int recvSliceRing1 = (rank + step + 1) % nranks;
+    if (isFinalUnidirectional) {
+      NCCLCHECKGOTO(socketSendRecv(nextSock, data + sendSliceRing0 * size, size, prevSock, data + recvSliceRing0 * size, size), res, exit);
+    } else {
+      struct ncclSocketOp ops[4] = {
+        {NCCL_SOCKET_SEND, nextSock, data + sendSliceRing0 * size, size, 0},
+        {NCCL_SOCKET_RECV, prevSock, data + recvSliceRing0 * size, size, 0},
+        {NCCL_SOCKET_SEND, prevSock, data + sendSliceRing1 * size, size, 0},
+        {NCCL_SOCKET_RECV, nextSock, data + recvSliceRing1 * size, size, 0}
+      };
+      NCCLCHECKGOTO(socketDoubleSendRecv(ops), res, exit);
+    }
+    if (step == 0) {
       BOOTSTRAP_PROF_CLOSE(tFirst);
       BOOTSTRAP_PROF_OPEN(tRest);
     }
