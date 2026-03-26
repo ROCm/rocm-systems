@@ -1607,7 +1607,8 @@ static int psp_ring_submit(struct PspRingContext *ctx, const char *desc)
     memset(frame, 0, sizeof(*frame));
     frame->cmd_buf_addr_lo = (ULONG)(ctx->cmd_mc_addr & 0xFFFFFFFF);
     frame->cmd_buf_addr_hi = (ULONG)((ctx->cmd_mc_addr >> 32) & 0xFFFFFFFF);
-    frame->cmd_buf_size = sizeof(struct PspGfxCmdResp);
+    /* amdgpu leaves cmd_buf_size=0 in the ring frame (confirmed via VRAM capture) */
+    frame->cmd_buf_size = 0;
     frame->fence_addr_lo = (ULONG)(ctx->fence_mc_addr & 0xFFFFFFFF);
     frame->fence_addr_hi = (ULONG)((ctx->fence_mc_addr >> 32) & 0xFFFFFFFF);
     frame->fence_value = fence_val;
@@ -1664,11 +1665,10 @@ static int psp_ring_load_fw(struct PspRingContext *ctx,
     MemoryBarrier();
     gpu_hdp_flush(ctx->dev);
 
-    /* Build command buffer */
+    /* Build command buffer — amdgpu VRAM capture shows buf_size=0, buf_ver=0 */
     struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
     memset(cmd, 0, sizeof(*cmd));
-    cmd->buf_size = sizeof(*cmd);
-    cmd->buf_version = PSP_GFX_CMD_BUF_VERSION;
+    /* Leave buf_size=0, buf_version=0 (matching amdgpu VRAM capture) */
     cmd->cmd_id = GFX_CMD_ID_LOAD_IP_FW;
     cmd->load_ip_fw.fw_phy_addr_lo =
         (ULONG)(ctx->fw_mc_addr & 0xFFFFFFFF);
@@ -1717,8 +1717,6 @@ static int psp_ring_autoload_rlc(struct PspRingContext *ctx)
 {
     struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
     memset(cmd, 0, sizeof(*cmd));
-    cmd->buf_size = sizeof(*cmd);
-    cmd->buf_version = PSP_GFX_CMD_BUF_VERSION;
     cmd->cmd_id = GFX_CMD_ID_AUTOLOAD_RLC;
 
     MemoryBarrier();
@@ -1749,8 +1747,6 @@ static int psp_ring_load_toc(struct PspRingContext *ctx,
     /* Build LOAD_TOC command */
     struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
     memset(cmd, 0, sizeof(*cmd));
-    cmd->buf_size = sizeof(*cmd);
-    cmd->buf_version = PSP_GFX_CMD_BUF_VERSION;
     cmd->cmd_id = GFX_CMD_ID_LOAD_TOC;
     cmd->load_toc.toc_phy_addr_lo =
         (ULONG)(ctx->fw_mc_addr & 0xFFFFFFFF);
@@ -1784,8 +1780,6 @@ static int psp_ring_setup_tmr(struct PspRingContext *ctx,
 {
     struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
     memset(cmd, 0, sizeof(*cmd));
-    cmd->buf_size = sizeof(*cmd);
-    cmd->buf_version = PSP_GFX_CMD_BUF_VERSION;
     cmd->cmd_id = GFX_CMD_ID_SETUP_TMR;
     cmd->setup_tmr.buf_phy_addr_lo =
         (ULONG)(tmr_mc_addr & 0xFFFFFFFF);
