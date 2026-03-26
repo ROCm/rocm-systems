@@ -153,6 +153,8 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
   compile_options.erase(
       std::remove(compile_options.begin(), compile_options.end(), std::string("")),
       compile_options.end());
+  
+  bc_type_ = hip::helpers::kLLVM;
 
   if (auto res = std::find_if(
           compile_options.begin(), compile_options.end(),
@@ -160,13 +162,18 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
       res != compile_options.end()) {
     auto isaName = getValueOf(*res);
     isa_ = "amdgcn-amd-amdhsa--" + isaName;
-    bc_type_ = hip::helpers::kLLVM;
     // check if spirv output is requested
     if (isaName == "amdgcnspirv") {
       isa_ = "spir64-amd-amdhsa--" + isaName;
       bc_type_ = hip::helpers::kSPIRV;
     }
     settings_.offloadArchProvided = true;
+    // Don't use O3 optimization for SPIRV output
+    if (bc_type_ == hip::helpers::kSPIRV) {
+      compile_options.erase(
+        std::remove(compile_options.begin(), compile_options.end(), std::string("-O3")),
+        compile_options.end());
+    }
     return true;
   }
   // App has not provided the gpu archiecture, need to find it
@@ -181,10 +188,6 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
 
   fgpu_rdc_ = fgpu_rdc;
 
-  if (bc_type_ == hip::helpers::kSPIRV && fgpu_rdc_) {
-    LogError("Error in hiprtc: SPIRV output is not supported with fgpu-rdc");
-    return false;
-  }
 
   // Append compile options
   std::vector<std::string> compileOpts(compile_options_);
@@ -195,6 +198,12 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
     LogError("Error in hiprtc: unable to transform options");
     return false;
   }
+  
+  if (bc_type_ == hip::helpers::kSPIRV && fgpu_rdc_) {
+    LogError("Error in hiprtc: SPIRV output is not supported with fgpu-rdc");
+    return false;
+  }
+
   if (bc_type_ == hip::helpers::kSPIRV || fgpu_rdc_) {
     // Generate SPIRV or Bitcode binary
     if (!hip::helpers::compileToBitCode(compile_input_, isa_, compileOpts, build_log_,
