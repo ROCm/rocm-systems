@@ -1329,7 +1329,7 @@ def generate_recommendations(
         and 0 < total_runtime_ns < _INIT_OVERHEAD_MAX_RUNTIME_NS
     )
 
-    if _is_init_overhead:
+    if _is_init_overhead and not recommendations:
         recommendations.append(
             {
                 "priority": "INFO",

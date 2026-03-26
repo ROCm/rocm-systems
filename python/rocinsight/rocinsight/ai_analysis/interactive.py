@@ -4246,7 +4246,7 @@ class WorkflowSession:
                     f"Runtime: {breakdown.get('total_runtime_ns', 0)/1e9:.3f}s, "
                     f"kernel={breakdown.get('kernel_time_pct', 0):.1f}%, "
                     f"memcpy={breakdown.get('memcpy_time_pct', 0):.1f}%, "
-                    f"overhead={breakdown.get('idle_time_pct', 0):.1f}%.\n\n"
+                    f"api_overhead={breakdown.get('api_overhead_pct', 0):.1f}%, idle={breakdown.get('idle_time_pct', 0):.1f}%.\n\n"
                     f"Rule-based recommendations:\n"
                 )
                 for r in recs:
@@ -4332,6 +4332,7 @@ class WorkflowSession:
             self._print_comparison(breakdown)
 
         # Plateau detection — warn the user and filter duplicate recommendations
+        _all_recs_for_hashing = list(recs)  # snapshot before any filtering
         is_plateaued, consec_count, last_pct = self._compute_plateau_status(breakdown)
         if is_plateaued:
             _print(
@@ -4352,8 +4353,10 @@ class WorkflowSession:
                 )
             recs = filtered_recs
 
-        # Update seen recommendation hashes
-        for r in recs:
+        # Update seen recommendation hashes from the ORIGINAL recs (before
+        # filtering), so suppressed recs are permanently marked as seen and
+        # don't reappear on subsequent plateau iterations.
+        for r in _all_recs_for_hashing:
             _hash = f"{r.get('category', '')}:{r.get('issue', '')[:40]}"
             if _hash not in self._state.seen_recommendation_hashes:
                 self._state.seen_recommendation_hashes.append(_hash)
@@ -4458,29 +4461,9 @@ class WorkflowSession:
         # Compute performance delta now that analysis_history has been updated
         self._update_checkpoint_delta()
 
-        # Seed conversation with this iteration's analysis results
-        conv = self._ensure_conv()
-        if conv is not None and breakdown:
-            _ctx = (
-                f"Iteration {snap.iteration + 1} analysis complete.\n"
-                f"Runtime: {breakdown.get('total_runtime_ns', 0)/1e9:.3f}s. "
-                f"Breakdown: kernel={breakdown.get('kernel_time_pct', 0):.1f}%, "
-                f"memcpy={breakdown.get('memcpy_time_pct', 0):.1f}%, "
-                f"overhead={breakdown.get('idle_time_pct', 0):.1f}%.\n"
-                f"Recommendations ({len(recs)}):\n"
-            )
-            for r in recs[:5]:
-                _ctx += f"- [{r.get('priority','')}] {r.get('issue','')}\n"
-            try:
-                # Fire-and-forget: inject context, discard response
-                _discard: List[str] = []
-                conv.send(
-                    _ctx + "\nAcknowledge this context briefly.",
-                    on_token=lambda t: _discard.append(t),
-                    max_tokens=256,
-                )
-            except Exception:
-                pass  # Never block Phase 4 on conversation failure
+        # Note: conversation context is seeded by the LLM-refined-recommendations
+        # block above (which sends breakdown + recs to the LLM). No separate
+        # context-injection call is needed — that would double API usage.
 
         return snap
 
