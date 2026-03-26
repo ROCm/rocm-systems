@@ -284,8 +284,9 @@ void
 process_t::read_string (host_address_t address, std::string *string,
                         size_t size) const
 {
-  constexpr size_t chunk_size
+  constexpr size_t cache_line_size
     = memory_cache_t<host_address_t>::cache_line_size;
+  constexpr size_t chunk_size = 4 * cache_line_size;
 
   dbgapi_assert (string && "invalid argument");
 
@@ -296,9 +297,11 @@ process_t::read_string (host_address_t address, std::string *string,
 
       /* Transfer one aligned chunk at a time, except for the first read
          which could read less than a chunk if the start address is not
-         aligned.  */
+         cache line aligned.  */
 
-      size_t request_size = chunk_size - (address & (chunk_size - 1));
+      static_assert (utils::is_power_of_two (cache_line_size));
+      size_t request_size = chunk_size - (address & (cache_line_size - 1));
+
       size_t xfer_size
         = read_host_memory_partial (address, staging_buffer, request_size);
 
@@ -1268,9 +1271,8 @@ process_t::update_code_objects ()
 
   try
     {
-      decltype (r_debug::r_state) state;
-      read_host_memory (m_runtime_info.r_debug + offsetof (r_debug, r_state),
-                        &state);
+      struct r_debug r_debug;
+      read_host_memory (m_runtime_info.r_debug, &r_debug);
 
       /* If the state is not RT_CONSISTENT then that indicates there is a
          thread actively updating the code object list.  We cannot read the
@@ -1278,25 +1280,18 @@ process_t::update_code_objects ()
          it will set state back to RT_CONSISTENT and hit the exiting breakpoint
          in the r_brk function which will trigger a read of the code object
          list.  */
-      if (state != r_debug::RT_CONSISTENT)
+      if (r_debug.r_state != r_debug::RT_CONSISTENT)
         return;
 
-      host_address_t link_map_address;
-      read_host_memory (m_runtime_info.r_debug + offsetof (r_debug, r_map),
-                        &link_map_address);
-
+      host_address_t link_map_address
+        = reinterpret_cast<uintptr_t> (r_debug.r_map);
       while (link_map_address != 0)
         {
-          global_address_t load_address;
-          read_host_memory (link_map_address + offsetof (link_map, l_addr),
-                            &load_address);
-
-          host_address_t l_name_address;
-          read_host_memory (link_map_address + offsetof (link_map, l_name),
-                            &l_name_address);
+          struct link_map entry;
+          read_host_memory (link_map_address, &entry);
 
           std::string uri;
-          read_string (l_name_address, &uri, -1);
+          read_string (reinterpret_cast<uintptr_t> (entry.l_name), &uri, -1);
 
           /* Check if the code object already exists.  */
           code_object_t *code_object = find_if (
@@ -1306,16 +1301,14 @@ process_t::update_code_objects ()
                  new code object of the same size could have been loaded at the
                  same address as an old stale code object. We could add a
                  unique identifier to the URI.  */
-              return x.load_address () == load_address && x.uri () == uri;
+              return x.load_address () == entry.l_addr && x.uri () == uri;
             });
 
           if (code_object == nullptr)
-            code_object = &create<code_object_t> (*this, uri, load_address);
+            code_object = &create<code_object_t> (*this, uri, entry.l_addr);
 
           code_object->set_mark (code_object_mark);
-
-          read_host_memory (link_map_address + offsetof (link_map, l_next),
-                            &link_map_address);
+          link_map_address = reinterpret_cast<uintptr_t> (entry.l_next);
         }
     }
   catch (const process_exited_exception_t &)
