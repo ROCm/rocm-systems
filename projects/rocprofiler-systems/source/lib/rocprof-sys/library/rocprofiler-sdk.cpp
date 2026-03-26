@@ -2797,6 +2797,21 @@ tool_fini(void* callback_data)
     stop();
     finalize_sdk_common();
 
+    // Destroy buffers to drain in-flight async flush callbacks before
+    // deleting tool_data, which those callbacks may still be accessing.
+    // rocprofiler_destroy_buffer returns BUFFER_BUSY if a flush is still
+    // in progress, so retry until it succeeds or buffer is not found.
+    for(auto itr : tool_data->get_buffers())
+    {
+        if(itr.handle > 0)
+        {
+            while(rocprofiler_destroy_buffer(itr) == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+            {
+                std::this_thread::yield();
+            }
+        }
+    }
+
     auto* _data        = as_client_data(callback_data);
     _data->client_id   = nullptr;
     _data->client_fini = nullptr;
