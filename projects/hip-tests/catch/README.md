@@ -182,9 +182,9 @@ The process must be a standalone exe inside the same folder as other tests.
 Initially, the new tests can be enabled via using ```-DHIP_CATCH_TEST=1```. After porting existing tests, this will be turned on by default.
 
 ## Building a single test
-Generate `hip_tests_config.hh` before compilation
+Generate `hip_test_config.hh` before compilation
 ```bash
-python3 <HIP_SRC_DIR>/catch/config/parse_config.py <HIP_SRC_DIR>/catch/config/configs <PLATFORM> <OS> <ARCH> <CONFIG_TARGET_DIR>/hip_tests_config.hh
+python3 <HIP_SRC_DIR>/catch/config/parse_config.py <HIP_SRC_DIR>/catch/config/configs <PLATFORM> <OS> <ARCH> <CONFIG_TARGET_DIR>/hip_test_config.hh
 ```
 
 ```bash
