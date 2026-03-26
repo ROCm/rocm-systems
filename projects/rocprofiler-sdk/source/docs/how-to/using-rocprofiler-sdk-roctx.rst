@@ -27,6 +27,14 @@ Markers
 
 Markers are used to insert a marker in the code with a message. Creating markers helps you see when a line of code is executed.
 
+When using ROCTx markers with profiling tools that support Perfetto trace visualization (such as ``rocprofv3`` with ``--output-format pftrace``), markers created with ``roctxMark()`` appear as arrows in the Perfetto UI timeline. For example, markers like ``roctxMark("pre-launch")`` and ``roctxMark("post-kernel-launch")`` will be displayed as visual markers that point to the exact timestamp when that line of code was executed.
+
+.. figure:: /data/perfetto_marker.png
+   :alt: ROCTx markers displayed as arrows in Perfetto UI
+   :align: center
+
+   Example of ``roctxMark()`` annotations appearing as arrows in the Perfetto UI timeline
+
 Ranges
 =======
 
