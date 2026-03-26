@@ -66,9 +66,15 @@
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
+<<<<<<< Updated upstream
  * - 1.16 - hsa_amd_counted_queue APIs
  * - 1.17 - hsa_amd_memory_async_batch_copy
  * - 1.18 - hsa_amd_pointer_info: Added alloc_flags field to hsa_amd_pointer_info_t
+=======
+ * - 1.16 - Counted Queue APIs: hsa_amd_counted_queue_acquire, hsa_amd_counted_queue_release
+ * - 1.17 - hsa_amd_memory_async_batch_copy
+ * - 1.18 - Support for Memory batch: hsa_amd_svm_discard_batch_async
+>>>>>>> Stashed changes
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
 #define HSA_AMD_INTERFACE_VERSION_MINOR 18
@@ -458,9 +464,15 @@ enum {
   HSA_STATUS_ERROR_RESOURCE_BUSY = 46,
 
   /**
+   * Xnack is disabled on the system, but is required 
+   * for the requested operation.
+   */
+  HSA_STATUS_ERROR_XNACK_DISABLED = 47,
+
+  /**
    * Request is not supported by this system
    */
-  HSA_STATUS_ERROR_NOT_SUPPORTED = 47,
+  HSA_STATUS_ERROR_NOT_SUPPORTED = 48,
 };
 
 /** @} */
@@ -4129,6 +4141,14 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
  * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The queue's agent is invalid or not a GPU agent.
  */
 hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
+
+/**
+ * @brief Discards a batch of SVM memory asynchronously.
+ */
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
+                                               uint32_t num_dep_signals,
+                                               const hsa_signal_t* dep_signals,
+                                               hsa_signal_t completion_signal);
 
 /**
  * @brief logging types
