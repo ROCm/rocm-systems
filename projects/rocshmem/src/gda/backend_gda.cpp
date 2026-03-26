@@ -799,22 +799,17 @@ void GDABackend::cleanup_ibv() {
     }
   } else if (gda_provider == GDAProvider::MLX5) {
     for (size_t i = 0; i < mlx5_qps.size(); i++) {
-      err = mlx5_qps[i].destroy(mlx5dv);
-      CHECK_ZERO(err, "mlx5_devx_qp::destroy");
-
-      err = ibv.destroy_cq(cqs[i]);
-      CHECK_ZERO(err, "ibv_destroy_cqs");
+      // mlx5dv::destroy_qp also destroys the associated CQ
+      err = mlx5dv.destroy_qp(mlx5_qps[i]);
+      CHECK_ZERO(err, "mlx5dv::destroy_qp");
     }
-
-    err = ibv.dealloc_pd(pd_parent);
-    CHECK_ZERO(err, "ibv_dealloc_pd (pd_parent)");
   } else {
     for (int i = 0; i < qps.size(); i++) {
       err = ibv.destroy_qp(qps[i]);
       CHECK_ZERO(err, "ibv_destroy_qp");
 
       err = ibv.destroy_cq(cqs[i]);
-      CHECK_ZERO(err, "ibv_destroy_cqs");
+      CHECK_ZERO(err, "ibv_destroy_cq");
     }
 
     if (gda_provider == GDAProvider::IONIC) {
@@ -1044,7 +1039,7 @@ void GDABackend::open_ib_device() {
   CHECK_NNULL(pd_orig, "ib allocate pd");
   dump_ibv_pd(pd_orig);
 
-  if (gda_provider == GDAProvider::IONIC || gda_provider == GDAProvider::MLX5) {
+  if (gda_provider == GDAProvider::IONIC) {
     create_parent_domain();
   }
 
@@ -1124,7 +1119,7 @@ void GDABackend::modify_qps_reset_to_init() {
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
     } else if (gda_provider == GDAProvider::MLX5) {
-      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
+      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1178,7 +1173,7 @@ void GDABackend::modify_qps_init_to_rtr() {
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
     } else if (gda_provider == GDAProvider::MLX5) {
-      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
+      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1216,7 +1211,7 @@ void GDABackend::modify_qps_rtr_to_rts() {
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
     } else if (gda_provider == GDAProvider::MLX5) {
-      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
+      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1254,7 +1249,7 @@ void GDABackend::create_queues() {
     ionic_create_cqs(ncqes);
     create_qps(sq_size);
   } else if (gda_provider == GDAProvider::MLX5) {
-    create_cqs(ncqes);
+    // mlx5_create_qps also creates the associated CQs
     mlx5_create_qps(sq_size);
   }
 
