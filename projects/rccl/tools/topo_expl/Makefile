@@ -1,6 +1,8 @@
-# Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 ROCM_PATH ?= /opt/rocm
 HIPCC = $(ROCM_PATH)/bin/hipcc
+HIPIFY_PL_EXE ?= $(ROCM_PATH)/bin/hipify-perl
+HIPIFY_PL_FLAGS = -inplace -quiet-warnings
 
 # Detect ROCm version using CMake (reads from rocm-core package or .info/version file)
 ROCM_VERSION_STRING := $(shell cmake -DROCM_PATH='$(ROCM_PATH)' -P get_rocm_version.cmake 2>&1 | tail -1)
@@ -17,6 +19,7 @@ ROCM_VERSION := $(shell echo $$((10000 * $(ROCM_MAJOR) + 100 * $(ROCM_MINOR) + $
 EXE = topo_expl
 
 CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) \
+           -std=c++17 \
            -Wl,--gc-sections -fgpu-rdc \
            -Iinclude -Itest -Ihipify_rccl/include -Ihipify_rccl/include/plugin \
            -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I/opt/rocm/include/ \
@@ -91,10 +94,10 @@ hipify:
 	cp -a ../../src/misc/archinfo.cc hipify_rccl/graph/
 	# Hipify all header and source files (CUDA -> HIP)
 	@echo ">>> Hipifying RCCL header files..."
-	hipify-perl -inplace -quiet-warnings hipify_rccl/include/*.h
-	hipify-perl -inplace -quiet-warnings hipify_rccl/include/latency_profiler/*.h
-	hipify-perl -inplace -quiet-warnings hipify_rccl/include/plugin/*.h
-	hipify-perl -inplace -quiet-warnings hipify_rccl/src/device/include/*.h
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/*.h
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/latency_profiler/*.h
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/plugin/*.h
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/src/device/include/*.h
 	# PATCH 1: Fix device includes - remove "device/" prefix since files are in same directory
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/src/device/include/*.h
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/include/*.h
@@ -103,9 +106,9 @@ hipify:
 	cp hipify_rccl/include/nvtx_stub.h hipify_rccl/include/nvtx.h
 	bash ../../cmake/scripts/add_unroll.sh "hipify_rccl/src/device/include/common.h"
 	@echo ">>> Hipifying RCCL source files..."
-	hipify-perl -inplace -quiet-warnings hipify_rccl/graph/*
-	hipify-perl -inplace -quiet-warnings hipify_rccl/include/network/unpack/*
-	hipify-perl -inplace -quiet-warnings hipify_rccl/*.cc
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/graph/*
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/network/unpack/*
+	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/*.cc
 	# PATCH 3: Generate *_tmp.h files - these are build-time generated headers in rccl
 	cp hipify_rccl/include/nccl_device/core.h hipify_rccl/include/nccl_device/core_tmp.h
 	cp hipify_rccl/include/nccl_device/comm.h hipify_rccl/include/nccl_device/comm_tmp.h
