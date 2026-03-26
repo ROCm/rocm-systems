@@ -20,10 +20,9 @@
 # -----------------------------------------------------------------------------
 
 import importlib
-from typing import Optional
 
 
-def load_bench(device_ids: list[str]) -> Optional[object | None]:
+def load_bench(device_ids: list[str]) -> object:
     try:
         from roofline.hip.hip import hipGetDeviceProperties
 
@@ -50,8 +49,10 @@ def load_bench(device_ids: list[str]) -> Optional[object | None]:
         bench_instance = bench_class(device_ids)
         return bench_instance
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-    return None
+        # Propagate error so users do not attempt to use a non-existent bench instance
+        raise RuntimeError(
+            f"Failed to load benchmark for devices {device_ids}: {e}"
+        ) from e
 
 
 if __name__ == "__main__":
@@ -66,6 +67,10 @@ if __name__ == "__main__":
 
     sys.path.append(str(Path("..").absolute().resolve()))
     # TODO: verify multi-device scenario- only one device works at this time
-    bench = load_bench(device_ids)
+    try:
+        bench = load_bench(device_ids)
+    except RuntimeError:
+        print("GPU benchmarking could not be executed")
+        sys.exit(1)
     metrics = bench.run_on_devices(device_ids)
     bench.dump_csv(metrics, "roofline.csv")
