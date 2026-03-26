@@ -169,6 +169,9 @@ release(uint, HIP_HOST_COHERENT, 0,                                           \
 release(uint, AMD_OPT_FLUSH, 1,                                               \
         "Kernel flush option , 0x0 = Use system-scope fence operations."      \
         "0x1 = Use device-scope fence operations when possible.")             \
+release(uint, HIP_AQL_KERNEL_DISPATCH_FENCE_NONE, 0,                         \
+        "Kernel dispatch AQL fence override: 0=default, 1=acquire "          \
+        "HSA_FENCE_SCOPE_NONE only (release follows AMD_OPT_FLUSH).")          \
 release(bool, AMD_DIRECT_DISPATCH, IS_LINUX,                                  \
         "Enable direct kernel dispatch.")                                     \
 release(uint, HIP_HIDDEN_FREE_MEM, 0,                                         \

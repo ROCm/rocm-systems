@@ -29,6 +29,7 @@
 #include <vector>
 #include <atomic>
 #include <cinttypes>
+#include <cstdio>
 
 #if defined(__AVX__)
 #if defined(__MINGW64__)
@@ -174,6 +175,15 @@ static inline void logAqlBarrierValuePacket(const hsa_queue_t* queue, uint16_t h
           pkt->signal.handle, pkt->value, pkt->mask,
           pkt->cond == 0 ? "EQ" : pkt->cond == 1 ? "NE" : pkt->cond == 2 ? "LT" : "GTE",
           pkt->completion_signal.handle, rptr, wptr);
+}
+
+/** Clear only the kernel-dispatch acquire fence scope sub-field to HSA_FENCE_SCOPE_NONE. */
+static uint16_t hipKernelDispatchClearAcquireFence(uint16_t header) {
+  header &= ~(((1u << HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE) - 1u)
+              << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+  header |= static_cast<uint16_t>(HSA_FENCE_SCOPE_NONE)
+            << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
+  return header;
 }
 
 // ================================================================================================
@@ -1138,10 +1148,17 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   setFenceDirty(true);
 
   if (addSystemScope_) {
-    header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
-                HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-    header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
-               HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    const unsigned fm = dev().settings().hipAqlKernelDispatchFenceMode_;
+    if (fm == 0) {
+      header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
+                  HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
+                 HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    } else if (fm == 1) {
+      header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      header = hipKernelDispatchClearAcquireFence(header);
+    }
     addSystemScope_ = false;
   }
 
@@ -1310,10 +1327,17 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   uint16_t firstSetup  = static_cast<uint16_t>(validFullHeaders[0] >> 16);
   uint16_t lastHeader  = static_cast<uint16_t>(validFullHeaders[numPackets - 1]);
   if (addSystemScope_) {
-    firstHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
-    firstHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
-    lastHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-    lastHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    const unsigned fm = dev().settings().hipAqlKernelDispatchFenceMode_;
+    if (fm == 0) {
+      firstHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+      firstHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+      lastHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      lastHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    } else if (fm == 1) {
+      firstHeader = hipKernelDispatchClearAcquireFence(firstHeader);
+      lastHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      lastHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    }
     addSystemScope_ = false;
   }
 
@@ -1708,18 +1732,29 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
 
+  const unsigned fenceMode = device.settings().hipAqlKernelDispatchFenceMode_;
+  uint16_t defaultFenceBits;
   if (device.settings().fenceScopeAgent_) {
     const auto& isa = device.isa();
     const bool isGfx12 = (isa.versionMajor() == 12) && (isa.versionMinor() == 0) &&
                          (isa.versionStepping() == 0 || isa.versionStepping() == 1);
-
-    dispatchPacketHeaderNoSync_ =
-        (kernelDispatchHBits | (isGfx12 ? sysAcquireAgentReleaseHBits : agentScopeHBits));
-    dispatchPacketHeader_ = (kernelDispatchHBits | barrierHBits |
-                             (isGfx12 ? sysAcquireAgentReleaseHBits : agentScopeHBits));
+    defaultFenceBits = isGfx12 ? sysAcquireAgentReleaseHBits : agentScopeHBits;
   } else {
-    dispatchPacketHeaderNoSync_ = (kernelDispatchHBits | systemScopeHBits);
-    dispatchPacketHeader_ = (kernelDispatchHBits | barrierHBits | systemScopeHBits);
+    defaultFenceBits = systemScopeHBits;
+  }
+
+  if (fenceMode == 1) {
+    dispatchPacketHeaderNoSync_ =
+        hipKernelDispatchClearAcquireFence(kernelDispatchHBits | defaultFenceBits);
+    dispatchPacketHeader_ = hipKernelDispatchClearAcquireFence(
+        (kernelDispatchHBits | barrierHBits | defaultFenceBits));
+    std::fprintf(stderr,
+                 "[CLR] HIP_AQL_KERNEL_DISPATCH_FENCE_NONE=1: acquire AQL fence scope is NONE; "
+                 "release follows AMD_OPT_FLUSH/agent-or-system defaults (VirtualGPU index=%u)\n",
+                 index_);
+  } else {
+    dispatchPacketHeaderNoSync_ = (kernelDispatchHBits | defaultFenceBits);
+    dispatchPacketHeader_ = (kernelDispatchHBits | barrierHBits | defaultFenceBits);
   }
 
   aqlHeader_ = dispatchPacketHeader_;
@@ -4105,10 +4140,17 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   // Copy scheduler's AQL packet for possible relaunch from the scheduler itself
   if (aql_packet != nullptr) {
     *aql_packet = dispatchPacket;
+    const unsigned fm = dev().settings().hipAqlKernelDispatchFenceMode_;
+    const uint16_t relaunchFenceBits = [&]() -> uint16_t {
+      constexpr uint16_t kSys = (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                                (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      if(fm == 1) {
+        return hipKernelDispatchClearAcquireFence(kSys);
+      }
+      return kSys;
+    }();
     aql_packet->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-                         (1 << HSA_PACKET_HEADER_BARRIER) |
-                         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
-                         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+                         (1 << HSA_PACKET_HEADER_BARRIER) | relaunchFenceBits;
     aql_packet->setup = sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
   }
 

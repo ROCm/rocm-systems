@@ -692,6 +692,7 @@ class Settings : public amd::HeapObject {
       uint enableCoopGroups_ : 1;             //!< Enable cooperative groups feature
       uint enableCoopMultiDeviceGroups_ : 1;  //!< Enable cooperative groups multi device
       uint fenceScopeAgent_ : 1;              //!< Enable fence scope agent in AQL dispatch packet
+      uint hipAqlKernelDispatchFenceMode_ : 1;  //!< HIP_AQL_KERNEL_DISPATCH_FENCE_NONE: 0 default,1 acquire NONE only
       uint rocr_backend_ : 1;                 //!< Device uses ROCr backend for submissions
       uint gwsInitSupported_ : 1;             //!< Check if GWS is supported on this machine.
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels

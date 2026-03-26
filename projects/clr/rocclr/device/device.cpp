@@ -1239,6 +1239,13 @@ Settings::Settings() : value_(0) {
   waitCommand_ = AMD_OCL_WAIT_COMMAND;
   supportDepthsRGB_ = false;
   fenceScopeAgent_ = AMD_OPT_FLUSH;
+  {
+    unsigned m = static_cast<unsigned>(HIP_AQL_KERNEL_DISPATCH_FENCE_NONE);
+    if(m > 1) {
+      m = 0;
+    }
+    hipAqlKernelDispatchFenceMode_ = m;
+  }
 
   // Amend certain flags for OpenCL
   if (!amd::IS_HIP) {
