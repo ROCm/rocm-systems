@@ -101,8 +101,8 @@ int hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx);
  */
 void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx);
 
-struct hsa_kfd_topology_context *hsakmt_kfdcontext_get_topology_context(HsaKFDContext *ctx);
 struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx);
+int hsakmt_kfdcontext_init_topology_context(HsaKFDContext *ctx);
 int hsakmt_kfdcontext_init_queue_context(HsaKFDContext *ctx);
 int hsakmt_kfdcontext_init_event_context(HsaKFDContext *ctx);
 int hsakmt_kfdcontext_init_debug_context(HsaKFDContext *ctx);
