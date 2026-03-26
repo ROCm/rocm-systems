@@ -259,6 +259,8 @@ def retrieve_projects(args):
         final_flags_list = sorted(merged_flags)
     # Always append -DTHEROCK_ENABLE_CORE=ON as a default at the end
     final_flags_list.append("-DTHEROCK_ENABLE_CORE=ON")
+    # Removing duplicates
+    final_flags_list = list(set(final_flags_list))
     final_flags = " ".join(final_flags_list)
 
     return [
