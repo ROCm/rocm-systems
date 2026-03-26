@@ -538,11 +538,12 @@ The trace output is captured in a rocpd database file and can be converted to pf
 
 The preceding command generates a rocpd database file prefixed with the process ID which can be converted to pftrace to be visualized in Perfetto UI.
 
+
 .. code-block:: shell
 
     $ /opt/rocm/bin/rocpd2pftrace -i 163852_results.db
 
-Here is the RCCL trace visualized in Perfetto UI:
+Here is the RCCL trace visualized in Perfetto UI for this `sample <https://github.com/bgopesh/allreduce_rccl/blob/master/rccl_allreduce.cpp>`_ `rccl` allreduce application:
 
 .. image:: /data/perfetto_rccl.png
 
