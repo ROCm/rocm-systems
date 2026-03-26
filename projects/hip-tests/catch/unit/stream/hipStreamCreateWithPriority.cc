@@ -289,8 +289,8 @@ template <typename T> bool verifyStreamPriorityKernelResults() {
 
 // allocate and initialise host source and destination buffers
 #define OP(x)                                                                                      \
-  T* src_h_##x;                                                                                    \
-  T* dst_h_##x;                                                                                    \
+  T* src_h_##x = nullptr;                                                                          \
+  T* dst_h_##x = nullptr;                                                                          \
   if (enable_priority_##x) {                                                                       \
     src_h_##x = reinterpret_cast<T*>(malloc(size));                                                \
     REQUIRE(src_h_##x != nullptr);                                                                 \
@@ -306,8 +306,8 @@ template <typename T> bool verifyStreamPriorityKernelResults() {
 
 // allocate and initialize device source and destination buffers
 #define OP(x)                                                                                      \
-  T* src_d_##x;                                                                                    \
-  T* dst_d_##x;                                                                                    \
+  T* src_d_##x = nullptr;                                                                          \
+  T* dst_d_##x = nullptr;                                                                          \
   if (enable_priority_##x) {                                                                       \
     HIP_CHECK(hipMalloc(&src_d_##x, size));                                                        \
     HIP_CHECK(hipMemcpy(src_d_##x, src_h_##x, size, hipMemcpyHostToDevice));                       \
@@ -368,10 +368,10 @@ template <typename T> bool verifyStreamPriorityKernelResults() {
 
 // free host & device memory
 #define OP(x)                                                                                      \
-  free(src_h_##x);                                                                                 \
-  free(dst_h_##x);                                                                                 \
-  HIP_CHECK(hipFree(src_d_##x));                                                                   \
-  HIP_CHECK(hipFree(dst_d_##x));
+  if (src_h_##x != nullptr) free(src_h_##x);                                                      \
+  if (dst_h_##x != nullptr) free(dst_h_##x);                                                      \
+  if (src_d_##x != nullptr) HIP_CHECK(hipFree(src_d_##x));                                        \
+  if (dst_d_##x != nullptr) HIP_CHECK(hipFree(dst_d_##x));
   OP(low)
   OP(normal)
   OP(high)
