@@ -87,7 +87,7 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
     ("TCP Read Requests", 875_000),
     ("TCP Write Requests", 375_000),
     ("TCP Miss Requests", 150_000),
-    ("TCP Read Hit Rate", 88.0),
+    ("TCP Hit Rate", 88.0),
     ("TCP Request Bandwidth", 80e9),
     # Table 304: LDS
     ("LDS Instructions", 125_000),
@@ -459,7 +459,7 @@ def create_mem_chart_diagram(
 
     tcp_read_req = get_metric(metric_dict, "TCP Read Requests")
     tcp_write_req = get_metric(metric_dict, "TCP Write Requests")
-    tcp_hit = get_metric(metric_dict, "TCP Read Hit Rate")
+    tcp_hit = get_metric(metric_dict, "TCP Hit Rate")
     tcp_bw = get_metric(metric_dict, "TCP Request Bandwidth")
 
     lds_insts = get_metric(metric_dict, "LDS Instructions")
@@ -605,7 +605,7 @@ def create_mem_chart_diagram(
 
     # Create stacked TCP/LDS/SQC panels - each height=10, total=30
     tcp_panel = Panel(
-        f"{metric_line('Read Hit Rate', tcp_hit, '%', COLORS['hit'])}\n"
+        f"{metric_line('Hit Rate', tcp_hit, '%', COLORS['hit'])}\n"
         f"{metric_line('BW', tcp_bw, 'Bytes/s', COLORS['bw']) if tcp_bw else ''}",
         title=f"[bold {COLORS['block']}]TCP (L0)[/bold {COLORS['block']}]",
         border_style=COLORS["block"],

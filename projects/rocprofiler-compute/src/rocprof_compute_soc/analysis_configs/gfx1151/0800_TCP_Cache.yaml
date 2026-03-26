@@ -79,13 +79,17 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # TCP_REQ (0x9) and TCP_REQ_MISS (0x11) do not share one counter space: REQ_MISS can
-        # exceed TCP_REQ (e.g. finer-granularity miss events), so (TCP_REQ - TCP_REQ_MISS) is invalid.
-        TCP Read Hit Rate:
-          avg: AVG((100 * TCP_REQ_READ_HIT_LRU_sum / (TCP_REQ_READ_HIT_LRU_sum + TCP_REQ_READ_MISS_EVICT_sum)) if ((TCP_REQ_READ_HIT_LRU_sum + TCP_REQ_READ_MISS_EVICT_sum) != 0) else None)
-          min: MIN((100 * TCP_REQ_READ_HIT_LRU_sum / (TCP_REQ_READ_HIT_LRU_sum + TCP_REQ_READ_MISS_EVICT_sum)) if ((TCP_REQ_READ_HIT_LRU_sum + TCP_REQ_READ_MISS_EVICT_sum) != 0) else None)
-          max: MAX((100 * TCP_REQ_READ_HIT_LRU_sum / (TCP_REQ_READ_HIT_LRU_sum + TCP_REQ_READ_MISS_EVICT_sum)) if ((TCP_REQ_READ_HIT_LRU_sum + TCP_REQ_READ_MISS_EVICT_sum) != 0) else None)
+        Hit Rate:
+          avg: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
+          min: MIN((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
+          max: MAX((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
+        # NOTE: "Read Hit Rate" was removed because the formula was incorrect.
+        # It subtracted ALL misses (TCP_REQ_MISS) from only read requests (TCP_REQ_READ),
+        # which can produce values > 100% or negative percentages.
+        # To correctly calculate Read Hit Rate, read-specific hit/miss counters are needed
+        # (e.g., TCP_TOTAL_HIT_LRU_READ, TCP_TOTAL_MISS_LRU_READ, TCP_TOTAL_MISS_EVICT_READ)
+        # which are not currently available in the counter definitions.
 
   # =========================================================================
   # TCP-GL1 Interface
@@ -158,11 +162,9 @@ Panel Config:
       Number of write requests to the TCP cache.
     Miss Requests: |-
       Number of requests that missed in the TCP cache and required fetching from GL1C.
-    TCP Read Hit Rate: |-
-      Percentage of TCP read traffic that hit in the LRU way: 100 × TCP_REQ_READ_HIT_LRU /
-      (TCP_REQ_READ_HIT_LRU + TCP_REQ_READ_MISS_EVICT). Do not use TCP_REQ − TCP_REQ_MISS for
-      hit rate — TCP_REQ (cache line accesses) and TCP_REQ_MISS (miss events) are not paired
-      counts; REQ_MISS can be larger than TCP_REQ on real silicon.
+    Hit Rate: |-
+      Percentage of TCP requests that hit in the cache.
+      Higher hit rates reduce traffic to GL1C and improve performance.
     GL1 Read Requests: |-
       Number of read requests sent from TCP to GL1C due to cache misses.
     TA Req Stall: |-

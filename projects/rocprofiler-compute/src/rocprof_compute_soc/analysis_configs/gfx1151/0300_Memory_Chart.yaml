@@ -123,8 +123,8 @@ Panel Config:
         TCP Miss Requests:
           value: AVG(TCP_REQ_MISS_sum / $denom)
           unit: (Requests + $normUnit)
-        TCP Read Hit Rate:
-          value: AVG((100 * TCP_REQ_READ_HIT_LRU_sum / (TCP_REQ_READ_HIT_LRU_sum + TCP_REQ_READ_MISS_EVICT_sum)) if ((TCP_REQ_READ_HIT_LRU_sum + TCP_REQ_READ_MISS_EVICT_sum) != 0) else None)
+        TCP Hit Rate:
+          value: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
         TCP Request Bandwidth:
           value: AVG((TCP_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
@@ -366,10 +366,9 @@ Panel Config:
       Definition: Percentage of scalar data cache requests that hit in cache.
       Formula: 100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum
 
-    TCP Read Hit Rate: |-
-      Definition: Percentage of TCP read traffic that hit in the LRU way (reads only).
-      Formula: 100 * TCP_REQ_READ_HIT_LRU_sum / (TCP_REQ_READ_HIT_LRU_sum + TCP_REQ_READ_MISS_EVICT_sum)
-      when the denominator is non-zero. TCP_REQ and TCP_REQ_MISS are not complementary counts.
+    TCP Hit Rate: |-
+      Definition: Percentage of TCP (L0 vector cache) requests that hit in cache.
+      Formula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum
 
     TCP Atomic Requests: |-
       Definition: Number of atomic operations through the TCP (Texture Cache Pipe).
