@@ -22,9 +22,12 @@ Panel Config:
         unit: Unit
       metric:
         SPI Busy:
-          avg: AVG((100 * SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-          min: MIN((100 * SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-          max: MAX((100 * SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          # Use GRBM_SPI_BUSY (not SPI_BUSY): SPI_BUSY is summed over all SPI instances, so it
+          # can exceed GRBM_GUI_ACTIVE when multiple SEs are busy in the same cycle. GRBM counts
+          # "any SPI busy" vs GUI active — same pairing as panel 1700 GRBM SPI Busy.
+          avg: AVG((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          max: MAX((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           unit: Percent
 
   # =========================================================================
@@ -93,9 +96,10 @@ Panel Config:
 
   metrics_description:
     SPI Busy: |-
-      Percentage of GPU active (GUI) cycles where the SPI (Shader Processor Input)
-      was busy. Computed as 100 * SPI_BUSY / GRBM_GUI_ACTIVE. SPI handles wave
-      scheduling and resource allocation.
+      Percentage of GPU active (GUI) cycles where any SPI was busy. Computed as
+      100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE (GRBM block). Do not use block-level SPI_BUSY here:
+      it is aggregated over every SPI instance, so summed busy cycles can far exceed GUI-active
+      cycles when multiple shader engines are active in parallel.
     Compute Wave Dispatches: |-
       Number of compute shader waves dispatched by SPI (SPI_CSN_WAVE).
     Wave Dispatch Rate: |-
