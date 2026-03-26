@@ -131,6 +131,12 @@ public:
   int GetNRanks() { return nRanks; }
 
   NetworkModel() : nRanks(0) {}
+  ~NetworkModel() {
+    for (NodeModel* n : nodes) {
+      delete n;
+    }
+    nodes.clear();
+  }
 };
 
 #endif

@@ -73,7 +73,8 @@ int main(int argc, char* argv[])
       gpuArch.find("GFX") == std::string::npos) {
       gpuArch = "gfx" + gpuArch;
     }
-    std::transform(gpuArch.begin(), gpuArch.end(), gpuArch.begin(), ::tolower);
+    std::transform(gpuArch.begin(), gpuArch.end(), gpuArch.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   }
 
   if (!cmdOptionExists(argv, argv + argc, {"-m", "--model"})) {

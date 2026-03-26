@@ -8,6 +8,9 @@
 #ifndef TOPO_EXPL_IMPL_H_
 #define TOPO_EXPL_IMPL_H_
 
+struct ncclMemoryStack;
+void ncclMemoryStackDestruct(struct ncclMemoryStack* me);
+
 struct graphInfo {
   int pattern;
   int nChannels;

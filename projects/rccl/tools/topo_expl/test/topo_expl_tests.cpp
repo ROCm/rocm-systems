@@ -72,6 +72,7 @@ static bool run_single_test(int model_id, int num_nodes) {
         test_result.nnodes = 0;
         test_results.push_back(test_result);
         topoExplDestroy(context);
+        topoExplSuppressVerbose = suppress_verbose;
         return false;
     }
     
@@ -168,9 +169,10 @@ static void print_test_summary() {
 }
 
 int run_test_suite_from_args(int argc, char* argv[]) {
-    // -t cannot be used with -m/--model or -n/--nodes
+    // -t cannot be used with -m/--model, -n/--nodes, or -a/--arch
     if (cmdOptionExists(argv, argv + argc, {"-m", "--model", "-n", "--nodes", "-a", "--arch"})) {
-        fprintf(stderr, "WARN: -m/--model and -n/--nodes cannot be used with -t (test mode).\n");
+        fprintf(stderr,
+                "WARN: -m/--model, -n/--nodes, and -a/--arch cannot be used with -t (test mode).\n");
         return TOPO_EXPL_INVALID_ARG;
     }
 

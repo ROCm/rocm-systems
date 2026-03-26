@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "topo_expl_api.h"
 #include "rccl_common.h"
 #include "nccl.h"
+#include <memory>
 #include "model.h"
 #include "topo_expl_impl.h"
 #include "topo.h"
@@ -254,6 +255,18 @@ void topoExplDestroy(TopoExplContext* context) {
   // Free comm structures
   if (context->comms) {
     for (int i = 0; i < context->nRanks; i++) {
+      ncclMemoryStackDestruct(&context->comms[i].memPermanent);
+      if (context->comms[i].sharedRes) {
+        if (context->comms[i].sharedRes->tpRankToLocalRank) {
+          free(context->comms[i].sharedRes->tpRankToLocalRank);
+        }
+        free(context->comms[i].sharedRes);
+        context->comms[i].sharedRes = nullptr;
+      }
+      if (context->comms[i].topParentRanks) {
+        free(context->comms[i].topParentRanks);
+        context->comms[i].topParentRanks = nullptr;
+      }
       if (context->comms[i].connectSend) {
         free(context->comms[i].connectSend);
       }
@@ -311,6 +324,7 @@ TopoExplResult topoExplGetAlgoInfo(
   uint64_t maxCount;
   TOPO_NCCLCHECK(rcclFuncMaxSendRecvCount(ncclFunc, comm->nRanks, count, maxCount));
 
+  // Support only fp32 production table
   info->maxSizeBytes = maxCount * sizeof(float);
   
   return TOPO_EXPL_SUCCESS;

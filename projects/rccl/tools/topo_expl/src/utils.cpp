@@ -76,7 +76,8 @@ std::string extractArchAndGpus(const char* desc, int* numGpus) {
     std::string descStr(desc);
     if (numGpus) *numGpus = 0;
     size_t start = 0;
-    while (start < descStr.length() && std::isspace(descStr[start])) {
+    while (start < descStr.length() &&
+           std::isspace(static_cast<unsigned char>(descStr[start]))) {
         start++;
     }
     
@@ -84,7 +85,8 @@ std::string extractArchAndGpus(const char* desc, int* numGpus) {
     if (gfxPos != std::string::npos) {
         if (numGpus && gfxPos > start) {
             std::string numStr = descStr.substr(start, gfxPos - start);
-            while (!numStr.empty() && std::isspace(numStr.back())) {
+            while (!numStr.empty() &&
+                   std::isspace(static_cast<unsigned char>(numStr.back()))) {
                 numStr.pop_back();
             }
             if (!numStr.empty()) {
@@ -92,7 +94,8 @@ std::string extractArchAndGpus(const char* desc, int* numGpus) {
             }
         }
         size_t end = gfxPos + 3;
-        while (end < descStr.length() && std::isdigit(descStr[end])) {
+        while (end < descStr.length() &&
+               std::isdigit(static_cast<unsigned char>(descStr[end]))) {
             end++;
         }
         return descStr.substr(gfxPos, end - gfxPos);
