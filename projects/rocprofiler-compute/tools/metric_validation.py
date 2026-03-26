@@ -1,28 +1,6 @@
 #!/usr/bin/env python3
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 ##############################################################################
 # This script reads counter values of workloads and computes metrics
@@ -44,7 +22,7 @@ from argparser import omniarg_parser  # noqa: E402
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base  # noqa: E402
 from utils import file_io, parser  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils import merge_counters_iteration_multiplex  # noqa: E402
+from utils.utils_analysis import impute_counters_iteration_multiplex  # noqa: E402
 
 
 class Colors:
@@ -150,7 +128,7 @@ class Analyzer(OmniAnalyze_Base):
 
                 # Handle iteration multiplexing if specified
                 if policy := self._profiling_config.get("iteration_multiplexing"):
-                    raw_pmc = merge_counters_iteration_multiplex(raw_pmc, policy)
+                    raw_pmc = impute_counters_iteration_multiplex(raw_pmc, policy)
 
                 base_workload = self._runs[path_info[0]]
                 # Make a copy of the dataframe to process

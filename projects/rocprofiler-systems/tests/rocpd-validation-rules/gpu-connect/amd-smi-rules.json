@@ -14,6 +14,7 @@
             ],
             "validation_queries": [
                 {
+                    "requires": "xgmi",
                     "comparison": "greater_than",
                     "description": "Check for Xgmi amd-smi metrics",
                     "error_message": "Did not find Xgmi data in amd-smi metrics",
@@ -21,6 +22,7 @@
                     "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE 'Xgmi%'"
                 },
                 {
+                    "requires": "pcie",
                     "comparison": "greater_than",
                     "description": "Check for Pcie amd-smi metrics",
                     "error_message": "Did not find Pcie data in amd-smi metrics",
@@ -39,57 +41,65 @@
             ],
             "validation_queries": [
                 {
+                    "requires": "xgmi",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring busy times",
+                    "description": "Check for amd-smi xgmi link speed samples",
                     "error_message": "Less than expected number of captured amd-smi xgmi link speed samples!",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_xgmi_link_speed'"
                 },
                 {
+                    "requires": "xgmi",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring busy times",
+                    "description": "Check for amd-smi xgmi link width samples",
                     "error_message": "Less than expected number of captured amd-smi xgmi link width samples!",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_xgmi_link_width'"
                 },
                 {
+                    "requires": "xgmi",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring busy times",
+                    "description": "Check for amd-smi xgmi read data samples",
                     "error_message": "Less than expected number of captured amd-smi xgmi read data samples!",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_xgmi_read_data%'"
                 },
                 {
+                    "requires": "xgmi",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring busy times",
+                    "description": "Check for amd-smi xgmi write data samples",
                     "error_message": "Less than expected number of captured amd-smi xgmi write data samples!",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_xgmi_write_data%'"
                 },
                 {
+                    "requires": "pcie",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring busy times",
+                    "description": "Check for amd-smi pcie bandwidth instantaneous samples",
                     "error_message": "Less than expected number of captured amd-smi pcie bandwidth instantaneous samples!",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_pcie_bandwidth_inst'"
                 },
                 {
+                    "requires": "pcie",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring busy times",
+                    "description": "Check for amd-smi pcie bandwidth accumulated samples",
                     "error_message": "Less than expected number of captured amd-smi pcie bandwidth accumulated samples!",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_pcie_bandwidth_acc'"
                 },
                 {
+                    "requires": "pcie",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring busy times",
+                    "description": "Check for amd-smi pcie link speed samples",
                     "error_message": "Less than expected number of captured amd-smi pcie link speed samples!",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_pcie_link_speed'"
                 },
                 {
+                    "requires": "pcie",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring busy times",
+                    "description": "Check for amd-smi pcie link width samples",
                     "error_message": "Less than expected number of captured amd-smi pcie link width samples!",
                     "expected_result": 100,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_pcie_link_width'"
