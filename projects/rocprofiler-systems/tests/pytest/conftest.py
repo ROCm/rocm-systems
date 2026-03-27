@@ -1125,10 +1125,12 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         _row("PAPI available:", cap.papi_availability),
         _row("Default NIC:", cap.default_nic),
         *(
-            lambda evts: [_subrow("PAPI NIC events:", evts[0])]
-            + [_subrow("", e) for e in evts[1:]]
-            if evts
-            else [_subrow("PAPI NIC events:", "None")]
+            lambda evts: (
+                [_subrow("PAPI NIC events:", evts[0])]
+                + [_subrow("", e) for e in evts[1:]]
+                if evts
+                else [_subrow("PAPI NIC events:", "None")]
+            )
         )(cap.papi_nic_events.split() if cap.papi_nic_events else []),
         "-" * 70,
         "GPU Information:",
