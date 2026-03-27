@@ -1,5 +1,5 @@
 # Benchmark Suite
-# TEST
+
 ## Generate Data
 
 From the current directory:
