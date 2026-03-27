@@ -28,6 +28,17 @@ if(NOT _XNACK_SUPPORTED)
     return()
 endif()
 
+# ROCm < 7.3.0 ships rocprofiler-sdk without handling for KFD_IOCTL_SVM_LOCATION_UNDEFINED
+# node IDs (0xFFFFFFFF), causing a fatal crash in the SDK's KFD parsing thread. Fixed in
+# ROCm 7.3.0.
+if(ROCPROFSYS_ROCM_VERSION VERSION_LESS "7.3.0")
+    rocprofiler_systems_message(
+        WARNING
+            "KFD tests disabled: ROCm ${ROCPROFSYS_ROCM_VERSION} has a rocprofiler-sdk bug with undefined node IDs (fixed in ROCm >= 7.3.0)"
+    )
+    return()
+endif()
+
 set(_kfd_environment
     "${_base_environment}"
     "HSA_XNACK=1"
@@ -52,9 +63,10 @@ rocprofiler_systems_add_test(
     GPU ON
     MPI OFF
     NUM_PROCS 1
-    RUN_ARGS -s 8 -p 64 -i 4
+    RUN_ARGS -s 32 -p 256 -i 4
     ENVIRONMENT "${_kfd_environment}"
     LABELS "kfd"
+    TIMEOUT 120
     PASS_REGEX "All 16 tests completed"
 )
 

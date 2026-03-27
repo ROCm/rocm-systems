@@ -584,6 +584,20 @@ test_memory_pressure(size_t total_bytes, int device)
     HIP_CHECK(hipGetDeviceProperties(&props, device));
     size_t gpu_mem = props.totalGlobalMem;
     printf("  GPU %d total memory: %zu MB\n", device, gpu_mem >> 20);
+
+    // Auto-scale: use at least 5% of GPU VRAM (capped at 1 GB) to create
+    // meaningful pressure that can trigger queue eviction and unmap events
+    // without dominating CI wall-time.
+    constexpr size_t MAX_AUTO_PRESSURE = 1ULL * 1024 * 1024 * 1024;
+    size_t           min_pressure      = std::min(gpu_mem / 20, MAX_AUTO_PRESSURE);
+    if(total_bytes < min_pressure)
+    {
+        printf("  Requested pressure (%zu MB) is < 5%% of GPU VRAM (%zu MB)\n",
+               total_bytes >> 20, min_pressure >> 20);
+        printf("  Auto-scaling pressure to %zu MB\n", min_pressure >> 20);
+        total_bytes = min_pressure;
+    }
+
     printf("  Allocating %zu MB of managed memory to create pressure\n",
            total_bytes >> 20);
 
@@ -644,7 +658,7 @@ test_memory_pressure(size_t total_bytes, int device)
 // ---------------------------------------------------------------------------
 
 static void
-test_alloc_free_cycle(size_t bytes, int /*device*/, int iterations)
+test_alloc_free_cycle(size_t bytes, int device, int iterations)
 {
     banner("Test 12: Rapid Alloc/Free Cycling");
 
@@ -654,6 +668,11 @@ test_alloc_free_cycle(size_t bytes, int /*device*/, int iterations)
     {
         uint64_t* managed = nullptr;
         HIP_CHECK(hipMallocManaged(&managed, bytes));
+
+        // Prefetch to GPU so pages become GPU-resident, then free.
+        // This ensures hipFree triggers UNMAP_FROM_GPU events.
+        HIP_CHECK(hipMemPrefetchAsync(managed, bytes, device, nullptr));
+        HIP_CHECK(hipDeviceSynchronize());
 
         kern_write_pattern<<<grid_size(n), BLOCK_SIZE>>>(managed, n, iter * 100ULL);
         HIP_CHECK(hipDeviceSynchronize());

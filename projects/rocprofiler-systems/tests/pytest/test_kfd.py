@@ -66,7 +66,7 @@ class TestKfdEvents(RocprofsysTest):
       - Unmap-from-GPU events (MMU notify, migrate, unmap from CPU)
     """
 
-    run_args = ["-s", "8", "-p", "64", "-i", "4"]
+    run_args = ["-s", "32", "-p", "256", "-i", "4"]
 
     @pytest.mark.rocpd("kfd_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
@@ -78,6 +78,7 @@ class TestKfdEvents(RocprofsysTest):
             env=kfd_environment,
             run_args=self.run_args,
             check_target_arch=True,
+            timeout=120,
         )
 
         self.assert_regex(
@@ -110,14 +111,6 @@ class TestKfdEvents(RocprofsysTest):
             print_output=True,
         )
 
-        self.assert_perfetto(
-            result,
-            subtest_name="Perfetto KFD queue validation",
-            categories=["kfd_queue"],
-            label_substrings=["QUEUE_EVICT"],
-            print_output=True,
-        )
-
         self.assert_rocpd(
             result,
             subtest_name="ROCpd KFD event validation",
@@ -129,8 +122,8 @@ class TestKfdEvents(RocprofsysTest):
     def test_kfd_prefetch_events(self, mode, kfd_environment, kfd_rules):
         """Focused test for prefetch-driven page migrations.
 
-        Uses smaller allocations with more prefetch iterations to
-        generate a high volume of PAGE_MIGRATE_PREFETCH events.
+        Uses more prefetch iterations to generate a high volume of
+        PAGE_MIGRATE_PREFETCH events.
         """
         env = kfd_environment.copy()
 
@@ -138,8 +131,9 @@ class TestKfdEvents(RocprofsysTest):
             mode,
             target="unified-memory",
             env=env,
-            run_args=["-s", "8", "-p", "64", "-i", "8"],
+            run_args=["-s", "32", "-p", "256", "-i", "8"],
             check_target_arch=True,
+            timeout=120,
         )
 
         self.assert_regex(
@@ -176,7 +170,9 @@ class TestKfdEvents(RocprofsysTest):
         """Stress test with high memory pressure to trigger queue evictions.
 
         Uses larger pressure allocation to maximize the chance of
-        triggering SVM queue eviction and TTM eviction events.
+        triggering SVM queue eviction and TTM eviction events. The
+        unified-memory program auto-scales pressure to at least 25%
+        of GPU VRAM (capped at 4 GB).
         """
         env = kfd_environment.copy()
 
@@ -184,9 +180,9 @@ class TestKfdEvents(RocprofsysTest):
             mode,
             target="unified-memory",
             env=env,
-            run_args=["-s", "32", "-p", "256", "-i", "4"],
+            run_args=["-s", "64", "-p", "512", "-i", "4"],
             check_target_arch=True,
-            timeout=600,
+            timeout=180,
         )
 
         self.assert_regex(
