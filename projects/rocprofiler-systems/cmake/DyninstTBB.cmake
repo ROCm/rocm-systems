@@ -49,7 +49,7 @@ endif()
 set(TBB_USE_DEBUG_BUILD OFF CACHE BOOL "Use debug versions of TBB libraries")
 
 # Minimum version of TBB (assumes a dotted-decimal format: YYYY.XX)
-set(_tbb_min_version 2018.6)
+set(_tbb_min_version 2022.3)
 
 set(TBB_MIN_VERSION
     ${_tbb_min_version}
@@ -124,10 +124,18 @@ elseif(NOT ROCPROFSYS_BUILD_TBB)
         "TBB was not found. Either configure cmake to find TBB properly or set ROCPROFSYS_BUILD_TBB=ON to download and build"
     )
 else()
-    # If we didn't find a suitable version on the system, then download one from the web
+    # Verify oneTBB submodule is initialized
+    if(NOT EXISTS ${PROJECT_SOURCE_DIR}/external/onetbb/CMakeLists.txt)
+        rocprofiler_systems_message(
+            FATAL_ERROR
+            "oneTBB submodule not initialized. Run: git submodule update --init external/onetbb"
+        )
+    endif()
+
+    # If we didn't find a suitable version on the system, then build from submodule
     rocprofiler_systems_message(STATUS "${ThreadingBuildingBlocks_ERROR_REASON}")
     rocprofiler_systems_message(
-        STATUS "Attempting to build TBB(${TBB_MIN_VERSION}) as external project"
+        STATUS "Attempting to build TBB(${TBB_MIN_VERSION}) from external/onetbb submodule"
     )
 
     if(NOT UNIX)
@@ -158,24 +166,24 @@ else()
     file(MAKE_DIRECTORY "${TBB_ROOT_DIR}/lib")
 
     foreach(c ${_tbb_components})
-        # Generate make target names
-        if(${c} STREQUAL tbbmalloc_proxy)
-            # tbbmalloc_proxy is spelled tbbproxy in their Makefiles
-            list(APPEND _tbb_components_cfg tbbproxy_release)
-        else()
-            list(APPEND _tbb_components_cfg ${c}_release)
-        endif()
-
         set(_tbb_${c}_lib
             $<BUILD_INTERFACE:${TBB_ROOT_DIR}/lib/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}>
             $<INSTALL_INTERFACE:${c}>
         )
 
-        # Generate library filenames
+        # Determine SOVERSION: tbb=12 (changed in 2022.3), others=2
+        if(${c} STREQUAL "tbb")
+            set(_soversion 12)
+        else()
+            set(_soversion 2)
+        endif()
+
+        # Generate library filenames with correct SOVERSION
         list(APPEND _tbb_libraries ${_tbb_${c}_lib})
         list(
             APPEND _tbb_build_byproducts
             "${TBB_ROOT_DIR}/lib/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+            "${TBB_ROOT_DIR}/lib/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}.${_soversion}"
         )
 
         foreach(t RELEASE DEBUG)
@@ -185,60 +193,26 @@ else()
 
     set(TBB_LIBRARIES "${_tbb_libraries}" CACHE FILEPATH "TBB library files" FORCE)
 
-    # Split the dotted decimal version into major/minor parts
-    string(REGEX REPLACE "\\." ";" _tbb_download_name ${TBB_MIN_VERSION})
-    list(GET _tbb_download_name 0 _tbb_ver_major)
-    list(GET _tbb_download_name 1 _tbb_ver_minor)
-
-    # Set the compiler for TBB It assumes gcc and tests for Intel, so clang is the only
-    # one that needs special treatment.
-    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
-        set(_tbb_compiler "compiler=clang")
-    endif()
-
-    find_program(MAKE_EXECUTABLE NAMES make gmake PATH_SUFFIXES bin)
-
-    if(NOT MAKE_EXECUTABLE AND CMAKE_GENERATOR MATCHES "Ninja")
-        rocprofiler_systems_message(
-            FATAL_ERROR
-            "make/gmake executable not found. Please re-run with -DMAKE_EXECUTABLE=/path/to/make"
-        )
-    elseif(NOT MAKE_EXECUTABLE AND CMAKE_GENERATOR MATCHES "Makefiles")
-        set(MAKE_EXECUTABLE "$(MAKE)")
-    endif()
-
     include(ExternalProject)
     ExternalProject_Add(
         rocprofiler-systems-tbb-build
         PREFIX ${TBB_ROOT_DIR}
-        URL
-            https://github.com/ajanicijamd/oneTBB/archive/refs/tags/v${_tbb_ver_major}.${_tbb_ver_minor}.01.tar.gz
-        BUILD_IN_SOURCE 1
-        CONFIGURE_COMMAND ""
+        SOURCE_DIR ${PROJECT_SOURCE_DIR}/external/onetbb
+        BINARY_DIR ${TBB_ROOT_DIR}/build
+        BUILD_BYPRODUCTS ${_tbb_build_byproducts}
+        CONFIGURE_COMMAND
+            ${CMAKE_COMMAND} -S <SOURCE_DIR> -B <BINARY_DIR>
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -DCMAKE_INSTALL_PREFIX=${TBB_ROOT_DIR} -DBUILD_SHARED_LIBS=ON -DTBB_TEST=OFF
+            -DTBB_EXAMPLES=OFF -DTBB_BUILD=ON -DTBBMALLOC_BUILD=ON
+            -DTBBMALLOC_PROXY_BUILD=ON -DTBB_STRICT=OFF -DTBB_INSTALL=ON
+            -DCMAKE_SKIP_BUILD_RPATH=OFF -DCMAKE_BUILD_RPATH=\$ORIGIN
+            -DCMAKE_INSTALL_RPATH=\$ORIGIN
         BUILD_COMMAND
-            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-            [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] ${MAKE_EXECUTABLE} -C src
-            ${_tbb_components_cfg} tbb_build_dir=${TBB_ROOT_DIR}/src tbb_build_prefix=tbb
-            ${_tbb_compiler}
-        INSTALL_COMMAND ""
-    )
-
-    # Install TBB libraries into staging prefix after build
-    add_custom_command(
-        OUTPUT ${_tbb_build_byproducts}
-        COMMAND ${CMAKE_COMMAND}
-        ARGS
-            -DLIBDIR=${TBB_LIBRARY_DIRS} -DINCDIR=${TBB_INCLUDE_DIRS}
-            -DPREFIX=${TBB_ROOT_DIR} -DCMAKE_STRIP=${CMAKE_STRIP} -P
-            ${CMAKE_CURRENT_LIST_DIR}/DyninstTBBInstall.cmake
-        DEPENDS rocprofiler-systems-tbb-build
-        COMMENT "Installing TBB..."
-    )
-
-    add_custom_target(
-        rocprofiler-systems-tbb-install
-        ALL
-        DEPENDS ${_tbb_build_byproducts}
+            ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${CMAKE_BUILD_TYPE} --target
+            tbb tbbmalloc tbbmalloc_proxy
+        INSTALL_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target install
     )
 
     install(
