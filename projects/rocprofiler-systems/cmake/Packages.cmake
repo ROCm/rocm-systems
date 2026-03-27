@@ -63,7 +63,7 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
-                                          "Provides spdlog library"
+    "Provides spdlog library"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
     "Provides timemory libraries"
@@ -851,18 +851,6 @@ set(TIMEMORY_USE_BFD
 )
 set(TIMEMORY_USE_LIBUNWIND ON CACHE BOOL "Enable libunwind support in timemory")
 set(TIMEMORY_USE_VISIBILITY OFF CACHE BOOL "Enable/disable using visibility decorations")
-set(TIMEMORY_USE_SANITIZER
-    ${ROCPROFSYS_USE_SANITIZER}
-    CACHE BOOL
-    "Build with -fsanitze=\${ROCPROFSYS_SANITIZER_TYPE}"
-    FORCE
-)
-set(TIMEMORY_SANITIZER_TYPE
-    ${ROCPROFSYS_SANITIZER_TYPE}
-    CACHE STRING
-    "Sanitizer type, e.g. leak, thread, address, memory, etc."
-    FORCE
-)
 
 if(DEFINED TIMEMORY_BUILD_GOTCHA AND NOT TIMEMORY_BUILD_GOTCHA)
     rocprofiler_systems_message(

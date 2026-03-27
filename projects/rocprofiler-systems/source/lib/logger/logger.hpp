@@ -12,9 +12,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <mutex>
-#include <new>
 #include <pthread.h>
-#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <sys/cdefs.h>

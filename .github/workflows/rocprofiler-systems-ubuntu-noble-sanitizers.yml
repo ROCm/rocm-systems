@@ -1,0 +1,249 @@
+name: rocprofiler-systems Ubuntu 24.04 Sanitizers (GCC)
+run-name: ubuntu-noble-sanitizers
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - ".github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml"
+      - "projects/rocprofiler-systems/**"
+      - "!**/*.md"
+      - "!**/*.rtf"
+      - "!**/*.rst"
+      - "!**/.markdownlint-ci2.yaml"
+      - "!**/.readthedocs.yaml"
+      - "!**/.spellcheck.local.yaml"
+      - "!**/.wordlist.txt"
+      - "!projects/rocprofiler-systems/docs/**"
+      - "!projects/rocprofiler-systems/source/docs/**"
+      - "!projects/rocprofiler-systems/source/python/gui/**"
+      - "!projects/rocprofiler-systems/docker/**"
+      - "!projects/rocprofiler-systems/CMakePresets.json"
+  pull_request:
+    paths:
+      - ".github/workflows/rocprofiler-systems-ubuntu-noble-sanitizers.yml"
+      - "projects/rocprofiler-systems/**"
+      - "!**/*.md"
+      - "!**/*.rtf"
+      - "!**/*.rst"
+      - "!**/.markdownlint-ci2.yaml"
+      - "!**/.readthedocs.yaml"
+      - "!**/.spellcheck.local.yaml"
+      - "!**/.wordlist.txt"
+      - "!projects/rocprofiler-systems/docs/**"
+      - "!projects/rocprofiler-systems/source/docs/**"
+      - "!projects/rocprofiler-systems/source/python/gui/**"
+      - "!projects/rocprofiler-systems/docker/**"
+      - "!projects/rocprofiler-systems/CMakePresets.json"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+  # Set to 0 so sanitizer findings are logged but do not fail tests.
+  # Change to a non-zero value (e.g. 1) to make sanitizer errors fail tests
+  # once the baseline is clean.
+  SANITIZER_EXIT_CODE: 0
+
+jobs:
+  ubuntu-noble-sanitizers:
+    runs-on: ubuntu-latest
+    container:
+      image: rocm/dev-ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ["g++"]
+        build-type: ["RelWithDebInfo"]
+        build-dyninst: ["ON"]
+        sanitizer-type: ["address", "thread", "undefined"]
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+      # Disable OpenMPI's binary patcher — it conflicts with ASAN's
+      # mprotect interceptor, causing SIGSEGV in all MPI/UCX tests.
+      OMPI_MCA_patcher: ""
+      ROCPROFSYS_CI: "ON"
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+          git --version
+
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems/
+            .gitmodules
+          set-safe-directory: true
+          submodules: true
+
+      - name: Install Packages
+        timeout-minutes: 25
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 30
+          timeout_minutes: 25
+          max_attempts: 2
+          command: |
+            apt-get update &&
+            apt-get install -y autoconf autotools-dev bash-completion bison build-essential \
+              bzip2 chrpath cmake curl environment-modules flex gettext git-core gnupg2 \
+              gzip iproute2 libgmock-dev libgtest-dev libiberty-dev libpapi-dev libpfm4-dev \
+              libsqlite3-dev libtool locales lsb-release m4 ninja-build nlohmann-json3-dev \
+              python3-pip software-properties-common texinfo unzip wget vim zip zlib1g-dev \
+              libucx-dev ucx-utils libomp-dev libopenmpi-dev &&
+            apt-get autoclean
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
+
+      - name: Initialize Submodules
+        shell: bash
+        run: |
+          git submodule update --init \
+            projects/rocprofiler-systems/external/dyninst \
+            projects/rocprofiler-systems/external/timemory
+
+      - name: Find Sanitizer Libraries and Configure Sanitizer Environment
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          SUPP_DIR=${PWD}/scripts
+          LOG_DIR=${PWD}/build/sanitizer-logs
+          mkdir -p "${LOG_DIR}"
+          SANITIZER_TYPE="${{ matrix.sanitizer-type }}"
+          if [ "${SANITIZER_TYPE}" = "address" ]; then
+              ASAN_LIB=$(${{ matrix.compiler }} -print-file-name=libasan.so)
+              ASAN_LIB=$(realpath "${ASAN_LIB}")
+              echo "ASan library: ${ASAN_LIB}"
+              ls -la "${ASAN_LIB}"
+              echo "ASAN_LIBRARY=${ASAN_LIB}" >> $GITHUB_ENV
+              echo "SANITIZER_CMAKE_FLAGS=-DASAN_LIBRARY=${ASAN_LIB}" >> $GITHUB_ENV
+              echo "ASAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-asan.supp:detect_leaks=1:new_delete_type_mismatch=0:detect_odr_violation=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${LOG_DIR}/asan:log_exe_name=1" >> $GITHUB_ENV
+              echo "LSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-lsan.supp:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
+              echo "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${LOG_DIR}/ubsan:log_exe_name=1" >> $GITHUB_ENV
+          elif [ "${SANITIZER_TYPE}" = "thread" ]; then
+              TSAN_LIB=$(${{ matrix.compiler }} -print-file-name=libtsan.so)
+              TSAN_LIB=$(realpath "${TSAN_LIB}")
+              echo "TSan library: ${TSAN_LIB}"
+              ls -la "${TSAN_LIB}"
+              echo "TSAN_LIBRARY=${TSAN_LIB}" >> $GITHUB_ENV
+              echo "SANITIZER_CMAKE_FLAGS=-DTSAN_LIBRARY=${TSAN_LIB}" >> $GITHUB_ENV
+              echo "TSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-thread.supp:second_deadlock_stack=1:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}:log_path=${LOG_DIR}/tsan:log_exe_name=1" >> $GITHUB_ENV
+
+              # Known TSan issue: logger fork tests (pthread_atfork + fork from
+              # multi-threaded process) cause the test binary to hang during
+              # process exit. TSan's exit-time cleanup deadlocks with the
+              # atfork handlers that reference static locals being destroyed.
+              echo "GTEST_FILTER=-logger_test*" >> $GITHUB_ENV
+          elif [ "${SANITIZER_TYPE}" = "undefined" ]; then
+              echo "SANITIZER_CMAKE_FLAGS=" >> $GITHUB_ENV
+              echo "UBSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-ubsan.supp:print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${LOG_DIR}/ubsan:log_exe_name=1" >> $GITHUB_ENV
+          fi
+
+      - name: Configure, Build and Test
+        timeout-minutes: 300
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        env:
+          GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
+          git config --global --add safe.directory ${PWD}
+          echo "CMake version: $(cmake --version | head -n 1)"
+          echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
+          echo "ROCm version: ${{ matrix.rocm-version }}"
+          echo "Sanitizer type: ${{ matrix.sanitizer-type }}"
+          echo "Sanitizer CMake flags: ${SANITIZER_CMAKE_FLAGS}"
+          TAG="-${{ matrix.sanitizer-type }}-sanitizer"
+          python3 ./scripts/run-ci.py -B build \
+            --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}${TAG} \
+            --build-jobs $(nproc) \
+            --repeat-until-pass 1 \
+            --site GitHub \
+            -- \
+            -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
+            -DROCPROFSYS_BUILD_TESTING=ON \
+            -DROCPROFSYS_USE_PYTHON=OFF \
+            -DROCPROFSYS_USE_MPI=OFF \
+            -DROCPROFSYS_USE_MPI_HEADERS=OFF \
+            -DROCPROFSYS_USE_COMPILE_TIMING=OFF \
+            -DROCPROFSYS_USE_SANITIZER=ON \
+            -DROCPROFSYS_SANITIZER_TYPE=${{ matrix.sanitizer-type }} \
+            ${SANITIZER_CMAKE_FLAGS} \
+            -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
+            -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
+            -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
+            -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
+            -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
+            -DROCPROFSYS_MAX_THREADS=64 \
+            -DROCPROFSYS_DISABLE_EXAMPLES="transpose;parallel-overhead;user-api;openmp;mpi;python;lulesh;rccl;causal;videodecode;jpegdecode;roctx;thread-limit;transferBench;hpc;shmem;scratch-memory;sdma_test" \
+            -DROCPROFSYS_BUILD_NUMBER=1 \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -- \
+            -R '^(rewrite-caller|code-coverage|trace-time-window|rocprofiler-systems-avail-all|rocprof-sys-unit-tests)'
+
+      - name: Check for Leftover Buffered Files
+        timeout-minutes: 5
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          set -v
+          if find /tmp -maxdepth 1 -name 'buffered*' -print -quit | grep -q .; then
+            echo "Error: Found leftover buffered storage files in /tmp:"
+            ls -lh /tmp/buffered*
+            exit 1
+          else
+            echo "✓ No buffered storage files found in /tmp"
+          fi
+
+      - name: Test Clean Up
+        timeout-minutes: 10
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          set -v
+          du /tmp -d 1 -h
+          du build/rocprof-sys-tests-output -d 1 -h
+          df -h
+          rm -fr /tmp/* build/rocprof-sys-tests-output/*
+
+      - name: Sanitizer Report Artifacts
+        if: always()
+        continue-on-error: True
+        uses: actions/upload-artifact@v7
+        with:
+          name: sanitizer-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-reports
+          path: |
+            projects/rocprofiler-systems/build/sanitizer-logs/
+          if-no-files-found: ignore
+
+      - name: CTest Artifacts
+        if: failure()
+        continue-on-error: True
+        uses: actions/upload-artifact@v7
+        with:
+          name: ctest-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-log
+          path: |
+            projects/rocprofiler-systems/build/*.log
+
+      - name: Data Artifacts
+        if: failure()
+        continue-on-error: True
+        uses: actions/upload-artifact@v7
+        with:
+          name: data-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-files
+          path: |
+            projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
+            projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
+            projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*-instr*.json
