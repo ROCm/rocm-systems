@@ -885,15 +885,25 @@ main(int argc, char** argv)
     printf("  Managed memory support: %s\n", props.managedMemory ? "YES" : "NO");
     printf("  Concurrent managed access: %s\n",
            props.concurrentManagedAccess ? "YES" : "NO");
+    printf("  HSA_XNACK: %s\n", getenv("HSA_XNACK") ? getenv("HSA_XNACK") : "(not set)");
     printf("  Per-allocation size: %zu MB\n", cfg.alloc_size_mb);
     printf("  Pressure test size: %zu MB\n", cfg.pressure_mb);
     printf("  Iterations: %d\n", cfg.iterations);
 
     if(!props.managedMemory)
     {
-        fprintf(stderr, "\nERROR: GPU %d does not support managed memory. Aborting.\n",
-                cfg.device_id);
-        return 1;
+        const char* xnack = getenv("HSA_XNACK");
+        if(!xnack || strcmp(xnack, "1") != 0)
+        {
+            fprintf(stderr,
+                    "\nERROR: GPU %d does not report managed memory support and "
+                    "HSA_XNACK is not set to 1. Aborting.\n"
+                    "  Set HSA_XNACK=1 to enable managed memory on XNACK-capable GPUs.\n",
+                    cfg.device_id);
+            return 1;
+        }
+        printf("  Note: GPU reports no managed memory support but HSA_XNACK=1 is set; "
+               "proceeding.\n");
     }
 
     size_t alloc_bytes    = cfg.alloc_size_mb * 1024ULL * 1024ULL;
