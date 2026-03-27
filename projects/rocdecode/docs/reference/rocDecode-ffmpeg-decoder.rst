@@ -15,7 +15,7 @@ The rocDecode FFMpeg decoder utility class, `FFMpegVideoDecoder <https://github.
 
 FFMpegVideoDecoder uses the FFMpeg video decoding backend to decode frame packets output by the FFMpeg demultiplexer (demuxer). It inherits from :doc:`the RocVideoDecode utility class <./rocDecode-util-decoder>` and uses many of the same functions. 
 
-The ``FFMpegVideoDecoder()`` constructor takes the same parameters as ``RocVideoDecoder`` with the exception of the first parameter, which is the number of CPU threads rather than the device ID, and the force zero latency parameter, which isn't supported with the FFMpeg decoder.
+The ``FFMpegVideoDecoder()`` constructor takes the same parameters as ``RocVideoDecoder`` except for the first parameter, which is the number of CPU threads rather than the device ID, and the force zero latency parameter, which isn't supported with the FFMpeg decoder.
 
 Six functions are implemented in FFMpegVideoDecoder: ``DecodeFrame()``, ``GetFrame()``, ``GetOutputSurfaceInfo()``, ``SaveFrameToFile()``, ``ReleaseFrame()``, and ``ReconfigureDecoder()``.
 
