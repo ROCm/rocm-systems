@@ -26,6 +26,7 @@
 #include "core/common.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/perfetto.hpp"
@@ -526,6 +527,8 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
             // Write the trace into a file.
             ofs.write(trace_data.data(), trace_data.size());
             if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+            output_file_registry::get_instance().register_file(
+                "Perfetto trace", _filename, "Open in https://ui.perfetto.dev");
         }
         ofs.close();
     }

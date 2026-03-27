@@ -669,7 +669,7 @@ INSTRUMENTATION WORKFLOW:
     }
 
     rocprofsys::common_utils::warn_if_output_not_writable("run");
-    rocprofsys::common_utils::validate_configuration("run");
+    rocprofsys::common_utils::validate_configuration();
 
     return _parser_data;
 }

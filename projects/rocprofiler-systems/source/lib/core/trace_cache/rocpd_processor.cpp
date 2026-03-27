@@ -8,6 +8,7 @@
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -37,7 +38,7 @@ auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
 #else
     return code_object.rocp_agent.handle;
@@ -192,7 +193,7 @@ rocpd_processor_t::handle(const memory_copy_sample& _mcs)
 void
 rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 {
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -601,6 +602,12 @@ rocpd_processor_t::finalize_processing()
 {
     LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
+
+    output_file_registry::get_instance().register_file(
+        "RocPD database", m_data_processor->get_database_path(),
+        "sqlite3, AMD Visualizer (OPTIQ), or rocprofiler-sdk provided rocpd Python "
+        "module for conversion to other formats");
+
     LOG_INFO("Rocpd processor finalized successfully");
 }
 

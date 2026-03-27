@@ -1155,7 +1155,7 @@ PROFILING WORKFLOW:
                                                "mutex-locks", "spin-locks", "rw-locks",
                                                "rocm" };
 
-#if(!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                          \
+#if (!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                         \
     (!defined(ROCPROFSYS_USE_MPI_HEADERS) || ROCPROFSYS_USE_MPI_HEADERS == 0)
     _backend_choices.erase("mpip");
 #endif
@@ -1321,7 +1321,7 @@ PROFILING WORKFLOW:
     }
 
     rocprofsys::common_utils::warn_if_output_not_writable("sample");
-    rocprofsys::common_utils::validate_configuration("sample");
+    rocprofsys::common_utils::validate_configuration();
 
     return _outv;
 }

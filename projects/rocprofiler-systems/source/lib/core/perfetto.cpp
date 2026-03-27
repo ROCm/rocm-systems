@@ -22,6 +22,7 @@
 
 #include "perfetto.hpp"
 #include "config.hpp"
+#include "output_file_registry.hpp"
 #include "library/runtime.hpp"
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
@@ -244,6 +245,8 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
     auto _filename = config::get_perfetto_output_filename();
 
+    // In MPI combined-trace mode, only rank 0 has non-empty trace_data
+    // after the gather, so only rank 0 writes and registers the file.
     if(!trace_data.empty())
     {
         operation::file_output_message<tim::project::rocprofsys> _fom{};
@@ -267,6 +270,8 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
             if(_timemory_manager)
                 _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
+            output_file_registry::get_instance().register_file(
+                "Perfetto trace", _filename, "Open in https://ui.perfetto.dev");
         }
         ofs.close();
     }

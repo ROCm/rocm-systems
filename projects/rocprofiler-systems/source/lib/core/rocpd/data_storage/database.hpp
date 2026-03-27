@@ -219,6 +219,8 @@ public:
 
     std::string get_upid();
 
+    [[nodiscard]] const std::string& get_path() const noexcept { return m_path; }
+
 private:
     static std::string generate_upid(const int pid, const int ppid);
 
@@ -227,6 +229,7 @@ private:
     sqlite3*    _sqlite3_db_temp{ nullptr };
     std::string m_tag;
     std::string m_upid;
+    std::string m_path;
 };
 
 }  // namespace data_storage

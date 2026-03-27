@@ -184,13 +184,6 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 
     std::cout << "\nOutput:        " << output_dir << "\n";
 
-    if(!check_directory_writable(output_dir))
-    {
-        std::cerr << "\nWARNING: Output directory may not be writable!\n";
-        std::cerr << "   Try: rocprof-sys-" << tool_name
-                  << " -o /tmp/profile -- <command>\n\n";
-    }
-
     std::cout << "\nResults will be available in:\n"
               << "  • Text profile:  " << output_dir << "/wall_clock.txt\n"
               << "  • Trace (visual): " << output_dir << "/perfetto-trace.proto\n"
@@ -267,8 +260,9 @@ warn_if_rocm_unavailable()
 {
     if(!check_rocm_available())
     {
-        std::cerr << "\nWARNING: GPU tracing requested but ROCm is not available\n\n";
-        std::cerr << "GPU features will be disabled.\n\n";
+        std::cerr << "\n[rocprof-sys][WARNING] GPU tracing requested but ROCm is not "
+                     "available.\n";
+        std::cerr << "  GPU features will be disabled.\n\n";
     }
 }
 
@@ -302,7 +296,7 @@ warn_if_output_not_writable(std::string_view tool_name)
 }
 
 inline void
-validate_configuration(std::string_view tool_name)
+validate_configuration()
 {
     // Check for conflicting ENABLE/DISABLE categories (causes std::abort() at runtime)
     const char* enable_cats  = std::getenv("ROCPROFSYS_ENABLE_CATEGORIES");
@@ -310,7 +304,7 @@ validate_configuration(std::string_view tool_name)
     if(enable_cats && std::strlen(enable_cats) > 0 && disable_cats &&
        std::strlen(disable_cats) > 0)
     {
-        std::cerr << "[rocprof-sys][warning] Both ROCPROFSYS_ENABLE_CATEGORIES and "
+        std::cerr << "[rocprof-sys][WARNING] Both ROCPROFSYS_ENABLE_CATEGORIES and "
                      "ROCPROFSYS_DISABLE_CATEGORIES are set.\n"
                   << "  This will cause an abort at runtime. Use only one.\n"
                   << "  ROCPROFSYS_ENABLE_CATEGORIES=" << enable_cats << "\n"
@@ -326,8 +320,6 @@ validate_configuration(std::string_view tool_name)
                   << "' is not writable!\n"
                   << "  Try: export ROCPROFSYS_TMPDIR=/tmp\n";
     }
-
-    (void) tool_name;
 }
 
 }  // namespace common_utils
