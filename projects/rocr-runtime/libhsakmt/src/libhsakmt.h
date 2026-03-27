@@ -29,7 +29,7 @@
 #include "hsakmt/linux/kfd_ioctl.h"
 #include "hsakmt/hsakmt.h"
 #include "kfdcontext.h"
-#include "hsakmt/hsakmtctx.h"
+#include "hsakmtctx.h"
 #include <pthread.h>
 #include <stdint.h>
 #include <limits.h>
@@ -40,6 +40,7 @@ extern unsigned long hsakmt_kfd_open_count;
 extern bool hsakmt_forked;
 extern pthread_mutex_t hsakmt_mutex;
 extern bool hsakmt_is_dgpu;
+extern bool hsakmt_is_svm_api_supported;
 extern int hsakmt_zfb_support;
 
 extern HsaVersionInfo hsakmt_kfd_version_info;

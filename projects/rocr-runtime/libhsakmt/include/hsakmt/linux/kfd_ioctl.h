@@ -1691,17 +1691,6 @@ struct kfd_ioctl_ais_args {
 	};
 };
 
-/**
- * kfd_ioctl_create_process_args
- * Create secondary KFD context ioctl operations
- *
- * @flags not use at current.
- */
-struct kfd_ioctl_create_process_args {
-	__u32 flags; 		/* [IN] */
-	__u32 pad;
-};
-
 #define AMDKFD_IOCTL_BASE 'K'
 #define AMDKFD_IO(nr)			_IO(AMDKFD_IOCTL_BASE, nr)
 #define AMDKFD_IOR(nr, type)		_IOR(AMDKFD_IOCTL_BASE, nr, type)
@@ -1822,11 +1811,8 @@ struct kfd_ioctl_create_process_args {
 #define AMDKFD_IOC_DBG_TRAP			\
 		AMDKFD_IOWR(0x26, struct kfd_ioctl_dbg_trap_args)
 
-#define AMDKFD_IOC_CREATE_PROCESS		\
-		AMDKFD_IOWR(0x27, struct kfd_ioctl_create_process_args)
-
 #define AMDKFD_COMMAND_START		0x01
-#define AMDKFD_COMMAND_END		0x28
+#define AMDKFD_COMMAND_END		0x27
 
 /* non-upstream ioctls */
 #define AMDKFD_IOC_IPC_IMPORT_HANDLE                                    \

@@ -319,10 +319,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupportCtx(HsaKFDContext *ctx) {
 	HsaSystemProperties props = {0};
 	HsaVersionInfo versionInfo = {0};
 
-	//secondary context doesn't support the debugger
-	if (!ctx->hsakmt_is_primary_ctx)
-		return HSAKMT_STATUS_NOT_SUPPORTED;
-
 	memset(&node, 0x00, sizeof(node));
 	memset(&props, 0x00, sizeof(props));
 	if (hsaKmtAcquireSystemPropertiesCtx(ctx, &props))
