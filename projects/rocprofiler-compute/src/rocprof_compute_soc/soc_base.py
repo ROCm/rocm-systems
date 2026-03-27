@@ -469,6 +469,7 @@ class OmniSoC_Base:
                     )
                     return None
                 placed_check.add(ctr)
+            out_files.append(bucket)
 
         if placed_check != set(items):
             console_warning(
