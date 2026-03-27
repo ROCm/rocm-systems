@@ -1338,9 +1338,9 @@ def test_parser_error_handling():
 
     from utils.parser import (
         build_eval_string,
-        calc_builtin_var,
         update_denominator_string,
     )
+    from utils.utils_common import calc_builtin_var
 
     try:
         build_eval_string("AVG(SQ_WAVES)", None, config={})
@@ -1351,10 +1351,7 @@ def test_parser_error_handling():
     assert build_eval_string("", "pmc_perf", config={}) == ""
     assert update_denominator_string("", "per_wave") == ""
 
-    class MockSysInfo:
-        total_l2_chan = 32
-
-    sys_info = MockSysInfo()
+    sys_info = {"total_l2_chan": 32}
     try:
         calc_builtin_var("$unsupported_var", sys_info)
         assert False, "Should have raised exception for unsupported var"

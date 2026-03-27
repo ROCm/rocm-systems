@@ -12,7 +12,6 @@ import pandas as pd
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning
 from utils.parser import eval_metric
-from utils.specs import MachineSpecs
 
 ################################################
 # Global vars
@@ -323,8 +322,6 @@ def calc_ceilings(
 def calc_ai_analyze(
     workload: schema.Workload,
     pmc_df: pd.DataFrame,
-    mspec: MachineSpecs,
-    sort_type: str,
     config: dict[str, Any],
     arch_config: schema.ArchConfig,
 ) -> dict[str, Union[list[list[float]], list[str]]]:
@@ -453,70 +450,6 @@ def calc_ai_analyze(
 
     console_debug("roofline", f"Generated {len(plot_points.kernelNames)} plot points")
     return plot_points.__dict__
-
-
-def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
-    """
-    Validate roofline.csv exists and has consistent structure.
-
-    Returns:
-        tuple: (is_valid, error_message)
-               is_valid=True if CSV is valid, False otherwise
-               error_message contains description if invalid
-    """
-    if isinstance(workload_dir, list):
-        base_dir = (
-            workload_dir[0][0]
-            if isinstance(workload_dir[0], (list, tuple))
-            else workload_dir[0]
-        )
-    else:
-        base_dir = workload_dir
-
-    benchmark_results = Path(base_dir) / "roofline.csv"
-
-    # Check if file exists
-    if not benchmark_results.exists():
-        return False, f"Benchmark results file not found: {benchmark_results}"
-
-    # Validate CSV structure
-    try:
-        with open(benchmark_results) as csvfile:
-            csv_reader = csv.reader(csvfile, delimiter=",")
-            row_count = 0
-            num_headers = 0
-
-            for row in csv_reader:
-                if row_count == 0:
-                    num_headers = len(row) - 1
-                    if num_headers <= 0:
-                        return (
-                            False,
-                            "Empty or invalid header row in benchmark_results",
-                        )
-                else:
-                    if len(row) - 1 != num_headers:
-                        return (
-                            False,
-                            f"Inconsistent row length in benchmark_results at "
-                            f"row {row_count + 1}. "
-                            f"Expected {num_headers + 1} columns, "
-                            f"found {len(row)}. "
-                            "Roofline data appears corrupted or incomplete.",
-                        )
-                row_count += 1
-
-            if row_count < 2:
-                return (
-                    False,
-                    f"Insufficient data in benchmark_results. "
-                    f"Found {row_count} rows (need at least 2)."
-                    f" Roofline data appears corrupted or incomplete.",
-                )
-    except Exception as e:
-        return False, f"Failed to read benchmark_results: {e}"
-
-    return True, ""
 
 
 def construct_roof(

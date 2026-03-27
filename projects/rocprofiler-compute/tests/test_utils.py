@@ -6440,7 +6440,7 @@ def test_validate_roofline_csv_valid():
     Test validate_roofline_csv returns True for a valid roofline.csv file.
     Creates a temporary directory with a properly formatted CSV.
     """
-    from utils.roofline_calc import validate_roofline_csv
+    from utils.utils_common import validate_roofline_csv
 
     with tempfile.TemporaryDirectory() as tmpdir:
         csv_path = Path(tmpdir) / "roofline.csv"
@@ -6460,7 +6460,7 @@ def test_validate_roofline_csv_invalid_inconsistent_columns():
     Test validate_roofline_csv returns False for a CSV with inconsistent row lengths.
     This simulates corrupted or incomplete benchmark data.
     """
-    from utils.roofline_calc import validate_roofline_csv
+    from utils.utils_common import validate_roofline_csv
 
     with tempfile.TemporaryDirectory() as tmpdir:
         csv_path = Path(tmpdir) / "roofline.csv"
@@ -7368,17 +7368,15 @@ class TestBuildMetricList:
         import sys
 
         sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-        from utils import schema
-        from utils.parser import build_metric_list
+        from utils.utils_common import build_metric_list
 
-        cls.schema = schema
         cls.build_metric_list = staticmethod(build_metric_list)
 
-    def _build_test_arch_config_for_single_metric(
+    def _build_test_panel_configs_for_single_metric(
         self, metric_name: str, expression_values: dict
     ):
         """
-        Build an ArchConfig containing a single metric for testing.
+        Build panel_configs containing a single metric for testing.
         """
         from collections import OrderedDict
 
@@ -7403,62 +7401,62 @@ class TestBuildMetricList:
             "data source": [{"metric_table": table}],
         }
 
-        ac = self.schema.ArchConfig()
-        ac.panel_configs = panel_configs
-        return ac
+        return panel_configs
 
     @staticmethod
-    def _extract_leaf_metric_entries(ac):
+    def _extract_leaf_metric_entries(metric_list):
         """Return only leaf metric entries whose ID has format 'panel.table.index'."""
-        return {k: v for k, v in ac.metric_list.items() if k.count(".") == 2}
+        return {k: v for k, v in metric_list.items() if k.count(".") == 2}
 
     def test_given_metric_with_valid_value__it_presents_in_metric_list(self):
-        ac = self._build_test_arch_config_for_single_metric(
+        panel_configs = self._build_test_panel_configs_for_single_metric(
             "Valid Metric A", {"value": "AVG(COUNTER_A)"}
         )
-        self.build_metric_list(ac, None)
-        assert "Valid Metric A" in self._extract_leaf_metric_entries(ac).values()
+        metric_list = self.build_metric_list(panel_configs, None)
+        leaf_entries = self._extract_leaf_metric_entries(metric_list)
+        assert "Valid Metric A" in leaf_entries.values()
 
     def test_given_metric_with_python_none__it_doesnt_present_in_metric_list(self):
-        ac = self._build_test_arch_config_for_single_metric(
+        panel_configs = self._build_test_panel_configs_for_single_metric(
             "Unsupported Metric B", {"value": None}
         )
-        self.build_metric_list(ac, None)
-        assert (
-            "Unsupported Metric B" not in self._extract_leaf_metric_entries(ac).values()
-        )
+        metric_list = self.build_metric_list(panel_configs, None)
+        leaf_entries = self._extract_leaf_metric_entries(metric_list)
+        assert "Unsupported Metric B" not in leaf_entries.values()
 
     def test_given_metric_with_string_none__it_doesnt_present_in_metric_list(self):
-        ac = self._build_test_arch_config_for_single_metric(
+        panel_configs = self._build_test_panel_configs_for_single_metric(
             "Unsupported Metric C", {"value": "None"}
         )
-        self.build_metric_list(ac, None)
-        assert (
-            "Unsupported Metric C" not in self._extract_leaf_metric_entries(ac).values()
-        )
+        metric_list = self.build_metric_list(panel_configs, None)
+        leaf_entries = self._extract_leaf_metric_entries(metric_list)
+        assert "Unsupported Metric C" not in leaf_entries.values()
 
     def test_given_expr_metric__it_presents_in_metric_list(self):
-        ac = self._build_test_arch_config_for_single_metric(
+        panel_configs = self._build_test_panel_configs_for_single_metric(
             "Expr Metric", {"expr": "(100 * COUNTER_B / COUNTER_C)"}
         )
-        self.build_metric_list(ac, None)
-        assert "Expr Metric" in self._extract_leaf_metric_entries(ac).values()
+        metric_list = self.build_metric_list(panel_configs, None)
+        leaf_entries = self._extract_leaf_metric_entries(metric_list)
+        assert "Expr Metric" in leaf_entries.values()
 
     def test_given_metric_with_partial_avg_min_max__it_presents_in_metric_list(self):
-        ac = self._build_test_arch_config_for_single_metric(
+        panel_configs = self._build_test_panel_configs_for_single_metric(
             "Partial Metric", {"avg": "AVG(COUNTER_E)", "min": None, "max": None}
         )
-        self.build_metric_list(ac, None)
-        assert "Partial Metric" in self._extract_leaf_metric_entries(ac).values()
+        metric_list = self.build_metric_list(panel_configs, None)
+        leaf_entries = self._extract_leaf_metric_entries(metric_list)
+        assert "Partial Metric" in leaf_entries.values()
 
     def test_given_metric_with_all_none_avg_min_max__it_doesnt_present_in_metric_list(
         self,
     ):
-        ac = self._build_test_arch_config_for_single_metric(
+        panel_configs = self._build_test_panel_configs_for_single_metric(
             "All None Metric", {"avg": None, "min": None, "max": None}
         )
-        self.build_metric_list(ac, None)
-        assert "All None Metric" not in self._extract_leaf_metric_entries(ac).values()
+        metric_list = self.build_metric_list(panel_configs, None)
+        leaf_entries = self._extract_leaf_metric_entries(metric_list)
+        assert "All None Metric" not in leaf_entries.values()
 
 
 # ---------------------------------------------------------------------------
@@ -7935,3 +7933,51 @@ def test_parse_patterns_star():
 
     args = Namespace(torch_operator=["*,torch.relu"])
     assert parse_torch_operator_patterns(args) == ["*", "torch.relu"]
+
+
+# =============================================================================
+# format_table_ascii TESTS
+# =============================================================================
+
+
+def test_format_table_ascii_basic():
+    """Test format_table_ascii produces correct ASCII table output."""
+    from utils.utils_common import format_table_ascii
+
+    data = [
+        {"Spec": "GPU Model", "Value": "MI300X", "Description": "The GPU model name."},
+        {"Spec": "Max SCLK", "Value": "2100", "Description": "Maximum clock speed."},
+    ]
+    columns = ["Spec", "Value", "Description"]
+
+    result = format_table_ascii(data, columns)
+
+    # Check table structure
+    assert "+-------+" in result  # Has separators
+    assert "| index |" in result  # Has index column header
+    assert "| Spec" in result  # Has Spec column
+    assert "| GPU Model" in result  # Has data
+    assert "| MI300X" in result  # Has value
+    assert "| 2100" in result  # Has second row value
+
+
+def test_format_table_ascii_text_wrapping():
+    """Test that long Description text is wrapped at 40 characters."""
+    from utils.utils_common import format_table_ascii
+
+    long_desc = (
+        "This is a very long description that should be wrapped "
+        "across multiple lines in the table output."
+    )
+    data = [{"Spec": "Test", "Value": "123", "Description": long_desc}]
+    columns = ["Spec", "Value", "Description"]
+
+    result = format_table_ascii(data, columns)
+    lines = result.split("\n")
+
+    # Find lines containing description content (not separator lines)
+    desc_lines = [
+        ln for ln in lines if "|" in ln and "Description" not in ln and "---" not in ln
+    ]
+    # Should have multiple lines for the wrapped description
+    assert len(desc_lines) > 1, "Long description should wrap to multiple lines"

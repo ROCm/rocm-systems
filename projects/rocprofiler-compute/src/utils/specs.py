@@ -17,8 +17,6 @@ from math import ceil
 from pathlib import Path as path
 from typing import Any, Optional, TypeVar
 
-import pandas as pd
-
 import config
 from utils.amdsmi_interface import (
     amdsmi_ctx,
@@ -36,8 +34,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.tty import get_table_string
-from utils.utils_common import get_version
+from utils.utils_common import format_table_ascii, get_version
 
 T = TypeVar("T")
 
@@ -758,9 +755,10 @@ class MachineSpecs:
         else:
             return self.total_l2_chan
 
-    def get_class_members(self) -> pd.DataFrame:
-        data = {}
-        missing_required_fields = []
+    def get_class_members(self) -> dict[str, Any]:
+        """Return class members as a dictionary."""
+        data: dict[str, Any] = {}
+        missing_required_fields: list[str] = []
 
         for class_field in fields(self):
             if not class_field.metadata.get("show_in_table", True):
@@ -783,18 +781,21 @@ class MachineSpecs:
                 )
             console_warning(f"Missing specs fields for {self.gpu_arch}")
 
-        return pd.DataFrame(data, index=[0])
+        return data
 
     def __repr__(self) -> str:
         topstr = (
             "Machine Specifications: describing the state of the machine that "
             "ROCm Compute Profiler data was collected on.\n"
         )
-        data = []
+        data: list[dict[str, Any]] = []
+        has_description = False
+        has_unit = False
+
         for class_field in fields(self):
             name = class_field.name
             if class_field.metadata.get("show_in_table", True):
-                _data = {}
+                _data: dict[str, Any] = {}
                 value = getattr(self, name)
                 if class_field.metadata:
                     # check out of table before any re-naming for pretty-printing
@@ -813,20 +814,22 @@ class MachineSpecs:
                         name = class_field.metadata["name"]
                     if "unit" in class_field.metadata:
                         _data["Unit"] = class_field.metadata["unit"]
+                        has_unit = True
                     if "doc" in class_field.metadata:
                         _data["Description"] = class_field.metadata["doc"]
+                        has_description = True
                 _data["Spec"] = name
-                _data["Value"] = value
+                _data["Value"] = value if value is not None else ""
                 data.append(_data)
-        df = pd.DataFrame(data)
+
+        # Build columns list based on what data is present
         columns = ["Spec", "Value"]
-        if "Description" in df.columns:
-            columns += ["Description"]
-        if "Unit" in df.columns:
-            columns += ["Unit"]
-        df = df[columns]
-        df = df.fillna("")
-        return topstr + get_table_string(df, transpose=False, decimal=2)
+        if has_description:
+            columns.append("Description")
+        if has_unit:
+            columns.append("Unit")
+
+        return topstr + format_table_ascii(data, columns, decimal=2)
 
 
 def get_rocm_ver() -> str:

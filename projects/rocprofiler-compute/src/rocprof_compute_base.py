@@ -7,12 +7,11 @@ import socket
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import config
 from argparser import omniarg_parser
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -26,11 +25,13 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils_common import (
+    build_metric_list,
     detect_rocprof,
     get_panel_alias,
     get_rank,
     get_version,
     get_version_display,
+    load_panel_configs,
     parse_sets_yaml,
     replace_env,
     replace_rank,
@@ -366,11 +367,9 @@ class RocProfCompute:
         arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
 
         if arch in self.__supported_archs.keys():
-            sys_info = (
-                self.__mspec.get_class_members().iloc[0] if for_current_arch else None
-            )
-            ac = self._build_arch_metric_list(arch, sys_info)
-            for key, value in ac.metric_list.items():
+            sys_info = self.__mspec.get_class_members() if for_current_arch else None
+            metric_list = self._build_arch_metric_list(arch, sys_info)
+            for key, value in metric_list.items():
                 prefix = "\t" * min(key.count("."), 2)
                 print(f"{prefix}{key} -> {value}")
             sys.exit(0)
@@ -382,10 +381,10 @@ class RocProfCompute:
         arch = self.__args.list_blocks
 
         if arch in self.__supported_archs.keys():
-            ac = self._build_arch_metric_list(arch, sys_info=None)
+            metric_list = self._build_arch_metric_list(arch, sys_info=None)
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
             panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
-            for key, value in ac.metric_list.items():
+            for key, value in metric_list.items():
                 if key.count(".") > 0:
                     continue
                 print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
@@ -396,16 +395,12 @@ class RocProfCompute:
     def _build_arch_metric_list(
         self,
         arch: str,
-        sys_info: "pd.Series",  # noqa: F821
-    ) -> schema.ArchConfig:
-        """Load panel configs for arch and populate metric_list.
-        Returns the ArchConfig."""
-        ac = schema.ArchConfig()
-        ac.panel_configs = file_io.load_panel_configs([
-            str(Path(self.__args.config_dir) / arch)
-        ])
-        parser.build_metric_list(ac, sys_info)
-        return ac
+        sys_info: Optional[dict[str, Any]],
+    ) -> dict[str, str]:
+        """Load panel configs for arch and build metric_list.
+        Returns the metric_list dictionary."""
+        panel_configs = load_panel_configs([str(Path(self.__args.config_dir) / arch)])
+        return build_metric_list(panel_configs, sys_info)
 
     @demarcate
     def list_sets(self) -> None:
@@ -536,6 +531,11 @@ class RocProfCompute:
 
     @demarcate
     def run_analysis(self) -> None:
+        # Lazy import file_io since its only used in analysis mode
+        # This will prevent analysis dependencies
+        # leakage into profile mode path
+        from utils import file_io
+
         self.print_graphic()
         console_log(f"Analysis mode = {self.__analyze_mode}")
 
