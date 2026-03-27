@@ -54,6 +54,46 @@ following steps illustrate how to install the necessary Python dependencies
 using `pip <https://packaging.python.org/en/latest/>`_ and ROCm Compute Profiler into a
 shared location controlled by the ``INSTALL_DIR`` environment variable.
 
+.. _core-install-cmake-vars:
+
+Configuration variables
+-----------------------
+
+The following installation steps leverage several
+`CMake <https://cmake.org/cmake/help/latest>`_ project variables defined as
+follows.
+
+.. list-table::
+    :header-rows: 1
+
+    * - CMake variable
+      - Description
+
+    * - ``CMAKE_INSTALL_PREFIX``
+      - Controls the install path for ROCm Compute Profiler files.
+
+    * - ``PYTHON_DEPS``
+      - Specifies an optional path to resolve Python package dependencies.
+
+    * - ``MOD_INSTALL_PATH``
+      - Specifies an optional path for separate ROCm Compute Profiler modulefile installation.
+
+    * - ``rocprofiler-sdk_DIR``
+      - Specifies the path to the ROCprofiler-SDK CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
+        This directory should contain ``rocprofiler-sdkConfig.cmake`` (for example, ``<rocprofiler-sdk-install-path>/lib/cmake/rocprofiler-sdk``).
+
+    * - ``STANDALONEBINARY_EXTRACT_DIR``
+      - Specifies an optional temporary path to be used for extraction by the ROCm Compute Profiler standalone binary.
+
+    * - ``STANDALONEBINARY``
+      - Should be ON to enable the build of a standalone binary for ROCm Compute Profiler.
+
+    * - ``TEST_FROM_INSTALL``
+      - Should be ON to enable testing from the installation location without dependency on the source directory.
+
+    * - ``SKIP_NATIVE_TOOL_BUILD``
+      - Should be ON to skip building the native profiling tool. When enabled, the native tool will be compiled at runtime instead of build time. This is useful when ROCprofiler-SDK is not available during build time.
+
 .. _core-install-steps:
 
 Install from the TheRock nightly releases
@@ -129,43 +169,6 @@ Install from the tarball
 #. Download the rocprofiler-compute specific tarball for the latest release from `<https://github.com/ROCm/rocm-systems/releases>`_.
 #. Untar the downloaded tarball and navigate to the `rocprofiler-compute` directory.
 #. Follow the installation steps under :ref:`source-install`.
-
-.. _core-install-cmake-vars:
-
-Configuration variables
------------------------
-
-The following installation example leverages several
-`CMake <https://cmake.org/cmake/help/latest>`_ project variables defined as
-follows.
-
-.. list-table::
-    :header-rows: 1
-
-    * - CMake variable
-      - Description
-
-    * - ``CMAKE_INSTALL_PREFIX``
-      - Controls the install path for ROCm Compute Profiler files.
-
-    * - ``PYTHON_DEPS``
-      - Specifies an optional path to resolve Python package dependencies.
-
-    * - ``MOD_INSTALL_PATH``
-      - Specifies an optional path for separate ROCm Compute Profiler modulefile installation.
-
-    * - ``rocprofiler-sdk_DIR``
-      - Specifies the path to the ROCprofiler-SDK CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
-        This directory should contain ``rocprofiler-sdkConfig.cmake`` (for example, ``<rocprofiler-sdk-install-path>/lib/cmake/rocprofiler-sdk``).
-
-    * - ``STANDALONEBINARY_EXTRACT_DIR``
-      - Specifies an optional temporary path to be used for extraction by the ROCm Compute Profiler standalone binary.
-
-    * - ``STANDALONEBINARY``
-      - Should be ON to enable the build of a standalone binary for ROCm Compute Profiler.
-
-    * - ``TEST_FROM_INSTALL``
-      - Should be ON to enable testing from the installation location without dependency on the source directory.
 
 Execution using modulefiles
 ---------------------------
