@@ -50,7 +50,7 @@ The ``RocVideoDecoder`` constructor instantiates a parser and a decoder, and ini
 
 The decoder instance is reused when there is a change to the video resolution without a change in the codec. The decoder maintains a pool of frame buffers for decoded images that haven't yet been displayed or processed. When the video stream resolution changes, the decoder is reconfigured for the new resolution and the pool of frame buffers that the decoder maintains is deleted.
 
-Reconfiguration parameters define how to handle the flushed frames. ``SetReconfigParams()`` sets these reconfiguration paramaters.
+Reconfiguration parameters define how to handle the flushed frames. ``SetReconfigParams()`` sets these reconfiguration parameters.
 
 ``WaitForDecodeCompletion()`` waits for the last submitted picture to be decoded.
 
