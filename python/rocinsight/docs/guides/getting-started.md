@@ -351,9 +351,9 @@ The checkpoint system tracks every code edit. Roll back to any prior state durin
 | Analyze trace | `rocinsight analyze -i trace.db` |
 | HTML report | `rocinsight analyze -i trace.db --format webview -d ./out -o report` |
 | Source scan | `rocinsight analyze --source-dir ./src` |
-| Interactive | `rocinsight analyze --interactive --llm claude-code -- ./my_app` |
-| MPI profiling | `rocinsight analyze --interactive -- mpirun -n 4 ./my_app` |
-| Resume session | `rocinsight analyze --interactive -- ./my_app --resume-session <path>` |
+| Interactive | `rocinsight analyze --source-dir ./src --llm claude-code --interactive ./my_app` |
+| MPI profiling | `rocinsight analyze --source-dir ./src --interactive "mpirun -n 4 ./my_app"` |
+| Resume session | `rocinsight analyze --source-dir ./src --interactive -- ./my_app --resume-session <path>` |
 | ATT analysis | `rocinsight analyze -i att_output/trace*.db --att-dir ./att_output` |
 
 ---
