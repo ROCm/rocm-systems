@@ -113,6 +113,7 @@ HIP_TEST_CASE(Unit_Grid_Group_Getters_Positive_Basic) {
 
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
+  CoopLogGridDimsIfEnabled(blocks, threads, "full");
   if (!CheckDimensions(device, grid_group_size_getter, blocks, threads)) return;
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
@@ -193,6 +194,7 @@ HIP_TEST_CASE(Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic) {
 
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
+  CoopLogGridDimsIfEnabled(blocks, threads, "full");
   if (!CheckDimensions(device, grid_group_non_member_size_getter, blocks, threads)) return;
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
@@ -268,9 +270,11 @@ HIP_TEST_CASE(Unit_Grid_Group_Sync_Positive_Basic) {
     // ROCM-2957. When fixed, please enable calls to GenerateBlock/ThreadDimensions()
     blocks = GENERATE_COPY(dim3(5,5,5), dim3(40,1,1), dim3(1, 40, 1), dim3(1, 1, 40));
     threads = GENERATE_COPY(dim3(64,1,1), dim3(33,3,3), dim3(64, 8, 2), dim3(16, 16, 3));
+    CoopLogGridDimsIfEnabled(blocks, threads, "strix");
   } else {
     blocks = GenerateBlockDimensions();
     threads = GenerateThreadDimensions();
+    CoopLogGridDimsIfEnabled(blocks, threads, "full");
   }
   if (!CheckDimensions(device, sync_kernel, blocks, threads)) return;
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);

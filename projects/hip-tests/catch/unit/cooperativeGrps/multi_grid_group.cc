@@ -155,7 +155,8 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Basic) {
       return;
     }
   }
-  const auto test_case = GENERATE(range(0, 20));
+  const auto test_case = GENERATE(range(0, CooperativeMultiGridTestCaseCount()));
+  CoopLogMultiGridCaseIfEnabled(static_cast<unsigned int>(test_case));
   std::vector<dim3> grid_dims(num_devices);
   std::vector<dim3> block_dims(num_devices);
   for (int i = 0; i < num_devices; i++) {
@@ -303,7 +304,8 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Base_Type) {
     }
   }
 
-  const auto test_case = GENERATE(range(0, 20));
+  const auto test_case = GENERATE(range(0, CooperativeMultiGridTestCaseCount()));
+  CoopLogMultiGridCaseIfEnabled(static_cast<unsigned int>(test_case));
   std::vector<dim3> grid_dims(num_devices);
   std::vector<dim3> block_dims(num_devices);
   for (int i = 0; i < num_devices; i++) {
@@ -424,7 +426,8 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions) {
       return;
     }
   }
-  const auto test_case = GENERATE(range(0, 20));
+  const auto test_case = GENERATE(range(0, CooperativeMultiGridTestCaseCount()));
+  CoopLogMultiGridCaseIfEnabled(static_cast<unsigned int>(test_case));
   std::vector<dim3> grid_dims(num_devices);
   std::vector<dim3> block_dims(num_devices);
   for (int i = 0; i < num_devices; i++) {
@@ -538,7 +541,8 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
     }
   }
   auto loops = GENERATE(2, 4, 8, 16);
-  const auto test_case = GENERATE(range(0, 20));
+  const auto test_case = GENERATE(range(0, CooperativeMultiGridTestCaseCount()));
+  CoopLogMultiGridCaseIfEnabled(static_cast<unsigned int>(test_case));
   std::vector<dim3> grid_dims(num_devices);
   std::vector<dim3> block_dims(num_devices);
   for (int i = 0; i < num_devices; i++) {

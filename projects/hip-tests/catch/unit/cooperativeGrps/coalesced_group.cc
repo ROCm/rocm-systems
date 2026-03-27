@@ -129,6 +129,7 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Positive_Basic) {
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto test_case = GENERATE(range(0, 4));
   uint64_t active_mask = get_active_mask(test_case, warp_size);
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
@@ -212,6 +213,7 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic) {
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto test_case = GENERATE(range(0, 4));
   uint64_t active_mask = get_active_mask(test_case, warp_size);
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
@@ -296,6 +298,7 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Bas
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto test_case = GENERATE(range(0, 4));
   uint64_t active_mask = get_active_mask(test_case, warp_size);
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
@@ -385,6 +388,7 @@ template <typename T> void CoalescedGroupShflUpTestImpl() {
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto test_case = GENERATE(range(0, 4));
   uint64_t active_mask = get_active_mask(test_case, warp_size);
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
@@ -469,6 +473,7 @@ template <typename T> void CoalescedGroupShflDownTest() {
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto test_case = GENERATE(range(0, 4));
   uint64_t active_mask = get_active_mask(test_case, warp_size);
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
@@ -561,6 +566,7 @@ template <typename T> void CoalescedGroupShflTest() {
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto test_case = GENERATE(range(0, 4));
   uint64_t active_mask = get_active_mask(test_case, warp_size);
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
@@ -706,6 +712,7 @@ template <bool global_memory, typename T> void CoalescedGroupSyncTest() {
   const auto randomized_run_count = GENERATE(range(0, cmd_options.cg_iterations));
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto test_case = GENERATE(range(0, 4));
   uint64_t active_mask = get_active_mask(test_case, warp_size);
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);

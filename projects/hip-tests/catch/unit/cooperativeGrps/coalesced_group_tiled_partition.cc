@@ -117,6 +117,7 @@ HIP_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic) {
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensions();
   auto threads = GenerateThreadDimensions();
+  CoopLogGridDimsIfEnabled(blocks, threads, "full");
   int warp_size = getWarpSize();
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
@@ -236,6 +237,7 @@ template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensionsForShuffle();
   auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto warp_size = getWarpSize();
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
@@ -347,6 +349,7 @@ template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() 
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensionsForShuffle();
   auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto warp_size = getWarpSize();
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
@@ -458,6 +461,7 @@ template <typename T> static void CoalescedGroupTiledPartitonShflTestImpl() {
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensionsForShuffle();
   auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto warp_size = getWarpSize();
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
@@ -601,6 +605,7 @@ template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncT
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensionsForShuffle();
   auto threads = GenerateThreadDimensionsForShuffle();
+  CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
   auto warp_size = getWarpSize();
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);

@@ -10,6 +10,7 @@
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
+#include "hip_test_params.hh"
 
 struct CPUGrid {
   CPUGrid() = default;
@@ -121,18 +122,26 @@ inline dim3 GenerateThreadDimensionsImpl(const std::initializer_list<double>& mu
 }
 
 inline dim3 GenerateThreadDimensions() {
-  const auto multipliers = {0.1, 0.5, 1.0, 1.5, 2.0};
-  return GenerateThreadDimensionsImpl(multipliers);
+  const int n = CurrentTestLevelNumber();
+  if (n == 0) {
+    return GenerateThreadDimensionsImpl({1.0});
+  }
+  if (n == 1) {
+    return GenerateThreadDimensionsImpl({0.1, 0.5, 1.0, 1.5});
+  }
+  return GenerateThreadDimensionsImpl({0.1, 0.5, 1.0, 1.5, 2.0});
 }
 
 inline dim3 GenerateThreadDimensionsForShuffle() {
-  const auto multipliers = {0.5, 1.0, 2.0};
-  return GenerateThreadDimensionsImpl(multipliers);
+  const int n = CurrentTestLevelNumber();
+  if (n == 0) {
+    return GenerateThreadDimensionsImpl({1.0});
+  }
+  return GenerateThreadDimensionsImpl({0.5, 1.0, 2.0});
 }
 
 inline dim3 GenerateThreadDimensionsForShuffleWarp() {
-    const auto multipliers = {1.0};
-  return GenerateThreadDimensionsImpl(multipliers);
+  return GenerateThreadDimensionsImpl({1.0});
 }
 
 /* Generate dimensions for 1D, 2D and 3D grids of blocks */
@@ -153,16 +162,24 @@ inline dim3 GenerateBlockDimensionsImpl(const std::initializer_list<double>& mul
 }
 
 inline dim3 GenerateBlockDimensions() {
-  const auto multipliers = {0.5, 1.0, 1.5, 2.0};
-  return GenerateBlockDimensionsImpl(multipliers);
+  const int n = CurrentTestLevelNumber();
+  if (n == 0) {
+    return GenerateBlockDimensionsImpl({1.0});
+  }
+  if (n == 1) {
+    return GenerateBlockDimensionsImpl({0.5, 1.0, 1.5});
+  }
+  return GenerateBlockDimensionsImpl({0.5, 1.0, 1.5, 2.0});
 }
 
 inline dim3 GenerateBlockDimensionsForShuffle() {
-  const auto multipliers = {0.5, 1.0};
-  return GenerateBlockDimensionsImpl(multipliers);
+  const int n = CurrentTestLevelNumber();
+  if (n == 0) {
+    return GenerateBlockDimensionsImpl({1.0});
+  }
+  return GenerateBlockDimensionsImpl({0.5, 1.0});
 }
 
 inline dim3 GenerateBlockDimensionsForShuffleWarp() {
-  const auto multipliers = {1.0};
-  return GenerateBlockDimensionsImpl(multipliers);
+  return GenerateBlockDimensionsImpl({1.0});
 }

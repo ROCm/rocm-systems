@@ -52,6 +52,7 @@ template <bool dynamic, size_t tile_size> void BlockPartitionGettersBasicTestImp
   DYNAMIC_SECTION("Tile size: " << tile_size) {
     auto blocks = GenerateBlockDimensions();
     auto threads = GenerateThreadDimensions();
+    CoopLogGridDimsIfEnabled(blocks, threads, "full");
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
     CPUGrid grid(blocks, threads);
@@ -142,6 +143,7 @@ template <typename T, size_t tile_size> void BlockTileShflUpTestImpl() {
 
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
+    CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
 
@@ -209,6 +211,7 @@ template <typename T, size_t tile_size> void BlockTileShflDownTestImpl() {
 
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
+    CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
 
@@ -288,6 +291,7 @@ template <typename T, size_t tile_size> void BlockTileShflXORTestImpl() {
 
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
+    CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
 
@@ -369,6 +373,7 @@ template <typename T, size_t tile_size> void BlockTileShflTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
+    CoopLogGridDimsIfEnabled(blocks, threads, "shuffle");
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
     CPUGrid grid(blocks, threads);
@@ -472,6 +477,7 @@ template <bool global_memory, typename T, size_t tile_size> void BlockTileSyncTe
     INFO("Run number: " << randomized_run_count + 1);
     auto blocks = GenerateBlockDimensions();
     auto threads = GenerateThreadDimensions();
+    CoopLogGridDimsIfEnabled(blocks, threads, "full");
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
     CPUGrid grid(blocks, threads);
@@ -1041,11 +1047,10 @@ TEST_CASE(Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type)
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
-  for (int i = 0; i < 32; i++) {
-    INFO("Expected x: " << expected << " got: " << *h_result.host_ptr());
-    INFO("Expected y: " << expected << " got: " << *h_result.host_ptr());
-    REQUIRE((h_result.host_ptr()->x == expected && h_result.host_ptr()->y == expected));
-  }
+  const Point& p = *h_result.host_ptr();
+  INFO("Expected x: " << expected << " got x: " << p.x);
+  INFO("Expected y: " << expected << " got y: " << p.y);
+  REQUIRE((p.x == expected && p.y == expected));
 }
 
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsigned int, long long,

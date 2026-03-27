@@ -77,6 +77,7 @@ static __global__ void thread_block_non_member_thread_rank_getter(unsigned int* 
 HIP_TEST_CASE(Unit_Thread_Block_Getters_Positive_Basic) {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
+  CoopLogGridDimsIfEnabled(blocks, threads, "full");
   if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
       threads.z <= 0) {
     return;
@@ -167,6 +168,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Positive_Basic) {
 HIP_TEST_CASE(Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic) {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
+  CoopLogGridDimsIfEnabled(blocks, threads, "full");
   if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
       threads.z <= 0) {
     return;
@@ -218,6 +220,7 @@ HIP_TEST_CASE(Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic) {
 HIP_TEST_CASE(Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic) {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
+  CoopLogGridDimsIfEnabled(blocks, threads, "full");
   if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
       threads.z <= 0) {
     return;
@@ -300,6 +303,7 @@ template <bool global_memory, typename T> void ThreadBlockSyncTest() {
   INFO("Run number: " << randomized_run_count + 1);
   const auto blocks = dim3(1, 1, 1);
   const auto threads = GenerateThreadDimensions();
+  CoopLogGridDimsIfEnabled(blocks, threads, "thread_only");
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
   CPUGrid grid(blocks, threads);

@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #pragma once
 
+#include <cstdlib>
 #include <vector>
 #include <string>
 #include <map>
@@ -142,3 +143,93 @@ private:
     int defaultWarmups = 100;
     size_t defaultMaxMemory = 2147483648; // 2GB
 };
+
+/** Parse numeric suffix from "level_N" (e.g. level_2 -> 2). Returns -1 if missing or invalid. */
+inline int ParseTestLevelNumber(const std::string& level) {
+  if (level.size() < 7 || level.compare(0, 6, "level_") != 0) {
+    return -1;
+  }
+  return std::atoi(level.c_str() + 6);
+}
+
+/** Level index for the running test (from listener + tags), or -1 if unset. */
+inline int CurrentTestLevelNumber() {
+  return ParseTestLevelNumber(TestParameterStore::instance().currentTestLevel);
+}
+
+/**
+ * How many multi_grid_group.cc test_case indices to sweep (smaller for low levels).
+ * Unknown level (-1) uses the broadest sweep (same as level_2+).
+ */
+inline int CooperativeMultiGridTestCaseCount() {
+  const int n = CurrentTestLevelNumber();
+  if (n == 0) {
+    return 2;
+  }
+  if (n == 1) {
+    return 8;
+  }
+  return 20;
+}
+/** SM-scale multiplier list sizes — must match cpu_grid.h GenerateBlockDimensions*. */
+inline int CooperativeBlockGridMultiplierListSize() {
+  const int n = CurrentTestLevelNumber();
+  if (n == 0) {
+    return 1;
+  }
+  if (n == 1) {
+    return 3;
+  }
+  return 4;
+}
+
+inline int CooperativeBlockGridMultiplierListSizeShuffle() {
+  const int n = CurrentTestLevelNumber();
+  if (n == 0) {
+    return 1;
+  }
+  return 2;
+}
+
+/** Warp-scale multiplier list sizes — must match cpu_grid.h GenerateThreadDimensions*. */
+inline int CooperativeThreadMultiplierListSizeFull() {
+  const int n = CurrentTestLevelNumber();
+  if (n == 0) {
+    return 1;
+  }
+  if (n == 1) {
+    return 4;
+  }
+  return 5;
+}
+
+inline int CooperativeThreadMultiplierListSizeShuffle() {
+  const int n = CurrentTestLevelNumber();
+  if (n == 0) {
+    return 1;
+  }
+  return 3;
+}
+
+/**
+ * Catch2 GENERATE_COPY unions alternatives of the same type: cpu_grid.h uses
+ * (2 + 3*M) block-grid variants and (10 + 3*M) thread-block variants for multiplier list size M.
+ */
+inline int CooperativeBlockGridGeneratorUnionCount(int multiplier_list_size) {
+  return 2 + 3 * multiplier_list_size;
+}
+
+inline int CooperativeThreadGeneratorUnionCount(int multiplier_list_size) {
+  return 10 + 3 * multiplier_list_size;
+}
+
+/**
+ * Two GENERATE statements in one TEST_CASE form a Cartesian product (Catch2).
+ * Use this for tests that call both GenerateBlockDimensions* and GenerateThreadDimensions*.
+ */
+inline int CooperativeGridThreadCartesianProductCount(int multiplier_list_size_block,
+                                                      int multiplier_list_size_thread) {
+  return CooperativeBlockGridGeneratorUnionCount(multiplier_list_size_block) *
+         CooperativeThreadGeneratorUnionCount(multiplier_list_size_thread);
+}
+
