@@ -72,6 +72,9 @@ def split_copy_compute_hw_queues_rules(validation_rules_dir) -> list[Path]:
 @pytest.mark.gpu
 class TestJacobi(RocprofsysTest):
 
+    openmp_non_usm_run_args = ["-m", "512"]
+    # With OMPX_APU_MAPS=1, it takes longer, so reduce domain size
+    openmp_usm_run_args = ["-m", "64"]
     hip_run_args = ["-g", "2", "1"]
 
     @pytest.mark.timeout(120)
@@ -82,12 +85,10 @@ class TestJacobi(RocprofsysTest):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = (
             "hip_api,kernel_dispatch,memory_copy,"
-            "kfd_page_fault,kfd_page_migrate,kfd_queue,"
-            "kfd_event_page_fault,kfd_event_page_migrate,"
-            "kfd_event_queue,kfd_event_unmap_from_gpu,kfd_event_dropped_events"
         )
         env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["HSA_XNACK"] = "1"
+        env["OFFLOAD_TRACK_ALLOCATION_TRACES"] = "true"
         if "apu" not in gpu_info.categories:
             # Forces zero-copy behavior on non-APU GPUs
             # Without this, it would be implicit zero-copy behavior
@@ -97,7 +98,62 @@ class TestJacobi(RocprofsysTest):
             mode,
             target="jacobi-fortran-usm",
             env=env,
-            run_args=["-m", "64"],
+            run_args=self.openmp_usm_run_args,
+            check_target_arch=True,
+        )
+
+        if "apu" in gpu_info.categories:
+            # We expect no omp_target_data_op_emi (CPU and GPU share the same memory)
+            self.assert_regex(
+                result,
+                subtest_name="USM Zero-Copy Validation (APU)",
+                fail_regex=["omp_target_data_op_emi"],
+            )
+
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto USM Zero-Copy Validation (APU)",
+                fail_regex=["omp_target_data_op_emi"],
+            )
+
+        else:
+            # We expect to see only one omp_target_data_op_emi
+            # Corresponds to the Fortran array descriptor being transferred
+            #   at the start of the program
+            self.assert_regex(
+                result,
+                subtest_name="USM Zero-Copy validation (Non-APU)",
+                pass_regex=[r"omp_target_data_op_emi\s*\|\s*1\s*\|\s*1\s*\|"],
+            )
+
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto USM Zero-Copy validation (Non-APU)",
+                categories=["rocm_ompt_api"],
+                labels=["omp_target_data_op_emi"],
+                counts=[1],
+                depths=[1],
+            )
+
+    
+    @pytest.mark.timeout(120)
+    @pytest.mark.openmp
+    @pytest.mark.xnack
+    @pytest.mark.parametrize("mode", ["sys_run"])
+    def test_usm_no_ompx_maps(self, mode, hpc_openmp_environment, gpu_info):
+        env = hpc_openmp_environment.copy()
+        env["ROCPROFSYS_ROCM_DOMAINS"] = (
+            "hip_api,kernel_dispatch,memory_copy,"
+        )
+        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
+        env["HSA_XNACK"] = "1"
+        env["OFFLOAD_TRACK_ALLOCATION_TRACES"] = "true"
+    
+        result = self.run_test(
+            mode,
+            target="jacobi-fortran-usm",
+            env=env,
+            run_args=self.openmp_usm_run_args,
             check_target_arch=True,
         )
 
@@ -148,7 +204,7 @@ class TestJacobi(RocprofsysTest):
             target="jacobi-fortran-targetdata-markers",
             env=env,
             check_target_arch=True,
-            run_args=self.openmp_run_args,
+            run_args=self.openmp_non_usm_run_args,
         )
         self.assert_regex(result)
 
