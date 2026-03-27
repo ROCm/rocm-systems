@@ -172,6 +172,18 @@ def add_general_group(
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
         ),
     )
+    general_group.add_argument(
+        "--arch",
+        dest="profile_arch_override",
+        metavar="GFX",
+        choices=sorted(supported_archs.keys()),
+        default=None,
+        help=(
+            "Override GPU architecture in profile mode. With --dry-run, skip rocminfo, "
+            "AMDGPU, and rocprofiler-sdk checks; only YAML/config for that arch is "
+            "required."
+        ),
+    )
 
 
 def omniarg_parser(
@@ -388,6 +400,19 @@ Examples:
         ),
     )
 
+    # Resolves PMCs from filters, prints bucket tables and cross-bucket metric stats.
+    profile_group.add_argument(
+        "--dry-run",
+        dest="profile_dry_run",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "\t\t\tPrint perfmon bucket plan (counter → pass/bucket) and exit.\n"
+            "\t\t\tDoes not write perfmon files, sysinfo, or run the workload.\n"
+            "\t\t\tWorkload command after `--` is optional."
+        ),
+    )
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
