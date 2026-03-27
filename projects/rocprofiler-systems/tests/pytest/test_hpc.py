@@ -72,13 +72,14 @@ def split_copy_compute_hw_queues_rules(validation_rules_dir) -> list[Path]:
 @pytest.mark.gpu
 class TestJacobi(RocprofsysTest):
 
-    openmp_run_args = ["-m", "512"]
     hip_run_args = ["-g", "2", "1"]
 
+    @pytest.mark.timeout(600)
     @pytest.mark.openmp
     @pytest.mark.xnack
+    @pytest.mark.parametrize("size", ["512", "256", "128", "64", "32", "16", "8", "4", "2", "1"])
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_usm(self, mode, hpc_openmp_environment, gpu_info):
+    def test_usm(self, mode, hpc_openmp_environment, gpu_info, size):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = (
             "hip_api,kernel_dispatch,memory_copy,"
@@ -97,7 +98,7 @@ class TestJacobi(RocprofsysTest):
             mode,
             target="jacobi-fortran-usm",
             env=env,
-            run_args=self.openmp_run_args,
+            run_args=["-m", size],
             check_target_arch=True,
         )
 
