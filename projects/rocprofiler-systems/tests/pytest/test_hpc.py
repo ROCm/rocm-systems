@@ -10,7 +10,7 @@ import pytest
 from conftest import RocprofsysTest
 from pathlib import Path
 
-pytestmark = [pytest.mark.hpc]
+pytestmark = [pytest.mark.hpc, pytest.mark.rocm]
 
 
 # =============================================================================
