@@ -5347,36 +5347,38 @@ static void configure_mec(struct WddmLiteDevice *dev)
         ULONG mec_lo = (ULONG)(dev->hw.gfx.mec_ucode_start >> 2);
         ULONG mec_hi = (ULONG)((dev->hw.gfx.mec_ucode_start >> 2) >> 32);
 
+        /* Write PRGRM_CNTR_START via gc_base1 (BASE_IDX=1, correct for 0x2900).
+         * Write BOTH with and without GRBM selection to ensure it takes effect.
+         * Also read back to verify. */
         grbm_select(dev, 1, 0, 0, 0);  /* ME=1 (MEC), pipe=0 */
         gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START, mec_lo);
         gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI, mec_hi);
+        /* Readback to verify */
+        ULONG rb_lo = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START);
+        ULONG rb_hi = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI);
+        pr_info("gpu_gfx: MEC PRGRM_CNTR_START wrote 0x%08x_%08x, readback 0x%08x_%08x\n",
+                mec_hi, mec_lo, rb_hi, rb_lo);
         grbm_select_reset(dev);
 
-        /*
-         * Reset cycle: halt=0 → icache invalidate → pipe reset → release.
-         * Must happen BEFORE programming DC_BASE (reset clears it).
-         */
-        ULONG mec_cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
-        pr_info("gpu_gfx: MEC CNTL before reset = 0x%08x\n", mec_cntl);
+        /* Match tinygrad's exact reset sequence:
+         * 1. Write PRGRM_CNTR_START (done above)
+         * 2. CNTL.update(pipe0_reset=1) — READ-MODIFY-WRITE, only set reset bit
+         * 3. CNTL.update(pipe0_reset=0) — clear reset bit, keep other bits
+         * NO icache invalidate, NO clearing all bits to 0. */
+        {
+            ULONG cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+            pr_info("gpu_gfx: MEC CNTL before reset = 0x%08x\n", cntl);
+            /* Assert pipe0_reset (keep other bits) */
+            gc1_wreg(dev, regCP_MEC_RS64_CNTL, cntl | CP_MEC_RS64_CNTL__MEC_PIPE0_RESET);
+            /* De-assert pipe0_reset (clear reset bit only) */
+            gc1_wreg(dev, regCP_MEC_RS64_CNTL, cntl & ~CP_MEC_RS64_CNTL__MEC_PIPE0_RESET);
 
-        /* First: clear halt and active, invalidate icache */
-        ULONG clean_cntl = CP_MEC_RS64_CNTL__MEC_INVALIDATE_ICACHE;
-        pr_info("gpu_gfx: clearing MEC halt/active, invalidating icache: 0x%08x\n",
-                clean_cntl);
-        gc1_wreg(dev, regCP_MEC_RS64_CNTL, clean_cntl);
-        Sleep(10);
-
-        /* Assert reset with clean state (no halt, no active) */
-        gc1_wreg(dev, regCP_MEC_RS64_CNTL,
-                 CP_MEC_RS64_CNTL__MEC_PIPE0_RESET |
-                 CP_MEC_RS64_CNTL__MEC_INVALIDATE_ICACHE);
-        Sleep(10);
-
-        /* Release reset (clean state) */
-        gc1_wreg(dev, regCP_MEC_RS64_CNTL, 0);
-
-        pr_info("gpu_gfx: MEC PC set to 0x%llx, reset cycle done\n",
-                (unsigned long long)dev->hw.gfx.mec_ucode_start);
+            /* Readback PRGRM_CNTR_START and INSTR_PNTR after reset */
+            grbm_select(dev, 1, 0, 0, 0);
+            ULONG ip = gc1_rreg(dev, 0x2903);
+            grbm_select_reset(dev);
+            pr_info("gpu_gfx: after tinygrad-style reset: INSTR_PNTR=0x%x\n", ip);
+        }
 
         /*
          * Program RS64 registers AFTER reset. Reset clears these to 0.
