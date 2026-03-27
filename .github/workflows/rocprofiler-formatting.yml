@@ -1,4 +1,4 @@
-name: "rocm-systems Formatting"
+name: "rocprofiler Formatting"
 on:
   pull_request:
 
