@@ -10,7 +10,7 @@ import pytest
 from conftest import RocprofsysTest
 from pathlib import Path
 
-pytestmark = [pytest.mark.hpc]
+pytestmark = [pytest.mark.hpc, pytest.mark.rocm]
 
 
 # =============================================================================
@@ -72,9 +72,12 @@ def split_copy_compute_hw_queues_rules(validation_rules_dir) -> list[Path]:
 @pytest.mark.gpu
 class TestJacobi(RocprofsysTest):
 
-    openmp_run_args = ["-m", "512"]
+    openmp_non_usm_run_args = ["-m", "512"]
+    # With OMPX_APU_MAPS=1, it takes longer, so reduce domain size
+    openmp_usm_run_args = ["-m", "64"]
     hip_run_args = ["-g", "2", "1"]
 
+    @pytest.mark.slow
     @pytest.mark.openmp
     @pytest.mark.xnack
     @pytest.mark.parametrize("mode", ["sys_run"])
@@ -97,7 +100,7 @@ class TestJacobi(RocprofsysTest):
             mode,
             target="jacobi-fortran-usm",
             env=env,
-            run_args=self.openmp_run_args,
+            run_args=self.openmp_usm_run_args,
             check_target_arch=True,
         )
 
@@ -148,7 +151,7 @@ class TestJacobi(RocprofsysTest):
             target="jacobi-fortran-targetdata-markers",
             env=env,
             check_target_arch=True,
-            run_args=self.openmp_run_args,
+            run_args=self.openmp_non_usm_run_args,
         )
         self.assert_regex(result)
 
