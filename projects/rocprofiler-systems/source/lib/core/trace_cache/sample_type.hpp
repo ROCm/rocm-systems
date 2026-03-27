@@ -758,9 +758,9 @@ deserialize(uint8_t*& buffer)
     uint64_t     timestamp;
     utility::parse_value(buffer, timestamp, item.nic_index, item.rx_rdma_cnp_pkts,
                          item.tx_rdma_cnp_pkts, item.rx_ucast_bytes, item.tx_ucast_bytes,
-                         item.rx_ucast_pkts, item.tx_ucast_pkts,
-                         item.tx_rdma_ack_timeout, item.resp_tx_pkt_seq_err,
-                         item.req_rx_pkt_seq_err, item.req_rx_impl_nak_seq_err);
+                         item.rx_ucast_pkts, item.tx_ucast_pkts, item.tx_rdma_ack_timeout,
+                         item.resp_tx_pkt_seq_err, item.req_rx_pkt_seq_err,
+                         item.req_rx_impl_nak_seq_err);
     item.timestamp = timestamp;
     return item;
 }
@@ -769,12 +769,11 @@ template <>
 inline size_t
 get_size(const ainic_sample& item)
 {
-    return utility::get_size(static_cast<uint64_t>(item.timestamp), item.nic_index,
-                             item.rx_rdma_cnp_pkts, item.tx_rdma_cnp_pkts,
-                             item.rx_ucast_bytes, item.tx_ucast_bytes, item.rx_ucast_pkts,
-                             item.tx_ucast_pkts, item.tx_rdma_ack_timeout,
-                             item.resp_tx_pkt_seq_err, item.req_rx_pkt_seq_err,
-                             item.req_rx_impl_nak_seq_err);
+    return utility::get_size(
+        static_cast<uint64_t>(item.timestamp), item.nic_index, item.rx_rdma_cnp_pkts,
+        item.tx_rdma_cnp_pkts, item.rx_ucast_bytes, item.tx_ucast_bytes,
+        item.rx_ucast_pkts, item.tx_ucast_pkts, item.tx_rdma_ack_timeout,
+        item.resp_tx_pkt_seq_err, item.req_rx_pkt_seq_err, item.req_rx_impl_nak_seq_err);
 }
 
 struct cpu_freq_sample : cacheable_t
