@@ -6,35 +6,6 @@
 #
 # Configure Intel's Threading Building Blocks for Dyninst
 #
-# ----------------------------------------
-#
-# Accepts the following CMake variables
-#
-# ROCPROFSYS_BUILD_TBB - Build TBB from source instead of finding system package
-# TBB_ROOT_DIR         - Hint directory that contains the TBB installation
-# TBB_INCLUDEDIR       - Hint directory that contains the TBB headers files
-# TBB_LIBRARYDIR       - Hint directory that contains the TBB library files
-# TBB_LIBRARY          - Alias for TBB_LIBRARYDIR
-# TBB_USE_DEBUG_BUILD  - Use debug version of tbb libraries, if present
-# TBB_MIN_VERSION      - Minimum acceptable version of TBB (default: 2018.6)
-#
-# Directly exports the following CMake variables
-#
-# TBB_ROOT_DIR         - Computed base directory of TBB installation
-# TBB_INCLUDE_DIRS     - TBB include directory
-# TBB_INCLUDE_DIR      - Alias for TBB_INCLUDE_DIRS
-# TBB_LIBRARY_DIRS     - TBB library directory
-# TBB_DEFINITIONS      - TBB compiler definitions
-# TBB_LIBRARIES        - TBB library files
-# TBB_<c>_LIBRARY_RELEASE - Path to the release version of component <c>
-# TBB_<c>_LIBRARY_DEBUG   - Path to the debug version of component <c>
-#
-# NOTE: The exported TBB_ROOT_DIR can be different from the value provided by the user in
-# the case that it is determined to build TBB from source. In such a case, TBB_ROOT_DIR
-# will contain the directory of the from-source installation.
-#
-# See Modules/FindTBB.cmake for additional input and exported variables
-#
 # =====================================================================================
 
 include_guard(GLOBAL)
