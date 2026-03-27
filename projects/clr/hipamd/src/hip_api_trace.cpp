@@ -900,12 +900,31 @@ hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
 hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags);
 hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx);
-hipError_t hipGreenCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
-                                   unsigned int flags, int priority);
-hipError_t hipStreamGetGreenCtx(hipStream_t hStream, hipGreenCtx_t* greenCtx);
-hipError_t hipGreenCtxRecordEvent(hipGreenCtx_t greenCtx, hipEvent_t event);
-hipError_t hipGreenCtxWaitEvent(hipGreenCtx_t greenCtx, hipEvent_t event);
-hipError_t hipCtxFromGreenCtx(hipCtx_t* ctx, hipGreenCtx_t greenCtx);
+hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
+                                        unsigned int flags, int priority);
+hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+                                   hipDevResourceType type);
+hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
+                                        const hipDevResource* input,
+                                        hipDevResource* remainder,
+                                        unsigned int flags, unsigned int minCount);
+hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+                                 const hipDevResource* input, hipDevResource* remainder,
+                                 unsigned int flags,
+                                 hipDevSmResourceGroupParams* groupParams);
+hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* desc,
+                                       hipDevResource* resources,
+                                       unsigned int nbResources);
+hipError_t hipDeviceGetExecutionCtx(hipGreenCtx_t* ctx, int device);
+hipError_t hipExecutionCtxGetDevResource(hipGreenCtx_t ctx, hipDevResource* resource,
+                                          hipDevResourceType type);
+hipError_t hipExecutionCtxGetDevice(int* device, hipGreenCtx_t ctx);
+hipError_t hipExecutionCtxGetId(hipGreenCtx_t ctx, unsigned long long* ctxId);
+hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
+                                    hipDevResourceType type);
+hipError_t hipExecutionCtxRecordEvent(hipGreenCtx_t ctx, hipEvent_t event);
+hipError_t hipExecutionCtxSynchronize(hipGreenCtx_t ctx);
+hipError_t hipExecutionCtxWaitEvent(hipGreenCtx_t ctx, hipEvent_t event);
 }  // namespace hip
 
 namespace hip {
@@ -1465,11 +1484,19 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipKernelGetFunction_fn = hip::hipKernelGetFunction;
   ptrDispatchTable->hipGreenCtxCreate_fn = hip::hipGreenCtxCreate;
   ptrDispatchTable->hipGreenCtxDestroy_fn = hip::hipGreenCtxDestroy;
-  ptrDispatchTable->hipGreenCtxStreamCreate_fn = hip::hipGreenCtxStreamCreate;
-  ptrDispatchTable->hipStreamGetGreenCtx_fn = hip::hipStreamGetGreenCtx;
-  ptrDispatchTable->hipGreenCtxRecordEvent_fn = hip::hipGreenCtxRecordEvent;
-  ptrDispatchTable->hipGreenCtxWaitEvent_fn = hip::hipGreenCtxWaitEvent;
-  ptrDispatchTable->hipCtxFromGreenCtx_fn = hip::hipCtxFromGreenCtx;
+  ptrDispatchTable->hipExecutionCtxStreamCreate_fn = hip::hipExecutionCtxStreamCreate;
+  ptrDispatchTable->hipDeviceGetDevResource_fn = hip::hipDeviceGetDevResource;
+  ptrDispatchTable->hipDevSmResourceSplitByCount_fn = hip::hipDevSmResourceSplitByCount;
+  ptrDispatchTable->hipDevSmResourceSplit_fn = hip::hipDevSmResourceSplit;
+  ptrDispatchTable->hipDevResourceGenerateDesc_fn = hip::hipDevResourceGenerateDesc;
+  ptrDispatchTable->hipDeviceGetExecutionCtx_fn = hip::hipDeviceGetExecutionCtx;
+  ptrDispatchTable->hipExecutionCtxGetDevResource_fn = hip::hipExecutionCtxGetDevResource;
+  ptrDispatchTable->hipExecutionCtxGetDevice_fn = hip::hipExecutionCtxGetDevice;
+  ptrDispatchTable->hipExecutionCtxGetId_fn = hip::hipExecutionCtxGetId;
+  ptrDispatchTable->hipStreamGetDevResource_fn = hip::hipStreamGetDevResource;
+  ptrDispatchTable->hipExecutionCtxRecordEvent_fn = hip::hipExecutionCtxRecordEvent;
+  ptrDispatchTable->hipExecutionCtxSynchronize_fn = hip::hipExecutionCtxSynchronize;
+  ptrDispatchTable->hipExecutionCtxWaitEvent_fn = hip::hipExecutionCtxWaitEvent;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2169,18 +2196,26 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetFunction_fn, 516);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
 HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxCreate_fn, 517);
 HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxDestroy_fn, 518);
-HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxStreamCreate_fn, 519);
-HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetGreenCtx_fn, 520);
-HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxRecordEvent_fn, 521);
-HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxWaitEvent_fn, 522);
-HIP_ENFORCE_ABI(HipDispatchTable, hipCtxFromGreenCtx_fn, 523);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxStreamCreate_fn, 519);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetDevResource_fn, 520);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDevSmResourceSplitByCount_fn, 521);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDevSmResourceSplit_fn, 522);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDevResourceGenerateDesc_fn, 523);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetExecutionCtx_fn, 524);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxGetDevResource_fn, 525);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxGetDevice_fn, 526);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxGetId_fn, 527);
+HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetDevResource_fn, 528);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxRecordEvent_fn, 529);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxSynchronize_fn, 530);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxWaitEvent_fn, 531);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 524)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 532)
 
 static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 26,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "

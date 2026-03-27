@@ -662,11 +662,19 @@ hip_7.3 {
 global:
     hipGreenCtxCreate;
     hipGreenCtxDestroy;
-    hipGreenCtxStreamCreate;
-    hipStreamGetGreenCtx;
-    hipGreenCtxRecordEvent;
-    hipGreenCtxWaitEvent;
-    hipCtxFromGreenCtx;
+    hipExecutionCtxStreamCreate;
+    hipDeviceGetDevResource;
+    hipDevSmResourceSplitByCount;
+    hipDevSmResourceSplit;
+    hipDevResourceGenerateDesc;
+    hipDeviceGetExecutionCtx;
+    hipExecutionCtxGetDevResource;
+    hipExecutionCtxGetDevice;
+    hipExecutionCtxGetId;
+    hipStreamGetDevResource;
+    hipExecutionCtxRecordEvent;
+    hipExecutionCtxSynchronize;
+    hipExecutionCtxWaitEvent;
 local:
     *;
 } hip_7.2;

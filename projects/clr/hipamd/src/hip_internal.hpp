@@ -13,6 +13,7 @@
 #include "rocclr/utils/debug.hpp"
 #include "hip_graph_capture.hpp"
 
+#include <unordered_map>
 #include <unordered_set>
 #include <thread>
 #include <stack>
@@ -38,6 +39,11 @@ template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr 
 
 namespace hip{
   extern std::once_flag g_ihipInitialized;
+
+  struct ResourceMeta {
+    uint32_t familyId;
+    unsigned int startCU;
+  };
 }
 typedef struct hipArray {
     void* data;  // FIXME: generalize this
@@ -281,6 +287,7 @@ public:
   class Device;
   class MemoryPool;
   class Event;
+  class GreenCtx;
   class Stream : public amd::HostQueue {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
@@ -516,6 +523,11 @@ public:
     int deviceId_;
     /// ROCclr host queue for default streams
     Stream* null_stream_  = nullptr;
+    /// Primary execution context (lazy-initialized singleton)
+    GreenCtx* primaryExecCtx_ = nullptr;
+    /// Per-device resource family map for CU mask offset tracking
+    std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
+    std::mutex resourceFamilyMapLock_;
     /// Store device flags
     unsigned int flags_;
     /// Maintain list of user enabled peers
@@ -582,6 +594,13 @@ public:
 
     hip::Stream* NullStream(bool wait = true);
     Stream* GetNullStream() const {return null_stream_;};
+
+    GreenCtx* getPrimaryExecCtx() const { return primaryExecCtx_; }
+    void setPrimaryExecCtx(GreenCtx* ctx) { primaryExecCtx_ = ctx; }
+    std::recursive_mutex& getLock() { return lock_; }
+
+    void registerResource(uint32_t resId, uint32_t familyId, unsigned int startCU);
+    const ResourceMeta* lookupResource(uint32_t resId);
 
     void SetActiveStatus() {
       isActive_ = true;

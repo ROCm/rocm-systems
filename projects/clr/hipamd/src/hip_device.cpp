@@ -23,6 +23,7 @@
 #include <hip/amd_detail/hip_storage.h>
 
 #include "hip_internal.hpp"
+#include "hip_greenctx.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
 
@@ -335,6 +336,17 @@ bool Device::existsActiveStreamForDevice() {
 }
 
 // ================================================================================================
+void Device::registerResource(uint32_t resId, uint32_t familyId, unsigned int startCU) {
+  std::lock_guard<std::mutex> lk(resourceFamilyMapLock_);
+  resourceFamilyMap_[resId] = {familyId, startCU};
+}
+
+const ResourceMeta* Device::lookupResource(uint32_t resId) {
+  std::lock_guard<std::mutex> lk(resourceFamilyMapLock_);
+  auto it = resourceFamilyMap_.find(resId);
+  return (it != resourceFamilyMap_.end()) ? &it->second : nullptr;
+}
+
 Device::~Device() {
   if ((IS_LINUX || !DEBUG_HIP_MEM_POOL_VMHEAP) && (default_mem_pool_ != nullptr)) {
     default_mem_pool_->release();
@@ -349,6 +361,9 @@ Device::~Device() {
   if (default_managed_mem_pool_ != nullptr) {
     default_managed_mem_pool_->release();
   }
+
+  delete primaryExecCtx_;
+  primaryExecCtx_ = nullptr;
 
   if (null_stream_ != nullptr) {
     hip::Stream::Destroy(null_stream_);

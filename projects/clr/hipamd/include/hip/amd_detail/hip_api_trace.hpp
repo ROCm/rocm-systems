@@ -1119,12 +1119,32 @@ typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements)(
 typedef hipError_t (*t_hipGreenCtxCreate)(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                                          unsigned int flags);
 typedef hipError_t (*t_hipGreenCtxDestroy)(hipGreenCtx_t ctx);
-typedef hipError_t (*t_hipGreenCtxStreamCreate)(hipStream_t* stream, hipGreenCtx_t greenctx,
-                                                unsigned int flags, int priority);
-typedef hipError_t (*t_hipStreamGetGreenCtx)(hipStream_t hStream, hipGreenCtx_t* greenCtx);
-typedef hipError_t (*t_hipGreenCtxRecordEvent)(hipGreenCtx_t greenCtx, hipEvent_t event);
-typedef hipError_t (*t_hipGreenCtxWaitEvent)(hipGreenCtx_t greenCtx, hipEvent_t event);
-typedef hipError_t (*t_hipCtxFromGreenCtx)(hipCtx_t* ctx, hipGreenCtx_t greenCtx);
+typedef hipError_t (*t_hipExecutionCtxStreamCreate)(hipStream_t* stream, hipGreenCtx_t greenctx,
+                                                     unsigned int flags, int priority);
+typedef hipError_t (*t_hipDeviceGetDevResource)(hipDevice_t device, hipDevResource* resource,
+                                                hipDevResourceType type);
+typedef hipError_t (*t_hipDevSmResourceSplitByCount)(hipDevResource* result,
+                                                     unsigned int* nbGroups,
+                                                     const hipDevResource* input,
+                                                     hipDevResource* remainder,
+                                                     unsigned int flags, unsigned int minCount);
+typedef hipError_t (*t_hipDevSmResourceSplit)(hipDevResource* result, unsigned int nbGroups,
+                                              const hipDevResource* input,
+                                              hipDevResource* remainder, unsigned int flags,
+                                              hipDevSmResourceGroupParams* groupParams);
+typedef hipError_t (*t_hipDevResourceGenerateDesc)(hipDevResourceDesc_t* phDesc,
+                                                    hipDevResource* resources,
+                                                    unsigned int nbResources);
+typedef hipError_t (*t_hipDeviceGetExecutionCtx)(hipGreenCtx_t* ctx, int device);
+typedef hipError_t (*t_hipExecutionCtxGetDevResource)(hipGreenCtx_t ctx, hipDevResource* resource,
+                                                      hipDevResourceType type);
+typedef hipError_t (*t_hipExecutionCtxGetDevice)(int* device, hipGreenCtx_t ctx);
+typedef hipError_t (*t_hipExecutionCtxGetId)(hipGreenCtx_t ctx, unsigned long long* ctxId);
+typedef hipError_t (*t_hipStreamGetDevResource)(hipStream_t hStream, hipDevResource* resource,
+                                                hipDevResourceType type);
+typedef hipError_t (*t_hipExecutionCtxRecordEvent)(hipGreenCtx_t ctx, hipEvent_t event);
+typedef hipError_t (*t_hipExecutionCtxSynchronize)(hipGreenCtx_t ctx);
+typedef hipError_t (*t_hipExecutionCtxWaitEvent)(hipGreenCtx_t ctx, hipEvent_t event);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1739,11 +1759,19 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
   t_hipGreenCtxCreate hipGreenCtxCreate_fn;
   t_hipGreenCtxDestroy hipGreenCtxDestroy_fn;
-  t_hipGreenCtxStreamCreate hipGreenCtxStreamCreate_fn;
-  t_hipStreamGetGreenCtx hipStreamGetGreenCtx_fn;
-  t_hipGreenCtxRecordEvent hipGreenCtxRecordEvent_fn;
-  t_hipGreenCtxWaitEvent hipGreenCtxWaitEvent_fn;
-  t_hipCtxFromGreenCtx hipCtxFromGreenCtx_fn;
+  t_hipExecutionCtxStreamCreate hipExecutionCtxStreamCreate_fn;
+  t_hipDeviceGetDevResource hipDeviceGetDevResource_fn;
+  t_hipDevSmResourceSplitByCount hipDevSmResourceSplitByCount_fn;
+  t_hipDevSmResourceSplit hipDevSmResourceSplit_fn;
+  t_hipDevResourceGenerateDesc hipDevResourceGenerateDesc_fn;
+  t_hipDeviceGetExecutionCtx hipDeviceGetExecutionCtx_fn;
+  t_hipExecutionCtxGetDevResource hipExecutionCtxGetDevResource_fn;
+  t_hipExecutionCtxGetDevice hipExecutionCtxGetDevice_fn;
+  t_hipExecutionCtxGetId hipExecutionCtxGetId_fn;
+  t_hipStreamGetDevResource hipStreamGetDevResource_fn;
+  t_hipExecutionCtxRecordEvent hipExecutionCtxRecordEvent_fn;
+  t_hipExecutionCtxSynchronize hipExecutionCtxSynchronize_fn;
+  t_hipExecutionCtxWaitEvent hipExecutionCtxWaitEvent_fn;
 
 
   // DO NOT EDIT ABOVE!

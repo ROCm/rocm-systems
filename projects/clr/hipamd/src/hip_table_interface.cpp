@@ -3215,29 +3215,81 @@ hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx) {
   return hip::GetHipDispatchTable()->hipGreenCtxDestroy_fn(ctx);
   CATCH;
 }
-hipError_t hipGreenCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx, unsigned int flags,
-                                   int priority) {
+hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
+                                        unsigned int flags, int priority) {
   TRY;
-  return hip::GetHipDispatchTable()->hipGreenCtxStreamCreate_fn(stream, greenctx, flags, priority);
+  return hip::GetHipDispatchTable()->hipExecutionCtxStreamCreate_fn(stream, greenctx, flags,
+                                                                     priority);
   CATCH;
 }
-hipError_t hipStreamGetGreenCtx(hipStream_t hStream, hipGreenCtx_t* greenCtx) {
+hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+                                   hipDevResourceType type) {
   TRY;
-  return hip::GetHipDispatchTable()->hipStreamGetGreenCtx_fn(hStream, greenCtx);
+  return hip::GetHipDispatchTable()->hipDeviceGetDevResource_fn(device, resource, type);
   CATCH;
 }
-hipError_t hipGreenCtxRecordEvent(hipGreenCtx_t greenCtx, hipEvent_t event) {
+hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
+                                        const hipDevResource* input, hipDevResource* remainder,
+                                        unsigned int flags, unsigned int minCount) {
   TRY;
-  return hip::GetHipDispatchTable()->hipGreenCtxRecordEvent_fn(greenCtx, event);
+  return hip::GetHipDispatchTable()->hipDevSmResourceSplitByCount_fn(result, nbGroups, input,
+                                                                      remainder, flags, minCount);
   CATCH;
 }
-hipError_t hipGreenCtxWaitEvent(hipGreenCtx_t greenCtx, hipEvent_t event) {
+hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+                                 const hipDevResource* input, hipDevResource* remainder,
+                                 unsigned int flags,
+                                 hipDevSmResourceGroupParams* groupParams) {
   TRY;
-  return hip::GetHipDispatchTable()->hipGreenCtxWaitEvent_fn(greenCtx, event);
+  return hip::GetHipDispatchTable()->hipDevSmResourceSplit_fn(result, nbGroups, input, remainder,
+                                                              flags, groupParams);
   CATCH;
 }
-hipError_t hipCtxFromGreenCtx(hipCtx_t* ctx, hipGreenCtx_t greenCtx) {
+hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
+                                       unsigned int nbResources) {
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxFromGreenCtx_fn(ctx, greenCtx);
+  return hip::GetHipDispatchTable()->hipDevResourceGenerateDesc_fn(phDesc, resources, nbResources);
+  CATCH;
+}
+hipError_t hipDeviceGetExecutionCtx(hipGreenCtx_t* ctx, int device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetExecutionCtx_fn(ctx, device);
+  CATCH;
+}
+hipError_t hipExecutionCtxGetDevResource(hipGreenCtx_t ctx, hipDevResource* resource,
+                                          hipDevResourceType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxGetDevResource_fn(ctx, resource, type);
+  CATCH;
+}
+hipError_t hipExecutionCtxGetDevice(int* device, hipGreenCtx_t ctx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxGetDevice_fn(device, ctx);
+  CATCH;
+}
+hipError_t hipExecutionCtxGetId(hipGreenCtx_t ctx, unsigned long long* ctxId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxGetId_fn(ctx, ctxId);
+  CATCH;
+}
+hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
+                                    hipDevResourceType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipStreamGetDevResource_fn(hStream, resource, type);
+  CATCH;
+}
+hipError_t hipExecutionCtxRecordEvent(hipGreenCtx_t ctx, hipEvent_t event) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxRecordEvent_fn(ctx, event);
+  CATCH;
+}
+hipError_t hipExecutionCtxSynchronize(hipGreenCtx_t ctx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxSynchronize_fn(ctx);
+  CATCH;
+}
+hipError_t hipExecutionCtxWaitEvent(hipGreenCtx_t ctx, hipEvent_t event) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExecutionCtxWaitEvent_fn(ctx, event);
   CATCH;
 }
