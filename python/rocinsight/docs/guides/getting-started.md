@@ -6,7 +6,7 @@ A visual, step-by-step guide to using ROCInsight for AMD GPU performance analysi
 
 ## Overview
 
-ROCInsight reads GPU trace databases from `rocprofv3` and turns raw profiling data into prioritized, actionable recommendations. It works across five analysis tiers — from static source scanning (no GPU needed) through instruction-level stall analysis.
+ROCInsight reads ROCPD GPU trace databases from any AMD profiling & tracing tool such as `rocprofv3` and turns raw profiling data into prioritized, actionable recommendations. It works across five analysis tiers — from static source scanning (no GPU needed) through instruction-level stall analysis.
 
 The core workflow is: **Profile -> Analyze -> Optimize -> Verify**. ROCInsight's interactive mode automates this entire loop with AI-powered code editing.
 
