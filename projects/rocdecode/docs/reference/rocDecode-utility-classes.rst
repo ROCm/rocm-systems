@@ -6,7 +6,7 @@
 The rocDecode utility classes
 ********************************************************************
 
-The rocDecode utility classes are provide high-level calls to the :doc:`rocDecode core APIs <./rocDecode-core-APIs>`.
+The rocDecode utility classes provide high-level calls to the :doc:`rocDecode core APIs <./rocDecode-core-APIs>`.
 
 The rocDecode utility classes are exposed in header files in the |utilsfolder|_ folder of the `rocDecode project <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode>`_. 
 
