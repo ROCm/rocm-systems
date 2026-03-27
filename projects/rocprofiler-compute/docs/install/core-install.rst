@@ -219,17 +219,17 @@ configuration.
 .. tip::
 
    To always run ROCm Compute Profiler with a particular version of Python, you can create a
-   bash alias. For example, to run ROCm Compute Profiler with Python 3.10, you can run the
+   bash alias. For example, to run ROCm Compute Profiler with Python 3.8, you can run the
    following command:
 
    .. code-block:: shell
 
-      alias rocprof-compute-mypython="/usr/bin/python3.10 /opt/rocm/bin/rocprof-compute"
+      alias rocprof-compute-mypython="/usr/bin/python3.8 /opt/rocm/bin/rocprof-compute"
 
 .. _core-install-rocprof-var:
 
 Configuring the environment for profiling
-------------------------------------------
+-----------------------------------------
 
 ROCm Compute Profiler supports two profiling backends, selectable via the ``ROCPROF`` environment variable.
 
@@ -252,7 +252,7 @@ Both backends build on the same underlying ROCprofiler-SDK infrastructure. The `
 .. _core-install-native-tool:
 
 Native counter collection tool
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 When using the ``rocprofiler-sdk`` backend on ROCm 7.0 or later, ROCm Compute Profiler also injects a native counter collection tool (``librocprofiler-compute-tool.so``) alongside the SDK tool via ``LD_PRELOAD``. This tool is a shared library built as part of ROCm Compute Profiler that directly uses the ROCprofiler-SDK public C API to collect hardware performance counter data per kernel dispatch.
 
