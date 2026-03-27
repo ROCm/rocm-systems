@@ -2891,10 +2891,19 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
                         load_failures++;
                     }
                 }
-            } else {
-                /* Fallback: load as RLC_G for older headers */
+            }
+
+            /* ALWAYS load RLC_G (type 8) from the common header — tinygrad does this
+             * unconditionally for ALL header versions. RLC_G is the main RLC firmware.
+             * Without it, RLC can't execute, AUTOLOAD can't distribute firmware, and
+             * EnableAllSmuFeatures can't power up GFX.
+             * Our old code only loaded RLC_G as a fallback for non-v2.2 headers,
+             * SKIPPING it for v2.2. This was the root cause of the EnableAll hang! */
+            {
                 ULONG ucode_off = rlc_hdr->ucode_array_offset_bytes;
                 ULONG ucode_sz = rlc_hdr->ucode_size_bytes;
+                pr_info("psp_ring: loading RLC_G (type=8, %u bytes at 0x%x)\n",
+                        ucode_sz, ucode_off);
                 if (ucode_off + ucode_sz <= rlc_len) {
                     ret = psp_ring_load_fw(&ctx, GFX_FW_TYPE_RLC_G,
                                             "rlc_g",
