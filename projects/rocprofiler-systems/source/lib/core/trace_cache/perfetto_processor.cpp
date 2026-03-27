@@ -1382,8 +1382,8 @@ perfetto_processor_t::handle(const ainic_sample& _ainic)
             "count");
         amd_smi_nic_req_rx_pkt_seq_err_track::emplace(
             _nic_index,
-            info::annotate_with_nic<category::amd_smi_nic_req_rx_pkt_seq_err>(
-                nic_name, _nic_index),
+            info::annotate_with_nic<category::amd_smi_nic_req_rx_pkt_seq_err>(nic_name,
+                                                                              _nic_index),
             "count");
         amd_smi_nic_req_rx_impl_nak_seq_err_track::emplace(
             _nic_index,
