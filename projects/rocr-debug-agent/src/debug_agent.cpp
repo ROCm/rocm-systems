@@ -1078,6 +1078,17 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
 
   if (need_print_waves)
     {
+      if (g_delay_loading)
+        {
+          amd_dbgapi_breakpoint_action_t bpaction;
+          DBGAPI_CHECK (amd_dbgapi_report_breakpoint_hit (
+              g_rbrk_breakpoint_id.value (), 0, &bpaction));
+
+          if (bpaction == AMD_DBGAPI_BREAKPOINT_ACTION_HALT)
+            process_dbgapi_events (process_id, all_wavefronts,
+                                   code_object_map);
+        }
+
       /* With --lazy,-z, code objects may not have been opened yet.
          Open them now so we can resolve PCs to code objects.  */
       for (auto it = code_object_map.begin (); it != code_object_map.end ();)
@@ -1608,7 +1619,8 @@ debug_agent_hsa_executable_freeze (hsa_executable_t executable,
 {
   auto v = original_hsa_executable_freeze (executable, options);
 
-  get_worker_thread ().update_code_object_list ();
+  if (!g_delay_loading)
+    get_worker_thread ().update_code_object_list ();
   return v;
 }
 
@@ -1617,7 +1629,8 @@ debug_agent_hsa_executable_destroy (hsa_executable_t executable)
 {
   auto v = original_hsa_executable_destroy (executable);
 
-  get_worker_thread ().update_code_object_list ();
+  if (!g_delay_loading)
+    get_worker_thread ().update_code_object_list ();
   return v;
 }
 
