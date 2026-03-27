@@ -294,53 +294,103 @@ class OmniSoC_Base:
         raw_counters = self.parse_counters("\n".join(snippets))
         return self._expand_tcc_template_counters(raw_counters)
 
-    def _prepend_priority_same_bucket_pass(
+    def _priority_metric_keys_for_coalescing(
         self,
-        work: list[str],
+    ) -> set[tuple[str, Any, int]]:
+        """(yaml stem id, panel id, metric index) for SoC priority metric tokens."""
+        keys: set[tuple[str, Any, int]] = set()
+        for token in self._same_bucket_priority_metric_ids():
+            tid = token.strip()
+            if not METRIC_ID_RE.match(tid):
+                continue
+            file_id, panel_id, metric_idx = convert_metric_id_to_panel_info(tid)
+            if metric_idx is None:
+                continue
+            keys.add((file_id, panel_id, metric_idx))
+        return keys
+
+    def _metric_counter_groups_for_coalescing(
+        self, active_counters: set[str]
+    ) -> list[tuple[int, int, str, str, int, str, frozenset[str]]]:
+        """
+        Build rows for metric-aware packing: sort key then frozen PMC ∩ collection.
+
+        Tuple: (priority_tier, neg_intersection_size, stem_id, panel_s, metric_idx,
+        metric_name, counters_for_metric).
+        """
+        priority_keys = self._priority_metric_keys_for_coalescing()
+        rows: list[tuple[int, int, str, str, int, str, frozenset[str]]] = []
+        for stem_id, panel_id, metric_idx, metric_name, metric_yaml in (
+            self._iter_arch_analysis_yaml_metrics()
+        ):
+            hw = self.parse_counters(metric_yaml)
+            hw = self._expand_tcc_template_counters(hw)
+            intersection = frozenset(hw & active_counters)
+            if not intersection:
+                continue
+            tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
+            neg_sz = -len(intersection)
+            panel_s = str(panel_id) if panel_id is not None else ""
+            rows.append(
+                (tier, neg_sz, stem_id, panel_s, metric_idx, metric_name, intersection)
+            )
+        rows.sort(key=lambda r: (r[0], r[1], r[2], r[3], r[4]))
+        return rows
+
+    def _metric_aware_coalesce_pass(
+        self,
+        work_set: set[str],
         output_files: list[CounterFile],
-        tcc_channel_counter_file_map: dict[str, CounterFile],
-        initial_file_count: int,
+        file_count: int,
     ) -> int:
         """
-        Pack SoC-defined priority metrics into ``pmc_perf_{n}`` before greedy fill.
-        Counters that do not fit stay in ``work`` for the default bin packer.
+        Lexicographic greedy heuristic (see ``_allocate_perfmon_counter_files`` doc):
+        place each metric’s PMC subset into the first feasible ``pmc_perf_*`` bucket,
+        else open a new bucket; overflow stays for first-fit.
         """
-        priority_ids = self._same_bucket_priority_metric_ids()
-        if not priority_ids:
-            return initial_file_count
-        priority_needed = self._expanded_hw_counters_for_metric_ids(priority_ids)
-        priority_in_run = sorted(c for c in work if c in priority_needed)
-        if not priority_in_run:
-            return initial_file_count
-
-        file_count = initial_file_count
-        priority_file = CounterFile(
-            f"pmc_perf_{file_count}.txt", self.__perfmon_config
-        )
-        overflow: list[str] = []
-        for ctr in priority_in_run:
-            if priority_file.add(ctr):
-                work.remove(ctr)
-                if is_tcc_channel_counter(ctr):
-                    tcc_channel_counter_file_map[ctr.split("[")[0]] = priority_file
+        if not work_set:
+            return file_count
+        cfg = self.__perfmon_config
+        for (
+            _tier,
+            _neg_sz,
+            stem_id,
+            panel_s,
+            metric_idx,
+            metric_name,
+            group,
+        ) in self._metric_counter_groups_for_coalescing(work_set):
+            need_sorted = sorted(c for c in group if c in work_set)
+            if not need_sorted:
+                continue
+            placed = False
+            for bucket_idx, bucket in enumerate(output_files):
+                if not _is_general_perfmon_bucket(bucket):
+                    continue
+                trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
+                if trial is not None:
+                    output_files[bucket_idx] = trial
+                    for ctr in need_sorted:
+                        work_set.discard(ctr)
+                    placed = True
+                    break
+            if placed:
+                continue
+            new_bucket = CounterFile(f"pmc_perf_{file_count}.txt", cfg)
+            trial = _trial_counter_file_with_extra(new_bucket, cfg, need_sorted)
+            if trial is not None and _flat_counters_in_perfmon_file(trial):
+                output_files.append(trial)
+                file_count += 1
+                for ctr in need_sorted:
+                    work_set.discard(ctr)
             else:
-                overflow.append(ctr)
-
-        if overflow:
-            sample = overflow[:12]
-            suffix = "…" if len(overflow) > 12 else ""
-            console_warning(
-                "profiling",
-                "Same-bucket priority metrics: not all PMCs fit in one perfmon pass "
-                f"({len(overflow)} counter(s) use default packing): "
-                f"{', '.join(sample)}{suffix}",
-            )
-
-        if not _flat_counters_in_perfmon_file(priority_file):
-            return initial_file_count
-
-        output_files.append(priority_file)
-        return file_count + 1
+                console_debug(
+                    "profiling",
+                    f"Metric-aware pack: cannot fit all PMCs for "
+                    f"{stem_id}.{panel_s}.{metric_idx} ({metric_name!r}) in one "
+                    f"bucket; deferring to first-fit.",
+                )
+        return file_count
 
     @demarcate
     def detect_counters(self) -> tuple[set[str], list[str]]:
@@ -441,9 +491,18 @@ class OmniSoC_Base:
         """
         Bin-pack counters into perfmon buckets (same layout as perfmon_coalesce).
 
-        After per-level dedicated files, optionally pre-allocates ``pmc_perf_0`` for
-        SoC priority metrics (see ``_same_bucket_priority_metric_ids``) before the
-        default greedy first-fit pass.
+        **Problem shape (informal).** Let each bucket be a vector-capacity bin (one
+        scalar limit per IP block). Counters consume one unit in their block’s
+        dimension. Each analysis metric induces a hyperedge over the counters it
+        references. Two goals are in tension: minimize the number of buckets, and
+        maximize metrics whose hyperedge is contained in a single bucket. That is a
+        multi-objective combinatorial problem; exact resolution is NP-hard (vector
+        bin packing plus co-location bonuses). This implementation uses a
+        **lexicographic greedy heuristic**: metric-aware whole-metric placement
+        (priority tier from ``_same_bucket_priority_metric_ids``, then larger
+        counter sets first) into existing ``pmc_perf_*`` buckets or a new bucket,
+        then classic first-fit for leftovers. See project docs / reviews for ILP
+        and partitioning alternatives.
         """
         output_files: list[CounterFile] = []
         accu_file_count = 0
@@ -465,12 +524,12 @@ class OmniSoC_Base:
         file_count = 0
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
-        file_count = self._prepend_priority_same_bucket_pass(
-            work,
-            output_files,
-            tcc_channel_counter_file_map,
-            file_count,
+        work_set = set(work)
+        file_count = self._metric_aware_coalesce_pass(
+            work_set, output_files, file_count
         )
+        work = sorted(work_set)
+        tcc_channel_counter_file_map = _rebuild_tcc_channel_file_map(output_files)
 
         for ctr in work:
             if is_tcc_channel_counter(ctr):
@@ -1050,6 +1109,48 @@ class CounterFile:
             block = "SQ"
 
         return self.blocks[block].add(counter)
+
+
+def _is_general_perfmon_bucket(bucket: CounterFile) -> bool:
+    """True for standard multi-counter passes; false for LEVEL-only files."""
+    return bucket.file_name_txt.startswith("pmc_perf_")
+
+
+def _clone_counter_file(
+    source: CounterFile,
+    perfmon_config: dict[str, int],
+) -> CounterFile:
+    duplicate = CounterFile(source.file_name_txt, perfmon_config)
+    for ctr in _flat_counters_in_perfmon_file(source):
+        if not duplicate.add(ctr):
+            msg = f"clone replay failed for {ctr!r} in {source.file_name_txt}"
+            raise RuntimeError(msg)
+    return duplicate
+
+
+def _trial_counter_file_with_extra(
+    basis: CounterFile,
+    perfmon_config: dict[str, int],
+    extra_counters_sorted: list[str],
+) -> CounterFile | None:
+    """Return a clone of ``basis`` with ``extra_counters_sorted`` appended, or None."""
+    trial = _clone_counter_file(basis, perfmon_config)
+    for ctr in extra_counters_sorted:
+        if not trial.add(ctr):
+            return None
+    return trial
+
+
+def _rebuild_tcc_channel_file_map(
+    output_files: list[CounterFile],
+) -> dict[str, CounterFile]:
+    """Map TCC counter base name to the bucket that holds its channel instances."""
+    result: dict[str, CounterFile] = {}
+    for bucket in output_files:
+        for ctr in _flat_counters_in_perfmon_file(bucket):
+            if is_tcc_channel_counter(ctr):
+                result[ctr.split("[")[0]] = bucket
+    return result
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
