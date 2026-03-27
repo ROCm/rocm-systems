@@ -368,7 +368,16 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
                                    uint32_t numGrids = 0, uint64_t prevGridSum = 0,
                                    uint64_t allGridSum = 0, uint32_t firstDevice = 0) {
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
-  amd::Kernel* kernel = function->kernel();
+
+  // Select the best kernel variant based on block size
+  amd::Kernel* kernel = function->selectVariant(launch_params.local_[0], launch_params.local_[1],
+                                                launch_params.local_[2]);
+
+  // Safety check: ensure selected kernel is valid
+  if (kernel == nullptr) {
+    LogPrintfError("Selected kernel variant is nullptr for function %s", function->name().c_str());
+    return hipErrorInvalidResourceHandle;
+  }
 
   size_t globalWorkOffset[3] = {0};
   amd::NDRangeContainer ndrange(3, globalWorkOffset, launch_params.global_.Data(),
@@ -582,6 +591,8 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  // Variant selection is handled automatically in ihipLaunchKernelCommand
+  // via DeviceFunc::selectVariant(), so we don't need to manually select here
   HIP_RETURN(
       ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, nullptr, nullptr));
 }
@@ -668,6 +679,8 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  // Variant selection is handled automatically in ihipLaunchKernelCommand
+  // via DeviceFunc::selectVariant(), so we don't need to manually select here
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, stream, kernelParams, nullptr, nullptr,
                                     nullptr, 0, amd::NDRangeKernelCommand::CooperativeGroups));
 }

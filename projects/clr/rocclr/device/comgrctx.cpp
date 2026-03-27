@@ -120,6 +120,9 @@ bool Comgr::LoadLib(bool is_versioned) {
   GET_COMGR_SYMBOL(amd_comgr_action_info_set_device_lib_linking)
   GET_COMGR_SYMBOL(amd_comgr_lookup_code_object)
   GET_COMGR_OPTIONAL_SYMBOL(amd_comgr_action_info_set_bundle_entry_ids)
+  GET_COMGR_OPTIONAL_SYMBOL(amd_comgr_action_info_set_block_sizes)
+  GET_COMGR_OPTIONAL_SYMBOL(amd_comgr_action_info_get_block_sizes_count)
+  GET_COMGR_OPTIONAL_SYMBOL(amd_comgr_action_info_get_block_sizes)
   is_ready_ = true;
   size_t major = 0, minor = 0;
   get_version(&major, &minor);

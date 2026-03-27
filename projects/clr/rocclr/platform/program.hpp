@@ -90,6 +90,7 @@ class Program : public RuntimeObject {
   std::vector<std::string> headers_;
   std::string sourceCode_;   //!< Strings that make up the source code
   Language language_;        //!< Input source language
+  bool mayHaveVariants_;     //!< Whether this program may contain block size variants
   devicebinary_t binary_;    //!< The binary image, provided by the app
   symbols_t* symbolTable_;   //!< The program's kernels symbol table
   std::string kernelNames_;  //!< The program kernel names
@@ -116,6 +117,7 @@ class Program : public RuntimeObject {
       : context_(context),
         sourceCode_(sourceCode),
         language_(language),
+        mayHaveVariants_(false),
         symbolTable_(NULL),
         programLog_(),
         programLock_(true) /* Program lock */ {
@@ -129,6 +131,7 @@ class Program : public RuntimeObject {
   Program(Context& context, Language language = Binary)
       : context_(context),
         language_(language),
+        mayHaveVariants_(false),
         symbolTable_(NULL),
         programLock_(true) /* Program lock */ {}
 
@@ -158,6 +161,12 @@ class Program : public RuntimeObject {
 
   //! Return the program language.
   const Language language() const { return language_; }
+
+  //! Return whether this program may contain block size variants.
+  bool mayHaveVariants() const { return mayHaveVariants_; }
+
+  //! Set whether this program may contain block size variants.
+  void setMayHaveVariants(bool has_variants) { mayHaveVariants_ = has_variants; }
 
   //! Append to source code.
   void appendToSource(const char* newCode) { sourceCode_.append(newCode); }

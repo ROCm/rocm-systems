@@ -109,12 +109,80 @@ DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod)
   guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name.c_str());
 
   kernel_ = new amd::Kernel(*program, *symbol, name);
+
+  // Dynamic modules may have block size variants from COMGR cloning, so we will query for those
+  // and populate block_size_variants_. Only search for variants in programs that may contain them
+  // (i.e., SPIR-V programs compiled with block size variants enabled).
+
+  if (program->mayHaveVariants()) {
+    LogPrintfInfo("DeviceFunc: Searching for block size variants for kernel '%s'", name.c_str());
+
+    // Search for block size variants with .bs<size> suffix (e.g. kernel.bs512 for a 512-thread
+    // variant of "kernel")
+    std::vector<uint32_t> variant_sizes = {32, 64, 256, 512};
+
+    block_size_variants_.reserve(variant_sizes.size());  // Optimistic reservation.
+    for (uint32_t block_size : variant_sizes) {
+      std::string variant_name = name + ".bs" + std::to_string(block_size);
+      const amd::Symbol* variant_symbol = program->findSymbol(variant_name.c_str());
+
+      if (variant_symbol == nullptr) {
+        continue;  // No variant for this block size, skip it.
+      }
+
+      amd::Kernel* variant_kernel = new amd::Kernel(*program, *variant_symbol, variant_name);
+
+      if (variant_kernel == nullptr) {
+        LogPrintfError("Failed to create kernel for variant %s", variant_name.c_str());
+        continue;
+      }
+
+      block_size_variants_.emplace_back(block_size, variant_kernel);
+    }
+
+    if (!block_size_variants_.empty()) {
+      LogPrintfInfo("Kernel %s has %zu block size variants", name.c_str(),
+                    block_size_variants_.size());
+    }
+  }
 }
 
 DeviceFunc::~DeviceFunc() {
   if (kernel_ != nullptr) {
     kernel_->release();
   }
+  // Clean up all block size variants
+  for (auto& [size, variant_kernel] : block_size_variants_) {
+    if (variant_kernel != nullptr) {
+      variant_kernel->release();
+    }
+  }
+}
+
+amd::Kernel* DeviceFunc::selectVariant(uint32_t block_size_x, uint32_t block_size_y,
+                                       uint32_t block_size_z) const {
+  if (!hasVariants()) return kernel_;  // Return primary kernel
+
+  // Calculate total threads in block
+  uint32_t total_threads = block_size_x * block_size_y * block_size_z;
+
+  // Find the smallest variant that can accommodate the launch
+  // Assumes that block_size_variants_ is sorted in ascending order of block size
+  for (const auto& [max_size, variant] : block_size_variants_) {
+    // Variant is valid if the launch size fits within its max
+    // First one that matches this requirement will be the best variant due to sorting
+    if (total_threads <= max_size) {
+      // Safety check: ensure variant kernel is valid
+      if (variant == nullptr) {
+        LogPrintfError("Variant kernel for max_size=%u is nullptr, continuing", max_size);
+        continue;
+      }
+      return variant;
+    }
+  }
+
+  // No suitable variant found, use primary kernel
+  return kernel_;
 }
 
 // Abstract functions

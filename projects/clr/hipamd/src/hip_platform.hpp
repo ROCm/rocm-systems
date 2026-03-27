@@ -37,6 +37,8 @@ class PlatformState {
   hipError_t UnloadModule(hipModule_t hmod);
   bool IsValidDynFunc(const void* hfunc);
   hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, const char* func_name);
+  hipError_t GetDynFuncWithBlockSize(hipFunction_t* hfunc, hipModule_t hmod, const char* func_name,
+                                     size_t blockSize);
   hipError_t GetFuncCount(unsigned int* count, hipModule_t hmod);
   hipError_t GetDynGlobalVar(const char* hostVar, hipModule_t hmod, hipDeviceptr_t* dev_ptr,
                              size_t* size_ptr);

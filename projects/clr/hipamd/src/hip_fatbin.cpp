@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "hip/hip_runtime_api.h"
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
+#include <algorithm>
 #include <unordered_map>
 #include <mutex>
 #include "hip_code_object.hpp"
@@ -532,6 +533,13 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
         std::string target_id = device->devices()[0]->isa().targetId();
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
 
+        // Get device warp size for compilation variants
+        int warp_size = static_cast<int>(device->devices()[0]->info().wavefrontWidth_);
+
+        // Define block sizes to compile: 1024, 512, 256, and device warp size
+        // The new COMGR API will clone kernels for each block size with appropriate attributes
+        std::vector<size_t> block_sizes = {1024, 512, 256, static_cast<size_t>(warp_size)};
+
         comgr_helper::ComgrDataSetUniqueHandle spirv_data_set;
         comgr_helper::ComgrDataSetUniqueHandle reloc_data;
         comgr_helper::ComgrDataUniqueHandle spirv_data;
@@ -553,6 +561,17 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
         if (spirv_isa_handle == code_obj_map.end()) {
           spirv_isa_handle = code_obj_map.find(spirv_isa_name_empty);
         }
+
+        // Debug: check if SPIR-V was found and its first bytes
+        if (spirv_isa_handle != code_obj_map.end()) {
+          const uint32_t* magic = reinterpret_cast<const uint32_t*>(spirv_isa_handle->second.first);
+          LogPrintfInfo("Found SPIR-V code object: size=%zu, first 4 bytes=0x%08x",
+                        spirv_isa_handle->second.second, magic[0]);
+        } else {
+          LogError("SPIR-V code object not found in bundle");
+          break;
+        }
+
         if (auto comgr_status =
                 amd::Comgr::set_data(spirv_data.get(), spirv_isa_handle->second.second /* size */,
                                      reinterpret_cast<const char*>(spirv_isa_handle->second.first)
@@ -586,6 +605,24 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
 
+        // Check if block size variants are enabled (default: enabled)
+        static bool disable_variants = []() -> bool {
+          const char* env_val = getenv("HIP_DISABLE_BLOCKSIZE_VARIANTS");
+          return env_val != nullptr && atoi(env_val) != 0;
+        }();
+        if (!disable_variants) {
+          // Set the block sizes for kernel cloning
+          if (auto comgr_status = amd::Comgr::action_info_set_block_sizes(
+                  reloc_action.get(), block_sizes.data(), block_sizes.size());
+              comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+            LogError("Failed to set block sizes for kernel cloning");
+            break;
+          }
+          LogPrintfInfo("Enabled kernel cloning for block sizes: 1024, 512, 256, %u", warp_size);
+        } else {
+          LogPrintfInfo("Block size variants disabled via HIP_DISABLE_BLOCKSIZE_VARIANTS");
+        }
+
         if (auto comgr_status = reloc_data.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
           LogError("Failed to create reloc data");
           break;
@@ -602,10 +639,11 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
                 amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE,
                                       reloc_action.get(), spirv_data_set.get(), reloc_data.get());
             comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to compile spirv to reloc");
+          LogPrintfError("Failed to compile SPIRV to relocatable (status=%d)", comgr_status);
           break;
         }
 
+        // Link all relocatable objects together into a single executable
         comgr_helper::ComgrActionInfoUniqueHandle exe_action;
         comgr_helper::ComgrDataSetUniqueHandle exe_output;
         if (auto comgr_status = exe_action.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
@@ -657,7 +695,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
 
-        hip_status = AddDevProgram(device, co, co_size, 0);
+        hip_status = AddDevProgram(device, co, co_size, 0, !disable_variants);
         if (hip_status != hipSuccess) {
           break;
         }
@@ -748,7 +786,8 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
 }
 
 hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_image,
-                                        size_t binary_size, size_t binary_offset) {
+                                        size_t binary_size, size_t binary_offset,
+                                        bool has_variants) {
   int devID = device->deviceId();
   amd::Context* ctx = device->asContext();
   amd::Program* program = new amd::Program(*ctx);
@@ -756,6 +795,12 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
   if (program == nullptr) {
     return hipErrorOutOfMemory;
   }
+
+  // Mark programs that may contain block size variants
+  if (has_variants) {
+    program->setMayHaveVariants(true);
+  }
+
   if (CL_SUCCESS !=
       program->addDeviceProgram(*ctx->devices()[0], binary_image, binary_size, false, nullptr,
                                 nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()),

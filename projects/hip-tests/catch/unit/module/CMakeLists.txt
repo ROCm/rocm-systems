@@ -229,9 +229,19 @@ if(HIP_PLATFORM MATCHES "amd")
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
     #target_link_libraries(addKernel-bundle.spv hip::host hip::device)
+    
+    # Compile kernel for block size variant testing
+    add_custom_target(blocksize_variant_kernel.spv
+                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only --offload-arch=amdgcnspirv
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/blocksize_variant_kernel.cpp
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/blocksize_variant_kernel.spv
+                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+    
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-    ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
+    ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
+    ${CMAKE_CURRENT_BINARY_DIR}/blocksize_variant_kernel.spv)
   endif()
 
 
@@ -411,6 +421,7 @@ set(TEST_SRC
 set(AMD_TEST_SRC
     hipExtLaunchKernelGGL.cc
     hipExtLaunchMultiKernelMultiDevFunctional.cc
+    hipModuleBlockSizeVariants.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -515,3 +526,7 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS testhipModuleLoadUnloa
 
 add_dependencies(module managed_kernel.code vcpy_kernel.code matmul.code kernel_composite_test.code
 testhipModuleLoadUnloadFunc_exe)
+
+if(NOT WIN32)
+  add_dependencies(module blocksize_variant_kernel.spv)
+endif()

@@ -30,6 +30,26 @@ module:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+  Unit_hipModuleBlockSizeVariants_VerifyVariantsCreated:
+    <<: *level_2
+    # AMD-only: SPIR-V kernel variant selection feature  
+    disabled: [nvidia_linux, nvidia_windows]
+  Unit_hipModuleBlockSizeVariants_GetFunctions:
+    <<: *level_2
+    # AMD-only: SPIR-V kernel variant selection feature
+    disabled: [nvidia_linux, nvidia_windows]
+  Unit_hipModuleBlockSizeVariants_LaunchWithDifferentBlockSizes:
+    <<: *level_2
+    # AMD-only: SPIR-V kernel variant selection feature
+    disabled: [nvidia_linux, nvidia_windows]
+  Unit_hipModuleBlockSizeVariants_VectorAddWithVariants:
+    <<: *level_2
+    # AMD-only: SPIR-V kernel variant selection feature
+    disabled: [nvidia_linux, nvidia_windows]
+  Unit_hipModuleBlockSizeVariants_RespectMaxBlockSizeAttribute:
+    <<: *level_2
+    # AMD-only: SPIR-V kernel variant selection feature
+    disabled: [nvidia_linux, nvidia_windows]
   Unit_hipExtLaunchKernelGGL_Functional: *level_2
   Unit_hipModuleLoadDataEx_Positive_Basic:
     <<: *level_2

@@ -56,9 +56,18 @@ class DeviceFunc {
   std::string name() const { return name_; }
   amd::Kernel* kernel() const { return kernel_; }
 
+  // Block size variant support
+  amd::Kernel* selectVariant(uint32_t block_size_x, uint32_t block_size_y,
+                             uint32_t block_size_z) const;
+  bool hasVariants() const { return !block_size_variants_.empty(); }
+
  private:
   std::string name_;     // name of the func(not unique identifier)
-  amd::Kernel* kernel_;  // Kernel ptr referencing to ROCclr Symbol
+  amd::Kernel* kernel_;  // Kernel ptr referencing to ROCclr Symbol (primary/largest variant)
+
+  // Collection of block size variants: max_block_size & kernel
+  // e.g., 512 & kernel.bs512, 256 & kernel.bs256, 64 & kernel.bs64
+  std::vector<std::pair<uint32_t, amd::Kernel*>> block_size_variants_;
 };
 
 // Abstract Structures

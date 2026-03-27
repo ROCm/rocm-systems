@@ -37,7 +37,7 @@ class FatBinaryInfo {
   hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices);
   hipError_t ExtractKpackBinary(const std::vector<hip::Device*>& devices);
   hipError_t AddDevProgram(hip::Device* device, const void* binary_image, size_t binary_size,
-                           size_t binary_offset);
+                           size_t binary_offset, bool has_variants = false);
   hipError_t BuildProgram(const int device_id);
 
   // Device Id bounds check

@@ -119,6 +119,12 @@ typedef amd_comgr_status_t (*t_amd_comgr_action_info_set_device_lib_linking)(
     amd_comgr_action_info_t action_info, bool link_device_lib);
 typedef amd_comgr_status_t (*t_amd_comgr_action_info_set_bundle_entry_ids)(
     amd_comgr_action_info_t action_info, const char* bundle_entry_ids[], size_t count);
+typedef amd_comgr_status_t (*t_amd_comgr_action_info_set_block_sizes)(
+    amd_comgr_action_info_t action_info, const size_t* block_sizes, size_t count);
+typedef amd_comgr_status_t (*t_amd_comgr_action_info_get_block_sizes_count)(
+    amd_comgr_action_info_t action_info, size_t* count);
+typedef amd_comgr_status_t (*t_amd_comgr_action_info_get_block_sizes)(
+    amd_comgr_action_info_t action_info, size_t* block_sizes);
 typedef amd_comgr_status_t (*t_amd_comgr_set_data_from_file_slice)(amd_comgr_data_t data, int fd,
                                                                    uint64_t offset, uint64_t size);
 typedef amd_comgr_status_t (*t_amd_comgr_lookup_code_object)(amd_comgr_data_t data,
@@ -181,6 +187,9 @@ struct ComgrEntryPoints {
   t_amd_comgr_map_name_expression_to_symbol_name amd_comgr_map_name_expression_to_symbol_name;
   t_amd_comgr_action_info_set_device_lib_linking amd_comgr_action_info_set_device_lib_linking;
   t_amd_comgr_action_info_set_bundle_entry_ids amd_comgr_action_info_set_bundle_entry_ids;
+  t_amd_comgr_action_info_set_block_sizes amd_comgr_action_info_set_block_sizes;
+  t_amd_comgr_action_info_get_block_sizes_count amd_comgr_action_info_get_block_sizes_count;
+  t_amd_comgr_action_info_get_block_sizes amd_comgr_action_info_get_block_sizes;
   t_amd_comgr_set_data_from_file_slice amd_comgr_set_data_from_file_slice;
   t_amd_comgr_lookup_code_object amd_comgr_lookup_code_object;
 };
@@ -400,6 +409,42 @@ class Comgr : public amd::AllStatic {
   static amd_comgr_status_t action_info_set_device_lib_linking(amd_comgr_action_info_t action_info,
                                                                bool link_device_lib) {
     return COMGR_DYN(amd_comgr_action_info_set_device_lib_linking)(action_info, link_device_lib);
+  }
+  static amd_comgr_status_t action_info_set_block_sizes(amd_comgr_action_info_t action_info,
+                                                        const size_t* block_sizes, size_t count) {
+#if defined(COMGR_DYN_DLL)
+    if (cep_.amd_comgr_action_info_set_block_sizes == nullptr) {
+      // comgr version without block sizes API is loaded
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "Failed to load COMGR function amd_comgr_action_info_set_block_sizes");
+      return AMD_COMGR_STATUS_ERROR;
+    }
+#endif
+    return COMGR_DYN(amd_comgr_action_info_set_block_sizes)(action_info, block_sizes, count);
+  }
+  static amd_comgr_status_t action_info_get_block_sizes_count(amd_comgr_action_info_t action_info,
+                                                              size_t* count) {
+#if defined(COMGR_DYN_DLL)
+    if (cep_.amd_comgr_action_info_get_block_sizes_count == nullptr) {
+      // comgr version without block sizes API is loaded
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "Failed to load COMGR function amd_comgr_action_info_get_block_sizes_count");
+      return AMD_COMGR_STATUS_ERROR;
+    }
+#endif
+    return COMGR_DYN(amd_comgr_action_info_get_block_sizes_count)(action_info, count);
+  }
+  static amd_comgr_status_t action_info_get_block_sizes(amd_comgr_action_info_t action_info,
+                                                        size_t* block_sizes) {
+#if defined(COMGR_DYN_DLL)
+    if (cep_.amd_comgr_action_info_get_block_sizes == nullptr) {
+      // comgr version without block sizes API is loaded
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "Failed to load COMGR function amd_comgr_action_info_get_block_sizes");
+      return AMD_COMGR_STATUS_ERROR;
+    }
+#endif
+    return COMGR_DYN(amd_comgr_action_info_get_block_sizes)(action_info, block_sizes);
   }
   static amd_comgr_status_t set_data_from_file_slice(amd_comgr_data_t data, int fd, uint64_t offset,
                                                      uint64_t size) {
