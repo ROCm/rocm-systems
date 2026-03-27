@@ -27,7 +27,7 @@ concurrency:
 
 env:
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.2.0"
+  ROCM_NIGHTLY_PATH: "/opt/rocm-nightly"
   PYTHON_VENV_PATH: "aqlprofile"
   PYTHON_VENV_ACTIVATE: "aqlprofile/bin/activate"
   navi3_EXCLUDE_TESTS_REGEX: ""
@@ -81,9 +81,14 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
-        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+        rocm_install_path="${{ env.ROCM_NIGHTLY_PATH }}"
+        rocm_tarball="${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz"
+        rm -rf "${rocm_install_path}"
+        mkdir -p "${rocm_install_path}"
+        tar -xf "${rocm_tarball}" -C "${rocm_install_path}"
+        rm -rf "${{ env.ROCM_PATH }}"
+        ln -s "${rocm_install_path}" "${{ env.ROCM_PATH }}"
+        echo "ROCm installed to: ${rocm_install_path}"
         ln -s -f /usr/bin/git /usr/local/bin/git
 
     - uses: actions/checkout@v5
@@ -164,9 +169,14 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
-        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+        rocm_install_path="${{ env.ROCM_NIGHTLY_PATH }}"
+        rocm_tarball="${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz"
+        rm -rf "${rocm_install_path}"
+        mkdir -p "${rocm_install_path}"
+        tar -xf "${rocm_tarball}" -C "${rocm_install_path}"
+        rm -rf "${{ env.ROCM_PATH }}"
+        ln -s "${rocm_install_path}" "${{ env.ROCM_PATH }}"
+        echo "ROCm installed to: ${rocm_install_path}"
 
     - name: Install requirements
       timeout-minutes: 10
