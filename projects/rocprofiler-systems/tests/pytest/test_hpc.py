@@ -10,7 +10,7 @@ import pytest
 from conftest import RocprofsysTest
 from pathlib import Path
 
-pytestmark = [pytest.mark.hpc, pytest.mark.rocm]
+pytestmark = [pytest.mark.hpc]
 
 
 # =============================================================================
@@ -137,6 +137,7 @@ class TestJacobi(RocprofsysTest):
                 depths=[1],
             )
 
+    @pytest.mark.rocm
     @pytest.mark.openmp
     @pytest.mark.roctx
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
@@ -164,6 +165,7 @@ class TestJacobi(RocprofsysTest):
             depths=[1, 1],
         )
 
+    @pytest.mark.rocm
     @pytest.mark.hip
     @pytest.mark.mpi
     @pytest.mark.rocpd("hpc_hip_environment")
@@ -205,6 +207,7 @@ class TestJacobi(RocprofsysTest):
         )
 
 
+@pytest.mark.rocm
 @pytest.mark.gpu
 @pytest.mark.hip
 @pytest.mark.openmp
@@ -251,6 +254,7 @@ class TestMatrixExponential(RocprofsysTest):
         )
 
 
+@pytest.mark.rocm
 @pytest.mark.gpu
 @pytest.mark.hip
 class TestSplitCopyComputeHWQueues(RocprofsysTest):
