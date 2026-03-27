@@ -3,13 +3,13 @@
 
 # -------------------------------------------------------------------------------------- #
 #
-# KFD event tests using jacobi-fortran-usm (requires XNACK-capable GPU)
+# KFD event tests using unified-memory (requires XNACK-capable GPU)
 #
 # -------------------------------------------------------------------------------------- #
 
-if(NOT TARGET jacobi-fortran-usm)
+if(NOT TARGET unified-memory)
     rocprofiler_systems_message(
-        WARNING "KFD tests disabled: jacobi-fortran-usm target not available"
+        WARNING "KFD tests disabled: unified-memory target not available"
     )
     return()
 endif()
@@ -22,7 +22,8 @@ endif()
 check_rocminfo("xnack" _XNACK_SUPPORTED)
 if(NOT _XNACK_SUPPORTED)
     rocprofiler_systems_message(
-        WARNING "KFD tests disabled: GPU does not support XNACK (required for KFD page fault/migrate events)"
+        WARNING
+            "KFD tests disabled: GPU does not support XNACK (required for KFD page fault/migrate events)"
     )
     return()
 endif()
@@ -30,7 +31,6 @@ endif()
 set(_kfd_environment
     "${_base_environment}"
     "HSA_XNACK=1"
-    "OMPX_APU_MAPS=1"
     "ROCPROFSYS_USE_AMD_SMI=OFF"
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,kfd_events"
 )
@@ -41,21 +41,21 @@ endif()
 
 # -------------------------------------------------------------------------------------- #
 #
-# KFD sampling test — runs jacobi-fortran-usm with KFD event tracing
+# KFD sampling test — runs unified-memory with KFD event tracing
 #
 # -------------------------------------------------------------------------------------- #
 
 rocprofiler_systems_add_test(
     SKIP_REWRITE SKIP_RUNTIME
-    NAME kfd-jacobi-usm
-    TARGET jacobi-fortran-usm
+    NAME kfd-unified-memory
+    TARGET unified-memory
     GPU ON
     MPI OFF
     NUM_PROCS 1
-    RUN_ARGS -m 512
+    RUN_ARGS -s 8 -p 64 -i 4
     ENVIRONMENT "${_kfd_environment}"
     LABELS "kfd"
-    PASS_REGEX "Total Jacobi run time:"
+    PASS_REGEX "All 16 tests completed"
 )
 
 # -------------------------------------------------------------------------------------- #
@@ -65,9 +65,9 @@ rocprofiler_systems_add_test(
 # -------------------------------------------------------------------------------------- #
 
 rocprofiler_systems_add_validation_test(
-    NAME kfd-jacobi-usm-sampling
+    NAME kfd-unified-memory-sampling
     PERFETTO_FILE "perfetto-trace.proto"
-    ARGS -m kfd_page_fault kfd_page_migrate kfd_queue -p
+    ARGS -m kfd_page_fault kfd_page_migrate kfd_queue kfd_event_unmap_from_gpu -p
     LABELS "kfd"
 )
 
@@ -77,11 +77,11 @@ rocprofiler_systems_add_validation_test(
 #
 # -------------------------------------------------------------------------------------- #
 
-if(${ENABLE_ROCPD_TEST} AND TEST kfd-jacobi-usm-sampling)
-    set_property(TEST kfd-jacobi-usm-sampling APPEND PROPERTY LABELS rocpd kfd)
+if(${ENABLE_ROCPD_TEST} AND TEST kfd-unified-memory-sampling)
+    set_property(TEST kfd-unified-memory-sampling APPEND PROPERTY LABELS rocpd kfd)
 
     rocprofiler_systems_add_validation_test(
-        NAME kfd-jacobi-usm-sampling
+        NAME kfd-unified-memory-sampling
         ROCPD_FILE "rocpd.db"
         ARGS --validation-rules
             "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
