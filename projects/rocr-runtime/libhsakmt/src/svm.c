@@ -80,7 +80,7 @@ hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
 			continue;
 		}
 
-		r = hsakmt_validate_nodeid(ctx, attrs[i].value, &args->attrs[i].value);
+		r = hsakmt_validate_nodeid(attrs[i].value, &args->attrs[i].value);
 		if (r != HSAKMT_STATUS_SUCCESS) {
 			pr_debug("invalid node ID: %d\n", attrs[i].value);
 			return r;
@@ -140,7 +140,7 @@ hsaKmtSVMGetAttrCtx(HsaKFDContext *ctx,
 		    attrs[i].type != KFD_IOCTL_SVM_ATTR_NO_ACCESS)
 		    continue;
 
-		r = hsakmt_validate_nodeid(ctx, attrs[i].value, &args->attrs[i].value);
+		r = hsakmt_validate_nodeid(attrs[i].value, &args->attrs[i].value);
 		if (r != HSAKMT_STATUS_SUCCESS) {
 			pr_debug("invalid node ID: %d\n", attrs[i].value);
 			return r;
@@ -175,7 +175,7 @@ hsaKmtSVMGetAttrCtx(HsaKFDContext *ctx,
 			attrs[i].value = INVALID_NODEID;
 			break;
 		default:
-			r = hsakmt_gpuid_to_nodeid(ctx, attrs[i].value, &attrs[i].value);
+			r = hsakmt_gpuid_to_nodeid(attrs[i].value, &attrs[i].value);
 			if (r != HSAKMT_STATUS_SUCCESS) {
 				pr_debug("invalid GPU ID: %d\n",
 					 attrs[i].value);
