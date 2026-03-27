@@ -42,7 +42,7 @@ rocprofiler_register_add_option(
 rocprofiler_register_add_option(
     ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT
     "Enable attachment by default, instead of requiring an environment variable when the application starts"
-    OFF)
+    ON)
 
 # In the future, we will do this even with clang-tidy enabled
 if(ROCPROFILER_REGISTER_BUILD_CI
