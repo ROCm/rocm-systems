@@ -148,12 +148,12 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::high_resolution_clock::now();
     if (mode == READ) {
-        hipLaunchKernelGGL(io_read_kernel, grid, block, 0, 0, data, d_out, N);
+        io_read_kernel<<<grid, block>>>(data, d_out, N);
     } else if (mode == WRITE) {
-        hipLaunchKernelGGL(io_write_kernel, grid, block, 0, 0, data, N);
+        io_write_kernel<<<grid, block>>>(data, N);
     } else {
         // RW and OPT use same kernel (different memory backing)
-        hipLaunchKernelGGL(io_rw_kernel, grid, block, 0, 0, data, d_out, N);
+        io_rw_kernel<<<grid, block>>>(data, d_out, N);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();

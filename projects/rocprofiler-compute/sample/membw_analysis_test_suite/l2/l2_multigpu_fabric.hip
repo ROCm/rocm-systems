@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
     if (ndevices < 2) {
         std::cerr << "ERROR: This workload requires >= 2 GPUs. Found " << ndevices << ".\n";
         std::cerr << "Skipping. Run on a multi-GPU system.\n";
-        return 1;
+        return 0;
     }
 
     int local_gpu = 0;
@@ -171,14 +171,11 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::high_resolution_clock::now();
     if (mode == READ) {
-        hipLaunchKernelGGL(fabric_read_kernel, grid, block, 0, 0,
-                           d_remote, d_local_out, N);
+        fabric_read_kernel<<<grid, block>>>(d_remote, d_local_out, N);
     } else if (mode == WRITE) {
-        hipLaunchKernelGGL(fabric_write_kernel, grid, block, 0, 0,
-                           d_remote, N);
+        fabric_write_kernel<<<grid, block>>>(d_remote, N);
     } else {
-        hipLaunchKernelGGL(fabric_rw_kernel, grid, block, 0, 0,
-                           d_remote, d_local_out, N);
+        fabric_rw_kernel<<<grid, block>>>(d_remote, d_local_out, N);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();

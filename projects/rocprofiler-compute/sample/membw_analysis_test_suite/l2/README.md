@@ -28,7 +28,7 @@ Each workload targets specific TCC perfmon counters exposed in the new L2 metric
 | l2_hbm_read_bw_stress | L2-EA read credit stall (HBM), L2-EA read BW, HBM read fraction, L2 hit rate, L2 Cache Efficiency | Streaming reads over 4x L2 buffer. Every access misses L2 -> EA read -> HBM. Exhausts DRAM read credits. | Reads small tile fitting in L2 -> high hit rate, no credit stalls. |
 | l2_hbm_write_bw_stress | L2-EA write credit stall (HBM), L2-EA write stall, TOO_MANY_EA_WRREQS_STALL, SRC_FIFO_FULL, writeback rate | Streaming writes over 4x L2 buffer. Write-allocate + eviction of dirty lines -> max EA write traffic. | Writes small region in L2 -> dirty lines stay cached, minimal writeback. |
 | l2_cache_thrash | TAG_STALL, IB_STALL, LATENCY_FIFO_FULL, eviction rate, Back Pressure Indicator, Internal Resource Pressure | Scattered RMW on 1.5x L2 buffer (prime stride). Fills latency FIFO, causes tag stalls, IB stalls (backpressure). | Coalesced RMW on small working set -> all hits, no stalls. |
-| l2_atomic_stress | EA0_ATOMIC, EA0_ATOMIC_LEVEL (atomic latency), TCC_ATOMIC | High-contention atomicAdd on 1024 cachelines across 2x L2 buffer. Forces EA atomic path with high per-atomic latency. | Low-contention atomics (1 per thread) on L2-fitting tile. |
+| l2_atomic_stress | EA0_ATOMIC, EA0_ATOMIC_LEVEL (atomic latency), TCC_ATOMIC | High-contention atomicAdd on 1024 cachelines across 2x L2 buffer. Forces EA atomic path with high per-atomic latency. | Regular RMW (no atomics) on L2-fitting tile. Each thread works on its own cacheline. |
 | l2_coherence_traffic | NC_REQ, UC_REQ, CC_REQ, PROBE, PROBE_EVICT | `fg` mode: fine-grained memory (CC type) -> coherence protocol, internal probes. `nc` mode: `__builtin_nontemporal_store` -> NC traffic. | Coarse-grained memory with normal cached accesses. |
 | l2_multigpu_fabric | EA0_RDREQ_GMI_CREDIT_STALL, EA0_WRREQ_GMI_CREDIT_STALL, Remote Access Pressure (IF) | GPU 0 reads/writes memory on GPU 1 via P2P -> Infinity Fabric (GMI) credit exhaustion. | N/A (requires 2 GPUs) |
 | l2_io_stress | EA0_RDREQ_IO_CREDIT_STALL, EA0_WRREQ_IO_CREDIT_STALL | GPU kernel accesses host-pinned memory (hipHostMalloc) -> PCIe/IO credit exhaustion. | Same kernel on device-local memory. |
@@ -44,7 +44,7 @@ Each workload targets specific TCC perfmon counters exposed in the new L2 metric
 | l2_hbm_write_bw_stress | L2 writeback rate | >30% | <5% |
 | l2_cache_thrash | L2 tag stall rate | >10% | <5% |
 | l2_cache_thrash | L2 Back Pressure Indicator | >10% | <5% |
-| l2_atomic_stress | L2-EA atomic latency | >100 cyc | <20 cyc |
+| l2_atomic_stress | L2-EA atomic latency | >100 cyc | N/A (no atomics) |
 | l2_coherence_traffic (fg) | Coherent cached req rate | >50% | <5% |
 | l2_io_stress | L2-EA read credit stall (IO) | >5% | <1% |
 | l2_normalized_throughput | Combined Credit Pressure | >10% | <1% |

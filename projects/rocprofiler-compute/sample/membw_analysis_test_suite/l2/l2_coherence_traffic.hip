@@ -36,9 +36,9 @@
 //   UC (uncached) or CC (coherent cached) requests, elevating TCC_UC_REQ
 //   and/or TCC_CC_REQ. The kernel does read-modify-write on this memory.
 //
-//   Baseline (mode=nc): Uses hipExtMallocWithFlags(hipDeviceMallocFinegrained)
-//   if available, or falls back to __builtin_nontemporal_store on coarse-
-//   grained memory to generate non-coherent streaming traffic (TCC_NC_REQ).
+//   Baseline (mode=nc): Attempts hipExtMallocWithFlags(hipDeviceMallocFinegrained),
+//   falling back to hipMalloc if unavailable. The kernel unconditionally uses
+//   __builtin_nontemporal_store to generate non-coherent streaming traffic (TCC_NC_REQ).
 //
 //   Optimized: Standard coarse-grained hipMalloc with normal cached accesses.
 //   Most requests will be normal cached (not NC/UC/CC).
@@ -161,11 +161,11 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::high_resolution_clock::now();
     if (mode == FG) {
-        hipLaunchKernelGGL(coherence_fg_baseline, grid, block, 0, 0, d_data, N);
+        coherence_fg_baseline<<<grid, block>>>(d_data, N);
     } else if (mode == NC) {
-        hipLaunchKernelGGL(coherence_nc_baseline, grid, block, 0, 0, d_data, N);
+        coherence_nc_baseline<<<grid, block>>>(d_data, N);
     } else {
-        hipLaunchKernelGGL(coherence_optimized, grid, block, 0, 0, d_data, N);
+        coherence_optimized<<<grid, block>>>(d_data, N);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();

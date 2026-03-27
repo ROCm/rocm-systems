@@ -69,7 +69,7 @@ size_t getL2CacheSize() {
 // Baseline: High-contention atomics on scattered addresses > L2 size.
 // num_targets is small, so many threads compete
 // on the same addresses. Buffer > L2 means atomics often go to EA.
-__global__ void atomic_stress_baseline(float* __restrict__ data,
+__global__ void l2_stress_with_atomic(float* __restrict__ data,
                                         long long N, int num_targets) {
     long long tid = (long long)blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -95,7 +95,7 @@ __global__ void atomic_stress_baseline(float* __restrict__ data,
 // fits in L2. Each thread works on its own cacheline. No EA atomic
 // traffic is generated. This contrasts with the baseline which sends
 // all operations through the EA atomic path.
-__global__ void atomic_stress_optimized(float* __restrict__ data,
+__global__ void l2_stress_without_atomic(float* __restrict__ data,
                                          long long N, long long tile_elems) {
     long long tid = (long long)blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -135,11 +135,9 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::high_resolution_clock::now();
     if (use_optimized) {
-        hipLaunchKernelGGL(atomic_stress_optimized, grid, block, 0, 0,
-                           d_data, N, tile_elems);
+        l2_stress_without_atomic<<<grid, block>>>(d_data, N, tile_elems);
     } else {
-        hipLaunchKernelGGL(atomic_stress_baseline, grid, block, 0, 0,
-                           d_data, N, num_targets);
+        l2_stress_with_atomic<<<grid, block>>>(d_data, N, num_targets);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();

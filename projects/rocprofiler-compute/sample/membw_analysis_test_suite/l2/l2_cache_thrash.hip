@@ -139,11 +139,9 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::high_resolution_clock::now();
     if (use_optimized) {
-        hipLaunchKernelGGL(cache_thrash_optimized, grid, block, 0, 0,
-                           d_data, N, tile_elems);
+        cache_thrash_optimized<<<grid, block>>>(d_data, N, tile_elems);
     } else {
-        hipLaunchKernelGGL(cache_thrash_baseline, grid, block, 0, 0,
-                           d_data, N);
+        cache_thrash_baseline<<<grid, block>>>(d_data, N);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();

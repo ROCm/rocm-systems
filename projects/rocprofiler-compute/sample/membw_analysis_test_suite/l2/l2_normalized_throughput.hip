@@ -139,11 +139,9 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::high_resolution_clock::now();
     if (use_optimized) {
-        hipLaunchKernelGGL(normalized_stress_optimized, grid, block, 0, 0,
-                           d_data, N);
+        normalized_stress_optimized<<<grid, block>>>(d_data, N);
     } else {
-        hipLaunchKernelGGL(normalized_stress_baseline, grid, block, 0, 0,
-                           d_data, N);
+        normalized_stress_baseline<<<grid, block>>>(d_data, N);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();
