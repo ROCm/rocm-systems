@@ -134,8 +134,6 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   }
 
   // for coalesced_groups, the mask is simply the activemask
-  // for tiled groups, it is legal for some threads in a tile to not participate so we also
-  // need to apply the active mask
   mask &= __activemask();
 
   if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
