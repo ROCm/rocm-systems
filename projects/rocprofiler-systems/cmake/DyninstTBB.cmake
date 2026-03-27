@@ -6,6 +6,11 @@
 #
 # Configure Intel's Threading Building Blocks for Dyninst
 #
+# Common CMake inputs: ROCPROFSYS_BUILD_TBB, TBB_ROOT_DIR, TBB_INCLUDEDIR,
+# TBB_LIBRARYDIR, TBB_USE_DEBUG_BUILD, TBB_MIN_VERSION.
+# Exported cache vars include TBB_INCLUDE_DIRS, TBB_LIBRARY_DIRS, TBB_LIBRARIES.
+# See cmake/Modules/FindTBB.cmake when using system packages.
+#
 # =====================================================================================
 
 include_guard(GLOBAL)
@@ -87,12 +92,13 @@ if(TBB_FOUND)
     set(TBB_ROOT ${TBB_ROOT_DIR})
 elseif(STERILE_BUILD)
     rocprofiler_systems_message(
-        FATAL_ERROR "TBB not found and cannot be downloaded because build is sterile."
+        FATAL_ERROR
+            "TBB not found and cannot be built from the external submodule because the build is sterile."
     )
 elseif(NOT ROCPROFSYS_BUILD_TBB)
     rocprofiler_systems_message(
         FATAL_ERROR
-        "TBB was not found. Either configure cmake to find TBB properly or set ROCPROFSYS_BUILD_TBB=ON to download and build"
+            "TBB was not found. Either configure CMake to find a suitable system TBB or set ROCPROFSYS_BUILD_TBB=ON to build from the external/onetbb submodule"
     )
 else()
     # Verify oneTBB submodule is initialized
@@ -100,7 +106,7 @@ else()
         RELATIVE_PATH external/onetbb
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         TEST_FILE CMakeLists.txt
-        REPO_URL https://github.com/oneapi-src/oneTBB.git
+        REPO_URL https://github.com/uxlfoundation/oneTBB.git
         REPO_BRANCH "v2022.3.0"
     )
 
@@ -119,7 +125,6 @@ else()
     set(TBB_ROOT_DIR ${TPL_STAGING_PREFIX}/tbb CACHE PATH "TBB root directory" FORCE)
 
     set(_tbb_libraries)
-    set(_tbb_components_cfg)
     set(_tbb_library_dirs
         $<BUILD_INTERFACE:${TBB_ROOT_DIR}/lib>
         $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}>
