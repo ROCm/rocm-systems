@@ -1045,7 +1045,11 @@ def test_roof_standalone_benchmark():
 
     # Save current and roofline directories, cd into roofline
     current_path = os.getcwd()
-    roof_path = str(Path(__file__).parent.parent) + "/src/roofline/"
+    # path for testing from libexec
+    roof_path = str(Path(__file__).parent.parent) + "/roofline/"
+    if not os.path.exists(roof_path):
+        # path for testing from build folder
+        roof_path = str(Path(__file__).parent.parent) + "/src/roofline/"
     os.chdir(roof_path)
 
     # Run benchmark, capture log
