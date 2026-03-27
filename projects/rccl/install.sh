@@ -285,6 +285,7 @@ fi
 
 # Build for specified GPU target(s) only
 if [[ ! -z "${build_amdgpu_targets}" ]]; then
+    build_amdgpu_targets="${build_amdgpu_targets//,/;}"
     cmake_common_options="${cmake_common_options} -DGPU_TARGETS=${build_amdgpu_targets}"
 fi
 
