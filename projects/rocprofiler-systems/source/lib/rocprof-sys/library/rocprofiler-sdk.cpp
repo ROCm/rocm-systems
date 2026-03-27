@@ -79,11 +79,11 @@ namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
-client_data* tool_data = new client_data{};
 
 namespace
 {
 using tool_agent_vec_t = std::vector<tool_agent>;
+client_data* tool_data = new client_data{};
 
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
@@ -2178,42 +2178,42 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
                         header->payload);
-                tool_kfd_page_fault_callback(record);
+                tool_kfd_page_fault_callback(tool_data, record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
                         header->payload);
-                tool_kfd_page_migrate_callback(record);
+                tool_kfd_page_migrate_callback(tool_data, record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
                         header->payload);
-                tool_kfd_queue_callback(record);
+                tool_kfd_queue_callback(tool_data, record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
                         header->payload);
-                tool_kfd_event_queue_callback(record);
+                tool_kfd_event_queue_callback(tool_data, record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
             {
                 auto* record = static_cast<
                     rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
                     header->payload);
-                tool_kfd_event_unmap_from_gpu_callback(record);
+                tool_kfd_event_unmap_from_gpu_callback(tool_data, record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
             {
                 auto* record = static_cast<
                     rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
                     header->payload);
-                tool_kfd_event_dropped_events_callback(record);
+                tool_kfd_event_dropped_events_callback(tool_data, record);
             }
 #endif
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
@@ -2636,7 +2636,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
        _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0 ||
        _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
     {
-        rocprofiler_sdk::kfd_event_metadata_initialize();
+        rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
     }
 
     if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0)

@@ -685,14 +685,22 @@ rocpd_processor_t::handle(const kfd_sample& _kfd)
                                     _kfd.start_timestamp, _kfd.end_timestamp,
                                     name_primary_key, event_primary_key);
 
-    auto agent_primary_key =
-        m_agent_manager
-            ->get_agent_by_type_index(_kfd.device_id,
-                                      static_cast<agent_type>(_kfd.device_type))
-            .base_id;
+    try
+    {
+        auto agent_primary_key =
+            m_agent_manager
+                ->get_agent_by_type_index(_kfd.device_id,
+                                          static_cast<agent_type>(_kfd.device_type))
+                .base_id;
 
-    m_data_processor->insert_pmc_event(event_primary_key, agent_primary_key,
-                                       _kfd.pmc_info_name.c_str(), _kfd.value, "{}");
+        m_data_processor->insert_pmc_event(event_primary_key, agent_primary_key,
+                                           _kfd.pmc_info_name.c_str(), _kfd.value, "{}");
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
+                    "device_type={}: {}",
+                    _kfd.device_id, _kfd.device_type, e.what());
+    }
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
