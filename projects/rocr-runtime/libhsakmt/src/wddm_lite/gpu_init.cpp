@@ -5695,139 +5695,35 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
             }
 
             /*
-             * Splice our GART PTEs into the VBIOS GFXHUB page table.
+             * Restore VBIOS PT_BASE if it was changed by a previous run.
+             * The early diag reads the current PT_BASE, but between runs
+             * (without power cycle), a previous PT switch may have left
+             * our GART table as the active PT. Restore to the known-good
+             * VBIOS PT address (0x86c750001 from VBIOS POST).
              *
-             * The VBIOS PT covers the same VA range as our GART
-             * (0x87f8000000-0x8817ffffff = 512MB = 131072 pages).
-             * It has firmware VA PTEs that we must preserve (for MEC
-             * instruction fetch), but its GART range entries are stale.
+             * The VBIOS PT covers VA range 0x87f8000000-0x8817ffffff and
+             * has firmware VA PTEs (installed by AUTOLOAD) that are
+             * essential for MEC instruction fetch.
              *
-             * Strategy: map the VBIOS PT physical memory into our GART
-             * (MMHUB), then overwrite its entries with our GART PTEs.
-             * This gives GFXHUB both firmware VA PTEs and our queue
-             * buffer PTEs.
-             *
-             * The VBIOS PT is 1MB (131072 * 8 bytes) at the physical
-             * address encoded in PT_BASE register.
+             * Known VBIOS PT_BASE for RX 9070 XT: 0x00000008_6c750001
+             * TODO: detect this dynamically at first boot.
              */
-            if (dev->hw.gmc.gart_table_cpu_addr != NULL &&
-                dev->hw.gmc.gart_table_bus_addr != 0) {
-                /* Extract VBIOS PT physical address from PT_BASE register.
-                 * Format: LO[31:0] | HI[15:0]<<32, bit 0 = valid flag.
-                 * Physical address is bits [47:12] << 12 (4KB aligned). */
-                ULONGLONG vbios_pt_phys =
-                    ((ULONGLONG)pt_hi << 32) | (pt_lo & ~0x1ULL);
-                /* Align to 4KB page (clear low 12 bits) */
-                vbios_pt_phys &= ~0xFFFULL;
-
-                ULONG vbios_pt_pages = (131072 * 8 + 4095) / 4096;  /* 256 pages for 1MB */
-                pr_info("gpu_gfx: VBIOS PT at phys 0x%llx (%u pages)\n",
-                        (unsigned long long)vbios_pt_phys, vbios_pt_pages);
-
-                /* Map VBIOS PT into our GART to get CPU access via MMHUB.
-                 * We temporarily use GART slots for this mapping. */
-                ULONGLONG vbios_pt_bus_pages[256];
-                for (ULONG i = 0; i < vbios_pt_pages; i++) {
-                    vbios_pt_bus_pages[i] = vbios_pt_phys + i * 4096;
-                }
-
-                ULONGLONG vbios_pt_gpu = gpu_gart_map(dev, vbios_pt_bus_pages,
-                                                       vbios_pt_pages);
-                if (vbios_pt_gpu != 0) {
-                    pr_info("gpu_gfx: VBIOS PT mapped to GART at GPU 0x%llx\n",
-                            (unsigned long long)vbios_pt_gpu);
-
-                    /* Now copy our GART PTEs into the VBIOS PT.
-                     * Our GART table is at gart_table_cpu_addr (CPU mapped).
-                     * The VBIOS PT is at the same GART offset in the mapped pages.
-                     *
-                     * But we need CPU access to the VBIOS PT — we mapped it
-                     * through GART/MMHUB for GPU access, but for CPU we need
-                     * the DMA mapping. Actually, the GART map gives us a GPU
-                     * address, not CPU address. We need a different approach.
-                     *
-                     * Alternative: since both PTs have the same structure,
-                     * write our PTE values directly to the VBIOS PT physical
-                     * pages by temporarily replacing GART PTEs.
-                     *
-                     * Simplest approach: the VBIOS PT bus address (0x86c750000)
-                     * might be accessible as a DMA buffer. Let's use
-                     * MmMapIoSpace equivalent via our escape interface.
-                     * For now, use a simpler approach: overwrite the GART PTE
-                     * entries that map the VBIOS PT region. Each GART PTE at
-                     * our table maps a 4KB page. We write our GART PTEs
-                     * to the VBIOS PT by setting up a temporary mapping. */
-
-                    /* Unmap the temporary GART mapping */
-                    gpu_gart_unmap(dev, vbios_pt_gpu, vbios_pt_pages);
-
-                    /* For now: copy our GART PTEs to VBIOS PT using
-                     * direct physical memory access via SMN.
-                     * SMN can access physical system memory on GFX12.
-                     * The GART table is 1MB (131072 * 8 bytes = 256 pages).
-                     * Each PTE is 8 bytes (64-bit). We write 131072 PTEs. */
-
-                    /* Read our GART PTEs from CPU-mapped table */
-                    volatile ULONGLONG *our_ptes =
-                        (volatile ULONGLONG *)dev->hw.gmc.gart_table_cpu_addr;
-
-                    /* We can't easily write to arbitrary physical memory.
-                     * But we CAN program the MMHUB page table to identity-map
-                     * the VBIOS PT address, then use a VRAM write escape.
-                     *
-                     * Simplest approach that works NOW: use the DMA-mapped
-                     * GART table pages. When we allocate GART, the pages
-                     * are DMA-mapped and CPU-accessible. The VBIOS PT is at
-                     * a different physical address.
-                     *
-                     * Since we can't easily access arbitrary physical memory,
-                     * let's try the opposite: copy the first few PTEs from
-                     * VBIOS PT (which have firmware VA entries) into our GART
-                     * table, THEN switch GFXHUB to our table.
-                     *
-                     * The firmware VA PTEs are at specific offsets in the
-                     * VBIOS PT. We need to figure out which PTE indices
-                     * map the firmware VA range. But the VBIOS PT covers
-                     * 0x87f8000000-0x8817ffffff — firmware VA 0x7000000003000
-                     * is NOT in this range! So the VBIOS PT can't have
-                     * firmware VA PTEs. The firmware VA must be resolved
-                     * through a DIFFERENT mechanism (system aperture? or
-                     * a different PT range?).
-                     *
-                     * WAIT: if firmware VA is outside the PT range, then
-                     * the PT isn't used for firmware VA! It must use the
-                     * system aperture or LOCAL_INSTR_BASE. But we proved
-                     * switching PT broke instruction fetch... unless the
-                     * TLB flush invalidated cached firmware VA translations.
-                     *
-                     * Let's try: switch to our GART PT but DON'T flush TLB.
-                     * Firmware VA translations stay in TLB cache. GART
-                     * addresses get translated through our PTEs.
-                     */
-                    pr_info("gpu_gfx: switching GFXHUB PT to our GART "
-                            "(NO TLB flush to preserve firmware VA cache)\n");
-
-                    ULONGLONG gart_bus = dev->hw.gmc.gart_table_bus_addr;
-                    ULONG new_pt_lo = (ULONG)(gart_bus & 0xFFFFFFFE) | 0x1;
-                    ULONG new_pt_hi = (ULONG)(gart_bus >> 32);
-
+            {
+                ULONG expected_lo = 0x6c750001;
+                ULONG expected_hi = 0x00000008;
+                if (pt_lo != expected_lo || pt_hi != expected_hi) {
+                    pr_warn("gpu_gfx: GFXHUB PT_BASE was changed "
+                            "(0x%08x_%08x != expected 0x%08x_%08x), "
+                            "restoring VBIOS PT\n",
+                            pt_hi, pt_lo, expected_hi, expected_lo);
                     gfxhub_wreg(dev,
-                        regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, new_pt_lo);
+                        regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32,
+                        expected_lo);
                     gfxhub_wreg(dev,
-                        regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, new_pt_hi);
-
-                    /* DO NOT flush TLB — firmware VA translations are cached
-                     * in TLB and we need them to stay. New GART accesses will
-                     * miss TLB and go to our new PT. */
-
-                    ULONG rb_lo2 = gfxhub_rreg(dev,
-                        regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32);
-                    ULONG rb_hi2 = gfxhub_rreg(dev,
-                        regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32);
-                    pr_info("gpu_gfx: GFXHUB PT_BASE = 0x%08x_%08x "
-                            "(our GART, no TLB flush)\n", rb_hi2, rb_lo2);
-                } else {
-                    pr_warn("gpu_gfx: failed to map VBIOS PT through GART\n");
+                        regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32,
+                        expected_hi);
+                    flush_gpu_tlb(dev, 0, 1);
+                    pr_info("gpu_gfx: VBIOS PT_BASE restored + TLB flushed\n");
                 }
             }
         } else {
