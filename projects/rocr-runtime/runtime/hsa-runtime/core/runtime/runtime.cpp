@@ -56,6 +56,7 @@
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
+#include "core/util/timer.h"
 
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
 #include <rocprofiler-register/rocprofiler-register.h>
@@ -1840,9 +1841,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     assert(async_events_.handler_[index] != nullptr);
     bool keep = async_events_.handler_[index](value, async_events_.arg_[index]);
     if (!keep) {
-      if (!wait_any) {
-        hsa_signals[index]->WaitingDec();
-      }
       hsa_signal_handle(async_events_.signal_[index])->Release();
       async_events_.CopyIndex(index, async_events_.Size() - 1);
       async_events_.PopBack();
@@ -1895,15 +1893,15 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           Signal::WaitAnyExceptions(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                     &async_events_.cond_[0], &async_events_.value_[0], &value[0]);
     } else {
-     if (core::Runtime::runtime_singleton_->flag().wait_any()) {
-       index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
+      if (core::Runtime::runtime_singleton_->flag().wait_any()) {
+        index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                     &async_events_.cond_[0], &async_events_.value_[0], uint64_t(-1),
                                     HSA_WAIT_STATE_BLOCKED, value, false);
-     } else {
-      // Skip wake-up signal logic
-      index = 1;
-      wait_any = false;
-     }
+      } else {
+        // Skip wake-up signal logic
+        index = 1;
+        wait_any = false;
+      }
     }
 
     // Reset the control signal
@@ -1920,14 +1918,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       bool polling = false;
       bool init_age = true;
 
-      // Mark all signals with a waiting tag
-      // @note: Waiting tag must be marked before the signal state check on CPU to
-      // avoid a possible race condition between KFD sleep and rocr's awake call
-      if (!wait_any) {
-        for (size_t e = 0; e < async_events_.Size(); e++) {
-          hsa_signals[e]->WaitingInc();
-        }
-      }
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
         if (wait_any) {
@@ -1969,16 +1959,59 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         }
         // If nothing was complete and an interrupt wait was requested, then call KFD
         if (interrupt_wait) {
-          WaitForInterrupt();
+          // Active poll before the expensive kernel wait, matching WaitMultiple's
+          // 200us polling window. During this window, new async handlers can wake
+          // the thread via atomic stores on the wake signal without needing the
+          // expensive(~1.5us) hsaKmtSetEvent ioctl call.
+          timer::fast_clock::time_point start_time = timer::fast_clock::now();
+          const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
+
+          while (true) {
+            for (size_t pi = 0; pi < async_events_.Size(); pi++) {
+              auto pval = atomic::Load(&hsa_signals[pi]->signal_.value,
+                                       std::memory_order_relaxed);
+              if (CheckSignalCondition(pval, async_events_.cond_[pi],
+                                       async_events_.value_[pi])) {
+                finish = true;
+                break;
+              }
+            }
+            if (finish) break;
+
+            if (timer::fast_clock::now() - start_time < kMaxElapsed) {
+              continue;
+            }
+
+            // Polling window expired — mark signals as waiting before kernel sleep.
+            // WaitingInc must be set before re-checking signal values to avoid
+            // a race where a producer's StoreRelease skips hsaKmtSetEvent.
+            for (size_t e = 0; e < async_events_.Size(); e++) {
+              hsa_signals[e]->WaitingInc();
+            }
+
+            // Re-check all signals after WaitingInc to close the race window
+            for (size_t ri = 0; ri < async_events_.Size(); ri++) {
+              auto rval = atomic::Load(&hsa_signals[ri]->signal_.value,
+                                       std::memory_order_relaxed);
+              if (CheckSignalCondition(rval, async_events_.cond_[ri],
+                                       async_events_.value_[ri])) {
+                finish = true;
+                break;
+              }
+            }
+
+            if (!finish) {
+              WaitForInterrupt();
+            }
+
+            for (size_t e = 0; e < async_events_.Size(); e++) {
+              // Remove waiting tag from events
+              hsa_signals[e]->WaitingDec();
+            }
+            break;
+          }
           init_age = false;
         }
-      }
-    }
-
-    if (!wait_any) {
-      // Remove the waiting tags from events
-      for (size_t e = 0; e < async_events_.Size(); e++) {
-        hsa_signals[e]->WaitingDec();
       }
     }
 
@@ -2405,7 +2438,7 @@ Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
 }
 
 Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
-  : info_(asyncInfo), exit(false) {
+  : exit(false), info_(asyncInfo) {
 
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)

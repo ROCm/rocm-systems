@@ -397,9 +397,11 @@ typedef struct hsa_amd_aie_ert_packet_s {
    */
   uint64_t reserved4;
   /**
-   * Reserved. Must be 0.
+   * Signal used to indicate completion of the command. When the command has
+   * finished, the runtime decrements the signal value. The application can use
+   * the special signal handle 0 to indicate that no completion signal is used.
    */
-  uint64_t reserved5;
+  hsa_signal_t completion_signal;
   /**
    * Address of packet data payload. ERT commands contain arbitrarily sized
    * data payloads.
@@ -3730,7 +3732,7 @@ typedef enum {
  * To minimize internal memory fragmentation, align the size to the recommended allocation granule
  * size, see HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE
  *
- * @param[in] pool memory to use
+ * @param[in] pool memory to use. Only GPU agent pools are supported.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
  * @param[in] flags - currently unsupported

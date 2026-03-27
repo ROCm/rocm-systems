@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import rocpd_data, schema
+from utils import schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -239,7 +239,7 @@ def create_df_pmc(
                 tmp_df = pd.read_csv(csv_file)
 
                 if config_dict.get("format_rocprof_output") == "rocpd":
-                    tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
+                    tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
 
                 # Demangle original KernelNames
                 # Skip for Standalone Roofline with -1 to keep full kernel names
