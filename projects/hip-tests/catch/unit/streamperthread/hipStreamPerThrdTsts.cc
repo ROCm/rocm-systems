@@ -240,7 +240,7 @@ static void EventSync() {
 
 /* Launch a kernel in hipStreamPerThread, while it is in flight check for
    hipStreamQuery(hipStreamPerThread) it should return hipErrorNotReady.*/
-TEST_CASE(Unit_hipStreamPerThreadTst_StrmQuery) {
+HIP_TEST_CASE(Unit_hipStreamPerThreadTst_StrmQuery) {
   int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
   int blockSize = 32, peak_clk;
   hipError_t err;
@@ -289,7 +289,7 @@ TEST_CASE(Unit_hipStreamPerThreadTst_StrmQuery) {
 }
 
 /* Testing hipStreamPerThread stream object with hipMallocManaged() memory*/
-TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
+HIP_TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
   int managed = 0;
   HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
   if (managed == 1) {
@@ -340,7 +340,7 @@ TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
 
 /*  To check the working of hipStreamPerThread in forked process*/
 #ifdef __linux__
-TEST_CASE(Unit_hipStreamPerThread_ChildProc) {
+HIP_TEST_CASE(Unit_hipStreamPerThread_ChildProc) {
   if (fork() == 0) {  //  child process
     int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
     int blockSize = 32, peak_clk;
@@ -389,7 +389,7 @@ TEST_CASE(Unit_hipStreamPerThread_ChildProc) {
 
 /* The following test case tests the working of hipEventSynchronize in
    multiple threads which are launched in quick succession*/
-TEST_CASE(Unit_hipStreamPerThread_EvtRcrdMThrd) {
+HIP_TEST_CASE(Unit_hipStreamPerThread_EvtRcrdMThrd) {
   IfTestPassed = true;
   int MAX_THREAD_CNT = 20;
   std::vector<std::thread> threads(MAX_THREAD_CNT);
@@ -404,7 +404,7 @@ TEST_CASE(Unit_hipStreamPerThread_EvtRcrdMThrd) {
 
 /* The following test case checks the working of hipStreamWaitEvent() with
    hipStreamWaitEvent()*/
-TEST_CASE(Unit_hipStreamPerThread_StrmWaitEvt) {
+HIP_TEST_CASE(Unit_hipStreamPerThread_StrmWaitEvt) {
   IfTestPassed = true;
   int *Ad = nullptr, NumElms = 4096, CONST_NUM = 123, blockSize = 32, *Ah = nullptr;
   int *Ad1 = nullptr, *Ah1 = nullptr;
@@ -469,7 +469,7 @@ TEST_CASE(Unit_hipStreamPerThread_StrmWaitEvt) {
 
 
 /* Testing hipLaunchCooperativeKernel() api with hipStreamPerThread*/
-TEST_CASE(Unit_hipStreamPerThread_CoopLaunch) {
+HIP_TEST_CASE(Unit_hipStreamPerThread_CoopLaunch) {
   hipDeviceProp_t device_properties;
   HIPCHECK(hipGetDeviceProperties(&device_properties, 0));
   /* Test whether target device supports cooperative groups ****************/

@@ -50,7 +50,7 @@ static void RunBenchmark(hipStream_t stream) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipEventRecord) {
+HIP_TEST_CASE(Performance_hipEventRecord) {
   SECTION("default stream") { RunBenchmark(nullptr); }
 
   SECTION("created stream") {

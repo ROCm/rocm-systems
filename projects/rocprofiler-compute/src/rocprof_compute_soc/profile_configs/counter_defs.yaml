@@ -7731,6 +7731,16 @@ rocprofiler-sdk:
       - gfx950
       block: TCC
       event: 87
+  - name: TCC_PROBE_EVICT_sum
+    description: Number of evictions/invalidations due to probes. Not windowable. Sum over TCC instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: reduce(TCC_PROBE_EVICT,sum)
   - name: TCC_PROBE_sum
     description: Number of probe requests. Not windowable. Sum over TCC instances.
     properties: []
@@ -9715,6 +9725,13 @@ rocprofiler-sdk:
       - gfx950
       block: TCP
       event: 63
+  - name: TCP_CACHE_MISS_sum
+    description: Total L1 cache miss requests sent from this TCP to all TCCs. Sum over TCP instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      expression: reduce(TCP_CACHE_MISS,sum)
   - name: TCP_TCP_TA_ADDR_STALL_CYCLES
     description: TCP stalls TA addr interface.
     properties: []

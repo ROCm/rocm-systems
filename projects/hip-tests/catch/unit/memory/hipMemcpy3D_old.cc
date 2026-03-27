@@ -514,8 +514,7 @@ template <typename T> void Memcpy3D<T>::simple_Memcpy3D() {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE(Unit_hipMemcpy3D_multiDevice_Negative) {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemcpy3D_multiDevice_Negative) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {

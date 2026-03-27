@@ -71,6 +71,7 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 PingPongTester::PingPongTester(TesterArguments args) : Tester(args) {
   r_buf = (int *)rocshmem_malloc(sizeof(int) * args.num_wgs);
+  rtt_factor = 2;
 }
 
 PingPongTester::~PingPongTester() { rocshmem_free(r_buf); }

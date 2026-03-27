@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from unittest import mock
 
@@ -63,10 +41,7 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     arch_config.dfs_type = {401: "metric_table", 402: "metric_table"}
 
     pmc_data = pd.DataFrame({"Kernel_Name": [kernel_name]})
-    filtered_pmc = pd.concat({"pmc_perf": pmc_data}, axis=1)
-    monkeypatch.setattr(
-        "utils.roofline_calc.apply_filters", lambda *a, **kw: filtered_pmc
-    )
+    pmc_df = pd.concat({"pmc_perf": pmc_data}, axis=1)
 
     def mock_eval_metric(
         dfs, dfs_type, sys_info_row, roofline_peaks, pmc_data, debug, config
@@ -96,6 +71,7 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
 
     return calc_ai_analyze(
         workload=workload,
+        pmc_df=pmc_df,
         mspec=mock.MagicMock(),
         sort_type="kernels",
         config={},

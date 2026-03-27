@@ -381,7 +381,7 @@ bool testPrintfMultGPU(int numOfGPUs, uint32_t num_blocks, uint32_t threads_per_
 #endif
 }  // namespace hipPrintfStressTest
 
-TEST_CASE(Stress_printf_ComplexKernelMultStream) {
+HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
 #ifdef __linux__
   printf("Test - Stress_printf_ComplexKernelMultStream start\n");
   bool TestPassed = true;
@@ -403,7 +403,7 @@ TEST_CASE(Stress_printf_ComplexKernelMultStream) {
 #endif
 }
 
-TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
+HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
 #ifdef __linux__
   printf("Test - Stress_printf_ComplexKernelMultStreamMultGpu start \n");
   bool TestPassed = true;

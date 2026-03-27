@@ -31,7 +31,7 @@
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Positive_Basic) {
   SignalExternalSemaphoreCommon(GraphExtSemaphoreSignalWrapper<true>);
 }
 
@@ -52,7 +52,7 @@ TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Timeline_Semaphore) {
+HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Timeline_Semaphore) {
   SignalExternalTimelineSemaphoreCommon(GraphExtSemaphoreSignalWrapper<true>);
 }
 
@@ -70,7 +70,7 @@ TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Tim
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Multiple_Semaphores) {
+HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Multiple_Semaphores) {
   SignalExternalMultipleSemaphoresCommon(GraphExtSemaphoreSignalWrapper<true>);
 }
 #endif
@@ -89,7 +89,7 @@ TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Mul
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters) {
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

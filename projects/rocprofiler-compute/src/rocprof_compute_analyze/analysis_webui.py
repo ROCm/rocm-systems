@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import copy
@@ -37,10 +15,12 @@ from dash.dependencies import Input, Output, State
 
 from config import HIDDEN_COLUMNS, PROJECT_NAME
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from roofline import Roofline
 from utils import file_io, parser, schema
 from utils.gui import build_bar_chart, build_table_chart
 from utils.gui_components.memchart import get_memchart
 from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.roofline_calc import calc_ai_analyze, validate_roofline_csv
 
 
 class webui_analysis(OmniAnalyze_Base):
@@ -169,8 +149,8 @@ class webui_analysis(OmniAnalyze_Base):
             )
             base_data[base_run].filter_top_n = top_n_filt
 
-            # Reload the pmc_kernel_top.csv for Top Stats panel
-            file_io.create_df_kernel_top_stats(
+            # Regenerate kernel top stats for Top Stats panel
+            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=base_data[base_run].raw_pmc,
                 raw_data_dir=str(self.dest_dir),
                 filter_gpu_ids=base_data[base_run].filter_gpu_ids,
@@ -178,6 +158,10 @@ class webui_analysis(OmniAnalyze_Base):
                 filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 time_unit=args.time_unit,
                 kernel_verbose=args.kernel_verbose,
+            )
+            base_data[base_run].dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+            base_data[base_run].dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = (
+                dispatch_info_df
             )
 
             # Only display basic metrics if no filters are applied
@@ -215,36 +199,70 @@ class webui_analysis(OmniAnalyze_Base):
                 get_memchart(panel_configs[300]["data source"], base_data[base_run])
             ]
 
-            has_roofline = (Path(self.dest_dir) / "roofline.csv").is_file()
+            is_roofline_valid, roofline_error_msg = validate_roofline_csv(
+                Path(self.dest_dir)
+            )
             soc = self.get_socs()
             if soc and self.arch in soc:
-                if has_roofline and hasattr(soc[self.arch], "roofline_obj"):
-                    # update roofline for visualization in GUI
-                    soc[self.arch].analysis_setup(
-                        roofline_parameters={
+                if is_roofline_valid:
+                    # Normalize user-facing "vL1D" to CSV column name "L1"
+                    mem_level = (
+                        args.mem_level
+                        if isinstance(args.mem_level, list)
+                        else [args.mem_level]
+                    )
+                    mem_level = [("L1" if m == "vL1D" else m) for m in mem_level]
+
+                    roof_obj = Roofline(
+                        args=soc[self.arch].get_args(),
+                        mspec=soc[self.arch]._mspec,
+                        run_parameters={
                             "workload_dir": self.dest_dir,
                             "device_id": 0,
-                            "sort_type": "kernels",
-                            "mem_level": "ALL",
+                            "sort_type": str(args.sort),
+                            "mem_level": mem_level,
                             "include_kernel_names": True,
                             "is_standalone": False,
                             "roofline_data_type": self.__roofline_data_type,
+                            # WebUI handles kernel filtering
+                            # client-side via Dash/Plotly
                             "kernel_filter": False,
                             "iteration_multiplexing": self._profiling_config[
                                 "iteration_multiplexing"
                             ],
-                        }
+                        },
                     )
-                    roof_obj = soc[self.arch].roofline_obj
-                    div_children.append(
-                        roof_obj.empirical_roofline(
-                            ret_df=parser.apply_filters(
-                                workload=base_data[base_run],
-                                dir_path=self.dest_dir,
-                                is_gui=True,
-                                debug=args.debug,
-                            )
-                        )
+
+                    workload = base_data[base_run]
+                    workload.path = self.dest_dir
+
+                    pmc_df = parser.apply_filters(
+                        workload, self.dest_dir, is_gui=True, debug=False
+                    )
+
+                    ai_data = calc_ai_analyze(
+                        workload=workload,
+                        pmc_df=pmc_df,
+                        mspec=soc[self.arch]._mspec,
+                        sort_type=str(args.sort),
+                        config=self._profiling_config,
+                        arch_config=arch_configs,
+                    )
+
+                    ops_fig, flops_fig, _, _ = roof_obj.construct_plotly_figures(
+                        ai_data=ai_data,
+                    )
+                    roofline_section = roof_obj.generate_html_section(
+                        ops_fig,
+                        flops_fig,
+                    )
+                    if roofline_section is not None:
+                        div_children.append(roofline_section)
+                else:
+                    console_warning(
+                        "roofline",
+                        "Skipping roofline charting: ",
+                        f"Invalid roofline.csv: {roofline_error_msg}",
                     )
 
             # Iterate over each section as defined in panel configs
@@ -372,7 +390,7 @@ class webui_analysis(OmniAnalyze_Base):
                 policy=self._profiling_config["iteration_multiplexing"],
             )
 
-        file_io.create_df_kernel_top_stats(
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=self._runs[self.dest_dir].raw_pmc,
             raw_data_dir=self.dest_dir,
             filter_gpu_ids=self._runs[self.dest_dir].filter_gpu_ids,
@@ -381,7 +399,11 @@ class webui_analysis(OmniAnalyze_Base):
             time_unit=args.time_unit,
             kernel_verbose=args.kernel_verbose,
         )
-        # create the loaded kernel stats
+        self._runs[self.dest_dir].dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        self._runs[self.dest_dir].dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = (
+            dispatch_info_df
+        )
+        # Load remaining non-metric tables (sysinfo, etc.)
         parser.load_non_mertrics_table(self._runs[self.dest_dir], self.dest_dir, args)
         # set architecture
         self.arch = self._runs[self.dest_dir].sys_info.iloc[0]["gpu_arch"]
