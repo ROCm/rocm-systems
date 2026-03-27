@@ -157,8 +157,8 @@ Building Dyninst alongside ROCm Systems Profiler
 
 To install Dyninst alongside ROCm Systems Profiler, configure ROCm Systems Profiler with ``ROCPROFSYS_BUILD_DYNINST=ON``.
 Depending on the version of Ubuntu, the ``apt`` package manager might have current enough
-versions of the Dyninst Boost, TBB, and LibIberty dependencies
-(use ``apt-get install libtbb-dev libiberty-dev libboost-dev``).
+versions of the Dyninst TBB, and LibIberty dependencies
+(use ``apt-get install libtbb-dev libiberty-dev``).
 However, it is possible to also build and install the Dyninst dependencies
 via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
 
@@ -166,7 +166,7 @@ via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
 
    git clone https://github.com/ROCm/rocm-systems.git
    cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON \
-         -DROCPROFSYS_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON \
+         -DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON \
          -S rocm-systems/projects/rocprofiler-systems
 
 where ``-DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON`` is expanded by
