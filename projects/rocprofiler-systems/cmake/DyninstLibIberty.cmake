@@ -85,6 +85,7 @@ else()
         PREFIX ${_li_root}
         URL
             ${DYNINST_BINUTILS_DOWNLOAD_URL}
+            https://ftp.gnu.org/gnu/binutils/binutils-2.46.0.tar.gz
             http://ftpmirror.gnu.org/gnu/binutils/binutils-2.46.tar.gz
             http://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.46.tar.gz
         BUILD_IN_SOURCE 1
