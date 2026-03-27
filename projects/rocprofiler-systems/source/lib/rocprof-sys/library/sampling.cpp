@@ -1101,14 +1101,14 @@ shutdown()
 void
 block_samples()
 {
-    LOG_CRITICAL("Blocking sampling...");
+    LOG_DEBUG("Blocking sampling...");
     trait::runtime_enabled<sampler_t>::set(false);
 }
 
 void
 unblock_samples()
 {
-    LOG_CRITICAL("Unblocking sampling...");
+    LOG_DEBUG("Unblocking sampling...");
     trait::runtime_enabled<sampler_t>::set(true);
 }
 
