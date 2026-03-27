@@ -108,10 +108,10 @@ The output includes a profiling plan with the exact `rocprofv3` command to run, 
 The interactive mode automates the full optimization loop: profile, analyze, AI-edit code, recompile, re-profile, compare.
 
 ```bash
-rocinsight analyze --interactive \
+rocinsight analyze \
   --source-dir ./my_app \
   --llm claude-code \
-  "./my_app"
+  --interactive "./my_app"
 ```
 
 ### What happens:
@@ -151,9 +151,10 @@ If the edit causes compilation errors, type `revert` to undo. The LLM analyzes t
 ROCInsight auto-detects MPI launchers and restructures the profiling command so each rank gets its own profiler instance.
 
 ```bash
-rocinsight analyze --interactive \
+rocinsight analyze \
   --llm claude-code \
-  "mpirun -n 8 ./multi_gpu_demo"
+  --source-dir ./src \
+  --interactive "mpirun -n 8 ./multi_gpu_demo"
 ```
 
 The tool:
@@ -332,7 +333,7 @@ Sessions auto-save to `~/.rocinsight/sessions/`. Resume any session with full co
 
 ```bash
 # Resume a prior session
-rocinsight analyze --interactive "./my_app" \
+rocinsight analyze --source-dir ./src --interactive "./my_app" \
   --resume-session ~/.rocinsight/sessions/workflow_2026-03-26_14-30-12___my_app.json
 ```
 
