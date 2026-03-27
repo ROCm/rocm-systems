@@ -5327,16 +5327,16 @@ static void configure_mec(struct WddmLiteDevice *dev)
         ULONG mec_hi = (ULONG)((dev->hw.gfx.mec_ucode_start >> 2) >> 32);
 
         /*
-         * Step 1: Disable MEC.
-         * halt + reset all pipes + deactivate. Do NOT invalidate icache —
-         * the firmware was cached by AUTOLOAD, and we need it to stay
-         * since GFXHUB uses VBIOS page tables that have the firmware VA
-         * mappings. Invalidating would force a re-fetch which works, but
-         * keeping the cache avoids unnecessary GFXHUB dependency.
+         * Step 1: Disable MEC (kernel's cp_compute_enable(false) pattern).
+         * Single write: halt + reset all pipes + deactivate + invalidate icache.
+         * The icache invalidation is REQUIRED — without it, MEC runs stale
+         * VBIOS code instead of restarting from compute firmware.
+         * This matches kernel's gfx_v12_0_cp_compute_enable(adev, false).
          */
-        ULONG disable_val = CP_MEC_RS64_CNTL__ALL_PIPE_RESET |
+        ULONG disable_val = CP_MEC_RS64_CNTL__MEC_INVALIDATE_ICACHE |
+                            CP_MEC_RS64_CNTL__ALL_PIPE_RESET |
                             CP_MEC_RS64_CNTL__MEC_HALT;
-        /* (active bits are 0 = deactivated, no icache invalidate) */
+        /* (active bits are 0 = deactivated) */
 
         ULONG cntl_before = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
         pr_info("gpu_gfx: MEC CNTL before disable = 0x%08x "
@@ -5692,6 +5692,48 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
                         sys_lo2, sys_hi2,
                         (unsigned long long)sys_lo2 << 18,
                         (unsigned long long)sys_hi2 << 18);
+            }
+
+            /*
+             * Switch GFXHUB page table to our GART table.
+             *
+             * The VBIOS GFXHUB PT covers the same VA range as our GART
+             * (0x87f8000000-0x8817ffffff) but has different PTEs (unmapped
+             * or mapped to different physical pages). MEC data access to
+             * queue buffers goes through GFXHUB and needs our GART PTEs.
+             *
+             * MEC instruction fetch goes through LOCAL_INSTR_BASE window
+             * (set by RLC during AUTOLOAD), NOT through the page table.
+             * So replacing the PT doesn't break instruction fetch.
+             *
+             * Our GART table physical address → GFXHUB PT_BASE register.
+             * Format: [47:0] = PDE with bit 0 = valid.
+             */
+            if (dev->hw.gmc.gart_table_bus_addr != 0) {
+                ULONGLONG gart_bus = dev->hw.gmc.gart_table_bus_addr;
+                ULONG new_pt_lo = (ULONG)(gart_bus & 0xFFFFFFFE) | 0x1; /* bit 0 = valid */
+                ULONG new_pt_hi = (ULONG)(gart_bus >> 32);
+
+                pr_info("gpu_gfx: switching GFXHUB PT_BASE from VBIOS to "
+                        "our GART table (bus=0x%llx)\n",
+                        (unsigned long long)gart_bus);
+
+                gfxhub_wreg(dev,
+                    regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, new_pt_lo);
+                gfxhub_wreg(dev,
+                    regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, new_pt_hi);
+
+                /* Readback verify */
+                ULONG rb_lo = gfxhub_rreg(dev,
+                    regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32);
+                ULONG rb_hi = gfxhub_rreg(dev,
+                    regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32);
+                pr_info("gpu_gfx: GFXHUB PT_BASE readback = 0x%08x_%08x\n",
+                        rb_hi, rb_lo);
+
+                /* Flush GFXHUB TLB to pick up new page table */
+                flush_gpu_tlb(dev, 0, 1);  /* VMID=0, hub=GFXHUB(1) */
+                pr_info("gpu_gfx: GFXHUB TLB flushed\n");
             }
         } else {
             /* Reinitialize GFXHUB with our GART table. */
