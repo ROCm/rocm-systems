@@ -10,6 +10,8 @@ extensions (`libpyrocpd`).
 
 ---
 
+**New to rocinsight?** Check out the [Getting Started Guide](docs/guides/getting-started.md) with animated demos for every feature.
+
 ## Table of Contents
 
 1. [Why rocinsight?](#why-rocinsight)
