@@ -823,7 +823,7 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_att_marker(
 
 #ifdef _WIN32
 #include <windows.h>
-BOOL WINAPI DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/) {
+extern "C" BOOL WINAPI DllMain(HINSTANCE /*hinstDLL*/, DWORD fdwReason, LPVOID /*lpvReserved*/) {
   switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
       aql_profile::constructor();

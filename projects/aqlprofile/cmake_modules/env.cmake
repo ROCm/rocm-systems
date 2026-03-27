@@ -3,11 +3,14 @@ add_definitions ( -DAMD_INTERNAL_BUILD )
 add_definitions ( -DHSA_LARGE_MODEL= )
 add_definitions ( -DHSA_DEPRECATED= )
 add_definitions ( -DLITTLEENDIAN_CPU=1 )
-# On Windows, GCC/Clang attributes used in Linux kernel headers are not available
+# linux/registers/*_ip_offset.h headers use __maybe_unused as a struct attribute.
+# Define it project-wide so it is never treated as a variable name regardless of platform.
 if ( WIN32 )
   add_definitions ( "-DNOMINMAX" )
   add_definitions ( "-D__maybe_unused=" )
   add_definitions ( "-D__unused__=" )
+else ()
+  add_definitions ( "-D__maybe_unused=__attribute__((__unused__))" )
 endif ()
 
 ## Compiler options

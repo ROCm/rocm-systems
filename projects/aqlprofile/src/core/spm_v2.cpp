@@ -15,6 +15,14 @@
 #include <shared_mutex>
 #include <filesystem>
 
+// On Windows the .def file controls symbol export; no declspec needed.
+// On Linux use visibility("default") to mark public API symbols.
+#ifdef _WIN32
+#define PUBLIC_API
+#else
+#define PUBLIC_API __attribute__((visibility("default")))
+#endif
+
 static void producer(std::shared_ptr<class spm_state_t> s);
 static void consumer(std::shared_ptr<class spm_state_t> s, aqlprofile_spm_data_callback_t callback, void* userdata);
 
