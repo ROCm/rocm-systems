@@ -8,7 +8,7 @@ The rocDecode RocVideoDecoder utility class
 
 The `RocVideoDecoder class <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/rocvideodecode/roc_video_dec.h>`_ provides high-level calls to :doc:`the core APIs <../reference/rocDecode-core-APIs>`.
 
-The RocVideoDecoder class includes several get functions that return information about the input frame, the output frame, the codec, the decoder, and the surface attributes. 
+The RocVideoDecoder class includes get functions that return information about the input frame, the output frame, the codec, the decoder, and the surface attributes. 
 
 * ``GetCodecId()``: returns the codec ID.
 * ``GetWidth()``: returns the output frame width
