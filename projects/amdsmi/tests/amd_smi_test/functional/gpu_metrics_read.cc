@@ -19,6 +19,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "gpu_metrics_read.h"
 
 #include <gtest/gtest.h>
@@ -67,7 +68,6 @@ void TestGpuMetricsRead::Run(void) {
   amdsmi_status_t err;
 
   TestBase::Run();
-  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -82,18 +82,20 @@ void TestGpuMetricsRead::Run(void) {
       std::cout << "\t**GPU METRICS: Using static struct (Backwards Compatibility):\n";
     }
     amdsmi_gpu_metrics_t smu = {};
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_metrics_info(processor_handles_[i], &smu);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    const char* status_string;
+    amdsmi_status_code_to_string(err, &status_string);
+    std::cout << "\t\t** amdsmi_get_gpu_metrics_info(): " << status_string << "\n";
     if (err != AMDSMI_STATUS_SUCCESS) {
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        continue;
+        IF_VERB(STANDARD) {
+          std::cout << "\t**" << "Not supported on this machine" << std::endl;
+          continue;
+        }
       }
     } else {
       auto temp_xcd_counter_value = uint16_t(0);
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_xcd_counter", "gpu=" + std::to_string(i), VERB(STANDARD));
       auto ret_xcd = amdsmi_get_gpu_xcd_counter(processor_handles_[i], &temp_xcd_counter_value);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_xcd, AMDSMI_STATUS_SUCCESS);
       IF_VERB(STANDARD) {
         std::cout << "\t\t** amdsmi_get_gpu_xcd_counter(): "
                   << smi_amdgpu_get_status_string(ret_xcd, false)
@@ -278,8 +280,7 @@ void TestGpuMetricsRead::Run(void) {
         std::cout << std::dec << "xcp_stats.gfx_busy_inst = \n";
         auto xcp = 0;
         for (auto& row : smu.xcp_stats) {
-          std::cout << "XCP[" << xcp << "] = "
-                    << "[ ";
+          std::cout << "XCP[" << xcp << "] = " << "[ ";
           std::copy(std::begin(row.gfx_busy_inst), std::end(row.gfx_busy_inst),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << " ]\n";
@@ -289,8 +290,7 @@ void TestGpuMetricsRead::Run(void) {
         xcp = 0;
         std::cout << std::dec << "xcp_stats.jpeg_busy = \n";
         for (auto& row : smu.xcp_stats) {
-          std::cout << "XCP[" << xcp << "] = "
-                    << "[ ";
+          std::cout << "XCP[" << xcp << "] = " << "[ ";
           std::copy(std::begin(row.jpeg_busy), std::end(row.jpeg_busy),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << " ]\n";
@@ -300,8 +300,7 @@ void TestGpuMetricsRead::Run(void) {
         xcp = 0;
         std::cout << std::dec << "xcp_stats.vcn_busy = \n";
         for (auto& row : smu.xcp_stats) {
-          std::cout << "XCP[" << xcp << "] = "
-                    << "[ ";
+          std::cout << "XCP[" << xcp << "] = " << "[ ";
           std::copy(std::begin(row.vcn_busy), std::end(row.vcn_busy),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << " ]\n";
@@ -311,8 +310,7 @@ void TestGpuMetricsRead::Run(void) {
         xcp = 0;
         std::cout << std::dec << "xcp_stats.gfx_busy_acc = \n";
         for (auto& row : smu.xcp_stats) {
-          std::cout << "XCP[" << xcp << "] = "
-                    << "[ ";
+          std::cout << "XCP[" << xcp << "] = " << "[ ";
           std::copy(std::begin(row.gfx_busy_acc), std::end(row.gfx_busy_acc),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << " ]\n";
@@ -322,8 +320,7 @@ void TestGpuMetricsRead::Run(void) {
         xcp = 0;
         std::cout << std::dec << "xcp_stats.gfx_below_host_limit_acc = \n";
         for (auto& row : smu.xcp_stats) {
-          std::cout << "XCP[" << xcp << "] = "
-                    << "[ ";
+          std::cout << "XCP[" << xcp << "] = " << "[ ";
           std::copy(std::begin(row.gfx_below_host_limit_acc),
                     std::end(row.gfx_below_host_limit_acc),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
@@ -334,8 +331,7 @@ void TestGpuMetricsRead::Run(void) {
         xcp = 0;
         std::cout << std::dec << "xcp_stats.gfx_below_host_limit_ppt_acc = \n";
         for (auto& row : smu.xcp_stats) {
-          std::cout << "XCP[" << xcp << "] = "
-                    << "[ ";
+          std::cout << "XCP[" << xcp << "] = " << "[ ";
           std::copy(std::begin(row.gfx_below_host_limit_ppt_acc),
                     std::end(row.gfx_below_host_limit_ppt_acc),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
@@ -346,8 +342,7 @@ void TestGpuMetricsRead::Run(void) {
         xcp = 0;
         std::cout << std::dec << "xcp_stats.gfx_below_host_limit_thm_acc = \n";
         for (auto& row : smu.xcp_stats) {
-          std::cout << "XCP[" << xcp << "] = "
-                    << "[ ";
+          std::cout << "XCP[" << xcp << "] = " << "[ ";
           std::copy(std::begin(row.gfx_below_host_limit_thm_acc),
                     std::end(row.gfx_below_host_limit_thm_acc),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
@@ -358,8 +353,7 @@ void TestGpuMetricsRead::Run(void) {
         xcp = 0;
         std::cout << std::dec << "xcp_stats.gfx_low_utilization_acc = \n";
         for (auto& row : smu.xcp_stats) {
-          std::cout << "XCP[" << xcp << "] = "
-                    << "[ ";
+          std::cout << "XCP[" << xcp << "] = " << "[ ";
           std::copy(std::begin(row.gfx_low_utilization_acc), std::end(row.gfx_low_utilization_acc),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << " ]\n";
@@ -369,8 +363,7 @@ void TestGpuMetricsRead::Run(void) {
         xcp = 0;
         std::cout << std::dec << "xcp_stats.gfx_below_host_limit_total_acc = \n";
         for (auto& row : smu.xcp_stats) {
-          std::cout << "XCP[" << xcp << "] = "
-                    << "[ ";
+          std::cout << "XCP[" << xcp << "] = " << "[ ";
           std::copy(std::begin(row.gfx_below_host_limit_total_acc),
                     std::end(row.gfx_below_host_limit_total_acc),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
@@ -379,40 +372,35 @@ void TestGpuMetricsRead::Run(void) {
         }
 
         std::cout << "\n\n";
-        std::cout << "\t ** -> Checking metrics with constant changes ** "
-                  << "\n";
+        std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
         constexpr uint16_t kMAX_ITER_TEST = 10;
         amdsmi_gpu_metrics_t gpu_metrics_check = {};
         for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-          DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu=" + std::to_string(i),
-                             VERB(STANDARD));
-          auto ret = amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
-          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+          amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
           std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST
                     << "]: " << gpu_metrics_check.firmware_timestamp << "\n";
         }
 
         std::cout << "\n";
         for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-          DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu=" + std::to_string(i),
-                             VERB(STANDARD));
-          auto ret = amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
-          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+          amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
           std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST
                     << "]: " << gpu_metrics_check.system_clock_counter << "\n";
         }
 
         std::cout << "\n";
         std::cout << " ** Note: Values MAX'ed out "
-                  << "(UINTX MAX are unsupported for the version in question) ** "
-                  << "\n\n";
+                  << "(UINTX MAX are unsupported for the version in question) ** " << "\n\n";
       }
     }
 
     // Verify api support checking functionality is working
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_metrics_info(processor_handles_[i], nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    if (err != AMDSMI_STATUS_INVAL) {
+      DISPLAY_AMDSMI_ERR(err);
+    }
+    amdsmi_status_code_to_string(err, &status_string);
+    std::cout << "\t\t** amdsmi_get_gpu_metrics_info(nullptr check): " << status_string << "\n";
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 }

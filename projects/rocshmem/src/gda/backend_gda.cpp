@@ -186,9 +186,42 @@ void GDABackend::setup_ctxs() {
     new (&ctx_array[i]) GDAContext(this, i + 1, gda_provider);
     ctx_free_list.get()->push_back(ctx_array + i);
   }
+
+  rocshmem_ctx_t *rocshmem_ctx_array_device = nullptr;
+  rocshmem_ctx_t *rocshmem_ctx_array_ptr = nullptr;
+  size_t ctx_array_size = sizeof(rocshmem_ctx_t) * envvar::max_num_contexts;
+
+  CHECK_HIP(hipMalloc((void**)&rocshmem_ctx_array_device, ctx_array_size));
+
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    rocshmem_ctx_array_device[i].ctx_opaque  = &ctx_array[i];
+    rocshmem_ctx_array_device[i].team_opaque = team_tracker.get_team_world()->tinfo_wrt_world;
+  }
+
+  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&rocshmem_ctx_array_ptr),
+                                HIP_SYMBOL(rocshmem_ctx_array)));
+
+  CHECK_HIP(hipMemcpy(rocshmem_ctx_array_ptr,
+                      &rocshmem_ctx_array_device,
+                      sizeof(rocshmem_ctx*),
+                      hipMemcpyDefault));
 }
 
 void GDABackend::cleanup_ctxs() {
+  /* Free ctx array */
+  rocshmem_ctx_t *rocshmem_ctx_array_ptr = nullptr;
+  rocshmem_ctx_t *rocshmem_ctx_array_device = nullptr;
+
+  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&rocshmem_ctx_array_ptr),
+                                HIP_SYMBOL(rocshmem_ctx_array)));
+
+  CHECK_HIP(hipMemcpy(&rocshmem_ctx_array_device,
+                      rocshmem_ctx_array_ptr,
+                      sizeof(rocshmem_ctx*),
+                      hipMemcpyDefault));
+
+  CHECK_HIP(hipFree(rocshmem_ctx_array_device));
+
   ctx_free_list.~FreeListProxy();
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     ctx_array[i].~GDAContext();
@@ -1201,11 +1234,12 @@ void GDABackend::modify_qps_rtr_to_rts() {
 
 void GDABackend::create_queues() {
   int ncqes;
+  uint32_t sq_size = envvar::gda::sq_size;
 
   if (gda_provider == GDAProvider::IONIC) {
-    ncqes = envvar::sq_size << 1;
+    ncqes = sq_size << 1;
   } else {
-    ncqes = envvar::sq_size;
+    ncqes = sq_size;
   }
 
   dest_info.resize(num_qps);
@@ -1220,16 +1254,13 @@ void GDABackend::create_queues() {
 
   if (gda_provider == GDAProvider::BNXT) {
     bnxt_create_cqs(ncqes);
-    bnxt_create_qps(envvar::sq_size);
+    bnxt_create_qps(sq_size);
   } else if (gda_provider == GDAProvider::IONIC) {
     ionic_create_cqs(ncqes);
-    create_qps(envvar::sq_size);
+    create_qps(sq_size);
   } else if (gda_provider == GDAProvider::MLX5) {
     create_cqs(ncqes);
-    mlx5_create_qps(envvar::sq_size);
-  } else {
-    create_cqs(ncqes);
-    create_qps(envvar::sq_size);
+    mlx5_create_qps(sq_size);
   }
 
   alternate_qp_ports();
