@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import re
 from collections import OrderedDict
@@ -41,7 +19,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils import normalize_filter_to_str_list
+from utils.utils_common import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -103,15 +81,15 @@ def create_df_kernel_top_stats(
     time_unit: str,
     kernel_verbose: int,
     sortby: str = "sum",
-) -> None:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
+
+    Returns:
+        A tuple of (kernel_top_df, dispatch_info_df).
     """
 
     df = df_in["pmc_perf"].copy()
-
-    # Demangle original KernelNames
-    kernel_name_shortener(df, kernel_verbose)
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
@@ -228,6 +206,8 @@ def create_df_kernel_top_stats(
     elif sortby == "kernel":
         grouped = grouped.sort_values("Kernel_Name")
         grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
+
+    return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
 
 @demarcate
