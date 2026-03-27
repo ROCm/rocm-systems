@@ -479,7 +479,7 @@ With each group type, the synchronization requires using the correct cooperative
 Operations
 ==========
 
-HIP has one group-wide operation: ``reduce()``. Participation of all the threads belonging to the group is expected, with each thread contributing the same value.
+HIP has one group-wide operation for now: ``reduce()``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
 
 .. code-block:: cpp
 
