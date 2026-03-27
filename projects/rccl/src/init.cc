@@ -264,12 +264,12 @@ static ncclResult_t ncclInit() {
           fclose(file);
         }
         if (strstr(strValue, "iommu=pt") == NULL)
-          WARN("Missing \"iommu=pt\" from kernel command line which can lead to system instablity or hang!");
+          WARN("Missing \"iommu=pt\" from kernel command line which can lead to system instability or hang!");
       }
 #ifndef HIP_UNCACHED_MEMORY
       char *env = getenv("HSA_FORCE_FINE_GRAIN_PCIE");
       if (env == NULL || strcmp(env, "1") != 0)
-        WARN("Missing \"HSA_FORCE_FINE_GRAIN_PCIE=1\" from environment which can lead to low RCCL performance, system instablity or hang!");
+        WARN("Missing \"HSA_FORCE_FINE_GRAIN_PCIE=1\" from environment which can lead to low RCCL performance, system instability or hang!");
 #endif
     }
   std::call_once(initOnceFlag, initOnceFunc);
