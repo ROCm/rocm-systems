@@ -80,7 +80,7 @@ class TestJacobi(RocprofsysTest):
     @pytest.mark.timeout(120)
     @pytest.mark.openmp
     @pytest.mark.xnack
-    @pytest.mark.parametrize("mode", ["sys_run"])
+    @pytest.mark.parametrize("mode", ["baseline", "sys_run"])
     def test_usm(self, mode, hpc_openmp_environment, gpu_info):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = (
@@ -101,6 +101,9 @@ class TestJacobi(RocprofsysTest):
             run_args=self.openmp_usm_run_args,
             check_target_arch=True,
         )
+
+        if mode == "baseline":
+            return
 
         if "apu" in gpu_info.categories:
             # We expect no omp_target_data_op_emi (CPU and GPU share the same memory)
@@ -139,7 +142,7 @@ class TestJacobi(RocprofsysTest):
     @pytest.mark.timeout(120)
     @pytest.mark.openmp
     @pytest.mark.xnack
-    @pytest.mark.parametrize("mode", ["sys_run"])
+    @pytest.mark.parametrize("mode", ["baseline", "sys_run"])
     def test_usm_no_ompx_maps(self, mode, hpc_openmp_environment, gpu_info):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = (
@@ -156,6 +159,9 @@ class TestJacobi(RocprofsysTest):
             run_args=self.openmp_usm_run_args,
             check_target_arch=True,
         )
+
+        if mode == "baseline":
+            return
 
         if "apu" in gpu_info.categories:
             # We expect no omp_target_data_op_emi (CPU and GPU share the same memory)
