@@ -51,16 +51,11 @@ Panel Config:
           peak: 5
           pop: ((100 * AVG((SQ_INSTS_ALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)) / 5)
         Wavefront Occupancy:
-          # To be fixed: Counter semantics vs GRBM_GUI_ACTIVE / aggregation do not yield a
-          # trustworthy wave count on gfx1151; restore when formula is validated.
-          # value: AVG(((4 * SQ_WAVE_CYCLES_sum) / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)))
-          # peak: ($max_waves_per_cu * $cu_per_gpu)
-          # pop: (100 * AVG((((4 * SQ_WAVE_CYCLES_sum) / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
-          #   / ($max_waves_per_cu * $cu_per_gpu))))
-          value: None
+          value: AVG((SQ_WAVE_CYCLES_sum / SQ_BUSY_CYCLES_avr) if (SQ_BUSY_CYCLES_avr != 0) else None)
           unit: Wavefronts
-          peak: None
-          pop: None
+          peak: ($max_waves_per_cu * $cu_per_gpu)
+          pop: ((100 * AVG((SQ_WAVE_CYCLES_sum / SQ_BUSY_CYCLES_avr) if (SQ_BUSY_CYCLES_avr != 0) else None))
+            / (($max_waves_per_cu * $cu_per_gpu)))
         # --- L2 / fabric (EA) ---
         L2 Cache Hit Rate:
           value: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
@@ -165,9 +160,10 @@ Panel Config:
       Calculated as (Total Instructions - Internal Instructions) / Busy Cycles.
       Higher IPC indicates better instruction throughput.
     Wavefront Occupancy: |-
-      To be fixed: Disabled — Avg / Peak / Pct of Peak are None until a validated gfx1151
-      formula exists (SQ_ACCUM_PREV non-functional; SQ_WAVE_CYCLES–based estimates
-      were not reliable in testing).
+      Average wavefront occupancy proxy: SQ_WAVE_CYCLES_sum / SQ_BUSY_CYCLES_avr per sample,
+      where SQ_BUSY_CYCLES_avr is the mean of per–shader-engine SQ_BUSY_CYCLES (active-wave
+      cycles per SE). Peak is $max_waves_per_cu × $cu_per_gpu (theoretical in-flight cap).
+      Pct of peak scales the average against that ceiling.
     L2 Cache Hit Rate: |-
       GL2C last-level cache hit rate (same as Memory Chart / GL2C panel).
       Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum) when the denominator is non-zero.

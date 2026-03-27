@@ -13934,6 +13934,16 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       expression: reduce(SQ_BUSY_CYCLES,sum)
+  - name: SQ_BUSY_CYCLES_avr
+    description: >-
+      SQ_BUSY_CYCLES averaged over SQ (shader engine) instances. SPG returns this
+      counter per SE; avr matches reduce(SQ_BUSY_CYCLES,avr) for occupancy-style ratios.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1151
+      - gfx1152
+      expression: reduce(SQ_BUSY_CYCLES,avr)
   - name: SQ_CYCLES_sum
     description: ''
     properties: []
