@@ -85,19 +85,10 @@ fallback_init()
     if(!is_initialized)
     {
         ROCP_INFO << "Falling back to dlsym'ing HSA API table...";
-
-        if(::rocprofiler::hsa::dlsym_table<::CoreApiTable> &&
-           ::rocprofiler::hsa::dlsym_table<::AmdExtTable>)
-        {
-            ::rocprofiler::hsa::dlsym_table(get_core_table_impl());
-            ::rocprofiler::hsa::dlsym_table(get_amd_ext_table_impl());
-            is_initialized       = true;
-            is_dlsym_initialized = true;
-        }
-        else
-        {
-            ROCP_WARNING << "::rocprofiler::hsa::dlsym_table not available!";
-        }
+        ::rocprofiler::hsa::dlsym_table(get_core_table_impl());
+        ::rocprofiler::hsa::dlsym_table(get_amd_ext_table_impl());
+        is_initialized       = true;
+        is_dlsym_initialized = true;
     }
 }
 }  // namespace

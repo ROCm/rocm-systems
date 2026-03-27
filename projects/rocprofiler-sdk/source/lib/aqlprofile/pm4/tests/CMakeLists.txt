@@ -20,9 +20,11 @@ target_sources(aqlprofile-pm4-tests PRIVATE ${AQLPROFILE_PM4_TEST_SOURCES})
 
 target_link_libraries(
     aqlprofile-pm4-tests
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-aqlprofile
+    PRIVATE -Wl,--start-group
             rocprofiler-sdk::rocprofiler-sdk-static-library
             rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-aqlprofile
+            -Wl,--end-group
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-drm

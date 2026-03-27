@@ -184,7 +184,7 @@ void
 update_table(TableT* _orig, uint64_t _tbl_instance);
 
 template <typename TableT>
-ROCPROFILER_WEAK void
+void
 dlsym_table(TableT* _orig);
 
 extern template void
