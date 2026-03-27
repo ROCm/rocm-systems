@@ -2473,8 +2473,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipMemset2D_ptr = nullptr;
   void* hipMemset2DAsync_ptr = nullptr;
   void* hipMemset3D_ptr = nullptr;
@@ -2703,7 +2701,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
   CHECK_IMAGE_SUPPORT
-
   void* hipMemcpy2D_ptr = nullptr;
   void* hipMemcpy2DAsync_ptr = nullptr;
   void* hipMemcpyParam2D_ptr = nullptr;
@@ -4479,8 +4476,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipMemcpy3D_ptr = nullptr;
   void* hipMemcpy3DAsync_ptr = nullptr;
   void* hipDrvMemcpy3D_ptr = nullptr;

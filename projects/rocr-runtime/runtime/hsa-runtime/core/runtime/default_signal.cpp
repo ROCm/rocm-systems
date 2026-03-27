@@ -106,7 +106,7 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
 
     if (g_use_mwaitx) {
       // Use timer-enabled mwaitx for busy waiting
-      timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 60000, true);
+      timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
     }
   }
 }
