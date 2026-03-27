@@ -87,8 +87,8 @@ class TestCodeCoverage(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     @pytest.mark.depends_on(
-        "CodeCoverage-basic_blocks_binary_rewrite",
-        "CodeCoverage-basic_blocks_hybrid_runtime_instrument",
+        "CodeCoverage_basic_blocks_binary_rewrite",
+        "CodeCoverage_basic_blocks_hybrid_runtime_instrument",
     )
     @pytest.mark.python_versions
     def test_python(self, python_version, test_output_base):

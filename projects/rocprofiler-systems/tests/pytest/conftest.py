@@ -1082,6 +1082,9 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
     def _row(label: str, value) -> str:
         return f"  {label:<{W}}{value}"
 
+    def _subrow(label: str, value) -> str:
+        return f"    {label:<{W}}{value}"
+
     header = [
         "",
         "=" * 70,
@@ -1094,20 +1097,41 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         _row("Validate ROCPD:", check_use_rocpd()),
         _row("Validate Perfetto:", check_use_perfetto()),
         "-" * 70,
+        "Core Executables:",
+        _row("Instrument:", rocprof_config.rocprofsys_instrument),
+        _row("Run:", rocprof_config.rocprofsys_run),
+        _row("Sample:", rocprof_config.rocprofsys_sample),
+        _row("Avail:", rocprof_config.rocprofsys_avail),
+        _row("Causal:", rocprof_config.rocprofsys_causal),
+        _row("Python:", rocprof_config.rocprofsys_python),
+        "-" * 70,
+        "Executables:",
+        _row("MPI:", cap.mpiexec_exec),
+        _subrow("Implementation:", cap.mpi_implementation),
+        _row("Julia:", cap.julia_exec),
+        _row("Oshrun:", cap.oshrun_exec),
+        _subrow("Version:", oshrun_version_str),
+        _row("Offload tool:", offload_msg),
+        _row("Rocminfo:", rocminfo_path if rocminfo_path else rocminfo_err_msg),
+        "-" * 70,
         "System Capabilities:",
         _row("Detected num procs:", cap.num_procs),
-        _row("MPI impl:", cap.mpi_implementation),
         _row("UCX available:", cap.ucx_availability),
-        _row("Default NIC:", cap.default_nic),
-        _row("PAPI available:", cap.papi_availability),
-        _row("PAPI NIC events:", cap.papi_nic_events),
         _row("Perf event paranoid:", cap.perf_event_paranoid),
         _row("CAP_SYS_ADMIN:", cap.cap_sys_admin),
         _row("CAP_PERFMON:", cap.cap_perfmon),
         _row("Ptrace scope:", cap.ptrace_scope),
+        _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
+        _row("PAPI available:", cap.papi_availability),
+        _row("Default NIC:", cap.default_nic),
+        *(
+            lambda evts: [_subrow("PAPI NIC events:", evts[0])]
+            + [_subrow("", e) for e in evts[1:]]
+            if evts
+            else [_subrow("PAPI NIC events:", "None")]
+        )(cap.papi_nic_events.split() if cap.papi_nic_events else []),
         "-" * 70,
         "GPU Information:",
-        _row("rocminfo:", rocminfo_path if rocminfo_path else rocminfo_err_msg),
         _row("Available:", gpu_info.available),
         _row("Architectures:", gpu_info.architectures or "None"),
         _row("Device count:", gpu_info.device_count),
@@ -1122,20 +1146,7 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         _row("Examples dir:", rocprof_config.rocprofsys_examples_dir),
         _row("Validation dir:", rocprof_config.rocpd_validation_rules),
         "-" * 70,
-        "Executables:",
-        _row("Instrument:", rocprof_config.rocprofsys_instrument),
-        _row("Run:", rocprof_config.rocprofsys_run),
-        _row("Sample:", rocprof_config.rocprofsys_sample),
-        _row("Avail:", rocprof_config.rocprofsys_avail),
-        _row("Causal:", rocprof_config.rocprofsys_causal),
-        _row("MPI:", cap.mpiexec_exec),
-        _row("Julia:", cap.julia_exec),
-        _row("Oshrun:", cap.oshrun_exec),
-        _row("Oshrun version:", oshrun_version_str),
-        _row("Offload tool:", offload_msg),
-        "-" * 70,
         "Python:",
-        _row("rocprof-sys-python:", rocprof_config.rocprofsys_python),
         _row("Site packages:", rocprof_config.rocprofsys_site_packages),
     ]
     if cap.supported_python_versions and cap.supported_python_executables:

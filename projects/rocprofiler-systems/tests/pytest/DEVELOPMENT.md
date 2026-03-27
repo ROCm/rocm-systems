@@ -28,25 +28,31 @@ Contains wrappers for the validation scripts and other helper functions that can
 
 `conftest.py` contains all the logic required for pytest to parse the `test_*.py` code and generate tests.
 
-- **`RocprofsysTest`**: A base class that every test class should use. It automatically injects frequently used fixtures.
-- **`pytest_collection_modifyitems`**: This is where skipping a test based on a marker condition is handled. Conditions should be put in lambdas for delayed evaluation.
+### Core Classes
 
-### Fixtures
+- **`RocprofsysTest`**: Base class for all test classes. It auto-injects common fixtures (`run_test`, `assert_regex`, `test_output_dir`, etc.) onto `self` via its `_setup` fixture, so test methods can call `self.run_test(...)`, `self.assert_regex(...)`, etc. directly.
 
-Some important fixtures are as follows:
+### Key Hooks
+
+- **`pytest_configure`**: Registers all custom markers and sets up CLI options.
+- **`pytest_collection_modifyitems`**: Handles test skipping based on marker conditions.
+- **`_generate_ctest_definitions`**: Generates a `CTestTestfile.cmake` from collected pytest items.
+
+### Subtests (Validation Fixtures)
+
+These fixtures run as **subtests**, meaning multiple validations within a single test are independently reported (one can fail without blocking others). They are automatically injected into `RocprofsysTest` via its `_setup` fixture, so test methods access them as `self.assert_regex(...)`, `self.assert_perfetto(...)`, etc.
 
 | Fixture | Description |
 |---------|-------------|
-| `run_test` | Unified fixture to run any test runner type and handle pytest logic |
-| `assert_regex` | Wraps `validate_regex` from `validators.py` |
-| `assert_file_regex` | Wraps `validate_file_regex` from `validators.py` |
-| `assert_perfetto` | Wraps `validate_perfetto_trace` from `validators.py` |
-| `assert_rocpd` | Wraps `validate_rocpd_database` from `validators.py` |
-| `assert_timemory` | Wraps `validate_timemory_json` from `validators.py` |
-| `assert_file_exists` | Wraps `validate_file_exists` from `validators.py` |
-| `assert_causal_json` | Wraps `validate_causal_json` from `validators.py` |
+| `assert_regex` | Validates test output against pass/fail regex patterns. Patterns can be per-mode (e.g., different patterns for `binary_rewrite` vs `sampling`). |
+| `assert_file_regex` | Like `assert_regex` but validates against a file's contents. |
+| `assert_perfetto` | Validates that a Perfetto trace was generated and optionally checks its contents. |
+| `assert_rocpd` | Validates that a ROCpd database was created. Requires `@pytest.mark.rocpd("env_name")`. |
+| `assert_timemory` | Validates timemory JSON output files. |
+| `assert_file_exists` | Validates that a specific file exists in the output directory. |
+| `assert_causal_json` | Validates causal profiling JSON output. |
 
-See their docstrings in `conftest.py` for more information.
+See the docstrings in `conftest.py` for full argument details.
 
 ## Writing a Test
 
@@ -175,6 +181,12 @@ When adding a functional marker:
 1. Register it in `pytest_configure()`.
 2. Add skip logic in `pytest_collection_modifyitems`. If the condition requires system checks, prefer wrapping it in a lambda for deferred evaluation.
 3. If the marker depends on a system capability not already tracked by `SystemCapabilities`, add it to `capabilities.py`.
+
+**CTest label behavior:** By default, all markers are included as CTest labels (e.g., `ctest -L "rocm"` filters by the `@pytest.mark.rocm` marker). To change how a marker appears in the generated CTest definitions, add it to one of these sets in `_generate_ctest_definitions()`:
+
+- `no_report_markers` — Marker is **not** added as a CTest label (e.g., `timeout`, `serialize`, `ci_disable`).
+- `no_report_args_markers` — Marker name is added as a label, but its **arguments are hidden** (e.g., `rocpd`).
+- `only_report_args_markers` — Only the marker's **arguments** are added as labels, not the marker name itself (e.g., `mpi_implementation`).
 
 ### Template
 
