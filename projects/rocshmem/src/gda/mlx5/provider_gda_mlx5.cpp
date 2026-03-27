@@ -50,14 +50,6 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp* q
 static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp* qp,
                                   struct ibv_qp_attr* attr, int attr_mask);
 
-static constexpr inline size_t mlx5_align_size(size_t size, size_t alignment) {
-  return (size + alignment - 1) & ~(alignment - 1);
-}
-
-static constexpr inline size_t mlx5_align_size_shift(size_t size, unsigned align_shift) {
- return mlx5_align_size(size, 1UL << align_shift);
-}
-
 struct hipGDAHostAllocator {
   static void* malloc(size_t size) {
     void* dev_ptr{nullptr};
@@ -92,17 +84,32 @@ static inline bool is_device_ptr(const void* ptr) {
   return ptr_attr.type == hipMemoryTypeDevice;
 }
 
+template <typename T>
+static constexpr inline size_t mlx5_align_amdgpu_cache_line(const T& value) {
+  // different cache levels can have different cache line sizes; varies by GPU arch as well
+  // L2$ is 128B on CDNA2, CDNA3, and CDNA4, so use that for now
+  constexpr size_t amdgpu_cache_line_size = 128;
+  return __builtin_align_up(value, amdgpu_cache_line_size);
+}
+
+template <typename T>
+static constexpr inline size_t mlx5_align_page(const T& value) {
+  // mlx5 HCA counts pages in 4 KiB chunks, but supports larger host page sizes
+  // amdgpu page size is not well-documented, but should at least support 4 KiB pages
+  constexpr size_t mlx5_page_size = MLX5_ADAPTER_PAGE_SIZE;
+  return __builtin_align_up(value, mlx5_page_size);
+}
+
 static inline size_t mlx5_calc_qp_umem_size(uint16_t& sq_depth,
                                             size_t& wq_size,
                                             size_t& dbrec_offset) {
-  // align doorbell record to cache size
-  constexpr size_t dbrec_size = mlx5_align_size(MLX5_DOORBELL_RECORD_SIZE, 64);
+  // align doorbell record to cache line size
+  constexpr size_t dbrec_size = mlx5_align_amdgpu_cache_line<size_t>(MLX5_DOORBELL_RECORD_SIZE);
   // round up to power of 2 WQEBB
   size_t wq_size_initial = bit_ceil(sq_depth) * MLX5_SEND_WQE_BB;
   // round up to page size
-  // TODO: check system page size instead of assuming 4 KiB
-  size_t umem_size = mlx5_align_size(wq_size_initial + dbrec_size, MLX5_ADAPTER_PAGE_SIZE);
-  // doorbell record in last 64B of umem allocation
+  size_t umem_size = mlx5_align_page(wq_size_initial + dbrec_size);
+  // doorbell record in last cache line of umem allocation
   dbrec_offset = umem_size - dbrec_size;
   // round back down to a power of 2
   wq_size = bit_floor(umem_size - dbrec_size);
