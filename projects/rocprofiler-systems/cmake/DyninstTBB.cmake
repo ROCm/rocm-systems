@@ -125,12 +125,13 @@ elseif(NOT ROCPROFSYS_BUILD_TBB)
     )
 else()
     # Verify oneTBB submodule is initialized
-    if(NOT EXISTS ${PROJECT_SOURCE_DIR}/external/onetbb/CMakeLists.txt)
-        rocprofiler_systems_message(
-            FATAL_ERROR
-            "oneTBB submodule not initialized. Run: git submodule update --init external/onetbb"
-        )
-    endif()
+    rocprofiler_systems_checkout_git_submodule(
+        RELATIVE_PATH external/onetbb
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        TEST_FILE CMakeLists.txt
+        REPO_URL https://github.com/oneapi-src/oneTBB.git
+        REPO_BRANCH "v2022.3.0"
+    )
 
     # If we didn't find a suitable version on the system, then build from submodule
     rocprofiler_systems_message(STATUS "${ThreadingBuildingBlocks_ERROR_REASON}")
@@ -204,11 +205,8 @@ else()
             ${CMAKE_COMMAND} -S <SOURCE_DIR> -B <BINARY_DIR>
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-            -DCMAKE_INSTALL_PREFIX=${TBB_ROOT_DIR} -DBUILD_SHARED_LIBS=ON -DTBB_TEST=OFF
-            -DTBB_EXAMPLES=OFF -DTBB_BUILD=ON -DTBBMALLOC_BUILD=ON
-            -DTBBMALLOC_PROXY_BUILD=ON -DTBB_STRICT=OFF -DTBB_INSTALL=ON
-            -DCMAKE_SKIP_BUILD_RPATH=OFF -DCMAKE_BUILD_RPATH=\$ORIGIN
-            -DCMAKE_INSTALL_RPATH=\$ORIGIN
+            -DCMAKE_INSTALL_PREFIX=${TBB_ROOT_DIR} -DCMAKE_BUILD_RPATH=\$ORIGIN
+            -DCMAKE_INSTALL_RPATH=\$ORIGIN -DTBB_TEST=OFF -DTBB_STRICT=OFF
         BUILD_COMMAND
             ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${CMAKE_BUILD_TYPE} --target
             tbb tbbmalloc tbbmalloc_proxy
