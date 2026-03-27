@@ -38,7 +38,6 @@
 #include "library/causal/sample_data.hpp"
 #include "library/causal/sampling.hpp"
 #include "library/causal/selected_entry.hpp"
-#include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
