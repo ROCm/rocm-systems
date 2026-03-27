@@ -387,6 +387,19 @@ endforeach()
 unset(_FLAG)
 unset(COMMON_SANITIZER_FLAGS)
 
+# UBSan's vptr check inserts implicit RTTI lookups for all polymorphic types.
+# External libraries (e.g. Dyninst) are not built with UBSan, so their typeinfo
+# symbols are not available, causing linker errors. Disable vptr for UBSan.
+target_compile_options(
+    rocprofiler-systems-undefined-sanitizer
+    INTERFACE "-fno-sanitize=vptr"
+)
+set_property(
+    TARGET rocprofiler-systems-undefined-sanitizer
+    APPEND
+    PROPERTY INTERFACE_LINK_OPTIONS "-fno-sanitize=vptr"
+)
+
 if(ROCPROFSYS_USE_SANITIZER)
     foreach(_TYPE ${ROCPROFSYS_SANITIZER_TYPE})
         if(TARGET rocprofiler-systems-${_TYPE}-sanitizer)
@@ -403,6 +416,16 @@ if(ROCPROFSYS_USE_SANITIZER)
     endforeach()
 else()
     set(ROCPROFSYS_USE_SANITIZER OFF)
+endif()
+
+# sanitizer instrumentation inflates stack frames and triggers false positives
+# in GCC's -Wmaybe-uninitialized and -Wstack-usage diagnostics
+if(ROCPROFSYS_USE_SANITIZER AND ROCPROFSYS_BUILD_DEVELOPER)
+    add_target_flag_if_avail(rocprofiler-systems-compile-options
+                             "-Wno-error=maybe-uninitialized"
+                             "-Wno-error=stack-usage="
+                             "-Wno-error=array-bounds"
+    )
 endif()
 
 # ----------------------------------------------------------------------------------------#
