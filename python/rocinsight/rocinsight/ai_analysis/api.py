@@ -35,15 +35,15 @@ try:
 except Exception:
     _ROCINSIGHT_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
 
-from ..analyze import (
+from ..analysis import (
     compute_time_breakdown,
     identify_hotspots,
     analyze_memory_copies,
     analyze_hardware_counters,
     generate_recommendations,
-    format_analysis_output,
     _detect_already_collected,
 )
+from ..formatters import format_analysis_output
 from ..tracelens_port import (
     compute_interval_timeline,
     analyze_kernels_by_category,
@@ -593,7 +593,7 @@ def analyze_database(
         # Tier 3: ATT (optional)
         att_analysis: dict = {}
         if att_dir:
-            from ..analyze import analyze_thread_trace
+            from ..analysis import analyze_thread_trace
 
             att_analysis = analyze_thread_trace(att_dir)
             if verbose and not att_analysis.get("has_att_data"):

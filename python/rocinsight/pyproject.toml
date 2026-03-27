@@ -32,6 +32,8 @@ Documentation = "https://rocm.docs.amd.com"
 [tool.setuptools]
 packages = [
     "rocinsight",
+    "rocinsight.analysis",
+    "rocinsight.formatters",
     "rocinsight.ai_analysis",
     "rocinsight.ai_analysis.tests",
 ]
@@ -42,6 +44,7 @@ rocinsight = [
     "ai_analysis/share/*.png",
     "ai_analysis/docs/*.md",
     "ai_analysis/docs/*.json",
+    "formatters/templates/*.html",
 ]
 
 [tool.pytest.ini_options]

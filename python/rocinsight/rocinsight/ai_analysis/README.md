@@ -451,7 +451,7 @@ Override model: `ROCINSIGHT_LLM_MODEL` env var or `--llm-model <model-name>`.
 | `--format` | Extension | Description |
 |---|---|---|
 | `text` | *(stdout)* or `.txt` | ASCII bar charts, fixed-width tables |
-| `json` | `.json` | Schema-conformant (v0.1.0–v0.4.0), machine-parseable |
+| `json` | `.json` | Schema-conformant (v0.1.0–v0.3.x), machine-parseable |
 | `markdown` | `.md` | GFM tables, priority emoji (🔴 HIGH, 🟠 MEDIUM, 🟡 LOW, ℹ INFO) |
 | `webview` | `.html` | Self-contained interactive HTML — AMD dark theme, hover tooltips, gauges, light/dark toggle, FAB scroll button, staggered animations |
 

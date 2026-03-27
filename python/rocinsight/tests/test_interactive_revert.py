@@ -370,3 +370,110 @@ class TestWorkflowConversation:
             assert conv1 is conv2
             # initialize should only be called once
             assert instance.initialize.call_count == 1
+
+    def test_save_session_warns_large_conversation(self, tmp_path):
+        """_save_session emits UserWarning when conversation has >1000 messages."""
+        import warnings
+
+        sess = _make_session(tmp_path)
+        sess._conv = None  # no live conversation object
+        # Inject a large conversation dict directly into state
+        sess._state.conversation = {
+            "messages": [{"role": "user", "content": f"msg {i}"} for i in range(1500)]
+        }
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            sess._save_session()
+        user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+        assert len(user_warnings) == 1
+        assert "1500 messages" in str(user_warnings[0].message)
+
+    def test_save_session_no_warning_small_conversation(self, tmp_path):
+        """_save_session does NOT warn when conversation has <= 1000 messages."""
+        import warnings
+
+        sess = _make_session(tmp_path)
+        sess._conv = None
+        sess._state.conversation = {
+            "messages": [{"role": "user", "content": f"msg {i}"} for i in range(50)]
+        }
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            sess._save_session()
+        user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+        assert len(user_warnings) == 0
+
+
+# ---------------------------------------------------------------------------
+# Command injection validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestCommandValidation:
+    """Tests for _has_shell_meta() shell injection detection."""
+
+    def test_safe_command_returns_false(self):
+        """Normal rocprofv3 command should not be flagged."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 --sys-trace -- ./app") is False
+
+    def test_semicolon_injection_detected(self):
+        """Semicolon-based command chaining should be detected."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 ; rm -rf /") is True
+
+    def test_pipe_injection_detected(self):
+        """Pipe-based output redirection should be detected."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 | cat /etc/passwd") is True
+
+    def test_ampersand_chain_detected(self):
+        """Ampersand-based command chaining should be detected."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 && echo pwned") is True
+
+    def test_subshell_detected(self):
+        """Dollar-sign subshell expansion should be detected."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 $(whoami)") is True
+
+    def test_backtick_detected(self):
+        """Backtick command substitution should be detected."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 `id`") is True
+
+    def test_parentheses_detected(self):
+        """Parentheses (subshell grouping) should be detected."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 (echo hi)") is True
+
+    def test_curly_braces_detected(self):
+        """Curly braces (brace expansion) should be detected."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 {a,b}") is True
+
+    def test_exclamation_detected(self):
+        """Exclamation mark (history expansion) should be detected."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 !last") is True
+
+    def test_safe_flags_and_paths(self):
+        """Complex but safe command with flags, paths, env vars should pass."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("rocprofv3 --kernel-trace --stats -d /tmp/out -o results -- ./my_app") is False
+
+    def test_empty_string_is_safe(self):
+        """Empty string should not be flagged."""
+        from rocinsight.ai_analysis.interactive import _has_shell_meta
+
+        assert _has_shell_meta("") is False

@@ -524,5 +524,58 @@ class TestGuideIntegrity:
         assert bad == [], f"Unknown tags found: {bad}"
 
 
+# ---------------------------------------------------------------------------
+# Group G: Path sanitization / redaction (6 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestPathSanitization:
+    """Tests for _redact_paths() in llm_analyzer.py."""
+
+    def _redact(self, value: str) -> str:
+        from rocinsight.ai_analysis.llm_analyzer import _redact_paths
+
+        return _redact_paths(value)
+
+    def test_absolute_home_path_redacted(self):
+        """Absolute /home/user/... path should be replaced with [REDACTED]."""
+        result = self._redact("kernel at /home/user/secret.py line 42")
+        assert "/home/user/secret.py" not in result
+        assert "[REDACTED]" in result
+
+    def test_absolute_opt_path_redacted(self):
+        """Absolute /opt/rocm/... path should be replaced with [REDACTED]."""
+        result = self._redact("loaded from /opt/rocm/lib/foo.so")
+        assert "/opt/rocm/lib/foo.so" not in result
+        assert "[REDACTED]" in result
+
+    def test_relative_path_traversal_redacted(self):
+        """Relative path traversal ../../etc/passwd should be redacted."""
+        result = self._redact("reading ../../etc/passwd")
+        assert "../../etc/passwd" not in result
+        assert "[REDACTED_PATH]" in result
+
+    def test_normal_text_unchanged(self):
+        """Text without paths should remain unchanged."""
+        text = "GPU utilization is 85.3% with 480 waves"
+        result = self._redact(text)
+        assert result == text
+
+    def test_mixed_paths_both_redacted(self):
+        """Both absolute and relative paths in the same string should be redacted."""
+        text = "kernel at /opt/rocm/lib/foo.so and ../../bar/baz.cpp"
+        result = self._redact(text)
+        assert "/opt/rocm/lib/foo.so" not in result
+        assert "../../bar/baz.cpp" not in result
+        assert "[REDACTED]" in result
+        assert "[REDACTED_PATH]" in result
+
+    def test_tmp_path_redacted(self):
+        """/tmp/ paths should also be redacted."""
+        result = self._redact("output saved to /tmp/rocpd_trace/run_001/results.db")
+        assert "/tmp/rocpd_trace" not in result
+        assert "[REDACTED]" in result
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

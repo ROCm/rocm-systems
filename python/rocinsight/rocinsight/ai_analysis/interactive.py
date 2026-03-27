@@ -18,6 +18,15 @@ from typing import Any, Dict, List, Optional, Union
 from .llm_conversation import LLMConversation
 from .llm_analyzer import load_reference_guide
 
+# ── Command safety ───────────────────────────────────────────────────────────
+_SHELL_META = set(";|&`$(){}!")
+
+
+def _has_shell_meta(cmd: str) -> bool:
+    """Return True if *cmd* contains shell metacharacters that could enable injection."""
+    return any(c in cmd for c in _SHELL_META)
+
+
 # ── Plateau detection constants ──────────────────────────────────────────────
 _PLATEAU_THRESHOLD_PCT = 2.0  # <2% change = plateau
 _PLATEAU_MIN_ITERATIONS = 2   # need 2+ sub-threshold iterations to declare plateau
@@ -925,6 +934,10 @@ class InteractiveSession:
                 selected_cmd = auto
             # else leave as-is (./app stays in command; user will see it)
 
+        if _has_shell_meta(selected_cmd):
+            _print("  Command contains shell metacharacters — rejected for safety.", style="red")
+            return
+
         _print()
         _print(f"  Running: $ {selected_cmd}", style=_AMD_RED)
         _print()
@@ -1276,6 +1289,10 @@ class InteractiveSession:
                 cmd = cmd.replace("-- ./app", f"-- {app_input}")
             elif "-- ./app" not in auto:
                 cmd = auto
+
+        if _has_shell_meta(cmd):
+            _print("  Command contains shell metacharacters — rejected for safety.", style="red")
+            return
 
         _print()
         _print(f"  Running: $ {cmd}", style=_AMD_RED)
@@ -2499,6 +2516,17 @@ class WorkflowSession:
                 self._state.conversation = self._conv.to_dict()
             except Exception:
                 pass
+
+        # Warn if conversation has grown very large
+        if self._state.conversation:
+            _msg_count = len(self._state.conversation.get("messages", []))
+            if _msg_count > 1000:
+                import warnings
+                warnings.warn(
+                    f"Session has {_msg_count} messages. Consider starting a "
+                    f"fresh session to reduce memory usage.",
+                    stacklevel=2,
+                )
 
         try:
             self._sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -3921,7 +3949,13 @@ class WorkflowSession:
                     try:
                         new_cmd = _input(f"  Edit command:\n  {cmd}\n  > ").strip()
                         if new_cmd:
-                            cmd = new_cmd
+                            if _has_shell_meta(new_cmd):
+                                _print(
+                                    "  Command contains shell metacharacters — rejected for safety.",
+                                    style="red",
+                                )
+                            else:
+                                cmd = new_cmd
                     except EOFError:
                         return False
                     continue
@@ -5158,6 +5192,12 @@ class WorkflowSession:
                     new_cmd = _input(
                         f"  Edit command (Enter to keep):\n  {current}\n  > "
                     ).strip()
+                    if new_cmd and _has_shell_meta(new_cmd):
+                        _print(
+                            "  Command contains shell metacharacters — rejected for safety.",
+                            style="red",
+                        )
+                        continue
                     return new_cmd or current
                 except EOFError:
                     return current

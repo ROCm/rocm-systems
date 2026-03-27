@@ -43,13 +43,18 @@ _PATH_PATTERN = re.compile(
     r'/tmp/[^\s,"\';>]+|/var/[^\s,"\';>]+|[A-Za-z]:\\[^\s,"\';>]+)'
 )
 
+# Regex to match relative path traversal (e.g. ../../secret/file)
+_RELATIVE_PATH_PATTERN = re.compile(r'(?:\.\./)+\S+')
+
 # Regex to match rocinsight-context tag comments in the reference guide
 _TAG_RE = re.compile(r"<!--\s*rocinsight-context:\s*([^-]+?)\s*-->")
 
 
 def _redact_paths(value: str) -> str:
     """Replace file system paths in a string with [REDACTED]."""
-    return _PATH_PATTERN.sub("[REDACTED]", value)
+    result = _PATH_PATTERN.sub("[REDACTED]", value)
+    result = _RELATIVE_PATH_PATTERN.sub("[REDACTED_PATH]", result)
+    return result
 
 
 # Default location for the reference guide (relative to package installation)

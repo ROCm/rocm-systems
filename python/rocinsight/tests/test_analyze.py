@@ -1636,6 +1636,99 @@ def test_init_overhead_suppresses_api_overhead_rule():
 
 
 # ---------------------------------------------------------------------------
+# generate_recommendations – Rule 2a: Init-overhead suppressed by prior recs
+# ---------------------------------------------------------------------------
+
+
+def test_init_overhead_not_emitted_when_other_recs_exist():
+    """Init-overhead INFO should not fire when higher-priority recs already exist.
+
+    When _is_init_overhead is True but memcpy_percent > 20 fires first (Rule 1),
+    the 'not recommendations' guard prevents the init-overhead INFO rec from
+    being emitted.
+    """
+    from rocinsight.analyze import generate_recommendations
+
+    # Short run + low kernel% → _is_init_overhead = True
+    # But memcpy_percent=30 → Memory Transfer HIGH fires first (Rule 1)
+    td = _empty_breakdown(
+        total_runtime=500_000_000,
+        kernel_percent=2.0,
+        memcpy_percent=30.0,
+        overhead_percent=68.0,
+    )
+    recs = generate_recommendations(td, [], {})
+    init_recs = [r for r in recs if r["category"] == "Runtime Initialization"]
+    assert len(init_recs) == 0, "Init-overhead should be suppressed when memcpy HIGH already fired"
+    # Verify memcpy HIGH DID fire
+    memcpy_recs = [r for r in recs if r["category"] == "Memory Transfer"]
+    assert len(memcpy_recs) == 1
+
+
+def test_init_overhead_not_emitted_when_low_occupancy_rec_exists():
+    """Init-overhead INFO should not fire when Tier 2 low occupancy HIGH rec exists.
+
+    Tier 2 rules (low occupancy, GPU utilization) run before Rule 2a, so if
+    they fire, the 'not recommendations' guard suppresses init-overhead.
+    """
+    from rocinsight.analyze import generate_recommendations
+
+    # Short run + low kernel% → _is_init_overhead = True
+    # But hw counters with low waves → Tier 2 LOW OCCUPANCY fires first
+    td = _empty_breakdown(
+        total_runtime=500_000_000,
+        kernel_percent=2.0,
+        memcpy_percent=0.0,
+        overhead_percent=98.0,
+    )
+    hw = _hw_counters(avg_waves=5, gpu_util=80.0)
+    recs = generate_recommendations(td, [], {}, hardware_counters=hw)
+    init_recs = [r for r in recs if r["category"] == "Runtime Initialization"]
+    assert len(init_recs) == 0, "Init-overhead suppressed when Low Occupancy already fired"
+    # Verify the Tier 2 rec DID fire
+    occ_recs = [r for r in recs if r["category"] == "Low Occupancy"]
+    assert len(occ_recs) == 1
+
+
+# ---------------------------------------------------------------------------
+# Editor validation in _apply_code_change_interactive
+# ---------------------------------------------------------------------------
+
+
+def test_editor_not_found_skips_subprocess():
+    """When shutil.which returns None for $EDITOR, subprocess.run must NOT be called."""
+    from unittest.mock import patch, MagicMock
+    from rocinsight.analyze import _apply_code_change_interactive
+
+    rec = {
+        "category": "Compute Bottleneck",
+        "issue": "Kernel is slow",
+        "suggestion": "Optimize it",
+        "actions": ["Do something"],
+        "estimated_impact": "20%",
+    }
+    colors = {"C": "", "G": "", "Y": "", "R": "", "DIM": "", "N": ""}
+
+    with (
+        patch("shutil.which", return_value=None) as mock_which,
+        patch("subprocess.run") as mock_run,
+        patch("os.environ.get", side_effect=lambda k, d="": "fake-editor" if k == "EDITOR" else d),
+        patch("builtins.input", return_value="y"),
+        patch("glob.glob", return_value=["/tmp/src/app.hip"]),
+        patch("os.path.isfile", return_value=True),
+    ):
+        _apply_code_change_interactive(
+            rec=rec,
+            source_dir="/tmp/src",
+            llm_provider=None,
+            llm_api_key=None,
+            llm_model=None,
+            colors=colors,
+        )
+    mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
