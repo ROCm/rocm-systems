@@ -291,6 +291,7 @@ SELECT
     ) AS category,
     R.string AS region,
     S.display_name AS name,
+    JSON_EXTRACT(S.extdata, '$.truncated_kernel_name') AS truncated_name,
     K.nid,
     P.pid,
     A.absolute_index AS agent_abs_index,
