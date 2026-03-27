@@ -41,7 +41,7 @@ rocprofiler_register_add_option(
     ${ROCM_DEP_ROCMCORE})
 rocprofiler_register_add_option(
     ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT
-    "Enable attachment by default, instead of requiring an environment variable when the application starts"
+    "Enable ROCP_TOOL_ATTACH by default at runtime (via ROCP_REG_DEFAULT_ATTACHMENT), instead of requiring ROCP_TOOL_ATTACH to be set in the environment when the application starts; requires the rocprofiler-sdk attach library to be available"
     ON)
 
 # In the future, we will do this even with clang-tidy enabled
