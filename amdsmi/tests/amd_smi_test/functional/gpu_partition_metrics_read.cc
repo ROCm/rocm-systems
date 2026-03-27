@@ -131,8 +131,8 @@ void TestGpuPartitionMetricsRead::Run(void) {
         IF_VERB(STANDARD) {
           std::cout << "\t**" <<
           "Not supported on this machine" << std::endl;
-          continue;
         }
+        continue;
       }
       CHK_ERR_ASRT(err);  // Anything else should be a failure
                           // (ie, we are not handling the metrics right/etc..)

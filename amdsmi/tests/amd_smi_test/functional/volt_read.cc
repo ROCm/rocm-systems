@@ -90,8 +90,8 @@ void TestVoltRead::Run(void) {
             // Verify api support checking functionality is working
             err =  amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, nullptr);
             ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-            return;
           }
+          return;
         } else {
           CHK_ERR_ASRT(err)
         }
