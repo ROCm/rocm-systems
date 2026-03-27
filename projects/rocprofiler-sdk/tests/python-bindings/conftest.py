@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import csv
+import glob
 import pytest
 import json
 
@@ -57,7 +58,10 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def agent_info_input_data(request):
-    filename = request.config.getoption("--agent-input")
+    filename_pattern = request.config.getoption("--agent-input")
+    matching_files = glob.glob(filename_pattern)
+    assert len(matching_files) == 1, f"Expected 1 file matching {filename_pattern}, found {len(matching_files)}"
+    filename = matching_files[0]
     data = []
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
@@ -69,7 +73,10 @@ def agent_info_input_data(request):
 
 @pytest.fixture
 def marker_input_data(request):
-    filename = request.config.getoption("--marker-input")
+    filename_pattern = request.config.getoption("--marker-input")
+    matching_files = glob.glob(filename_pattern)
+    assert len(matching_files) == 1, f"Expected 1 file matching {filename_pattern}, found {len(matching_files)}"
+    filename = matching_files[0]
     data = []
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
@@ -81,12 +88,18 @@ def marker_input_data(request):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
+    filename_pattern = request.config.getoption("--json-input")
+    matching_files = glob.glob(filename_pattern)
+    assert len(matching_files) == 1, f"Expected 1 file matching {filename_pattern}, found {len(matching_files)}"
+    filename = matching_files[0]
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
+    filename_pattern = request.config.getoption("--pftrace-input")
+    matching_files = glob.glob(filename_pattern)
+    assert len(matching_files) == 1, f"Expected 1 file matching {filename_pattern}, found {len(matching_files)}"
+    filename = matching_files[0]
     return PerfettoReader(filename).read()[0]
