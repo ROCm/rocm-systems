@@ -2,7 +2,10 @@
 #include <resource_guards.hh>
 #include <hip/amd_detail/amd_gfx1250_TDM.h>
 
+#include <string>
+
 #if defined(__clang__) && defined(__HIP__)
+#if defined(__gfx1250__) || defined(__gfx1251__)
 __global__ void  TDM_load_store_tester(const int* data,  int* result, int sizex, int sizey)
 {
     __shared__ int shmem[10 * 10];
@@ -31,9 +34,21 @@ __global__ void  TDM_load_store_tester(const int* data,  int* result, int sizex,
     __builtin_amdgcn_s_wait_tensorcnt(0);
 
 }
+#endif // #if defined(__gfx1250__) || defined(__gfx1251__)
 
 TEST_CASE("TDM_Basic_load_2d")
 {
+#if HT_AMD
+    int device = 0;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t props{};
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    const std::string arch(props.gcnArchName);
+    if (arch.find("gfx1250") == std::string::npos && arch.find("gfx1251") == std::string::npos) {
+        HipTest::HIP_SKIP_TEST("TDM_Basic_load_2d requires gfx1250 or gfx1251");
+        return;
+    }
+#endif
     constexpr int kAllocSize = 10 * 10;
     const auto alloc_size = kAllocSize * sizeof(int);
 
@@ -50,7 +65,9 @@ TEST_CASE("TDM_Basic_load_2d")
     }
 
     HIP_CHECK(hipMemcpy(input_dev.ptr(), input.ptr(), alloc_size, hipMemcpyHostToDevice));
-    TDM_load_store_tester<<<1, 32>>>(input_dev.ptr(), result_dev.ptr(), 10, 10);
+#if defined(__gfx1250__) || defined(__gfx1251__)
+TDM_load_store_tester<<<1, 32>>>(input_dev.ptr(), result_dev.ptr(), 10, 10);
+#endif
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(result.ptr(), result_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
 
