@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import glob
 import json
 import pytest
 import pandas as pd
@@ -41,13 +42,19 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def input_data(request):
-    filename = request.config.getoption("--input")
+    filename_pattern = request.config.getoption("--input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
+    filename_pattern = request.config.getoption("--json-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))

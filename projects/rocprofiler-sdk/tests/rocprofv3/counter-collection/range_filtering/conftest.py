@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import glob
 import json
 import pytest
 import pandas as pd
@@ -80,9 +81,13 @@ def extract_iteration_list(jobs, pass_):
     return tokenize(kernel_iteration_range)
 
 
-def process_config(out_file, input_config, pass_):
+def process_config(out_file_pattern, input_config, pass_):
 
     ret_dict = {}
+
+    files = glob.glob(out_file_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {out_file_pattern}"
+    out_file = files[0]
 
     with open(out_file, "r") as inp:
         ret_dict["json_data"] = dotdict(collapse_dict_list(json.load(inp)))

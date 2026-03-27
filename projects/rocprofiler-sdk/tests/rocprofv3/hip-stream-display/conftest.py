@@ -23,6 +23,7 @@
 
 
 import csv
+import glob
 import json
 import os
 import pytest
@@ -61,7 +62,11 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
+    filename_pattern = request.config.getoption("--json-input")
+    files = glob.glob(filename_pattern)
+    if len(files) == 0:
+        return pytest.skip("stream tracing unavailable")
+    filename = files[0]
     if not os.path.isfile(filename):
         return pytest.skip("stream tracing unavailable")
     with open(filename, "r") as inp:
@@ -70,7 +75,11 @@ def json_data(request):
 
 @pytest.fixture
 def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
+    filename_pattern = request.config.getoption("--pftrace-input")
+    files = glob.glob(filename_pattern)
+    if len(files) == 0:
+        return pytest.skip("stream tracing unavailable")
+    filename = files[0]
     if not os.path.isfile(filename):
         return pytest.skip("stream tracing unavailable")
     return PerfettoReader(filename).read()[0]
@@ -78,7 +87,10 @@ def pftrace_data(request):
 
 @pytest.fixture
 def kernel_csv_data(request):
-    filename = request.config.getoption("--kernel-csv-input")
+    filename_pattern = request.config.getoption("--kernel-csv-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     data = []
     if not os.path.isfile(filename):
         raise FileExistsError(f"{filename} does not exist")
@@ -91,7 +103,10 @@ def kernel_csv_data(request):
 
 @pytest.fixture
 def memory_copy_csv_data(request):
-    filename = request.config.getoption("--memory-copy-csv-input")
+    filename_pattern = request.config.getoption("--memory-copy-csv-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     data = []
     if not os.path.isfile(filename):
         raise FileExistsError(f"{filename} does not exist")

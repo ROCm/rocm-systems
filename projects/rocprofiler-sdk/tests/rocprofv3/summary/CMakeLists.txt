@@ -48,13 +48,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_*_results.pftrace
          --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_*_results.otf2
          --summary-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_summary.txt
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_*_summary.txt
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-summary-cmd-line)
@@ -85,13 +85,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_*_results.pftrace
          --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_*_results.otf2
          --summary-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_summary.txt
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_*_summary.txt
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-summary-inp-yaml)

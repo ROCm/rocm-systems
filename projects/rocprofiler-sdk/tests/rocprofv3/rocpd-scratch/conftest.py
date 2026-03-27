@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import glob
 import pandas as pd
 import pytest
 import json
@@ -54,12 +55,24 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
+    filename_pattern = request.config.getoption("--json-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
+    # Generated pftrace files from rocpd convert don't have PID, so handle both glob and exact paths
+    filename_pattern = request.config.getoption("--pftrace-input")
+    if os.path.isfile(filename_pattern):
+        # Exact file path (rocpd convert output)
+        filename = filename_pattern
+    else:
+        # Glob pattern (for consistency)
+        files = glob.glob(filename_pattern)
+        assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+        filename = files[0]
     return PerfettoReader(filename).read()[0]

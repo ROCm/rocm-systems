@@ -25,6 +25,7 @@
 import json
 import pytest
 import csv
+import glob
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
@@ -53,17 +54,23 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def trace_data_csv(request):
-    filename = request.config.getoption("--trace-input-csv")
-    return filename
+    filename_pattern = request.config.getoption("--trace-input-csv")
+    # Return the pattern itself, not the matched files
+    # This test validates that NO files are created due to minimum_output_data threshold
+    return filename_pattern
 
 
 @pytest.fixture
 def trace_data_json(request):
-    filename = request.config.getoption("--trace-input-json")
-    return filename
+    filename_pattern = request.config.getoption("--trace-input-json")
+    # Return the pattern itself, not the matched files
+    # This test validates that NO files are created due to minimum_output_data threshold
+    return filename_pattern
 
 
 @pytest.fixture
 def trace_data_pftrace(request):
-    filename = request.config.getoption("--trace-input-pftrace")
-    return filename
+    filename_pattern = request.config.getoption("--trace-input-pftrace")
+    # Return the pattern itself, not the matched files
+    # This test validates that NO files are created due to minimum_output_data threshold
+    return filename_pattern

@@ -50,13 +50,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_*_results.pftrace
          --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_*_results.otf2
          --collection-period-input
-         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_collection_periods.log
+         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_*_collection_periods.log
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-collection-period

@@ -54,13 +54,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_*_results.pftrace
          --kernel-csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_*_kernel_trace.csv
          --memory-copy-csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_*_memory_copy_trace.csv
     TIMEOUT 60
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-hip-stream-display

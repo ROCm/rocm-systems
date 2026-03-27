@@ -47,9 +47,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-scratch-perfetto-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        bash -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -69,7 +68,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
+    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.json
          --pftrace-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
     TIMEOUT 120
     LABELS "integration-tests;rocpd"

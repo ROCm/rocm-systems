@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import glob
 import json
 import pytest
 import csv
@@ -50,7 +51,10 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def agent_info_input_data(request):
-    filename = request.config.getoption("--agent-input")
+    filename_pattern = request.config.getoption("--agent-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     data = []
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
@@ -62,7 +66,10 @@ def agent_info_input_data(request):
 
 @pytest.fixture
 def counter_input_data(request):
-    filename = request.config.getoption("--counter-input")
+    filename_pattern = request.config.getoption("--counter-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     data = []
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)

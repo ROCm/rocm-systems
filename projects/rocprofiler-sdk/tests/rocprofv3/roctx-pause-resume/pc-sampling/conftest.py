@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import glob
 import json
 import os
 import pytest
@@ -41,7 +42,11 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
+    filename_pattern = request.config.getoption("--json-input")
+    files = glob.glob(filename_pattern)
+    if len(files) == 0:
+        return pytest.skip("PC sampling unavailable")
+    filename = files[0]
     if not os.path.isfile(filename):
         return pytest.skip("PC sampling unavailable")
     with open(filename, "r") as inp:

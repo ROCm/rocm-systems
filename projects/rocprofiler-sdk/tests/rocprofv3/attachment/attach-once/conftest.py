@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import csv
+import glob
 import json
 import pytest
 import os
@@ -40,9 +41,16 @@ def pytest_addoption(parser):
 
 def get_data(request, field, section_name):
     """Load data from JSON or CSV file and extract specific section"""
-    inp_data = request.config.getoption(field)
-    if not inp_data:
+    inp_data_pattern = request.config.getoption(field)
+    if not inp_data_pattern:
         return []
+
+    # Resolve glob pattern to actual file
+    files = glob.glob(inp_data_pattern)
+    if len(files) == 0:
+        print(f"Warning: No files found matching pattern: {inp_data_pattern}")
+        return []
+    inp_data = files[0]
 
     # Determine file format by extension
     if inp_data.lower().endswith(".json"):

@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import glob
 import os
 import json
 import pytest
@@ -52,20 +53,29 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
+    filename_pattern = request.config.getoption("--json-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
+    filename_pattern = request.config.getoption("--pftrace-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     return PerfettoReader(filename).read()[0]
 
 
 @pytest.fixture
 def otf2_data(request):
-    filename = request.config.getoption("--otf2-input")
+    filename_pattern = request.config.getoption("--otf2-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     if not os.path.exists(filename):
         raise FileExistsError(f"{filename} does not exist")
     return OTF2Reader(filename).read()[0]

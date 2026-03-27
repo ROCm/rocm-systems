@@ -37,7 +37,7 @@ export ROCP_TOOL_ATTACH=1
 OUTPUT_SUBDIR="attachment-output"
 # For CSV, we don't require specific files since different traces may or may not be generated
 # We'll just check if at least one CSV file was created
-EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
+# Note: Output files will have PID appended, e.g., out_12345_results.json
 OUTPUT_FORMAT="csv json rocpd"
 
 # Clean up any existing output
@@ -125,13 +125,24 @@ else
     echo "Found $CSV_COUNT CSV file(s)"
 fi
 
-# For other formats, check specific expected files
-for expected_file in "${EXPECTED_FILES[@]}"; do
-    if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
-        echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file} not found"
-        exit 1
-    fi
-done
+# For other formats, check specific expected files (with PID pattern)
+# Check for JSON files
+JSON_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${OUTPUT_FILENAME}_*_results.json" | wc -l)
+if [ $JSON_COUNT -eq 0 ]; then
+    echo "Error: No JSON files matching ${OUTPUT_FILENAME}_*_results.json were generated"
+    exit 1
+else
+    echo "Found $JSON_COUNT JSON file(s)"
+fi
+
+# Check for rocpd database files
+DB_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${OUTPUT_FILENAME}_*_results.db" | wc -l)
+if [ $DB_COUNT -eq 0 ]; then
+    echo "Error: No database files matching ${OUTPUT_FILENAME}_*_results.db were generated"
+    exit 1
+else
+    echo "Found $DB_COUNT database file(s)"
+fi
 
 echo "Attachment ${OUTPUT_FORMAT} test completed successfully"
 exit 0

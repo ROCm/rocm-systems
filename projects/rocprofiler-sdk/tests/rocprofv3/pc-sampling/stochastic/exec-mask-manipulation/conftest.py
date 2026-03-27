@@ -22,6 +22,7 @@
 # SOFTWARE.
 
 
+import glob
 import json
 import os
 import pytest
@@ -53,7 +54,15 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def input_csv(request):
-    filename = request.config.getoption("--input-csv")
+    filename_pattern = request.config.getoption("--input-csv")
+    files = glob.glob(filename_pattern)
+    if len(files) == 0:
+        # The CSV file is not generated, because the dependency test
+        # responsible to generate this file was skipped or failed.
+        # Thus emit the message to skip this test as well.
+        print("PC sampling unavailable")
+        return None
+    filename = files[0]
     if not os.path.isfile(filename):
         # The CSV file is not generated, because the dependency test
         # responsible to generate this file was skipped or failed.
@@ -78,7 +87,15 @@ def input_csv(request):
 
 @pytest.fixture
 def input_json(request):
-    filename = request.config.getoption("--input-json")
+    filename_pattern = request.config.getoption("--input-json")
+    files = glob.glob(filename_pattern)
+    if len(files) == 0:
+        # The JSON file is not generated, because the dependency test
+        # responsible to generate this file was skipped or failed.
+        # Thus emit the message to skip this test as well.
+        print("PC sampling unavailable")
+        return None
+    filename = files[0]
     if not os.path.isfile(filename):
         # The CSV file is not generated, because the dependency test
         # responsible to generate this file was skipped or failed.

@@ -60,13 +60,13 @@ rocprofiler_add_integration_validate_test(
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
     ARGS --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_*_kernel_trace.csv
          --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_hsa_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_*_hsa_api_trace.csv
          --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_*_memory_copy_trace.csv
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_*_agent_info.csv
          --skip-if
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
 
@@ -81,12 +81,12 @@ rocprofiler_add_integration_validate_test(
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
     ARGS --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_*_results.json
          --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_*_results.json
          --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_*_results.json
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_*_results.json
          --skip-if
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)

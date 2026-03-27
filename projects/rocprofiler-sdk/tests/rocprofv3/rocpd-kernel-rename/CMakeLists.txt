@@ -76,9 +76,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-rename-csv-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/generated-rename-csv/ -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db
+        bash -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d ${CMAKE_CURRENT_BINARY_DIR}/generated-rename-csv/ -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -90,9 +89,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-no-rename-csv-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f csv -d
-        ${CMAKE_CURRENT_BINARY_DIR}/generated-no-rename-csv/ -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_results.db
+        bash -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/generated-no-rename-csv/ -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -113,9 +111,9 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --rename-csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-kernel-rename/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-kernel-rename/out_*_kernel_trace.csv
          --no-rename-csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-no-kernel-rename/out_*_kernel_trace.csv
          --generated-rename-csv-input
          ${CMAKE_CURRENT_BINARY_DIR}/generated-rename-csv/out_kernel_trace.csv
          --generated-no-rename-csv-input

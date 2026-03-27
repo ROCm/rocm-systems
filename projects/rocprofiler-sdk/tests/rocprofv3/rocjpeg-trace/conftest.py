@@ -23,6 +23,7 @@
 
 
 import csv
+import glob
 import json
 import os
 import pytest
@@ -62,7 +63,10 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
+    filename_pattern = request.config.getoption("--json-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     if not os.path.isfile(filename):
         return pytest.skip("rocjpeg tracing unavailable")
     with open(filename, "r") as inp:
@@ -71,7 +75,10 @@ def json_data(request):
 
 @pytest.fixture
 def csv_data(request):
-    filename = request.config.getoption("--csv-input")
+    filename_pattern = request.config.getoption("--csv-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     data = []
     if not os.path.isfile(filename):
         # The CSV file is not generated, because the dependency test
@@ -88,7 +95,10 @@ def csv_data(request):
 
 @pytest.fixture
 def otf2_data(request):
-    filename = request.config.getoption("--otf2-input")
+    filename_pattern = request.config.getoption("--otf2-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     if not os.path.isfile(filename):
         return pytest.skip("rocjpeg tracing unavailable")
     return OTF2Reader(filename).read()[0]
@@ -96,7 +106,10 @@ def otf2_data(request):
 
 @pytest.fixture
 def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
+    filename_pattern = request.config.getoption("--pftrace-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     if not os.path.isfile(filename):
         return pytest.skip("rocjpeg tracing unavailable")
     return PerfettoReader(filename).read()[0]

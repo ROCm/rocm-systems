@@ -90,9 +90,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-otf2-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        bash -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -126,9 +125,9 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-perfetto-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename --annotate-args
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        bash -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename --annotate-args
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -163,9 +162,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-csv-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        bash -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -183,9 +181,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        bash -c
+        "${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
@@ -287,6 +284,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS
     COPY conftest.py validate.py
     CONFIG pytest.ini
+<<<<<<< HEAD
     BUNDLE_TESTS
     ARGS validate.py::test_perfetto_data
          validate.py::test_otf2_data
@@ -296,6 +294,10 @@ rocprofiler_add_integration_validate_test(
          validate.py::test_event_id_annotations
          --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
+=======
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.json
+>>>>>>> 3205b94ee3 (Updated rocprofv3 tests to work with added pids)
          --otf2-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2
          --otf2-sys-tree-input

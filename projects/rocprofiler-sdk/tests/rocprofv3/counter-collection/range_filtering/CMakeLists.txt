@@ -34,11 +34,11 @@ rocprofiler_add_integration_validate_test(
     ARGS --json-config
          ${CMAKE_CURRENT_BINARY_DIR}/input_range.json
          --input-json-pass1
-         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_1/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_1/out_*_results.json
          --input-json-pass2
-         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_2/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_2/out_*_results.json
          --input-json-pass3
-         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_3/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_3/out_*_results.json
     TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-range-filter)

@@ -38,9 +38,9 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     DISCOVERY_ARGS -k test_validate_pc_sampling_exec_mask_manipulation_
     ARGS --input-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_pc_sampling_host_trap.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_*_pc_sampling_host_trap.csv
          --input-json
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_*_results.json
          --all-sampled
          False
     TIMEOUT 60
@@ -72,9 +72,9 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     DISCOVERY_ARGS -k test_validate_pc_sampling_exec_mask_manipulation_
     ARGS --input-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_pc_sampling_host_trap.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_*_pc_sampling_host_trap.csv
          --input-json
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_*_results.json
          --all-sampled
          False
     TIMEOUT 60
@@ -105,9 +105,9 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     DISCOVERY_ARGS -k test_validate_pc_sampling_exec_mask_manipulation_
     ARGS --input-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_pc_sampling_host_trap.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_*_pc_sampling_host_trap.csv
          --input-json
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_*_results.json
          --all-sampled
          False
     TIMEOUT 60

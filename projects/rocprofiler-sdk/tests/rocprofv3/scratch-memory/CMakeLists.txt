@@ -35,9 +35,9 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_results.json
+    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_*_results.json
          --csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_scratch_memory_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_*_scratch_memory_trace.csv
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-scratch-memory-tracing-csv

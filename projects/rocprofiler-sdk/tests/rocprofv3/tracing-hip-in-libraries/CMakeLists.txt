@@ -39,31 +39,31 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_hsa_api_trace.csv
          --hip-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_hip_api_trace.csv
          --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_kernel_trace.csv
          --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_memory_copy_trace.csv
          --marker-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_marker_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_marker_api_trace.csv
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_agent_info.csv
          --kernel-stats
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_stats.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_kernel_stats.csv
          --hip-stats
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_api_stats.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_hip_api_stats.csv
          --hsa-stats
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_api_stats.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_hsa_api_stats.csv
          --memory-copy-stats
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_stats.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_memory_copy_stats.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_results.pftrace
          --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_*_results.otf2
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries)

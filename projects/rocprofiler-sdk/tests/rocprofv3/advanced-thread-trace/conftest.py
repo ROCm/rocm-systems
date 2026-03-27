@@ -24,6 +24,7 @@
 import csv
 import pytest
 import json
+import glob
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
@@ -70,7 +71,12 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--input")
+    filename_pattern = request.config.getoption("--input")
+    matching_files = glob.glob(filename_pattern)
+    assert (
+        len(matching_files) == 1
+    ), f"Expected exactly 1 file matching {filename_pattern}, found {len(matching_files)}: {matching_files}"
+    filename = matching_files[0]
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 

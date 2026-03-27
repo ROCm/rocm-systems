@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import csv
+import glob
 import json
 import pytest
 import os
@@ -210,7 +211,14 @@ def convert_agents_to_csv_format(agents):
 def get_csv_data(file_path):
     """Load data from CSV file"""
     try:
-        with open(file_path, "r") as inp:
+        matches = glob.glob(file_path)
+        if not matches:
+            print(f"No files matching pattern {file_path}")
+            return []
+        assert (
+            len(matches) == 1
+        ), f"Expected 1 file matching {file_path}, found {len(matches)}"
+        with open(matches[0], "r") as inp:
             csv_reader = csv.DictReader(inp)
             return [row for row in csv_reader]
     except FileNotFoundError as e:

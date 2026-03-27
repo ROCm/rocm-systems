@@ -32,13 +32,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --hsa-trace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_hsa_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_*_hsa_api_trace.csv
          --kernel-trace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_*_kernel_trace.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_*_results.pftrace
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-hsa-multiqueue)

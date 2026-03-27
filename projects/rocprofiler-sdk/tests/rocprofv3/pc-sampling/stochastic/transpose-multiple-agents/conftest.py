@@ -22,6 +22,7 @@
 # SOFTWARE.
 
 
+import glob
 import json
 import os
 import pytest
@@ -59,7 +60,15 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def input_samples_csv(request):
-    filename = request.config.getoption("--input-samples-csv")
+    filename_pattern = request.config.getoption("--input-samples-csv")
+    files = glob.glob(filename_pattern)
+    if len(files) == 0:
+        # The CSV file is not generated, because the dependency test
+        # responsible to generate this file was skipped or failed.
+        # Thus emit the message to skip this test as well.
+        print("PC sampling unavailable")
+        return None
+    filename = files[0]
     if not os.path.isfile(filename):
         # The CSV file is not generated, because the dependency test
         # responsible to generate this file was skipped or failed.
@@ -84,14 +93,30 @@ def input_samples_csv(request):
 
 @pytest.fixture
 def input_kernel_trace_csv(request):
-    filename = request.config.getoption("--input-kernel-trace-csv")
+    filename_pattern = request.config.getoption("--input-kernel-trace-csv")
+    files = glob.glob(filename_pattern)
+    if len(files) == 0:
+        # The CSV file is not generated, because the dependency test
+        # responsible to generate this file was skipped or failed.
+        # Thus emit the message to skip this test as well.
+        print("PC sampling unavailable")
+        return None
+    filename = files[0]
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_agent_info_csv(request):
-    filename = request.config.getoption("--input-agent-info-csv")
+    filename_pattern = request.config.getoption("--input-agent-info-csv")
+    files = glob.glob(filename_pattern)
+    if len(files) == 0:
+        # The CSV file is not generated, because the dependency test
+        # responsible to generate this file was skipped or failed.
+        # Thus emit the message to skip this test as well.
+        print("PC sampling unavailable")
+        return None
+    filename = files[0]
     with open(filename, "r") as inp:
         return pd.read_csv(
             inp,
@@ -105,7 +130,15 @@ def input_agent_info_csv(request):
 
 @pytest.fixture
 def input_samples_json(request):
-    filename = request.config.getoption("--input-samples-json")
+    filename_pattern = request.config.getoption("--input-samples-json")
+    files = glob.glob(filename_pattern)
+    if len(files) == 0:
+        # The JSON file is not generated, because the dependency test
+        # responsible to generate this file was skipped or failed.
+        # Thus emit the message to skip this test as well.
+        print("PC sampling unavailable")
+        return None
+    filename = files[0]
     if not os.path.isfile(filename):
         # The CSV file is not generated, because the dependency test
         # responsible to generate this file was skipped or failed.

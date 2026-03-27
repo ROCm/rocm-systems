@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import glob
 import os
 import csv
 import pytest
@@ -78,7 +79,10 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def agent_info_input_data(request):
-    filename = request.config.getoption("--agent-input")
+    filename_pattern = request.config.getoption("--agent-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     data = []
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
@@ -90,7 +94,10 @@ def agent_info_input_data(request):
 
 @pytest.fixture
 def hsa_input_data(request):
-    filename = request.config.getoption("--hsa-input")
+    filename_pattern = request.config.getoption("--hsa-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     data = []
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
@@ -111,7 +118,10 @@ def kernel_input_data(request):
 
 @pytest.fixture
 def counter_input_data(request):
-    filename = request.config.getoption("--counter-input")
+    filename_pattern = request.config.getoption("--counter-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
@@ -209,12 +219,18 @@ def memory_copy_stats_data(request):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
+    filename_pattern = request.config.getoption("--json-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
+    filename_pattern = request.config.getoption("--pftrace-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     return PerfettoReader(filename).read()[0]

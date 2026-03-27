@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import csv
+import glob
 import pytest
 import json
 
@@ -82,9 +83,13 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def agent_info_input_data(request):
-    filename = request.config.getoption("--agent-input")
+    filename_pattern = request.config.getoption("--agent-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -94,9 +99,13 @@ def agent_info_input_data(request):
 
 @pytest.fixture
 def hsa_input_data(request):
-    filename = request.config.getoption("--hsa-input")
+    filename_pattern = request.config.getoption("--hsa-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -106,9 +115,13 @@ def hsa_input_data(request):
 
 @pytest.fixture
 def kernel_input_data(request):
-    filename = request.config.getoption("--kernel-input")
+    filename_pattern = request.config.getoption("--kernel-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -118,9 +131,13 @@ def kernel_input_data(request):
 
 @pytest.fixture
 def memory_copy_input_data(request):
-    filename = request.config.getoption("--memory-copy-input")
+    filename_pattern = request.config.getoption("--memory-copy-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -130,9 +147,13 @@ def memory_copy_input_data(request):
 
 @pytest.fixture
 def marker_input_data(request):
-    filename = request.config.getoption("--marker-input")
+    filename_pattern = request.config.getoption("--marker-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -142,9 +163,13 @@ def marker_input_data(request):
 
 @pytest.fixture
 def hip_input_data(request):
-    filename = request.config.getoption("--hip-input")
+    filename_pattern = request.config.getoption("--hip-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -154,18 +179,30 @@ def hip_input_data(request):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--json-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
-    return PerfettoReader(filename).read()[0]
+    filename_pattern = request.config.getoption("--pftrace-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    return PerfettoReader(matches[0]).read()[0]
 
 
 @pytest.fixture
 def rocpd_data(request):
-    filename = request.config.getoption("--rocpd-input")
-    return RocpdReader(filename).read()[0]
+    filename_pattern = request.config.getoption("--rocpd-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    return RocpdReader(matches[0]).read()[0]

@@ -54,11 +54,11 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_*_results.pftrace
          --memory-copy-csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_*_memory_copy_trace.csv
     TIMEOUT 60
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-hip-streams-per-thread

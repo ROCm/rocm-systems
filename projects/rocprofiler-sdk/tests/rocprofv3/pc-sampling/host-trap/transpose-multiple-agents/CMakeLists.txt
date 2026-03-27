@@ -46,11 +46,11 @@ rocprofiler_add_integration_validate_test(
     ARGS -k
          test_multi_agent_support
          --input-samples-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_pc_sampling_host_trap.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_*_pc_sampling_host_trap.csv
          --input-kernel-trace-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_*_kernel_trace.csv
          --input-agent-info-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input/out_*_agent_info.csv
     TIMEOUT 60
     LABELS "integration-tests;pc-sampling"
     FIXTURES_REQUIRED
@@ -82,11 +82,11 @@ rocprofiler_add_integration_validate_test(
     ARGS -k
          test_multi_agent_support
          --input-samples-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_pc_sampling_host_trap.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_*_pc_sampling_host_trap.csv
          --input-kernel-trace-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_*_kernel_trace.csv
          --input-agent-info-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_*_agent_info.csv
     TIMEOUT 60
     LABELS "integration-tests;pc-sampling"
     FIXTURES_REQUIRED
@@ -117,11 +117,11 @@ rocprofiler_add_integration_validate_test(
     ARGS -k
          test_multi_agent_support
          --input-samples-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_pc_sampling_host_trap.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_*_pc_sampling_host_trap.csv
          --input-kernel-trace-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_*_kernel_trace.csv
          --input-agent-info-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_*_agent_info.csv
     TIMEOUT 60
     LABELS "integration-tests;pc-sampling"
     FIXTURES_REQUIRED

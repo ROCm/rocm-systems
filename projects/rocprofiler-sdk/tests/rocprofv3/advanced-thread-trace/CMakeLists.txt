@@ -103,7 +103,7 @@ rocprofiler_add_integration_validate_test(
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path
     ARGS --input
-         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/cmd_input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/cmd_input/out_*_results.json
          --code-object-input
          ${CMAKE_CURRENT_BINARY_DIR}
          --output-path
@@ -120,7 +120,7 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-json
     DISABLED ${IS_DISABLED}
     ARGS --input
-         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input/out_*_results.json
          --code-object-input
          ${CMAKE_CURRENT_BINARY_DIR}
          --output-path
@@ -298,7 +298,7 @@ rocprofiler_add_integration_validate_test(
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-att-perfcounter-target-cu
     ARGS --input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/perfcounter_target_cu/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/perfcounter_target_cu/out_*_results.json
          --output-path
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/perfcounter_target_cu
          --target-cu

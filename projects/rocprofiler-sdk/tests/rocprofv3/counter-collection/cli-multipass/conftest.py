@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import csv
+import glob
 import os
 import pytest
 
@@ -43,9 +44,13 @@ def output_dir(request):
 @pytest.fixture
 def pass1_agent_info(output_dir):
     """Agent info from pass 1"""
-    filename = os.path.join(output_dir, "pass_1", "out_agent_info.csv")
+    filename_pattern = os.path.join(output_dir, "pass_1", "out_*_agent_info.csv")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -55,9 +60,13 @@ def pass1_agent_info(output_dir):
 @pytest.fixture
 def pass1_counter_data(output_dir):
     """Counter data from pass 1"""
-    filename = os.path.join(output_dir, "pass_1", "out_counter_collection.csv")
+    filename_pattern = os.path.join(output_dir, "pass_1", "out_*_counter_collection.csv")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -67,9 +76,13 @@ def pass1_counter_data(output_dir):
 @pytest.fixture
 def pass2_agent_info(output_dir):
     """Agent info from pass 2"""
-    filename = os.path.join(output_dir, "pass_2", "out_agent_info.csv")
+    filename_pattern = os.path.join(output_dir, "pass_2", "out_*_agent_info.csv")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -79,9 +92,13 @@ def pass2_agent_info(output_dir):
 @pytest.fixture
 def pass2_counter_data(output_dir):
     """Counter data from pass 2"""
-    filename = os.path.join(output_dir, "pass_2", "out_counter_collection.csv")
+    filename_pattern = os.path.join(output_dir, "pass_2", "out_*_counter_collection.csv")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)

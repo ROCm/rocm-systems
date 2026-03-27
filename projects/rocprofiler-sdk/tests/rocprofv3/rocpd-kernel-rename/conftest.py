@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import csv
+import glob
 import pandas as pd
 import pytest
 import json
@@ -63,14 +64,20 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
+    filename_pattern = request.config.getoption("--json-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def rename_csv_data(request):
-    filename = request.config.getoption("--rename-csv-input")
+    filename_pattern = request.config.getoption("--rename-csv-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     data = []
     if not os.path.isfile(filename):
         raise FileExistsError(f"{filename} does not exist")
@@ -83,7 +90,10 @@ def rename_csv_data(request):
 
 @pytest.fixture
 def no_rename_csv_data(request):
-    filename = request.config.getoption("--no-rename-csv-input")
+    filename_pattern = request.config.getoption("--no-rename-csv-input")
+    files = glob.glob(filename_pattern)
+    assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+    filename = files[0]
     data = []
     if not os.path.isfile(filename):
         raise FileExistsError(f"{filename} does not exist")
@@ -96,7 +106,16 @@ def no_rename_csv_data(request):
 
 @pytest.fixture
 def generated_rename_csv_data(request):
-    filename = request.config.getoption("--generated-rename-csv-input")
+    # Generated CSV files from rocpd convert don't have PID, so handle both glob and exact paths
+    filename_pattern = request.config.getoption("--generated-rename-csv-input")
+    if os.path.isfile(filename_pattern):
+        # Exact file path (rocpd convert output)
+        filename = filename_pattern
+    else:
+        # Glob pattern (for consistency)
+        files = glob.glob(filename_pattern)
+        assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+        filename = files[0]
     data = []
     if not os.path.isfile(filename):
         raise FileExistsError(f"{filename} does not exist")
@@ -109,7 +128,16 @@ def generated_rename_csv_data(request):
 
 @pytest.fixture
 def generated_no_rename_csv_data(request):
-    filename = request.config.getoption("--generated-no-rename-csv-input")
+    # Generated CSV files from rocpd convert don't have PID, so handle both glob and exact paths
+    filename_pattern = request.config.getoption("--generated-no-rename-csv-input")
+    if os.path.isfile(filename_pattern):
+        # Exact file path (rocpd convert output)
+        filename = filename_pattern
+    else:
+        # Glob pattern (for consistency)
+        files = glob.glob(filename_pattern)
+        assert len(files) > 0, f"No files found matching pattern: {filename_pattern}"
+        filename = files[0]
     data = []
     if not os.path.isfile(filename):
         raise FileExistsError(f"{filename} does not exist")

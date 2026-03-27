@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import glob
 import json
 import pytest
 import pandas as pd
@@ -89,62 +90,98 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def input_csv_pass1(request):
-    filename = request.config.getoption("--input-csv-pass1")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--input-csv-pass1")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_csv_pass2(request):
-    filename = request.config.getoption("--input-csv-pass2")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--input-csv-pass2")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_csv_pass3(request):
-    filename = request.config.getoption("--input-csv-pass3")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--input-csv-pass3")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_csv_pass4(request):
-    filename = request.config.getoption("--input-csv-pass4")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--input-csv-pass4")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_csv_pmc1(request):
-    filename = request.config.getoption("--input-csv-pmc1")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--input-csv-pmc1")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_json_pass1(request):
-    filename = request.config.getoption("--input-json-pass1")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--input-json-pass1")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def input_json_pass2(request):
-    filename = request.config.getoption("--input-json-pass2")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--input-json-pass2")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def input_json_pass3(request):
-    filename = request.config.getoption("--input-json-pass3")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--input-json-pass3")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def input_json_pass4(request):
-    filename = request.config.getoption("--input-json-pass4")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--input-json-pass4")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))

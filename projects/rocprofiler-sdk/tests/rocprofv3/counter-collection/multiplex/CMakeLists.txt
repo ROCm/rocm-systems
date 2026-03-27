@@ -55,9 +55,9 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input.json input.yml
     CONFIG pytest.ini
     ARGS --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_*_agent_info.csv
          --counter-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_*_counter_collection.csv
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiplex
@@ -83,9 +83,9 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input.json input.yml
     CONFIG pytest.ini
     ARGS --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_*_agent_info.csv
          --counter-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_*_counter_collection.csv
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiple-yaml
