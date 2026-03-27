@@ -118,7 +118,7 @@ static bool hipPerfMemMallocCpyFree_test() {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfMemMallocCpyFree_test) {
+HIP_TEST_CASE(Perf_hipPerfMemMallocCpyFree_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

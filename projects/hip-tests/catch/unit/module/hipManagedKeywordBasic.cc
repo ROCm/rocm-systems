@@ -31,7 +31,7 @@ constexpr auto fileName = "managed_kernel.code";
  * - HIP_VERSION >= 5.6
 */
 
-TEST_CASE(Unit_hipModuleGetGlobal_Functional) {
+HIP_TEST_CASE(Unit_hipModuleGetGlobal_Functional) {
   bool testStatus = true;
   int numDevices = 0;
   hipDeviceptr_t x;

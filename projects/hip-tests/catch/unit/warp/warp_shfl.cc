@@ -39,7 +39,7 @@ template <typename T> class WarpShfl : public WarpShflTest<WarpShfl<T>, T> {
     LinearAllocGuard<uint8_t> src_lanes_dev(LinearAllocs::hipMalloc, alloc_size);
     src_lanes_.resize(width_);
     std::generate(src_lanes_.begin(), src_lanes_.end(),
-                  [this] { return GenerateRandomInteger(0, static_cast<int>(2 * width_)); });
+                  [this] { return GenRandomInteger(0, static_cast<int>(2 * width_)); });
 
     HIP_CHECK(hipMemcpy(src_lanes_dev.ptr(), src_lanes_.data(), alloc_size, hipMemcpyHostToDevice));
     shfl<<<this->grid_.grid_dim_, this->grid_.block_dim_>>>(arr_dev, input_dev, active_masks,
@@ -86,7 +86,7 @@ template <typename T> class WarpShfl : public WarpShflTest<WarpShfl<T>, T> {
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp shuffle
  */
-TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Positive_Basic, int, unsigned int, long, unsigned long,
+HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Positive_Basic, int, unsigned int, long, unsigned long,
                    long long, unsigned long long, float, double, __half, __half2) {
   int device;
   hipDeviceProp_t device_properties;

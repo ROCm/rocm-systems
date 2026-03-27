@@ -28,7 +28,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___threadfence_block_Positive_Basic_Shared) {
+HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Shared) {
   LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
 
@@ -60,7 +60,7 @@ TEST_CASE(Unit___threadfence_block_Positive_Basic_Shared) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___threadfence_block_Positive_Basic_Global) {
+HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Global) {
   LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
 
@@ -92,7 +92,7 @@ TEST_CASE(Unit___threadfence_block_Positive_Basic_Global) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___threadfence_block_Positive_Basic_Pinned) {
+HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Pinned) {
   LinearAllocGuard<int> in_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 
@@ -120,7 +120,7 @@ TEST_CASE(Unit___threadfence_block_Positive_Basic_Pinned) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___threadfence_block_Positive_Basic_Managed) {
+HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Managed) {
   LinearAllocGuard<int> in_host(LinearAllocs::hipMallocManaged, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipMallocManaged, 2 * sizeof(int));
 
@@ -148,7 +148,7 @@ TEST_CASE(Unit___threadfence_block_Positive_Basic_Managed) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___threadfence_block_Positive_Basic_Peer) {
+HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Peer) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("At least 2 devices are required");

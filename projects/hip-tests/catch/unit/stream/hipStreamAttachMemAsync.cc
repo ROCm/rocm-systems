@@ -13,7 +13,7 @@ __device__ __managed__ int var = 0;
 
 enum class StreamAttachTestType { NullStream = 0, StreamPerThread, CreatedStream };
 
-TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
   hipStream_t stream{nullptr};
 
   auto streamType =
@@ -68,7 +68,7 @@ __global__ void kernel(int* ptr, size_t size) {
 constexpr size_t size = 1024;
 __device__ __managed__ int m_memory[size];
 
-TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
   hipStream_t stream{nullptr};
 
   auto streamType =

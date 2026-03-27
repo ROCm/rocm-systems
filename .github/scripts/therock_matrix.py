@@ -38,8 +38,9 @@ project_map = {
         "cmake_options": "-DTHEROCK_ENABLE_DC_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
         "projects_to_test": "",  # rdc-tests is not built by TheRock build system - TBD
     },
+    # Make sure we enable THEROCK_ENABLE_CORE so we build amdsmitst to run sanity tests.
     "debug_tools": {
-        "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_CORE=ON",
         "projects_to_test": "rocr-debug-agent, rocgdb",
     },
     # media libs to be enabled in following PR
@@ -51,8 +52,9 @@ project_map = {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
         "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-systems",
     },
+    # Make sure we enable THEROCK_ENABLE_CORE so we build amdsmitst to run sanity tests.
     "rocshmem": {
-        "cmake_options": "-DTHEROCK_ENABLE_ROCSHMEM=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": "-DTHEROCK_ENABLE_ROCSHMEM=ON -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_CORE=ON",
         "projects_to_test": "",  # rocshmem testing to be enabled in a future PR
     },
     "runtimes": {
