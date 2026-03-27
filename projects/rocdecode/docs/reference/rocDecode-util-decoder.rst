@@ -52,7 +52,7 @@ The decoder instance is reused when there is a change to the video resolution wi
 
 Reconfiguration parameters define how to handle the flushed frames. ``SetReconfigParams()`` sets these reconfiguration paramaters.
 
-``WaitForDecodeCompletion()`` waits for the the last submitted picture to be decoded.
+``WaitForDecodeCompletion()`` waits for the last submitted picture to be decoded.
 
 ``ReconfigureDecoder()`` reconfigures the decoder.
 
