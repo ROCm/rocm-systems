@@ -687,6 +687,9 @@ file(COPY tools/msccl-unit-test-algorithms DESTINATION ${PROJECT_BINARY_DIR})
 ## Install Algorithm files under share folder
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/msccl-algorithms DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/msccl-unit-test-algorithms DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
+## Install tuner config directory for CSV-based tuner
+file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
+rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
 
 rocm_export_targets(
   NAMESPACE roc::
