@@ -26,13 +26,19 @@ RCCL will automatically detect and load the config file at runtime.
 
 ## Auto-Discovery Order
 
+## Auto-Discovery Order
+
 The built-in CSV tuner searches for config files in this order:
 
 1. `NCCL_TUNER_CONFIG_FILE` environment variable (if set)
-2. `./tuner/rccl_tuner_<arch>.csv` (local, for development)
-3. `./tuner/rccl_tuner.csv` (local, for development)
-4. `${ROCM_PATH}/share/rccl/tuner/rccl_tuner_<arch>.csv` (GPU-specific, e.g., `rccl_tuner_gfx950.csv`)
-5. `${ROCM_PATH}/share/rccl/tuner/rccl_tuner.csv` (generic fallback)
+2. `<librccl.so dir>/tuner/rccl_tuner_<arch>.csv` (adjacent to library, for development builds)
+3. `<librccl.so dir>/tuner/rccl_tuner.csv` (adjacent to library, for development builds)
+4. `<librccl.so dir>/../share/rccl/tuner/rccl_tuner_<arch>.csv` (relative share path, for installed RCCL)
+5. `<librccl.so dir>/../share/rccl/tuner/rccl_tuner.csv` (relative share path, for installed RCCL)
+6. `${ROCM_PATH}/share/rccl/tuner/rccl_tuner_<arch>.csv` (fallback, GPU-specific)
+7. `${ROCM_PATH}/share/rccl/tuner/rccl_tuner.csv` (fallback, generic)
+
+At each location, if GPU architecture is unknown, the directory is scanned for any `rccl_tuner*.csv` file.
 
 ## CSV Format
 
