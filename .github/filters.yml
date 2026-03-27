@@ -3,7 +3,7 @@ rocprofiler-compute:
   - '!projects/rocprofiler-compute/**/*.md'
   - '!projects/rocprofiler-compute/**/*.rtf'
   - '!projects/rocprofiler-compute/**/*.rst'
-  - '.github/workflows/rocprofiler-compute-formatting.yml'
+  #- '.github/workflows/rocprofiler-compute-formatting.yml'
 rocprofiler-sdk:
   - 'projects/rocprofiler-sdk/**'
   - '!projects/rocprofiler-sdk/**/*.md'
@@ -15,4 +15,4 @@ rocprofiler-systems:
   - '!projects/rocprofiler-systems/**/*.md'
   - '!projects/rocprofiler-systems/**/*.rtf'
   - '!projects/rocprofiler-systems/**/*.rst'
-  - '.github/workflows/rocprofiler-systems-formatting.yml'
+  #- '.github/workflows/rocprofiler-systems-formatting.yml'
