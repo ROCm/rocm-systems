@@ -84,38 +84,44 @@ if(NOT hip_FOUND)
 endif()
 
 set(MAIN_SOURCES
-  debug_agent_test.cpp
-  vector_add_assert_trap.cpp
-  sigquit.cpp
-  print_all_waves.cpp
-  snapshot_objfile_on_load.cpp
-  vector_add_normal.cpp
-  vector_add_memory_fault.cpp
-  save_code_objects.cpp)
+    debug_agent_test.cpp
+    vector_add_assert_trap.cpp
+    sigquit.cpp
+    print_all_waves.cpp
+    snapshot_objfile_on_load.cpp
+    vector_add_normal.cpp
+    vector_add_memory_fault.cpp
+    save_code_objects.cpp
+)
 set(NO_DEBUG_SOURCES vector_add_assert_trap_no_debug_info.cpp)
 set(HEADERS util.h)
 
 # Source files required for testing.
-set(TEST_SOURCE_FILES
-    vector_add_assert_trap.cpp
-)
+set(TEST_SOURCE_FILES vector_add_assert_trap.cpp)
 
 # Mark source files as HIP.
-set_source_files_properties(${MAIN_SOURCES} ${NO_DEBUG_SOURCES} PROPERTIES LANGUAGE HIP)
+set_source_files_properties(
+    ${MAIN_SOURCES}
+    ${NO_DEBUG_SOURCES}
+    PROPERTIES LANGUAGE HIP
+)
 
 # Build offload args ONLY for .hipfb custom commands.
 if(CMAKE_HIP_ARCHITECTURES AND NOT CMAKE_HIP_ARCHITECTURES STREQUAL "OFF")
-  set(OFFLOAD_ARGS "")
-  foreach(ARCH IN LISTS CMAKE_HIP_ARCHITECTURES)
-    list(APPEND OFFLOAD_ARGS "--offload-arch=${ARCH}")
-  endforeach()
-  message(STATUS "Building for HIP architectures: ${CMAKE_HIP_ARCHITECTURES}")
+    set(OFFLOAD_ARGS "")
+    foreach(ARCH IN LISTS CMAKE_HIP_ARCHITECTURES)
+        list(APPEND OFFLOAD_ARGS "--offload-arch=${ARCH}")
+    endforeach()
+    message(STATUS "Building for HIP architectures: ${CMAKE_HIP_ARCHITECTURES}")
 else()
-  # CMake's HIP support should take care of picking up a fallback HIP
-  # architecture in case no GPU is found on the system. The default is
-  # usually gfx906.
-  message(FATAL_ERROR "Could not determine HIP architecture for building device code."
-            "Please set CMAKE_HIP_ARCHITECTURES to the desired architecture.")
+    # CMake's HIP support should take care of picking up a fallback HIP
+    # architecture in case no GPU is found on the system. The default is
+    # usually gfx906.
+    message(
+        FATAL_ERROR
+        "Could not determine HIP architecture for building device code."
+        "Please set CMAKE_HIP_ARCHITECTURES to the desired architecture."
+    )
 endif()
 
 # Set HIP_FLAGS for compilation of hipfb files.
@@ -128,7 +134,13 @@ endif()
 #
 # -cuda-device-only to generate hipfb files.
 #
-set(HIP_FLAGS -x hip ${OFFLOAD_ARGS} -O3 --cuda-device-only)
+set(HIP_FLAGS
+    -x
+    hip
+    ${OFFLOAD_ARGS}
+    -O3
+    --cuda-device-only
+)
 
 # This is needed because some debug agent tests rely on looking up the source
 # files through DWARF entries. Since the test files and executable may be
@@ -136,8 +148,8 @@ set(HIP_FLAGS -x hip ${OFFLOAD_ARGS} -O3 --cuda-device-only)
 # anymore, we have to adjust the source file path in DWARF to be the same
 # directory of the test executable.
 set(DWARF_FLAGS
-  -fdebug-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
-  -fdebug-compilation-dir=.
+    -fdebug-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
+    -fdebug-compilation-dir=.
 )
 
 # Output directory for the HIPFB files.
@@ -145,28 +157,38 @@ set(HIPFB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
 # Generate the hipfb files we use for testing.
 add_custom_command(
-  OUTPUT "${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb"
-  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_FLAGS}
-          ${CMAKE_CURRENT_SOURCE_DIR}/snapshot_objfile_on_load.cpp
-          -o ${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb
-  DEPENDS snapshot_objfile_on_load.cpp
-  COMMENT "Building snapshot_objfile_on_load.hipfb"
-  VERBATIM)
+    OUTPUT "${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb"
+    COMMAND
+        ${CMAKE_HIP_COMPILER} ${HIP_FLAGS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/snapshot_objfile_on_load.cpp -o
+        ${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb
+    DEPENDS snapshot_objfile_on_load.cpp
+    COMMENT "Building snapshot_objfile_on_load.hipfb"
+    VERBATIM
+)
 
 add_custom_command(
-  OUTPUT "${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb"
-  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_FLAGS}
-          ${CMAKE_CURRENT_SOURCE_DIR}/save_code_objects.cpp
-          -o ${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb
-  DEPENDS save_code_objects.cpp
-  COMMENT "Building save_code_objects.hipfb"
-  VERBATIM)
+    OUTPUT "${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb"
+    COMMAND
+        ${CMAKE_HIP_COMPILER} ${HIP_FLAGS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/save_code_objects.cpp -o
+        ${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb
+    DEPENDS save_code_objects.cpp
+    COMMENT "Building save_code_objects.hipfb"
+    VERBATIM
+)
 
 # Define targets to manage dependencies.
-add_custom_target(snapshot_objfile_on_load-tgt ALL
-  DEPENDS ${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb)
-add_custom_target(save_code_objects-tgt ALL
-  DEPENDS ${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb)
+add_custom_target(
+    snapshot_objfile_on_load-tgt
+    ALL
+    DEPENDS ${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb
+)
+add_custom_target(
+    save_code_objects-tgt
+    ALL
+    DEPENDS ${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb
+)
 
 # Build the library with no debug info.
 add_library(rocm-debug-agent-no-dbginfo ${NO_DEBUG_SOURCES})
@@ -176,7 +198,11 @@ target_compile_options(rocm-debug-agent-no-dbginfo PRIVATE)
 add_executable(rocm-debug-agent-test ${MAIN_SOURCES})
 target_compile_options(rocm-debug-agent-test PRIVATE -ggdb ${DWARF_FLAGS})
 target_link_libraries(rocm-debug-agent-test PRIVATE rocm-debug-agent-no-dbginfo)
-add_dependencies(rocm-debug-agent-test snapshot_objfile_on_load-tgt save_code_objects-tgt)
+add_dependencies(
+    rocm-debug-agent-test
+    snapshot_objfile_on_load-tgt
+    save_code_objects-tgt
+)
 
 # Enable the testing target if requested. This enables running debug agent
 # tests from the build tree with ctest.
@@ -206,7 +232,8 @@ endif()
 # Install the test executable.
 install(
     TARGETS rocm-debug-agent-test
-    DESTINATION tests/rocm-debug-agent COMPONENT tests
+    DESTINATION tests/rocm-debug-agent
+    COMPONENT tests
 )
 
 # Install the shared objects used by testing.
