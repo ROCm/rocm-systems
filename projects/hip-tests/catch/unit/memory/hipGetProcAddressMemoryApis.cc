@@ -5382,8 +5382,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
   if (HmmAttrPrint() != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 
   void* hipMallocManaged_ptr = nullptr;
@@ -5676,8 +5675,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
 
   if (mem_pool_support != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
 
   void* hipMallocAsync_ptr = nullptr;
@@ -6020,8 +6018,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   void* hipMemGetAddressRange_ptr = nullptr;
@@ -6052,8 +6049,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   int canAccessPeer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, deviceId, peerDeviceId));
   if (!canAccessPeer) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
   const int N = 16;

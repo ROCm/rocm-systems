@@ -13,8 +13,7 @@
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   const auto device_count = HipTest::getDeviceCount();
@@ -49,8 +48,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic) {
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   const auto device_count = HipTest::getDeviceCount();
@@ -130,8 +128,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
 
 HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
   const auto device_count = HipTest::getDeviceCount();

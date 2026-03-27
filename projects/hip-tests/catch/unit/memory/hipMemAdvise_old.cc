@@ -318,14 +318,13 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
       HIP_CHECK(hipStreamDestroy(strm));
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   if (setenv("HSA_XNACK", "1", 1) != 0) {
-    HipTest::HIP_SKIP_TEST("cannot set XNACK via environment.");
-    return;
+    HIP_SKIP_TEST("cannot set XNACK via environment.");
   }
 
   hipDeviceProp_t prop;
@@ -338,7 +337,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
     hip::SpawnProc proc("hipMemAdviseTstAlignedAllocMem", true);
     REQUIRE(proc.run() == 0);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }
 #endif

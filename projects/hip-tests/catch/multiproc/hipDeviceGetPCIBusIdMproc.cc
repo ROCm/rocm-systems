@@ -178,7 +178,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci) {
   }();
 
   if (are_devices_hidden) {
-    HipTest::HIP_SKIP_TEST(
+    HIP_SKIP_TEST(
         "There are hidden devices, which means lscpi might report something different than what we "
         "have here");
   }

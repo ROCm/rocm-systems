@@ -54,8 +54,7 @@ static void RunBenchmark() {
  */
 HIP_TEST_CASE(Performance_hipMemPoolExportToShareableHandle) {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   RunBenchmark();
 }

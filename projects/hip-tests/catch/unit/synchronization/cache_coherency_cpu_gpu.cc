@@ -113,15 +113,13 @@ static bool cpu_to_gpu_coherency() {
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
-    return true;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 
   SECTION("With device fine grained buffer") {
     HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 0));
     if (deviceFineGrain == 0) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
-      return true;
+      HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
     }
     fprintf(stderr, "info: allocate device mem (%zu bytes) on device 0\n", Nbytes);
     HIP_CHECK(

@@ -467,7 +467,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
     }
 #endif
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);  // NOLINT
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);  // NOLINT
   }
 }
 
@@ -521,7 +521,7 @@ void setEnv() {
     setenv("HIP_VISIBLE_DEVICES", uuidEnv.c_str(), 1);
   } else {
     tState = 2;
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
   }
 }
 /**

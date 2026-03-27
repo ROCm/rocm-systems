@@ -19,21 +19,19 @@ namespace {
 constexpr auto wait_ms = 500;
 }  // anonymous namespace
 
-#define checkMempoolSupported(device) {\
-  int deviceSupportsMemoryPools = 0;\
-  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,\
-        hipDeviceAttributeMemoryPoolsSupported, device));\
-  if (0 == deviceSupportsMemoryPools) {\
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);\
-    return;\
-  }\
+#define checkMempoolSupported(device) {                                                            \
+  int deviceSupportsMemoryPools = 0;                                                               \
+  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,                                      \
+        hipDeviceAttributeMemoryPoolsSupported, device));                                          \
+  if (0 == deviceSupportsMemoryPools) {                                                            \
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);                                    \
+  }                                                                                                \
 }
 
-#define checkIfMultiDev(numOfDev) {\
-  if (numOfDev < 2) {\
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);\
-    return;\
-  }\
+#define checkIfMultiDev(numOfDev) {                                                                \
+  if (numOfDev < 2) {                                                                              \
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);                                         \
+  }                                                                                                \
 }
 
 template <typename T> __global__ void kernel_500ms(T* host_res, int clk_rate) {

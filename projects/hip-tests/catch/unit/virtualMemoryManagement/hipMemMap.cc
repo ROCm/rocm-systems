@@ -281,8 +281,7 @@ void physicalMemoryReuse_MultiDev (hipMemAllocationProp prop) {
   int devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
@@ -454,8 +453,7 @@ void vMMMemoryReuse_MultiGPU (hipMemAllocationProp prop) {
   int deviceId = 0, devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
