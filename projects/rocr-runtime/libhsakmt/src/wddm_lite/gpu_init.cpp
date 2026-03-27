@@ -6761,6 +6761,22 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
                     queue_idx, rptr_before, wptr_lo_before, status_before);
         }
 
+        /* Diagnostic: after HQD activation, wait 200ms and re-read registers.
+         * This checks if MEC's internal state changes after activation. */
+        if (queue_idx == 0) {
+            Sleep(200);
+            grbm_select(dev, 1, pipe, queue, 0);
+            ULONG rptr2 = gc0_rreg(dev, regCP_HQD_PQ_RPTR);
+            ULONG wptr2 = gc0_rreg(dev, regCP_HQD_PQ_WPTR_LO);
+            ULONG st2 = gc0_rreg(dev, regCP_HQD_HQ_STATUS0);
+            ULONG mec_ip = gc1_rreg(dev, 0x2903);  /* MEC INSTR_PNTR */
+            grbm_select_reset(dev);
+            ULONG fault2 = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_STATUS_LO32);
+            pr_info("gpu_queue: q0 after 200ms: RPTR=%u WPTR=%u STATUS=0x%08x "
+                    "MEC_IP=0x%x FAULT=0x%x\n",
+                    rptr2, wptr2, st2, mec_ip, fault2);
+        }
+
         /* Check for VM faults after queue activation */
         {
             ULONG fault = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_STATUS_LO32);
