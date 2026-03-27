@@ -5640,92 +5640,32 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
             keep_gfxhub, sizeof(keep_gfxhub));
 
         if (keep_gfxhub[0] == '1') {
-            /* Preserve VBIOS/AUTOLOAD page tables — firmware VA mappings.
-             * Dump current state for diagnostics. */
+            /* Dump VBIOS GFXHUB state for diagnostics before switching. */
             ULONG gc_test = gfxhub_rreg(dev, regGCVM_CONTEXT0_CNTL);
             ULONG pt_lo = gfxhub_rreg(dev,
                 regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32);
             ULONG pt_hi = gfxhub_rreg(dev,
                 regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32);
-            pr_info("gpu_gfx: KEEP_VBIOS_GFXHUB=1 — preserving page tables "
-                    "(CNTL=0x%08x, PT_BASE=0x%08x_%08x)\n",
+            pr_info("gpu_gfx: KEEP_VBIOS_GFXHUB=1 — VBIOS state: "
+                    "CNTL=0x%08x PT_BASE=0x%08x_%08x\n",
                     gc_test, pt_hi, pt_lo);
 
             /*
-             * Extend GFXHUB system aperture to cover system memory.
+             * Switch GFXHUB to our flat GART page table.
              *
-             * VBIOS sets system aperture to VRAM only (0x80000000000 to
-             * ~0x87f7ffffff). But MEC needs to access queue buffers which
-             * are DMA-allocated system memory (bus addrs like 0x8xxxxxxxx).
-             * The system aperture provides identity-mapped (physical addr)
-             * access without page table translation.
-             *
-             * Set LOW=0 so all physical addresses from 0 are in aperture.
-             * Keep HIGH at VRAM end. This lets MEC access both VRAM and
-             * system memory through the system aperture.
+             * Earlier analysis showed the VBIOS PT must be preserved so
+             * that MEC can access firmware VA via GFXHUB. This was wrong.
+             * MEC instruction fetch uses LOCAL_INSTR_BASE (a physical
+             * aperture set by RLC during AUTOLOAD), which is independent
+             * of the GFXHUB page table. Every GFXHUB fault we have seen
+             * is at GART+16KB (queue buffer access), never at any firmware
+             * VA. Switching to our flat GART fixes queue buffer access
+             * while LOCAL_INSTR_BASE continues to handle firmware fetch.
              */
-            {
-                ULONG sys_lo = gfxhub_rreg(dev,
-                    regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR);
-                ULONG sys_hi = gfxhub_rreg(dev,
-                    regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR);
-                pr_info("gpu_gfx: GFXHUB SYS_APERTURE before extend: "
-                        "lo=0x%08x hi=0x%08x\n", sys_lo, sys_hi);
-
-                /* Set LOW=0 to include all system memory addresses */
-                gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR, 0x0);
-
-                /* Extend HIGH to include our GART range end (0x8817ffffff).
-                 * Format: addr >> 18. GART end = 0x8817ffffff >> 18 = 0x2205ff */
-                ULONG new_hi = (ULONG)((dev->hw.gmc.gart_end + 1) >> 18);
-                if (new_hi > sys_hi) {
-                    gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR,
-                                new_hi);
-                }
-
-                ULONG sys_lo2 = gfxhub_rreg(dev,
-                    regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR);
-                ULONG sys_hi2 = gfxhub_rreg(dev,
-                    regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR);
-                pr_info("gpu_gfx: GFXHUB SYS_APERTURE after extend: "
-                        "lo=0x%08x hi=0x%08x (addr 0x%llx-0x%llx)\n",
-                        sys_lo2, sys_hi2,
-                        (unsigned long long)sys_lo2 << 18,
-                        (unsigned long long)sys_hi2 << 18);
-            }
-
-            /*
-             * Restore VBIOS PT_BASE if it was changed by a previous run.
-             * The early diag reads the current PT_BASE, but between runs
-             * (without power cycle), a previous PT switch may have left
-             * our GART table as the active PT. Restore to the known-good
-             * VBIOS PT address (0x86c750001 from VBIOS POST).
-             *
-             * The VBIOS PT covers VA range 0x87f8000000-0x8817ffffff and
-             * has firmware VA PTEs (installed by AUTOLOAD) that are
-             * essential for MEC instruction fetch.
-             *
-             * Known VBIOS PT_BASE for RX 9070 XT: 0x00000008_6c750001
-             * TODO: detect this dynamically at first boot.
-             */
-            {
-                ULONG expected_lo = 0x6c750001;
-                ULONG expected_hi = 0x00000008;
-                if (pt_lo != expected_lo || pt_hi != expected_hi) {
-                    pr_warn("gpu_gfx: GFXHUB PT_BASE was changed "
-                            "(0x%08x_%08x != expected 0x%08x_%08x), "
-                            "restoring VBIOS PT\n",
-                            pt_hi, pt_lo, expected_hi, expected_lo);
-                    gfxhub_wreg(dev,
-                        regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32,
-                        expected_lo);
-                    gfxhub_wreg(dev,
-                        regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32,
-                        expected_hi);
-                    flush_gpu_tlb(dev, 0, 1);
-                    pr_info("gpu_gfx: VBIOS PT_BASE restored + TLB flushed\n");
-                }
-            }
+            gfxhub_gart_enable(dev);
+            flush_gpu_tlb(dev, 0, 1);
+            pr_info("gpu_gfx: GFXHUB switched from VBIOS PT to GART "
+                    "(was 0x%08x_%08x)\n", pt_hi, pt_lo);
         } else {
             /* Reinitialize GFXHUB with our GART table. */
             ULONG gc_test = gfxhub_rreg(dev, regGCVM_CONTEXT0_CNTL);
@@ -5847,10 +5787,11 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
 
         if (keep_gfxhub_fw[0] == '1') {
             pr_info("gpu_gfx: KEEP_VBIOS_GFXHUB=1 — using firmware VA 0x%llx "
-                    "as PC_START (trusting VBIOS page tables)\n",
+                    "as PC_START (LOCAL_INSTR_BASE aperture maps it to TMR)\n",
                     (unsigned long long)dev->hw.gfx.mec_ucode_start);
-            /* Don't override mec_ucode_start — keep firmware VA from PSP header.
-             * VBIOS/AUTOLOAD page tables should map this to decrypted firmware in TMR. */
+            /* Don't override mec_ucode_start — firmware VA from PSP header.
+             * LOCAL_INSTR_BASE (set by RLC during AUTOLOAD) provides the
+             * physical backing; GFXHUB PT is not involved in instruction fetch. */
         } else if (!(bl_status & 0x80000000)) {
             /* AUTOLOAD did NOT complete — firmware VA has no mapping.
              * Scan top of VRAM for TMR (decrypted firmware).
