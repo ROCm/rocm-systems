@@ -512,9 +512,7 @@ For arithmetic reduces (``plus``, ``less`` and ``greater``):
 
 * On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
 
-* On AMD platform:
-
-``int`` or ``unsigned int``; if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then: ``unsigned long long``, ``long long``, ``half``/``single``/``double`` precision floating point types will also receive hardware acceleration.
+* On AMD platform: there is hardware acceleration for ``int`` or ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``unsigned long long``, ``long long``, ``half``/``single``/``double`` precision floating point types will also receive hardware acceleration.
 
 For bitwise-reduces: (``bit_and``, ``bit_or``, ``bit_xor``)
 
