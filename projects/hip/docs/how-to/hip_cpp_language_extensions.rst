@@ -101,7 +101,7 @@ be:
 
 The kernel arguments are listed after the configuration parameters.
 
-.. literalinclude:: ../../tools/example_codes/calling_global_functions.hip
+.. literalinclude:: ../tools/example_codes/calling_global_functions.hip
   :start-after: // [sphinx-start]
   :end-before: // [sphinx-end]
   :language: cuda
