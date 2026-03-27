@@ -397,9 +397,11 @@ typedef struct hsa_amd_aie_ert_packet_s {
    */
   uint64_t reserved4;
   /**
-   * Reserved. Must be 0.
+   * Signal used to indicate completion of the command. When the command has
+   * finished, the runtime decrements the signal value. The application can use
+   * the special signal handle 0 to indicate that no completion signal is used.
    */
-  uint64_t reserved5;
+  hsa_signal_t completion_signal;
   /**
    * Address of packet data payload. ERT commands contain arbitrarily sized
    * data payloads.

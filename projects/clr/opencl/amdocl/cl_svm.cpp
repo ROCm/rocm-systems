@@ -973,7 +973,7 @@ RUNTIME_ENTRY(cl_int, clSetKernelExecInfo,
     return CL_INVALID_KERNEL;
   }
 
-  if (param_value == NULL) {
+  if ((param_value == NULL) && (param_value_size != 0)) {
     return CL_INVALID_VALUE;
   }
 
@@ -1001,7 +1001,10 @@ RUNTIME_ENTRY(cl_int, clSetKernelExecInfo,
       }
       break;
     case CL_KERNEL_EXEC_INFO_SVM_PTRS:
-      if (param_value_size == 0 || !amd::isMultipleOf(param_value_size, sizeof(void*))) {
+      if (param_value_size == 0 && param_value == NULL) {
+        return CL_SUCCESS;
+      }
+      else if (param_value_size == 0 || !amd::isMultipleOf(param_value_size, sizeof(void*))) {
         return CL_INVALID_VALUE;
       } else {
         size_t count = param_value_size / sizeof(void*);

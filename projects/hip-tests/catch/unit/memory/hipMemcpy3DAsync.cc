@@ -15,8 +15,6 @@
 #pragma clang diagnostic ignored "-Wunused-variable"
 
 HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Basic) {
-  CHECK_IMAGE_SUPPORT
-
   constexpr bool async = true;
 
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
@@ -40,8 +38,6 @@ HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior) {
-  CHECK_IMAGE_SUPPORT
-
   constexpr bool async = true;
 
   HIP_CHECK(hipDeviceSynchronize());
@@ -62,8 +58,6 @@ HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Parameters) {
-  CHECK_IMAGE_SUPPORT
-
   constexpr bool async = true;
   Memcpy3DZeroWidthHeightDepth<async>(Memcpy3DWrapper<async>);
 }
@@ -79,8 +73,6 @@ HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Array) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Negative_Parameters) {
-  CHECK_IMAGE_SUPPORT
-
   constexpr bool async = true;
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
 
@@ -229,8 +221,6 @@ HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Negative_Parameters) {
 }
 
 HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Capture) {
-  CHECK_IMAGE_SUPPORT
-
   constexpr hipExtent kExtent{128 * sizeof(int), 128, 8};
 
   LinearAllocGuard3D<int> src_alloc(kExtent);
