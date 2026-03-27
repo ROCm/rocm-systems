@@ -272,6 +272,7 @@ process_t::detach ()
 
   /* Destruct the breakpoints before the shared libraries and code objects  */
   std::get<handle_object_set_t<breakpoint_t>> (m_handle_object_sets).clear ();
+  m_code_objects_index.clear ();
   std::get<handle_object_set_t<code_object_t>> (m_handle_object_sets).clear ();
 
   log_info ("detached %s", to_cstring (id ()));
@@ -1293,19 +1294,38 @@ process_t::update_code_objects ()
           std::string uri;
           read_string (reinterpret_cast<uintptr_t> (entry.l_name), &uri, -1);
 
-          /* Check if the code object already exists.  */
-          code_object_t *code_object = find_if (
-            [&] (const code_object_t &x)
+          code_object_t *code_object = nullptr;
+          if (auto found = m_code_objects_index.find (entry.l_addr);
+              found != m_code_objects_index.end ())
             {
+              code_object = found->second;
+
               /* FIXME: We have an ABA problem for memory based code objects. A
                  new code object of the same size could have been loaded at the
                  same address as an old stale code object. We could add a
                  unique identifier to the URI.  */
-              return x.load_address () == entry.l_addr && x.uri () == uri;
-            });
+              if (code_object->uri () != uri)
+                {
+                  /* Two code objects cannot be loaded at the same address,
+                     destroy the old one and remove it from the index.  */
+                  m_code_objects_index.erase (found);
+                  destroy (code_object);
+
+                  /* Create a new code object for this entry.  */
+                  code_object = nullptr;
+                }
+            }
 
           if (code_object == nullptr)
-            code_object = &create<code_object_t> (*this, uri, entry.l_addr);
+            {
+              code_object = &create<code_object_t> (*this, uri, entry.l_addr);
+
+              [[maybe_unused]] bool success
+                = m_code_objects_index.emplace (entry.l_addr, code_object)
+                    .second;
+              dbgapi_assert (success
+                             && "failed to insert code object in index");
+            }
 
           code_object->set_mark (code_object_mark);
           link_map_address = reinterpret_cast<uintptr_t> (entry.l_next);
@@ -1323,7 +1343,13 @@ process_t::update_code_objects ()
        code_object_it != range<code_object_t> ().end ();)
     {
       if (code_object_it->mark () < code_object_mark)
-        code_object_it = destroy (code_object_it);
+        {
+          [[maybe_unused]] size_t count
+            = m_code_objects_index.erase (code_object_it->load_address ());
+          dbgapi_assert (count == 1);
+
+          code_object_it = destroy (code_object_it);
+        }
       else
         ++code_object_it;
     }
@@ -1402,6 +1428,7 @@ process_t::runtime_enable (os_runtime_info_t runtime_info)
                      to_cstring (status));
 
       /* Destruct the code objects.  */
+      m_code_objects_index.clear ();
       std::get<handle_object_set_t<code_object_t>> (m_handle_object_sets)
         .clear ();
 
