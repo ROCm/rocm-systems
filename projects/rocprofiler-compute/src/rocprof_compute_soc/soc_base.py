@@ -392,6 +392,100 @@ class OmniSoC_Base:
                 )
         return file_count
 
+    def _cp_sat_same_bin_counter_groups(
+        self, work_set: set[str]
+    ) -> list[frozenset[str]]:
+        """Priority metrics intersected with ``work_set`` (for CP-SAT same-bin rows)."""
+        groups: list[frozenset[str]] = []
+        for token in self._same_bucket_priority_metric_ids():
+            expanded = self._expanded_hw_counters_for_metric_ids((token,))
+            inter = frozenset(expanded & work_set)
+            if inter:
+                groups.append(inter)
+        return groups
+
+    def _try_cp_sat_pmc_perf_buckets(
+        self,
+        work_set: set[str],
+        file_count_start: int,
+    ) -> list[CounterFile] | None:
+        """
+        If ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and ``ortools`` is installed,
+        partition **all** of ``work_set`` into a minimum-bin vector packing with
+        hard same-bin constraints for priority metrics. On success, clears those
+        counters from ``work_set`` and returns new ``CounterFile`` rows; else
+        returns ``None`` (no mutation).
+        """
+        if os.environ.get("ROCPROF_COMPUTE_PERFMON_CP_SAT", "").strip() != "1":
+            return None
+        if not work_set:
+            return None
+        items = sorted(work_set)
+        if any(is_tcc_channel_counter(c) for c in items):
+            console_debug(
+                "profiling",
+                "CP-SAT perfmon: skipped (TCC channel counters present).",
+            )
+            return None
+
+        try:
+            from utils.perfmon_cp_sat import cp_sat_partition_counters
+        except ImportError as exc:
+            console_debug(
+                "profiling",
+                f"CP-SAT perfmon: skipped (import error: {exc}).",
+            )
+            return None
+
+        groups = self._cp_sat_same_bin_counter_groups(work_set)
+        partition = cp_sat_partition_counters(
+            items,
+            self.__perfmon_config,
+            groups,
+        )
+        if partition is None:
+            console_debug(
+                "profiling",
+                "CP-SAT perfmon: no feasible/optimal solution within limit; "
+                "using heuristic only.",
+            )
+            return None
+
+        placed_check: set[str] = set()
+        out_files: list[CounterFile] = []
+        file_count = file_count_start
+        for bucket_items in partition:
+            bucket = CounterFile(
+                f"pmc_perf_{file_count}.txt",
+                self.__perfmon_config,
+            )
+            file_count += 1
+            for ctr in sorted(bucket_items):
+                if not bucket.add(ctr):
+                    console_warning(
+                        "profiling",
+                        "CP-SAT perfmon: CounterFile rejected layout; "
+                        "falling back to heuristic.",
+                    )
+                    return None
+                placed_check.add(ctr)
+
+        if placed_check != set(items):
+            console_warning(
+                "profiling",
+                "CP-SAT perfmon: partition mismatch; falling back to heuristic.",
+            )
+            return None
+
+        for ctr in items:
+            work_set.discard(ctr)
+        console_debug(
+            "profiling",
+            f"CP-SAT perfmon: placed all {len(items)} counter(s) in "
+            f"{len(out_files)} bucket(s).",
+        )
+        return out_files
+
     @demarcate
     def detect_counters(self) -> tuple[set[str], list[str]]:
         """
@@ -501,8 +595,13 @@ class OmniSoC_Base:
         **lexicographic greedy heuristic**: metric-aware whole-metric placement
         (priority tier from ``_same_bucket_priority_metric_ids``, then larger
         counter sets first) into existing ``pmc_perf_*`` buckets or a new bucket,
-        then classic first-fit for leftovers. See project docs / reviews for ILP
-        and partitioning alternatives.
+        then classic first-fit for leftovers.
+
+        **Optional CP-SAT path** (toward fewer buckets under hard same-bin groups):
+        set ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and install ``ortools`` (see
+        ``[optimizer]`` extra in ``pyproject.toml``). Applies only when the PMC
+        set has no TCC channel counters and is within size limits; otherwise
+        falls back to the heuristic above.
         """
         output_files: list[CounterFile] = []
         accu_file_count = 0
@@ -525,6 +624,11 @@ class OmniSoC_Base:
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
         work_set = set(work)
+        cp_sat_files = self._try_cp_sat_pmc_perf_buckets(work_set, file_count)
+        if cp_sat_files is not None:
+            output_files.extend(cp_sat_files)
+            file_count += len(cp_sat_files)
+
         file_count = self._metric_aware_coalesce_pass(
             work_set, output_files, file_count
         )
