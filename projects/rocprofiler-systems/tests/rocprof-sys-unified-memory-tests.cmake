@@ -19,6 +19,7 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
 endif()
 
 rocprofiler_systems_add_test(
+    SKIP_RUNTIME
     NAME unified-memory-basic-output
     TARGET unified-memory
     GPU ON
@@ -42,8 +43,8 @@ if(TEST unified-memory-basic-output-sampling)
     add_test(
         NAME unified-memory-validate-structure
         COMMAND
-            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-unified-memory.py
-            --output-dir
+            ${ROCPROFSYS_VALIDATION_PYTHON}
+            ${CMAKE_CURRENT_LIST_DIR}/validate-unified-memory.py --output-dir
             ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/unified-memory-basic-output-sampling
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     )

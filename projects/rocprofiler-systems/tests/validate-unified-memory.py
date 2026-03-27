@@ -12,8 +12,7 @@ from pathlib import Path
 
 def print_help():
     """Print the help message"""
-    print(
-        f"""
+    print(f"""
     Unified Memory Output Validation Tool
 
     DESCRIPTION:
@@ -51,8 +50,7 @@ def print_help():
         0  - All validations passed successfully
         1  - File not found or general error
         65 - Validation failures detected (EX_DATAERR)
-    """
-    )
+    """)
 
 
 def validate_text_output(filepath):
