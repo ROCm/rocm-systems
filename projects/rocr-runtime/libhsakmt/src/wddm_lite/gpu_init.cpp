@@ -5114,8 +5114,22 @@ static void gc0_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 /* CP_MEC_RS64_CNTL bit definitions */
 #define CP_MEC_RS64_CNTL__MEC_INVALIDATE_ICACHE  (1 << 4)
 #define CP_MEC_RS64_CNTL__MEC_PIPE0_RESET       (1 << 16)
+#define CP_MEC_RS64_CNTL__MEC_PIPE1_RESET       (1 << 17)
+#define CP_MEC_RS64_CNTL__MEC_PIPE2_RESET       (1 << 18)
+#define CP_MEC_RS64_CNTL__MEC_PIPE3_RESET       (1 << 19)
 #define CP_MEC_RS64_CNTL__MEC_PIPE0_ACTIVE      (1 << 26)
+#define CP_MEC_RS64_CNTL__MEC_PIPE1_ACTIVE      (1 << 27)
+#define CP_MEC_RS64_CNTL__MEC_PIPE2_ACTIVE      (1 << 28)
+#define CP_MEC_RS64_CNTL__MEC_PIPE3_ACTIVE      (1 << 29)
 #define CP_MEC_RS64_CNTL__MEC_HALT              (1 << 30)
+
+/* Combined masks for all pipes */
+#define CP_MEC_RS64_CNTL__ALL_PIPE_RESET  \
+    (CP_MEC_RS64_CNTL__MEC_PIPE0_RESET | CP_MEC_RS64_CNTL__MEC_PIPE1_RESET | \
+     CP_MEC_RS64_CNTL__MEC_PIPE2_RESET | CP_MEC_RS64_CNTL__MEC_PIPE3_RESET)
+#define CP_MEC_RS64_CNTL__ALL_PIPE_ACTIVE \
+    (CP_MEC_RS64_CNTL__MEC_PIPE0_ACTIVE | CP_MEC_RS64_CNTL__MEC_PIPE1_ACTIVE | \
+     CP_MEC_RS64_CNTL__MEC_PIPE2_ACTIVE | CP_MEC_RS64_CNTL__MEC_PIPE3_ACTIVE)
 
 /* CP_ME_CNTL bit definitions (GFX12) */
 #define CP_ME_CNTL__PFP_PIPE0_RESET         (1 << 18)
@@ -5292,279 +5306,169 @@ static void configure_mec(struct WddmLiteDevice *dev)
     pr_info("gpu_gfx: MEC doorbell range set [0x000, 0x0F8]\n");
 
     /*
-     * GFX12 CP engine configuration — following tinygrad _config_mec().
-     * Program counter start addresses come from RS64 firmware headers.
-     * For each engine: set PC → assert reset → release reset.
-     * This is required even on VFIO — PSP has loaded firmware into
-     * a staging area, and the reset cycle distributes it to icache.
+     * GFX12 MEC configuration — matching Linux amdgpu AUTOLOAD path.
+     *
+     * Key insight from kernel gfx_v12_0.c:
+     *   - After AUTOLOAD completes, RLC has set LOCAL_INSTR_BASE, loaded
+     *     instruction caches, configured data sections, etc.
+     *   - The kernel NEVER writes LOCAL_INSTR_BASE, MTVEC, LOCAL_BASE0,
+     *     GP0, or DC_BASE — all set by RLC during AUTOLOAD.
+     *   - The kernel NEVER does GRBM_SOFT_RESET in the AUTOLOAD path.
+     *   - For AUTOLOAD path: just set PRGRM_CNTR_START per pipe, then enable.
+     *   - For PSP path: set PRGRM_CNTR_START, do reset pulse, then enable.
+     *
+     * Previous approach (tinygrad-style pipe0_reset + GRBM_SOFT_RESET)
+     * was destroying the AUTOLOAD state (LOCAL_INSTR_BASE, icache, etc.)
+     * that only RLC can set. This is why MEC went to PC=0 after reset.
      */
 
-    /* Step 1: Configure PFP (Pre-Fetch Parser) */
-    if (dev->hw.gfx.pfp_ucode_start != 0) {
-        ULONG pfp_lo = (ULONG)(dev->hw.gfx.pfp_ucode_start >> 2);
-        ULONG pfp_hi = (ULONG)((dev->hw.gfx.pfp_ucode_start >> 2) >> 32);
-
-        grbm_select(dev, 0, 0, 0, 0);  /* ME=0 (GFX), pipe=0 */
-        gc1_wreg(dev, regCP_PFP_PRGRM_CNTR_START, pfp_lo);
-        gc1_wreg(dev, regCP_PFP_PRGRM_CNTR_START_HI, pfp_hi);
-        grbm_select_reset(dev);
-
-        /* Assert PFP reset, then release */
-        ULONG me_cntl = gc1_rreg(dev, regCP_ME_CNTL);
-        pr_info("gpu_gfx: CP_ME_CNTL before PFP reset = 0x%08x\n", me_cntl);
-        gc1_wreg(dev, regCP_ME_CNTL, me_cntl | CP_ME_CNTL__PFP_PIPE0_RESET);
-        gc1_wreg(dev, regCP_ME_CNTL, me_cntl & ~CP_ME_CNTL__PFP_PIPE0_RESET);
-
-        pr_info("gpu_gfx: PFP PC set to 0x%llx, reset cycle done\n",
-                (unsigned long long)dev->hw.gfx.pfp_ucode_start);
-    } else {
-        pr_info("gpu_gfx: PFP ucode_start not set — skipping PFP config\n");
-    }
-
-    /* Step 2: Configure ME (Main Engine) */
-    if (dev->hw.gfx.me_ucode_start != 0) {
-        ULONG me_lo = (ULONG)(dev->hw.gfx.me_ucode_start >> 2);
-        ULONG me_hi = (ULONG)((dev->hw.gfx.me_ucode_start >> 2) >> 32);
-
-        grbm_select(dev, 0, 0, 0, 0);  /* ME=0 (GFX), pipe=0 */
-        gc1_wreg(dev, regCP_ME_PRGRM_CNTR_START, me_lo);
-        gc1_wreg(dev, regCP_ME_PRGRM_CNTR_START_HI, me_hi);
-        grbm_select_reset(dev);
-
-        /* Assert ME reset, then release */
-        ULONG me_cntl = gc1_rreg(dev, regCP_ME_CNTL);
-        gc1_wreg(dev, regCP_ME_CNTL, me_cntl | CP_ME_CNTL__ME_PIPE0_RESET);
-        gc1_wreg(dev, regCP_ME_CNTL, me_cntl & ~CP_ME_CNTL__ME_PIPE0_RESET);
-
-        pr_info("gpu_gfx: ME PC set to 0x%llx, reset cycle done\n",
-                (unsigned long long)dev->hw.gfx.me_ucode_start);
-    } else {
-        pr_info("gpu_gfx: ME ucode_start not set — skipping ME config\n");
-    }
-
-    /* Step 3: Configure MEC (Micro Engine Compute) */
     if (dev->hw.gfx.mec_ucode_start != 0) {
         ULONG mec_lo = (ULONG)(dev->hw.gfx.mec_ucode_start >> 2);
         ULONG mec_hi = (ULONG)((dev->hw.gfx.mec_ucode_start >> 2) >> 32);
 
-        /* Write PRGRM_CNTR_START via gc_base1 (BASE_IDX=1, correct for 0x2900).
-         * Write BOTH with and without GRBM selection to ensure it takes effect.
-         * Also read back to verify. */
-        grbm_select(dev, 1, 0, 0, 0);  /* ME=1 (MEC), pipe=0 */
-        gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START, mec_lo);
-        gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI, mec_hi);
-        /* Readback to verify */
-        ULONG rb_lo = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START);
-        ULONG rb_hi = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI);
-        pr_info("gpu_gfx: MEC PRGRM_CNTR_START wrote 0x%08x_%08x, readback 0x%08x_%08x\n",
-                mec_hi, mec_lo, rb_hi, rb_lo);
-        grbm_select_reset(dev);
+        /*
+         * Step 1: Disable MEC (kernel's cp_compute_enable(false) pattern).
+         * Single write: halt + reset all pipes + deactivate + invalidate icache.
+         * This does NOT destroy LOCAL_INSTR_BASE or other RLC-programmed state —
+         * it only resets the pipe execution state.
+         */
+        ULONG disable_val = CP_MEC_RS64_CNTL__MEC_INVALIDATE_ICACHE |
+                            CP_MEC_RS64_CNTL__ALL_PIPE_RESET |
+                            CP_MEC_RS64_CNTL__MEC_HALT;
+        /* (active bits are 0 = deactivated) */
 
-        /* Match tinygrad's exact reset sequence:
-         * 1. Write PRGRM_CNTR_START (done above)
-         * 2. CNTL.update(pipe0_reset=1) — READ-MODIFY-WRITE, only set reset bit
-         * 3. CNTL.update(pipe0_reset=0) — clear reset bit, keep other bits
-         * NO icache invalidate, NO clearing all bits to 0. */
+        ULONG cntl_before = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+        pr_info("gpu_gfx: MEC CNTL before disable = 0x%08x "
+                "(active=%d, halt=%d, reset=%d)\n",
+                cntl_before,
+                (cntl_before >> 26) & 1, (cntl_before >> 30) & 1,
+                (cntl_before >> 16) & 1);
+
+        gc1_wreg(dev, regCP_MEC_RS64_CNTL, disable_val);
+        pr_info("gpu_gfx: MEC disabled (halt+reset+deactivate+icache_inv)\n");
+
+        /*
+         * Step 2: Dump RS64 state AFTER disable but BEFORE we touch anything.
+         * This shows what AUTOLOAD set up — if LOCAL_INSTR_BASE survived
+         * the pipe-level reset, we're in business.
+         */
+        grbm_select(dev, 1, 0, 0, 0);
         {
-            ULONG cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
-            pr_info("gpu_gfx: MEC CNTL before reset = 0x%08x\n", cntl);
-            /* Assert pipe0_reset (keep other bits) */
-            gc1_wreg(dev, regCP_MEC_RS64_CNTL, cntl | CP_MEC_RS64_CNTL__MEC_PIPE0_RESET);
-            /* De-assert pipe0_reset (clear reset bit only) */
-            gc1_wreg(dev, regCP_MEC_RS64_CNTL, cntl & ~CP_MEC_RS64_CNTL__MEC_PIPE0_RESET);
-
-            /* Readback PRGRM_CNTR_START and INSTR_PNTR after reset */
-            grbm_select(dev, 1, 0, 0, 0);
-            ULONG ip = gc1_rreg(dev, 0x2903);
-            grbm_select_reset(dev);
-            pr_info("gpu_gfx: after tinygrad-style reset: INSTR_PNTR=0x%x\n", ip);
-        }
-
-        /*
-         * Program RS64 registers AFTER reset. Reset clears these to 0.
-         * Must be done with grbm_select active for the target pipe.
-         */
-        grbm_select(dev, 1, 0, 0, 0);  /* ME=1 (MEC), pipe=0 */
-
-        /*
-         * Set MTVEC (Machine Trap Vector) to firmware entry point.
-         * RS64 is RISC-V: when an interrupt arrives, MEC jumps to MTVEC.
-         * Without MTVEC set, MEC jumps to address 0 on interrupt.
-         *
-         * MTVEC uses instruction-word address (same as PC_START).
-         * Format: {HI:LO} = 64-bit address, full 32 bits per register.
-         */
-        {
-            ULONG mtvec_lo = (ULONG)(dev->hw.gfx.mec_ucode_start >> 2);
-            ULONG mtvec_hi = (ULONG)((dev->hw.gfx.mec_ucode_start >> 2) >> 32);
-            pr_info("gpu_gfx: programming MTVEC = 0x%08x_%08x "
-                    "(firmware entry = 0x%llx)\n",
-                    mtvec_hi, mtvec_lo,
-                    (unsigned long long)dev->hw.gfx.mec_ucode_start);
-            gc1_wreg(dev, 0x2901, mtvec_lo);  /* CP_MEC_MTVEC_LO */
-            gc1_wreg(dev, 0x2902, mtvec_hi);  /* CP_MEC_MTVEC_HI */
-
-            /* Readback verify */
-            ULONG mv_lo = gc1_rreg(dev, 0x2901);
-            ULONG mv_hi = gc1_rreg(dev, 0x2902);
-            pr_info("gpu_gfx: MTVEC readback = 0x%08x_%08x\n", mv_hi, mv_lo);
-        }
-
-        /*
-         * LOCAL_INSTR_BASE: instruction aperture window.
-         * Register format: address bits [31:16] go in LO[31:16],
-         * bits [47:32] go in HI[15:0]. 64KB aligned.
-         * Note: this may not stick (possibly RLC-only register).
-         */
-        {
-            ULONGLONG code_mc = dev->hw.gfx.mec_ucode_start;
-            pr_info("gpu_gfx: MEC LOCAL_INSTR_BASE = 0x%llx\n",
-                    (unsigned long long)code_mc);
-            gc1_wreg(dev, 0x292c, (ULONG)(code_mc & 0xFFFF0000));  /* LOCAL_INSTR_BASE_LO */
-            gc1_wreg(dev, 0x292d, (ULONG)((code_mc >> 32) & 0xFFFF));  /* LOCAL_INSTR_BASE_HI */
-            gc1_wreg(dev, 0x292e, 0x0003 << 16);  /* LOCAL_INSTR_MASK_LO: 256KB */
-            gc1_wreg(dev, 0x292f, 0x0000);         /* LOCAL_INSTR_MASK_HI */
-        }
-
-        if (dev->hw.gfx.mec_fw_data && dev->hw.gfx.mec_fw_data_size > 0) {
-            /* Set LOCAL_BASE0 to VRAM data address */
-            ULONGLONG data_mc = dev->hw.gmc.vram_start +
-                                (11 * 1024 * 1024);  /* same offset as step 3.5a */
-            pr_info("gpu_gfx: MEC LOCAL_BASE0 (data seg) = 0x%llx (size=%u)\n",
-                    (unsigned long long)data_mc,
-                    dev->hw.gfx.mec_fw_data_size);
-            gc1_wreg(dev, 0x2927, (ULONG)(data_mc & 0xFFFF0000));  /* LOCAL_BASE0_LO */
-            gc1_wreg(dev, 0x2928, (ULONG)((data_mc >> 32) & 0xFFFF));  /* LOCAL_BASE0_HI */
-
-            /* Data mask: firmware data is 256KB, keep current mask or set to 256KB */
-            gc1_wreg(dev, 0x2929, 0x0003 << 16);  /* LOCAL_MASK0_LO: 256KB */
-            gc1_wreg(dev, 0x292a, 0x0000);         /* LOCAL_MASK0_HI */
-
-            /* Also set DC_BASE (0x5870/0x5871) — belt and suspenders */
-            gc1_wreg(dev, regCP_MEC_DC_BASE_LO, (ULONG)(data_mc & 0xFFFFFFFF));
-            gc1_wreg(dev, regCP_MEC_DC_BASE_HI, (ULONG)(data_mc >> 32));
-            gc1_wreg(dev, regCP_MEC_DC_BASE_CNTL, 0x0);  /* VMID=0, cache_policy=0 */
-
-            /* Invalidate MEC data cache */
-            gc1_wreg(dev, regCP_MEC_DC_OP_CNTL, 0x1);  /* INVALIDATE_DCACHE */
-            for (int i = 0; i < 100; i++) {
-                ULONG op = gc1_rreg(dev, regCP_MEC_DC_OP_CNTL);
-                if (op & 0x2) break;  /* INVALIDATE_DCACHE_COMPLETE */
-                Sleep(1);
-            }
-        } else {
-            pr_warn("gpu_gfx: no MEC data section — LOCAL_BASE0 not programmed\n");
-        }
-
-        /*
-         * Set GP0 (0x2910/0x2911) as stack pointer for RS64 firmware.
-         * In RISC-V, x2 (sp) is the stack pointer. RS64 maps GP0 to this.
-         * If SP=0, the first stack store instruction stalls because address 0
-         * has no valid mapping. Set SP to the top of the data segment in VRAM
-         * so firmware can push/pop from a valid address.
-         */
-        if (dev->hw.gfx.mec_fw_data && dev->hw.gfx.mec_fw_data_size > 0) {
-            ULONGLONG data_mc = dev->hw.gmc.vram_start +
-                                (11 * 1024 * 1024);  /* same offset as step 3.5a */
-            /* Stack grows downward — point to the END of the data region */
-            ULONGLONG sp_addr = data_mc + dev->hw.gfx.mec_fw_data_size;
-            pr_info("gpu_gfx: MEC GP0 (SP) = 0x%llx\n",
-                    (unsigned long long)sp_addr);
-            gc1_wreg(dev, 0x2910, (ULONG)(sp_addr & 0xFFFFFFFF));  /* GP0_LO */
-            gc1_wreg(dev, 0x2911, (ULONG)(sp_addr >> 32));          /* GP0_HI */
-
-            /* Readback */
+            ULONG ip = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
+            ULONG li_lo = gc1_rreg(dev, 0x292c);  /* LOCAL_INSTR_BASE_LO */
+            ULONG li_hi = gc1_rreg(dev, 0x292d);  /* LOCAL_INSTR_BASE_HI */
+            ULONG lb0_lo = gc1_rreg(dev, 0x2927); /* LOCAL_BASE0_LO */
+            ULONG lb0_hi = gc1_rreg(dev, 0x2928); /* LOCAL_BASE0_HI */
+            ULONG mtvec_lo = gc1_rreg(dev, 0x2901);
+            ULONG mtvec_hi = gc1_rreg(dev, 0x2902);
             ULONG gp0_lo = gc1_rreg(dev, 0x2910);
             ULONG gp0_hi = gc1_rreg(dev, 0x2911);
-            pr_info("gpu_gfx: MEC GP0 readback = 0x%08x_%08x\n", gp0_hi, gp0_lo);
+            ULONG dc_lo = gc1_rreg(dev, regCP_MEC_DC_BASE_LO);
+            ULONG dc_hi = gc1_rreg(dev, regCP_MEC_DC_BASE_HI);
+
+            pr_info("gpu_gfx: RS64 state after disable (AUTOLOAD preserved?):\n");
+            pr_info("gpu_gfx:   INSTR_PNTR     = 0x%08x\n", ip);
+            pr_info("gpu_gfx:   LOCAL_INSTR    = 0x%08x_%08x\n", li_hi, li_lo);
+            pr_info("gpu_gfx:   LOCAL_BASE0    = 0x%08x_%08x\n", lb0_hi, lb0_lo);
+            pr_info("gpu_gfx:   MTVEC          = 0x%08x_%08x\n", mtvec_hi, mtvec_lo);
+            pr_info("gpu_gfx:   GP0            = 0x%08x_%08x\n", gp0_hi, gp0_lo);
+            pr_info("gpu_gfx:   DC_BASE        = 0x%08x_%08x\n", dc_hi, dc_lo);
         }
 
+        /*
+         * Step 3: Set PRGRM_CNTR_START for all MEC pipes.
+         * Kernel does this for all 4 pipes (num_pipe_per_mec).
+         * The register format from kernel:
+         *   LO = (ucode_start_addr_lo >> 2) | (ucode_start_addr_hi << 30)
+         *   HI = ucode_start_addr_hi >> 2
+         * We use the simpler tinygrad encoding since we have the full address.
+         */
+        for (int pipe = 0; pipe < 4; pipe++) {
+            grbm_select(dev, 1, pipe, 0, 0);
+            gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START, mec_lo);
+            gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI, mec_hi);
+        }
+        /* Readback pipe 0 to verify */
+        grbm_select(dev, 1, 0, 0, 0);
+        {
+            ULONG rb_lo = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START);
+            ULONG rb_hi = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI);
+            pr_info("gpu_gfx: MEC PRGRM_CNTR_START = 0x%08x_%08x "
+                    "(wrote 0x%08x_%08x) [all 4 pipes]\n",
+                    rb_hi, rb_lo, mec_hi, mec_lo);
+        }
         grbm_select_reset(dev);
     } else {
         pr_warn("gpu_gfx: MEC ucode_start not set — cannot configure MEC\n");
-        pr_warn("gpu_gfx: firmware loading is required for MEC init\n");
     }
 
-    {
-        ULONG me_cntl = gc1_rreg(dev, regCP_ME_CNTL);
-        ULONG mec_cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
-        pr_info("gpu_gfx: after config: CP_ME_CNTL=0x%08x MEC_CNTL=0x%08x\n",
-                me_cntl, mec_cntl);
-
-        /* Check if MEC firmware started after reset cycle */
-        grbm_select(dev, 1, 0, 0, 0);
-        ULONG mec_ip = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
-        ULONG mec_pc = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START);
-        ULONG mec_pc_hi = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI);
-
-        /* Dump RS64 LOCAL_BASE and LOCAL_INSTR_BASE registers */
-        ULONG lb0_lo  = gc1_rreg(dev, 0x2927);  /* LOCAL_BASE0_LO */
-        ULONG lb0_hi  = gc1_rreg(dev, 0x2928);  /* LOCAL_BASE0_HI */
-        ULONG lm0_lo  = gc1_rreg(dev, 0x2929);  /* LOCAL_MASK0_LO */
-        ULONG lm0_hi  = gc1_rreg(dev, 0x292a);  /* LOCAL_MASK0_HI */
-        ULONG l_aper  = gc1_rreg(dev, 0x292b);  /* LOCAL_APERTURE */
-        ULONG li_lo   = gc1_rreg(dev, 0x292c);  /* LOCAL_INSTR_BASE_LO */
-        ULONG li_hi   = gc1_rreg(dev, 0x292d);  /* LOCAL_INSTR_BASE_HI */
-        ULONG lim_lo  = gc1_rreg(dev, 0x292e);  /* LOCAL_INSTR_MASK_LO */
-        ULONG lim_hi  = gc1_rreg(dev, 0x292f);  /* LOCAL_INSTR_MASK_HI */
-        ULONG li_aper = gc1_rreg(dev, 0x2930);  /* LOCAL_INSTR_APERTURE */
-        ULONG ls_aper = gc1_rreg(dev, 0x2931);  /* LOCAL_SCRATCH_APERTURE */
-        ULONG ls_lo   = gc1_rreg(dev, 0x2932);  /* LOCAL_SCRATCH_BASE_LO */
-        ULONG ls_hi   = gc1_rreg(dev, 0x2933);  /* LOCAL_SCRATCH_BASE_HI */
-        ULONG mtvec_lo = gc1_rreg(dev, 0x2901); /* MTVEC_LO */
-        ULONG mtvec_hi = gc1_rreg(dev, 0x2902); /* MTVEC_HI */
-        ULONG dc_cntl  = gc1_rreg(dev, 0x290b); /* DC_BASE_CNTL */
-        ULONG dc_op    = gc1_rreg(dev, 0x290c); /* DC_OP_CNTL */
-
-        /* GP0 often used as stack pointer by RS64 firmware */
-        ULONG gp0_lo   = gc1_rreg(dev, 0x2910); /* GP0_LO */
-        ULONG gp0_hi   = gc1_rreg(dev, 0x2911); /* GP0_HI */
-
+    /* PFP and ME configuration (tinygrad-style reset pulse — GFX12 only) */
+    if (dev->hw.gfx.pfp_ucode_start != 0) {
+        ULONG pfp_lo = (ULONG)(dev->hw.gfx.pfp_ucode_start >> 2);
+        ULONG pfp_hi = (ULONG)((dev->hw.gfx.pfp_ucode_start >> 2) >> 32);
+        grbm_select(dev, 0, 0, 0, 0);
+        gc1_wreg(dev, regCP_PFP_PRGRM_CNTR_START, pfp_lo);
+        gc1_wreg(dev, regCP_PFP_PRGRM_CNTR_START_HI, pfp_hi);
         grbm_select_reset(dev);
 
-        pr_info("gpu_gfx: after config: MEC INSTR_PNTR=0x%08x PC_START=0x%08x_%08x\n",
-                mec_ip, mec_pc_hi, mec_pc);
-        pr_info("gpu_gfx: RS64 LOCAL_BASE0  = 0x%08x_%08x  MASK0 = 0x%08x_%08x  APERTURE=0x%x\n",
-                lb0_hi, lb0_lo, lm0_hi, lm0_lo, l_aper);
-        pr_info("gpu_gfx: RS64 LOCAL_INSTR  = 0x%08x_%08x  MASK  = 0x%08x_%08x  APERTURE=0x%x\n",
-                li_hi, li_lo, lim_hi, lim_lo, li_aper);
-        pr_info("gpu_gfx: RS64 LOCAL_SCRATCH = 0x%08x_%08x  APERTURE=0x%x\n",
-                ls_hi, ls_lo, ls_aper);
-        pr_info("gpu_gfx: RS64 MTVEC = 0x%08x_%08x  DC_CNTL=0x%x DC_OP=0x%x\n",
-                mtvec_hi, mtvec_lo, dc_cntl, dc_op);
-        pr_info("gpu_gfx: RS64 GP0 = 0x%08x_%08x\n", gp0_hi, gp0_lo);
+        ULONG me_cntl = gc1_rreg(dev, regCP_ME_CNTL);
+        gc1_wreg(dev, regCP_ME_CNTL, me_cntl | CP_ME_CNTL__PFP_PIPE0_RESET);
+        gc1_wreg(dev, regCP_ME_CNTL, me_cntl & ~CP_ME_CNTL__PFP_PIPE0_RESET);
+        pr_info("gpu_gfx: PFP PC set to 0x%llx\n",
+                (unsigned long long)dev->hw.gfx.pfp_ucode_start);
+    }
+    if (dev->hw.gfx.me_ucode_start != 0) {
+        ULONG me_lo = (ULONG)(dev->hw.gfx.me_ucode_start >> 2);
+        ULONG me_hi = (ULONG)((dev->hw.gfx.me_ucode_start >> 2) >> 32);
+        grbm_select(dev, 0, 0, 0, 0);
+        gc1_wreg(dev, regCP_ME_PRGRM_CNTR_START, me_lo);
+        gc1_wreg(dev, regCP_ME_PRGRM_CNTR_START_HI, me_hi);
+        grbm_select_reset(dev);
+
+        ULONG me_cntl = gc1_rreg(dev, regCP_ME_CNTL);
+        gc1_wreg(dev, regCP_ME_CNTL, me_cntl | CP_ME_CNTL__ME_PIPE0_RESET);
+        gc1_wreg(dev, regCP_ME_CNTL, me_cntl & ~CP_ME_CNTL__ME_PIPE0_RESET);
+        pr_info("gpu_gfx: ME PC set to 0x%llx\n",
+                (unsigned long long)dev->hw.gfx.me_ucode_start);
     }
 }
 
 static int enable_mec(struct WddmLiteDevice *dev)
 {
-    ULONG val = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+    /*
+     * Matching kernel gfx_v12_0_cp_compute_enable(adev, true):
+     * Single write with all resets cleared, all pipes active, halt cleared.
+     * The MEC loads PC from PRGRM_CNTR_START when transitioning from
+     * reset/halted state to active.
+     *
+     * Previous approach (read-modify-write, only setting pipe0) was wrong:
+     * - Only activated pipe0, kernel activates all 4 pipes
+     * - Left stale bits from the disable write
+     */
+    ULONG val_before = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
     pr_info("gpu_gfx: CP_MEC_RS64_CNTL before enable = 0x%08x "
             "(active=%d, halt=%d, reset=%d)\n",
-            val,
-            (val >> 26) & 1, (val >> 30) & 1, (val >> 16) & 1);
+            val_before,
+            (val_before >> 26) & 1, (val_before >> 30) & 1,
+            (val_before >> 16) & 1);
 
-    /*
-     * Following tinygrad _enable_mec() for GFX10+:
-     * Read-modify-write: set active=1, clear halt and reset.
-     * Always write even if active bit is already set — on VFIO
-     * after GRBM_SOFT_RESET, MEC needs a fresh activation even
-     * if the bit reads as 1 (stale state).
-     */
-    val |= CP_MEC_RS64_CNTL__MEC_PIPE0_ACTIVE;   /* active = 1 */
-    val &= ~CP_MEC_RS64_CNTL__MEC_HALT;           /* halt = 0 */
-    val &= ~CP_MEC_RS64_CNTL__MEC_PIPE0_RESET;    /* reset = 0 */
-    pr_info("gpu_gfx: writing MEC_RS64_CNTL = 0x%08x (active=1, halt=0, reset=0)\n",
-            val);
-    gc1_wreg(dev, regCP_MEC_RS64_CNTL, val);
+    /* Kernel pattern: construct fresh value, no icache inv, no resets,
+     * all pipes active, not halted. */
+    ULONG enable_val = CP_MEC_RS64_CNTL__ALL_PIPE_ACTIVE;
+    /* (no reset bits, no halt bit, no icache_inv — all zero) */
 
-    Sleep(50);  /* tinygrad waits 50ms */
+    pr_info("gpu_gfx: writing MEC_RS64_CNTL = 0x%08x "
+            "(all pipes active, halt=0, reset=0)\n", enable_val);
+    gc1_wreg(dev, regCP_MEC_RS64_CNTL, enable_val);
 
-    val = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+    Sleep(50);  /* kernel waits 50us, tinygrad waits 50ms — use 50ms for safety */
+
+    ULONG val_after = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
     pr_info("gpu_gfx: CP_MEC_RS64_CNTL after enable = 0x%08x "
             "(active=%d, halt=%d, reset=%d)\n",
-            val,
-            (val >> 26) & 1, (val >> 30) & 1, (val >> 16) & 1);
+            val_after,
+            (val_after >> 26) & 1, (val_after >> 30) & 1,
+            (val_after >> 16) & 1);
 
     /* Read MEC INSTR_PNTR to see if firmware started executing */
     grbm_select(dev, 1, 0, 0, 0);
@@ -5572,166 +5476,62 @@ static int enable_mec(struct WddmLiteDevice *dev)
     grbm_select_reset(dev);
     pr_info("gpu_gfx: MEC INSTR_PNTR after enable = 0x%08x\n", mec_ip);
 
-    /*
-     * If MEC is at PC_START+1, it may be in WFI (Wait For Interrupt).
-     * The RS64 firmware's first instruction is typically WFI, waiting for
-     * RLC to signal that AUTOLOAD is complete. Try triggering an interrupt
-     * to wake MEC from WFI.
-     */
-    if (mec_ip != 0) {
-        /* Read pending interrupts and MIE (Machine Interrupt Enable) */
-        grbm_select(dev, 1, 0, 0, 0);
-        ULONG pending = gc1_rreg(dev, 0x2935);  /* CP_MEC_RS64_PENDING_INTERRUPT */
-        ULONG int_reg = gc1_rreg(dev, 0x2907);  /* CP_MEC_RS64_INTERRUPT */
-        ULONG mie_lo = gc1_rreg(dev, 0x2905);   /* CP_MEC_MIE_LO */
-        ULONG mie_hi = gc1_rreg(dev, 0x2906);   /* CP_MEC_MIE_HI */
-        grbm_select_reset(dev);
-        pr_info("gpu_gfx: MEC PENDING=0x%08x INT=0x%08x "
-                "MIE=0x%08x_%08x\n",
-                pending, int_reg, mie_hi, mie_lo);
-
-        /* If MIE=0, interrupts are disabled — set MIE to enable all */
-        if (mie_lo == 0 && mie_hi == 0) {
-            pr_info("gpu_gfx: MIE=0, enabling all interrupts\n");
-            grbm_select(dev, 1, 0, 0, 0);
-            gc1_wreg(dev, 0x2905, 0xFFFFFFFF);  /* MIE_LO = all bits */
-            gc1_wreg(dev, 0x2906, 0xFFFFFFFF);  /* MIE_HI = all bits */
-
-            /* Readback verify */
-            mie_lo = gc1_rreg(dev, 0x2905);
-            mie_hi = gc1_rreg(dev, 0x2906);
-            grbm_select_reset(dev);
-            pr_info("gpu_gfx: MIE after enable = 0x%08x_%08x\n",
-                    mie_hi, mie_lo);
-
-            /* Give MEC time to process pending interrupts */
-            Sleep(50);
-
-            grbm_select(dev, 1, 0, 0, 0);
-            ULONG mec_ip_mie = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
-            grbm_select_reset(dev);
-            pr_info("gpu_gfx: INSTR_PNTR after MIE enable = 0x%08x "
-                    "(was 0x%08x)\n", mec_ip_mie, mec_ip);
-            if (mec_ip_mie != mec_ip) {
-                pr_info("gpu_gfx: MEC advanced after MIE enable!\n");
-                mec_ip = mec_ip_mie;
-            }
-        }
-
-        /* Try sending an interrupt to wake MEC from WFI */
-        pr_info("gpu_gfx: sending RS64 interrupt (0x2907 = 0x1)...\n");
-        grbm_select(dev, 1, 0, 0, 0);
-        gc1_wreg(dev, 0x2907, 0x1);  /* CP_MEC_RS64_INTERRUPT = 1 */
-
-        /* Rapid poll INSTR_PNTR to catch any transient execution */
-        for (int p = 0; p < 10; p++) {
-            ULONG pip = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
-            if (pip != mec_ip) {
-                pr_info("gpu_gfx: INSTR_PNTR[%d] = 0x%08x (changed!)\n",
-                        p, pip);
-            }
-        }
-        grbm_select_reset(dev);
-        Sleep(100);
-
-        grbm_select(dev, 1, 0, 0, 0);
-        ULONG mec_ip2 = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
-        ULONG pending2 = gc1_rreg(dev, 0x2935);
-        ULONG mtvec_lo = gc1_rreg(dev, 0x2901);
-        ULONG mtvec_hi = gc1_rreg(dev, 0x2902);
-        ULONG mepc_lo = gc1_rreg(dev, 0x2903);  /* MEPC_LO if exists */
-        ULONG mepc_hi = gc1_rreg(dev, 0x2904);  /* MEPC_HI if exists */
-        ULONG mcause = gc1_rreg(dev, 0x2905);   /* MCAUSE if exists */
-        grbm_select_reset(dev);
-        pr_info("gpu_gfx: after RS64 int: INSTR_PNTR=0x%08x PENDING=0x%08x "
-                "MTVEC=0x%08x_%08x\n",
-                mec_ip2, pending2, mtvec_hi, mtvec_lo);
-        pr_info("gpu_gfx: MEPC=0x%08x_%08x MCAUSE=0x%08x\n",
-                mepc_hi, mepc_lo, mcause);
-
-        /* Check GFXHUB fault after interrupt (MEC may have tried to fetch) */
-        ULONG fault = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_STATUS_LO32);
-        if (fault != 0) {
-            ULONG fa_lo = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
-            ULONG fa_hi = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
-            pr_warn("gpu_gfx: GFXHUB FAULT after interrupt! "
-                    "status=0x%08x addr=0x%08x_%08x\n",
-                    fault, fa_hi, fa_lo);
-        }
-
-        if (mec_ip2 != mec_ip && mec_ip2 != 0) {
-            pr_info("gpu_gfx: MEC WOKE UP! INSTR_PNTR = 0x%08x\n", mec_ip2);
-            mec_ip = mec_ip2;
-        } else {
-            /* MEC didn't advance — try IQ_TIMER_INT via F32 */
-            pr_info("gpu_gfx: trying F32 IQ_TIMER_INT...\n");
-            gc0_wreg(dev, 0x1e16, (1 << 9));
-            Sleep(200);
-
-            grbm_select(dev, 1, 0, 0, 0);
-            ULONG mec_ip3 = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
-            grbm_select_reset(dev);
-            pr_info("gpu_gfx: MEC INSTR_PNTR after F32 = 0x%08x\n", mec_ip3);
-            if (mec_ip3 != mec_ip && mec_ip3 != 0) {
-                pr_info("gpu_gfx: MEC WOKE UP from F32 interrupt!\n");
-                mec_ip = mec_ip3;
-            }
-        }
-    }
-
-    /* If INSTR_PNTR=0, poll a few more times — MEC may just be slow to start */
+    /* Poll a few times if MEC hasn't started yet */
     if (mec_ip == 0) {
-        for (int poll = 0; poll < 5; poll++) {
-            Sleep(100);
+        for (int poll = 0; poll < 10; poll++) {
+            Sleep(50);
             grbm_select(dev, 1, 0, 0, 0);
             mec_ip = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
             grbm_select_reset(dev);
-            pr_info("gpu_gfx: MEC INSTR_PNTR poll[%d] = 0x%08x\n",
-                    poll, mec_ip);
-            if (mec_ip != 0) break;
+            if (mec_ip != 0) {
+                pr_info("gpu_gfx: MEC started after %dms: INSTR_PNTR=0x%08x\n",
+                        (poll + 1) * 50, mec_ip);
+                break;
+            }
         }
     }
 
-    /* Diagnostic dump if MEC didn't start */
+    /* Check for GFXHUB fault (instruction fetch from firmware VA may fail) */
+    {
+        ULONG gc_fault = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_STATUS_LO32);
+        if (gc_fault != 0) {
+            ULONG fa_lo = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
+            ULONG fa_hi = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
+            pr_warn("gpu_gfx: GFXHUB FAULT during MEC start! "
+                    "status=0x%08x addr=0x%08x_%08x\n",
+                    gc_fault, fa_hi, fa_lo);
+        }
+    }
+
+    /* Diagnostic dump */
     if (mec_ip == 0) {
         pr_warn("gpu_gfx: MEC INSTR_PNTR still 0 — dumping diagnostics\n");
 
-        /* Read GFXHUB system aperture registers */
+        grbm_select(dev, 1, 0, 0, 0);
+        {
+            ULONG li_lo = gc1_rreg(dev, 0x292c);
+            ULONG li_hi = gc1_rreg(dev, 0x292d);
+            ULONG pc_lo = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START);
+            ULONG pc_hi = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI);
+            ULONG dc_lo = gc1_rreg(dev, regCP_MEC_DC_BASE_LO);
+            ULONG dc_hi = gc1_rreg(dev, regCP_MEC_DC_BASE_HI);
+            ULONG mtvec_lo = gc1_rreg(dev, 0x2901);
+            ULONG mtvec_hi = gc1_rreg(dev, 0x2902);
+
+            pr_info("gpu_gfx:   LOCAL_INSTR = 0x%08x_%08x\n", li_hi, li_lo);
+            pr_info("gpu_gfx:   PC_START    = 0x%08x_%08x\n", pc_hi, pc_lo);
+            pr_info("gpu_gfx:   DC_BASE     = 0x%08x_%08x\n", dc_hi, dc_lo);
+            pr_info("gpu_gfx:   MTVEC       = 0x%08x_%08x\n", mtvec_hi, mtvec_lo);
+        }
+        grbm_select_reset(dev);
+
         ULONG sys_lo = gfxhub_rreg(dev, regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR);
         ULONG sys_hi = gfxhub_rreg(dev, regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR);
-        pr_info("gpu_gfx: GFXHUB SYS_APERTURE_LOW  = 0x%08x (addr 0x%llx)\n",
-                sys_lo, (unsigned long long)sys_lo << 18);
-        pr_info("gpu_gfx: GFXHUB SYS_APERTURE_HIGH = 0x%08x (addr 0x%llx)\n",
-                sys_hi, (unsigned long long)sys_hi << 18);
-
-        /* Read GFXHUB VM context 0 */
-        ULONG ctx0 = gfxhub_rreg(dev, regGCVM_CONTEXT0_CNTL);
-        pr_info("gpu_gfx: GFXHUB CONTEXT0_CNTL = 0x%08x\n", ctx0);
-
-        /* Read DC_BASE back */
-        grbm_select(dev, 1, 0, 0, 0);
-        ULONG dc_lo = gc1_rreg(dev, regCP_MEC_DC_BASE_LO);
-        ULONG dc_hi = gc1_rreg(dev, regCP_MEC_DC_BASE_HI);
-        ULONG dc_cntl = gc1_rreg(dev, regCP_MEC_DC_BASE_CNTL);
-        ULONG pc_lo = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START);
-        ULONG pc_hi = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI);
-        grbm_select_reset(dev);
-        pr_info("gpu_gfx: MEC DC_BASE = 0x%08x_%08x CNTL=0x%08x\n",
-                dc_hi, dc_lo, dc_cntl);
-        pr_info("gpu_gfx: MEC PC_START = 0x%08x_%08x\n", pc_hi, pc_lo);
-
-        /* Check GFXHUB VM fault status AFTER MEC enable attempt */
-        ULONG gc_fault = gfxhub_rreg(dev, 0x1600);  /* GCVM_L2_PROTECTION_FAULT_STATUS */
-        pr_info("gpu_gfx: GFXHUB VM FAULT STATUS (post-enable) = 0x%08x\n",
-                gc_fault);
-
-        /* Check MMHUB fault too */
-        ULONG mm_fault = mmhub_rreg(dev, 0x05e0);  /* MMVM_L2_PROTECTION_FAULT_STATUS */
-        pr_info("gpu_gfx: MMHUB VM FAULT STATUS (post-enable) = 0x%08x\n",
-                mm_fault);
+        pr_info("gpu_gfx:   GFXHUB SYS_APERTURE = 0x%08x - 0x%08x\n",
+                sys_lo, sys_hi);
     }
 
-    if (val & CP_MEC_RS64_CNTL__MEC_PIPE0_ACTIVE) {
+    if (val_after & CP_MEC_RS64_CNTL__MEC_PIPE0_ACTIVE) {
         pr_info("gpu_gfx: MEC pipe0 active (INSTR_PNTR=%s)\n",
                 mec_ip != 0 ? "running" : "0=no firmware");
         dev->hw.gfx.mec_enabled = TRUE;
@@ -5740,7 +5540,7 @@ static int enable_mec(struct WddmLiteDevice *dev)
 
     pr_err("gpu_gfx: MEC pipe0 NOT active after enable write — "
            "compute queues won't work\n");
-    dev->hw.gfx.mec_enabled = TRUE;  /* continue for diagnostics */
+    dev->hw.gfx.mec_enabled = TRUE;
     return -1;
 }
 
@@ -6115,22 +5915,20 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
     /*
      * Step 3.5: MEC initialization.
      *
-     * Two modes:
-     * A) Firmware loaded (mec_ucode_start != 0): Full reset cycle.
-     *    GRBM_SOFT_RESET → configure_mec (reset + PC_START) → enable_mec.
-     *    PC_START may point to firmware VA (if AUTOLOAD completed) or
-     *    to VRAM MC address (if we copied firmware there).
+     * Key insight from Linux amdgpu gfx_v12_0.c:
+     * In the AUTOLOAD path, the kernel NEVER does GRBM_SOFT_RESET.
+     * GRBM_SOFT_RESET destroys LOCAL_INSTR_BASE and other RLC-programmed
+     * state that only RLC can set (during AUTOLOAD). This was the root
+     * cause of MEC going to PC=0 — the instruction aperture was wiped.
      *
-     * B) VBIOS preserve (mec_ucode_start == 0, e.g. SKIP_FW_LOAD=1):
-     *    Skip GRBM_SOFT_RESET and reset cycle to preserve VBIOS firmware
-     *    in instruction caches. Just set doorbell range and unhalt MEC.
-     *    The VBIOS already completed bootload and loaded firmware.
-     *
-     * C) VBIOS passthrough (mec_ucode_start == 0 BUT bootload bit 31 set):
-     *    VBIOS AUTOLOAD completed — firmware is decrypted and mapped at
-     *    the standard firmware VA (0x7000000003000). Use firmware VA as
-     *    PC_START with full reset cycle.
+     * The correct sequence (matching kernel AUTOLOAD path):
+     * 1. Dequeue any active HQDs
+     * 2. Disable MEC via CP_MEC_RS64_CNTL (halt+reset+deactivate)
+     *    This preserves RLC state (LOCAL_INSTR_BASE, page tables, etc.)
+     * 3. Set PRGRM_CNTR_START for all pipes
+     * 4. Enable MEC (clear halt/reset, set active)
      */
+
     /* Check if VBIOS AUTOLOAD completed and we should use firmware VA */
     if (dev->hw.gfx.mec_ucode_start == 0 &&
         (dev->hw.gfx.rlc_bootload_status & 0x80000000)) {
@@ -6139,82 +5937,22 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
                 dev->hw.gfx.rlc_bootload_status);
         dev->hw.gfx.mec_ucode_start = 0x7000000003000ULL;
     }
+
     if (dev->hw.gfx.mec_ucode_start != 0) {
-        /* Mode A: Full reset cycle with our firmware */
-        {
-            /* First dequeue any active HQDs left from VBIOS */
-            dequeue_all_hqds(dev);
+        /* Dequeue any active HQDs left from VBIOS */
+        dequeue_all_hqds(dev);
 
-            /* Read MEC INSTR_PNTR BEFORE soft reset (diagnostic) */
-            grbm_select(dev, 1, 0, 0, 0);
-            ULONG mec_ip_before = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
-            grbm_select_reset(dev);
-            pr_info("gpu_gfx: MEC INSTR_PNTR before soft reset = 0x%08x\n",
-                    mec_ip_before);
-
-            ULONG old_sr = gc0_rreg(dev, regGRBM_SOFT_RESET);
-            pr_info("gpu_gfx: GRBM_SOFT_RESET (before) = 0x%08x\n", old_sr);
-
-            /* Assert soft_reset_cp (bit 0) + soft_reset_cpc (bit 18) */
-            gc0_wreg(dev, regGRBM_SOFT_RESET,
-                     GRBM_SOFT_RESET__SOFT_RESET_CP |
-                     GRBM_SOFT_RESET__SOFT_RESET_CPC);
-            Sleep(50);  /* tinygrad waits 50ms */
-
-            /* Release reset */
-            gc0_wreg(dev, regGRBM_SOFT_RESET, 0x0);
-            pr_info("gpu_gfx: GRBM_SOFT_RESET done (CP+CPC)\n");
-
-            /* Read MEC INSTR_PNTR AFTER soft reset (diagnostic) */
-            grbm_select(dev, 1, 0, 0, 0);
-            ULONG mec_ip_after = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
-            grbm_select_reset(dev);
-            pr_info("gpu_gfx: MEC INSTR_PNTR after soft reset = 0x%08x\n",
-                    mec_ip_after);
-        }
-
-        /* Step 4: Configure MEC doorbell range and GRBM timeout */
+        /* Configure MEC (disable → set PC_START → doorbell range) */
         configure_mec(dev);
 
-        /* Step 5: Enable MEC */
+        /* Enable MEC */
         if (enable_mec(dev) != 0) {
             pr_warn("gpu_gfx: MEC enable failed (continuing)\n");
         }
     } else {
-        /* Mode B: Preserve VBIOS MEC state.
-         * Don't soft-reset, don't invalidate icache, don't overwrite PC_START.
-         * VBIOS firmware should be in instruction caches.
-         * Just set doorbell range and unhalt MEC. */
-        pr_info("gpu_gfx: VBIOS preserve mode — skipping soft reset\n");
-
-        /* Read current MEC state from VBIOS */
-        grbm_select(dev, 1, 0, 0, 0);
-        ULONG mec_ip = gc1_rreg(dev, regCP_MEC_RS64_INSTR_PNTR);
-        ULONG mec_pc_lo = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START);
-        ULONG mec_pc_hi = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI);
-        grbm_select_reset(dev);
-        ULONG mec_cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
-        pr_info("gpu_gfx: VBIOS MEC state: CNTL=0x%08x INSTR_PNTR=0x%08x "
-                "PC_START=0x%08x_%08x\n",
-                mec_cntl, mec_ip, mec_pc_hi, mec_pc_lo);
-
-        /* Dequeue any VBIOS HQDs */
-        dequeue_all_hqds(dev);
-
-        /* Set doorbell range (safe — doesn't disturb MEC execution) */
-        gc0_wreg(dev, regCP_MEC_DOORBELL_RANGE_LOWER, 0x0);
-        gc0_wreg(dev, regCP_MEC_DOORBELL_RANGE_UPPER, 0xF8);
-        pr_info("gpu_gfx: MEC doorbell range set [0x000, 0x0F8]\n");
-
-        /* Set GRBM read timeout */
-        ULONG grbm_cntl = gc0_rreg(dev, regGRBM_CNTL);
-        grbm_cntl = (grbm_cntl & ~0xFF) | 0xFF;
-        gc0_wreg(dev, regGRBM_CNTL, grbm_cntl);
-
-        /* Enable MEC: just unhalt, preserving VBIOS PC_START and firmware */
-        if (enable_mec(dev) != 0) {
-            pr_warn("gpu_gfx: MEC enable failed in VBIOS mode (continuing)\n");
-        }
+        pr_warn("gpu_gfx: No MEC firmware address — "
+                "skipping MEC init (BOOTLOAD=0x%08x)\n",
+                dev->hw.gfx.rlc_bootload_status);
     }
 
     /* Step 6: Read diagnostic registers */
