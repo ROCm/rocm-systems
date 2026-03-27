@@ -295,8 +295,8 @@ namespace envvar {
         VERSION,
         WARN,
         ENV,
+        ENV_ALL,
         ENV_FULL,
-        ENV_PRETTY,
         INFO,
         TRACE,
       };
@@ -535,7 +535,7 @@ namespace envvar {
      * Print only modified variables (name=value)
      * Example: ROCSHMEM_HEAP_SIZE=2147483648
      */
-    MODIFIED_ONLY,
+    MODIFIED,
 
     /**
      * Print all variables with name and value
@@ -560,26 +560,26 @@ namespace envvar {
    * This function prints rocSHMEM environment variables in different formats
    * depending on the mode parameter.
    *
-   * @param mode Print mode (MODIFIED_ONLY, ALL_VALUES, or FULL_DOCUMENTATION)
+   * @param mode Print mode (MODIFIED, ALL_VALUES, or FULL_DOCUMENTATION)
    * @param os Output stream to write to (defaults to std::cout)
    *
    * Example usage:
    * @code
    *   // Print only modified variables
-   *   rocshmem::envvar::print_all_envvars(rocshmem::envvar::print_mode::MODIFIED_ONLY);
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::MODIFIED);
    *
    *   // Print all variables with values
-   *   rocshmem::envvar::print_all_envvars(rocshmem::envvar::print_mode::ALL_VALUES);
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::ALL_VALUES);
    *
    *   // Print full documentation
-   *   rocshmem::envvar::print_all_envvars(rocshmem::envvar::print_mode::FULL_DOCUMENTATION);
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::FULL_DOCUMENTATION);
    * @endcode
    *
    * @note This function is thread-safe and acquires a lock on the internal
    *       environment variable map.
    */
-  void print_all_envvars(print_mode mode = print_mode::MODIFIED_ONLY,
-                         std::ostream& os = std::cout);
+  void print_envvars(print_mode mode = print_mode::MODIFIED,
+                     std::ostream& os = std::cout);
 
 }  // namespace envvar
 }  // namespace rocshmem

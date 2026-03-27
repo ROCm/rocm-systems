@@ -170,7 +170,7 @@ void print_usage(const char* progname) {
 int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
   const char* output_file = nullptr;
   bool print_env = false;
-  rocshmem::envvar::print_mode env_mode = rocshmem::envvar::print_mode::MODIFIED_ONLY;
+  rocshmem::envvar::print_mode env_mode = rocshmem::envvar::print_mode::MODIFIED;
 
   // Parse command line arguments
   for (int i = 1; i < argc; i++) {
@@ -187,7 +187,7 @@ int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
       }
     } else if (std::strcmp(argv[i], "--env") == 0) {
       print_env = true;
-      env_mode = rocshmem::envvar::print_mode::MODIFIED_ONLY;
+      env_mode = rocshmem::envvar::print_mode::MODIFIED;
     } else if (std::strcmp(argv[i], "--envfull") == 0) {
       print_env = true;
       env_mode = rocshmem::envvar::print_mode::ALL_VALUES;
@@ -241,7 +241,7 @@ int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
   // Print environment variables if requested
   if (print_env) {
     std::cout << "\n";
-    rocshmem::envvar::print_all_envvars(env_mode, std::cout);
+    rocshmem::envvar::print_envvars(env_mode, std::cout);
   }
 
   // Restore cout/cerr if redirected

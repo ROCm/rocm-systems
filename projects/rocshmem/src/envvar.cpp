@@ -38,82 +38,82 @@ namespace rocshmem {
 namespace envvar {
   inline namespace _base {
     const var<bool> uniqueid_with_mpi("UNIQUEID_WITH_MPI",
-                                       "Use MPI when using uniqueId-based initialization",
-                                       false);
+                                      "Use MPI when using uniqueId-based initialization",
+                                      false);
     const var<types::debug_level> debug_level("DEBUG_LEVEL",
-                                                "Debug output level (NONE, VERSION, WARN, ENV, ENV:FULL, ENV:PRETTY, INFO, TRACE)",
-                                                types::debug_level::NONE);
+                                              "Debug output level (NONE, VERSION, WARN, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)",
+                                              types::debug_level::NONE);
     const var<size_t> heap_size("HEAP_SIZE",
-                                 "Size of the rocSHMEM symmetric heap in bytes (per PE). Note: heap is on GPU memory.",
-                                 1L << 30);
+                                "Size of the rocSHMEM symmetric heap in bytes (per PE). Note: heap is on GPU memory.",
+                                1L << 30);
     const var<size_t> max_num_teams("MAX_NUM_TEAMS",
-                                     "Maximum number of teams an application can use",
-                                     40);
+                                    "Maximum number of teams an application can use",
+                                    40);
     const var<size_t> max_num_host_contexts("MAX_NUM_HOST_CONTEXTS",
-                                              "Maximum number of host-side communication contexts",
-                                              1);
+                                            "Maximum number of host-side communication contexts",
+                                            1);
     const var<size_t> max_num_contexts("MAX_NUM_CONTEXTS",
-                                        "Maximum number of contexts an application can use",
-                                        32);
+                                       "Maximum number of contexts an application can use",
+                                       32);
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
-                                             "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
-                                             1024);
+                                            "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
+                                            1024);
     const var<std::string> requested_dev("USE_IB_HCA",
-                                          "Specify which NIC this PE should bind to (e.g., 'bnxt_re0'). Empty string enables auto-detection.");
+                                         "Specify which NIC this PE should bind to (e.g., 'bnxt_re0'). Empty string enables auto-detection.");
     const var<std::string> hca_list("HCA_LIST", "");
     const var<uint32_t> sq_size("SQ_SIZE",
-                                 "Send queue size for GDA backend",
-                                 1024);
+                                "Send queue size for GDA backend",
+                                1024);
     const var<std::string> backend("BACKEND",
-                                    "Backend selection (ipc, ro, gda). Empty string enables auto-selection.");
+                                   "Backend selection (ipc, ro, gda). Empty string enables auto-selection.");
     const var<bool> disable_mixed_ipc("DISABLE_MIXED_IPC",
-                                       "Force using network conduit even when IPC is available",
-                                       false);
+                                      "Force using network conduit even when IPC is available",
+                                      false);
     const var<bool> disable_ipc("DISABLE_IPC",
-                                 "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
-                                 false);
+                                "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
+                                false);
   }  // inline namespace _base
 
   namespace bootstrap {
     const var<int64_t> timeout("TIMEOUT",
-                                "Bootstrap initialization timeout in seconds",
-                                5);
+                               "Bootstrap initialization timeout in seconds",
+                               5);
     const var<std::string> hostid("HOSTID",
-                                   "Override host identifier for bootstrap. Empty string uses hostname.");
+                                  "Override host identifier for bootstrap. Empty string uses hostname.");
     const var<types::socket_family> socket_family("SOCKET_FAMILY",
-                                                    "Socket family for bootstrap (AF_UNSPEC, AF_INET, AF_INET6)",
-                                                    types::socket_family::UNSPEC);
+                                                  "Socket family for bootstrap (AF_UNSPEC, AF_INET, AF_INET6)",
+                                                  types::socket_family::UNSPEC);
     const var<std::string> socket_ifname("SOCKET_IFNAME",
-                                          "Interface to use for bootstrap (only valid when not using MPI, e.g., 'eno8303'). Empty string enables auto-detection.");
+                                         "Interface to use for bootstrap (only valid when not using MPI, e.g., 'eno8303'). Empty string enables auto-detection.");
   }  // namespace bootstrap
 
   namespace ro {
     const var<bool> disable_ipc("DISABLE_IPC",
-                                 "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
-                                 false);
+                                "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
+                                false);
     const var<useconds_t> progress_delay("PROGRESS_DELAY",
-                                          "Progress engine delay in microseconds (reduces memory subsystem load for performance)",
-                                          3);
+                                         "Progress engine delay in microseconds (reduces memory subsystem load for performance)",
+                                         3);
     const var<bool> net_cpu_queue("NET_CPU_QUEUE",
-                                   "Use CPU queue for network operations in Reverse Offload backend",
-                                   false);
+                                  "Use CPU queue for network operations in Reverse Offload backend",
+                                  false);
   }  // namespace ro
 
   namespace gda {
     const var<std::string> provider("PROVIDER",
-                                     "NIC vendor selection (bnxt, pensando, ionic, mlx5). Empty string enables auto-detection.");
+                                    "NIC vendor selection (bnxt, pensando, ionic, mlx5). Empty string enables auto-detection.");
     const var<bool> alternate_qp_ports("ALTERNATE_QP_PORTS",
-                                        "Enable alternating QP mappings across rocSHMEM contexts (helps saturate bandwidth on multiport bonded interfaces)",
-                                        true);
+                                       "Enable alternating QP mappings across rocSHMEM contexts (helps saturate bandwidth on multiport bonded interfaces)",
+                                       true);
     const var<uint8_t> traffic_class("TRAFFIC_CLASS",
-                                      "Traffic class for QPs when using Ethernet link layer",
-                                      0);
+                                     "Traffic class for QPs when using Ethernet link layer",
+                                     0);
     const var<bool> pcie_relaxed_ordering("PCIE_RELAXED_ORDERING",
-                                           "Enable PCIe Relaxed Ordering when registering symmetric heap with RDMA NICs",
-                                           false);
+                                          "Enable PCIe Relaxed Ordering when registering symmetric heap with RDMA NICs",
+                                          false);
     const var<bool> enable_dmabuf("ENABLE_DMABUF",
-                                   "Enable dmabuf support for memory registration",
-                                   false);
+                                  "Enable dmabuf support for memory registration",
+                                  false);
     const var<bool> override_nic_firmware_check("OVERRIDE_NIC_FIRMWARE_CHECK", "", false);
     const var<std::string> alltoallv_wg_algo("ALLTOALLV_WG_ALGO", "");
     const var<uint32_t> sq_size("SQ_SIZE", "", 4096);
@@ -178,10 +178,12 @@ namespace envvar {
           level = debug_level::WARN;
         } else if (level_str == "ENV") {
           level = debug_level::ENV;
+        } else if (level_str == "ENV:MODIFIED") {
+          level = debug_level::ENV;
+        } else if (level_str == "ENV:ALL") {
+          level = debug_level::ENV_ALL;
         } else if (level_str == "ENV:FULL") {
           level = debug_level::ENV_FULL;
-        } else if (level_str == "ENV:PRETTY") {
-          level = debug_level::ENV_PRETTY;
         } else if (level_str == "INFO") {
           level = debug_level::INFO;
         } else if (level_str == "TRACE") {
@@ -203,11 +205,11 @@ namespace envvar {
         case debug_level::WARN:
           return os << "WARN";
         case debug_level::ENV:
-          return os << "ENV";
+          return os << "ENV:MODIFIED";
+        case debug_level::ENV_ALL:
+          return os << "ENV:ALL";
         case debug_level::ENV_FULL:
           return os << "ENV:FULL";
-        case debug_level::ENV_PRETTY:
-          return os << "ENV:PRETTY";
         case debug_level::INFO:
           return os << "INFO";
         case debug_level::TRACE:
@@ -217,7 +219,7 @@ namespace envvar {
     }  // inline namespace _debug
   }  // namespace types
 
-  void print_all_envvars(print_mode mode, std::ostream& os) {
+  void print_envvars(print_mode mode, std::ostream& os) {
     auto [var_map, map_mutex] = _detail::get_var_map();
     std::lock_guard map_lock(map_mutex);
 
@@ -270,8 +272,8 @@ namespace envvar {
         std::visit([&os, mode](const auto& v) {
           using T = typename std::decay_t<decltype(v.get())>::value_type;
 
-          // For MODIFIED_ONLY mode, skip variables using default values
-          if (mode == print_mode::MODIFIED_ONLY && v.get().is_default()) {
+          // For MODIFIED mode, skip variables using default values
+          if (mode == print_mode::MODIFIED && v.get().is_default()) {
             return;
           }
 
@@ -287,7 +289,7 @@ namespace envvar {
             }
           };
 
-          if (mode == print_mode::MODIFIED_ONLY || mode == print_mode::ALL_VALUES) {
+          if (mode == print_mode::MODIFIED || mode == print_mode::ALL_VALUES) {
             // Simple format: NAME=value
             os << v.get().get_name() << "=" << format_value(v.get().get_value()) << "\n";
           } else {

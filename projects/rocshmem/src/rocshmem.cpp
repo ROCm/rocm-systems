@@ -185,13 +185,13 @@ static void setFilesLimit() {
       debug_val == debug_level::ENV_PRETTY) {
     envvar::print_mode mode;
     if (debug_val == debug_level::ENV) {
-      mode = envvar::print_mode::MODIFIED_ONLY;
+      mode = envvar::print_mode::MODIFIED;
     } else if (debug_val == debug_level::ENV_FULL) {
       mode = envvar::print_mode::ALL_VALUES;
     } else {
       mode = envvar::print_mode::FULL_DOCUMENTATION;
     }
-    envvar::print_all_envvars(mode, std::cout);
+    envvar::print_envvars(mode, std::cout);
   }
 
   int ret;
@@ -322,13 +322,13 @@ static void setFilesLimit() {
       debug_val == debug_level::ENV_PRETTY) {
     envvar::print_mode mode;
     if (debug_val == debug_level::ENV) {
-      mode = envvar::print_mode::MODIFIED_ONLY;
+      mode = envvar::print_mode::MODIFIED;
     } else if (debug_val == debug_level::ENV_FULL) {
       mode = envvar::print_mode::ALL_VALUES;
     } else {
       mode = envvar::print_mode::FULL_DOCUMENTATION;
     }
-    envvar::print_all_envvars(mode, std::cout);
+    envvar::print_envvars(mode, std::cout);
   }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
