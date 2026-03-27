@@ -14,7 +14,7 @@ import pandas as pd
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils import rocpd_data
+from utils import utils_analysis
 from utils.analysis_orm import Database, get_views
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.parser import (
@@ -287,7 +287,7 @@ class db_analysis(OmniAnalyze_Base):
         args = self.get_args()
 
         for workload_path in self._runs.keys():
-            pmc_df = rocpd_data.process_rocpd_csv(
+            pmc_df = utils_analysis.process_rocpd_csv(
                 pd.read_csv(Path(workload_path) / "pmc_perf.csv")
             )
 
