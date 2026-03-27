@@ -53,7 +53,6 @@
 #include <sys/socket.h>
 #include <chrono>
 #include <thread>
-#include <fstream>
 
 #include "suites/functional/svm_memory.h"
 #include "common/base_rocr_utils.h"
