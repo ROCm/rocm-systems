@@ -154,8 +154,6 @@ class LLMoE {
   }
 
   void ll_dispatch() {
-    [[maybe_unused]] int num_local_experts {num_experts / num_ranks};
-
     // Buffer control
     LLMoEBufferLayout<T> ll_layout(rdma_buffer_ptr, num_tokens,
                        hidden, num_ranks, num_experts);
@@ -178,6 +176,7 @@ class LLMoE {
     CHECK_HIP(hipStreamSynchronize(stream));
 
     //--- DEBUG FUNCTIONS ---
+    // int num_local_experts {num_experts / num_ranks};
     // Print rdma_x (buffer.dispatch_send_buffer) for debugging
     // print_rdma_x(buffer.dispatch_send_buffer);
 
@@ -196,7 +195,6 @@ class LLMoE {
   }
 
   void ll_combine() { // hipStream_t stream : TODO: pass stream
-    [[maybe_unused]] int num_local_experts {num_experts / num_ranks};
 
     // Buffer control
     LLMoEBufferLayout<T> ll_layout(rdma_buffer_ptr, num_tokens,
