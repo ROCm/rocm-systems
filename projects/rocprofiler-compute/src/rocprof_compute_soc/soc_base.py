@@ -204,6 +204,144 @@ class OmniSoC_Base:
 
         return gpu_model
 
+    def _append_analysis_yaml_for_filter_token(
+        self,
+        raw_token: str,
+        config_filename_dict: dict[str, str],
+        config_root_dir: str,
+        texts: list[str],
+    ) -> None:
+        block_id = raw_token
+        if METRIC_ID_RE.match(block_id):
+            pass
+        else:
+            alias = block_id
+            panel_alias_dict = get_panel_alias()
+            if alias not in panel_alias_dict:
+                raise KeyError(f"Unknown panel alias: {alias!r}")
+            block_id = str(panel_alias_dict[alias])
+            print(f"alias: {alias}, block id: {block_id}")
+
+        file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
+
+        if file_id not in config_filename_dict:
+            console_warning(
+                f"Skipping {block_id}: file id {file_id} not found in "
+                f"{config_root_dir}"
+            )
+            return
+
+        with open(config_filename_dict[file_id]) as stream:
+            file_config = yaml.safe_load(stream)
+        if panel_id is None:
+            texts.append(yaml.dump(file_config, sort_keys=False))
+            return
+
+        panel_dict = {
+            section["metric_table"]["id"]: section["metric_table"]
+            for section in file_config["Panel Config"]["data source"]
+            if "metric_table" in section
+        }
+        if panel_id not in panel_dict:
+            console_warning(
+                f"Skipping {block_id}: metric table {panel_id} not found in "
+                f"{config_filename_dict[file_id]}"
+            )
+            return
+        if metric_id is None:
+            texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
+            return
+
+        metric_dict = {
+            idx: panel_dict[panel_id]["metric"][metric]
+            for idx, metric in enumerate(panel_dict[panel_id]["metric"].keys())
+        }
+        if metric_id not in metric_dict:
+            console_warning(
+                f"Skipping {block_id}: metric id {metric_id} not found in "
+                f"panel id {panel_id}"
+            )
+            return
+        texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
+
+    def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
+        """
+        Optional metric ids (e.g. ``'2.1.3'``) whose PMCs should share the first
+        ``pmc_perf_*`` pass when IP block limits allow. Subclasses return arch-specific
+        tuples; default is no extra policy.
+        """
+        return ()
+
+    def _expanded_hw_counters_for_metric_ids(
+        self, metric_ids: tuple[str, ...]
+    ) -> set[str]:
+        """Hardware PMC names for the given metric id strings, TCC-expanded."""
+        if not metric_ids or not self.__arch:
+            return set()
+        args = self.get_args()
+        config_root_dir = f"{args.config_dir}/{self.__arch}"
+        config_filename_dict = {
+            filename.name.split("_")[0]: str(filename)
+            for filename in Path(config_root_dir).glob("*.yaml")
+        }
+        snippets: list[str] = []
+        for mid in metric_ids:
+            self._append_analysis_yaml_for_filter_token(
+                mid, config_filename_dict, config_root_dir, snippets
+            )
+        if not snippets:
+            return set()
+        raw_counters = self.parse_counters("\n".join(snippets))
+        return self._expand_tcc_template_counters(raw_counters)
+
+    def _prepend_priority_same_bucket_pass(
+        self,
+        work: list[str],
+        output_files: list[CounterFile],
+        tcc_channel_counter_file_map: dict[str, CounterFile],
+        initial_file_count: int,
+    ) -> int:
+        """
+        Pack SoC-defined priority metrics into ``pmc_perf_{n}`` before greedy fill.
+        Counters that do not fit stay in ``work`` for the default bin packer.
+        """
+        priority_ids = self._same_bucket_priority_metric_ids()
+        if not priority_ids:
+            return initial_file_count
+        priority_needed = self._expanded_hw_counters_for_metric_ids(priority_ids)
+        priority_in_run = sorted(c for c in work if c in priority_needed)
+        if not priority_in_run:
+            return initial_file_count
+
+        file_count = initial_file_count
+        priority_file = CounterFile(
+            f"pmc_perf_{file_count}.txt", self.__perfmon_config
+        )
+        overflow: list[str] = []
+        for ctr in priority_in_run:
+            if priority_file.add(ctr):
+                work.remove(ctr)
+                if is_tcc_channel_counter(ctr):
+                    tcc_channel_counter_file_map[ctr.split("[")[0]] = priority_file
+            else:
+                overflow.append(ctr)
+
+        if overflow:
+            sample = overflow[:12]
+            suffix = "…" if len(overflow) > 12 else ""
+            console_warning(
+                "profiling",
+                "Same-bucket priority metrics: not all PMCs fit in one perfmon pass "
+                f"({len(overflow)} counter(s) use default packing): "
+                f"{', '.join(sample)}{suffix}",
+            )
+
+        if not _flat_counters_in_perfmon_file(priority_file):
+            return initial_file_count
+
+        output_files.append(priority_file)
+        return file_count + 1
+
     @demarcate
     def detect_counters(self) -> tuple[set[str], list[str]]:
         """
@@ -251,62 +389,9 @@ class OmniSoC_Base:
                     texts.append(stream.read())
 
         for block_id in filter_blocks:
-            if METRIC_ID_RE.match(block_id):
-                block_id = block_id
-            else:
-                alias = block_id
-                panel_alias_dict = get_panel_alias()
-                if alias not in panel_alias_dict:
-                    raise KeyError(f"Unknown panel alias: {alias!r}")
-                block_id = panel_alias_dict[alias]  # int
-                print(f"alias: {alias}, block id: {block_id}")
-
-            file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
-
-            # File id filtering
-            if file_id not in config_filename_dict:
-                console_warning(
-                    f"Skipping {block_id}: file id {file_id} not found in "
-                    f"{config_root_dir}"
-                )
-                continue
-
-            with open(config_filename_dict[file_id]) as stream:
-                file_config = yaml.safe_load(stream)
-            if panel_id is None:
-                # If no panel id level filtering, then read the whole file
-                texts.append(yaml.dump(file_config, sort_keys=False))
-                continue
-
-            # Panel id filtering
-            panel_dict = {
-                section["metric_table"]["id"]: section["metric_table"]
-                for section in file_config["Panel Config"]["data source"]
-                if "metric_table" in section
-            }
-            if panel_id not in panel_dict:
-                console_warning(
-                    f"Skipping {block_id}: metric table {panel_id} not found in "
-                    f"{config_filename_dict[file_id]}"
-                )
-                continue
-            if metric_id is None:
-                # If no metric id level filtering, then read the whole panel
-                texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
-                continue
-
-            # Metric id filtering
-            metric_dict = {
-                id: panel_dict[panel_id]["metric"][metric]
-                for id, metric in enumerate(panel_dict[panel_id]["metric"].keys())
-            }
-            if metric_id not in metric_dict:
-                console_warning(
-                    f"Skipping {block_id}: metric id {metric_id} not found in "
-                    f"panel id {panel_id}"
-                )
-                continue
-            texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
+            self._append_analysis_yaml_for_filter_token(
+                block_id, config_filename_dict, config_root_dir, texts
+            )
 
         counters = self.parse_counters("\n".join(texts))
         counters = self._expand_tcc_template_counters(counters)
@@ -353,7 +438,13 @@ class OmniSoC_Base:
     def _allocate_perfmon_counter_files(
         self, counters: set[str]
     ) -> tuple[list[CounterFile], int, int]:
-        """Bin-pack counters into perfmon buckets (same layout as perfmon_coalesce)."""
+        """
+        Bin-pack counters into perfmon buckets (same layout as perfmon_coalesce).
+
+        After per-level dedicated files, optionally pre-allocates ``pmc_perf_0`` for
+        SoC priority metrics (see ``_same_bucket_priority_metric_ids``) before the
+        default greedy first-fit pass.
+        """
         output_files: list[CounterFile] = []
         accu_file_count = 0
         work = sorted(list(counters))
@@ -373,6 +464,13 @@ class OmniSoC_Base:
 
         file_count = 0
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
+
+        file_count = self._prepend_priority_same_bucket_pass(
+            work,
+            output_files,
+            tcc_channel_counter_file_map,
+            file_count,
+        )
 
         for ctr in work:
             if is_tcc_channel_counter(ctr):

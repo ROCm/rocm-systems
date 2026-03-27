@@ -69,6 +69,14 @@ class gfx1151_soc(OmniSoC_Base):
         self._mspec.lds_banks_per_cu = 32  # Standard RDNA3.5 LDS config
         self._mspec.pipes_per_gpu = 2  # APU typically has fewer pipes
 
+    def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
+        """
+        Prefer one perfmon pass for these analysis metrics (panel.metric index):
+        2.1.3 System Speed of Light, 8.3.0 TCP Cache, 11.3.0 GL1C — when PMC
+        counts fit IP block limits; overflow uses the default greedy packer.
+        """
+        return ("2.1.3", "8.3.0", "11.3.0")
+
     # -----------------------
     # Required child methods
     # -----------------------
