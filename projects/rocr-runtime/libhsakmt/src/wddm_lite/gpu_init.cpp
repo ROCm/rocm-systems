@@ -5327,15 +5327,16 @@ static void configure_mec(struct WddmLiteDevice *dev)
         ULONG mec_hi = (ULONG)((dev->hw.gfx.mec_ucode_start >> 2) >> 32);
 
         /*
-         * Step 1: Disable MEC (kernel's cp_compute_enable(false) pattern).
-         * Single write: halt + reset all pipes + deactivate + invalidate icache.
-         * This does NOT destroy LOCAL_INSTR_BASE or other RLC-programmed state —
-         * it only resets the pipe execution state.
+         * Step 1: Disable MEC.
+         * halt + reset all pipes + deactivate. Do NOT invalidate icache —
+         * the firmware was cached by AUTOLOAD, and we need it to stay
+         * since GFXHUB uses VBIOS page tables that have the firmware VA
+         * mappings. Invalidating would force a re-fetch which works, but
+         * keeping the cache avoids unnecessary GFXHUB dependency.
          */
-        ULONG disable_val = CP_MEC_RS64_CNTL__MEC_INVALIDATE_ICACHE |
-                            CP_MEC_RS64_CNTL__ALL_PIPE_RESET |
+        ULONG disable_val = CP_MEC_RS64_CNTL__ALL_PIPE_RESET |
                             CP_MEC_RS64_CNTL__MEC_HALT;
-        /* (active bits are 0 = deactivated) */
+        /* (active bits are 0 = deactivated, no icache invalidate) */
 
         ULONG cntl_before = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
         pr_info("gpu_gfx: MEC CNTL before disable = 0x%08x "
@@ -5649,6 +5650,49 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
             pr_info("gpu_gfx: KEEP_VBIOS_GFXHUB=1 — preserving page tables "
                     "(CNTL=0x%08x, PT_BASE=0x%08x_%08x)\n",
                     gc_test, pt_hi, pt_lo);
+
+            /*
+             * Extend GFXHUB system aperture to cover system memory.
+             *
+             * VBIOS sets system aperture to VRAM only (0x80000000000 to
+             * ~0x87f7ffffff). But MEC needs to access queue buffers which
+             * are DMA-allocated system memory (bus addrs like 0x8xxxxxxxx).
+             * The system aperture provides identity-mapped (physical addr)
+             * access without page table translation.
+             *
+             * Set LOW=0 so all physical addresses from 0 are in aperture.
+             * Keep HIGH at VRAM end. This lets MEC access both VRAM and
+             * system memory through the system aperture.
+             */
+            {
+                ULONG sys_lo = gfxhub_rreg(dev,
+                    regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR);
+                ULONG sys_hi = gfxhub_rreg(dev,
+                    regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR);
+                pr_info("gpu_gfx: GFXHUB SYS_APERTURE before extend: "
+                        "lo=0x%08x hi=0x%08x\n", sys_lo, sys_hi);
+
+                /* Set LOW=0 to include all system memory addresses */
+                gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR, 0x0);
+
+                /* Extend HIGH to include our GART range end (0x8817ffffff).
+                 * Format: addr >> 18. GART end = 0x8817ffffff >> 18 = 0x2205ff */
+                ULONG new_hi = (ULONG)((dev->hw.gmc.gart_end + 1) >> 18);
+                if (new_hi > sys_hi) {
+                    gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR,
+                                new_hi);
+                }
+
+                ULONG sys_lo2 = gfxhub_rreg(dev,
+                    regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR);
+                ULONG sys_hi2 = gfxhub_rreg(dev,
+                    regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR);
+                pr_info("gpu_gfx: GFXHUB SYS_APERTURE after extend: "
+                        "lo=0x%08x hi=0x%08x (addr 0x%llx-0x%llx)\n",
+                        sys_lo2, sys_hi2,
+                        (unsigned long long)sys_lo2 << 18,
+                        (unsigned long long)sys_hi2 << 18);
+            }
         } else {
             /* Reinitialize GFXHUB with our GART table. */
             ULONG gc_test = gfxhub_rreg(dev, regGCVM_CONTEXT0_CNTL);
