@@ -15,6 +15,17 @@ namespace amd::activity_prof {
 
 decltype(report_activity) report_activity{nullptr};
 
+// Reserved sentinel pointer value (0x1) used to signal roctracer that CLR commits
+// to delivering an activity record for this operation. roctracer's TracerCallback
+// distinguishes this from an IsEnabled query (nullptr) and a real record (valid ptr).
+// See TracerCallback in roctracer.cpp, ACTIVITY_DOMAIN_HIP_OPS case.
+static void* const kCommitRecordSentinel = reinterpret_cast<void*>(uintptr_t{1});
+
+void CommitRecord(OpId operation_id) {
+  auto function = report_activity.load(std::memory_order_acquire);
+  if (function) function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, kCommitRecordSentinel);
+}
+
 #if defined(__linux__)
 __thread activity_correlation_id_t correlation_id __attribute__((tls_model("initial-exec"))) = 0;
 #elif defined(_WIN32)
@@ -30,7 +41,7 @@ static inline size_t linearSize(const amd::Coord3D& size3d) {
 
 bool IsEnabled(OpId operation_id) {
   if (operation_id < OP_ID_NUMBER)
-    if (auto report = report_activity.load(std::memory_order_relaxed))
+    if (auto report = report_activity.load(std::memory_order_acquire))
       return report(ACTIVITY_DOMAIN_HIP_OPS, operation_id, nullptr) == 0;
   return false;
 }
@@ -44,7 +55,7 @@ void ReportActivity(const amd::Command& command) {
     return;
   }
 
-  auto function = report_activity.load(std::memory_order_relaxed);
+  auto function = report_activity.load(std::memory_order_acquire);
   if (!function) return;
 
   const auto* queue = command.queue();

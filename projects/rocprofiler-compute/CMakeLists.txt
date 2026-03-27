@@ -606,6 +606,18 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+# ---------------------------------------
+# Pure csv compatibility layer for pandas
+# ---------------------------------------
+
+add_test(
+    NAME test_utils_profile_csv
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_profile_csv.xml ${COV_OPTION}
+        tests/test_utils_profile_csv.py ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Generate coverage tests
 # -----------------------------------
@@ -744,6 +756,52 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
+
+# ==============================================================================
+# Vendored Dependencies Installation
+# ==============================================================================
+# Vendored packages are included as git submodules and installed as pure Python.
+# Each package has: conditional submodule init + unconditional install.
+# See src/vendored/README.md and CONTRIBUTING.md for vendoring guidelines.
+
+find_package(Git QUIET)
+
+# Vendored package wrapper
+install(
+    FILES src/vendored/__init__.py
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/vendored
+    COMPONENT main
+)
+
+# PyYAML
+if(NOT EXISTS "${PROJECT_SOURCE_DIR}/src/vendored/pyyaml/lib/yaml")
+    if(Git_FOUND)
+        message(STATUS "Initializing vendored/pyyaml submodule...")
+        execute_process(
+            COMMAND
+                ${GIT_EXECUTABLE} submodule update --init --recursive src/vendored/pyyaml
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            RESULT_VARIABLE GIT_SUBMOD_RESULT
+        )
+        if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+            message(FATAL_ERROR "git submodule update failed for src/vendored/pyyaml")
+        endif()
+    else()
+        message(FATAL_ERROR "vendored/pyyaml not found and git not available")
+    endif()
+else()
+    message(STATUS "Vendored/pyyaml: OK")
+endif()
+install(
+    DIRECTORY src/vendored/pyyaml/lib/yaml
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/vendored/pyyaml/lib
+    COMPONENT main
+    FILES_MATCHING
+    PATTERN "*.py"
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE
+)
+
 # samples
 install(
     DIRECTORY sample
@@ -788,18 +846,6 @@ install(
     ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
     \")"
     COMPONENT main
-)
-
-# License header update(s)
-add_custom_target(
-    license
-    COMMAND
-        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}/src
-        --license ${PROJECT_SOURCE_DIR}/LICENSE.md --extension '.py'
-    COMMAND
-        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}
-        --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
-        "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
 )
 
 install(
