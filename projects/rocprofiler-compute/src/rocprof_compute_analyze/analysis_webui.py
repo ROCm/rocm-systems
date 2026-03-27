@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import copy
@@ -171,8 +149,8 @@ class webui_analysis(OmniAnalyze_Base):
             )
             base_data[base_run].filter_top_n = top_n_filt
 
-            # Reload the pmc_kernel_top.csv for Top Stats panel
-            file_io.create_df_kernel_top_stats(
+            # Regenerate kernel top stats for Top Stats panel
+            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=base_data[base_run].raw_pmc,
                 raw_data_dir=str(self.dest_dir),
                 filter_gpu_ids=base_data[base_run].filter_gpu_ids,
@@ -180,6 +158,10 @@ class webui_analysis(OmniAnalyze_Base):
                 filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 time_unit=args.time_unit,
                 kernel_verbose=args.kernel_verbose,
+            )
+            base_data[base_run].dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+            base_data[base_run].dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = (
+                dispatch_info_df
             )
 
             # Only display basic metrics if no filters are applied
@@ -408,7 +390,7 @@ class webui_analysis(OmniAnalyze_Base):
                 policy=self._profiling_config["iteration_multiplexing"],
             )
 
-        file_io.create_df_kernel_top_stats(
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=self._runs[self.dest_dir].raw_pmc,
             raw_data_dir=self.dest_dir,
             filter_gpu_ids=self._runs[self.dest_dir].filter_gpu_ids,
@@ -417,7 +399,11 @@ class webui_analysis(OmniAnalyze_Base):
             time_unit=args.time_unit,
             kernel_verbose=args.kernel_verbose,
         )
-        # create the loaded kernel stats
+        self._runs[self.dest_dir].dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        self._runs[self.dest_dir].dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = (
+            dispatch_info_df
+        )
+        # Load remaining non-metric tables (sysinfo, etc.)
         parser.load_non_mertrics_table(self._runs[self.dest_dir], self.dest_dir, args)
         # set architecture
         self.arch = self._runs[self.dest_dir].sys_info.iloc[0]["gpu_arch"]

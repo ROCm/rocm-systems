@@ -317,24 +317,27 @@ else()
   set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
 
   # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-  install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
-  install ( TARGETS ${HSAKMT_TARGET}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
+  if (NOT WIN32)
+    install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
+      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
 
+    install ( TARGETS ${HSAKMT_TARGET}
+      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
+  endif()
   # Install public headers
   install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
 
   # Record our usage data for clients find_package calls.
-  install ( EXPORT ${HSAKMT_TARGET}Targets
-    FILE ${HSAKMT_TARGET}Targets.cmake
-    NAMESPACE ${HSAKMT_TARGET}::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-    COMPONENT dev)
-
+  if (NOT WIN32)
+    install ( EXPORT ${HSAKMT_TARGET}Targets
+      FILE ${HSAKMT_TARGET}Targets.cmake
+      NAMESPACE ${HSAKMT_TARGET}::
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+      COMPONENT dev)
+  endif()
   # Adds the target alias hsakmt::hsakmt to the local cmake cache.
   # This isn't necessary today.  It's harmless preparation for some
   # hypothetical future in which the we might be included by add_subdirectory()
@@ -355,13 +358,14 @@ else()
                    VERSION ${BUILD_VERSION_STRING}
                    COMPATIBILITY
                    AnyNewerVersion)
-
-  install(FILES
-          ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
-          ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
-          DESTINATION
-          ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-          COMPONENT dev)
+  if (NOT WIN32)
+    install(FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
+            ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
+            DESTINATION
+            ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+            COMPONENT dev)
+  endif()
 
   # Optionally record the package's find module in the user's package cache.
   if ( NOT DEFINED EXPORT_TO_USER_PACKAGE_REGISTRY )
@@ -381,8 +385,9 @@ else()
   # CPACK_PACKAGING_INSTALL_PREFIX is needed in libhsakmt.pc.in
   # TODO: Add support for relocatable packages.
   configure_file ( libhsakmt.pc.in libhsakmt.pc @ONLY )
-
-  install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev)
+  if (NOT WIN32)
+    install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev)
+  endif()
 
   if ( NOT BUILD_SHARED_LIBS)
     ## Create separate target file for static builds
@@ -424,14 +429,17 @@ else()
     endif()
     target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 
-    install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
+    if (NOT WIN32)
+      install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
               ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
               LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
-    install ( EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
-      FILE ${HSAKMT_STATIC_DRM_TARGET}Targets.cmake
-      NAMESPACE ${HSAKMT_STATIC_DRM_TARGET}::
-      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-      COMPONENT dev)
+
+      install ( EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
+        FILE ${HSAKMT_STATIC_DRM_TARGET}Targets.cmake
+        NAMESPACE ${HSAKMT_STATIC_DRM_TARGET}::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+        COMPONENT dev)
+    endif()
 
     add_library( ${HSAKMT_STATIC_DRM_TARGET}::${HSAKMT_STATIC_DRM_TARGET} ALIAS ${HSAKMT_STATIC_DRM_TARGET} )
   endif()
