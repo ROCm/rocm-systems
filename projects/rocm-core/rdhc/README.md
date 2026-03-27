@@ -11,7 +11,7 @@ RDHC is a comprehensive health check tool for ROCm deployments. It validates GPU
 - **Dynamic Component Detection**: Automatically identifies installed ROCm components
 - **Flexible Reporting**: Pretty table output and JSON export options
 - **Configurable Verbosity**: Support for verbose, normal, and silent modes
-- **Optional check control**: Skip cluster-only or environment-limited tests; relax kernel parameter strictness (see [Optional CLI behavior](#optional-cli-behavior-pr-4478))
+- **Optional check control**: Skip cluster-only or environment-limited tests; relax kernel parameter strictness (see [Optional CLI behavior])
 
 ## Test Categories
 
@@ -127,7 +127,7 @@ sudo -E ./rdhc.py --kernel-params-warnings-only
 sudo -E ./rdhc.py --all --skip-optional-cluster-checks --kernel-params-warnings-only -v
 ```
 
-## Optional CLI behavior (PR [#4478](https://github.com/ROCm/rocm-systems/pull/4478))
+## Optional CLI behavior
 
 These options improve usability when some checks are not applicable or cannot run reliably:
 
