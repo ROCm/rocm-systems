@@ -77,6 +77,8 @@ namespace rocshmem {
 __device__  rocshmem_ctx_t
 __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
 
+__constant__  rocshmem_ctx_t *rocshmem_ctx_array;
+
 __constant__ Backend *device_backend_proxy;
 
 __constant__ constmem_t constmem;

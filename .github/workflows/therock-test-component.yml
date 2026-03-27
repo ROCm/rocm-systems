@@ -38,6 +38,7 @@ jobs:
         --group-add video
         --device /dev/kfd
         --device /dev/dri
+        --group-add 993
         --group-add 992
         --group-add 110
         --ulimit memlock=-1:-1
@@ -78,7 +79,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 526c77297de1418cbd11edccea09dc37055fd71c # 2026-03-12 commit
+          ref: 9a38f01d34a90ecabd87d6cdf197466eab4e84ab # 2026-03-20 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'

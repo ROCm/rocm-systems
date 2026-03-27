@@ -870,6 +870,11 @@ hsa_status_t HSA_API
     return amdExtTable->hsa_amd_profiling_async_copy_enable_fn(enable);
 }
 
+hsa_status_t HSA_API
+  hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
+    return amdExtTable->hsa_amd_agent_preload_fn(agent, flags);
+}
+
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_profiling_get_dispatch_time(
     hsa_agent_t agent, hsa_signal_t signal,

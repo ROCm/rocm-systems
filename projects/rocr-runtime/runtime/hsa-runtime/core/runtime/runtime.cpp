@@ -1220,17 +1220,22 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       count += agents_by_node_[mappedNodes[i]].size();
     }
 
-    AMD::callback_t<decltype(alloc)> Alloc(alloc);
-    *accessible = (hsa_agent_t*)Alloc(sizeof(hsa_agent_t) * count);
-    if ((*accessible) == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     *num_agents_accessible = count;
 
-    uint32_t index = 0;
-    for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
-      auto& list = agents_by_node_[mappedNodes[i]];
-      for (auto agent : list) {
-        (*accessible)[index] = agent->public_handle();
-        index++;
+    if (count == 0) {
+      *accessible = nullptr;
+    } else {
+      AMD::callback_t<decltype(alloc)> Alloc(alloc);
+      *accessible = (hsa_agent_t*)Alloc(sizeof(hsa_agent_t) * count);
+      if ((*accessible) == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+      uint32_t index = 0;
+      for (HSAuint32 i = 0; i < thunkInfo.NMappedNodes; i++) {
+        auto& list = agents_by_node_[mappedNodes[i]];
+        for (auto agent : list) {
+          (*accessible)[index] = agent->public_handle();
+          index++;
+        }
       }
     }
   }

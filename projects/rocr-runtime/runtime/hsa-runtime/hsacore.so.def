@@ -171,6 +171,7 @@ global:
 	hsa_amd_profiling_set_profiler_enabled;
 	hsa_amd_profiling_get_dispatch_time;
 	hsa_amd_profiling_async_copy_enable;
+	hsa_amd_agent_preload;
 	hsa_amd_profiling_get_async_copy_time;
 	hsa_amd_profiling_convert_tick_to_system_domain;
 	hsa_amd_signal_create;
