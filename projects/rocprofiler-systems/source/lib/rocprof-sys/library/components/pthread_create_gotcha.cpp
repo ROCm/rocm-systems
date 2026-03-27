@@ -520,13 +520,13 @@ std::mutex pthread_create_gotcha::s_mutex = {};
 void
 pthread_create_gotcha::pause()
 {
-    std::unique_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
     pthread_create_gotcha_t::set_ready(false);
 }
 void
 pthread_create_gotcha::resume()
 {
-    std::unique_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
     pthread_create_gotcha_t::set_ready(true);
 }
 

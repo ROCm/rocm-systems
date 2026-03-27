@@ -102,14 +102,14 @@ std::mutex numa_gotcha::s_mutex = {};
 void
 numa_gotcha::pause()
 {
-    std::unique_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
     numa_gotcha_t::set_ready(false);
 }
 
 void
 numa_gotcha::resume()
 {
-    std::unique_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
     numa_gotcha_t::set_ready(true);
 }
 

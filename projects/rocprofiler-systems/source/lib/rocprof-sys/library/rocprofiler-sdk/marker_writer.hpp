@@ -48,7 +48,6 @@ struct default_marker_policy
     static void pop_perfetto_ts(const char* name, uint64_t ts,
                                 const std::vector<annotation_entry>& annotations);
 
-    // static void cache_init();
     static void add_string(const std::string_view string_value);
     static void store_region(const trace_cache::region_sample& sample);
     static void add_thread_info(const rocprofsys::trace_cache::info::thread& thread_info);
@@ -59,9 +58,6 @@ struct default_marker_policy
 /// Delegates raw API calls to the policy, which can be mocked for testing.
 ///
 /// @tparam MarkerWriterPolicy Compile-time policy providing thin API wrappers.
-///                           Must provide: push_timemory, pop_timemory,
-///                           push_perfetto_ts, pop_perfetto_ts, cache_init,
-///                           store_region, add_thread_info.
 template <typename MarkerWriterPolicy = default_marker_policy>
 class marker_writer
 {

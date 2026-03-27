@@ -267,14 +267,14 @@ std::mutex ucx_gotcha::s_mutex = {};
 void
 ucx_gotcha::pause()
 {
-    std::unique_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
     ucx_gotcha_t::set_ready(false);
 }
 
 void
 ucx_gotcha::resume()
 {
-    std::unique_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
     ucx_gotcha_t::set_ready(true);
 }
 

@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <atomic>
-#include <optional>
 #define TIMEMORY_KOKKOSP_POSTFIX ROCPROFSYS_PUBLIC_API
 
 #include "library/kokkosp.hpp"
@@ -37,7 +35,6 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
-#include <optional>
 
 #include <timemory/api/kokkosp.hpp>
 #include <timemory/backends/process.hpp>
@@ -51,9 +48,12 @@
 
 #include "logger/debug.hpp"
 
+#include <atomic>
 #include <cstdlib>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace kokkosp  = ::tim::kokkosp;
 namespace category = ::tim::category;

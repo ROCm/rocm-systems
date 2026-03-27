@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <vector>
-
 namespace rocprofsys
 {
 namespace kokkosp

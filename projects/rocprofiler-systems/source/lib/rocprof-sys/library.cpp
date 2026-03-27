@@ -405,28 +405,6 @@ rocprofsys_preinit_hidden()
     _preinit_callback = []() {};
 }
 
-void
-pause_gotcha_components()
-{
-    component::mpi_gotcha::pause();
-    component::ucx_gotcha::pause();
-    component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
-    component::vaapi_gotcha::pause();
-    ::rocprofsys::pthread_gotcha::pause();
-    component::numa_gotcha::pause();
-}
-
-void
-resume_gotcha_components()
-{
-    component::mpi_gotcha::resume();
-    component::ucx_gotcha::resume();
-    component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
-    component::vaapi_gotcha::resume();
-    ::rocprofsys::pthread_gotcha::resume();
-    component::numa_gotcha::resume();
-}
-
 using callback_t = void (*)();
 std::mutex              external_pause_resume_callbacks_mutex;
 std::vector<callback_t> external_pause_callbacks;
@@ -696,7 +674,7 @@ rocprofsys_init_tooling_hidden(void)
         if(trace_controller)
         {
             auto pause_callback = [](void) {
-                LOG_CRITICAL("Pause callback...");
+                LOG_DEBUG("Pause callback...");
                 rocprofiler_sdk::pause();
                 sampling::pause();
                 component::mpi_gotcha::pause();
@@ -709,7 +687,7 @@ rocprofsys_init_tooling_hidden(void)
                 invoke_external_pause_callbacks();
             };
             auto resume_callback = [](void) {
-                LOG_CRITICAL("Resume callback...");
+                LOG_DEBUG("Resume callback...");
                 rocprofiler_sdk::resume();
                 sampling::resume();
                 component::mpi_gotcha::resume();
@@ -723,29 +701,6 @@ rocprofsys_init_tooling_hidden(void)
             };
             trace_controller->register_region_start_stop_callbacks(resume_callback,
                                                                    pause_callback);
-
-            // trace_controller->register_region_start_stop_callbacks(
-            //     rocprofiler_sdk::resume, rocprofiler_sdk::pause);
-            // trace_controller->register_region_start_stop_callbacks(sampling::resume,
-            //                                                        sampling::pause);
-            // trace_controller->register_region_start_stop_callbacks(
-            //     component::mpi_gotcha::resume, component::mpi_gotcha::pause);
-            // trace_controller->register_region_start_stop_callbacks(
-            //     component::ucx_gotcha::resume, component::ucx_gotcha::pause);
-            // trace_controller->register_region_start_stop_callbacks(
-            //     component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume,
-            //     component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause);
-            // trace_controller->register_region_start_stop_callbacks(
-            //     component::vaapi_gotcha::resume, component::vaapi_gotcha::pause);
-            // trace_controller->register_region_start_stop_callbacks(
-            //     ::rocprofsys::pthread_gotcha::resume,
-            //     ::rocprofsys::pthread_gotcha::pause);
-            // trace_controller->register_region_start_stop_callbacks(
-            //     component::numa_gotcha::resume, component::numa_gotcha::pause);
-            // trace_controller->register_region_start_stop_callbacks(
-            //     rocprofsys::kokkosp::resume, rocprofsys::kokkosp::pause);
-            // trace_controller->register_region_start_stop_callbacks(
-            //     invoke_external_resume_callbacks, invoke_external_pause_callbacks);
 
             trace_controller->force_initial_pause();
         }

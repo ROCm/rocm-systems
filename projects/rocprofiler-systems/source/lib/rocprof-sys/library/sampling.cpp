@@ -1957,7 +1957,7 @@ pause()
         return;
     }
 
-    LOG_CRITICAL("Pausing sampling...");
+    LOG_DEBUG("Pausing sampling...");
     pending_pause_ts.store(tim::get_clock_real_now<uint64_t, std::nano>());
     block_samples();
 }
@@ -1972,7 +1972,7 @@ resume()
         return;
     }
 
-    LOG_CRITICAL("Resuming sampling...");
+    LOG_DEBUG("Resuming sampling...");
     auto _pause_ts  = pending_pause_ts.exchange(0);
     auto _resume_ts = tim::get_clock_real_now<uint64_t, std::nano>();
     if(_pause_ts > 0)

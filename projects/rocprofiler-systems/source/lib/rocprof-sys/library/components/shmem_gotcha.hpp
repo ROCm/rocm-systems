@@ -532,7 +532,7 @@ template <typename SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::pause()
 {
-    std::unique_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
     using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::set_ready(false);
 }
@@ -541,7 +541,7 @@ template <typename SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::resume()
 {
-    std::unique_lock<std::mutex> _lk{ s_mutex };
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
     using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
     shmem_gotcha_t::set_ready(true);
 }

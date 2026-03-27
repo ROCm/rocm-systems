@@ -2644,9 +2644,9 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 std::shared_ptr<control::trace_control>
 get_trace_controller()
 {
-    const auto rocx_client = get_roctx_client();
-    if(!rocx_client) return nullptr;
-    return rocx_client->get_controller();
+    const auto roctx_client = get_roctx_client();
+    if(!roctx_client) return nullptr;
+    return roctx_client->get_controller();
 }
 
 void
