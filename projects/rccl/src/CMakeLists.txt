@@ -1044,10 +1044,8 @@ set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 
 # ── Split device compilation pipeline ─────────────────────────────────────────
 if(ENABLE_SPLIT_DEVICE_COMPILE)
-  list(GET GPU_TARGETS 0 _split_gpu_arch)
-  message(STATUS "Split device compile: targeting ${_split_gpu_arch}")
+  message(STATUS "Split device compile: targeting ${GPU_TARGETS}")
 
-  set(_bundler_device_target "hip-amdgcn-amd-amdhsa--${_split_gpu_arch}")
   set(_bundler_host_target "host-x86_64-unknown-linux-gnu-")
 
   # Read properties from the rccl target so the pipeline stays in sync
@@ -1066,18 +1064,24 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   endif()
 
   include(${PROJECT_SOURCE_DIR}/cmake/SplitDeviceCompile.cmake)
+  if(ENABLE_COMPRESS)
+    set(_sdc_compress COMPRESS)
+  else()
+    set(_sdc_compress "")
+  endif()
+
   setup_split_device_compile(
     TARGET              rccl
     SOURCES             ${DEVICE_TU_SOURCES}
     FUNC_ONLY_SOURCES   ${DEVICE_FUNC_ONLY_SOURCES}
-    GPU_ARCH            ${_split_gpu_arch}
+    GPU_ARCHES          ${GPU_TARGETS}
     ROCM_PATH           ${ROCM_PATH}
     OUTPUT_DIR          ${CMAKE_CURRENT_BINARY_DIR}
     INCLUDE_DIRS        ${_split_include_dirs}
     COMPILE_DEFS        ${_split_compile_defs}
     COMPILE_OPTS        ${_split_compile_opts}
-    BUNDLER_DEVICE_TARGET ${_bundler_device_target}
-    BUNDLER_HOST_TARGET   ${_bundler_host_target}
+    BUNDLER_HOST_TARGET ${_bundler_host_target}
+    ${_sdc_compress}
   )
 
   add_dependencies(rccl_device_objects hipify_all)
