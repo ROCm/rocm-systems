@@ -25,7 +25,7 @@ breathe==4.35.0
     # via rocm-docs-core
 certifi==2024.7.4
     # via requests
-cffi==1.17.0
+cffi==2.0.0
     # via
     #   cryptography
     #   pynacl
@@ -37,7 +37,7 @@ click==8.1.7
     #   sphinx-external-toc
 comm==0.2.2
     # via ipykernel
-cryptography==43.0.0
+cryptography==46.0.6
     # via pyjwt
 debugpy==1.8.13
     # via ipykernel
@@ -258,8 +258,9 @@ traitlets==5.14.3
     #   matplotlib-inline
     #   nbclient
     #   nbformat
-typing-extensions==4.12.2
+typing-extensions==4.15.0
     # via
+    #   cryptography
     #   ipython
     #   myst-nb
     #   pydata-sphinx-theme
