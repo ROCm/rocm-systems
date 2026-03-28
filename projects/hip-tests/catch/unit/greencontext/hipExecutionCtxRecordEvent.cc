@@ -18,10 +18,10 @@ THE SOFTWARE.
 */
 
 /**
- * @addtogroup hipGreenCtxRecordEvent hipGreenCtxRecordEvent
+ * @addtogroup hipExecutionCtxRecordEvent hipExecutionCtxRecordEvent
  * @{
  * @ingroup GreenContextTest
- * `hipGreenCtxRecordEvent` and `hipGreenCtxWaitEvent` APIs
+ * `hipExecutionCtxRecordEvent` and `hipExecutionCtxWaitEvent` APIs
  */
 
 #include <hip_test_common.hh>
@@ -36,7 +36,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipGreenCtxRecordEvent_Sanity") {
+TEST_CASE("Unit_hipExecutionCtxRecordEvent_Sanity") {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
@@ -50,7 +50,7 @@ TEST_CASE("Unit_hipGreenCtxRecordEvent_Sanity") {
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);
 
-  HIP_CHECK(hipGreenCtxRecordEvent(green_ctx, event));
+  HIP_CHECK(hipExecutionCtxRecordEvent(green_ctx, event));
 
   HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipGreenCtxDestroy(green_ctx));
@@ -64,7 +64,7 @@ TEST_CASE("Unit_hipGreenCtxRecordEvent_Sanity") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipGreenCtxWaitEvent_Sanity") {
+TEST_CASE("Unit_hipExecutionCtxWaitEvent_Sanity") {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
@@ -78,8 +78,8 @@ TEST_CASE("Unit_hipGreenCtxWaitEvent_Sanity") {
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);
 
-  HIP_CHECK(hipGreenCtxRecordEvent(green_ctx, event));
-  HIP_CHECK(hipGreenCtxWaitEvent(green_ctx, event));
+  HIP_CHECK(hipExecutionCtxRecordEvent(green_ctx, event));
+  HIP_CHECK(hipExecutionCtxWaitEvent(green_ctx, event));
 
   HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipGreenCtxDestroy(green_ctx));
@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipGreenCtxWaitEvent_Sanity") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipGreenCtxRecordEventFunctional") {
+TEST_CASE("Unit_hipExecutionCtxRecordEventFunctional") {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
@@ -109,8 +109,8 @@ TEST_CASE("Unit_hipGreenCtxRecordEventFunctional") {
 
   hipStream_t stream1 = nullptr;
   hipStream_t stream2 = nullptr;
-  HIP_CHECK(hipGreenCtxStreamCreate(&stream1, green_ctx, hipStreamNonBlocking, 0x0));
-  HIP_CHECK(hipGreenCtxStreamCreate(&stream2, green_ctx, hipStreamNonBlocking, 0x0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream1, green_ctx, hipStreamNonBlocking, 0x0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream2, green_ctx, hipStreamNonBlocking, 0x0));
   REQUIRE(stream1 != nullptr);
   REQUIRE(stream2 != nullptr);
 
@@ -143,8 +143,8 @@ TEST_CASE("Unit_hipGreenCtxRecordEventFunctional") {
   HipTest::vectorADD<<<blocks, kThreads, 0, stream1>>>(d_a, d_b, d_c, kNumElements);
   HIP_CHECK(hipGetLastError());
 
-  HIP_CHECK(hipGreenCtxRecordEvent(green_ctx, event));
-  HIP_CHECK(hipGreenCtxWaitEvent(green_ctx, event));
+  HIP_CHECK(hipExecutionCtxRecordEvent(green_ctx, event));
+  HIP_CHECK(hipExecutionCtxWaitEvent(green_ctx, event));
 
   HIP_CHECK(hipMemcpyAsync(h_c, d_c, kBytes, hipMemcpyDeviceToHost, stream2));
   HIP_CHECK(hipStreamSynchronize(stream2));
@@ -166,6 +166,6 @@ TEST_CASE("Unit_hipGreenCtxRecordEventFunctional") {
 }
 
 /**
- * End doxygen group hipGreenCtxRecordEvent.
+ * End doxygen group hipExecutionCtxRecordEvent.
  * @}
  */

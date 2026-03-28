@@ -56,7 +56,7 @@ TEST_CASE("Unit_hipGreenCtxCreateDestroy_Sanity") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipGreenCtxStreamCreate_Sanity") {
+TEST_CASE("Unit_hipExecutionCtxStreamCreate_Sanity") {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
@@ -67,7 +67,7 @@ TEST_CASE("Unit_hipGreenCtxStreamCreate_Sanity") {
   REQUIRE(green_ctx != nullptr);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipGreenCtxStreamCreate(&stream, green_ctx, hipStreamNonBlocking, 0x0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, green_ctx, hipStreamNonBlocking, 0x0));
   REQUIRE(stream != nullptr);
 
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -94,7 +94,7 @@ TEST_CASE("Unit_hipGreenCtxKernelLaunch_Basic") {
   REQUIRE(green_ctx != nullptr);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipGreenCtxStreamCreate(&stream, green_ctx, hipStreamNonBlocking, 0x0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&stream, green_ctx, hipStreamNonBlocking, 0x0));
   REQUIRE(stream != nullptr);
 
   constexpr size_t kNumElements = 1024;
@@ -177,12 +177,12 @@ TEST_CASE("Unit_hipGreenCtxCreate_Negative") {
 /**
  * Test Description
  * ------------------------
- *  - Negative parameter validation for hipGreenCtxStreamCreate and hipStreamGetGreenCtx
+ *  - Negative parameter validation for hipExecutionCtxStreamCreate and hipStreamGetGreenCtx
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipGreenCtxStreamCreate_Negative") {
+TEST_CASE("Unit_hipExecutionCtxStreamCreate_Negative") {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
@@ -193,24 +193,24 @@ TEST_CASE("Unit_hipGreenCtxStreamCreate_Negative") {
   REQUIRE(green_ctx != nullptr);
   
   hipStream_t valid_stream = nullptr;
-  HIP_CHECK(hipGreenCtxStreamCreate(&valid_stream, green_ctx, hipStreamNonBlocking, 0x0));
+  HIP_CHECK(hipExecutionCtxStreamCreate(&valid_stream, green_ctx, hipStreamNonBlocking, 0x0));
   REQUIRE(valid_stream != nullptr);
 
   hipStream_t stream = nullptr;
 
   SECTION("stream create with null stream pointer") {
-    HIP_CHECK_ERROR(hipGreenCtxStreamCreate(nullptr, green_ctx, hipStreamNonBlocking, 0x0), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipExecutionCtxStreamCreate(nullptr, green_ctx, hipStreamNonBlocking, 0x0), hipErrorInvalidValue);
   }
 
   SECTION("stream create with invalid green context") {
     hipGreenCtx_t invalid_green_ctx = nullptr;
-    HIP_CHECK_ERROR(hipGreenCtxStreamCreate(&stream, invalid_green_ctx, hipStreamNonBlocking, 0x0),
+    HIP_CHECK_ERROR(hipExecutionCtxStreamCreate(&stream, invalid_green_ctx, hipStreamNonBlocking, 0x0),
                      hipErrorInvalidValue);
   }
 
   SECTION("stream create with invalid flags") {
     constexpr unsigned int kInvalidFlags = 0xFFFFFFFF;
-    HIP_CHECK_ERROR(hipGreenCtxStreamCreate(&stream, green_ctx, kInvalidFlags, 0x0),
+    HIP_CHECK_ERROR(hipExecutionCtxStreamCreate(&stream, green_ctx, kInvalidFlags, 0x0),
                     hipErrorInvalidValue);
   }
 
