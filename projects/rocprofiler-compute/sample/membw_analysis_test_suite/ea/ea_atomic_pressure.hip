@@ -136,11 +136,9 @@ int main(int argc, char** argv) {
     // Single dispatch for clean profiling
     auto start = std::chrono::high_resolution_clock::now();
     if (use_optimized) {
-        hipLaunchKernelGGL(ea_atomic_pressure_optimized, grid, block, 0, 0,
-                           d_input, d_histogram, N);
+        ea_atomic_pressure_optimized<<<grid, block, 0, 0>>>(d_input, d_histogram, N);
     } else {
-        hipLaunchKernelGGL(ea_atomic_pressure_baseline, grid, block, 0, 0,
-                           d_input, d_histogram, N);
+        ea_atomic_pressure_baseline<<<grid, block, 0, 0>>>(d_input, d_histogram, N);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();

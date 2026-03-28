@@ -783,7 +783,7 @@ Panel Config:
           value: ((SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum
             + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum)) * 100)
           unit: Percent
-        EA read BW fraction - IF:
+        EA read BW fraction - GMI:
           value: ((SUM(TCC_EA0_RDREQ_GMI_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum
             + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum)) * 100)
           unit: Percent
@@ -814,45 +814,54 @@ Panel Config:
         value: Avg
         unit: Unit
       metric:
-        EA-HBM read BW:
+        EA to HBM read BW:
           value: ((SUM(TCC_EA0_RDREQ_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA-HBM write BW:
+        EA to HBM write BW:
           value: ((SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA-HBM atomic BW:
+        EA to HBM atomic BW:
           value: ((SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA-HBM total BW:
+        EA to HBM total BW:
           value: ((SUM((TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_WRREQ_WRITE_DRAM_32B_sum
             + TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA-IF read BW:
+        EA to GMI read BW:
           value: ((SUM(TCC_EA0_RDREQ_GMI_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA-IF write BW:
+        EA to GMI write BW:
           value: ((SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA-IF atomic BW:
+        EA to GMI atomic BW:
           value: ((SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA-IO read BW:
+        EA to IO read BW:
           value: ((SUM(TCC_EA0_RDREQ_IO_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA-IO write BW:
+        EA to IO write BW:
           value: ((SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA-IO atomic BW:
+        EA to IO atomic BW:
           value: ((SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
-        EA read latency:
+        EA read average latency:
           value: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)
           unit: Cycles per Request
-        EA write latency:
+        EA read latency:
+          value: AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)
+          unit: Cycles per Request
+        EA write average latency:
           value: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum)
           unit: Cycles per Request
-        EA atomic latency:
+        EA write latency:
+          value: AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)
+          unit: Cycles per Request
+        EA atomic average latency:
           value: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)
+          unit: Cycles per Request
+        EA atomic latency:
+          value: AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)
           unit: Cycles per Request
   - metric_table:
       id: 3015
@@ -929,10 +938,10 @@ Panel Config:
         Normalized EA - HBM write credit stall:
           value: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
           unit: Percent
-        Normalized EA - IF read credit stall:
+        Normalized EA - GMI read credit stall:
           value: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
           unit: Percent
-        Normalized EA - IF write credit stall:
+        Normalized EA - GMI write credit stall:
           value: (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
           unit: Percent
         Normalized EA - IO read credit stall:
@@ -956,20 +965,20 @@ Panel Config:
         unit: Unit
       metric:
         # Normalized throughput metrics use wall-clock time for absolute measurement
-        Normalized EA-HBM read requests:
+        Normalized EA to HBM read requests:
           value: SUM(TCC_EA0_RDREQ_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
-        Normalized EA-HBM write requests:
+        Normalized EA to HBM write requests:
           value: SUM(TCC_EA0_WRREQ_WRITE_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
-        Normalized EA-HBM atomic requests:
+        Normalized EA to HBM atomic requests:
           value: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
-        Normalized EA-IF total 32B requests:
+        Normalized EA to GMI total 32B requests:
           value: SUM(TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_WRREQ_WRITE_GMI_32B_sum
             + TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
-        Normalized EA-IO total 32B requests:
+        Normalized EA to IO total 32B requests:
           value: SUM(TCC_EA0_RDREQ_IO_32B_sum + TCC_EA0_WRREQ_WRITE_IO_32B_sum
             + TCC_EA0_WRREQ_ATOMIC_IO_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
@@ -992,7 +1001,7 @@ Panel Config:
           value: ((SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum)
             / SUM(TCC_BUSY_sum)) * 100)
           unit: Percent
-        EA IF BW Bound - Combined:
+        EA GMI BW Bound - Combined:
           value: ((SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum)
             / SUM(TCC_BUSY_sum)) * 100)
           unit: Percent
@@ -1016,7 +1025,7 @@ Panel Config:
             + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum
             + TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_WRREQ_IO_CREDIT_STALL_sum)) * 100)
           unit: Percent
-        EA Stall Destination Dominance - IF:
+        EA Stall Destination Dominance - GMI:
           value: ((SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum)
             / SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum
             + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum
@@ -1526,7 +1535,7 @@ Panel Config:
       Equation: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
     # Table 3013: EA Interface
     # EA (Efficiency Arbiter) sits between L2 (TCC) and the SoC Data Fabric,
-    # routing traffic to HBM (DRAM), Infinity Fabric (GMI), and PCIe (IO).
+    # routing traffic to HBM (DRAM), GMI, and PCIe (IO).
     # EA is the GFXIP/SoC demarcation point.
     EA utilization: >-
       Percentage of kernel execution time the EA block is active. Measures overall EA
@@ -1536,15 +1545,15 @@ Panel Config:
     EA read request fraction - HBM: >-
       Percentage of EA read requests destined for the accelerator's local HBM.
       High values (>90%) are typical for compute workloads. Low values indicate
-      significant remote (IF) or host (IO) read traffic.
+      significant remote (GMI) or host (IO) read traffic.
       Equation: (SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)) * 100
     EA read BW fraction - HBM: >-
       Bandwidth-weighted percentage of EA read traffic destined for HBM, calculated
       using 32B-granularity counters. Unlike the request fraction, this accounts for
       different request sizes across destinations.
       Equation: (SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum)) * 100
-    EA read BW fraction - IF: >-
-      Bandwidth-weighted percentage of EA read traffic routed via Infinity Fabric (GMI)
+    EA read BW fraction - GMI: >-
+      Bandwidth-weighted percentage of EA read traffic routed via GMI
       to remote XCDs or AIDs. High values indicate significant remote memory access,
       which has higher latency than local HBM. Uses gfx950-specific 32B counters.
       Equation: (SUM(TCC_EA0_RDREQ_GMI_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum)) * 100
@@ -1577,59 +1586,73 @@ Panel Config:
       High uncached rates are expected for write-only or streaming workloads.
       Equation: (SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM(TCC_EA0_WRREQ_sum)) * 100
     # Table 3014: EA Traffic
-    EA-HBM read BW: >-
+    EA to HBM read BW: >-
       Read bandwidth from EA to HBM (DRAM), calculated using the gfx950-specific
       32B-granularity counter. Each count represents 32 bytes of read data transferred.
       Equation: (SUM(TCC_EA0_RDREQ_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA-HBM write BW: >-
+    EA to HBM write BW: >-
       Non-atomic write bandwidth from EA to HBM. Uses the gfx950-specific per-destination
       write counter that separates pure writes from atomics.
       Equation: (SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA-HBM atomic BW: >-
+    EA to HBM atomic BW: >-
       Atomic operation bandwidth from EA to HBM. Atomics involve read-modify-write
       cycles and typically achieve lower effective bandwidth than pure reads or writes.
       Equation: (SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA-HBM total BW: >-
+    EA to HBM total BW: >-
       Total bandwidth from EA to HBM combining reads, writes, and atomics.
       This represents the aggregate HBM bandwidth consumed by the accelerator.
       Compare against peak HBM bandwidth to assess memory bandwidth utilization.
       Equation: (SUM((TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_WRREQ_WRITE_DRAM_32B_sum + TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA-IF read BW: >-
-      Read bandwidth from EA via Infinity Fabric (GMI) to remote memory.
+    EA to GMI read BW: >-
+      Read bandwidth from EA via GMI to remote memory.
       High values indicate significant cross-die or cross-socket data movement.
       Equation: (SUM(TCC_EA0_RDREQ_GMI_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA-IF write BW: >-
-      Write bandwidth from EA via Infinity Fabric (GMI) to remote memory.
+    EA to GMI write BW: >-
+      Write bandwidth from EA via GMI to remote memory.
       Equation: (SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA-IF atomic BW: >-
-      Atomic bandwidth from EA via Infinity Fabric (GMI). Remote atomics incur
+    EA to GMI atomic BW: >-
+      Atomic bandwidth from EA via GMI. Remote atomics incur
       significantly higher latency than local HBM atomics.
       Equation: (SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA-IO read BW: >-
+    EA to IO read BW: >-
       Read bandwidth from EA via IO (PCIe) interface. Measures host-to-device
       or device-to-device PCIe read data transfer rate.
       Equation: (SUM(TCC_EA0_RDREQ_IO_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA-IO write BW: >-
+    EA to IO write BW: >-
       Write bandwidth from EA via IO (PCIe) interface. Measures device-to-host
       PCIe write data transfer rate.
       Equation: (SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA-IO atomic BW: >-
+    EA to IO atomic BW: >-
       Atomic bandwidth from EA via IO (PCIe) interface. PCIe atomics are rare
       and typically indicate cross-device synchronization.
       Equation: (SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))
-    EA read latency: >-
-      Average number of cycles an EA read request is in flight, from L2's perspective.
-      Calculated as accumulated in-flight read requests divided by total read requests.
-      Higher latency indicates memory-side congestion or long HBM/IF/IO access times.
+    EA read average latency: >-
+      The average number of cycles an EA read request is in flight, from L2's perspective.
+      Weighted average across all L2 channels (SUM/SUM gives more weight to channels with more requests).
+      Higher latency indicates memory-side congestion or long HBM/GMI/IO access times.
       Equation: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)
-    EA write latency: >-
-      Average number of cycles an EA write request is in flight. Write latency
+    EA read latency: >-
+      The number of cycles an EA read request was in flight, from L2's perspective.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel).
+      Equation: AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)
+    EA write average latency: >-
+      The average number of cycles an EA write request is in flight. Write latency
       is typically lower than read latency since writes can be buffered.
+      Weighted average across all L2 channels (SUM/SUM gives more weight to channels with more requests).
       Equation: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum)
-    EA atomic latency: >-
-      Average number of cycles an EA atomic request is in flight. Atomics typically
+    EA write latency: >-
+      The number of cycles an EA write request was in flight, from L2's perspective.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel).
+      Equation: AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)
+    EA atomic average latency: >-
+      The average number of cycles an EA atomic request is in flight. Atomics typically
       have the highest latency due to read-modify-write semantics.
+      Weighted average across all L2 channels (SUM/SUM gives more weight to channels with more requests).
       Equation: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)
+    EA atomic latency: >-
+      The number of cycles an EA atomic request was in flight, from L2's perspective.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel).
+      Equation: AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)
     # Table 3016: Normalized EA Stall Metrics (%)
     # These use $GRBM_GUI_ACTIVE_PER_XCD as denominator, enabling cross-component comparison.
     Normalized EA - HBM read credit stall: >-
@@ -1642,12 +1665,12 @@ Panel Config:
       credit exhaustion. High values indicate HBM write bandwidth is saturated.
       Normalized to kernel cycles for cross-component comparison.
       Equation: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
-    Normalized EA - IF read credit stall: >-
+    Normalized EA - GMI read credit stall: >-
       Percentage of kernel execution time EA read requests were stalled due to Infinity
       Fabric credit exhaustion. High values indicate remote read bandwidth is saturated.
       Normalized to kernel cycles for cross-component comparison.
       Equation: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
-    Normalized EA - IF write credit stall: >-
+    Normalized EA - GMI write credit stall: >-
       Percentage of kernel execution time EA write requests were stalled due to Infinity
       Fabric credit exhaustion. High values indicate remote write bandwidth is saturated.
       Normalized to kernel cycles for cross-component comparison.
@@ -1672,24 +1695,24 @@ Panel Config:
       Normalized to kernel cycles for cross-component comparison.
       Equation: (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
     # Table 3017: Normalized EA Throughput Metrics (per Second)
-    Normalized EA-HBM read requests: >-
+    Normalized EA to HBM read requests: >-
       EA to HBM read requests per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
       Equation: SUM(TCC_EA0_RDREQ_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
-    Normalized EA-HBM write requests: >-
+    Normalized EA to HBM write requests: >-
       EA to HBM non-atomic write requests per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
       Equation: SUM(TCC_EA0_WRREQ_WRITE_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
-    Normalized EA-HBM atomic requests: >-
+    Normalized EA to HBM atomic requests: >-
       EA to HBM atomic requests per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
       Equation: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
-    Normalized EA-IF total 32B requests: >-
-      Total EA to Infinity Fabric 32B-granularity requests (reads + writes + atomics)
-      per second. Measures aggregate IF traffic rate. Uses 32B counters because
+    Normalized EA to GMI total 32B requests: >-
+      Total EA to GMI 32B-granularity requests (reads + writes + atomics)
+      per second. Measures aggregate GMI traffic rate. Uses 32B counters because
       per-destination request-count counters are not available for GMI.
       Equation: SUM(TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_WRREQ_WRITE_GMI_32B_sum + TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
-    Normalized EA-IO total 32B requests: >-
+    Normalized EA to IO total 32B requests: >-
       Total EA to IO (PCIe) 32B-granularity requests (reads + writes + atomics)
       per second. Measures aggregate PCIe traffic rate. Uses 32B counters because
       per-destination request-count counters are not available for IO.
@@ -1700,21 +1723,18 @@ Panel Config:
       Percentage of L2 busy time EA read requests were stalled due to HBM credit
       exhaustion. High values (>10%) indicate HBM read bandwidth is saturated.
       This is the EA-centric view of the HBM read bottleneck.
-      Reference: mi300_gpu_bandwidth.pdf TCC_TAG_STALL breakdown.
       Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
     EA HBM BW Bound - Write Credit Pressure: >-
       Percentage of L2 busy time EA write requests were stalled due to HBM credit
       exhaustion. High values (>10%) indicate HBM write bandwidth is saturated.
-      Reference: mi300_gpu_bandwidth.pdf TCC_TAG_STALL breakdown.
       Equation: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
     EA HBM BW Bound - Combined: >-
       Combined HBM read and write credit stall percentage. This is the primary
       EA-level HBM bandwidth bound indicator. High values (>10%) with high EA
       utilization strongly indicate HBM bandwidth is the bottleneck.
-      Reference: mi300_gpu_bandwidth.pdf - SoC_BW = min{CU_BW, XCD_BW, LLC_BW, HBM_BW}.
       Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
-    EA IF BW Bound - Combined: >-
-      Combined Infinity Fabric read and write credit stall percentage. High values
+    EA GMI BW Bound - Combined: >-
+      Combined GMI read and write credit stall percentage. High values
       indicate the remote memory (GMI) path is the bottleneck. Relevant for multi-XCD
       or multi-socket workloads with significant cross-die data movement.
       Equation: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
@@ -1746,8 +1766,8 @@ Panel Config:
       whether HBM is the dominant stall source among all three destinations.
       A value near 100% means virtually all EA stalls come from HBM backpressure.
       Equation: (SUM(HBM_credit_stalls) / SUM(all_credit_stalls)) * 100
-    EA Stall Destination Dominance - IF: >-
-      Percentage of total EA credit stalls attributable to Infinity Fabric (GMI).
+    EA Stall Destination Dominance - GMI: >-
+      Percentage of total EA credit stalls attributable to GMI.
       A high value indicates remote memory access is the dominant bottleneck source.
       Equation: (SUM(GMI_credit_stalls) / SUM(all_credit_stalls)) * 100
     EA Stall Destination Dominance - IO: >-
