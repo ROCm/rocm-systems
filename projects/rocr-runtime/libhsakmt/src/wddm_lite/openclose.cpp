@@ -350,6 +350,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                                 "performing mode1 reset...\n", sos_status);
                         gpu_smu_mode1_reset(&g_wddm_lite_dev);
                         did_mode1_reset = TRUE;
+                        /* Mode1 clears AUTOLOAD — update saved state so
+                         * firmware loading isn't skipped later. */
+                        g_wddm_lite_dev.hw.gfx.rlc_bootload_status = 0;
                     } else {
                         pr_info("wddm_lite: SOS not alive, "
                                 "skipping mode1 reset\n");
@@ -396,6 +399,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                                 "hardware reset (matching amdgpu)\n");
                         gpu_smu_mode1_reset(&g_wddm_lite_dev);
                         did_mode1_reset = TRUE;
+                        /* Mode1 clears AUTOLOAD — update saved state so
+                         * firmware loading isn't skipped later. */
+                        g_wddm_lite_dev.hw.gfx.rlc_bootload_status = 0;
 
                         /* After Mode1 reset, SOS was killed. Reload it.
                          * Mode1 → bootloader runs → we load SOS again. */
