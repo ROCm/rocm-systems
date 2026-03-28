@@ -45,6 +45,7 @@
 #include <regex>
 #include <sstream>
 
+#include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/scoped_fd.h"
 #include "config/amd_smi_config.h"
