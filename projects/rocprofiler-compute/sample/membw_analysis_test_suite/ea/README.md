@@ -88,8 +88,27 @@ src/rocprof-compute analyze --path /tmp/ea_test_opt \
 
 ## Validation Results (MI350X)
 
-All results collected on MI350X GPUs. `ea_fabric_bw` validated on a multi-GPU
-system with peer access enabled.
+### Test Environment
+
+| Component          | Configuration                                      |
+|--------------------|----------------------------------------------------|
+| GPU                | 2x AMD Instinct MI350X (gfx950)                    |
+| GPU Architecture   | CDNA 4 (gfx950), 256 CUs, 32 SIMDs/CU, 8 XCDs     |
+| GPU SCLK           | 2200 MHz (max)                                     |
+| GPU MCLK           | 1900 MHz (HBM)                                     |
+| HBM                | 288 GB per GPU, 128 HBM channels, NPS1              |
+| L2 Cache           | 4096 KB, 128 channels, 16 banks                    |
+| L1 Cache           | 32 KB per CU                                       |
+| VBIOS              | 113-M350-01-1K5-020E                               |
+| Compute Partition  | SPX                                                |
+| Memory Partition   | NPS1                                                |
+| CPU                | AMD EPYC 9655 96-Core (Turin)                      |
+| OS                 | Ubuntu 24.04 LTS, kernel 6.8.0-31-generic          |
+| ROCm               | 7.2.0                                              |
+| GPU Driver         | amdgpu 6.16.13                                     |
+
+All results collected on MI350X GPUs. `ea_fabric_bw` validated on the multi-GPU
+system with peer access enabled between GPU 0 and GPU 1.
 
 ### ea_hbm_read_bw -- HBM Read Traffic
 
