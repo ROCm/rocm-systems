@@ -6021,15 +6021,49 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
     }
 
     if (dev->hw.gfx.mec_ucode_start != 0) {
-        /* Dequeue any active HQDs left from VBIOS */
-        dequeue_all_hqds(dev);
+        /*
+         * If VBIOS AUTOLOAD was already complete when our driver started,
+         * MEC may already be running the correct compute firmware. Disabling
+         * and restarting MEC clears the GFXHUB VM TLB entries that map
+         * firmware VA (0x7000000003000) → TMR. After restart, GFXHUB
+         * CONTEXT0 (our flat GART) doesn't cover firmware VA, so MEC faults
+         * and falls through to VBIOS code at 0x4044.
+         *
+         * When MEC is already active+running (not halted, not in reset),
+         * skip the disable/restart. Just configure the doorbell range and
+         * dequeue any stale HQDs. MEC retains its firmware VA context.
+         */
+        BOOLEAN mec_already_running = FALSE;
+        if (dev->hw.gfx.rlc_bootload_status & 0x80000000) {
+            ULONG mec_cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+            BOOLEAN active = (mec_cntl >> 26) & 1;
+            BOOLEAN halted = (mec_cntl >> 30) & 1;
+            BOOLEAN in_reset = (mec_cntl >> 16) & 1;
+            if (active && !halted && !in_reset) {
+                pr_info("gpu_gfx: MEC already running (CNTL=0x%08x) — "
+                        "skipping disable/restart to preserve firmware VA "
+                        "GFXHUB mapping\n", mec_cntl);
+                mec_already_running = TRUE;
+            }
+        }
 
-        /* Configure MEC (disable → set PC_START → doorbell range) */
-        configure_mec(dev);
-
-        /* Enable MEC */
-        if (enable_mec(dev) != 0) {
-            pr_warn("gpu_gfx: MEC enable failed (continuing)\n");
+        if (mec_already_running) {
+            /* Doorbell range and GRBM timeout still needed. */
+            ULONG grbm_cntl = gc0_rreg(dev, regGRBM_CNTL);
+            grbm_cntl = (grbm_cntl & ~0xFF) | 0xFF;
+            gc0_wreg(dev, regGRBM_CNTL, grbm_cntl);
+            gc0_wreg(dev, regCP_MEC_DOORBELL_RANGE_LOWER, 0x0);
+            gc0_wreg(dev, regCP_MEC_DOORBELL_RANGE_UPPER, 0xF8);
+            pr_info("gpu_gfx: MEC doorbell range set [0x000, 0x0F8] (passthrough)\n");
+        } else {
+            /* Dequeue any active HQDs left from VBIOS */
+            dequeue_all_hqds(dev);
+            /* Configure MEC (disable → set PC_START → doorbell range) */
+            configure_mec(dev);
+            /* Enable MEC */
+            if (enable_mec(dev) != 0) {
+                pr_warn("gpu_gfx: MEC enable failed (continuing)\n");
+            }
         }
     } else {
         pr_warn("gpu_gfx: No MEC firmware address — "
