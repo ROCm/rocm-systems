@@ -27,8 +27,7 @@ if(EXISTS /etc/os-release AND NOT IS_DIRECTORY /etc/os-release)
         string(REPLACE "\"" "" _OS_RELEASE_RAW "${_OS_RELEASE_RAW}")
         string(REPLACE "-" " " _OS_RELEASE_RAW "${_OS_RELEASE_RAW}")
         string(
-            REGEX REPLACE
-            "NAME=.*\nVERSION=([0-9]+)\.([0-9]+).*\nID=([a-z]+).*"
+            REGEX REPLACE "NAME=.*\nVERSION=([0-9]+)\.([0-9]+).*\nID=([a-z]+).*"
             "\\3-\\1.\\2"
             _OS_RELEASE
             "${_OS_RELEASE_RAW}"
@@ -354,8 +353,7 @@ macro(ROCPROFILER_SYSTEMS_CHECK_PASS_FAIL_REGEX NAME PASS FAIL)
         set(${FAIL} "(${ROCPROFSYS_ABORT_FAIL_REGEX})")
     else()
         string(
-            REPLACE
-            "|ROCPROFSYS_ABORT_FAIL_REGEX"
+            REPLACE "|ROCPROFSYS_ABORT_FAIL_REGEX"
             "|${ROCPROFSYS_ABORT_FAIL_REGEX}"
             ${FAIL}
             "${${FAIL}}"
@@ -675,8 +673,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
             sys-run
         )
             string(
-                REGEX REPLACE
-                "rewrite-run(-|/)"
+                REGEX REPLACE "rewrite-run(-|/)"
                 "rewrite\\1"
                 _prefix
                 "${TEST_NAME}-${_TEST}/"
@@ -1074,8 +1071,7 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
         endif()
 
         string(
-            REPLACE
-            "${TEST_NAME}-${TEST_PYTHON_VERSION}"
+            REPLACE "${TEST_NAME}-${TEST_PYTHON_VERSION}"
             "${TEST_NAME}"
             _TEST_DIR
             "${_TEST}"
@@ -1198,7 +1194,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         TEST
         ""
         "NAME;TIMEOUT;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_METRIC;PERFETTO_FILE;ROCPD_FILE"
-        "ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;EXIST_FILES;ARGS"
+        "ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;EXIST_FILES;ARGS;FIXTURES_REQUIRED"
         ${ARGN}
     )
 
@@ -1301,6 +1297,10 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
     elseif("${TEST_NAME}" MATCHES "-runtime-instrument$")
         string(REGEX REPLACE "-runtime-instrument$" "" _BASE_TEST_NAME "${TEST_NAME}")
         list(APPEND _VALIDATION_FIXTURES "${_BASE_TEST_NAME}-runtime-instrument-fixture")
+    endif()
+
+    if(TEST_FIXTURES_REQUIRED)
+        list(APPEND _VALIDATION_FIXTURES "${TEST_FIXTURES_REQUIRED}")
     endif()
 
     foreach(
@@ -1427,8 +1427,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
         set(TEST_FAIL_REGEX "(${ROCPROFSYS_ABORT_FAIL_REGEX})")
     else()
         string(
-            REPLACE
-            "|ROCPROFSYS_ABORT_FAIL_REGEX"
+            REPLACE "|ROCPROFSYS_ABORT_FAIL_REGEX"
             "|${ROCPROFSYS_ABORT_FAIL_REGEX}"
             TEST_FAIL_REGEX
             "${TEST_FAIL_REGEX}"

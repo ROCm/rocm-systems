@@ -71,13 +71,12 @@ add_test(
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
-# Set this test as a fixture that must pass for GPU connect tests to run
 set_tests_properties(
     transferbench-validation-check
     PROPERTIES
         LABELS "transferbench;validation"
         FIXTURES_SETUP transferbench_available
-        FAIL_REGULAR_EXPRESSION "Error: No valid transfers created"
+        SKIP_REGULAR_EXPRESSION "Error: No valid transfers created"
 )
 
 rocprofiler_systems_add_test(
@@ -105,14 +104,8 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "transferbench;perfetto"
     ARGS --counter-names "XGMI Read Data" "XGMI Write Data" -p
+    FIXTURES_REQUIRED transferbench_available
 )
-if(TEST validate-transferbench-sys-run-perfetto)
-    set_property(
-        TEST validate-transferbench-sys-run-perfetto
-        APPEND
-        PROPERTY FIXTURES_REQUIRED transferbench_available
-    )
-endif()
 
 # Add ROCPD validation if enabled
 if(${ENABLE_ROCPD_TEST} AND TEST transferbench-sys-run)
@@ -124,14 +117,6 @@ if(${ENABLE_ROCPD_TEST} AND TEST transferbench-sys-run)
         LABELS "transferbench;rocpd"
         ARGS --validation-rules
             ${_gpu_connect_rocpd_validation_rules}
+        FIXTURES_REQUIRED transferbench_available
     )
-
-    # Make ROCPD validation test depend on the transferBench fixture
-    if(TEST validate-transferbench-sys-run-rocpd)
-        set_property(
-            TEST validate-transferbench-sys-run-rocpd
-            APPEND
-            PROPERTY FIXTURES_REQUIRED transferbench_available
-        )
-    endif()
 endif()

@@ -14,10 +14,10 @@
             ],
             "validation_queries": [
                 {
-                    "requires": "vcn_activity",
+                    "requires": "vcn_activity,vcn_busy",
                     "comparison": "greater_than",
-                    "description": "Check for vcn_activity amd-smi metrics",
-                    "error_message": "Did not find vcn_activity in amd-smi metrics",
+                    "description": "Check for vcn_activity and vcn_busy amd-smi metrics",
+                    "error_message": "Did not find vcn_activity or vcn_busy in amd-smi metrics",
                     "expected_result": 1,
                     "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE 'VcnAct%'"
                 }
@@ -66,10 +66,10 @@
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_memory_usage'"
                 },
                 {
-                    "requires": "vcn_activity",
+                    "requires": "vcn_activity,vcn_busy",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring VCN activity",
-                    "error_message": "Less than expected activity in amd-smi vcn-activity samples!",
+                    "description": "Check for amd-smi monitoring VCN activity and VCN busy",
+                    "error_message": "Less than expected activity in amd-smi vcn-activity or vcn-busy samples!",
                     "expected_result": 10,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_vcn_activity_%' and event.value > 0"
                 }
