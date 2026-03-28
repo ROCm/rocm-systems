@@ -109,18 +109,19 @@ jobs:
       CORE_EXT_RUNNER: mi325
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
-      - name: Install Latest Nightly ROCm
+      - &install_latest_nightly_rocm
+        name: Install Latest Nightly ROCm
         shell: bash
         working-directory: /tmp
         run: |
-          rocm_install_path="${{ env.ROCM_NIGHTLY_PATH }}"
+          rocm_nightly_path="${{ env.ROCM_NIGHTLY_PATH }}"
           rocm_tarball="${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz"
-          rm -rf "${rocm_install_path}"
-          mkdir -p "${rocm_install_path}"
-          tar -xf "${rocm_tarball}" -C "${rocm_install_path}"
+          rm -rf "${rocm_nightly_path}"
+          mkdir -p "${rocm_nightly_path}"
+          tar -xf "${rocm_tarball}" -C "${rocm_nightly_path}"
           rm -rf "${{ env.ROCM_PATH }}"
-          ln -s "${rocm_install_path}" "${{ env.ROCM_PATH }}"
-          echo "ROCm installed to: ${rocm_install_path}"
+          ln -s "${rocm_nightly_path}" "${{ env.ROCM_PATH }}"
+          echo "ROCm installed to: ${rocm_nightly_path}"
 
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
@@ -504,18 +505,7 @@ jobs:
       - name: Init/Update submodules
         run: git submodule update --init --recursive --jobs 16
 
-      - name: Install Latest Nightly ROCm using TheRock Tarballs
-        shell: bash
-        working-directory: /tmp
-        run: |
-          rocm_install_path="${{ env.ROCM_NIGHTLY_PATH }}"
-          rocm_tarball="${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz"
-          rm -rf "${rocm_install_path}"
-          mkdir -p "${rocm_install_path}"
-          tar -xf "${rocm_tarball}" -C "${rocm_install_path}"
-          rm -rf "${{ env.ROCM_PATH }}"
-          ln -s "${rocm_install_path}" "${{ env.ROCM_PATH }}"
-          echo "ROCm installed to: ${rocm_install_path}"
+      - *install_latest_nightly_rocm
 
       - name: Install requirements (venv)
         timeout-minutes: 10
@@ -720,18 +710,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - name: Install Latest Nightly ROCm
-      shell: bash
-      working-directory: /tmp
-      run: |
-        rocm_install_path="${{ env.ROCM_NIGHTLY_PATH }}"
-        rocm_tarball="${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz"
-        rm -rf "${rocm_install_path}"
-        mkdir -p "${rocm_install_path}"
-        tar -xf "${rocm_tarball}" -C "${rocm_install_path}"
-        rm -rf "${{ env.ROCM_PATH }}"
-        ln -s "${rocm_install_path}" "${{ env.ROCM_PATH }}"
-        echo "ROCm installed to: ${rocm_install_path}"
+    - *install_latest_nightly_rocm
 
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
       uses: actions/checkout@v5

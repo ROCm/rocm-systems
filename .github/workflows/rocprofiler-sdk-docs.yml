@@ -91,14 +91,14 @@ jobs:
         shell: bash
         working-directory: /tmp
         run: |
-          rocm_install_path="${{ env.ROCM_NIGHTLY_PATH }}"
+          rocm_nightly_path="${{ env.ROCM_NIGHTLY_PATH }}"
           rocm_tarball="${{ env.ROCM_PATH }}-gfx94X.tar.gz"
-          rm -rf "${rocm_install_path}"
-          mkdir -p "${rocm_install_path}"
-          tar -xf "${rocm_tarball}" -C "${rocm_install_path}"
+          rm -rf "${rocm_nightly_path}"
+          mkdir -p "${rocm_nightly_path}"
+          tar -xf "${rocm_tarball}" -C "${rocm_nightly_path}"
           rm -rf "${{ env.ROCM_PATH }}"
-          ln -s "${rocm_install_path}" "${{ env.ROCM_PATH }}"
-          echo "ROCm installed to: ${rocm_install_path}"
+          ln -s "${rocm_nightly_path}" "${{ env.ROCM_PATH }}"
+          echo "ROCm installed to: ${rocm_nightly_path}"
 
       - name: Install os essentials
         timeout-minutes: 10
