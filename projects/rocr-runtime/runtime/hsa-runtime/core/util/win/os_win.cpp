@@ -497,6 +497,199 @@ int Ctz(uint64_t i) {
 }
 
 char* DlError() { return nullptr; }
+
+static const char* kPipePrefix = "\\\\.\\pipe\\";
+static const DWORD kMaxPipeInstances = 128;
+
+struct IPCPipeInfo {
+  HANDLE pipe;
+  std::string pipeName;  // non-empty only for server sockets
+  bool serverSide;       // true for server and accepted-connection sockets
+  uint32_t recvTimeoutMs;     // 0 = no timeout (blocking reads)
+};
+
+// Poll the pipe with PeekNamedPipe until data is available or timeout
+// expires.  Returns true if data is ready, false on timeout or pipe error.
+static bool WaitForPipeData(HANDLE pipe, uint32_t timeoutMs) {
+  if (timeoutMs <= 0) return true;
+  uint32_t elapsed = 0;
+  DWORD sleepMs = 1; // init with 1ms
+  const DWORD maxSleep = 500; // max at 500ms
+  while (elapsed < timeoutMs) {
+    DWORD available = 0;
+    if (!PeekNamedPipe(pipe, NULL, 0, NULL, &available, NULL))
+      return false;
+    if (available > 0) return true;
+    ::Sleep(sleepMs);
+    elapsed += static_cast<uint32_t>(sleepMs);
+    sleepMs = std::min(sleepMs * 2, maxSleep);
+  }
+  return false;
+}
+
+static std::string PipeName(const char* name) {
+  return std::string(kPipePrefix) + name;
+}
+
+static HANDLE CreatePipeInstance(const char* fullName) {
+  return CreateNamedPipe(
+      fullName,
+      PIPE_ACCESS_DUPLEX,
+      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+      kMaxPipeInstances,
+      4096, 4096, 0, NULL);
+}
+
+IPCSocket CreateIPCServer(const char* name, int backlog) {
+  std::string pipeName = PipeName(name);
+  (void)backlog;
+  HANDLE pipe = CreateNamedPipe(
+      pipeName.c_str(),
+      PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+      kMaxPipeInstances,
+      4096, 4096, 0, NULL);
+  if (pipe == INVALID_HANDLE_VALUE) return INVALID_SOCKET_VALUE;
+  auto* info = new IPCPipeInfo{pipe, pipeName, true, 0};
+  return reinterpret_cast<IPCSocket>(info);
+}
+
+IPCSocket AcceptIPCConnection(IPCSocket server) {
+  auto* serverInfo = reinterpret_cast<IPCPipeInfo*>(server);
+  HANDLE connPipe = serverInfo->pipe;
+
+  if (!ConnectNamedPipe(connPipe, NULL)) {
+    DWORD err = GetLastError();
+    if (err != ERROR_PIPE_CONNECTED) return INVALID_SOCKET_VALUE;
+  }
+
+  // The current pipe instance is now connected to the client.
+  // Create a new instance so the server can accept the next client.
+  HANDLE newPipe = CreatePipeInstance(serverInfo->pipeName.c_str());
+  if (newPipe == INVALID_HANDLE_VALUE) {
+    DisconnectNamedPipe(connPipe);
+    assert(false && "!CreatePipeInstance failed.");
+    return INVALID_SOCKET_VALUE;
+  }
+  serverInfo->pipe = newPipe;
+
+  auto* connInfo = new IPCPipeInfo{connPipe, "", true, 0};
+  return reinterpret_cast<IPCSocket>(connInfo);
+}
+
+IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
+                             std::chrono::milliseconds retryInterval) {
+  std::string pipeName = PipeName(name);
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    HANDLE pipe = CreateFile(
+        pipeName.c_str(), GENERIC_READ | GENERIC_WRITE,
+        0, NULL, OPEN_EXISTING, 0, NULL);
+    if (pipe != INVALID_HANDLE_VALUE) {
+      auto* info = new IPCPipeInfo{pipe, "", false, 0};
+      return reinterpret_cast<IPCSocket>(info);
+    }
+    DWORD err = GetLastError();
+    if (err != ERROR_PIPE_BUSY && err != ERROR_FILE_NOT_FOUND) {
+      return INVALID_SOCKET_VALUE;
+    }
+    ::Sleep(static_cast<DWORD>(retryInterval.count()));
+  }
+  return INVALID_SOCKET_VALUE;
+}
+
+void SetIPCSocketRecvTimeout(IPCSocket sock, std::chrono::seconds timeout) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(sock);
+  info->recvTimeoutMs = static_cast<DWORD>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count());
+}
+
+int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
+  if (!WaitForPipeData(info->pipe, info->recvTimeoutMs))
+    return -1;
+  DWORD bytesRead = 0;
+  if (!ReadFile(info->pipe, buf, static_cast<DWORD>(len), &bytesRead, NULL))
+    return -1;
+  return static_cast<int>(bytesRead);
+}
+
+int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
+  DWORD bytesWritten = 0;
+  if (!WriteFile(info->pipe, buf, static_cast<DWORD>(len), &bytesWritten, NULL))
+    return -1;
+  return static_cast<int>(bytesWritten);
+}
+
+int IPCSendHandle(IPCSocket conn, intptr_t handle) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
+  HANDLE pipe = info->pipe;
+
+  if (!WaitForPipeData(pipe, info->recvTimeoutMs))
+    return -1;
+
+  DWORD remotePid = 0;
+  DWORD bytesRead = 0;
+  if (!ReadFile(pipe, &remotePid, sizeof(remotePid), &bytesRead, NULL) ||
+      bytesRead != sizeof(remotePid))
+    return -1;
+
+  HANDLE remoteProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, remotePid);
+  if (!remoteProcess) return -1;
+
+  HANDLE dupHandle = NULL;
+  BOOL ok = DuplicateHandle(
+      GetCurrentProcess(), reinterpret_cast<HANDLE>(handle),
+      remoteProcess, &dupHandle, 0, FALSE, DUPLICATE_SAME_ACCESS);
+  CloseHandle(remoteProcess);
+  if (!ok) return -1;
+
+  DWORD bytesWritten = 0;
+  intptr_t handleVal = reinterpret_cast<intptr_t>(dupHandle);
+  if (!WriteFile(pipe, &handleVal, sizeof(handleVal), &bytesWritten, NULL) ||
+      bytesWritten != sizeof(handleVal))
+    return -1;
+
+  return 0;
+}
+
+intptr_t IPCRecvHandle(IPCSocket conn) {
+  auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
+  HANDLE pipe = info->pipe;
+
+  DWORD myPid = static_cast<DWORD>(::_getpid());
+  DWORD bytesWritten = 0;
+  if (!WriteFile(pipe, &myPid, sizeof(myPid), &bytesWritten, NULL) ||
+      bytesWritten != sizeof(myPid))
+    return -1;
+
+  if (!WaitForPipeData(pipe, info->recvTimeoutMs))
+    return -1;
+
+  intptr_t handleVal = 0;
+  DWORD bytesRead = 0;
+  if (!ReadFile(pipe, &handleVal, sizeof(handleVal), &bytesRead, NULL) ||
+      bytesRead != sizeof(handleVal))
+    return -1;
+
+  return handleVal;
+}
+
+void CloseIPCSocket(IPCSocket sock) {
+  if (sock != INVALID_SOCKET_VALUE) {
+    auto* info = reinterpret_cast<IPCPipeInfo*>(sock);
+    // Server-side accepted connections need DisconnectNamedPipe to
+    // release the client before closing the handle.
+    if (info->serverSide && info->pipeName.empty()) {
+      DisconnectNamedPipe(info->pipe);
+    }
+    if (info->pipe && info->pipe != INVALID_HANDLE_VALUE)
+      CloseHandle(info->pipe);
+    delete info;
+  }
+}
+
 }   //  namespace os
 }   //  namespace rocr
 

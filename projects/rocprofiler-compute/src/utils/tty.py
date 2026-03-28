@@ -1,30 +1,9 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import copy
+import shutil
 import textwrap
 from pathlib import Path
 from typing import Any, Optional, TextIO
@@ -35,19 +14,15 @@ from tabulate import tabulate
 import config
 from utils import mem_chart, parser, schema
 from utils.kernel_name_shortener import (
-    MAX_SHORTENING_LEVEL,
     kernel_name_shortener,
-    process_single_kernel_name,
 )
 from utils.logger import console_error, console_log, console_warning
-from utils.utils import (
+from utils.utils_analysis import NS_TO_MS, CallTreeNode, simplify_kernel_name
+from utils.utils_common import (
     METRIC_ID_RE,
-    NS_TO_MS,
-    compute_operator_prefix_stats,
     convert_metric_id_to_panel_info,
     get_panel_alias,
     get_uuid,
-    simplify_kernel_name,
 )
 
 KERNEL_NAME_WRAP_WIDTH = 40
@@ -200,8 +175,8 @@ def is_roofline_shown(
                 if not kernel_top_df.empty and kernel_id in kernel_top_df.index:
                     kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
                     kernel_pct = (
-                        kernel_top_df.loc[kernel_id, "Pct"]
-                        if "Pct" in kernel_top_df.columns
+                        kernel_top_df.loc[kernel_id, "Percent"]
+                        if "Percent" in kernel_top_df.columns
                         else 0
                     )
                 else:
@@ -257,221 +232,187 @@ def is_roofline_shown(
     return True
 
 
-def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
-    """Display torch operator data in a properly formatted table."""
-    if df is None or df.empty:
-        console_log(f"No data available for operator: {operator_name}")
+def list_torch_operators(
+    workload_path: str,
+    call_trees: dict[str, CallTreeNode],
+) -> None:
+    """Display PyTorch operators as a unified call tree grouped by source location."""
+    if not call_trees:
+        print(f"\nPyTorch Operators in: {workload_path}")
+        print("Total: 0 operators")
         return
 
-    console_log(f"\n{operator_name}")
-    console_log("=" * len(operator_name))
+    print(f"\n{'=' * 80}")
+    print(f"PyTorch Operator Call Tree: {workload_path}")
+    print("Grouped by source location, sorted by total GPU kernel duration.")
+    print(f"{'=' * 80}")
+    show_call_tree(call_trees)
+    print(f"\n{'=' * 80}")
 
-    # Create a copy for display formatting
-    display_df = df.copy()
 
-    # Max display width per column type; Kernel_Name is skipped (show wrapped).
-    column_widths = {
-        "Operator_Name": 40,
-        "Context": 35,
-        "default": 20,  # fallback for all other string columns
-    }
+def format_stats(launches: int, duration_ms: float) -> str:
+    """Format launch count and duration as an inline parenthesized string."""
+    if duration_ms < 0.01:
+        formatted_duration = f"{duration_ms * 1000:.2f} us"
+    else:
+        formatted_duration = f"{duration_ms:.2f} ms"
+    return f"(kernel_launches: {launches}, total_duration: {formatted_duration})"
 
-    # Truncate string columns; wrap Kernel_Name (full, no truncation)
-    for col in display_df.columns:
-        if display_df[col].dtype != "object":
-            continue  # skip numeric columns
-        if col == "Kernel_Name":
-            display_df[col] = (
-                display_df[col].astype(str).apply(wrap_kernel_name)
-            )  # wrap full name instead of truncating
-            continue
-        max_width = column_widths.get(
-            col, column_widths["default"]
-        )  # use column-specific width or fallback
-        display_df[col] = (
-            display_df[col]
-            .astype(str)  # ensure type is string before continuing text operations
-            .apply(
-                lambda x: (
-                    string_multiple_lines(
-                        x, max_width, 2
-                    )  # split into at most 2 lines, add "..." if still too long
-                    if len(x) > max_width
-                    else x  # leave short values as-is
-                )
-            )
+
+def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
+    """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
+    terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
+    safe_width = max(terminal_cols - 2, min_width)
+    return min(safe_width, max_width)
+
+
+def print_wrapped_tree_line(
+    prefix: str,
+    body: str,
+    width: Optional[int] = None,
+    break_long_words: bool = False,
+) -> None:
+    """Print a tree line and wrap continuation lines to preserve indentation."""
+    effective_width = get_tree_wrap_width() if width is None else width
+    print(
+        textwrap.fill(
+            body,
+            width=effective_width,
+            initial_indent=prefix,
+            subsequent_indent=" " * len(prefix),
+            break_long_words=break_long_words,
+            break_on_hyphens=False,
         )
-
-    # Reset index for row numbering
-    display_df = display_df.reset_index(drop=True)
-
-    # Use tabulate for consistent formatting (no maxcolwidths: natural column width)
-    table_str = tabulate(
-        display_df,
-        headers=display_df.columns,
-        tablefmt="fancy_grid",
-        showindex=True,
-        floatfmt=".2f",
     )
 
-    console_log(table_str)
 
-
-def show_torch_operator_hierarchy(
-    operator_name: str,
-    df: pd.DataFrame,
-    index: Optional[int] = None,
-    kernel_name_to_id: Optional[dict[str, int]] = None,
-    kernel_verbose: int = 1,
-    prefix_stats: Optional[dict[str, tuple[float, int]]] = None,
+def print_wrapped_kernel_line(
+    prefix: str,
+    kernel_name: str,
+    suffix: str,
+    width: Optional[int] = None,
+    continuation_prefix: str = "",
 ) -> None:
-    """
-    Display the PyTorch operator listing with hierarchy, numbering, and durations.
+    """Wrap long kernel names while keeping suffix attached to final name chunk."""
+    effective_width = get_tree_wrap_width() if width is None else width
+    content_width = max(effective_width - len(prefix), 20)
 
-    Kernel names are shortened using the same logic as analyze-mode tables (and -k)
-    so they match; kernel_verbose controls shortening (default 1, overridable by user).
-    Shows Operator N: 'name', then for each hierarchy path: full_name
-    (total_duration, count), the hierarchy tree, and kernel launches with
-    optional kernel durations (total_duration ms) when timestamps are present.
-    If kernel_name_to_id is provided, each kernel line shows (id N) for use with -k.
-    If prefix_stats is provided, it is used directly; otherwise computed from df.
-    """
-    print(f"\n{'-' * 80}")
-    if index is not None:
-        print(f"Operator {index}:  '{operator_name}'")
-    else:
-        print(f"Operator:  '{operator_name}'")
-    print("-" * 80)
-
-    if "Operator_Name" not in df.columns or "Kernel_Name" not in df.columns:
-        console_log("Torch operator CSV missing Operator_Name or Kernel_Name columns.")
+    inline = f"{kernel_name} {suffix}"
+    if len(inline) <= content_width:
+        print(f"{prefix}{inline}")
         return
 
-    # Indent for content under each hierarchy so it's clear it belongs to that hierarchy
-    hierarchy_indent = " " * 7
+    # Reserve room so suffix is never detached on its own line.
+    name_width = max(content_width - len(suffix) - 1, 8)
+    wrapped_name = textwrap.wrap(
+        kernel_name,
+        width=name_width,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    if not wrapped_name:
+        print(f"{prefix}{suffix}")
+        return
 
-    # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
-    # "Context_Id", etc. Optional: Start_Timestamp_function, End_Timestamp_function,
-    # Start_Timestamp_kernel, End_Timestamp_kernel for durations.
+    # Build continuation with vertical pipes from parent levels
+    # Preserve parent pipes but replace branch character with spaces
+    if len(continuation_prefix) > 0:
+        # continuation_prefix has pipes, add spaces for branch chars
+        spaces_needed = len(prefix) - len(continuation_prefix)
+        continuation = continuation_prefix + " " * spaces_needed
+    else:
+        # No parent pipes, just use spaces matching the prefix
+        continuation = " " * len(prefix)
 
-    if prefix_stats is None:
-        prefix_stats = compute_operator_prefix_stats(df)
-    has_duration = bool(prefix_stats)
-
-    unique_op_hierarchies = df["Operator_Name"].unique()
-    left_col_width = 50
-    inner_width = left_col_width - len(hierarchy_indent)
-    for i, op in enumerate(unique_op_hierarchies, start=1):
-        stats_str = ""
-        if has_duration and op in prefix_stats:
-            total_ms, count = prefix_stats[op]
-            stats_str = f" (total_duration: {total_ms:.2f} ms, count: {count})"
-        print(f"{hierarchy_indent}Hierarchy {i}:  {op}{stats_str}")
-        kernel_header = (
-            "Kernels Launched" if not has_duration else "Kernels Launched (duration)"
-        )
-        print(
-            f"{hierarchy_indent}\n{hierarchy_indent}"
-            + "Operator Hierarchy".ljust(inner_width)
-            + kernel_header
-        )
-        print(f"{hierarchy_indent}{'-' * (80 - len(hierarchy_indent))}")
-        parts = str(op).split("/")
-
-        hierarchy_lines = []
-        for level, part in enumerate(parts):
-            if level == 0:
-                line = f"{part}"
+    for i, chunk in enumerate(wrapped_name):
+        if i == 0:
+            if len(wrapped_name) == 1:
+                print(f"{prefix}{chunk} {suffix}")
             else:
-                indent = "  " * level
-                prefix_char = "└─ "
-                line = f"{indent}{prefix_char}{part}"
-            hierarchy_lines.append(line)
+                print(f"{prefix}{chunk}")
+        elif i == len(wrapped_name) - 1:
+            print(f"{continuation}{chunk} {suffix}")
+        else:
+            print(f"{continuation}{chunk}")
 
-        # Get kernels for this operator hierarchy
-        kernels_info = []
-        op_data = df[df["Operator_Name"] == op]
-        has_kernel_ts = (
-            "Start_Timestamp_kernel" in df.columns
-            and "End_Timestamp_kernel" in df.columns
+
+def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
+    """Print the unified call tree grouped by source location."""
+    sorted_locations = sorted(
+        call_trees.items(), key=lambda kv: kv[1].total_duration_ms, reverse=True
+    )
+    for i, (location, root) in enumerate(sorted_locations):
+        if i > 0:
+            print(f"\n{'- ' * 40}")
+        stats = format_stats(root.kernel_launches, root.total_duration_ms)
+        print(f"\n{location} {stats}")
+        for child in sorted(
+            root.children.values(),
+            key=lambda c: c.total_duration_ms,
+            reverse=True,
+        ):
+            print_operator_node(child)
+
+
+def print_operator_node(
+    node: CallTreeNode, is_last: bool = True, parent_pipes: str = ""
+) -> None:
+    # Build indent with vertical pipes for parent levels
+    indent = parent_pipes
+    is_branching = len(node.children) + len(node.kernels) > 1
+
+    # Use ├─ for non-last items, └─ for last items
+    branch_char = "└─ " if is_last else "├─ "
+    node_prefix = f"{indent}{branch_char}"
+
+    if is_branching:
+        stats = format_stats(node.kernel_launches, node.total_duration_ms)
+        print_wrapped_tree_line(node_prefix, f"{node.name} {stats}")
+    else:
+        print_wrapped_tree_line(node_prefix, node.name)
+
+    # Build new parent_pipes for children
+    if is_last:
+        new_parent_pipes = parent_pipes + "   "  # 3 spaces
+    else:
+        new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
+
+    # Process child nodes
+    children = sorted(
+        node.children.values(), key=lambda c: c.total_duration_ms, reverse=True
+    )
+    for i, child in enumerate(children):
+        # A child is last if it's the final child AND there are no kernels after it
+        child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)
+        print_operator_node(child, is_last=child_is_last, parent_pipes=new_parent_pipes)
+
+    # Process kernels
+    for i, (kernel_name, kernel_stats) in enumerate(
+        sorted(
+            node.kernels.items(),
+            key=lambda kv: kv[1].total_duration_ns,
+            reverse=True,
         )
-        kernel_counts: dict[str, int] = {}
-        kernel_duration_ns: dict[str, float] = {}
-        kernel_context: dict[str, dict[str, Any]] = {}
-        for _, row in op_data.iterrows():
-            full_kernel_name = str(row["Kernel_Name"]).strip()
-            if not full_kernel_name:
-                continue
-            if kernel_verbose >= MAX_SHORTENING_LEVEL:
-                kernel_name = full_kernel_name
-            else:
-                kernel_name = process_single_kernel_name(
-                    full_kernel_name, kernel_verbose
-                )
+    ):
+        launches = kernel_stats.launches
+        duration_ns = kernel_stats.total_duration_ns
+        kernel_id = kernel_stats.kernel_id
+        id_suffix = f" (id {kernel_id})" if kernel_id is not None else ""
+        display_name = simplify_kernel_name(kernel_name)
+        total_ms = duration_ns * NS_TO_MS
+        stats = format_stats(launches, total_ms)
 
-            if kernel_name not in kernel_counts:
-                kernel_counts[kernel_name] = 0
-                kernel_duration_ns[kernel_name] = 0.0
-                kernel_context[kernel_name] = {
-                    "full_name": full_kernel_name,
-                    "contexts": {},
-                }
-            kernel_counts[kernel_name] += 1
-            if has_kernel_ts:
-                kernel_duration_ns[kernel_name] += float(
-                    row["End_Timestamp_kernel"]
-                ) - float(row["Start_Timestamp_kernel"])
-            context_id = row.get("Context_Id")
-            if pd.isna(context_id) or not str(context_id).strip():
-                continue
-            topmost_location = str(context_id).split("/")[0]
-            if "@" not in topmost_location:
-                continue
-            _, location = topmost_location.split("@", 1)
-            if ":" not in location:
-                continue
-            file_name, line_num = location.split(":", 1)
-            ctx = kernel_context[kernel_name]["contexts"]
-            ctx.setdefault(file_name, {})
-            ctx[file_name][line_num] = ctx[file_name].get(line_num, 0) + 1
+        # Last kernel gets └─, others get ├─
+        kernel_is_last = i == len(node.kernels) - 1
+        kernel_branch_char = "└─ " if kernel_is_last else "├─ "
+        kernel_prefix = f"{new_parent_pipes}{kernel_branch_char}"
 
-        for kernel_name, num_launches in kernel_counts.items():
-            id_suffix = ""
-            if kernel_name_to_id is not None and kernel_name in kernel_name_to_id:
-                id_suffix = f" (id {kernel_name_to_id[kernel_name]})"
-            display_name = simplify_kernel_name(kernel_name)
-            total_ms = None
-            if has_kernel_ts and kernel_name in kernel_duration_ns:
-                total_ms = kernel_duration_ns[kernel_name] * NS_TO_MS
-            if total_ms is not None and not pd.isna(total_ms):
-                kernel_info = (
-                    f"|--> {display_name}{id_suffix} ({num_launches} launches, "
-                    f"total_duration: {total_ms:.2f} ms)\n"
-                )
-            else:
-                kernel_info = (
-                    f"|--> {display_name}{id_suffix} ({num_launches} launches)\n"
-                )
-            kernels_info.append(kernel_info)
-            for file_name, line_count in kernel_context[kernel_name][
-                "contexts"
-            ].items():
-                for line_num, count in line_count.items():
-                    kernels_info.append(
-                        f"      {file_name}:{line_num} ({count} launches)\n"
-                    )
-
-        # Print hierarchy lines (left column), indented under this hierarchy
-        for line in hierarchy_lines:
-            print(f"{hierarchy_indent}{line.ljust(inner_width)}|")
-
-        # Print kernel lines aligned to the deepest level, indented under this hierarchy
-        deepest_indent = "  " * len(parts)
-        for kernel_line in kernels_info:
-            left_padding = deepest_indent + "    "
-            print(f"{hierarchy_indent}{left_padding.ljust(inner_width)}{kernel_line}")
-
-        print()
+        print_wrapped_kernel_line(
+            kernel_prefix,
+            display_name,
+            f"{id_suffix} {stats}".strip(),
+            continuation_prefix=new_parent_pipes,
+        )
 
 
 def process_table_data(
@@ -530,7 +471,7 @@ def process_table_data(
                     table_type == "metric_table" and header not in hidden_cols
                 ):
                     if run_name != base_run:
-                        # Calculate percentage difference between current and
+                        # Calculate percent difference between current and
                         # base dataframe.
                         base_series = pd.to_numeric(
                             base_df[header], errors="coerce"
@@ -539,20 +480,20 @@ def process_table_data(
                             cur_df[header], errors="coerce"
                         ).fillna(0.0)
 
-                        # Calculate absolute and percentage differences
+                        # Calculate absolute and percent differences
                         absolute_diff = (cur_series - base_series).round(args.decimal)
-                        percentage_diff = (
+                        percent_diff = (
                             absolute_diff / base_series.replace(0, 1) * 100
                         ).round(args.decimal)
 
                         if args.verbose >= 2:
-                            console_log("---------", header, percentage_diff)
+                            console_log("---------", header, percent_diff)
 
-                        # Format as "value (percentage%)"
+                        # Format as "value (percent%)"
                         formatted_diff = (
                             cur_series.round(args.decimal).astype(str)
                             + " ("
-                            + percentage_diff.astype(str)
+                            + percent_diff.astype(str)
                             + "%)"
                         )
 
@@ -563,13 +504,13 @@ def process_table_data(
                         #       requirement
                         if (
                             header in ["Value", "Count", "Avg"]
-                            and percentage_diff.abs().gt(args.report_diff).any()
+                            and percent_diff.abs().gt(args.report_diff).any()
                         ):
                             result_df["Abs Diff"] = absolute_diff
 
                             if args.report_diff:
-                                violation_idx = percentage_diff.index[
-                                    percentage_diff.abs() > args.report_diff
+                                violation_idx = percent_diff.index[
+                                    percent_diff.abs() > args.report_diff
                                 ]
                                 console_warning(
                                     f"Dataframe diff exceeds {args.report_diff}% "

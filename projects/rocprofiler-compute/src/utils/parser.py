@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import ast
@@ -37,8 +15,9 @@ import pandas as pd
 
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
-from utils.utils import normalize_filter_to_str_list
+from utils.utils_common import normalize_filter_to_str_list
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -52,6 +31,8 @@ from utils.utils import normalize_filter_to_str_list
 
 # 001 is ID of pmc_kernel_top.csv table
 PMC_KERNEL_TOP_TABLE_ID: int = 1
+# 002 is ID of pmc_dispatch_info.csv table
+PMC_DISPATCH_INFO_TABLE_ID: int = 2
 
 # Build-in $denom defined in mongodb query:
 #       "denom": {
@@ -217,14 +198,18 @@ def to_int(
         raise Exception("to_int: unsupported type.")
 
 
-def to_sum(a: Union[pd.Series, None]) -> float:
+def to_sum(a: Union[pd.Series, int, float, np.number, None]) -> float:
     if a is None:
         return np.nan
-    elif np.isnan(a).all():
-        return np.nan
-    elif a.empty:
-        return np.nan
+    elif isinstance(a, (int, float, np.number)):
+        if np.isnan(a):
+            return np.nan
+        return float(a)
     elif isinstance(a, pd.Series):
+        if a.empty:
+            return np.nan
+        elif np.isnan(a).all():
+            return np.nan
         return a.sum()
     else:
         raise Exception("to_sum: unsupported type.")
@@ -783,6 +768,44 @@ def calc_builtin_var(var: Union[int, str], sys_info: pd.Series) -> int:  # type:
         console_error(f'Built-in var "{var}" is not supported')
 
 
+def build_metric_list(
+    arch_configs: schema.ArchConfig,
+    sys_info: pd.Series,
+) -> None:
+    """
+    Populate arch_configs.metric_list from the panel configs.
+
+    Builds the metric_list mapping (panel/table/metric IDs -> display names)
+    without constructing DataFrames or metric_counters.  Use this directly when
+    only the metric listing is needed (e.g. --list-metrics, --list-blocks).
+    """
+    metric_list = {}
+
+    _expand_placeholder_ranges(arch_configs, sys_info)
+
+    for panel_id, panel in arch_configs.panel_configs.items():
+        for data_source in panel["data source"]:
+            for type, data_config in data_source.items():
+                if type == "metric_table":
+                    data_source_idx = str(data_config["id"] // 100)
+                    if data_source_idx != "0":
+                        metric_list[data_source_idx] = panel["title"]
+
+                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
+                    metric_list[table_idx] = data_config["title"]
+
+                    for i, (key, entries) in enumerate(data_config["metric"].items()):
+                        metric_idx = f"{table_idx}.{i}"
+                        if _metric_has_valid_expr(entries, data_config):
+                            metric_list[metric_idx] = key
+
+                elif type in ("raw_csv_table", "pc_sampling_table"):
+                    data_source_idx = str(data_config["id"] // 100)
+                    metric_list[data_source_idx] = panel["title"]
+
+    setattr(arch_configs, "metric_list", metric_list)
+
+
 @demarcate
 def build_dfs(
     arch_configs: schema.ArchConfig,
@@ -790,10 +813,10 @@ def build_dfs(
     sys_info: pd.Series,
 ) -> None:
     """
-    - Build dataframe for each type of data source within each panel.
-      Each dataframe will be used as a template to load data with each run later.
-      For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
-    - Collect/build metric_list to suport customrized metrics profiling.
+    Build dataframe for each type of data source within each panel.
+
+    Each dataframe will be used as a template to load data with each run later.
+    For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
     """
 
     # TODO: more error checking for filter_metrics!!
@@ -806,38 +829,10 @@ def build_dfs(
     }
 
     dfs = {}
-    metric_list = {}
     dfs_type = {}
     metric_counters = {}
 
-    for panel_id, panel in arch_configs.panel_configs.items():
-        for data_source in panel["data source"]:
-            for type, data_config in data_source.items():
-                if (
-                    type == "metric_table"
-                    and "metric" in data_config
-                    and "placeholder_range" in data_config["metric"]
-                ):
-                    new_metrics = {}
-                    if sys_info is not None:
-                        # NB: support single placeholder for now!!
-                        p_range = data_config["metric"].pop("placeholder_range")
-                        metric, metric_expr = data_config["metric"].popitem()
-
-                        for p, r in p_range.items():
-                            # NB: We have to resolve placeholder range first if it
-                            #   is a build-in var. It will be too late to do it in
-                            #   eval_metric(). This is the only reason we need
-                            #   sys_info at this stage.
-                            var = calc_builtin_var(r, sys_info)
-                            for i in range(var):
-                                new_key = metric.replace(p, str(i))
-                                new_val = {}
-                                for k, v in metric_expr.items():
-                                    new_val[k] = metric_expr[k].replace(p, str(i))
-                                    new_metrics[new_key] = new_val
-
-                    data_config["metric"] = new_metrics
+    _expand_placeholder_ranges(arch_configs, sys_info)
 
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
@@ -846,10 +841,6 @@ def build_dfs(
                     headers = ["Metric_ID"]
                     data_source_idx = str(data_config["id"] // 100)
 
-                    if data_source_idx != 0 or (
-                        filter_metrics and data_source_idx in filter_metrics
-                    ):
-                        metric_list[data_source_idx] = panel["title"]
                     if (
                         "cli_style" in data_config
                         and data_config["cli_style"] == "simple_box"
@@ -875,12 +866,6 @@ def build_dfs(
 
                     df = pd.DataFrame(columns=headers)
 
-                    if not data_config["metric"]:
-                        data_source_idx = (
-                            f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                        )
-                        metric_list[data_source_idx] = data_config["title"]
-
                     for i, (key, entries) in enumerate(data_config["metric"].items()):
                         data_source_idx = (
                             f"{data_config['id'] // 100}.{data_config['id'] % 100}"
@@ -901,8 +886,6 @@ def build_dfs(
                             (str(panel_id // 100) in filter_metrics)
                         ):
                             values = [metric_idx, key]
-
-                            metric_list[data_source_idx] = data_config["title"]
 
                             if (
                                 "cli_style" in data_config
@@ -933,9 +916,6 @@ def build_dfs(
 
                             df_new_row = pd.DataFrame([values], columns=headers)
                             df = pd.concat([df, df_new_row])
-
-                        # collect metric_list
-                        metric_list[metric_idx] = key
 
                         # generate mapping of counters and metrics
                         filtered_counters = {}
@@ -968,7 +948,6 @@ def build_dfs(
                             df = pd.DataFrame(
                                 [data_config["source"]], columns=["from_csv"]
                             )
-                        metric_list[data_source_idx] = panel["title"]
                     else:
                         df = pd.DataFrame()
                 elif type == "pc_sampling_table":
@@ -976,7 +955,6 @@ def build_dfs(
                     df = pd.DataFrame(
                         [data_config["source"]], columns=["from_pc_sampling"]
                     )
-                    metric_list[data_source_idx] = panel["title"]
                 else:
                     df = pd.DataFrame()
 
@@ -984,7 +962,6 @@ def build_dfs(
                 dfs_type[data_config["id"]] = type
 
     setattr(arch_configs, "dfs", dfs)
-    setattr(arch_configs, "metric_list", metric_list)
     setattr(arch_configs, "dfs_type", dfs_type)
     setattr(arch_configs, "metric_counters", metric_counters)
 
@@ -1020,6 +997,64 @@ def build_metric_value_string(
                     df[expr] = df[expr].apply(
                         update_normal_unit_string, normal_unit=normal_unit
                     )
+
+
+def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
+    """
+    Return True if a metric entry has at least one evaluatable expression field
+    that is not None and not the string "None".
+
+    Expression fields are identified by matching the header display name against
+    schema.SUPPORTED_FIELD, excluding Peak-prefixed fields which are empirical values.
+    """
+    for header_key, header_display in data_config["header"].items():
+        if header_display in schema.SUPPORTED_FIELD and not header_display.startswith(
+            "Peak"
+        ):
+            expr_value = entries.get(header_key)
+            if expr_value is not None and expr_value != "None":
+                return True
+    return False
+
+
+def _expand_placeholder_ranges(
+    arch_configs: schema.ArchConfig,
+    sys_info: pd.Series,
+) -> None:
+    """
+    Expand placeholder_range entries in metric_table data configs in-place.
+
+    Some metric tables define a range of metrics via a placeholder key that is
+    expanded into individual entries at load time. sys_info is required to
+    resolve built-in range variables; if it is None the table is cleared.
+    """
+    for _panel_id, panel in arch_configs.panel_configs.items():
+        for data_source in panel["data source"]:
+            for type, data_config in data_source.items():
+                if (
+                    type == "metric_table"
+                    and "metric" in data_config
+                    and "placeholder_range" in data_config["metric"]
+                ):
+                    new_metrics = {}
+                    if sys_info is not None:
+                        # NB: support single placeholder for now!!
+                        p_range = data_config["metric"].pop("placeholder_range")
+                        metric, metric_expr = data_config["metric"].popitem()
+                        for p, r in p_range.items():
+                            # NB: We have to resolve placeholder range first if it
+                            #   is a build-in var. It will be too late to do it in
+                            #   eval_metric(). This is the only reason we need
+                            #   sys_info at this stage.
+                            var = calc_builtin_var(r, sys_info)
+                            for i in range(var):
+                                new_key = metric.replace(p, str(i))
+                                new_val = {
+                                    k: v.replace(p, str(i))
+                                    for k, v in metric_expr.items()
+                                }
+                                new_metrics[new_key] = new_val
+                    data_config["metric"] = new_metrics
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
@@ -1401,7 +1436,7 @@ def apply_filters(
     # We pick up kernel names from kerne ids first.
     # Then filter valid entries with kernel names.
     if workload.filter_kernel_ids:
-        filtered_df = apply_kernel_filter(filtered_df, workload, dir_path)
+        filtered_df = apply_kernel_filter(filtered_df, workload)
 
     # Apply dispatch filter
     if workload.filter_dispatch_ids:
@@ -1416,27 +1451,30 @@ def apply_filters(
     return filtered_df
 
 
-def apply_kernel_filter(
-    df: pd.DataFrame, workload: schema.Workload, dir_path_path: str
-) -> pd.DataFrame:
+def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
     """Apply kernel ID or name filters."""
     if all(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
         # Handle integer kernel IDs
-        kernels_dataframe = pd.read_csv(Path(dir_path_path) / "pmc_kernel_top.csv")
+        kernel_top_dataframe = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
+        if kernel_top_dataframe is None:
+            console_error(
+                "Kernel top stats table not loaded. "
+                "Ensure create_df_kernel_top_stats() "
+                "is called before applying kernel filters."
+            )
 
         # Validate kernel IDs
         for kernel_id in workload.filter_kernel_ids:
-            if kernel_id >= len(kernels_dataframe["Kernel_Name"]):
+            if kernel_id >= len(kernel_top_dataframe["Kernel_Name"]):
                 console_error(
                     f"{kernel_id} is an invalid kernel id. "
                     "Please enter an id between 0-"
-                    f"{len(kernels_dataframe['Kernel_Name']) - 1}"
+                    f"{len(kernel_top_dataframe['Kernel_Name']) - 1}"
                 )
 
         # Extract kernel names and mark selected kernels with "*"
         # TODO: fix it for unaligned comparison
         selected_kernels = []
-        kernel_top_dataframe = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
         kernel_top_dataframe["Selected"] = ""
 
         for kernel_id in workload.filter_kernel_ids:
@@ -1942,22 +1980,17 @@ def load_pc_sampling_data(
             console_warning(f"PC sampling: can not read {json_file_path}")
             return pd.DataFrame()
         else:
-            # NB:
-            #   We should find better way to remove the dependency on kernel_top_table
             kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-            file = Path(dir_path) / str(kernel_top_df.loc[0, "from_csv"])
             kernel_index = workload.filter_kernel_ids[0]
 
-            kernel_df = pd.read_csv(file)
-
-            if kernel_index >= len(kernel_df):
+            if kernel_index >= len(kernel_top_df):
                 console_warning(
                     f"Kernel index {kernel_index} is out of bounds. "
-                    f"kernel_top CSV has only {len(kernel_df)} rows."
+                    f"kernel_top table has only {len(kernel_top_df)} rows."
                 )
                 return pd.DataFrame()
 
-            kernel_name = kernel_df.iloc[kernel_index]["Kernel_Name"]
+            kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
 
             return load_pc_sampling_data_per_kernel(
                 pc_sampling_method,
@@ -2028,22 +2061,12 @@ def load_non_mertrics_table(
     workload.dfs.update(tmp)
 
 
-@demarcate
-def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
-    """
-    Loads all torch operator CSVs from torch_trace directory
-    into workload.torch_operators.
-    """
-    torch_trace_dir = Path(dir_path) / "torch_trace"
-    workload.torch_operators = {}
-    if torch_trace_dir.exists() and torch_trace_dir.is_dir():
-        for csv_file in torch_trace_dir.glob("*.csv"):
-            operator_name = csv_file.stem  # filename without .csv
-            try:
-                df = pd.read_csv(csv_file)
-                workload.torch_operators[operator_name] = df
-            except Exception as e:
-                console_warning(f"Could not load {csv_file}: {e}")
+torch_operator_matcher = PatternMatcherEngine(mode="glob-hierarchy")
+
+
+def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
+    """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
+    return torch_operator_matcher.matches(pattern, operator_name)
 
 
 @demarcate
@@ -2062,9 +2085,6 @@ def load_table_data(
     """
     if not skip_kernel_top:
         load_non_mertrics_table(workload, dir_path, args)
-
-    # Load torch operator trace data if present
-    load_torch_trace_data(workload, dir_path)
 
     eval_metric(
         workload.dfs,

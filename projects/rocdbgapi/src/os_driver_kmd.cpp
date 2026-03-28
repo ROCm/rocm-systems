@@ -22,14 +22,22 @@
 #include "logging.h"
 #include "os_driver.h"
 
-#include <ntstatus.h>
+/* Make sure we use the STATUS_XXX constants from ntstatus.h.  Some of
+   the constants we use (but not all) are defined in winnt.h too, but
+   defined as DWORD (aka 'unsigned long'), while ntstatus.h defines
+   all STATUS constants as NTSTATUS (aka 'long').  */
+#define WIN32_NO_STATUS
 #include <windows.h>
+#undef WIN32_NO_STATUS
+#include <ntstatus.h>
+/* Needed for the NTSTATUS typedef.  */
+#include <winternl.h>
 
 #include <d3dkmthk.h>
 
 #include "windows/kmddbg.h"
 
-#include <hsa/amd_hsa_queue.h>
+#include "hsa/amd_hsa_queue.h"
 
 #include <algorithm>
 #include <cinttypes>
@@ -987,6 +995,9 @@ private:
      behind ADAPTER.  */
   amd_dbgapi_status_t init_adapter (D3DKMT_HANDLE adapter);
 
+  /* Get the adapter name.  */
+  std::string get_adapter_name (D3DKMT_HANDLE adapter) const;
+
   /* Build a queue_id we can return to the core from the agent_id and KMD
      queue_id.  */
   os_queue_id_t make_queue_id (os_agent_id_t agent_id,
@@ -1258,6 +1269,40 @@ kmd_driver_t::check_version () const
   return AMD_DBGAPI_STATUS_SUCCESS;
 }
 
+std::string
+kmd_driver_t::get_adapter_name (D3DKMT_HANDLE adapter) const
+{
+  D3DKMT_QUERYADAPTERINFO query_info{};
+  D3DKMT_ADAPTERREGISTRYINFO adapter_reg_info{};
+  query_info.Type = KMTQAITYPE_ADAPTERREGISTRYINFO;
+  query_info.hAdapter = adapter;
+  query_info.pPrivateDriverData = &adapter_reg_info;
+  query_info.PrivateDriverDataSize = sizeof (D3DKMT_ADAPTERREGISTRYINFO);
+
+  if (m_d3d.api.query_adapter_info (&query_info) != STATUS_SUCCESS)
+    return "<unknown>";
+
+  size_t wide_len = ::wcsnlen (adapter_reg_info.AdapterString,
+                               std::size (adapter_reg_info.AdapterString));
+  if (wide_len == 0)
+    return "<unknown>";
+
+  int size_needed
+    = WideCharToMultiByte (CP_ACP, 0, adapter_reg_info.AdapterString,
+                           (int)wide_len, nullptr, 0,
+                           nullptr, nullptr);
+  if (size_needed <= 0)
+    return "<unknown>";
+
+  std::string result (size_needed, '\0');
+  int size
+    = WideCharToMultiByte (CP_ACP, 0, adapter_reg_info.AdapterString,
+                           (int)wide_len, &result[0], size_needed,
+                           "?", nullptr);
+  dbgapi_assert (size == size_needed);
+  return result;
+}
+
 amd_dbgapi_status_t
 kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
                               size_t snapshot_count, size_t *agent_count,
@@ -1281,32 +1326,7 @@ kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
       agent = {};
 
       /* Query the agent name from the OS.  */
-      D3DKMT_QUERYADAPTERINFO query_info{};
-      D3DKMT_ADAPTERREGISTRYINFO adapter_reg_info{};
-      query_info.Type = KMTQAITYPE_ADAPTERREGISTRYINFO;
-      query_info.hAdapter = agent_handle.adapter;
-      query_info.pPrivateDriverData = &adapter_reg_info;
-      query_info.PrivateDriverDataSize = sizeof (D3DKMT_ADAPTERREGISTRYINFO);
-
-      if (m_d3d.api.query_adapter_info (&query_info) == STATUS_SUCCESS)
-        {
-          /* We need to convert from wchar string to std::string.  */
-          char tmp[MAX_PATH * MB_CUR_MAX] = {};
-          size_t tmp_i = 0;
-          for (size_t i = 0;
-               i < MAX_PATH && adapter_reg_info.AdapterString[i] != 0; i++)
-            {
-              int r
-                = ::wctomb (&tmp[tmp_i], adapter_reg_info.AdapterString[i]);
-              if (r == -1)
-                tmp[tmp_i++] = '?';
-              else
-                tmp_i += r;
-            }
-          agent.name = tmp;
-        }
-      else
-        agent.name = "<unknown>";
+      agent.name = get_adapter_name (agent_handle.adapter);
 
       /* Query the rest of the information to MKD.  */
       KMDDBGRIF_DBGR_CMDS cmd{};

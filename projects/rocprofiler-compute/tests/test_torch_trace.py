@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import json
 import sqlite3
@@ -35,7 +13,11 @@ from utils.rocpd_data import (
     MARKER_API_TRACE_QUERY,
     convert_dbs_to_csv,
 )
-from utils.utils import process_torch_trace_output
+from utils.utils_analysis import (
+    build_call_trees_with_kernel_ids,
+    process_torch_trace_output,
+    write_torch_trace_consolidated_csv,
+)
 
 GUID = "abc-1234-def"
 
@@ -359,7 +341,7 @@ def write_csv_layout(workload_dir, fbase="run0", pid="12345"):
     counter_df.to_csv(counter_path, index=False)
 
 
-def read_operator_csvs(torch_trace_dir):
+def read_torch_trace_csvs(torch_trace_dir):
     """Return a dict mapping filename -> sorted DataFrame for comparison."""
     result = {}
 
@@ -369,6 +351,13 @@ def read_operator_csvs(torch_trace_dir):
         result[csv_file.name] = df
 
     return result
+
+
+def build_kernel_top_df():
+    """Build a kernel top stats DataFrame matching the test kernel names."""
+    return pd.DataFrame({
+        "Kernel_Name": sorted({r[12] for r in COUNTER_ROWS}),
+    })
 
 
 def test_torch_trace_output_same_for_rocpd_and_csv():
@@ -382,14 +371,42 @@ def test_torch_trace_output_same_for_rocpd_and_csv():
     write_rocpd_layout(rocpd_dir)
     write_csv_layout(csv_dir)
 
-    process_torch_trace_output(rocpd_dir)
-    process_torch_trace_output(csv_dir)
+    kernel_top_df = build_kernel_top_df()
+    rocpd_output = process_torch_trace_output(rocpd_dir)
+    csv_output = process_torch_trace_output(csv_dir)
+    assert rocpd_output is not None
+    assert csv_output is not None
+    rocpd_df, rocpd_trace_path = rocpd_output
+    csv_df, csv_trace_path = csv_output
 
-    rocpd_results = read_operator_csvs(Path(rocpd_dir) / "torch_trace")
-    csv_results = read_operator_csvs(Path(csv_dir) / "torch_trace")
+    write_torch_trace_consolidated_csv(rocpd_df, rocpd_trace_path)
+    write_torch_trace_consolidated_csv(csv_df, csv_trace_path)
+    rocpd_trees = build_call_trees_with_kernel_ids(rocpd_df, kernel_top_df)
+    csv_trees = build_call_trees_with_kernel_ids(csv_df, kernel_top_df)
+
+    for trees in (rocpd_trees, csv_trees):
+        assert "test.py:10" in trees
+        assert "test.py:15" in trees
+
+        linear_root = trees["test.py:10"]
+        assert linear_root.kernel_launches == 2
+        assert "nn.Module.Linear.forward" in linear_root.children
+        linear_node = linear_root.children["nn.Module.Linear.forward"]
+        assert "kernel_gemm" in linear_node.kernels
+        assert linear_node.kernels["kernel_gemm"].launches == 2
+
+        mm_root = trees["test.py:15"]
+        assert mm_root.kernel_launches == 1
+        assert "torch.mm" in mm_root.children
+        mm_node = mm_root.children["torch.mm"]
+        assert "kernel_mm" in mm_node.kernels
+        assert mm_node.kernels["kernel_mm"].launches == 1
+
+    rocpd_results = read_torch_trace_csvs(Path(rocpd_dir) / "torch_trace")
+    csv_results = read_torch_trace_csvs(Path(csv_dir) / "torch_trace")
 
     assert rocpd_results.keys() == csv_results.keys(), (
-        f"Operator files differ: rocpd={sorted(rocpd_results.keys())} "
+        f"Torch trace CSV files differ: rocpd={sorted(rocpd_results.keys())} "
         f"csv={sorted(csv_results.keys())}"
     )
 
