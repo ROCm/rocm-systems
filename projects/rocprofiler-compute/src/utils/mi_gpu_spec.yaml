@@ -13,7 +13,7 @@
 #           |-- gpu model
 #           |-- chip_ids: chip id is specific to the environment the gpu is being used on
 #               | -- physical
-#               | -- virtual
+#               | -- virtual # The pattern is physical + 16
 #           |-- partition_mode
 #               | -- compute partition mode
 #               | -- memory partition mode
@@ -342,3 +342,18 @@ mi_gpu_spec:
             chip_ids:
               physical: 30114
               virtual: 30130
+          - gpu_model: mi350p
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 4
+                  dpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps1:
+                  spx: 1
+                  dpx: 2
+                  cpx: 4
+            chip_ids:
+              physical: 30120
+              virtual: 30136

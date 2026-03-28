@@ -59,7 +59,6 @@ static __global__ void var_update(int* data) {
    correct memory type and device oridinal are returned */
 HIP_TEST_CASE(Unit_hipPointerGetAttribute_MemoryTypes) {
   CHECK_IMAGE_SUPPORT
-
   HIP_CHECK(hipSetDevice(0));
   size_t pitch_A;
   size_t width{NUM_W * sizeof(char)};
@@ -323,7 +322,6 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
 /* Allocate memory using different Allocation APIs and check whether
    IPC CAPABLE attribute returns correctly */
 HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
-
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = N * sizeof(int);
   unsigned int datatype;
@@ -340,7 +338,6 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
   size_t pitch_A;
   size_t width{NUM_W * sizeof(char)};
   SECTION("Malloc Pitch Allocation") {
-    CHECK_IMAGE_SUPPORT
     char* A_d;
     HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
     HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,

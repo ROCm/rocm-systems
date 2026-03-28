@@ -130,6 +130,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       max_msg_size = 8;
       break;
     case PingPongTestType:
+    case PingAllTestType:
     case ShmemPtrTestType:
       min_msg_size = 4;
       max_msg_size = 4;

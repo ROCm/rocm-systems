@@ -434,8 +434,7 @@ namespace rocshmem
           ibvDeviceList.push_back(ibvDevice);
         }
       } else {
-        fprintf(stderr, "[Error] No visible InfiniBand devices found.\n");
-        exit(1);
+        fprintf(stderr, "[Warning] No visible InfiniBand devices found.\n");
       }
       ibv.free_device_list(deviceList);
       isInitialized = true;
