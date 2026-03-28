@@ -54,3 +54,24 @@ def test_cp_sat_infeasible_group_over_cap() -> None:
     groups = [frozenset(items)]
     part = cp_sat_partition_counters(items, cfg, groups, time_limit_s=5.0)
     assert part is None
+
+
+def test_cp_sat_metric_spread_prefers_colocated_pairs() -> None:
+    """Spread penalty should pair (SQ_i, TCP_i) in the same bin when possible."""
+    cfg = {"SQ": 1, "TCP": 1}
+    items = ["SQ_A_sum", "TCP_REQ_sum", "SQ_B_sum", "TCP_GL1_sum"]
+    spread_groups = [[0, 1], [2, 3]]
+    part = cp_sat_partition_counters(
+        items,
+        cfg,
+        [],
+        time_limit_s=5.0,
+        metric_spread_index_groups=spread_groups,
+        metric_spread_penalty=50,
+        bin_used_weight=1,
+    )
+    assert part is not None
+    with_a = next(b for b in part if "SQ_A_sum" in b)
+    assert "TCP_REQ_sum" in with_a
+    with_b = next(b for b in part if "SQ_B_sum" in b)
+    assert "TCP_GL1_sum" in with_b

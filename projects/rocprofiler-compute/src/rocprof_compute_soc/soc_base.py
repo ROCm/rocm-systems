@@ -404,6 +404,33 @@ class OmniSoC_Base:
                 groups.append(inter)
         return groups
 
+    def _cp_sat_metric_spread_index_groups(
+        self,
+        items_sorted: list[str],
+    ) -> list[list[int]]:
+        """Per-metric item index lists (len >= 2) for CP-SAT spread objective."""
+        item_index = {name: idx for idx, name in enumerate(items_sorted)}
+        active: set[str] = set(items_sorted)
+        out: list[list[int]] = []
+        for row in self._metric_counter_groups_for_coalescing(active):
+            counter_group = row[-1]
+            idxs = sorted(
+                {item_index[c] for c in counter_group if c in item_index}
+            )
+            if len(idxs) >= 2:
+                out.append(idxs)
+        return out
+
+    @staticmethod
+    def _cp_sat_metric_spread_penalty_from_env() -> int:
+        raw = os.environ.get(
+            "ROCPROF_COMPUTE_PERFMON_CP_SAT_METRIC_PENALTY", "100"
+        ).strip()
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            return 100
+
     def _try_cp_sat_pmc_perf_buckets(
         self,
         work_set: set[str],
@@ -411,8 +438,11 @@ class OmniSoC_Base:
     ) -> list[CounterFile] | None:
         """
         If ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and ``ortools`` is installed,
-        partition **all** of ``work_set`` into a minimum-bin vector packing with
-        hard same-bin constraints for priority metrics. On success, clears those
+        partition **all** of ``work_set`` under vector caps. Hard same-bin rows
+        still apply to priority metrics; by default a **metric-spread** objective
+        (``ROCPROF_COMPUTE_PERFMON_CP_SAT_METRIC_PENALTY``, default ``100``)
+        reduces formulas spanning 2+ passes at the cost of more buckets—set
+        ``0`` to restore min-bin-only behavior. On success, clears those
         counters from ``work_set`` and returns new ``CounterFile`` rows; else
         returns ``None`` (no mutation).
         """
@@ -438,10 +468,24 @@ class OmniSoC_Base:
             return None
 
         groups = self._cp_sat_same_bin_counter_groups(work_set)
+        spread_penalty = self._cp_sat_metric_spread_penalty_from_env()
+        spread_groups = (
+            self._cp_sat_metric_spread_index_groups(items)
+            if spread_penalty > 0
+            else None
+        )
+        if spread_penalty > 0 and spread_groups:
+            console_debug(
+                "profiling",
+                f"CP-SAT perfmon: metric_spread_penalty={spread_penalty}, "
+                f"{len(spread_groups)} metric group(s).",
+            )
         partition = cp_sat_partition_counters(
             items,
             self.__perfmon_config,
             groups,
+            metric_spread_index_groups=spread_groups,
+            metric_spread_penalty=spread_penalty,
         )
         if partition is None:
             console_debug(
@@ -598,11 +642,12 @@ class OmniSoC_Base:
         counter sets first) into existing ``pmc_perf_*`` buckets or a new bucket,
         then classic first-fit for leftovers.
 
-        **Optional CP-SAT path** (toward fewer buckets under hard same-bin groups):
-        set ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and install ``ortools`` (see
-        ``[optimizer]`` extra in ``pyproject.toml``). Applies only when the PMC
-        set has no TCC channel counters and is within size limits; otherwise
-        falls back to the heuristic above.
+        **Optional CP-SAT path** (``ROCPROF_COMPUTE_PERFMON_CP_SAT=1``, ``ortools``):
+        Pure min-bin CP-SAT ignores analysis metrics and often **increases** how
+        many formulas span 2+ passes. By default we add a **metric-spread** term
+        (``ROCPROF_COMPUTE_PERFMON_CP_SAT_METRIC_PENALTY``, default ``100``; set
+        ``0`` for min-bins-only). Skipped when TCC channel PMCs are present or
+        over item limits; otherwise falls back to the heuristic above.
         """
         output_files: list[CounterFile] = []
         accu_file_count = 0

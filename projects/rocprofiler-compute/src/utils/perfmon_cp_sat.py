@@ -15,13 +15,20 @@ force all counters in a group into a single bin.
 **Limitations.** TCC channel counters are not supported (conservative linear
 capacity does not match ``LimitedSet`` channel sharing). Large instances are
 rejected via ``_MAX_ITEMS``.
+
+**Metric spread.** Optional ``metric_spread_index_groups`` + ``metric_spread_penalty``
+add a term ``sum_{m,k} u_{m,k}`` (bins touched by each metric) so the solver
+trades off fewer multi-bucket metrics vs raw bin count (see env in
+``OmniSoC_Base._try_cp_sat_pmc_perf_buckets``).
 """
 
 from __future__ import annotations
 
 _MAX_ITEMS = 256
 _MAX_BINS_CAP = 48
+_MAX_METRIC_SPREAD_GROUPS = 240
 _DEFAULT_TIME_LIMIT_S = 15.0
+_DEFAULT_BIN_USED_WEIGHT = 1
 
 
 def counter_ip_block_for_perfmon(counter: str) -> str:
@@ -74,12 +81,20 @@ def cp_sat_partition_counters(
     *,
     max_bins: int | None = None,
     time_limit_s: float = _DEFAULT_TIME_LIMIT_S,
+    metric_spread_index_groups: list[list[int]] | None = None,
+    metric_spread_penalty: int = 0,
+    bin_used_weight: int = _DEFAULT_BIN_USED_WEIGHT,
 ) -> list[list[str]] | None:
     """
-    Partition ``items_sorted`` into fewest used bins under vector capacities.
+    Partition ``items_sorted`` under vector capacities.
 
     Each counter in ``same_bin_counter_groups`` that intersects ``items_sorted``
     must lie entirely in one bin (per group). Groups of size 0 or 1 are ignored.
+
+    If ``metric_spread_penalty > 0`` and ``metric_spread_index_groups`` is set,
+    minimize ``metric_spread_penalty * sum u_{m,k} + bin_used_weight * sum bin_used``
+    where ``u_{m,k}=1`` iff metric ``m`` places a counter in bin ``k`` (metrics
+    with only one item in the partition are omitted from ``groups``).
 
     Returns a list of non-empty bucket lists, or ``None`` if ortools is
     missing, inputs are invalid, time limit hit without feasibility, or solver
@@ -145,11 +160,33 @@ def cp_sat_partition_counters(
             )
         model.Add(sum(group_vars_per_bin) == 1)
 
-    bin_used = [model.NewBoolVar(f"u_{bin_idx}") for bin_idx in range(num_bins)]
+    bin_used = [model.NewBoolVar(f"bu_{bin_idx}") for bin_idx in range(num_bins)]
     for bin_idx in range(num_bins):
         for item_idx in range(n):
             model.Add(bin_used[bin_idx] >= assign[(item_idx, bin_idx)])
-    model.Minimize(sum(bin_used))
+
+    spread_flat: list[object] = []
+    if metric_spread_penalty > 0 and metric_spread_index_groups:
+        capped = metric_spread_index_groups[:_MAX_METRIC_SPREAD_GROUPS]
+        for mix, grp_idxs in enumerate(capped):
+            if len(grp_idxs) < 2:
+                continue
+            for bin_idx in range(num_bins):
+                u_mk = model.NewBoolVar(f"ms_{mix}_{bin_idx}")
+                spread_flat.append(u_mk)
+                for item_idx in grp_idxs:
+                    model.Add(u_mk >= assign[(item_idx, bin_idx)])
+                model.Add(
+                    sum(assign[(item_idx, bin_idx)] for item_idx in grp_idxs)
+                    <= len(grp_idxs) * u_mk
+                )
+
+    if spread_flat and metric_spread_penalty > 0:
+        model.Minimize(
+            metric_spread_penalty * sum(spread_flat) + bin_used_weight * sum(bin_used)
+        )
+    else:
+        model.Minimize(bin_used_weight * sum(bin_used))
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_s
