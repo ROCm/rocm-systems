@@ -1305,9 +1305,9 @@ bool Device::populateOCLDeviceConstants() {
     return false;
   }
   assert(grid_max_dim.x != 0 && grid_max_dim.y != 0 && grid_max_dim.z != 0);
-  info_.maxGridDim_[0] = grid_max_dim.x;
-  info_.maxGridDim_[1] = grid_max_dim.y;
-  info_.maxGridDim_[2] = grid_max_dim.z;
+  info_.maxGridDim_[0] = std::min(grid_max_dim.x, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+  info_.maxGridDim_[1] = std::min(grid_max_dim.y, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+  info_.maxGridDim_[2] = std::min(grid_max_dim.z, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
 
   info_.nativeVectorWidthChar_ = info_.preferredVectorWidthChar_ = 4;
   info_.nativeVectorWidthShort_ = info_.preferredVectorWidthShort_ = 2;

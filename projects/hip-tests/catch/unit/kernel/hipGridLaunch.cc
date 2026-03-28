@@ -191,8 +191,7 @@ TEST_CASE("Unit_hipGridLaunch_ExceedMaxGridDim_Negative") {
     if (maxGridX < UINT_MAX) {
       hipLaunchKernelGGL(emptyKernel, dim3(maxGridX + 1, 1, 1), dim3(1, 1, 1), 0, 0);
       hipError_t err = hipGetLastError();
-      REQUIRE((err == hipErrorInvalidConfiguration || err == hipErrorLaunchFailure ||
-               err == hipSuccess));  // Some implementations may allow this
+      REQUIRE(err == hipErrorInvalidConfiguration);
     }
   }
 
@@ -200,8 +199,7 @@ TEST_CASE("Unit_hipGridLaunch_ExceedMaxGridDim_Negative") {
     if (maxGridY < UINT_MAX) {
       hipLaunchKernelGGL(emptyKernel, dim3(1, maxGridY + 1, 1), dim3(1, 1, 1), 0, 0);
       hipError_t err = hipGetLastError();
-      REQUIRE((err == hipErrorInvalidConfiguration || err == hipErrorLaunchFailure ||
-               err == hipSuccess));
+      REQUIRE(err == hipErrorInvalidConfiguration);
     }
   }
 
@@ -209,8 +207,7 @@ TEST_CASE("Unit_hipGridLaunch_ExceedMaxGridDim_Negative") {
     if (maxGridZ < UINT_MAX) {
       hipLaunchKernelGGL(emptyKernel, dim3(1, 1, maxGridZ + 1), dim3(1, 1, 1), 0, 0);
       hipError_t err = hipGetLastError();
-      REQUIRE((err == hipErrorInvalidConfiguration || err == hipErrorLaunchFailure ||
-               err == hipSuccess));
+      REQUIRE(err == hipErrorInvalidConfiguration);
     }
   }
 }
