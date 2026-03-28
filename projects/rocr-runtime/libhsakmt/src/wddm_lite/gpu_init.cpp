@@ -202,13 +202,16 @@
 #define regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32      0x168F
 #define regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32      0x1690
 #define regGCVM_CONTEXT1_PAGE_TABLE_BASE_ADDR_LO32      0x1691
+#define regGCVM_CONTEXT1_PAGE_TABLE_BASE_ADDR_HI32      0x1692
 
 #define regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32     0x16AF
 #define regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32     0x16B0
 #define regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32       0x16CF
 #define regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32       0x16D0
 #define regGCVM_CONTEXT1_PAGE_TABLE_START_ADDR_LO32     0x16B1
+#define regGCVM_CONTEXT1_PAGE_TABLE_START_ADDR_HI32     0x16B2
 #define regGCVM_CONTEXT1_PAGE_TABLE_END_ADDR_LO32       0x16D1
+#define regGCVM_CONTEXT1_PAGE_TABLE_END_ADDR_HI32       0x16D2
 
 #define regGCVM_INVALIDATE_ENG0_SEM                     0x1635
 #define regGCVM_INVALIDATE_ENG0_REQ                     0x1647
@@ -3718,6 +3721,37 @@ static void gfxhub_init_gart_aperture(struct WddmLiteDevice *dev)
                 (ULONG)((gmc->gart_end >> 44) & 0xFFFFFFFF));
 }
 
+/*
+ * Configure GFXHUB VMID 1 (CONTEXT1) with our flat GART page table.
+ * Must be called AFTER gfxhub_setup_vmid_config, which sets CONTEXT1_CNTL
+ * and full-range START/END. We override START/END to exactly [gart_start,
+ * gart_end] so the hardware only translates GART VAs with this PT, and
+ * firmware VA (0x7000000003000) correctly faults rather than hitting
+ * an out-of-bounds PTE index.
+ *
+ * CONTEXT0 (VMID 0) is never touched here — AUTOLOAD/RLC configures it
+ * with firmware VA mappings that MEC needs for instruction fetch.
+ */
+static void gfxhub_init_compute_vmid1(struct WddmLiteDevice *dev)
+{
+    struct GpuGmcConfig *gmc = &dev->hw.gmc;
+    ULONGLONG pt_base = gmc->gart_table_bus_addr | AMDGPU_PTE_VALID;
+
+    gfxhub_wreg(dev, regGCVM_CONTEXT1_PAGE_TABLE_BASE_ADDR_LO32,
+                (ULONG)(pt_base & 0xFFFFFFFF));
+    gfxhub_wreg(dev, regGCVM_CONTEXT1_PAGE_TABLE_BASE_ADDR_HI32,
+                (ULONG)((pt_base >> 32) & 0xFFFFFFFF));
+
+    gfxhub_wreg(dev, regGCVM_CONTEXT1_PAGE_TABLE_START_ADDR_LO32,
+                (ULONG)((gmc->gart_start >> 12) & 0xFFFFFFFF));
+    gfxhub_wreg(dev, regGCVM_CONTEXT1_PAGE_TABLE_START_ADDR_HI32,
+                (ULONG)((gmc->gart_start >> 44) & 0xFFFFFFFF));
+    gfxhub_wreg(dev, regGCVM_CONTEXT1_PAGE_TABLE_END_ADDR_LO32,
+                (ULONG)((gmc->gart_end >> 12) & 0xFFFFFFFF));
+    gfxhub_wreg(dev, regGCVM_CONTEXT1_PAGE_TABLE_END_ADDR_HI32,
+                (ULONG)((gmc->gart_end >> 44) & 0xFFFFFFFF));
+}
+
 static void gfxhub_init_system_aperture(struct WddmLiteDevice *dev)
 {
     struct GpuGmcConfig *gmc = &dev->hw.gmc;
@@ -3867,6 +3901,34 @@ static void gfxhub_gart_enable(struct WddmLiteDevice *dev)
     ULONG val = gfxhub_rreg(dev, regCP_DEBUG);
     val |= (1 << 15);
     gfxhub_wreg(dev, regCP_DEBUG, val);
+}
+
+
+/*
+ * Post-AUTOLOAD GFXHUB compute context setup.
+ *
+ * Unlike gfxhub_gart_enable(), this does NOT touch CONTEXT0 (VMID 0).
+ * After AUTOLOAD, RLC has configured CONTEXT0 with firmware VA mappings
+ * (0x7000000003000 → TMR) that MEC requires for instruction fetch.
+ * Overwriting CONTEXT0 here causes MEC to fetch from the wrong address.
+ *
+ * Instead we configure CONTEXT1 (VMID 1) with our flat GART page table
+ * for compute queue data access. HQDs must use CP_HQD_VMID=1.
+ */
+static void gfxhub_enable_compute_context(struct WddmLiteDevice *dev)
+{
+    gfxhub_init_system_aperture(dev);
+    gfxhub_init_tlb(dev);
+    gfxhub_init_cache(dev);
+    gfxhub_disable_identity_aperture(dev);
+    gfxhub_setup_vmid_config(dev);   /* VMID 1-15: CNTL + full-range START/END */
+    gfxhub_init_compute_vmid1(dev);  /* VMID 1: PAGE_TABLE_BASE + exact GART START/END */
+    gfxhub_program_invalidation(dev);
+
+    /* Disable CP UTCL1 error halt */
+    ULONG dbg_val = gfxhub_rreg(dev, regCP_DEBUG);
+    dbg_val |= (1 << 15);
+    gfxhub_wreg(dev, regCP_DEBUG, dbg_val);
 }
 
 
@@ -5640,40 +5702,42 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
             keep_gfxhub, sizeof(keep_gfxhub));
 
         if (keep_gfxhub[0] == '1') {
-            /* Dump VBIOS GFXHUB state for diagnostics before switching. */
+            /* Dump AUTOLOAD-configured GFXHUB CONTEXT0 state. */
             ULONG gc_test = gfxhub_rreg(dev, regGCVM_CONTEXT0_CNTL);
             ULONG pt_lo = gfxhub_rreg(dev,
                 regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32);
             ULONG pt_hi = gfxhub_rreg(dev,
                 regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32);
-            pr_info("gpu_gfx: KEEP_VBIOS_GFXHUB=1 — VBIOS state: "
+            pr_info("gpu_gfx: KEEP_VBIOS_GFXHUB=1 — CONTEXT0 after AUTOLOAD: "
                     "CNTL=0x%08x PT_BASE=0x%08x_%08x\n",
                     gc_test, pt_hi, pt_lo);
 
             /*
-             * Switch GFXHUB to our flat GART page table.
+             * Do NOT touch CONTEXT0 (VMID 0). AUTOLOAD/RLC configured it
+             * with firmware VA mappings (0x7000000003000 → TMR) that MEC
+             * needs for instruction fetch. Overwriting CONTEXT0 causes MEC
+             * to fault at the firmware VA and fall through to VBIOS code
+             * (stuck at 0x4044).
              *
-             * Earlier analysis showed the VBIOS PT must be preserved so
-             * that MEC can access firmware VA via GFXHUB. This was wrong.
-             * MEC instruction fetch uses LOCAL_INSTR_BASE (a physical
-             * aperture set by RLC during AUTOLOAD), which is independent
-             * of the GFXHUB page table. Every GFXHUB fault we have seen
-             * is at GART+16KB (queue buffer access), never at any firmware
-             * VA. Switching to our flat GART fixes queue buffer access
-             * while LOCAL_INSTR_BASE continues to handle firmware fetch.
+             * Instead, configure CONTEXT1 (VMID 1) with our flat GART PT
+             * for compute queue data access. HQDs use CP_HQD_VMID=1.
              */
-            gfxhub_gart_enable(dev);
-            flush_gpu_tlb(dev, 0, 1);
-            pr_info("gpu_gfx: GFXHUB switched from VBIOS PT to GART "
-                    "(was 0x%08x_%08x)\n", pt_hi, pt_lo);
+            gfxhub_enable_compute_context(dev);
+            flush_gpu_tlb(dev, 1, 1);
+            pr_info("gpu_gfx: GFXHUB CONTEXT1 (VMID 1) configured with GART "
+                    "PT — CONTEXT0 firmware VA mapping preserved\n");
         } else {
-            /* Reinitialize GFXHUB with our GART table. */
+            /*
+             * After AUTOLOAD, CONTEXT0 holds the firmware PT set by RLC.
+             * Same rule applies: leave CONTEXT0 alone, use CONTEXT1 for
+             * compute queue data.
+             */
             ULONG gc_test = gfxhub_rreg(dev, regGCVM_CONTEXT0_CNTL);
-            pr_info("gpu_gfx: reinitializing GFXHUB GART "
-                    "(was CONTEXT0_CNTL=0x%08x)\n", gc_test);
-            gfxhub_gart_enable(dev);
-            flush_gpu_tlb(dev, 0, 1);
-            pr_info("gpu_gfx: GFXHUB GART enabled\n");
+            pr_info("gpu_gfx: configuring GFXHUB CONTEXT1 for compute "
+                    "(CONTEXT0_CNTL=0x%08x preserved)\n", gc_test);
+            gfxhub_enable_compute_context(dev);
+            flush_gpu_tlb(dev, 1, 1);
+            pr_info("gpu_gfx: GFXHUB CONTEXT1 (VMID 1) enabled for compute\n");
         }
     }
 
@@ -5787,11 +5851,11 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
 
         if (keep_gfxhub_fw[0] == '1') {
             pr_info("gpu_gfx: KEEP_VBIOS_GFXHUB=1 — using firmware VA 0x%llx "
-                    "as PC_START (LOCAL_INSTR_BASE aperture maps it to TMR)\n",
+                    "as PC_START (CONTEXT0 maps it to TMR)\n",
                     (unsigned long long)dev->hw.gfx.mec_ucode_start);
             /* Don't override mec_ucode_start — firmware VA from PSP header.
-             * LOCAL_INSTR_BASE (set by RLC during AUTOLOAD) provides the
-             * physical backing; GFXHUB PT is not involved in instruction fetch. */
+             * AUTOLOAD/RLC configured GFXHUB CONTEXT0 (VMID 0) to map this
+             * VA → TMR. MEC uses CONTEXT0 for instruction fetch. */
         } else if (!(bl_status & 0x80000000)) {
             /* AUTOLOAD did NOT complete — firmware VA has no mapping.
              * Scan top of VRAM for TMR (decrypted firmware).
@@ -6324,7 +6388,7 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
     mqd[128] = (ULONG)(q->mqd_gpu_addr) & 0xFFFFFFFC;          /* cp_mqd_base_addr */
     mqd[129] = (ULONG)(q->mqd_gpu_addr >> 32) & 0xFFFFFFFF;    /* cp_mqd_base_addr_hi */
     mqd[130] = 1;      /* cp_hqd_active */
-    mqd[131] = 0;      /* cp_hqd_vmid = 0 */
+    mqd[131] = 1;      /* cp_hqd_vmid = 1 (CONTEXT1: our flat GART, firmware VA in CONTEXT0) */
     mqd[132] = (0x55 << 8) | 1;  /* cp_hqd_persistent_state: preload_size=0x55 (bits [17:8]), preload_req=1 (bit 0) */
     mqd[133] = 0x2;    /* cp_hqd_pipe_priority (tinygrad: 2) */
     mqd[134] = 0xF;    /* cp_hqd_queue_priority (tinygrad: 0xf) */
