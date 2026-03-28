@@ -447,11 +447,26 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                 char skip_fw[32] = {};
                 GetEnvironmentVariableA("HSAKMT_SKIP_FW_LOAD",
                     skip_fw, sizeof(skip_fw));
+
+                /* Auto-skip firmware loading if VBIOS AUTOLOAD already completed.
+                 * In this state PSP has already loaded/decrypted all firmware and
+                 * reloading via PSP ring hangs (PSP rejects duplicate loads).
+                 * We still call EnableAllSmuFeatures in case GFX features need
+                 * re-enabling after power state changes. */
+                BOOLEAN vbios_autoload_done =
+                    (g_wddm_lite_dev.hw.gfx.rlc_bootload_status & 0x80000000) != 0;
+
                 if (g_wddm_lite_dev.hw.psp_sos_alive) {
-                    GetEnvironmentVariableA("HSAKMT_SKIP_FW_LOAD",
-                        skip_fw, sizeof(skip_fw));
                     if (skip_fw[0] == '1') {
-                        pr_info("wddm_lite: firmware loading skipped\n");
+                        pr_info("wddm_lite: firmware loading skipped "
+                                "(HSAKMT_SKIP_FW_LOAD=1)\n");
+                    } else if (vbios_autoload_done) {
+                        pr_info("wddm_lite: firmware loading skipped — "
+                                "VBIOS AUTOLOAD already complete (0x%08x)\n",
+                                g_wddm_lite_dev.hw.gfx.rlc_bootload_status);
+                        /* Firmware already loaded by VBIOS; call EnableAllSmuFeatures
+                         * to ensure GFX power is up before gfx_init. */
+                        gpu_smu_enable_features(&g_wddm_lite_dev);
                     } else {
                         char fw_dir[256] = ".";
                         GetEnvironmentVariableA("HSAKMT_FW_DIR",
@@ -474,11 +489,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                 /* AUTOLOAD_RLC is now sent inside gpu_psp_load_all_fw as the
                  * last PSP ring command (matching amdgpu's psp_load_non_psp_fw). */
 
-                /* Step 7: SMU features — already called immediately after FW load.
-                 * Skip here to avoid double-sending EnableAllSmuFeatures. */
-                if (0 && g_wddm_lite_dev.hw.psp_sos_alive && skip_fw[0] != '1') {
-                    gpu_smu_enable_features(&g_wddm_lite_dev);
-                } else if (skip_fw[0] == '1') {
+                /* Step 7: SMU features — already called immediately after FW load
+                 * or in the vbios_autoload_done branch above. Skip here. */
+                if (skip_fw[0] == '1') {
                     pr_info("wddm_lite: SMU enable_features skipped (SKIP_FW_LOAD)\n");
                 }
 
