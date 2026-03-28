@@ -20,20 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// EA IF/GMI Bandwidth Workload (multi-GPU)
+// EA GMI Bandwidth Workload (multi-GPU)
 //
-// Target metrics: EA IF BW Bound - Combined (30.18.3),
-//                 EA read BW fraction - IF (30.13.3),
-//                 EA Stall Destination Dominance - IF (30.18.9),
-//                 EA-IF read BW (30.14.4)
+// Target metrics: EA GMI BW Bound - Combined (30.18.3),
+//                 EA read BW fraction - GMI (30.13.3),
+//                 EA Stall Destination Dominance - GMI (30.18.9),
+//                 EA to GMI read BW (30.14.4)
 //
 // Baseline: Streaming reads from remote GPU memory via peer access.
-//           All traffic traverses GMI/Infinity Fabric.
-//           Expected: IF BW Bound > 10%, read BW fraction IF > 90%.
+//           All traffic traverses GMI.
+//           Expected: GMI BW Bound > 10%, read BW fraction GMI > 90%.
 //
 // Optimized: Copy remote data to local GPU memory first, then read locally.
 //            All traffic via HBM.
-//            Expected: IF BW Bound ~ 0%, Stall Dominance HBM ~ 100%.
+//            Expected: GMI BW Bound ~ 0%, Stall Dominance HBM ~ 100%.
 //
 // Requires >= 2 GPUs. Skips gracefully on single-GPU systems.
 
@@ -136,8 +136,7 @@ int main(int argc, char** argv) {
 
     // Single dispatch for clean profiling
     auto start = std::chrono::high_resolution_clock::now();
-    hipLaunchKernelGGL(ea_fabric_bw_read, grid, block, 0, 0,
-                       read_ptr, d_out, N);
+    ea_fabric_bw_read<<<grid, block, 0, 0>>>(read_ptr, d_out, N);
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();
 

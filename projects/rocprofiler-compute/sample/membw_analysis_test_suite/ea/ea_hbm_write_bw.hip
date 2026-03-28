@@ -23,11 +23,11 @@
 // EA HBM Write Credit Pressure Workload
 //
 // Target metrics: EA HBM BW Bound - Write Credit Pressure (30.18.1),
-//                 EA-HBM write BW (30.14.1), EA Write Backpressure (30.18.5)
+//                 EA to HBM write BW (30.14.1), EA Write Backpressure (30.18.5)
 //
 // Baseline: Streaming writes to a 4GB buffer using grid-stride loop.
 //           Each thread writes sequentially, maximizing write request rate.
-//           Expected: Write Credit Pressure > 10%, high EA-HBM write BW.
+//           Expected: Write Credit Pressure > 10%, high EA to HBM write BW.
 //
 // Optimized: Accumulate partial results in registers across multiple iterations.
 //            Write only the final accumulated value, reducing total write
@@ -107,9 +107,9 @@ int main(int argc, char** argv) {
     // Single dispatch for clean profiling
     auto start = std::chrono::high_resolution_clock::now();
     if (use_optimized) {
-        hipLaunchKernelGGL(ea_hbm_write_bw_optimized, grid, block, 0, 0, d_data, N);
+        ea_hbm_write_bw_optimized<<<grid, block, 0, 0>>>(d_data, N);
     } else {
-        hipLaunchKernelGGL(ea_hbm_write_bw_baseline, grid, block, 0, 0, d_data, N);
+        ea_hbm_write_bw_baseline<<<grid, block, 0, 0>>>(d_data, N);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();

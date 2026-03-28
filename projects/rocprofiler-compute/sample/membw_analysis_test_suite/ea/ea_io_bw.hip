@@ -25,7 +25,7 @@
 // Target metrics: EA IO BW Bound - Combined (30.18.4),
 //                 EA read BW fraction - IO (30.13.4),
 //                 EA Stall Destination Dominance - IO (30.18.10),
-//                 EA-IO read BW (30.14.7)
+//                 EA to IO read BW (30.14.7)
 //
 // Baseline: Streaming reads from host-pinned (fine-grained coherent) memory.
 //           All traffic traverses PCIe/IO path.
@@ -108,8 +108,7 @@ int main(int argc, char** argv) {
 
     // Single dispatch for clean profiling
     auto start = std::chrono::high_resolution_clock::now();
-    hipLaunchKernelGGL(ea_io_bw_read, grid, block, 0, 0,
-                       read_ptr, d_out, N);
+    ea_io_bw_read<<<grid, block, 0, 0>>>(read_ptr, d_out, N);
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();
 

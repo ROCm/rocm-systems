@@ -115,11 +115,9 @@ int main(int argc, char** argv) {
     // Single dispatch for clean profiling
     auto start = std::chrono::high_resolution_clock::now();
     if (use_optimized) {
-        hipLaunchKernelGGL(ea_rw_balance_optimized, grid, block, 0, 0,
-                           d_src, d_dst, N);
+        ea_rw_balance_optimized<<<grid, block, 0, 0>>>(d_src, d_dst, N);
     } else {
-        hipLaunchKernelGGL(ea_rw_balance_baseline, grid, block, 0, 0,
-                           d_src, d_dst, N);
+        ea_rw_balance_baseline<<<grid, block, 0, 0>>>(d_src, d_dst, N);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();

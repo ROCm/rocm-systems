@@ -23,17 +23,17 @@
 // EA HBM Read Credit Pressure Workload
 //
 // Target metrics: EA HBM BW Bound - Read Credit Pressure (30.18.0),
-//                 EA-HBM read BW (30.14.0), EA read latency (30.14.10)
+//                 EA to HBM read BW (30.14.0), EA read latency (30.14.10)
 //
 // Baseline: Streaming reads from a 4GB buffer (>> 4MB L2) using grid-stride loop.
 //           Coalesced sequential access maximizes read request rate, flooding EA
 //           with outstanding read requests and exhausting HBM read credits.
-//           Expected: Read Credit Pressure > 10%, high EA-HBM read BW.
+//           Expected: Read Credit Pressure > 10%, high EA to HBM read BW.
 //
 // Optimized: Tiled access pattern where each workgroup reads a tile that fits
 //            partially in L2, then reuses it across multiple passes.
 //            L2 hits reduce EA read requests.
-//            Expected: Read Credit Pressure < 5%, lower EA-HBM read BW.
+//            Expected: Read Credit Pressure < 5%, lower EA to HBM read BW.
 
 #include <hip/hip_runtime.h>
 #include <iostream>
@@ -129,11 +129,9 @@ int main(int argc, char** argv) {
     // Single dispatch for clean profiling
     auto start = std::chrono::high_resolution_clock::now();
     if (use_optimized) {
-        hipLaunchKernelGGL(ea_hbm_read_bw_optimized, grid, block, 0, 0,
-                           d_data, d_out, N);
+        ea_hbm_read_bw_optimized<<<grid, block, 0, 0>>>(d_data, d_out, N);
     } else {
-        hipLaunchKernelGGL(ea_hbm_read_bw_baseline, grid, block, 0, 0,
-                           d_data, d_out, N);
+        ea_hbm_read_bw_baseline<<<grid, block, 0, 0>>>(d_data, d_out, N);
     }
     CHECK_HIP(hipDeviceSynchronize());
     auto end = std::chrono::high_resolution_clock::now();
