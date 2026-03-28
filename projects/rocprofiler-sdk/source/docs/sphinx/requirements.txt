@@ -18,7 +18,7 @@ breathe==4.36.0
     # via rocm-docs-core
 certifi==2025.1.31
     # via requests
-cffi==1.17.1
+cffi==2.0.0
     # via
     #   cryptography
     #   pynacl
@@ -33,7 +33,7 @@ click-log==0.4.0
     # via doxysphinx
 contourpy==1.3.1
     # via matplotlib
-cryptography==44.0.2
+cryptography==46.0.6
     # via pyjwt
 cycler==0.12.1
     # via matplotlib
@@ -178,9 +178,10 @@ tomli==2.2.1
     # via sphinx
 tqdm==4.67.1
     # via mpire
-typing-extensions==4.12.2
+typing-extensions==4.15.0
     # via
     #   beautifulsoup4
+    #   cryptography
     #   pydata-sphinx-theme
     #   pygithub
 urllib3==2.3.0
