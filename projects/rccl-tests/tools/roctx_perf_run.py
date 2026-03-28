@@ -355,7 +355,7 @@ def run_matrix(args, meta, run_dir):
                 tag = f"{test}/{dtype}/rep{rep}"
                 prof_dir = os.path.join(run_dir, f"{test}_{dtype}_rep{rep}_%rank%")
                 log_path = os.path.join(run_dir, f"{test}_{dtype}_rep{rep}.log")
-                os.makedirs(prof_dir, exist_ok=True)
+                #os.makedirs(prof_dir, exist_ok=True)
 
                 cmd = build_rocprofv3_cmd(args, test, dtype, prof_dir)
                 print(f"  [{tag}] profiling ...")

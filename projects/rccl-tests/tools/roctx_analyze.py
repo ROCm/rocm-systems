@@ -24,16 +24,18 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 COLLECTIVE_KERNEL_RE = re.compile(r"ncclDev")
 
 BUS_BW_FACTOR = {
-    "all_reduce":      lambda n: 2 * (n - 1) / n,
     "all_gather":      lambda n: (n - 1) / n,
-    "reduce_scatter":  lambda n: (n - 1) / n,
+    "all_reduce_bias": lambda n: 2 * (n - 1) / n,
+    "all_reduce":      lambda n: 2 * (n - 1) / n,
+    "alltoallv":       lambda n: (n - 1) / n,
     "alltoall":        lambda n: (n - 1) / n,
     "broadcast":       lambda n: 1,
-    "reduce":          lambda n: 1,
-    "scatter":         lambda n: 1,
     "gather":          lambda n: 1,
-    "sendrecv":        lambda n: 1,
     "hypercube":       lambda n: 2 * (n - 1) / n,
+    "reduce":          lambda n: 1,
+    "reduce_scatter":  lambda n: (n - 1) / n,
+    "scatter":         lambda n: 1,
+    "sendrecv":        lambda n: 1,
 }
 
 MARKER_MSG_RE = re.compile(
@@ -137,10 +139,10 @@ def infer_collective(run_dir):
     return None
 
 
-# Matches subdirectory names like  all_reduce_bfloat16_rep3
+# Matches subdirectory names like  all_reduce_bfloat16_rep3_4
 _SUBDIR_RE = re.compile(
     r"^(?P<collective>" + "|".join(re.escape(k) for k in sorted(BUS_BW_FACTOR, key=len, reverse=True)) + r")"
-    r"_(?P<dtype>.+)_rep(?P<rep>\d+)$"
+    r"_(?P<dtype>.+)_rep(?P<rep>\d+)_(?P<rank>\d+)$"
 )
 
 
