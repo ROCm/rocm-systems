@@ -1134,8 +1134,9 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_bin
   // If this header read is inconsequential, we could only cache full read.
   // However, it seems reading the gpu_metrics sysfs in any capacity
   // is the issue, so should remain.
-  const std::string key =
-      path_ + "/device/" + kDevAttribNameMap.at(type) + "#" + std::to_string(b_size);
+  const std::string gpu_metrics_path = path_ + "/device/" + kDevAttribNameMap.at(type);
+
+  const std::string key = gpu_metrics_path + "#" + std::to_string(b_size);
   GpuMetricsCache* cache_ptr = nullptr;
   {
     std::lock_guard<std::mutex> map_lk(g_gpu_metrics_cache_map_mu);
@@ -1163,8 +1164,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_bin
   }
 
   FILE* ptr;
-  sysfs_path += "/device/";
-  sysfs_path += kDevAttribNameMap.at(type);
+  sysfs_path = gpu_metrics_path;
 
   ptr = fopen(sysfs_path.c_str(), "rb");
   if (!ptr) {
