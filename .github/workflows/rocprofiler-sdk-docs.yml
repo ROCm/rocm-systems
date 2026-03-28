@@ -90,10 +90,10 @@ jobs:
         shell: bash
         working-directory: /tmp
         run: |
-          mv "${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz" .
+          mv "${{ env.ROCM_PATH }}-gfx94X.tar.gz" .
           rm -rf ${{ env.ROCM_PATH }}*
           mkdir -p "${{ env.ROCM_PATH }}"
-          tar -xf "rocm-${{ matrix.system.gpu-target }}.tar.gz" -C "${{ env.ROCM_PATH }}"
+          tar -xf rocm-gfx94X.tar.gz -C "${{ env.ROCM_PATH }}"
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
       - name: Install os essentials
