@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -72,8 +71,6 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     return calc_ai_analyze(
         workload=workload,
         pmc_df=pmc_df,
-        mspec=mock.MagicMock(),
-        sort_type="kernels",
         config={},
         arch_config=arch_config,
     )

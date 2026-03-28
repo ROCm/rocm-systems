@@ -43,16 +43,6 @@ SUPPORTED_ARCHS = {
 }
 
 
-class MockMSpec:
-    def __init__(
-        self, gpu_model="mi300a", gpu_arch="gfx942", compute_partition=None, l2_banks=32
-    ):
-        self.gpu_model = gpu_model
-        self.gpu_arch = gpu_arch
-        self.compute_partition = compute_partition
-        self.l2_banks = l2_banks
-
-
 class MockArgs:
     def __init__(self, **kwargs):
         # Set kwargs as attributes
@@ -1377,15 +1367,6 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     with open(workload_dir + "/out/pmc_1/results_0.csv", "w") as f:
         f.write(csv_content)
 
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi250x"
-            self.l2_banks = 32
-            self.gpu_arch = "gfx90a"
-            self.compute_partition = "CPX"
-
-    mspec = MockSpec()
-
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
@@ -1397,9 +1378,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
         "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"]
     )
 
-    utils_profile.run_prof(
-        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-    )
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
     assert Path(workload_dir + "/test.csv").exists()
 
@@ -1419,15 +1398,6 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     fname.write_text("pmc: SQ_WAVES")
     workload_dir = str(tmp_path / "workload")
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
-
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi300x"
-            self.gpu_arch = "gfx942"
-            self.compute_partition = "SPX"
-            self.l2_banks = 32
-
-    mspec = MockSpec()
 
     csv_files = [workload_dir + "/out/pmc_1/converted.csv"]
 
@@ -1476,9 +1446,7 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.shutil.copyfile", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.shutil.rmtree", lambda *a, **k: None)
 
-    utils_profile.run_prof(
-        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-    )
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
@@ -1495,15 +1463,6 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     fname = tmp_path / "test.txt"
     fname.write_text("pmc: SQ_WAVES")
     workload_dir = str(tmp_path / "workload")
-
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi300x"
-            self.gpu_arch = "gfx942"
-            self.compute_partition = "SPX"
-            self.l2_banks = 32
-
-    mspec = MockSpec()
 
     profiler_options = {
         "APP_CMD": ["./test_app"],
@@ -1527,7 +1486,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
     utils_profile.run_prof(
-        str(fname), profiler_options, workload_dir, mspec, logging.INFO, "csv"
+        str(fname), profiler_options, workload_dir, logging.INFO, "csv"
     )
 
 
@@ -1548,15 +1507,6 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     yaml_file.write_text("counters:\n  - TCC_HIT")
     workload_dir = str(tmp_path / "workload")
 
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi300x"
-            self.gpu_arch = "gfx942"
-            self.compute_partition = "SPX"
-            self.l2_banks = 32
-
-    mspec = MockSpec()
-
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
@@ -1569,12 +1519,11 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
     monkeypatch.setattr(
-        "yaml.safe_load", lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}}
+        "utils.utils_profile.yaml.safe_load",
+        lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}},
     )
 
-    utils_profile.run_prof(
-        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-    )
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
 def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
@@ -1592,15 +1541,6 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     fname.write_text("pmc: SQ_WAVES")
     workload_dir = str(tmp_path / "workload")
 
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi300x"
-            self.gpu_arch = "gfx942"
-            self.compute_partition = "SPX"
-            self.l2_banks = 32
-
-    mspec = MockSpec()
-
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
@@ -1616,9 +1556,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_profile.run_prof(
-            str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-        )
+        utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
 def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
@@ -1635,15 +1573,6 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     fname = tmp_path / "test.txt"
     fname.write_text("pmc: SQ_WAVES")
     workload_dir = str(tmp_path / "workload")
-
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi300x"
-            self.gpu_arch = "gfx942"
-            self.compute_partition = "SPX"
-            self.l2_banks = 32
-
-    mspec = MockSpec()
 
     captured_env = {}
 
@@ -1663,9 +1592,7 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils_profile.run_prof(
-        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-    )
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
 def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
@@ -1684,15 +1611,6 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     workload_dir = str(tmp_path / "workload")
 
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
-
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi300x"
-            self.gpu_arch = "gfx942"
-            self.compute_partition = "SPX"
-            self.l2_banks = 32
-
-    mspec = MockSpec()
 
     csv_content = (
         "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
@@ -1730,9 +1648,7 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
-    utils_profile.run_prof(
-        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-    )
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
 def test_run_prof_no_results_files(tmp_path, monkeypatch):
@@ -1750,15 +1666,6 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     fname.write_text("pmc: SQ_WAVES")
     workload_dir = str(tmp_path / "workload")
 
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi300x"
-            self.gpu_arch = "gfx942"
-            self.compute_partition = "SPX"
-            self.l2_banks = 32
-
-    mspec = MockSpec()
-
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv2")
     monkeypatch.setattr(
         "utils.utils_profile.capture_subprocess_output",
@@ -1768,9 +1675,7 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
-    utils_profile.run_prof(
-        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-    )
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
 def test_run_prof_header_standardization(tmp_path, monkeypatch):
@@ -1789,15 +1694,6 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     workload_dir = str(tmp_path / "workload")
 
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
-
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi300x"
-            self.gpu_arch = "gfx942"
-            self.compute_partition = "SPX"
-            self.l2_banks = 32
-
-    mspec = MockSpec()
 
     results_csv = workload_dir + "/out/pmc_1/results_test.csv"
 
@@ -1859,9 +1755,7 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.shutil.copyfile", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.shutil.rmtree", lambda *a, **k: None)
 
-    utils_profile.run_prof(
-        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-    )
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
     # Verify that rename_columns was called with the header standardization mapping
     assert len(rename_calls) == 1
@@ -1888,15 +1782,6 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     fname.write_text("pmc: TCC_HIT[0]")
     workload_dir = str(tmp_path / "workload")
 
-    class MockSpec:
-        def __init__(self):
-            self.gpu_model = "mi300x"
-            self.gpu_arch = "gfx942"
-            self.compute_partition = "SPX"
-            self.l2_banks = 32
-
-    mspec = MockSpec()
-
     # Mock functions
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
@@ -1917,9 +1802,7 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
 
     # Execute function
-    utils_profile.run_prof(
-        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-    )
+    utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
 def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
@@ -1989,7 +1872,6 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_profile.Path", path_side_effect)
 
-    mspec = MockMSpec(gpu_model="mi250")
     loglevel = logging.DEBUG
     format_rocprof_output = True
 
@@ -2039,7 +1921,6 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             fname_str,
             profiler_options,
             workload_dir_str,
-            mspec,
             loglevel,
             format_rocprof_output,
         )
@@ -2084,7 +1965,6 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             fname_str,
             profiler_options,
             workload_dir_str,
-            mspec,
             loglevel,
             format_rocprof_output,
         )
@@ -2183,7 +2063,6 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.shutil.copyfile", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.shutil.rmtree", lambda *a, **k: None)
 
-    mspec = MockMSpec()
     loglevel = logging.INFO
     format_rocprof_output = "csv"
 
@@ -2196,7 +2075,6 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
         fname_str,
         profiler_options_cli_kokkos,
         workload_dir_str,
-        mspec,
         loglevel,
         format_rocprof_output,
     )
