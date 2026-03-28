@@ -922,7 +922,7 @@ Panel Config:
     # These metrics use (GRBM_GUI_ACTIVE_PER_XCD * cu_per_gpu) as denominator, enabling direct comparison across components.
     # The cu_per_gpu factor normalizes the per-CU counter sums to give average percentage per instance.
     Normalized L1 Cache - VMEM stalled by L1 Cache: >-
-      Average percentage of time each SQ is stalled on VMEM instructions waiting for L1 Cache.
+      Average percentage of time each CU is stalled on VMEM instructions waiting for L1 Cache.
       Normalized by CU count for cross-component comparison (0-100% range).
       Equation: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
     Normalized L1 Cache - TA addr stalled by TCP: >-
