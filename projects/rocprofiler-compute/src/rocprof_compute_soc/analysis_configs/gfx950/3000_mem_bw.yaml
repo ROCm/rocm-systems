@@ -12,52 +12,52 @@ Panel Config:
         unit: Unit
       metric:
         L1 Cache - VMEM stalled by L1 Cache:
-          value: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM(SQ_BUSY_CYCLES)
+          value: (SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM(SQ_BUSY_CYCLES)) * 100
           unit: Percent
         L1 Cache - TA coalesce rate:
-          value: SUM(((4 * TA_BUFFER_WAVEFRONTS_sum) * 100)) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)
+          value: (SUM(4 * TA_BUFFER_WAVEFRONTS_sum) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)) * 100
           unit: Percent
         L1 Cache - VL1 coalesce efficiency:
-          value: SUM(((TA_TOTAL_WAVEFRONTS_sum * 64) * 100)) / SUM((TCP_TOTAL_ACCESSES_sum * 4))
+          value: (SUM(TA_TOTAL_WAVEFRONTS_sum * 64) / SUM(TCP_TOTAL_ACCESSES_sum * 4)) * 100
           unit: Percent
         L1 Cache - TA addr stalled by TCP:
-          value: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+          value: (SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / SUM(TA_TA_BUSY_sum)) * 100
           unit: Percent
         L1 Cache - TA addr stalled by TD:
-          value: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+          value: (SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / SUM(TA_TA_BUSY_sum)) * 100
           unit: Percent
         L1 Cache - TA data stalled by TCP:
-          value: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+          value: (SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / SUM(TA_TA_BUSY_sum)) * 100
           unit: Percent
         L1 Cache - TA addresser stalled:
-          value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+          value: (SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / SUM(TA_TA_BUSY_sum)) * 100
           unit: Percent
         L1 Cache - TA stalled by TCP (aggregated):
-          value: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+          value: (SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)) * 100
           unit: Percent
         L1 Cache - TCP hit rate:
-          value: SUM(((TCP_TOTAL_CACHE_ACCESSES_sum - TCP_CACHE_MISS_sum) * 100)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          value: (SUM(TCP_TOTAL_CACHE_ACCESSES_sum - TCP_CACHE_MISS_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)) * 100
           unit: Percent
         L1 Cache - TCP miss rate:
-          value: SUM((TCP_CACHE_MISS_sum * 100)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          value: (SUM(TCP_CACHE_MISS_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)) * 100
           unit: Percent
         L1 Cache - TCP stalled by UTCL1:
-          value: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+          value: (SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / SUM(TCP_GATE_EN2_sum)) * 100
           unit: Percent
         L1 Cache - TCP stalled by UTCL2:
-          value: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+          value: (SUM(TCP_UTCL1_STALL_LFIFO_NO_RES_sum) / SUM(TCP_GATE_EN2_sum)) * 100
           unit: Percent
         L1 Cache - UTCL1 hit rate:
-          value: SUM((TCP_UTCL1_TRANSLATION_HIT_sum * 100)) / SUM(TCP_UTCL1_REQUEST_sum)
+          value: (SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM(TCP_UTCL1_REQUEST_sum)) * 100
           unit: Percent
         L1 Cache - UTCL1 miss rate:
-          value: SUM((TCP_UTCL1_TRANSLATION_MISS_sum * 100)) / SUM(TCP_UTCL1_REQUEST_sum)
+          value: (SUM(TCP_UTCL1_TRANSLATION_MISS_sum) / SUM(TCP_UTCL1_REQUEST_sum)) * 100
           unit: Percent
         L1 Cache - TCP stalled by TD:
-          value: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+          value: (SUM(TCP_TD_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)) * 100
           unit: Percent
         L1 Cache - TCP stalled by L2:
-          value: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+          value: (SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)) * 100
           unit: Percent
         L1 Cache - Tag RAM 0 Req:
           value: SUM(TCP_TAGRAM0_REQ_sum) / SUM($denom)
@@ -92,7 +92,7 @@ Panel Config:
           value: SUM(TCP_TOTAL_ACCESSES_sum) / SUM(TCP_GATE_EN2_sum)
           unit: Requests per Cycle
         L1 utilization:
-          value: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
+          value: (SUM(TCP_GATE_EN2_sum) / SUM(TCP_GATE_EN1_sum)) * 100
           unit: Percent
         L1 average latency:
           value: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TOTAL_ACCESSES_sum)
@@ -139,16 +139,16 @@ Panel Config:
         unit: Unit
       metric:
         TD - stalled by TCP:
-          value: SUM((TD_TC_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          value: (SUM(TD_TC_STALL_sum) / SUM(TD_TD_BUSY_sum)) * 100
           unit: Percent
         TD - input FIFO full:
-          value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          value: (SUM(TD_TC_TD_FIFO_FULL_sum) / SUM(TD_TD_BUSY_sum)) * 100
           unit: Percent
         TD - output FIFO full:
-          value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          value: (SUM(TD_OUTPUT_FIFO_FULL_sum) / SUM(TD_TD_BUSY_sum)) * 100
           unit: Percent
         TD - stalled by SPI:
-          value: SUM((TD_SPI_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          value: (SUM(TD_SPI_STALL_sum) / SUM(TD_TD_BUSY_sum)) * 100
           unit: Percent
         TD - L1-CU throughput:
           value: SUM(TD_LOAD_WAVEFRONT_sum) / SUM(TD_TD_BUSY_sum)
@@ -163,7 +163,7 @@ Panel Config:
           value: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)
           unit: (Wavefronts + $normUnit)
         TD - coalescable wavefronts rate:
-          value: SUM((TD_COALESCABLE_WAVEFRONT_sum * 100)) / SUM(TD_LOAD_WAVEFRONT_sum)
+          value: (SUM(TD_COALESCABLE_WAVEFRONT_sum) / SUM(TD_LOAD_WAVEFRONT_sum)) * 100
           unit: Percent
   - metric_table:
       id: 3004
@@ -175,49 +175,49 @@ Panel Config:
       metric:
         # SQ stalls (upstream)
         Normalized L1 Cache - VMEM stalled by L1 Cache:
-          value: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         # TA stalls
         Normalized L1 Cache - TA addr stalled by TCP:
-          value: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized L1 Cache - TA addr stalled by TD:
-          value: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized L1 Cache - TA data stalled by TCP:
-          value: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized L1 Cache - TA addresser stalled:
-          value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized L1 Cache - TA stalled by TCP (aggregated):
-          value: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         # TCP stalls
         Normalized L1 Cache - TCP stalled by UTCL1:
-          value: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized L1 Cache - TCP stalled by UTCL2:
-          value: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TCP_UTCL1_STALL_LFIFO_NO_RES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized L1 Cache - TCP stalled by TD:
-          value: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TCP_TD_TCP_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized L1 Cache - TCP stalled by L2:
-          value: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         # TD stalls
         Normalized TD - stalled by TCP:
-          value: SUM((TD_TC_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TD_TC_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized TD - input FIFO full:
-          value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TD_TC_TD_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized TD - output FIFO full:
-          value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TD_OUTPUT_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
         Normalized TD - stalled by SPI:
-          value: SUM((TD_SPI_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: ((SUM(TD_SPI_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
           unit: Percent
   - metric_table:
       id: 3005
@@ -420,7 +420,7 @@ Panel Config:
           value: ((SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)) * 100)
           unit: Percent
         L2 utilization:
-          value: ((SUM(TCC_BUSY_sum) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)) * 100)
+          value: ((SUM(TCC_BUSY_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100)
           unit: Percent
         L2 tag stall rate:
           value: ((SUM(TCC_TAG_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
@@ -661,43 +661,43 @@ Panel Config:
         value: Avg
         unit: Unit
       metric:
-        # Normalized stall metrics use $GRBM_GUI_ACTIVE_PER_XCD as denominator
-        # This enables direct comparison with L1 stall metrics (same denominator)
+        # Normalized stall metrics use (GRBM_GUI_ACTIVE_PER_XCD * total_l2_chan) as denominator.
+        # The total_l2_chan factor normalizes the per-channel counter sums to give average percentage per channel.
         Normalized L2 - Tag stall:
-          value: (SUM(TCC_TAG_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_TAG_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 - Input buffer stall:
-          value: (SUM(TCC_IB_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_IB_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 - Latency FIFO full:
-          value: (SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_LATENCY_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 - Source FIFO full:
-          value: (SUM(TCC_SRC_FIFO_FULL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_SRC_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 to EA - Write stall:
-          value: (SUM(TCC_EA0_WRREQ_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_EA0_WRREQ_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 to EA - Too many writes stall:
-          value: (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 to EA - Read credit stall (HBM):
-          value: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 to EA - Write credit stall (HBM):
-          value: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 to EA - Read credit stall (GMI):
-          value: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 to EA - Write credit stall (GMI):
-          value: (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 to EA - Read credit stall (IO):
-          value: (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
         Normalized L2 to EA - Write credit stall (IO):
-          value: (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          value: (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))) * 100
           unit: Percent
   - metric_table:
       id: 3011
@@ -924,59 +924,59 @@ Panel Config:
     Normalized L1 Cache - VMEM stalled by L1 Cache: >-
       Average percentage of time each CU is stalled on VMEM instructions waiting for L1 Cache.
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA addr stalled by TCP: >-
       Average percentage of time each TA address path is stalled by TCP.
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA addr stalled by TD: >-
       Average percentage of time each TA address path is stalled by TD.
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA data stalled by TCP: >-
       Average percentage of time each TA data path is stalled by TCP.
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA addresser stalled: >-
       Average percentage of time each TA addresser is stalled.
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA stalled by TCP (aggregated): >-
       Average percentage of time each TA is stalled by TCP (from TCP perspective).
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TCP stalled by UTCL1: >-
       Average percentage of time each TCP is stalled by UTCL1 (TLB inflight saturation).
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TCP stalled by UTCL2: >-
       Average percentage of time each TCP is stalled by UTCL2 (TLB miss latency).
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TCP_UTCL1_STALL_LFIFO_NO_RES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TCP stalled by TD: >-
       Average percentage of time each TCP is stalled by TD (return path backpressure).
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TCP_TD_TCP_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TCP stalled by L2: >-
       Average percentage of time each TCP is stalled by L2 (TCC backpressure via TCR).
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized TD - stalled by TCP: >-
       Average percentage of time each TD is stalled waiting for TCP data.
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TD_TC_STALL_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TD_TC_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized TD - input FIFO full: >-
       Average percentage of time each TD input FIFO is full.
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TD_TC_TD_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized TD - output FIFO full: >-
       Average percentage of time each TD output FIFO is full.
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TD_OUTPUT_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized TD - stalled by SPI: >-
       Average percentage of time each TD is stalled by SPI.
       Normalized by CU count for cross-component comparison (0-100% range).
-      Equation: SUM((TD_SPI_STALL_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+      Equation: ((SUM(TD_SPI_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     # Table 3005: Normalized Throughput Metrics (per Second)
     Normalized TA processing rate: >-
       Wavefronts processed by TA per second of kernel execution.
@@ -1131,66 +1131,67 @@ Panel Config:
       High values indicate external coherence traffic is evicting useful data.
       Equation: (SUM(TCC_PROBE_EVICT_sum) / SUM(TCC_PROBE_sum)) * 100
     # Table 3010: Normalized L2 Stall Metrics (%)
-    # These metrics use $GRBM_GUI_ACTIVE_PER_XCD as denominator, enabling direct comparison with L1 stalls.
+    # These metrics use (GRBM_GUI_ACTIVE_PER_XCD * total_l2_chan) as denominator.
+    # The total_l2_chan factor normalizes the per-channel counter sums to give average percentage per channel.
     Normalized L2 - Tag stall: >-
-      Percentage of kernel execution time the L2 tag pipeline was stalled for any reason.
+      Average percentage of time each L2 channel's tag pipeline was stalled for any reason.
       This is the primary L2 bottleneck indicator (lump sum of all internal TCC stalls).
-      Normalized to kernel cycles for cross-component comparison with L1 stalls.
-      Equation: (SUM(TCC_TAG_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_TAG_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 - Input buffer stall: >-
-      Percentage of kernel execution time the L2 input buffer was stalled, meaning L2
+      Average percentage of time each L2 channel's input buffer was stalled, meaning L2
       cannot accept new requests from L1. Indicates L1-to-L2 interface bottleneck.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_IB_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_IB_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 - Latency FIFO full: >-
-      Percentage of kernel execution time the L2 latency FIFO was full, indicating
+      Average percentage of time each L2 channel's latency FIFO was full, indicating
       too many requests are pending in the L2 cache. Suggests L2 internal congestion.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_LATENCY_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 - Source FIFO full: >-
-      Percentage of kernel execution time the L2 source data FIFO was full, indicating
+      Average percentage of time each L2 channel's source data FIFO was full, indicating
       the write data path is saturated.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_SRC_FIFO_FULL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_SRC_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Write stall: >-
-      Percentage of kernel execution time L2 write requests to L2 to memory through EA were stalled.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_EA0_WRREQ_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Average percentage of time each L2 channel's write requests to memory through EA were stalled.
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_EA0_WRREQ_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Too many writes stall: >-
-      Percentage of kernel execution time L2 could not send write requests to memory
+      Average percentage of time each L2 channel could not send write requests to memory
       because maximum pending EA write requests was reached. Indicates write credit starvation.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Read credit stall (HBM): >-
-      Percentage of kernel execution time L2 read requests were stalled due to HBM
+      Average percentage of time each L2 channel's read requests were stalled due to HBM
       credit exhaustion. High values indicate HBM read bandwidth is saturated.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Write credit stall (HBM): >-
-      Percentage of kernel execution time L2 write requests were stalled due to HBM
+      Average percentage of time each L2 channel's write requests were stalled due to HBM
       credit exhaustion. High values indicate HBM write bandwidth is saturated.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Read credit stall (GMI): >-
-      Percentage of kernel execution time L2 read requests were stalled due to GMI
+      Average percentage of time each L2 channel's read requests were stalled due to GMI
       credit exhaustion. High values indicate remote read bandwidth is saturated.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Write credit stall (GMI): >-
-      Percentage of kernel execution time L2 write requests were stalled due to GMI
+      Average percentage of time each L2 channel's write requests were stalled due to GMI
       credit exhaustion. High values indicate remote write bandwidth is saturated.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Read credit stall (IO): >-
-      Percentage of kernel execution time L2 read requests were stalled due to IO
+      Average percentage of time each L2 channel's read requests were stalled due to IO
       interface credit exhaustion. High values indicate PCIe/IO read bandwidth is saturated.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Write credit stall (IO): >-
-      Percentage of kernel execution time L2 write requests were stalled due to IO
+      Average percentage of time each L2 channel's write requests were stalled due to IO
       interface credit exhaustion. High values indicate PCIe/IO write bandwidth is saturated.
-      Normalized to kernel cycles for cross-component comparison.
-      Equation: (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Equation: (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     # Table 3011: Normalized L2 Throughput Metrics (per Second)
     Normalized L2 read requests: >-
       L2 read requests per second of kernel execution.
