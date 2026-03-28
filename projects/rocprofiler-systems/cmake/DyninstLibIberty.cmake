@@ -87,6 +87,9 @@ else()
             ${DYNINST_BINUTILS_DOWNLOAD_URL}
             https://ftp.gnu.org/gnu/binutils/binutils-2.46.0.tar.gz
             https://sourceware.org/pub/binutils/releases/binutils-2.46.0.tar.gz
+        PATCH_COMMAND
+            ${CMAKE_COMMAND} -E chdir <SOURCE_DIR> patch -p1 -i
+            ${CMAKE_CURRENT_LIST_DIR}/patches/binutils-readelf-dump-relocations-rels.patch
         BUILD_IN_SOURCE 1
         CONFIGURE_COMMAND
             ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
