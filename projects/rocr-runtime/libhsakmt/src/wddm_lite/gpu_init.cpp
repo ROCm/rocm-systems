@@ -5699,6 +5699,9 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
         ULONG  mec_code_sz = dev->hw.gfx.mec_fw_code_size;
         UCHAR *mec_data = dev->hw.gfx.mec_fw_data;
         ULONG  mec_data_sz = dev->hw.gfx.mec_fw_data_size;
+        /* Preserve AUTOLOAD status — needed by Step 0b to take TLB-safe
+         * VMID1 path when MEC is already executing from firmware VA. */
+        ULONG early_bl = dev->hw.gfx.rlc_bootload_status;
         memset(&dev->hw.gfx, 0, sizeof(dev->hw.gfx));
         dev->hw.gfx.pfp_ucode_start = pfp;
         dev->hw.gfx.me_ucode_start  = me;
@@ -5707,6 +5710,7 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
         dev->hw.gfx.mec_fw_code_size = mec_code_sz;
         dev->hw.gfx.mec_fw_data = mec_data;
         dev->hw.gfx.mec_fw_data_size = mec_data_sz;
+        dev->hw.gfx.rlc_bootload_status = early_bl;
     }
 
     /* Step 0: Disable GFXOFF so GC registers are accessible.
