@@ -3932,6 +3932,34 @@ static void gfxhub_enable_compute_context(struct WddmLiteDevice *dev)
 }
 
 
+/*
+ * Minimal VMID 1 setup that does NOT invalidate L2 or TLBs.
+ *
+ * Used when VBIOS AUTOLOAD has already completed and MEC is running.
+ * In this state, MEC has active TLB entries for firmware VA
+ * (0x7000000003000) in GFXHUB CONTEXT0. Calling gfxhub_init_cache
+ * (which writes GCVM_L2_CNTL2 = invalidate_all) would evict those
+ * entries. After eviction, GFXHUB walks CONTEXT0 (our flat GART,
+ * only covers [gart_start, gart_end]) and firmware VA is out of range
+ * → MEC faults and falls through to VBIOS code at 0x4044.
+ *
+ * This function only writes CONTEXT1 registers and the VMID 1 CNTL
+ * bit, which are safe to write without disturbing MEC execution.
+ */
+static void gfxhub_setup_vmid1_no_invalidate(struct WddmLiteDevice *dev)
+{
+    /* Enable CONTEXT1 (VMID 1) with same permission bits as gfxhub_setup_vmid_config. */
+    ULONG val = VM_CONTEXT_ENABLE_CONTEXT;
+    val |= (3 & 0x3) << 1;
+    val |= (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10);
+    val |= (1 << 11) | (1 << 12) | (1 << 13);
+    gfxhub_wreg(dev, regGCVM_CONTEXT1_CNTL, val);
+
+    /* Set VMID 1 PAGE_TABLE_BASE/START/END without global TLB invalidation. */
+    gfxhub_init_compute_vmid1(dev);
+}
+
+
 static void flush_gpu_tlb(struct WddmLiteDevice *dev, int vmid,
                           int is_gfxhub);
 
@@ -5712,20 +5740,36 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
                     "CNTL=0x%08x PT_BASE=0x%08x_%08x\n",
                     gc_test, pt_hi, pt_lo);
 
-            /*
-             * Do NOT touch CONTEXT0 (VMID 0). AUTOLOAD/RLC configured it
-             * with firmware VA mappings (0x7000000003000 → TMR) that MEC
-             * needs for instruction fetch. Overwriting CONTEXT0 causes MEC
-             * to fault at the firmware VA and fall through to VBIOS code
-             * (stuck at 0x4044).
-             *
-             * Instead, configure CONTEXT1 (VMID 1) with our flat GART PT
-             * for compute queue data access. HQDs use CP_HQD_VMID=1.
-             */
-            gfxhub_enable_compute_context(dev);
-            flush_gpu_tlb(dev, 1, 1);
-            pr_info("gpu_gfx: GFXHUB CONTEXT1 (VMID 1) configured with GART "
-                    "PT — CONTEXT0 firmware VA mapping preserved\n");
+            if (dev->hw.gfx.rlc_bootload_status & 0x80000000) {
+                /*
+                 * VBIOS AUTOLOAD was already complete when our driver started.
+                 * MEC is (or was) running with TLB entries for firmware VA
+                 * cached from VBIOS GFXHUB setup. gfxhub_enable_compute_context
+                 * calls gfxhub_init_cache which writes GCVM_L2_CNTL2 to
+                 * invalidate ALL TLBs — evicting the firmware VA entry. After
+                 * eviction, GFXHUB walks CONTEXT0 (flat GART, only covers
+                 * [gart_start, gart_end]) and firmware VA is out of range →
+                 * MEC faults and executes VBIOS code at 0x4044.
+                 *
+                 * Use the minimal path: only set CONTEXT1 registers without
+                 * any global TLB/L2 invalidation. VMID 1 TLB flush is still
+                 * needed (to activate the new CONTEXT1 mapping), but VMID 0
+                 * TLBs must remain intact.
+                 */
+                gfxhub_setup_vmid1_no_invalidate(dev);
+                flush_gpu_tlb(dev, 1, 1);
+                pr_info("gpu_gfx: GFXHUB CONTEXT1 (VMID 1) set without global "
+                        "TLB invalidation — MEC firmware VA TLBs preserved\n");
+            } else {
+                /*
+                 * Fresh AUTOLOAD path: MEC wasn't running before, so global
+                 * TLB invalidation is safe. Full compute context setup.
+                 */
+                gfxhub_enable_compute_context(dev);
+                flush_gpu_tlb(dev, 1, 1);
+                pr_info("gpu_gfx: GFXHUB CONTEXT1 (VMID 1) configured with GART "
+                        "PT — CONTEXT0 firmware VA mapping preserved\n");
+            }
         } else {
             /*
              * After AUTOLOAD, CONTEXT0 holds the firmware PT set by RLC.
