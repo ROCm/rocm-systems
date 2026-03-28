@@ -49,54 +49,5 @@ class Workload:
     matched_torch_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
-# Metrics will be calculated ONLY when the header(key) is in below list
-SUPPORTED_FIELD = [
-    "Value",
-    "Minimum",
-    "Maximum",
-    "Average",
-    "Median",
-    "Min",
-    "Max",
-    "Avg",
-    "Pct of Peak",
-    "Peak",
-    "Peak (Empirical)",
-    "Count",
-    "Mean",
-    "Percent",
-    "Std Dev",
-    "Q1",
-    "Q3",
-    "Expression",
-    # Special keywords for L2 channel
-    "Channel",
-    "L2 Cache Hit Rate",
-    "Requests",
-    "L2 Read",
-    "L2 Write",
-    "L2 Atomic",
-    "L2-Fabric Requests",
-    "L2-Fabric Read",
-    "L2-Fabric Write and Atomic",
-    "L2-Fabric Atomic",
-    "L2 Read Req",
-    "L2 Write Req",
-    "L2 Atomic Req",
-    "L2-Fabric Read Req",
-    "L2-Fabric Write and Atomic Req",
-    "L2-Fabric Atomic Req",
-    "L2-Fabric Read Latency",
-    "L2-Fabric Write Latency",
-    "L2-Fabric Atomic Latency",
-    "L2-Fabric Read Stall (PCIe)",
-    "L2-Fabric Read Stall (Infinity Fabric™)",
-    "L2-Fabric Read Stall (HBM)",
-    "L2-Fabric Write Stall (PCIe)",
-    "L2-Fabric Write Stall (Infinity Fabric™)",
-    "L2-Fabric Write Stall (HBM)",
-    "L2-Fabric Write Starve",
-]
-
 # The prefix of raw pmc_perf.csv
 PMC_PERF_FILE_PREFIX = "pmc_perf"
