@@ -1,0 +1,17 @@
+Fix -Werror=maybe-uninitialized on dump_relocations (GCC 14+).
+
+GCC does not prove that rels is set on all paths before free(rels); initializing
+matches the intended contract (slurp_* always assigns through &rels when entered).
+
+--- a/binutils/readelf.c
++++ b/binutils/readelf.c
+@@ -2259,7 +2259,7 @@ dump_relocations (Filedata *          filedata,
+ 		  bool                is_dynsym,
+ 		  bool                dump_reloc)
+ {
+   size_t i;
+-  Elf_Internal_Rela * rels;
++  Elf_Internal_Rela * rels = NULL;
+   bool res = true;
+
+   if (rel_type == reltype_unknown)
