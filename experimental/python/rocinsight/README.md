@@ -56,13 +56,13 @@ identical to the rocprofiler-sdk version.
 
 ```bash
 # Install directly from git — no clone needed, no C++ compiler required
-pip install 'rocinsight @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+pip install 'rocinsight @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/rocinsight'
 
 # With LLM extras
-pip install 'rocinsight[llm] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+pip install 'rocinsight[llm] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/rocinsight'
 
 # Or from a local clone
-pip install python/rocinsight
+pip install experimental/python/rocinsight
 
 # Analyze a trace database
 rocinsight analyze -i trace.db
@@ -88,22 +88,22 @@ rocinsight analyze -i trace.db --interactive --llm anthropic
 
 ```bash
 # Core (stdlib only — no C++ required)
-pip install 'rocinsight @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+pip install 'rocinsight @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/rocinsight'
 
 # With LLM support (Anthropic + OpenAI)
-pip install 'rocinsight[llm] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+pip install 'rocinsight[llm] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/rocinsight'
 
 # All optional extras
-pip install 'rocinsight[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=python/rocinsight'
+pip install 'rocinsight[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/rocinsight'
 
 # Pin to a specific commit
-pip install 'rocinsight @ git+https://github.com/ROCm/rocm-systems.git@<commit>#subdirectory=python/rocinsight'
+pip install 'rocinsight @ git+https://github.com/ROCm/rocm-systems.git@<commit>#subdirectory=experimental/python/rocinsight'
 ```
 
 ### Option 2: pip from local clone (development install)
 
 ```bash
-cd rocm-systems-dev/python/rocinsight
+cd rocm-systems-dev/experimental/python/rocinsight
 pip install -e .                      # Core analysis (stdlib only)
 pip install -e ".[llm]"               # + Anthropic + OpenAI support
 pip install -e ".[all]"               # + rich terminal output
@@ -113,7 +113,7 @@ pip install -e ".[dev]"               # + pytest / flake8 / black
 ### Option 3: pip (non-editable, from super-repo root)
 
 ```bash
-pip install ./python/rocinsight
+pip install ./experimental/python/rocinsight
 ```
 
 ### Option 4: CMake (as part of the super-repo build)
@@ -121,7 +121,7 @@ pip install ./python/rocinsight
 ```bash
 cmake -B build \
       -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-      python/rocinsight
+      experimental/python/rocinsight
 
 cmake --build build
 sudo cmake --install build
@@ -805,7 +805,7 @@ export ROCINSIGHT_LLM_PRIVATE_HEADERS="{'Ocp-Apim-Subscription-Key': 'abc123'}"
 ## Project Structure
 
 ```
-python/rocinsight/
+experimental/python/rocinsight/
 ├── README.md                          ← this file
 ├── pyproject.toml                     ← PEP 517 package metadata; entry point: rocinsight
 ├── CMakeLists.txt                     ← pip-based install target + ctest wiring
@@ -970,7 +970,7 @@ rocinsight is a pure-Python package.  The CMakeLists.txt provides:
 
 ```bash
 # Standalone build
-cmake -B build -DCMAKE_INSTALL_PREFIX=/opt/rocm python/rocinsight
+cmake -B build -DCMAKE_INSTALL_PREFIX=/opt/rocm experimental/python/rocinsight
 cmake --build build
 sudo cmake --install build
 
@@ -1002,11 +1002,11 @@ rocinsight has two test suites: **unit tests** (no GPU or real .db required) and
 
 ```bash
 # 1. Install rocinsight in editable mode (once)
-cd python/rocinsight
+cd experimental/python/rocinsight
 pip install -e ".[dev]"
 
 # 2. Run all unit tests
-pytest python/rocinsight/ai_analysis/tests -v
+pytest experimental/python/rocinsight/ai_analysis/tests -v
 
 # 3. Run all integration tests (need a real .db)
 pytest tests -v --db-path /path/to/trace.db
@@ -1014,23 +1014,23 @@ pytest tests -v --db-path /path/to/trace.db
 
 ### Unit tests (no GPU required)
 
-Unit tests live in `python/rocinsight/python/rocinsight/ai_analysis/tests/`.
+Unit tests live in `experimental/python/rocinsight/rocinsight/ai_analysis/tests/`.
 They mock all external I/O and cover the full API surface without needing a GPU or
 a real profiling database.
 
 ```bash
 # From the repo root
-cd python/rocinsight
-pytest python/rocinsight/ai_analysis/tests -v
+cd experimental/python/rocinsight
+pytest experimental/python/rocinsight/ai_analysis/tests -v
 
 # Run a specific file
-pytest python/rocinsight/ai_analysis/tests/test_api_standalone.py -v
+pytest experimental/python/rocinsight/ai_analysis/tests/test_api_standalone.py -v
 
 # Run with coverage report
-pytest python/rocinsight/ai_analysis/tests -v --cov=rocinsight --cov-report=term-missing
+pytest experimental/python/rocinsight/ai_analysis/tests -v --cov=rocinsight --cov-report=term-missing
 
 # If not installed in editable mode, set PYTHONPATH manually
-PYTHONPATH=python python3 -m pytest python/rocinsight/ai_analysis/tests -v
+PYTHONPATH=python python3 -m pytest experimental/python/rocinsight/ai_analysis/tests -v
 ```
 
 Test files and what they cover:
@@ -1053,7 +1053,7 @@ Integration tests in `tests/` run against a real rocprofv3 SQLite database.
 
 ```bash
 # Run all integration tests
-cd python/rocinsight
+cd experimental/python/rocinsight
 pytest tests -v --db-path /path/to/trace.db
 
 # A real test database is available after building rocprofiler-sdk:
@@ -1078,7 +1078,7 @@ Integration test files:
 
 ```bash
 # Register and run tests via CTest
-cmake -B build -DROCINSIGHT_BUILD_TESTS=ON python/rocinsight
+cmake -B build -DROCINSIGHT_BUILD_TESTS=ON experimental/python/rocinsight
 cmake --build build
 ctest --test-dir build -R rocinsight -V
 
@@ -1102,7 +1102,7 @@ ctest --test-dir super-build -R rocinsight
 | **Analysis logic** | Identical | Identical |
 | **LLM providers** | Identical | Identical |
 | **Interactive session** | Identical | Identical |
-| **Installation** | Requires full SDK build | `pip install ./python/rocinsight` |
+| **Installation** | Requires full SDK build | `pip install ./experimental/python/rocinsight` |
 
 All analysis functions, recommendation rules, output formats, LLM integration, and the
 interactive session are **identical** between rocpd and rocinsight — only the database

@@ -20,7 +20,7 @@ Install ROCInsight with a single pip command. The `[all]` extra includes LLM sup
 pip install "rocinsight[all]"
 
 # Or from source (development mode)
-cd python/rocinsight && pip install -e ".[all]"
+cd experimental/python/rocinsight && pip install -e ".[all]"
 
 # Verify
 rocinsight --version

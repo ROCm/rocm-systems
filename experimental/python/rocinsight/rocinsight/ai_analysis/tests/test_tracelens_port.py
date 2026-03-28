@@ -411,7 +411,7 @@ def _find_repo_root() -> Path:
         if (current / ".git").exists():
             return current
         current = current.parent
-    # Fallback: return the package root (python/rocinsight/) as a safe default.
+    # Fallback: return the package root (experimental/python/rocinsight/) as a safe default.
     return Path(__file__).resolve().parents[3]
 
 
