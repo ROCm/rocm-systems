@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-import copy
 import csv
 import ctypes
 import glob
@@ -729,18 +728,15 @@ def expand_placeholder_ranges(
     sys_info: Optional[dict[str, Any]],
 ) -> OrderedDict[int, dict[str, Any]]:
     """
-    Expand placeholder_range entries in metric_table data configs.
+    Expand placeholder_range entries in metric_table data configs in-place.
 
-    Returns a new OrderedDict with expanded placeholders. The original
-    panel_configs is not modified.
+    Mutates panel_configs directly and returns the same object for convenience.
 
     Some metric tables define a range of metrics via a placeholder key that is
     expanded into individual entries at load time. sys_info is required to
     resolve built-in range variables; if it is None the table is cleared.
     """
-    result = copy.deepcopy(panel_configs)
-
-    for _panel_id, panel in result.items():
+    for _panel_id, panel in panel_configs.items():
         for data_source in panel["data source"]:
             for type_key, data_config in data_source.items():
                 if (
@@ -768,7 +764,7 @@ def expand_placeholder_ranges(
                                 new_metrics[new_key] = new_val
                     data_config["metric"] = new_metrics
 
-    return result
+    return panel_configs
 
 
 def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
