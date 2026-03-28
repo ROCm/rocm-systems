@@ -783,12 +783,8 @@ class OmniSoC_Base:
         self, output_files: list[CounterFile]
     ) -> None:
         """
-        After bucket allocation, report metrics whose formula PMCs span 2+ buckets.
-
-        Denominator for the header percentage is every metric row yielded from the
-        arch YAML scan (not only metrics touching this dry-run's counter set).
-        Numerator counts metrics where at least one parsed PMC appears in the current
-        allocation and those PMCs map to multiple bucket labels.
+        After bucket allocation, report metrics by how in-collection PMCs map to
+        buckets: (1) 2+ bucket labels, (2) exactly one label. Same YAML scan scope.
         """
         args = self.get_args()
         arch = self.__arch or "unknown"
@@ -803,7 +799,8 @@ class OmniSoC_Base:
             )
             return
 
-        rows: list[tuple[str, str, int, str, int, str]] = []
+        multi_rows: list[tuple[str, str, int, str, int, str]] = []
+        single_rows: list[tuple[str, str, int, str, str]] = []
         total_metrics = 0
         for file_id, panel_id, metric_idx, metric_name, metric_yaml in (
             self._iter_arch_analysis_yaml_metrics()
@@ -817,21 +814,31 @@ class OmniSoC_Base:
                 b = counter_to_bucket.get(c)
                 if b is not None:
                     buckets.add(b)
-            if len(buckets) <= 1:
-                continue
             panel_s = str(panel_id) if panel_id is not None else "-"
-            rows.append(
-                (
-                    file_id,
-                    panel_s,
-                    metric_idx,
-                    metric_name,
-                    len(buckets),
-                    ", ".join(sorted(buckets)),
+            n_b = len(buckets)
+            if n_b > 1:
+                multi_rows.append(
+                    (
+                        file_id,
+                        panel_s,
+                        metric_idx,
+                        metric_name,
+                        n_b,
+                        ", ".join(sorted(buckets)),
+                    )
                 )
-            )
+            elif n_b == 1:
+                single_rows.append(
+                    (
+                        file_id,
+                        panel_s,
+                        metric_idx,
+                        metric_name,
+                        next(iter(buckets)),
+                    )
+                )
 
-        multi_count = len(rows)
+        multi_count = len(multi_rows)
         pct = (100.0 * multi_count / total_metrics) if total_metrics else 0.0
         pct_str = f"{pct:.1f}%" if total_metrics else "n/a"
         print(
@@ -849,31 +856,41 @@ class OmniSoC_Base:
             print("(no metrics found in YAML scan)\n", flush=True)
             return
 
-        if not rows:
+        if not multi_rows:
             print(
                 "(none listed — in-collection counters stay in one bucket per metric)\n"
             )
-            print(flush=True)
-            return
+        else:
+            _dry_run_print_markdown_metric_table(
+                ["File", "Panel", "Idx", "Metric name", "#Bkts", "Buckets"],
+                [
+                    [r[0], r[1], str(r[2]), r[3], str(r[4]), r[5]]
+                    for r in multi_rows
+                ],
+            )
 
-        headers = ["File", "Panel", "Idx", "Metric name", "#Bkts", "Buckets"]
-        str_rows = [
-            [r[0], r[1], str(r[2]), r[3], str(r[4]), r[5]] for r in rows
-        ]
-        widths = [
-            max(len(headers[i]), max(len(row[i]) for row in str_rows))
-            for i in range(len(headers))
-        ]
-
-        def pipe_line(parts: list[str]) -> str:
-            return "| " + " | ".join(
-                parts[i].ljust(widths[i]) for i in range(len(parts))
-            ) + " |"
-
-        print(pipe_line(headers))
-        print(pipe_line(["-" * widths[i] for i in range(len(widths))]))
-        for row in str_rows:
-            print(pipe_line(row))
+        single_count = len(single_rows)
+        spct = (100.0 * single_count / total_metrics) if total_metrics else 0.0
+        spct_str = f"{spct:.1f}%" if total_metrics else "n/a"
+        print(
+            f"\nMetrics with PMC counters assigned to one perfmon bucket "
+            f"({single_count} of {total_metrics} metrics, {spct_str})"
+        )
+        print(
+            "Listed rows are metrics where at least one formula counter is in this "
+            "dry-run's collection and every such counter maps to the same single "
+            "bucket above (metrics with no in-collection PMCs are omitted)."
+        )
+        if not single_rows:
+            print(
+                "(none listed — no metric has in-collection PMCs confined to one "
+                "bucket)\n"
+            )
+        else:
+            _dry_run_print_markdown_metric_table(
+                ["File", "Panel", "Idx", "Metric name", "Bucket"],
+                [[r[0], r[1], str(r[2]), r[3], r[4]] for r in single_rows],
+            )
         print(flush=True)
 
     @demarcate
@@ -1391,3 +1408,24 @@ def _dry_run_counter_to_bucket_map(
         for ctr in _flat_counters_in_perfmon_file(counter_file):
             result[ctr] = label
     return result
+
+
+def _dry_run_print_markdown_metric_table(
+    headers: list[str],
+    str_rows: list[list[str]],
+) -> None:
+    """Print a left-padded pipe table for dry-run metric listings."""
+    widths = [
+        max(len(headers[i]), max(len(row[i]) for row in str_rows))
+        for i in range(len(headers))
+    ]
+
+    def pipe_line(parts: list[str]) -> str:
+        return "| " + " | ".join(
+            parts[i].ljust(widths[i]) for i in range(len(parts))
+        ) + " |"
+
+    print(pipe_line(headers))
+    print(pipe_line(["-" * widths[i] for i in range(len(widths))]))
+    for row in str_rows:
+        print(pipe_line(row))
