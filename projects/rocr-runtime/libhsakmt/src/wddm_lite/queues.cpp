@@ -430,12 +430,63 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
             free_hqd_index(hqd_idx);
             hqd_idx = GPU_MAX_COMPUTE_QUEUES;
         } else {
-            /* Queue activated — doorbell test disabled (PM4 NOP invalid on AQL queue).
-             * Doorbell routing verified working: WPTR_LO updates after doorbell write.
-             */
             pr_info("hsaKmtCreateQueue: HQD %u activated, doorbell_index=%u (BAR offset=0x%x)\n",
                     hqd_idx, g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_index,
                     g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_index * 8);
+
+            /* === NOP AQL packet test ===
+             * Write a Barrier-AND packet (type=4) with no deps and no signal.
+             * MEC should consume it and advance RPTR by 64 bytes. This tests
+             * the full doorbell → MEC → queue processing path. */
+            if (hqd_idx == 0 && s_queues[slot].rptr.cpu_addr &&
+                s_queues[slot].wptr.cpu_addr && QueueAddress) {
+                volatile ULONG *rptr_mem = (volatile ULONG *)s_queues[slot].rptr.cpu_addr;
+                volatile ULONG *wptr_mem = (volatile ULONG *)s_queues[slot].wptr.cpu_addr;
+                UCHAR *ring = (UCHAR *)QueueAddress;
+
+                /* Clear ring to zeros (NOP-ish — barrier with no deps) */
+                memset(ring, 0, 64);
+                /* AQL barrier-AND: header byte 0 = (type=4)<<0 | (barrier=1)<<8
+                 * For AQL: uint16_t header at offset 0:
+                 *   bits [7:0]  = type = HSA_PACKET_TYPE_BARRIER_AND = 4
+                 *   bits [9:8]  = barrier = 1
+                 *   bits [13:11] = acquire fence = 0
+                 *   bits [15:14] = release fence = 0
+                 * completion_signal at offset 40 = 0 (no signal) */
+                USHORT *hdr = (USHORT *)ring;
+                hdr[0] = (4) | (1 << 8);  /* type=BARRIER_AND, barrier=1 */
+
+                /* Update WPTR to 1 (one 64-byte packet) */
+                MemoryBarrier();
+                wptr_mem[0] = 1;  /* WPTR in AQL packet count (not bytes) */
+                wptr_mem[1] = 0;  /* high 32 bits */
+                MemoryBarrier();
+
+                /* Ring doorbell */
+                ULONG db_byte_off_test = g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_index * 8;
+                volatile ULONGLONG *db = (volatile ULONGLONG *)
+                    ((UCHAR *)g_wddm_lite_dev.doorbell_base + db_byte_off_test);
+                pr_info("hsaKmtCreateQueue: NOP test — writing doorbell at offset 0x%x, WPTR=1\n",
+                        db_byte_off_test);
+                *db = 1;  /* doorbell value = new WPTR */
+                MemoryBarrier();
+
+                /* Wait up to 1s for RPTR to advance */
+                for (int poll = 0; poll < 100; poll++) {
+                    Sleep(10);
+                    ULONG rptr_val = rptr_mem[0];
+                    if (rptr_val != 0) {
+                        pr_info("hsaKmtCreateQueue: NOP test PASSED! "
+                                "RPTR=%u after %d ms — MEC processed doorbell\n",
+                                rptr_val, (poll + 1) * 10);
+                        break;
+                    }
+                    if (poll == 99) {
+                        pr_warn("hsaKmtCreateQueue: NOP test FAILED — "
+                                "RPTR still 0 after 1000ms (MEC not processing doorbell)\n");
+                    }
+                }
+            }
         }
     } else {
         pr_warn("hsaKmtCreateQueue: GFX engine not initialized or no HQD slots, "
