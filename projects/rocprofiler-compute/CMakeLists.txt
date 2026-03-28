@@ -561,8 +561,8 @@ add_test(
     NAME test_analysis_db
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_analysis_db.xml ${COV_OPTION}
-        tests/test_analysis_db.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_analysis_db.xml ${COV_OPTION} tests/test_analysis_db.py
+        ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
