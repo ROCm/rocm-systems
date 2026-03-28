@@ -1960,7 +1960,10 @@ static int load_fw_rs64(struct PspRingContext *ctx, const char *fw_dir,
         data_offset = hdr->data_offset_bytes;
         data_size = hdr->data_size_bytes;
     } else {
-        /* v1.x fallback: treat entire ucode as code, no separate data */
+        /* v1.x fallback: load entire ucode array as code, no separate data.
+         * MES v1.0 firmware (mes_firmware_header_v1_0) packages code+data
+         * as a single blob in common_ucode_size_bytes, matching amdgpu
+         * behavior where ucode_size = common_header.ucode_size_bytes. */
         code_offset = hdr->ucode_array_offset_bytes;
         code_size = hdr->common_ucode_size_bytes;
         data_offset = 0;
@@ -2937,12 +2940,22 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* MES firmware (RS64 — code + data/stack) */
-    pr_info("psp_ring: === Loading MES firmware (RS64) ===\n");
+    /* MES firmware — PSP type is GFX_FW_TYPE_CP_MES (33), NOT RS64_MES (76).
+     * amdgpu_psp_get_fw_type() maps AMDGPU_UCODE_ID_CP_MES → type 33.
+     * Type 76 is rejected by PSP with TEE_ERROR_BAD_PARAMETERS.
+     * GFX12 uses unified MES (gc_12_0_1_uni_mes.bin) by default. */
+    pr_info("psp_ring: === Loading MES firmware ===\n");
     {
-        ULONG mes_stacks[] = { GFX_FW_TYPE_RS64_MES_STACK };
-        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mes.bin",
-                            GFX_FW_TYPE_RS64_MES, mes_stacks, 1, NULL);
+#define GFX_FW_TYPE_CP_MES       33
+#define GFX_FW_TYPE_MES_STACK_V1 34
+        ULONG mes_stacks[] = { GFX_FW_TYPE_MES_STACK_V1 };
+        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_uni_mes.bin",
+                            GFX_FW_TYPE_CP_MES, mes_stacks, 1, NULL);
+        if (ret != 0) {
+            pr_info("psp_ring: trying legacy gc_12_0_1_mes.bin\n");
+            ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mes.bin",
+                                GFX_FW_TYPE_CP_MES, mes_stacks, 1, NULL);
+        }
         if (ret != 0) {
             pr_warn("psp_ring: MES load failed (continuing)\n");
             load_failures++;
