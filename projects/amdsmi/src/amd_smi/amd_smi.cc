@@ -3670,8 +3670,8 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
     } else if (profile->profile_type == AMDSMI_ACCELERATOR_PARTITION_CPX) {
       // Note: # of XCDs is max # of partitions CPX supports
       uint16_t tmp_xcd_count = 0;
-      status = rsmi_wrapper(rsmi_dev_metrics_xcd_counter_get, processor_handle, 0, &tmp_xcd_count);
-      if (status == AMDSMI_STATUS_SUCCESS) {
+      amdsmi_status_t xcd_status = amdsmi_get_gpu_xcd_counter(processor_handle, &tmp_xcd_count);
+      if (xcd_status == AMDSMI_STATUS_SUCCESS) {
         profile->num_partitions = tmp_xcd_count;
       }
     }
