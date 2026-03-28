@@ -7,7 +7,6 @@ __pycache__
 
 # generated files/folders
 /dist
-/omniperf.spec
 /build*
 /.vscode
 /.cache
@@ -27,3 +26,8 @@ _toc.yml
 
 # Backup directories
 .backups/
+
+# AI tool configs
+CLAUDE.md
+.cursor/rules
+.github/copilot-instructions.md
