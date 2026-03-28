@@ -3,10 +3,9 @@
  *
  * SPDX-License-Identifier: MIT
  */
-
+#include "warp_common.hh"
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
-
 #include <array>
 #include <random>
 
@@ -16,7 +15,7 @@
 #include <hip/hip_cooperative_groups.h>
 #include <resource_guards.hh>
 #include <utils.hh>
-
+#include <utility>
 
 /**
  * @addtogroup thread_block_tile thread_block_tile
@@ -541,6 +540,540 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Sync_Positive_Basic, uint8_t, uint
   SECTION("Global memory") { BlockTileSyncTest<true, TestType, 2, 16, 32>(); }
   SECTION("Shared memory") { BlockTileSyncTest<false, TestType, 2, 16, 32>(); }
 }
+
+template <size_t TileSize>
+void __global__ simpleSum(int* result)
+{
+   int sum = 1;
+   cg::thread_block mygroup = cg::this_thread_block();
+   auto mytile = cg::tiled_partition<TileSize>(mygroup);
+   *result = cg::reduce(mytile, sum, cg::plus<int>());
+}
+
+template <size_t TileSize>
+void __global__ simpleSumSubtiles(int* result)
+{
+   int sum = 1;
+   cg::thread_block mygroup = cg::this_thread_block();
+   auto supertile = cg::tiled_partition<TileSize>(mygroup);
+   auto subtile = cg::tiled_partition<TileSize / 2>(supertile);
+   *result = cg::reduce(subtile, sum, cg::plus<int>());
+}
+
+template <size_t TileSize>
+void testReduceForTileSize()
+{
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(int));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSum<TileSize>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  REQUIRE(*h_result.host_ptr() == TileSize);
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSumSubtiles<TileSize>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  REQUIRE(*h_result.host_ptr() == TileSize / 2);
+}
+
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Basic, int)
+{
+  unsigned int wavefrontSize = getWarpSize();
+
+  testReduceForTileSize<2>();
+  testReduceForTileSize<4>();
+  testReduceForTileSize<8>();
+  testReduceForTileSize<16>();
+  testReduceForTileSize<32>();
+
+  if (wavefrontSize > 32) {
+    testReduceForTileSize<64>();
+  }
+}
+
+template <size_t TileSize>
+void __global__ partialSum(int* result)
+{
+   int sum = 1;
+   cg::thread_block mygroup = cg::this_thread_block();
+   auto mytile = cg::tiled_partition<TileSize>(mygroup);
+
+  if (threadIdx.x != warpSize - 1) {
+     *result = cg::reduce(mytile, sum, cg::plus<int>());
+  }
+}
+
+// Not all the threads of a tile have to participate in a reduce (unlike reduce sync operations)
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads)
+{
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(int));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+  void* kernelPtr = reinterpret_cast<void*>(getWarpSize() == 32?
+                    partialSum<32> :
+                    partialSum<64>);
+
+  HIP_CHECK(hipLaunchCooperativeKernel(kernelPtr, gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  // because a thread did not participate; we get a partial sum
+  REQUIRE(*h_result.host_ptr() == getWarpSize() - 1);
+}
+
+template <size_t TileSize, class Functor, class T>
+void __global__ reduceKernel(T* output, const T* input, unsigned long long* extraMasks)
+{
+  int tid = threadIdx.x;
+  int laneId = tid % warpSize;
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<TileSize>(mygroup);
+
+  for (int i = 0; i < kNumReduces; i++) {
+    int idx = warpSize * i + laneId;
+    unsigned long long mask = extraMasks[i];
+    T& result = output[idx];
+
+    if ((1ull << laneId) & mask) {
+      result = cg::reduce(mytile, input[idx], Functor());
+    } else {
+      result = 0;
+    }
+  }
+}
+
+template <class Functor, class T>
+void __global__ reduceKernelCoalesced(T* output, const T* input, unsigned long long* extraMasks)
+{
+  int tid = threadIdx.x;
+  int laneId = tid % warpSize;
+
+  for (int i = 0; i < kNumReduces; i++) {
+    int idx = warpSize * i + laneId;
+    unsigned long long mask = extraMasks[i];
+    T& result = output[idx];
+
+    if ((1ull << laneId) & mask) {
+      auto coalesced = cg::coalesced_threads();
+
+      result = cg::reduce(coalesced, input[idx], Functor());
+    } else {
+      result = 0;
+    }
+  }
+}
+
+// @TileSize the tile size or 0 when testing coalesced groups
+template <size_t TileSize, class Op, class T>
+void reduceForTypeAndOp()
+{
+  using distribution = typename DistributionType<T>::type;
+  int wavefrontSize = getWarpSize();
+  int size_bytes = kNumReduces * sizeof(T) * wavefrontSize;
+  LinearAllocGuard<T> h_result(LinearAllocs::malloc, size_bytes);
+  LinearAllocGuard<T> d_result(LinearAllocs::hipMalloc, size_bytes);
+  LinearAllocGuard<T> h_input(LinearAllocs::malloc, size_bytes);
+  LinearAllocGuard<T> d_input(LinearAllocs::hipMalloc, size_bytes);
+  LinearAllocGuard<unsigned long long> d_extraMasks(LinearAllocs::hipMalloc,
+                                                    kNumReduces * sizeof(unsigned long long));
+  LinearAllocGuard<unsigned long long> h_extraMasks(LinearAllocs::malloc,
+                                                    kNumReduces * sizeof(unsigned long long));
+  std::mt19937_64 gen(Catch::rngSeed());
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(wavefrontSize) };
+  hipError_t status;
+  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
+                                         (std::is_signed<T>::value? -1023 : 0);
+  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
+                                         1023;
+  distribution distInput(a, b);
+  int numReduce = 0;
+  void* kernelPtr;
+
+  genRandomBuffers(d_input, h_input, distInput, gen, kNumReduces * wavefrontSize);
+  genRandomMasks(d_extraMasks,
+                 h_extraMasks,
+                 gen,
+                 kNumReduces);
+
+  std::array<void*, 3> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr() };
+  void* args[devicePtrs.size()];
+
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+
+  if constexpr (TileSize == 0) {
+    kernelPtr = reinterpret_cast<void*>(reduceKernelCoalesced<Op, T>);
+  } else {
+    kernelPtr = reinterpret_cast<void*>(reduceKernel<TileSize, Op, T>);
+  }
+
+  status = hipLaunchCooperativeKernel(kernelPtr,
+                                      gridDim,
+                                      blockDim,
+                                      args,
+                                      0,
+                                      nullptr);
+  HIP_CHECK(status);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+
+  while (numReduce < kNumReduces) {
+    for (int laneId = 0; laneId < wavefrontSize; laneId++) {
+      unsigned long long mask = ~0ull;
+      T result = h_result.host_ptr()[numReduce * wavefrontSize + laneId], expected = 0;
+      const T* input = &h_input.host_ptr()[numReduce * wavefrontSize];
+
+      if constexpr (TileSize > 0) {
+        mask >>= (64 - TileSize);
+        mask <<= ((laneId % wavefrontSize) / TileSize) * TileSize;
+      }
+
+      mask &= h_extraMasks.host_ptr()[numReduce];
+
+      if ((1ull << laneId) & mask) {
+        Op op {};
+        expected = calculateExpected(input, op, mask);
+      }
+
+      if constexpr (std::is_integral<T>::value) {
+        // for integral types the result should match exactly
+        if (result != expected) {
+          std::string opName = opToString<T, Op>();
+          printMismatch(result, expected, input, mask);
+          INFO("Operator: " << opName);
+          REQUIRE(result == expected);
+        }
+      } else {
+        compareFloatingPoint(result, expected, mask, h_input.host_ptr());
+      }
+    }
+
+    numReduce++;
+  }
+}
+
+template <class Op, class T>
+void reduceCoopTiles(const std::index_sequence<>)
+{
+}
+
+template <class Op, class T, size_t TileSize, size_t... TileSizes>
+void reduceCoopTiles(const std::index_sequence<TileSize, TileSizes...>)
+{
+  const std::index_sequence<TileSizes...> remainingTiles;
+
+  reduceForTypeAndOp<TileSize, Op, T>();
+  reduceCoopTiles<Op, T>(remainingTiles);
+}
+
+template <bool Coalesced, class Op, class T, int WarpSize>
+void runReduceRandomForType()
+{
+  if constexpr (Coalesced) {
+    reduceForTypeAndOp<0, Op, T>();
+  } else if constexpr (WarpSize <= 32) {
+    std::index_sequence<1, 2, 4, 8, 16, 32> tileSizes;
+    reduceCoopTiles<Op, T>(tileSizes);
+  } else {
+    std::index_sequence<1, 2, 4, 8, 16, 32, 64> tileSizes;
+    reduceCoopTiles<Op, T>(tileSizes);
+  }
+}
+
+template <bool Coalesced, class T, int WarpSize, class Op = void>
+void runReduceRandomForOps(const std::tuple<>)
+{
+}
+
+template <bool Coalesced, class T, int WarpSize, class Op, class... Ops>
+void runReduceRandomForOps(const std::tuple<Op, Ops...>)
+{
+  const std::tuple<Ops...> remainingOps;
+
+  runReduceRandomForType<Coalesced, Op, T, WarpSize>();
+  runReduceRandomForOps<Coalesced, T, WarpSize>(remainingOps);
+}
+
+// for all the tile sizes and all input types, using random input values, calculates the reduce()
+// values. Additionally, randomly make some threads not participate
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, unsigned int, long long,
+                   unsigned long long, float, half, double)
+{
+  std::tuple<cooperative_groups::plus<TestType>,
+             cooperative_groups::less<TestType>,
+             cooperative_groups::greater<TestType>> types;
+
+  if (getWarpSize() == 32) {
+    runReduceRandomForOps<false, TestType, 32>(types);
+  } else {
+    runReduceRandomForOps<false, TestType, 64>(types);
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsigned int, long long,
+                   unsigned long long)
+{
+  std::tuple<cooperative_groups::bit_and<TestType>,
+             cooperative_groups::bit_or<TestType>,
+             cooperative_groups::bit_xor<TestType>> types;
+
+  if (getWarpSize() == 32) {
+    runReduceRandomForOps<false, TestType, 32>(types);
+  } else {
+    runReduceRandomForOps<false, TestType, 64>(types);
+  }
+}
+
+// passes a custom operator to cooperative_groups::reduce()
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_Custom_Op)
+{
+  if (getWarpSize() == 32) {
+    runReduceRandomForType<false, MaxOfAbsolute<int>, int, 32>();
+  } else {
+    runReduceRandomForType<false, MaxOfAbsolute<int>, int, 64>();
+  }
+}
+
+struct Vector {
+  int x;
+  int y;
+};
+
+// given two vector returns the one with the maximum magnitude
+struct MaxMagnitude {
+  Vector __device__ operator()(Vector lhs, Vector rhs) const
+  {
+    int lhsMag = lhs.x * lhs.x + lhs.y * lhs.y;
+    int rhsMag = rhs.x * rhs.x + rhs.y * rhs.y;
+
+    return lhsMag > rhsMag? lhs : rhs;
+  }
+};
+
+void __global__ maxMagnitude(Vector* result)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<4>(mygroup);
+  MaxMagnitude op;
+  Vector input[] = {{ 2, 3 },
+                    { 1, 9 },
+                    { 0, 7 },
+                    { 4, 1} };
+
+  *result = cg::reduce(mytile, input[threadIdx.x], op);
+}
+
+// tests that we can pass trivially copyable structs as values to reduce
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters)
+{
+  LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector));
+  LinearAllocGuard<Vector> d_result(LinearAllocs::hipMalloc, sizeof(Vector));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 4 };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+  Vector* result;
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  result = &h_result.host_ptr()[0];
+  REQUIRE((result->x == 1 && result->y == 9));
+}
+
+template <size_t NumElems>
+using ArrayContainer = std::array<unsigned char, NumElems>;
+
+template <size_t NumElems>
+struct Sum {
+  ArrayContainer<NumElems> __device__ operator()(const ArrayContainer<NumElems>& lhs,
+                                                 const ArrayContainer<NumElems>& rhs) const
+  {
+    ArrayContainer<NumElems> result;
+
+    for (int i = 0; i < NumElems; i++) {
+      result[i] = lhs[i] + rhs[i];
+    }
+
+    return result;
+  }
+};
+
+template <size_t NumElems>
+struct Max {
+  ArrayContainer<NumElems> __device__ operator()(const ArrayContainer<NumElems>& lhs,
+                                                 const ArrayContainer<NumElems>& rhs) const
+  {
+    ArrayContainer<NumElems> result;
+
+    for (int i = 0; i < NumElems; i++) {
+      for (int i = 0; i < NumElems; i++) {
+        result[i] = std::max(lhs[i], rhs[i]);
+      }
+    }
+
+    return result;
+  }
+};
+
+template <size_t NumElems, class Functor>
+__global__ void applyFunctor(ArrayContainer<NumElems>* result)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<32>(mygroup);
+  __shared__ ArrayContainer<NumElems> input;
+  Functor op;
+
+  if (threadIdx.x < NumElems) {
+    input[threadIdx.x] = threadIdx.x;
+    __syncwarp();
+    *result = cg::reduce(mytile, input, op);
+  }
+}
+
+template <size_t NumElems, template <size_t> class Functor>
+void testReduceSizes()
+{
+  LinearAllocGuard<ArrayContainer<NumElems>> h_result(LinearAllocs::malloc, sizeof(ArrayContainer<NumElems>));
+  LinearAllocGuard<ArrayContainer<NumElems>> d_result(LinearAllocs::hipMalloc, sizeof(ArrayContainer<NumElems>));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 32 };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+  ArrayContainer<NumElems>* result;
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(applyFunctor<NumElems, Functor<NumElems>>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  result = &h_result.host_ptr()[0];
+  INFO("T is of size: " << NumElems);
+
+  for (int i = 0; i < NumElems; i++) {
+    INFO("Element: " << i);
+
+    if (std::is_same<Functor<NumElems>, Sum<NumElems>>::value) {
+      // the result can be calculated with an arithmetic series formula, modulo 256
+      // (we do overflow unsigned char for some indices, but that is defined behaviour)
+      REQUIRE((*result)[i] == ((NumElems * (i + i)) / 2) % 256);
+    } else {
+      REQUIRE((*result)[i] == i);
+    }
+  }
+
+  if constexpr (NumElems > 1) {
+    testReduceSizes<NumElems - 1, Functor>();
+  }
+}
+
+// we allow any reduction size of T of up to 32 bytes; this tests that reduction works with user-defined
+// types in that range; including non-powers of two
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes)
+{
+  SECTION("sum") {
+    testReduceSizes<32, Sum>();
+  }
+
+  SECTION("max") {
+    testReduceSizes<32, Max>();
+  }
+}
+
+struct Point {
+    int x;
+    int y;
+
+    __device__ Point operator+(const Point& rhs)
+    {
+      return { x + rhs.x, y + rhs.y };
+    }
+
+};
+
+__global__ void sumPoints(Point* result)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<32>(mygroup);
+  Point input;
+  
+  input.x = threadIdx.x;
+  input.y = threadIdx.x;
+
+  __syncwarp();
+  *result = cg::reduce(mytile, input, cooperative_groups::plus<Point> {});
+}
+
+// using a standard functor in the cooperative_groups namespace with a type that is not primitive
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type)
+{
+  LinearAllocGuard<Point> h_result(LinearAllocs::malloc, sizeof(Point) * 32);
+  LinearAllocGuard<Point> d_result(LinearAllocs::hipMalloc, sizeof(Point) * 32);
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 32 };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+  int expected = 31 * 16;
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(sumPoints), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+
+  for (int i = 0; i < 32; i++) {
+    INFO("Expected x: " << expected << " got: " << *h_result.host_ptr());
+    INFO("Expected y: " << expected << " got: " << *h_result.host_ptr());
+    REQUIRE((h_result.host_ptr()->x == expected && h_result.host_ptr()->y == expected));
+  }
+}
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsigned int, long long,
+                   unsigned long long, float, half, double)
+{
+  std::tuple<cooperative_groups::plus<TestType>,
+             cooperative_groups::less<TestType>,
+             cooperative_groups::greater<TestType>> ops;
+
+  if (getWarpSize() == 32) {
+    runReduceRandomForOps<true, TestType, 32>(ops);
+  } else {
+    runReduceRandomForOps<true, TestType, 64>(ops);
+  }
+}
+
+
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int, long long, unsigned long long)
+{
+  std::tuple<cooperative_groups::bit_and<TestType>,
+             cooperative_groups::bit_or<TestType>,
+             cooperative_groups::bit_xor<TestType>> ops;
+  if (getWarpSize() == 32) {
+    runReduceRandomForOps<true, TestType, 32>(ops);
+  } else {
+    runReduceRandomForOps<true, TestType, 64>(ops);
+  }
+} 
 
 /**
  * End doxygen group DeviceLanguageTest.

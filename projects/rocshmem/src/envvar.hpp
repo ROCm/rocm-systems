@@ -149,7 +149,9 @@ namespace envvar {
         template <> struct _is_narrow_character<char>          : std::true_type  { };
         template <> struct _is_narrow_character<signed char>   : std::true_type  { };
         template <> struct _is_narrow_character<unsigned char> : std::true_type  { };
+#if defined(__cpp_char8_t) || (defined(__cplusplus) && __cplusplus >= 202002L)
         template <> struct _is_narrow_character<char8_t>       : std::true_type  { };
+#endif  // char8_t narrow character specialization
 
         template <typename T>
         struct is_narrow_character
@@ -489,7 +491,6 @@ namespace envvar {
 
     extern const var<std::string> requested_nic;
     extern const var<std::string> hca_list;
-    extern const var<uint32_t> sq_size;
   }  // inline namespace _base
 
   namespace bootstrap {
@@ -516,6 +517,7 @@ namespace envvar {
     extern const var<bool> enable_dmabuf;
     extern const var<bool> override_nic_firmware_check;
     extern const var<std::string> alltoallv_wg_algo;
+    extern const var<uint32_t> sq_size;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem

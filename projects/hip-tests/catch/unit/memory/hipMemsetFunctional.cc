@@ -266,7 +266,6 @@ template <typename T> void checkMemset2D(T value, size_t width, size_t height, b
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_2D) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr size_t width{128};
   constexpr size_t height{128};
@@ -276,7 +275,6 @@ HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_2D) {
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_SmallSize_2D) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr char memsetVal = 0x42;
   SECTION("hipMemset2D - Small Size") { checkMemset2D(memsetVal, 1, 1, false); }
@@ -284,7 +282,6 @@ HIP_TEST_CASE(Unit_hipMemsetFunctional_SmallSize_2D) {
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroSize_2D) {
-  CHECK_IMAGE_SUPPORT
 
   size_t pitch{0};
   size_t width{10};
@@ -366,7 +363,6 @@ template <typename T> void partialMemsetTest2D(T valA, T valB, size_t width, siz
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_2D) {
-  CHECK_IMAGE_SUPPORT
 
   for (auto widthOffset = 8; widthOffset <= 128; widthOffset *= 2) {
     for (auto heightOffset = 8; heightOffset <= 128; heightOffset *= 2) {
@@ -480,19 +476,16 @@ void check_memset_3D(std::string sectionStr, size_t width, size_t height, size_t
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_3D) {
-  CHECK_IMAGE_SUPPORT
 
   check_memset_3D("Zero Value", 128, 128, 10, 0);
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_SmallSize_3D) {
-  CHECK_IMAGE_SUPPORT
 
   check_memset_3D("Small Size", 1, 1, 1, 0x42);
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroSize_3D) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr size_t elementSize = sizeof(char);
   check_memset_3D("Zero Width", 0, FULL_DIM, FULL_DIM, 0x23);
@@ -548,7 +541,6 @@ void partialMemsetTest3D(T valA, T valB, size_t width, size_t height, size_t dep
 }
 
 HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_3D) {
-  CHECK_IMAGE_SUPPORT
 
   for (auto widthOffset = 8; widthOffset <= 128; widthOffset *= 2) {
     for (auto heightOffset = 8; heightOffset <= 128; heightOffset *= 2) {

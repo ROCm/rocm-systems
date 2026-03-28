@@ -98,13 +98,19 @@ DeviceBitcodeTester::~DeviceBitcodeTester() {
   }
 }
 
-void DeviceBitcodeTester::launch(const char* kernel, void** args,
-                                 dim3 grid, dim3 block) {
+void DeviceBitcodeTester::launch(const char* kernel, void** args) {
   hipFunction_t fn;
   CHECK_HIP(hipModuleGetFunction(&fn, module, kernel));
-  CHECK_HIP(hipModuleLaunchKernel(fn, grid.x, grid.y, grid.z,
-                                  block.x, block.y, block.z,
-                                  0, nullptr, args, nullptr));
+  if (wf_size <= 0) {
+    fprintf(stderr, "[PE %d] invalid runtime wavefront size: %d\n",
+            my_pe, wf_size);
+    rocshmem_global_exit(1);
+  }
+  // Prefer one wave per block for bitcode kernels; kernel-side wf_id gating
+  // also protects wave barrier participation if launch geometry regresses.
+  unsigned bx = static_cast<unsigned>(wf_size);
+  CHECK_HIP(hipModuleLaunchKernel(fn, 1, 1, 1, bx, 1, 1, 0, nullptr, args,
+                                  nullptr));
   CHECK_HIP(hipDeviceSynchronize());
 }
 

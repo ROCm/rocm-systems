@@ -3621,7 +3621,6 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     if (attributes->isManaged) {
       attributes->type = hipMemoryTypeManaged;
     }
-    HIP_RETURN(hipSuccess);
   } else {
     attributes->type = hipMemoryTypeUnregistered;
     attributes->devicePointer = nullptr;
