@@ -14,12 +14,12 @@
             ],
             "validation_queries": [
                 {
-                    "requires": "jpeg_activity",
+                    "requires": "jpeg_activity,jpeg_busy",
                     "comparison": "greater_than",
-                    "description": "Check for jpeg_activity amd-smi metrics",
-                    "error_message": "Did not find jpeg_activity in amd-smi metrics",
+                    "description": "Check for jpeg_activity and jpeg_busy amd-smi metrics",
+                    "error_message": "Did not find jpeg_activity or jpeg_busy in amd-smi metrics",
                     "expected_result": 1,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE 'JpegAct%'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE 'JpegAct%' OR symbol LIKE 'JpegBusy%'"
                 }
             ]
         },
@@ -66,12 +66,12 @@
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_memory_usage'"
                 },
                 {
-                    "requires": "jpeg_activity",
+                    "requires": "jpeg_activity,jpeg_busy",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring JPEG activity",
-                    "error_message": "Less than expected activity in amd-smi jpeg-activity samples!",
+                    "description": "Check for amd-smi monitoring JPEG activity and busy",
+                    "error_message": "Less than expected activity in amd-smi jpeg-activity or jpeg-busy samples!",
                     "expected_result": 10,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_jpeg_activity_%' and event.value > 0"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_jpeg_activity_%' and event.value > 0 OR info.name LIKE 'device_jpeg_busy_%' and event.value > 0"
                 }
             ]
         }

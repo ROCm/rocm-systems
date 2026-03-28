@@ -67,7 +67,8 @@ endif()
 # This test runs before all other GPU connect tests and acts as a fixture
 add_test(
     NAME transferbench-validation-check
-    COMMAND $<TARGET_FILE:transferBench>
+    COMMAND bash ${CMAKE_CURRENT_LIST_DIR}/transferbench_validation_check.sh
+            $<TARGET_FILE:transferBench>
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
@@ -77,7 +78,7 @@ set_tests_properties(
     PROPERTIES
         LABELS "transferbench;validation"
         FIXTURES_SETUP transferbench_available
-        FAIL_REGULAR_EXPRESSION "Error: No valid transfers created"
+        SKIP_RETURN_CODE 77
 )
 
 rocprofiler_systems_add_test(

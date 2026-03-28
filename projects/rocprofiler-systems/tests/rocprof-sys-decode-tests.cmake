@@ -30,11 +30,13 @@ set(_video_decode_environment
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api"
     "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage"
     "ROCPROFSYS_SAMPLING_CPUS=none"
+    "ROCPROFSYS_SAMPLING_GPUS": "all"
 )
 set(_jpeg_decode_environment
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocjpeg_api"
     "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,jpeg_activity,mem_usage"
     "ROCPROFSYS_SAMPLING_CPUS=none"
+    "ROCPROFSYS_SAMPLING_GPUS": "all"
 )
 
 set(_vcn_rocpd_validation_rules
