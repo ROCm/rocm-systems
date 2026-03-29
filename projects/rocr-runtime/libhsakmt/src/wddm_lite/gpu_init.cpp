@@ -6239,6 +6239,103 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
         pr_info("gpu_gfx: PFP INSTR_PNTR = 0x%08x (0=stalled)\n", pfp_ip);
     }
 
+    /* ================================================================
+     * MES (Micro Engine Scheduler) enable.
+     * After AUTOLOAD, MES firmware is in TMR. We need to:
+     *   1. Set CP_MES_PRGRM_CNTR_START for each pipe
+     *   2. Reset + activate pipes via CP_MES_CNTL
+     * MES handles doorbell routing to MEC on GFX12.
+     *
+     * Register offsets (BASE_IDX=1 → gc_base1):
+     *   CP_MES_PRGRM_CNTR_START    = 0x2800
+     *   CP_MES_PRGRM_CNTR_START_HI = 0x289d
+     *   CP_MES_CNTL                = 0x2807
+     *   RLC_CP_SCHEDULERS          = 0x098a
+     *
+     * CP_MES_CNTL bits:
+     *   MES_INVALIDATE_ICACHE = bit 4
+     *   MES_PIPE0_RESET = bit 16, MES_PIPE1_RESET = bit 17
+     *   MES_PIPE0_ACTIVE = bit 26, MES_PIPE1_ACTIVE = bit 27
+     *   MES_HALT = bit 30
+     * ================================================================ */
+    if (dev->hw.gfx.rlc_bootload_status & 0x80000000) {
+        /* MES start address from firmware header:
+         * mes_uc_start_addr = 0x00080000_00000000 (both pipes)
+         * After >> 2: lo=0x00000000, hi=0x00020000 */
+        ULONG mes_pc_lo = 0x00000000;
+        ULONG mes_pc_hi = 0x00020000;
+
+#define regCP_MES_PRGRM_CNTR_START_MES    0x2800
+#define regCP_MES_PRGRM_CNTR_START_HI_MES 0x289d
+#define regCP_MES_CNTL_MES                0x2807
+#define regRLC_CP_SCHEDULERS              0x098a
+
+#define MES_INVALIDATE_ICACHE  (1 << 4)
+#define MES_PIPE0_RESET        (1 << 16)
+#define MES_PIPE1_RESET        (1 << 17)
+#define MES_PIPE0_ACTIVE       (1 << 26)
+#define MES_PIPE1_ACTIVE       (1 << 27)
+#define MES_HALT               (1 << 30)
+
+        /* Enable pipe 1 (KIQ) first, then pipe 0 (SCHED) — matches amdgpu */
+        for (int pipe = 1; pipe >= 0; pipe--) {
+            /* GRBM select: me=3 (MES), pipe=N, queue=0 */
+            grbm_select(dev, 3, pipe, 0, 0);
+
+            /* Assert reset for this pipe */
+            ULONG cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
+            if (pipe == 0)
+                cntl |= MES_PIPE0_RESET;
+            else
+                cntl |= MES_PIPE1_RESET;
+            gc1_wreg(dev, regCP_MES_CNTL_MES, cntl);
+
+            /* Set program counter start */
+            gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_MES, mes_pc_lo);
+            gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES, mes_pc_hi);
+
+            grbm_select_reset(dev);
+
+            pr_info("gpu_gfx: MES pipe %d: PC_START=0x%08x_%08x, resetting\n",
+                    pipe, mes_pc_hi, mes_pc_lo);
+        }
+
+        /* Activate both pipes: clear resets, clear halt, set ACTIVE */
+        {
+            ULONG activate = MES_PIPE0_ACTIVE | MES_PIPE1_ACTIVE;
+            grbm_select(dev, 3, 0, 0, 0);
+            gc1_wreg(dev, regCP_MES_CNTL_MES, activate);
+            grbm_select_reset(dev);
+            pr_info("gpu_gfx: MES enabled (CNTL=0x%08x)\n", activate);
+        }
+
+        /* Wait for MES to start (500us for unified MES) */
+        Sleep(1);
+
+        /* Tell RLC which is KIQ: me=3, pipe=1, queue=0 → (3<<5)|(1<<3)|0|0x80 */
+        {
+            ULONG sched = gc1_rreg(dev, regRLC_CP_SCHEDULERS);
+            sched &= 0xFFFFFF00;
+            sched |= (3 << 5) | (1 << 3) | 0 | 0x80;
+            gc1_wreg(dev, regRLC_CP_SCHEDULERS, sched);
+            pr_info("gpu_gfx: RLC_CP_SCHEDULERS = 0x%08x (KIQ=me3,pipe1,q0)\n", sched);
+        }
+
+        /* Read back MES state */
+        {
+            grbm_select(dev, 3, 0, 0, 0);
+            ULONG mes_cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
+            grbm_select_reset(dev);
+            pr_info("gpu_gfx: MES CNTL readback = 0x%08x "
+                    "(pipe0_active=%d, pipe1_active=%d, halt=%d)\n",
+                    mes_cntl,
+                    (mes_cntl >> 26) & 1, (mes_cntl >> 27) & 1,
+                    (mes_cntl >> 30) & 1);
+        }
+    } else {
+        pr_info("gpu_gfx: skipping MES enable (AUTOLOAD not complete)\n");
+    }
+
     dev->hw.gfx_initialized = TRUE;
     pr_info("gpu_gfx: GFX engine initialization complete\n");
     return 0;
