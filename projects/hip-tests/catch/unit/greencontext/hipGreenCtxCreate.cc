@@ -36,7 +36,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipGreenCtxCreateDestroy_Sanity") {
+HIP_TEST_CASE(Unit_hipGreenCtxCreateDestroy_Sanity) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
@@ -56,7 +56,7 @@ TEST_CASE("Unit_hipGreenCtxCreateDestroy_Sanity") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipExecutionCtxStreamCreate_Sanity") {
+HIP_TEST_CASE(Unit_hipExecutionCtxStreamCreate_Sanity) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
@@ -83,7 +83,7 @@ TEST_CASE("Unit_hipExecutionCtxStreamCreate_Sanity") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipGreenCtxKernelLaunch_Basic") {
+HIP_TEST_CASE(Unit_hipGreenCtxKernelLaunch_Basic) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
@@ -152,7 +152,7 @@ TEST_CASE("Unit_hipGreenCtxKernelLaunch_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipGreenCtxCreate_Negative") {
+HIP_TEST_CASE(Unit_hipGreenCtxCreate_Negative) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipGreenCtx_t green_ctx = nullptr;
@@ -182,7 +182,7 @@ TEST_CASE("Unit_hipGreenCtxCreate_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipExecutionCtxStreamCreate_Negative") {
+HIP_TEST_CASE(Unit_hipExecutionCtxStreamCreate_Negative) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);

@@ -567,7 +567,6 @@ namespace hip {
     ObjectRegistry<hipGraphicsResource_t> mappedGraphicsResources_;
 
     // ----- Execution context state -----
-    std::recursive_mutex lock_;                //!< Device-wide lock
     GreenCtx* primaryExecCtx_ = nullptr;      //!< Primary execution context
     std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
     std::mutex resourceFamilyMapLock_;

@@ -252,16 +252,19 @@ hipError_t GreenCtx::deviceGetDevResource(int device, hipDevResource* resource,
   resource->type = type;
 
   hipDeviceProp_t prop{};
+  constexpr unsigned int kAlignment = 2;
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
   unsigned int cuCount = prop.multiProcessorCount;
-  unsigned int alignment = 2;
+  unsigned int alignment = kAlignment;
 
   resource->sm.smCount = cuCount;
-  resource->sm.minSmPartitionSize = alignment;
-  resource->sm.smCoscheduledAlignment = alignment;
+  resource->sm.minSmPartitionSize = kAlignment;
+  resource->sm.smCoscheduledAlignment =  kAlignment;
   resource->sm.flags = 0;
 
   resource->nextResource = nullptr;
+  tagResource(resource, 0, device);
+
   return hipSuccess;
 }
 
@@ -407,8 +410,9 @@ hipError_t GreenCtx::devResourceGenerateDesc(hipDevResourceDesc_t* phDesc,
   unsigned int refSmAlignment = 0;
   uint32_t refFamilyId = 0;
   bool familyChecked = false;
+  int refDeviceId = -1;
   for (unsigned int i = 0; i < nbResources; i++) {
-    if (resources[i].type == hipDevResourceTypeSm) {
+      // Validate SM Resource Alignment
       if (resources[i].sm.smCount == 0)
         return hipErrorInvalidResourceConfiguration;
       if (refSmAlignment == 0) {
@@ -416,9 +420,15 @@ hipError_t GreenCtx::devResourceGenerateDesc(hipDevResourceDesc_t* phDesc,
       } else if (resources[i].sm.smCoscheduledAlignment != refSmAlignment) {
         return hipErrorInvalidResourceConfiguration;
       }
+      // Validate SM Resource Device ID
+      int devId = readDeviceId(&resources[i]);
+      if (refDeviceId == -1) {
+        refDeviceId = devId;
+      } else if (devId != refDeviceId ){
+        return hipErrorInvalidResourceConfiguration;
+      }
       uint32_t resId = readResourceId(&resources[i]);
       if (resId != 0) {
-        int devId = readDeviceId(&resources[i]);
         const auto* meta = lookupResourceMeta(devId, resId);
         if (meta != nullptr) {
           if (!familyChecked) {
@@ -429,15 +439,16 @@ hipError_t GreenCtx::devResourceGenerateDesc(hipDevResourceDesc_t* phDesc,
           }
         }
       }
-    }
   }
 
   auto* desc = new DevResourceDesc();
   desc->resources.assign(resources, resources + nbResources);
+  desc->deviceId = refDeviceId;
 
   *phDesc = reinterpret_cast<hipDevResourceDesc_t>(desc);
   return hipSuccess;
 }
+
 
 // ---------------------------------------------------------------------------
 // Static: Primary execution context factory
@@ -504,13 +515,15 @@ hipError_t hipGreenCtxCreate(hipGreenCtx_t* phCtx, hipDevResourceDesc_t desc,
                               int device, unsigned int flags) {
   HIP_INIT_API(hipGreenCtxCreate, phCtx, desc, device, flags);
 
-  if (phCtx == nullptr || desc == nullptr)
+  if (phCtx == nullptr || desc == nullptr || flags != 0) {
     HIP_RETURN(hipErrorInvalidValue);
+  }
 
   int count = 0;
   HIP_RETURN_ONFAIL(ihipDeviceGetCount(&count));
-  if (device < 0 || device >= count)
+  if (device < 0 || device >= count) {
     HIP_RETURN(hipErrorInvalidDevice);
+  }
 
   auto* resourceDesc = reinterpret_cast<DevResourceDesc*>(desc);
 
@@ -530,8 +543,9 @@ hipError_t hipGreenCtxCreate(hipGreenCtx_t* phCtx, hipDevResourceDesc_t desc,
 hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx) {
   HIP_INIT_API(hipGreenCtxDestroy, ctx);
 
-  if (ctx == nullptr)
+  if (ctx == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
+  }
 
   auto* greenCtx = reinterpret_cast<GreenCtx*>(ctx);
   int deviceId = greenCtx->deviceId();
@@ -546,13 +560,15 @@ hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx) {
 hipError_t hipDeviceGetExecutionCtx(hipGreenCtx_t* ctx, int device) {
   HIP_INIT_API(hipDeviceGetExecutionCtx, ctx, device);
 
-  if (ctx == nullptr)
+  if (ctx == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
+  }
 
   int count = 0;
   HIP_RETURN_ONFAIL(ihipDeviceGetCount(&count));
-  if (device < 0 || device >= count)
+  if (device < 0 || device >= count) {
     HIP_RETURN(hipErrorInvalidDevice);
+  }
 
   std::scoped_lock lock(g_devices[device]->getLock());
   GreenCtx* primaryCtx = g_devices[device]->getPrimaryExecCtx();
@@ -572,10 +588,12 @@ hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenc
                                         unsigned int flags, int priority) {
   HIP_INIT_API(hipExecutionCtxStreamCreate, stream, greenctx, flags, priority);
 
-  if (stream == nullptr || greenctx == nullptr)
+  if (stream == nullptr || greenctx == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
-  if (flags != hipStreamDefault && flags != hipStreamNonBlocking)
+  }
+  if (flags != hipStreamDefault && flags != hipStreamNonBlocking) {
     HIP_RETURN(hipErrorInvalidValue);
+  }
 
   auto* ctx = reinterpret_cast<GreenCtx*>(greenctx);
 
@@ -603,8 +621,9 @@ hipError_t hipExecutionCtxGetDevResource(hipGreenCtx_t ctx, hipDevResource* reso
                                           hipDevResourceType type) {
   HIP_INIT_API(hipExecutionCtxGetDevResource, ctx, resource, type);
 
-  if (ctx == nullptr || resource == nullptr)
+  if (ctx == nullptr || resource == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
+  }
 
   auto* greenCtx = reinterpret_cast<GreenCtx*>(ctx);
   std::scoped_lock lock(greenCtx->lock());
@@ -613,14 +632,18 @@ hipError_t hipExecutionCtxGetDevResource(hipGreenCtx_t ctx, hipDevResource* reso
 
 hipError_t hipExecutionCtxGetDevice(int* device, hipGreenCtx_t ctx) {
   HIP_INIT_API(hipExecutionCtxGetDevice, device, ctx);
-  if (device == nullptr || ctx == nullptr) HIP_RETURN(hipErrorInvalidValue);
+  if (device == nullptr || ctx == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   *device = reinterpret_cast<GreenCtx*>(ctx)->deviceId();
   HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipExecutionCtxGetId(hipGreenCtx_t ctx, unsigned long long* ctxId) {
   HIP_INIT_API(hipExecutionCtxGetId, ctx, ctxId);
-  if (ctx == nullptr || ctxId == nullptr) HIP_RETURN(hipErrorInvalidValue);
+  if (ctx == nullptr || ctxId == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   *ctxId = reinterpret_cast<GreenCtx*>(ctx)->ctxId();
   HIP_RETURN(hipSuccess);
 }
@@ -629,10 +652,16 @@ hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource
                                     hipDevResourceType type) {
   HIP_INIT_API(hipStreamGetDevResource, hStream, resource, type);
 
-  if (resource == nullptr) HIP_RETURN(hipErrorInvalidValue);
-  if (type == hipDevResourceTypeWorkqueueConfig || type == hipDevResourceTypeWorkqueue)
+  if (resource == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (type == hipDevResourceTypeWorkqueueConfig ||
+      type == hipDevResourceTypeWorkqueue) {
     HIP_RETURN(hipErrorInvalidResourceType);
-  if (!isValid(hStream)) HIP_RETURN(hipErrorInvalidHandle);
+  }
+  if (!isValid(hStream)) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
 
   std::memset(resource, 0, sizeof(hipDevResource));
 
@@ -673,21 +702,31 @@ hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource
 // ---------------------------------------------------------------------------
 hipError_t hipExecutionCtxRecordEvent(hipGreenCtx_t ctx, hipEvent_t event) {
   HIP_INIT_API(hipExecutionCtxRecordEvent, ctx, event);
-  if (ctx == nullptr) HIP_RETURN(hipErrorInvalidValue);
-  if (!isValid(event)) HIP_RETURN(hipErrorInvalidHandle);
+  if (ctx == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!isValid(event)) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
   HIP_RETURN(reinterpret_cast<GreenCtx*>(ctx)->recordEvent(event));
 }
 
 hipError_t hipExecutionCtxSynchronize(hipGreenCtx_t ctx) {
   HIP_INIT_API(hipExecutionCtxSynchronize, ctx);
-  if (ctx == nullptr) HIP_RETURN(hipErrorInvalidValue);
+  if (ctx == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   HIP_RETURN(reinterpret_cast<GreenCtx*>(ctx)->synchronize());
 }
 
 hipError_t hipExecutionCtxWaitEvent(hipGreenCtx_t ctx, hipEvent_t event) {
   HIP_INIT_API(hipExecutionCtxWaitEvent, ctx, event);
-  if (ctx == nullptr) HIP_RETURN(hipErrorInvalidValue);
-  if (!isValid(event)) HIP_RETURN(hipErrorInvalidHandle);
+  if (ctx == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!isValid(event)) {
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
   HIP_RETURN(reinterpret_cast<GreenCtx*>(ctx)->waitEvent(event));
 }
 

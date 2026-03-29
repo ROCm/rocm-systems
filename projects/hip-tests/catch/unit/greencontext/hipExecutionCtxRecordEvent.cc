@@ -36,7 +36,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipExecutionCtxRecordEvent_Sanity") {
+HIP_TEST_CASE(Unit_hipExecutionCtxRecordEvent_Sanity) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
@@ -64,7 +64,7 @@ TEST_CASE("Unit_hipExecutionCtxRecordEvent_Sanity") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipExecutionCtxWaitEvent_Sanity") {
+HIP_TEST_CASE(Unit_hipExecutionCtxWaitEvent_Sanity) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipExecutionCtxWaitEvent_Sanity") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipExecutionCtxRecordEventFunctional") {
+HIP_TEST_CASE(Unit_hipExecutionCtxRecordEventFunctional) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
