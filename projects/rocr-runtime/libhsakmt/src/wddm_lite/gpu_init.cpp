@@ -5430,26 +5430,16 @@ static void configure_mec(struct WddmLiteDevice *dev)
         ULONG mec_hi = (ULONG)((dev->hw.gfx.mec_ucode_start >> 2) >> 32);
 
         /*
-         * Step 1: Disable MEC (kernel's cp_compute_enable(false) pattern).
-         * Single write: halt + reset all pipes + deactivate + invalidate icache.
-         * The icache invalidation is REQUIRED — without it, MEC runs stale
-         * VBIOS code instead of restarting from compute firmware.
-         * This matches kernel's gfx_v12_0_cp_compute_enable(adev, false).
+         * Step 1: Configure MEC using tinygrad-style reset pulse.
+         * Tinygrad: set PC_START, then pulse reset (set then clear),
+         * then later enable. Uses RMW (read-modify-write) not full writes.
          */
-        ULONG disable_val = CP_MEC_RS64_CNTL__MEC_INVALIDATE_ICACHE |
-                            CP_MEC_RS64_CNTL__ALL_PIPE_RESET |
-                            CP_MEC_RS64_CNTL__MEC_HALT;
-        /* (active bits are 0 = deactivated) */
-
         ULONG cntl_before = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
-        pr_info("gpu_gfx: MEC CNTL before disable = 0x%08x "
+        pr_info("gpu_gfx: MEC CNTL before config = 0x%08x "
                 "(active=%d, halt=%d, reset=%d)\n",
                 cntl_before,
                 (cntl_before >> 26) & 1, (cntl_before >> 30) & 1,
                 (cntl_before >> 16) & 1);
-
-        gc1_wreg(dev, regCP_MEC_RS64_CNTL, disable_val);
-        pr_info("gpu_gfx: MEC disabled (halt+reset+deactivate+icache_inv)\n");
 
         /*
          * Step 2: Dump RS64 state AFTER disable but BEFORE we touch anything.
@@ -5487,21 +5477,27 @@ static void configure_mec(struct WddmLiteDevice *dev)
          *   HI = ucode_start_addr_hi >> 2
          * We use the simpler tinygrad encoding since we have the full address.
          */
-        for (int pipe = 0; pipe < 4; pipe++) {
-            grbm_select(dev, 1, pipe, 0, 0);
-            gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START, mec_lo);
-            gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI, mec_hi);
-        }
-        /* Readback pipe 0 to verify */
+        /* Set PC_START for pipe 0 (matching tinygrad: only pipe 0) */
         grbm_select(dev, 1, 0, 0, 0);
-        {
-            ULONG rb_lo = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START);
-            ULONG rb_hi = gc1_rreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI);
-            pr_info("gpu_gfx: MEC PRGRM_CNTR_START = 0x%08x_%08x "
-                    "(wrote 0x%08x_%08x) [all 4 pipes]\n",
-                    rb_hi, rb_lo, mec_hi, mec_lo);
-        }
+        gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START, mec_lo);
+        gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI, mec_hi);
         grbm_select_reset(dev);
+
+        pr_info("gpu_gfx: MEC PC_START set to 0x%08x_%08x (pipe 0)\n",
+                mec_hi, mec_lo);
+
+        /* Reset pulse: assert then deassert mec_pipe0_reset (tinygrad style RMW) */
+        {
+            ULONG cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+            cntl |= (1 << 16);  /* mec_pipe0_reset = 1 */
+            gc1_wreg(dev, regCP_MEC_RS64_CNTL, cntl);
+
+            cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+            cntl &= ~(1 << 16); /* mec_pipe0_reset = 0 */
+            gc1_wreg(dev, regCP_MEC_RS64_CNTL, cntl);
+
+            pr_info("gpu_gfx: MEC reset pulse done (pipe 0)\n");
+        }
     } else {
         pr_warn("gpu_gfx: MEC ucode_start not set — cannot configure MEC\n");
     }
@@ -5556,13 +5552,14 @@ static int enable_mec(struct WddmLiteDevice *dev)
             (val_before >> 26) & 1, (val_before >> 30) & 1,
             (val_before >> 16) & 1);
 
-    /* Kernel pattern: construct fresh value, no icache inv, no resets,
-     * all pipes active, not halted. */
-    ULONG enable_val = CP_MEC_RS64_CNTL__ALL_PIPE_ACTIVE;
-    /* (no reset bits, no halt bit, no icache_inv — all zero) */
+    /* Tinygrad-style RMW: set pipe0_active=1, clear halt, clear reset */
+    ULONG enable_val = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+    enable_val |= (1 << 26);   /* mec_pipe0_active = 1 */
+    enable_val &= ~(1 << 30);  /* mec_halt = 0 */
+    enable_val &= ~(1 << 16);  /* mec_pipe0_reset = 0 */
 
     pr_info("gpu_gfx: writing MEC_RS64_CNTL = 0x%08x "
-            "(all pipes active, halt=0, reset=0)\n", enable_val);
+            "(pipe0 active, halt=0, reset=0)\n", enable_val);
     gc1_wreg(dev, regCP_MEC_RS64_CNTL, enable_val);
 
     Sleep(50);  /* kernel waits 50us, tinygrad waits 50ms — use 50ms for safety */
@@ -5796,8 +5793,34 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
             ULONG gc_test = gfxhub_rreg(dev, regGCVM_CONTEXT0_CNTL);
             pr_info("gpu_gfx: configuring GFXHUB CONTEXT1 for compute "
                     "(CONTEXT0_CNTL=0x%08x preserved)\n", gc_test);
-            gfxhub_enable_compute_context(dev);
-            flush_gpu_tlb(dev, 1, 1);
+
+            /* Dump AUTOLOAD-configured system aperture BEFORE we overwrite */
+            {
+                ULONG sa_lo_pre = gfxhub_rreg(dev, 0x1619);
+                ULONG sa_hi_pre = gfxhub_rreg(dev, 0x161A);
+                pr_info("gpu_gfx: GFXHUB sys aperture BEFORE: LOW=0x%08x HIGH=0x%08x\n",
+                        sa_lo_pre, sa_hi_pre);
+            }
+
+            /* Check env var to skip GFXHUB compute context (for MES debugging) */
+            char skip_gfxhub_cc[32] = {};
+            GetEnvironmentVariableA("HSAKMT_SKIP_GFXHUB_CC",
+                skip_gfxhub_cc, sizeof(skip_gfxhub_cc));
+            if (skip_gfxhub_cc[0] == '1') {
+                pr_info("gpu_gfx: SKIPPING gfxhub_enable_compute_context "
+                        "(HSAKMT_SKIP_GFXHUB_CC=1)\n");
+            } else {
+                gfxhub_enable_compute_context(dev);
+                flush_gpu_tlb(dev, 1, 1);
+            }
+
+            /* Read system aperture AFTER */
+            {
+                ULONG sa_lo_post = gfxhub_rreg(dev, 0x1619);
+                ULONG sa_hi_post = gfxhub_rreg(dev, 0x161A);
+                pr_info("gpu_gfx: GFXHUB sys aperture AFTER: LOW=0x%08x HIGH=0x%08x\n",
+                        sa_lo_post, sa_hi_post);
+            }
             pr_info("gpu_gfx: GFXHUB CONTEXT1 (VMID 1) enabled for compute\n");
         }
     }
@@ -5864,6 +5887,15 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
              * Port 0: Compute/GFX doorbell routing
              *   enable=1 (bit 0), awid=0x3 (bits [5:1]), awaddr_31_28=0x3 (bits [31:28])
              *   Encoded: 0x1 | (0x3 << 1) | (0x3 << 28) = 0x30000007 */
+            /* Dump all S2A doorbell entries */
+            for (int si = 0; si < 8; si++) {
+                ULONG sval = gpu_smn_rreg(dev, nbio2 + 0x01cb + si);
+                pr_info("gpu_gfx: S2A_DOORBELL_ENTRY_%d = 0x%08x "
+                        "(en=%d, awid=%d, awaddr=%d)\n",
+                        si, sval, sval & 1, (sval >> 1) & 0x1F,
+                        (sval >> 28) & 0xF);
+            }
+
             ULONG entry0 = gpu_smn_rreg(dev, nbio2 + 0x01cb);
             pr_info("gpu_gfx: S2A_DOORBELL_ENTRY_0 (before) = 0x%08x\n", entry0);
             gpu_smn_wreg(dev, nbio2 + 0x01cb, 0x30000007);
@@ -6261,9 +6293,19 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
     if (dev->hw.gfx.rlc_bootload_status & 0x80000000) {
         /* MES start address from firmware header:
          * mes_uc_start_addr = 0x00080000_00000000 (both pipes)
-         * After >> 2: lo=0x00000000, hi=0x00020000 */
+         * After >> 2: lo=0x00000000, hi=0x00020000
+         *
+         * Try both the header value and 0x0 to see which works. */
         ULONG mes_pc_lo = 0x00000000;
         ULONG mes_pc_hi = 0x00020000;
+
+        /* Check env var to try PC_START=0 instead */
+        char mes_pc_zero[32] = {};
+        GetEnvironmentVariableA("HSAKMT_MES_PC_ZERO", mes_pc_zero, sizeof(mes_pc_zero));
+        if (mes_pc_zero[0] == '1') {
+            mes_pc_hi = 0;
+            pr_info("gpu_gfx: MES PC_START override → 0x0 (HSAKMT_MES_PC_ZERO=1)\n");
+        }
 
 #define regCP_MES_PRGRM_CNTR_START_MES    0x2800
 #define regCP_MES_PRGRM_CNTR_START_HI_MES 0x289d
@@ -6277,46 +6319,53 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
 #define MES_PIPE1_ACTIVE       (1 << 27)
 #define MES_HALT               (1 << 30)
 
-        /* Enable pipe 1 (KIQ) first, then pipe 0 (SCHED) — matches amdgpu */
-        for (int pipe = 1; pipe >= 0; pipe--) {
-            /* GRBM select: me=3 (MES), pipe=N, queue=0 */
-            grbm_select(dev, 3, pipe, 0, 0);
-
-            /* Assert reset for this pipe */
+        /* Enable pipe 1 (KIQ) ONLY first — matching amdgpu mes_v12_0_enable.
+         * Do NOT enable pipe 0 (SCHED) until KIQ is set up. */
+        {
+            /* Reset pipe 1 */
+            grbm_select(dev, 3, 1, 0, 0);
             ULONG cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
-            if (pipe == 0)
-                cntl |= MES_PIPE0_RESET;
-            else
-                cntl |= MES_PIPE1_RESET;
+            cntl |= MES_PIPE1_RESET;
             gc1_wreg(dev, regCP_MES_CNTL_MES, cntl);
 
-            /* Set program counter start */
+            /* Set PC_START for pipe 1 */
             gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_MES, mes_pc_lo);
             gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES, mes_pc_hi);
-
             grbm_select_reset(dev);
 
-            pr_info("gpu_gfx: MES pipe %d: PC_START=0x%08x_%08x, resetting\n",
-                    pipe, mes_pc_hi, mes_pc_lo);
+            pr_info("gpu_gfx: MES pipe 1 (KIQ): PC_START=0x%08x_%08x, resetting\n",
+                    mes_pc_hi, mes_pc_lo);
+
+            /* Activate: amdgpu sets BOTH pipe0+pipe1 active for KIQ init.
+             * MES_PIPE0_ACTIVE=1 is always set (matching amdgpu mes_v12_0_enable). */
+            grbm_select(dev, 3, 1, 0, 0);
+            gc1_wreg(dev, regCP_MES_CNTL_MES, MES_PIPE0_ACTIVE | MES_PIPE1_ACTIVE);
+            grbm_select_reset(dev);
+            pr_info("gpu_gfx: MES pipes 0+1 enabled (matching amdgpu)\n");
         }
 
-        /* Activate both pipes: clear resets, clear halt, set ACTIVE */
+        /* Wait 500ms for MES KIQ to initialize */
+        Sleep(500);
+
+        /* Check GFXHUB fault after MES enable */
         {
-            ULONG activate = MES_PIPE0_ACTIVE | MES_PIPE1_ACTIVE;
-            grbm_select(dev, 3, 0, 0, 0);
-            gc1_wreg(dev, regCP_MES_CNTL_MES, activate);
-            grbm_select_reset(dev);
-            pr_info("gpu_gfx: MES enabled (CNTL=0x%08x)\n", activate);
+            ULONG fault = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_STATUS_LO32);
+            if (fault != 0) {
+                ULONG fa_lo = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
+                ULONG fa_hi = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
+                pr_err("gpu_gfx: GFXHUB FAULT after MES enable! "
+                       "status=0x%08x addr=0x%08x_%08x\n",
+                       fault, fa_hi, fa_lo);
+            } else {
+                pr_info("gpu_gfx: GFXHUB clean after MES enable\n");
+            }
         }
-
-        /* Wait for MES to start (500us for unified MES) */
-        Sleep(1);
 
         /* Tell RLC which is KIQ: me=3, pipe=1, queue=0 → (3<<5)|(1<<3)|0|0x80 */
         {
             ULONG sched = gc1_rreg(dev, regRLC_CP_SCHEDULERS);
             sched &= 0xFFFFFF00;
-            sched |= (3 << 5) | (1 << 3) | 0 | 0x80;
+            sched |= (3 << 5) | (1 << 3) | 0 | 0x80; /* me=3, pipe=1, queue=0 */
             gc1_wreg(dev, regRLC_CP_SCHEDULERS, sched);
             pr_info("gpu_gfx: RLC_CP_SCHEDULERS = 0x%08x (KIQ=me3,pipe1,q0)\n", sched);
         }
@@ -6332,6 +6381,394 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
                     (mes_cntl >> 26) & 1, (mes_cntl >> 27) & 1,
                     (mes_cntl >> 30) & 1);
         }
+        /* Diagnostic: read GFXHUB system aperture after setup */
+        {
+            ULONG sa_lo = gfxhub_rreg(dev, 0x1619); /* GCMC_VM_SYSTEM_APERTURE_LOW_ADDR */
+            ULONG sa_hi = gfxhub_rreg(dev, 0x161A); /* GCMC_VM_SYSTEM_APERTURE_HIGH_ADDR */
+            pr_info("gpu_gfx: GFXHUB system aperture: LOW=0x%08x HIGH=0x%08x "
+                    "(covers 0x%llx - 0x%llx)\n",
+                    sa_lo, sa_hi,
+                    (unsigned long long)sa_lo << 18,
+                    (unsigned long long)(sa_hi + 1) << 18);
+        }
+
+        /* ============================================================
+         * MES KIQ Queue Setup + SET_HW_RESOURCES
+         *
+         * MES needs a KIQ ring to receive configuration messages.
+         * We allocate a small ring in the existing VRAM mapping,
+         * program the KIQ HQD via direct register writes, then
+         * submit a SET_HW_RESOURCES packet telling MES about
+         * available VMIDs, HQDs, and doorbells.
+         * ============================================================ */
+        {
+            /* Use a 4KB region in our GART for the KIQ ring and control buffers.
+             * Layout: ring=slot 250, rptr=slot 251, wptr=slot 252, mqd=slot 253 */
+            struct GpuGmcConfig *gmc = &dev->hw.gmc;
+            if (!gmc->gart_table_cpu_addr) {
+                pr_warn("gpu_gfx: no GART — skipping MES KIQ setup\n");
+                goto mes_done;
+            }
+
+            /* Allocate DMA buffers for KIQ ring and control structures */
+            /* We'll use a simple VRAM region at a fixed offset for MES KIQ.
+             * VRAM offset 5MB (after PSP ring at 4MB) */
+            ULONGLONG mes_vram_offset = 5 * 1024 * 1024;
+            ULONGLONG mes_vram_mc = dev->hw.gmc.vram_start + mes_vram_offset;
+            UCHAR *mes_vram_cpu = NULL;
+
+            /* Map VRAM for MES KIQ buffers (8 pages = 32KB) */
+            {
+                AMDGPU_ESCAPE_MAP_BAR_DATA map;
+                memset(&map, 0, sizeof(map));
+                map.Header.Command = AMDGPU_ESCAPE_MAP_BAR;
+                map.Header.Size = sizeof(map);
+                map.BarIndex = 0;  /* BAR0 = VRAM */
+                map.Offset = mes_vram_offset;
+                map.Length = 32768;
+                if (wddm_lite_escape(dev, &map, sizeof(map)) == 0 && map.MappedAddress) {
+                    mes_vram_cpu = (UCHAR *)map.MappedAddress;
+                } else {
+                    pr_warn("gpu_gfx: MES VRAM mapping failed — skipping KIQ setup\n");
+                    goto mes_done;
+                }
+            }
+
+            memset(mes_vram_cpu, 0, 32768);
+
+            /* KIQ buffer layout in VRAM:
+             * +0x0000: ring buffer (4KB)
+             * +0x1000: RPTR writeback (4B)
+             * +0x2000: WPTR poll (4B)
+             * +0x3000: MQD (4KB)
+             * +0x4000: EOP buffer (4KB)
+             * +0x5000: fence/status (4B)
+             * +0x6000: scheduler context (4KB) */
+            ULONGLONG kiq_ring_mc = mes_vram_mc + 0x0000;
+            ULONGLONG kiq_rptr_mc = mes_vram_mc + 0x1000;
+            ULONGLONG kiq_wptr_mc = mes_vram_mc + 0x2000;
+            ULONGLONG kiq_mqd_mc  = mes_vram_mc + 0x3000;
+            ULONGLONG kiq_eop_mc  = mes_vram_mc + 0x4000;
+            ULONGLONG kiq_fence_mc = mes_vram_mc + 0x5000;
+            ULONGLONG kiq_schctx_mc = mes_vram_mc + 0x6000;
+
+            volatile ULONG *kiq_ring = (volatile ULONG *)(mes_vram_cpu + 0x0000);
+            volatile ULONG *kiq_rptr = (volatile ULONG *)(mes_vram_cpu + 0x1000);
+            volatile ULONG *kiq_wptr = (volatile ULONG *)(mes_vram_cpu + 0x2000);
+            volatile ULONG *kiq_fence = (volatile ULONG *)(mes_vram_cpu + 0x5000);
+
+            /* Try KIQ on pipe 0 with MES_RING0 doorbell (0x00B).
+             * Unified MES might use pipe 0 for KIQ instead of pipe 1.
+             * Check env var to select pipe. */
+            ULONG kiq_pipe = 1;
+            ULONG kiq_doorbell_qword = 0x00C;  /* MES_RING1 for pipe 1 */
+            char mes_pipe0[32] = {};
+            GetEnvironmentVariableA("HSAKMT_MES_KIQ_PIPE0", mes_pipe0, sizeof(mes_pipe0));
+            if (mes_pipe0[0] == '1') {
+                kiq_pipe = 0;
+                kiq_doorbell_qword = 0x00B;  /* MES_RING0 for pipe 0 */
+                pr_info("gpu_gfx: using MES KIQ on pipe 0 (HSAKMT_MES_KIQ_PIPE0=1)\n");
+            }
+            ULONG kiq_doorbell_dword = kiq_doorbell_qword << 1;
+
+            /* Build MQD in memory first — MES reads this for queue details.
+             * MQD layout matches v12_compute_mqd / our GfxMqd struct.
+             * Key fields are at the same offsets as HQD register indices. */
+            volatile ULONG *mqd = (volatile ULONG *)(mes_vram_cpu + 0x3000);
+            /* Clear MQD */
+            memset((void *)mqd, 0, 4096);
+            /* cp_mqd_base_addr (MQD offsets 134-135) */
+            mqd[134] = (ULONG)(kiq_mqd_mc & 0xFFFFFFFF);
+            mqd[135] = (ULONG)(kiq_mqd_mc >> 32);
+            /* cp_hqd_vmid (131) */
+            mqd[131] = 0;
+            /* cp_hqd_pq_base (136-137) = ring_addr >> 8 */
+            mqd[136] = (ULONG)((kiq_ring_mc >> 8) & 0xFFFFFFFF);
+            mqd[137] = (ULONG)(kiq_ring_mc >> 40);
+            /* cp_hqd_pq_rptr (138) */
+            mqd[138] = 0;
+            /* cp_hqd_pq_rptr_report_addr (139-140) */
+            mqd[139] = (ULONG)(kiq_rptr_mc & 0xFFFFFFFF);
+            mqd[140] = (ULONG)(kiq_rptr_mc >> 32);
+            /* cp_hqd_pq_wptr_poll_addr (141-142) */
+            mqd[141] = (ULONG)(kiq_wptr_mc & 0xFFFFFFFF);
+            mqd[142] = (ULONG)((kiq_wptr_mc >> 32) & 0xFFFF);
+            /* cp_hqd_pq_doorbell_control (143) */
+            mqd[143] = (1 << 30) | (kiq_doorbell_dword << DOORBELL_OFFSET_SHIFT);
+            /* cp_hqd_pq_control (145) */
+            mqd[145] = (9 << 0) | (9 << 8) | (1 << 13) | (1 << 30) | (1u << 31) | (1 << 28);
+            /* cp_hqd_persistent_state (150 in some layouts, using amdgpu's offset) */
+            mqd[150] = (0x55 << 8) | 1;
+            /* cp_hqd_eop_base_addr (152-153) */
+            mqd[152] = (ULONG)((kiq_eop_mc >> 8) & 0xFFFFFFFF);
+            mqd[153] = (ULONG)(kiq_eop_mc >> 40);
+            /* cp_hqd_eop_control (154) */
+            mqd[154] = 9;
+
+            /* Program KIQ HQD via direct register writes (me=3, pipe=1, queue=0) */
+            pr_info("gpu_gfx: programming MES KIQ HQD (ring=0x%llx)\n",
+                    (unsigned long long)kiq_ring_mc);
+
+            grbm_select(dev, 3, kiq_pipe, 0, 0);
+            {
+                /* Disable doorbell first */
+                gc0_wreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL, 0);
+
+                /* MQD base */
+                gc0_wreg(dev, 0x1fa7 /* CP_MQD_BASE_ADDR */, (ULONG)(kiq_mqd_mc & 0xFFFFFFFF));
+                gc0_wreg(dev, 0x1fa7 + 1, (ULONG)(kiq_mqd_mc >> 32));
+
+                /* MQD control: VMID=0 */
+                gc0_wreg(dev, 0x1fac + 1 /* CP_MQD_CONTROL */, 0);
+
+                /* PQ base (ring buffer address >> 8) */
+                gc0_wreg(dev, regCP_HQD_PQ_BASE, (ULONG)((kiq_ring_mc >> 8) & 0xFFFFFFFF));
+                gc0_wreg(dev, regCP_HQD_PQ_BASE + 1, (ULONG)(kiq_ring_mc >> 40));
+
+                /* RPTR report addr */
+                gc0_wreg(dev, regCP_HQD_PQ_RPTR_REPORT_ADDR, (ULONG)(kiq_rptr_mc & 0xFFFFFFFF));
+                gc0_wreg(dev, regCP_HQD_PQ_RPTR_REPORT_ADDR_HI, (ULONG)(kiq_rptr_mc >> 32));
+
+                /* WPTR poll addr */
+                gc0_wreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR, (ULONG)(kiq_wptr_mc & 0xFFFFFFFF));
+                gc0_wreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR_HI, (ULONG)((kiq_wptr_mc >> 32) & 0xFFFF));
+
+                /* PQ control: ring_size=log2(4096/4)-1=9, PRIV_STATE=1, KMD_QUEUE=1,
+                 * NO_UPDATE_RPTR=1, UNORD_DISPATCH=1 */
+                ULONG pq_ctrl = (9 << 0)     /* QUEUE_SIZE = log2(1024 dwords) - 1 */
+                              | (9 << 8)      /* RPTR_BLOCK_SIZE = log2(4096/4)-1 = 9 */
+                              | (1 << 13)     /* UNORD_DISPATCH */
+                              | (1 << 30)     /* PRIV_STATE */
+                              | (1u << 31)    /* KMD_QUEUE */
+                              | (1 << 28);    /* NO_UPDATE_RPTR */
+                gc0_wreg(dev, regCP_HQD_PQ_CONTROL, pq_ctrl);
+
+                /* Doorbell: DOORBELL_OFFSET = dword_offset << SHIFT */
+                ULONG db_ctrl = (1 << 30) /* DOORBELL_EN */
+                              | (kiq_doorbell_dword << DOORBELL_OFFSET_SHIFT);
+                gc0_wreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL, db_ctrl);
+
+                /* VMID = 0 */
+                gc0_wreg(dev, 0x1fac /* CP_HQD_VMID */, 0);
+
+                /* Persistent state: PRELOAD_SIZE=0x55 (matching amdgpu) */
+                gc0_wreg(dev, 0x1fab /* CP_HQD_PERSISTENT_STATE */, 0x55 << 8 | 1);
+
+                /* EOP buffer */
+                gc0_wreg(dev, 0x1fc3 /* CP_HQD_EOP_BASE_ADDR */, (ULONG)((kiq_eop_mc >> 8) & 0xFFFFFFFF));
+                gc0_wreg(dev, 0x1fc3 + 1, (ULONG)(kiq_eop_mc >> 40));
+                gc0_wreg(dev, 0x1fc5 /* CP_HQD_EOP_CONTROL */, 9); /* log2(4096/4)-1 */
+
+                /* Activate */
+                gc0_wreg(dev, regCP_HQD_ACTIVE, 1);
+            }
+            grbm_select_reset(dev);
+
+            /* Verify KIQ HQD activation */
+            grbm_select(dev, 3, kiq_pipe, 0, 0);
+            ULONG kiq_active = gc0_rreg(dev, regCP_HQD_ACTIVE);
+            grbm_select_reset(dev);
+            pr_info("gpu_gfx: MES KIQ HQD ACTIVE = %u\n", kiq_active & 1);
+
+            /* Test: try writing 0xDEADBEEF to first DWORD of ring and see
+             * if it survives (VRAM access verification) */
+            kiq_ring[0] = 0xDEADBEEF;
+            MemoryBarrier();
+            ULONG readback = kiq_ring[0];
+            pr_info("gpu_gfx: VRAM ring test: wrote 0xDEADBEEF, read 0x%08x (%s)\n",
+                    readback, readback == 0xDEADBEEF ? "OK" : "MISMATCH!");
+
+            /* Build SET_HW_RESOURCES packet (256 bytes = 64 DWORDs) */
+            ULONG hw_res[64];
+            memset(hw_res, 0, sizeof(hw_res));
+
+            /* DW0: header — type=1 (SCHEDULER), opcode=0 (SET_HW_RSRC), dwsize=64
+             * MES_API_HEADER bitfield: type [3:0], opcode [11:4], dwsize [19:12] */
+            hw_res[0] = (1 << 0)   /* type = MES_API_TYPE_SCHEDULER */
+                      | (0 << 4)   /* opcode = MES_SCH_API_SET_HW_RSRC */
+                      | (64 << 12); /* dwsize = API_FRAME_SIZE_IN_DWORDS */
+
+            /* DW1: vmid_mask_mmhub — VMIDs 8-15 for compute */
+            hw_res[1] = 0xFF00;
+
+            /* DW2: vmid_mask_gfxhub — VMIDs 4-15 for compute */
+            hw_res[2] = 0xFFF0;
+
+            /* DW3: gds_size */
+            hw_res[3] = 0;
+
+            /* DW4: paging_vmid */
+            hw_res[4] = 0;
+
+            /* DW5-12: compute_hqd_mask[8] — all queues available per pipe */
+            for (int i = 0; i < 8; i++)
+                hw_res[5 + i] = 0x7E; /* queues 1-6 available (reserve 0 for KIQ) */
+
+            /* DW13-14: gfx_hqd_mask[2] */
+            hw_res[13] = 0;
+            hw_res[14] = 0;
+
+            /* DW15-16: sdma_hqd_mask[2] */
+            hw_res[15] = 0xFC; /* SDMA queues 2-7 */
+            hw_res[16] = 0xFC;
+
+            /* DW17-21: aggregated_doorbells[5] — unused for now */
+
+            /* DW22-23: g_sch_ctx_gpu_mc_ptr (64-bit) */
+            hw_res[22] = (ULONG)(kiq_schctx_mc & 0xFFFFFFFF);
+            hw_res[23] = (ULONG)(kiq_schctx_mc >> 32);
+
+            /* DW24-25: query_status_fence_gpu_mc_ptr */
+            hw_res[24] = (ULONG)(kiq_fence_mc & 0xFFFFFFFF);
+            hw_res[25] = (ULONG)(kiq_fence_mc >> 32);
+
+            /* DW26-33: gc_base[8] */
+            hw_res[26] = dev->hw.ip.gc_base;     /* BASE_IDX=0 */
+            hw_res[27] = dev->hw.ip.gc_base1;    /* BASE_IDX=1 */
+
+            /* DW34-41: mmhub_base[8] */
+            hw_res[34] = dev->hw.ip.mmhub_base;
+
+            /* DW42-49: osssys_base[8] — IH base */
+            hw_res[42] = dev->hw.ip.ih_base;
+
+            /* DW50: api_status (output, leave 0) */
+
+            /* DW51: flags bitfield */
+            hw_res[51] = (1 << 0)   /* disable_reset */
+                       | (1 << 2)   /* disable_mes_log */
+                       | (1 << 1)   /* use_different_vmid_compute */
+                       | (1 << 10)  /* enable_reg_active_poll */
+                       | (1 << 6);  /* enable_level_process_quantum_check */
+
+            /* DW52: oversubscription_timer */
+            hw_res[52] = 50;
+
+            /* Write SET_HW_RESOURCES to KIQ ring */
+            memcpy((void *)kiq_ring, hw_res, sizeof(hw_res));
+            MemoryBarrier();
+
+            /* Update WPTR in memory — use same value as doorbell (byte count).
+             * HW polls WPTR_POLL_ADDR and compares to RPTR to detect work.
+             * Both should be in same units for HW to match them correctly. */
+            kiq_wptr[0] = 64 * 4;  /* 256 bytes = one 64-dword packet */
+            kiq_wptr[1] = 0;
+            MemoryBarrier();
+
+            /* Notify MES of new WPTR — write doorbell AND MMIO WPTR register */
+            /* Map doorbell BAR if not already mapped.
+             * Try BAR indices 1, 2, 3 to find the 256MB doorbell BAR. */
+            if (!dev->doorbell_base) {
+                /* Dump all BARs for diagnostics */
+                pr_info("gpu_gfx: BAR layout: NumBars=%u VramBar=%u MmioBar=%u\n",
+                        dev->info.NumBars, dev->info.VramBarIndex, dev->info.MmioBarIndex);
+                for (ULONG bi = 0; bi < dev->info.NumBars && bi < 8; bi++) {
+                    pr_info("gpu_gfx:   BAR%u: phys=0x%llx len=0x%llx isMem=%d\n",
+                            bi,
+                            (unsigned long long)dev->info.Bars[bi].PhysicalAddress.QuadPart,
+                            (unsigned long long)dev->info.Bars[bi].Length,
+                            dev->info.Bars[bi].IsMemory);
+                }
+
+                /* Find the doorbell BAR — look for 256MB memory BAR that isn't VRAM */
+                ULONG db_bar = 1;
+                AMDGPU_ESCAPE_MAP_BAR_DATA dbmap;
+                memset(&dbmap, 0, sizeof(dbmap));
+                dbmap.Header.Command = AMDGPU_ESCAPE_MAP_BAR;
+                dbmap.Header.Size = sizeof(dbmap);
+                dbmap.BarIndex = db_bar;
+                dbmap.Offset = 0;
+                dbmap.Length = 4096;
+                if (wddm_lite_escape(dev, &dbmap, sizeof(dbmap)) == 0 && dbmap.MappedAddress) {
+                    dev->doorbell_base = dbmap.MappedAddress;
+                    dev->doorbell_size = 4096;
+                    pr_info("gpu_gfx: doorbell BAR%u mapped at %p for MES KIQ\n",
+                            db_bar, dev->doorbell_base);
+                }
+            }
+
+            if (dev->doorbell_base) {
+                volatile ULONGLONG *kiq_db = (volatile ULONGLONG *)
+                    ((UCHAR *)dev->doorbell_base + kiq_doorbell_qword * 8);
+                pr_info("gpu_gfx: MES KIQ doorbell at BAR+0x%x, writing WPTR=%u\n",
+                        (ULONG)(kiq_doorbell_qword * 8), 64 * 4);
+                *kiq_db = 64 * 4;  /* byte-unit WPTR */
+                MemoryBarrier();
+            } else {
+                pr_warn("gpu_gfx: no doorbell BAR — MES KIQ doorbell not sent\n");
+            }
+            /* Also write WPTR via MMIO register (dword count, matching memory) */
+            grbm_select(dev, 3, kiq_pipe, 0, 0);
+            gc0_wreg(dev, regCP_HQD_PQ_WPTR_LO, 64);
+            gc0_wreg(dev, regCP_HQD_PQ_WPTR_HI, 0);
+            grbm_select_reset(dev);
+            pr_info("gpu_gfx: MES KIQ WPTR also written via MMIO\n");
+
+            /* Wait for MES to process SET_HW_RESOURCES */
+            Sleep(100);
+
+            /* Check MES execution state + additional diagnostic registers */
+            grbm_select(dev, 3, kiq_pipe, 0, 0);
+            {
+                /* MES scratch registers / GP registers (RS64 status indicators) */
+                ULONG mes_gp0_lo = gc1_rreg(dev, 0x2910); /* GP0_LO */
+                ULONG mes_gp0_hi = gc1_rreg(dev, 0x2911); /* GP0_HI */
+                ULONG mes_gp4_lo = gc1_rreg(dev, 0x2918); /* GP4_LO */
+                ULONG mes_instr = gc1_rreg(dev, 0x2908); /* INSTR_PNTR */
+                pr_info("gpu_gfx: MES pipe1 RS64: INSTR_PNTR=0x%08x "
+                        "GP0=0x%08x_%08x GP4=0x%08x\n",
+                        mes_instr, mes_gp0_hi, mes_gp0_lo, mes_gp4_lo);
+            }
+            {
+                ULONG mes_ic_lo = gc1_rreg(dev, 0x5850); /* CP_MES_IC_BASE_LO */
+                ULONG mes_ic_hi = gc1_rreg(dev, 0x5851); /* CP_MES_IC_BASE_HI */
+                ULONG mes_md_lo = gc1_rreg(dev, 0x5854); /* CP_MES_MDBASE_LO */
+                ULONG mes_md_hi = gc1_rreg(dev, 0x5855); /* CP_MES_MDBASE_HI */
+                ULONG mes_pc_lo = gc1_rreg(dev, regCP_MES_PRGRM_CNTR_START_MES);
+                ULONG mes_pc_hi = gc1_rreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES);
+                ULONG mes_cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
+                pr_info("gpu_gfx: MES pipe1 state: IC_BASE=0x%08x_%08x "
+                        "MDBASE=0x%08x_%08x PC_START=0x%08x_%08x CNTL=0x%08x\n",
+                        mes_ic_hi, mes_ic_lo, mes_md_hi, mes_md_lo,
+                        mes_pc_hi, mes_pc_lo, mes_cntl);
+            }
+            grbm_select_reset(dev);
+
+            /* Also check pipe 0 */
+            grbm_select(dev, 3, 0, 0, 0);
+            {
+                ULONG mes0_ic_lo = gc1_rreg(dev, 0x5850);
+                ULONG mes0_ic_hi = gc1_rreg(dev, 0x5851);
+                ULONG mes0_cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
+                pr_info("gpu_gfx: MES pipe0 state: IC_BASE=0x%08x_%08x CNTL=0x%08x\n",
+                        mes0_ic_hi, mes0_ic_lo, mes0_cntl);
+            }
+            grbm_select_reset(dev);
+
+            /* Check fence/api_status */
+            ULONG api_status = kiq_fence[0];
+            pr_info("gpu_gfx: MES SET_HW_RESOURCES api_status = 0x%08x "
+                    "(0=pending, 1=success)\n", api_status);
+
+            /* Check KIQ RPTR — both memory and register */
+            ULONG kiq_rptr_val = kiq_rptr[0];
+            grbm_select(dev, 3, kiq_pipe, 0, 0);
+            ULONG kiq_rptr_reg = gc0_rreg(dev, regCP_HQD_PQ_RPTR);
+            ULONG kiq_wptr_reg = gc0_rreg(dev, regCP_HQD_PQ_WPTR_LO);
+            ULONG kiq_active_reg = gc0_rreg(dev, regCP_HQD_ACTIVE);
+            ULONG kiq_status_reg = gc0_rreg(dev, regCP_HQD_HQ_STATUS0);
+            grbm_select_reset(dev);
+            pr_info("gpu_gfx: MES KIQ: mem_RPTR=%u reg_RPTR=%u reg_WPTR=%u "
+                    "ACTIVE=%u STATUS=0x%08x\n",
+                    kiq_rptr_val, kiq_rptr_reg, kiq_wptr_reg,
+                    kiq_active_reg & 1, kiq_status_reg);
+
+            /* Also check ring content (first DWORD should be header=0x00400010) */
+            pr_info("gpu_gfx: MES KIQ ring[0]=0x%08x ring[1]=0x%08x\n",
+                    kiq_ring[0], kiq_ring[1]);
+        }
+mes_done:
+        (void)0; /* label must be followed by a statement */
     } else {
         pr_info("gpu_gfx: skipping MES enable (AUTOLOAD not complete)\n");
     }
@@ -6339,6 +6776,48 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
     dev->hw.gfx_initialized = TRUE;
     pr_info("gpu_gfx: GFX engine initialization complete\n");
     return 0;
+}
+
+/* Program HQD from MQD via bulk register copy (exported for queues.cpp NOP test) */
+void gpu_program_hqd_from_mqd(struct WddmLiteDevice *dev,
+    ULONG me, ULONG pipe, ULONG queue, volatile ULONG *mqd)
+{
+    grbm_select(dev, me, pipe, queue, 0);
+    gc0_wreg(dev, regCP_HQD_ACTIVE, 0); /* deactivate first */
+    /* Bulk copy MQD[128..183] → regs [0x1fa9..0x1fe0] */
+    for (ULONG i = 0; i < 56; i++)
+        gc0_wreg(dev, 0x1fa9 + i, mqd[128 + i]);
+    gc0_wreg(dev, regCP_HQD_ACTIVE, 1); /* activate */
+    grbm_select_reset(dev);
+    gpu_hdp_flush(dev);
+    pr_info("gpu_program_hqd_from_mqd: me=%u pipe=%u q=%u activated\n", me, pipe, queue);
+}
+
+/* Check GFXHUB fault and return status (exported for queues.cpp) */
+ULONG gpu_check_gfxhub_fault(struct WddmLiteDevice *dev)
+{
+    ULONG fault = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_STATUS_LO32);
+    if (fault != 0) {
+        ULONG fa_lo = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
+        ULONG fa_hi = gfxhub_rreg(dev, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
+        pr_err("gpu_check_gfxhub_fault: FAULT! status=0x%08x addr=0x%08x_%08x\n",
+               fault, fa_hi, fa_lo);
+    }
+    return fault;
+}
+
+/* Read HQD WPTR register for a specific me/pipe/queue (exported for queues.cpp) */
+ULONG gpu_read_hqd_wptr(struct WddmLiteDevice *dev,
+    ULONG me, ULONG pipe, ULONG queue)
+{
+    grbm_select(dev, me, pipe, queue, 0);
+    ULONG wptr = gc0_rreg(dev, regCP_HQD_PQ_WPTR_LO);
+    ULONG rptr = gc0_rreg(dev, regCP_HQD_PQ_RPTR);
+    ULONG active = gc0_rreg(dev, regCP_HQD_ACTIVE);
+    grbm_select_reset(dev);
+    pr_info("gpu_read_hqd_wptr: me=%u pipe=%u q=%u: WPTR=%u RPTR=%u ACTIVE=%u\n",
+            me, pipe, queue, wptr, rptr, active & 1);
+    return wptr;
 }
 
 void gpu_gfx_cleanup(struct WddmLiteDevice *dev)
@@ -6580,7 +7059,7 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
     mqd[128] = (ULONG)(q->mqd_gpu_addr) & 0xFFFFFFFC;          /* cp_mqd_base_addr */
     mqd[129] = (ULONG)(q->mqd_gpu_addr >> 32) & 0xFFFFFFFF;    /* cp_mqd_base_addr_hi */
     mqd[130] = 1;      /* cp_hqd_active */
-    mqd[131] = 1;      /* cp_hqd_vmid = 1 (CONTEXT1: our flat GART, firmware VA in CONTEXT0) */
+    mqd[131] = 0;      /* cp_hqd_vmid = 0 (system aperture, matching tinygrad) */
     mqd[132] = (0x55 << 8) | 1;  /* cp_hqd_persistent_state: preload_size=0x55 (bits [17:8]), preload_req=1 (bit 0) */
     mqd[133] = 0x2;    /* cp_hqd_pipe_priority (tinygrad: 2) */
     mqd[134] = 0xF;    /* cp_hqd_queue_priority (tinygrad: 0xf) */
