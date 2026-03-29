@@ -68,10 +68,18 @@ jobs:
     - name: Configure Env
       shell: bash
       working-directory: projects/rocprofiler-systems/
-      run:
-        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
-        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
-        echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
+      run: |
+        OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"' | cut -d'.' -f1)
+        echo "OS_VERSION_MAJOR=${OS_VERSION_MAJOR}" >> $GITHUB_ENV
+        if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then
+            GCC_TOOLSET=/opt/rh/gcc-toolset-10/root/usr/bin
+            echo "CC=${GCC_TOOLSET}/$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
+            echo "CXX=${GCC_TOOLSET}/${{ matrix.compiler }}" >> $GITHUB_ENV
+            echo "PATH=${GCC_TOOLSET}:${PATH}" >> $GITHUB_ENV
+        else
+            echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
+            echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+        fi
         env
 
     - name: Install Packages
@@ -79,6 +87,7 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
           if [ $OS_VERSION_MAJOR -eq 8 ]; then
+            dnf install -y gcc-toolset-10-binutils gcc-toolset-10-gcc gcc-toolset-10-gcc-c++ gcc-gfortran || true
             wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
             chmod +x /opt/trace_processor/bin/trace_processor_shell
           fi
@@ -127,8 +136,8 @@ jobs:
           --build-jobs 2
           --site GitHub
           --
-          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
-          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_C_COMPILER=${CC}
+          -DCMAKE_CXX_COMPILER=${CXX}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
