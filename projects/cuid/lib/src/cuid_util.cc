@@ -168,7 +168,7 @@ std::string CuidUtilities::real_dev_path_from_fd(int fd) {
   return "";
 }
 
-std::string CuidUtilities::get_real_path(const std::string path) {
+std::string CuidUtilities::get_real_path(const std::string &path) {
   char buf[PATH_MAX];
   if (realpath(path.c_str(), buf) != nullptr) {
     return std::string(buf) + "/device";
@@ -195,6 +195,9 @@ int CuidUtilities::extract_render_minor(const std::string &path) {
 
 // Minimal structures matching the kernel DRM UAPI (stable ABI).
 // Only the fields up to ids_flags are needed for VF detection.
+// The kernel ioctl handler (amdgpu_info_ioctl) respects return_size via
+// copy_to_user(out, &dev_info, min(size, sizeof(dev_info))), so providing
+// a smaller buffer than the full drm_amdgpu_info_device is safe.
 namespace {
 
 struct cuid_drm_amdgpu_info {
@@ -334,7 +337,6 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
                                      cuid_hmac *hmac) {
   if (!primary_id || !hmac) {
     // Return invalid on null input
-    amdcuid_id_t empty = {};
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
 

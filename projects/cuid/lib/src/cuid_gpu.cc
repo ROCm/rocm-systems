@@ -48,7 +48,7 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr> &gpus) {
       std::string device_path =
           std::string(drm_path) + "/" + render_name + "/device";
       amdcuid_gpu_info info = {};
-      amdcuid_status_t status = discover_single(&info, device_path);
+      discover_single(&info, device_path);
 
       gpus.emplace_back(std::make_shared<CuidGpu>(info));
     }
@@ -62,7 +62,6 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info,
 
   amdcuid_gpu_info info = {};
   std::string bdf = CuidUtilities::readlink_bdf(device_path);
-  info.header.fields.gpu.unit_id = 0;
 
   // Determine unit_id from SR-IOV VF (Virtual Function) status via ioctl.
   // In bare metal or passthrough, unit_id is 0.
