@@ -459,7 +459,7 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
 endif()
 
 # Find the generated files in the output directory
-file(GLOB GENERATED_FILES "${GEN_DIR}/*")
+file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
 
 # Append all found generated files to the list
 foreach(file ${GENERATED_FILES})
@@ -1084,6 +1084,7 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   )
 
   add_dependencies(rccl_device_objects hipify_all)
+  add_dependencies(rccl rccl_device_objects)
 
   # Only the final link needs the fat object; host .o compiles are independent.
   set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS ${DEVICE_FAT_OBJECTS})

@@ -638,7 +638,7 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 ## RCCL library
 #==================================================================================================
 option(ENABLE_SPLIT_DEVICE_COMPILE
-  "Pre-compile device code per-TU via LLC for fast linking" OFF)
+  "Pre-compile device code per-TU via LLC for fast linking" ON)
 
 if(ENABLE_SPLIT_DEVICE_COMPILE AND NOT BUILD_SHARED_LIBS)
   message(FATAL_ERROR "ENABLE_SPLIT_DEVICE_COMPILE requires BUILD_SHARED_LIBS=ON (shared library)")

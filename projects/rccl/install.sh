@@ -400,13 +400,17 @@ fi
 
 check_exit_code "$?"
 
-# Use Ninja when split-device or time-trace is requested
-if [[ "${split_device}" == true ]] || [[ "${time_trace}" == true ]]; then
+# Use Ninja when available or when explicitly needed for time-trace.
+# Split-device compile (on by default) works with both Ninja and Make.
+if [[ "${time_trace}" == true ]]; then
     if ! hash ninja &>/dev/null ; then
-        echo "ninja could not be found"
+        echo "ninja could not be found (required for --time-trace)"
         echo "Use \"${time_trace_ninja_msg}\" to install ninja"
         exit 1
     fi
+    build_system="ninja"
+    enable_ninja="-GNinja"
+elif hash ninja &>/dev/null ; then
     build_system="ninja"
     enable_ninja="-GNinja"
 else
