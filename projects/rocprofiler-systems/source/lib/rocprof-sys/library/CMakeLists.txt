@@ -12,7 +12,6 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/thread_deleter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tracing.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/ainic_stats.cpp
 )
 
 set(library_headers
@@ -21,8 +20,6 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/process_sampler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocm.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi_ainic.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sampling.hpp
@@ -30,7 +27,6 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/thread_deleter.hpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_info.hpp
     ${CMAKE_CURRENT_LIST_DIR}/tracing.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/ainic_stats.hpp
 )
 
 target_sources(
@@ -43,11 +39,10 @@ target_sources(
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
         ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
-        ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
-        ${CMAKE_CURRENT_LIST_DIR}/amd_smi_ainic.cpp
 )
 add_subdirectory(rocprofiler-sdk)
 
+add_subdirectory(pmc)
 add_subdirectory(causal)
 add_subdirectory(components)
 add_subdirectory(coverage)
@@ -57,8 +52,6 @@ set(ndebug_sources
     ${CMAKE_CURRENT_LIST_DIR}/components/mpi_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/components/backtrace_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/kokkosp.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi_ainic.cpp
 )
 
 set_source_files_properties(
