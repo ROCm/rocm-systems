@@ -135,8 +135,14 @@ class ProfileModeImportGuard:
         """Check if module exists in project directory, not site-packages."""
         project_root = Path(__file__).parent.parent
         for base in [project_root / "src", project_root]:
-            for p in [base / f"{module_name}.py", base / module_name / "__init__.py"]:
-                if p.exists():
+            # Check for: module.py, module/__init__.py, or module/ (namespace pkg)
+            candidates = [
+                base / f"{module_name}.py",
+                base / module_name / "__init__.py",
+                base / module_name,  # namespace package (dir without __init__.py)
+            ]
+            for p in candidates:
+                if p.is_file() or (p.is_dir() and p.exists()):
                     return True
         return False
 
