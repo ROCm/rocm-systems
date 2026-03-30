@@ -448,7 +448,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
   if (!dev)
     return HSAKMT_STATUS_ERROR;
 
-  *AvailableBytes = dev->VramAvail();
+  if (dev->VramAvail(AvailableBytes) != ErrorCode::Success) {
+    return HSAKMT_STATUS_ERROR;
+  }
+
   return HSAKMT_STATUS_SUCCESS;
 }
 

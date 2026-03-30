@@ -182,7 +182,7 @@ bool WDDMDevice::FindSegmentId(SegmentKind segment_kind, uint32_t* segment_id)
 /*Local heap(dedicated GPU memory) includes visiable heap and invisiable heap.
  *Non local heap refers to shared GPU memory and it is sytem memory.
  */
-uint64_t WDDMDevice::VramAvail(void) {
+ErrorCode WDDMDevice::VramAvail(uint64_t* available_bytes) {
   D3DKMT_QUERYSTATISTICS stats;
   NTSTATUS ret;
   uint64_t usedVis = 0;
@@ -190,16 +190,24 @@ uint64_t WDDMDevice::VramAvail(void) {
   uint64_t usedNonLocal = 0;
   uint32_t segmentId = 0;
 
+  if (!available_bytes) {
+    return ErrorCode::InvalidateParams;
+  }
+
+  *available_bytes = 0;
+
   // wait fence complete
   uint64_t value = page_fence_value_.load();
-  if(!CpuWait(&page_syncobj_, &value, 1, false))
-    return HSA_STATUS_ERROR;
+  if (!CpuWait(&page_syncobj_, &value, 1, false)) {
+    pr_err("Failed to wait for paging fence\n");
+    return ErrorCode::Unknown;
+  }
 
   if (IsDgpu()) {
     // local cpu-visible memory
     if (!FindSegmentId(SegmentKind::kLocalMemory, &segmentId)) {
       pr_err("Failed to find local memory segment\n");
-      return HSA_STATUS_ERROR;
+      return ErrorCode::Unknown;
     }
 
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
@@ -207,8 +215,11 @@ uint64_t WDDMDevice::VramAvail(void) {
     stats.AdapterLuid = adapter_luid_;
     stats.QuerySegment.SegmentId = segmentId;
     ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedVis = stats.QueryResult.SegmentInformation.BytesResident;
+    if (ret != STATUS_SUCCESS) {
+      pr_err("Failed to query visible local memory segment %u info: %x\n", segmentId, ret);
+      return TranslateNtStatus(ret);
+    }
+    usedVis = stats.QueryResult.SegmentInformation.BytesResident;
 
     // local invisible memory
     if (device_info_.local_invisible_heap_size) {
@@ -226,7 +237,7 @@ uint64_t WDDMDevice::VramAvail(void) {
 
       if (!foundInvisible) {
         pr_err("Failed to find invisible memory segment\n");
-        return HSA_STATUS_ERROR;
+        return ErrorCode::Unknown;
       }
       memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
       stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
@@ -234,16 +245,20 @@ uint64_t WDDMDevice::VramAvail(void) {
       stats.QuerySegment.SegmentId = invisibleSegmentId;
 
       ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-      if (ret == 0)
-        usedInv = stats.QueryResult.SegmentInformation.BytesResident;
+      if (ret != STATUS_SUCCESS) {
+        pr_err("Failed to query invisible local memory segment %u info: %x\n",
+               invisibleSegmentId, ret);
+        return TranslateNtStatus(ret);
+      }
+      usedInv = stats.QueryResult.SegmentInformation.BytesResident;
     }
 
-    return LocalHeapSize() - usedVis - usedInv;
+    *available_bytes = LocalHeapSize() - usedVis - usedInv;
   } else {
     // APU - NonLocal memory
     if (!FindSegmentId(SegmentKind::kSystemMemory, &segmentId)) {
       pr_err("Failed to find system memory segment\n");
-      return HSA_STATUS_ERROR;
+      return ErrorCode::Unknown;
     }
 
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
@@ -251,11 +266,16 @@ uint64_t WDDMDevice::VramAvail(void) {
     stats.AdapterLuid = adapter_luid_;
     stats.QuerySegment.SegmentId = segmentId;
     ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
-    if (ret == 0)
-      usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
+    if (ret != STATUS_SUCCESS) {
+      pr_err("Failed to query system memory segment %u info: %x\n", segmentId, ret);
+      return TranslateNtStatus(ret);
+    }
+    usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
 
-    return NonLocalHeapSize() - usedNonLocal;
+    *available_bytes = NonLocalHeapSize() - usedNonLocal;
   }
+
+  return ErrorCode::Success;
 }
 
 bool WDDMDevice::CreateDevice(void) {
