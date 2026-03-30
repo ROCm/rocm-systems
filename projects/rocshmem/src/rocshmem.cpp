@@ -181,12 +181,12 @@ static void setFilesLimit() {
   using rocshmem::envvar::types::debug_level;
   auto debug_val = envvar::debug_level.get_value();
   if (debug_val == debug_level::ENV ||
-      debug_val == debug_level::ENV_FULL ||
-      debug_val == debug_level::ENV_PRETTY) {
+      debug_val == debug_level::ENV_ALL ||
+      debug_val == debug_level::ENV_FULL) {
     envvar::print_mode mode;
     if (debug_val == debug_level::ENV) {
       mode = envvar::print_mode::MODIFIED;
-    } else if (debug_val == debug_level::ENV_FULL) {
+    } else if (debug_val == debug_level::ENV_ALL) {
       mode = envvar::print_mode::ALL_VALUES;
     } else {
       mode = envvar::print_mode::FULL_DOCUMENTATION;
@@ -318,12 +318,12 @@ static void setFilesLimit() {
   using rocshmem::envvar::types::debug_level;
   auto debug_val = envvar::debug_level.get_value();
   if (debug_val == debug_level::ENV ||
-      debug_val == debug_level::ENV_FULL ||
-      debug_val == debug_level::ENV_PRETTY) {
+      debug_val == debug_level::ENV_ALL ||
+      debug_val == debug_level::ENV_FULL) {
     envvar::print_mode mode;
     if (debug_val == debug_level::ENV) {
       mode = envvar::print_mode::MODIFIED;
-    } else if (debug_val == debug_level::ENV_FULL) {
+    } else if (debug_val == debug_level::ENV_ALL) {
       mode = envvar::print_mode::ALL_VALUES;
     } else {
       mode = envvar::print_mode::FULL_DOCUMENTATION;

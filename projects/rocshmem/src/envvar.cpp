@@ -58,7 +58,7 @@ namespace envvar {
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
                                             "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
                                             1024);
-    const var<std::string> requested_dev("USE_IB_HCA",
+    const var<std::string> requested_nic("USE_IB_HCA",
                                          "Specify which NIC this PE should bind to (e.g., 'bnxt_re0'). Empty string enables auto-detection.");
     const var<std::string> hca_list("HCA_LIST", "");
     const var<uint32_t> sq_size("SQ_SIZE",
