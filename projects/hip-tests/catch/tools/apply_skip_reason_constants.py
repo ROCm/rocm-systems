@@ -226,7 +226,7 @@ LITERAL_REPLACEMENTS: list[tuple[str, str]] = [
     ('HipTest::HIP_SKIP_TEST("Device Property canMapHostMemory is not set")',
      "HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported)"),
     ('HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs")',
-     "HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanThreeGpus)"),
+     "HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus)"),
     ('HipTest::HIP_SKIP_TEST("Machine does not support VMM. Skipping Test..")',
      "HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported)"),
     ('HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support")',

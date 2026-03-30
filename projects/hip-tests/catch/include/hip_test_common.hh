@@ -496,8 +496,6 @@ inline constexpr char const kWarpVoteUnsupported[] =
     "Skipped: warp vote is not supported on this device.";
 inline constexpr char const kWarpBallotUnsupported[] =
     "Skipped: warp ballot is not supported on this device.";
-inline constexpr char const kFewerThanThreeGpus[] =
-    "Skipped: fewer than three GPUs (numDevices < 3).";
 inline constexpr char const kVmmUnsupported[] =
     "Skipped: virtual memory management (VMM) is not supported.";
 }  // namespace SkipReason
