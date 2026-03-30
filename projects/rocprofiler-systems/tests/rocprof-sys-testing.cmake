@@ -1242,15 +1242,6 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         )
     endif()
 
-    message(WARNING "TEST_NAME: ${TEST_NAME}")
-    message(WARNING "TEST_EXIST_FILES: ${TEST_EXIST_FILES}")
-    message(WARNING "PROJECT_BINARY_DIR: ${PROJECT_BINARY_DIR}")
-    set(file_list
-        file
-        (GLOB FILES ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/*)
-    )
-    message(WARNING "TEST_NAME FILE LIST: ${file_list}")
-
     set(_EXIST_FILES_TESTS "")
     foreach(_FILE ${TEST_EXIST_FILES})
         add_test(

@@ -1100,6 +1100,7 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         else
             metric_name = trait::name<Category>::value;
 
+        LOG_INFO("METRIC NAME = {}", metric_name);
         for(size_t i = 0; i < data.size(); ++i)
         {
             const auto value = data[i];
@@ -1134,6 +1135,7 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
                 {
                     amd_smi_vcn_track::emplace(unique_key, track_name, "%");
                 }
+                LOG_INFO("ADDING VCN ACTIVITY ENTRY IN TRACK: {}", track_name);
                 TRACE_COUNTER("device_vcn_activity", amd_smi_vcn_track::at(unique_key, 0),
                               _ts, static_cast<double>(value));
             }
@@ -1143,6 +1145,7 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
                 {
                     amd_smi_jpeg_track::emplace(unique_key, track_name, "%");
                 }
+                LOG_INFO("ADDING JPEG ACTIVITY ENTRY IN TRACK: {}", track_name);
                 TRACE_COUNTER("device_jpeg_activity",
                               amd_smi_jpeg_track::at(unique_key, 0), _ts,
                               static_cast<double>(value));

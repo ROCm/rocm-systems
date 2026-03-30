@@ -94,16 +94,9 @@ endif()
 
 if(NAVI_DETECTED)
     set(ROCPROFSYS_ROCM_EVENTS_TEST "SQ_WAVES")
-    set(ROCPROFSYS_FILE_CHECKS "rocprof-device-0-SQ_WAVES.txt")
     set(ROCPROFSYS_COUNTER_NAMES_ARG "SQ_WAVES")
 else()
     set(ROCPROFSYS_ROCM_EVENTS_TEST "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY")
-    set(ROCPROFSYS_FILE_CHECKS
-        "rocprof-device-3-GRBM_COUNT.txt"
-        "rocprof-device-3-SQ_WAVES.txt"
-        "rocprof-device-3-SQ_INSTS_VALU.txt"
-        "rocprof-device-3-TA_TA_BUSY.txt"
-    )
     set(ROCPROFSYS_COUNTER_NAMES_ARG "GRBM_COUNT" "SQ_WAVES" "SQ_INSTS_VALU" "TA_TA_BUSY")
 endif()
 
@@ -126,7 +119,6 @@ rocprofiler_systems_add_validation_test(
     NAME transpose-rocprofiler-sampling
     PERFETTO_FILE "perfetto-trace.proto"
     ARGS --counter-names ${ROCPROFSYS_COUNTER_NAMES_ARG} -p
-    EXIST_FILES ${ROCPROFSYS_FILE_CHECKS}
     LABELS "rocprofiler"
 )
 
@@ -134,9 +126,40 @@ rocprofiler_systems_add_validation_test(
     NAME transpose-rocprofiler-binary-rewrite
     PERFETTO_FILE "perfetto-trace.proto"
     ARGS --counter-names ${ROCPROFSYS_COUNTER_NAMES_ARG} -p
-    EXIST_FILES ${ROCPROFSYS_FILE_CHECKS}
     LABELS "rocprofiler"
 )
+
+# Verify counter output files exist for any device ID (0-9).
+# The device number in the filename comes from device_type_index which depends on
+# the CI runner's GPU topology, so we check all possible IDs.
+set(_rocprof_output_dir "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output")
+foreach(
+    _PARENT_TEST
+    transpose-rocprofiler-sampling
+    transpose-rocprofiler-binary-rewrite-run
+)
+    if(NOT TEST "${_PARENT_TEST}")
+        continue()
+    endif()
+
+    foreach(_COUNTER ${ROCPROFSYS_COUNTER_NAMES_ARG})
+        add_test(
+            NAME validate-${_PARENT_TEST}-rocprof-device-${_COUNTER}-exists
+            COMMAND
+                sh -c
+                "for i in 0 1 2 3 4 5 6 7 8 9; do test -e ${_rocprof_output_dir}/${_PARENT_TEST}/rocprof-device-\${i}-${_COUNTER}.txt && exit 0; done; exit 1"
+        )
+
+        set_tests_properties(
+            validate-${_PARENT_TEST}-rocprof-device-${_COUNTER}-exists
+            PROPERTIES
+                DEPENDS "${_PARENT_TEST}"
+                LABELS "rocprofiler;validate"
+                TIMEOUT 30
+                FIXTURES_REQUIRED rocprofsys-global-tmp-files
+        )
+    endforeach()
+endforeach()
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -155,6 +178,7 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST transpose-sampling)
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/amd-smi-rules.json"
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/cpu-metrics-rules.json"
+
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/timer-sampling-rules.json"
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/sdk-metrics-rules.json"
         LABELS "rocpd"
