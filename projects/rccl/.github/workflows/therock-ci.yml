@@ -69,7 +69,6 @@ jobs:
         -DTHEROCK_RCCL_SOURCE_DIR=./rccl 
         -DTHEROCK_RCCL_TESTS_SOURCE_DIR=./rccl-tests
         -DTHEROCK_ENABLE_MPI=ON
-        -DENABLE_SPLIT_DEVICE_COMPILE=ON
 
   therock_ci_summary:
     name: TheRock CI Summary
