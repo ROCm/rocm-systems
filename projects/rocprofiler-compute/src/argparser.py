@@ -178,13 +178,7 @@ def add_general_group(
         metavar="GFX",
         choices=sorted(supported_archs.keys()),
         default=None,
-        help=(
-            "Override GPU architecture in profile mode. "
-            "Required with profile --dry-run (same idea as --list-metrics <arch>: "
-            "pick the analysis_configs tree). With --dry-run and --arch, skip "
-            "rocminfo, AMDGPU, and rocprofiler-sdk checks; only YAML/config for "
-            "that arch is required."
-        ),
+        help="Override GPU architecture in profile mode.",
     )
 
 
