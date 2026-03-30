@@ -13,8 +13,6 @@
 #include <utils.hh>
 
 HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Basic) {
-  CHECK_IMAGE_SUPPORT
-
   constexpr bool async = false;
 
 #if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
@@ -38,8 +36,6 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Basic) {
 }
 
 HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior) {
-  CHECK_IMAGE_SUPPORT
-
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Host to Device") { Memcpy3DHtoDSyncBehavior(DrvMemcpy3DWrapper<>, true); }
@@ -56,8 +52,6 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior) {
 }
 
 HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Parameters) {
-  CHECK_IMAGE_SUPPORT
-
   constexpr bool async = false;
   Memcpy3DZeroWidthHeightDepth<async>(DrvMemcpy3DWrapper<>);
 }
@@ -72,8 +66,6 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Array) {
 }
 
 HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative_Parameters) {
-  CHECK_IMAGE_SUPPORT
-
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
 
   constexpr auto NegativeTests = [](hipPitchedPtr dst_ptr, hipPos dst_pos, hipPitchedPtr src_ptr,
@@ -211,8 +203,6 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative_Parameters) {
 }
 
 HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Capture) {
-  CHECK_IMAGE_SUPPORT
-
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
   LinearAllocGuard3D<int> device_alloc(extent);
   LinearAllocGuard<int> host_alloc(

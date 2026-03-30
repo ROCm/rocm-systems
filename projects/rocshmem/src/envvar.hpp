@@ -491,7 +491,6 @@ namespace envvar {
 
     extern const var<std::string> requested_nic;
     extern const var<std::string> hca_list;
-    extern const var<uint32_t> sq_size;
   }  // inline namespace _base
 
   namespace bootstrap {
@@ -518,6 +517,7 @@ namespace envvar {
     extern const var<bool> enable_dmabuf;
     extern const var<bool> override_nic_firmware_check;
     extern const var<std::string> alltoallv_wg_algo;
+    extern const var<uint32_t> sq_size;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem

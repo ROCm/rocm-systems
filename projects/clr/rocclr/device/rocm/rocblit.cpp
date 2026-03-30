@@ -497,9 +497,10 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
     // Different devices
     if (srcAgent.handle == dev().getCpuAgent().handle) {
       // Host to device
+      // Keep (dst=GPU, src=CPU) ordering for ROCr SDMA engine selection queries.
       engine = HwQueueEngine::SdmaH2D;
-      copyAgent = dstAgent;
-      peerAgent = srcAgent;
+      copyAgent = srcAgent;
+      peerAgent = dstAgent;
     } else if (dstAgent.handle == dev().getCpuAgent().handle) {
       // Device to host
       engine = HwQueueEngine::SdmaD2H;
