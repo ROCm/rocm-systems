@@ -169,6 +169,9 @@ class TestAmdSmiCli(unittest.TestCase):
             return ['pass']
 
         (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+        if std_out is None:
+            # Command not found or not supported on this system
+            return ['pass']
         lines = std_out.split('\n')
 
         found = False
@@ -905,6 +908,13 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print_func_name('')
         msg = f'{self.tab}### amd-smi bad-pages'
         self.common.print(msg)
+
+        # bad-pages subcommand may not be present in all amd-smi builds
+        if not self.PrintCmdsOnly:
+            if self.common.TODO_SKIP_FAIL:
+                msg = f'{self.tab}Not Yet Implemented'
+                self.common.print(msg)
+                self.skipTest(msg)
 
         cmds = self.CreateCmds('bad-pages', 'Bad Pages Arguments:', 'Device Arguments:', 'Command Modifiers:', '')
         self.RunCmds(cmds)
