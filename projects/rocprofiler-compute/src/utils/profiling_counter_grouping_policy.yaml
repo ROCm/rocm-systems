@@ -1,3 +1,5 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 # =============================================================================
 # Profiling counter grouping policy (same-bucket priority metric IDs)
 # =============================================================================
