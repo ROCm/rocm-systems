@@ -100,6 +100,10 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
     std::string const skip_msg =
         "hipMemRangeGetAttribute error, read_only = " + std::to_string(read_only);
     HipTest::HIP_SKIP_TEST(skip_msg.c_str());
+    HIP_CHECK(hipFree(A));
+    HIP_CHECK(hipFree(B));
+    HIP_CHECK(hipFree(C));
+    return;
   }
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
@@ -126,6 +130,12 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
     std::string const skip_msg =
         "hipMemRangeGetAttribute error device = " + std::to_string(static_cast<int>(device));
     HipTest::HIP_SKIP_TEST(skip_msg.c_str());
+    HIP_CHECK(hipEventDestroy(event0));
+    HIP_CHECK(hipEventDestroy(event1));
+    HIP_CHECK(hipFree(A));
+    HIP_CHECK(hipFree(B));
+    HIP_CHECK(hipFree(C));
+    return;
   }
 
   for (size_t i = 0; i < numElements; i++) {

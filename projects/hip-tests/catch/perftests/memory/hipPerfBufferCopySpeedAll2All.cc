@@ -221,7 +221,8 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   free(streams);
   free(dstBuf);
   free(srcBuf);
-  REQUIRE(true);
+  // Successful completion of the perf sweep; not a runtime skip (see HIP_SKIP_TEST elsewhere).
+  CHECK(true);
 }
 
 static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {

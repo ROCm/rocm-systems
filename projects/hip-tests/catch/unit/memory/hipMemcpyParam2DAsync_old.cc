@@ -48,7 +48,11 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0));
     if (!peerAccess) {
       HipTest::HIP_SKIP_TEST("Skipped the test as there is no peer access");
-    } else {
+      HIP_CHECK(hipFree(A_d));
+      HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, nullptr, C_h, false);
+      return;
+    }
+    {
       TestType* E_d{nullptr};
       size_t pitch_E;
       HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&E_d), &pitch_E, width, NUM_H));

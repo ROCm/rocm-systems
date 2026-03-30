@@ -158,8 +158,7 @@ template <typename T> void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
     free(hOutputData);
     DeAllocateMemory();
   } else {
-    HipTest::HIP_SKIP_TEST("Skipped the test as there is no peer access
-");
+    HipTest::HIP_SKIP_TEST("Skipped the test as there is no peer access");
   }
 }
 /*
@@ -239,8 +238,7 @@ template <typename T> void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
     free(hOutputData);
     DeAllocateMemory();
   } else {
-    HipTest::HIP_SKIP_TEST("Skipped the test as there is no peer access
-");
+    HipTest::HIP_SKIP_TEST("Skipped the test as there is no peer access");
   }
 }
 /*
