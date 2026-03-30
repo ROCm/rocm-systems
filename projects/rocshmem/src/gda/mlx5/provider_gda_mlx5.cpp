@@ -491,7 +491,7 @@ static int mlx5_create_qp(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp, struct
 }
 
 static int mlx5_modify_qp_reset2init(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
-                                     struct ibv_qp_attr* attr, int attr_mask) {
+                                     struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask) {
   // man 3 ibv_modify_qp
   [[maybe_unused]] constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
                                      IBV_QP_ACCESS_FLAGS;
@@ -521,7 +521,7 @@ static int mlx5_modify_qp_reset2init(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp&
   return mlx5dv.devx_obj_modify(qp.devx_qp_obj, in, sizeof(in), out, sizeof(out));
 }
 
-static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp* qp,
+static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
                                    struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask, uint32_t gid_type) {
   // man 3 ibv_modify_qp
   [[maybe_unused]] constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
@@ -600,7 +600,7 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp* q
   return mlx5dv.devx_obj_modify(qp.devx_qp_obj, in, sizeof(in), out, sizeof(out));
 }
 
-static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp* qp,
+static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
                                   struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask) {
   // man 3 ibv_modify_qp
   [[maybe_unused]] constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC |
