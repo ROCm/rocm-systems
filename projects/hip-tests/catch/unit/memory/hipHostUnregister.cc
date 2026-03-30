@@ -7,12 +7,12 @@
 #include <hip_test_common.hh>
 
 namespace hipHostUnregisterTests {
-constexpr unsigned int allFlags = hipHostRegisterDefault &   // 0
-                                  hipHostRegisterPortable &  // 1
-                                  hipHostRegisterMapped &    // 2
+constexpr unsigned int allFlags = hipHostRegisterDefault |   // 0
+                                  hipHostRegisterPortable |  // 1
+                                  hipHostRegisterMapped |    // 2
                                   hipHostRegisterIoMemory    // 4
 #if HT_NVIDIA
-                                  & cudaHostRegisterReadOnly;  // 8
+                                  | cudaHostRegisterReadOnly;  // 8
 #else
     ;
 #endif
@@ -29,13 +29,17 @@ inline bool hipHostRegisterSupported() {
 }
 
 
-HIP_TEST_CASE(Unit_hipHostUnregister_MemoryNotAccessableAfterUnregister) {
+TEST_CASE("Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister") {
   if (!hipHostRegisterSupported()) {
     return;
   }
   // try all combinations of flags
   for (unsigned int flag = 0; flag <= allFlags; ++flag) {
-    DYNAMIC_SECTION("Using flag: " << flag) {
+#if defined(_WIN32)
+    // hipHostRegisterIoMemory not supported on Windows; skip flags 4-7
+    if (flag & hipHostRegisterIoMemory) continue;
+#endif
+      DYNAMIC_SECTION("Using flag: " << flag) {
       auto x = std::unique_ptr<int>(new int);
       HIP_CHECK(hipHostRegister(x.get(), sizeof(int), flag));
 
@@ -70,6 +74,10 @@ HIP_TEST_CASE(Unit_hipHostUnregister_AlreadyUnregisteredPointer) {
   }
   // try all combinations of flags
   for (unsigned int flag = 0; flag <= allFlags; ++flag) {
+#if defined(_WIN32)
+    // hipHostRegisterIoMemory not supported on Windows; skip flags 4-7
+    if (flag & hipHostRegisterIoMemory) continue;
+#endif
     DYNAMIC_SECTION("Using flag: " << flag) {
       auto x = std::unique_ptr<int>(new int);
       HIP_CHECK(hipHostRegister(x.get(), sizeof(int), flag));
@@ -84,7 +92,7 @@ HIP_TEST_CASE(Unit_hipHostUnregister_Capture) {
   auto buffer = std::make_unique<int[]>(kBufferSize);
   hipError_t capture_error = hipSuccess;
 
-  HIP_CHECK_ERROR(hipHostRegister(buffer.get(), kBufferSize, 0), capture_error);
+  HIP_CHECK_ERROR(hipHostRegister(buffer.get(), kBufferSize * sizeof(int), 0), capture_error);
 
   constexpr bool kRelaxedModeAllowed = true;
   BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);

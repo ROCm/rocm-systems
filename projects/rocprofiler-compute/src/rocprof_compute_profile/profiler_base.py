@@ -191,7 +191,6 @@ class RocProfCompute_Base:
             )
 
         gen_sysinfo(
-            workload_name=args.name,
             workload_dir=args.path,
             app_cmd=args.remaining,
             skip_roof=args.no_roof,

@@ -8,6 +8,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added L2 memory bandwidth derived metrics under `--membw-analysis` to allow L2 memory bandwidth specific profiling and analysis metric block 30.
 
+* Introduced support for MI350P GPU
+
 ### Changed
 
 * Standalone roofline (`--roof-only` option) in profile mode now creates `roofline.csv` only. HTML roofline charts are generated via `rocprof-compute analyze`. The `calc_ai_profile()` function has been removed; `calc_ai_analyze()` is the single source of truth for arithmetic intensity calculation.
