@@ -23,9 +23,6 @@
 #include "rocprof-sys-sample.hpp"
 #include "common/output.hpp"
 
-#include <timemory/environment.hpp>
-
-#include <cstdlib>
 #include <string_view>
 #include <unistd.h>
 
@@ -59,11 +56,7 @@ main(int argc, char** argv)
 
     add_torch_library_path(_env, _argv);
 
-    int _verbose = get_verbose_level();
-    if(const char* env_verbose = std::getenv("ROCPROFSYS_VERBOSE"))
-    {
-        _verbose = std::atoi(env_verbose);
-    }
+    auto _verbose = get_verbose_level();
     output::print_updated_environment(_env, get_updated_envs(), _verbose);
 
     if(!_argv.empty())

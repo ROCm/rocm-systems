@@ -28,7 +28,6 @@
 #include <timemory/log/color.hpp>
 #include <timemory/log/macros.hpp>
 
-#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <string_view>
@@ -45,10 +44,8 @@ int
 get_verbose(parser_data_t& _data)
 {
     auto& verbose = _data.verbose;
-    verbose       = tim::get_env("ROCPROFSYS_CAUSAL_VERBOSE",
-                                 tim::get_env<int>("ROCPROFSYS_VERBOSE", verbose, false));
-    auto _debug   = tim::get_env("ROCPROFSYS_CAUSAL_DEBUG",
-                                 tim::get_env<bool>("ROCPROFSYS_DEBUG", false, false));
+    verbose       = tim::get_env<int>("ROCPROFSYS_VERBOSE", verbose, false);
+    auto _debug   = tim::get_env<bool>("ROCPROFSYS_DEBUG", false, false);
     if(_debug) verbose += 8;
     return verbose;
 }
@@ -87,14 +84,13 @@ main(int argc, char** argv)
         auto _verbose = get_verbose(_parse_data);
         output::print_updated_environment(_parse_data.current, _parse_data.updated,
                                           _verbose, "ROCPROFSYS: ");
-        output::print_command(_parse_data.command, _parse_data.verbose, "ROCPROFSYS: ");
+        output::print_command(_parse_data.command, _verbose, "ROCPROFSYS: ");
         _argv.emplace_back(nullptr);
         _envp.emplace_back(nullptr);
 
         if(_fork_exec)
         {
-            auto _main_pid = getpid();
-            auto _pid      = fork();
+            auto _pid = fork();
 
             if(_pid == 0)
             {

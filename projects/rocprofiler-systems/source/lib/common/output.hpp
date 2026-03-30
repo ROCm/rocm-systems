@@ -41,10 +41,17 @@ inline std::string
 build_command_string(const std::vector<char*>& _argv)
 {
     std::string _result;
-    for(const auto& arg : _argv)
+    size_t      _estimated_size = 0;
+    for(const auto* arg : _argv)
     {
         if(arg == nullptr) continue;
-        if(!_result.empty()) _result += " ";
+        _estimated_size += std::string_view{ arg }.size() + 1;
+    }
+    _result.reserve(_estimated_size);
+    for(const auto* arg : _argv)
+    {
+        if(arg == nullptr) continue;
+        if(!_result.empty()) _result += ' ';
         _result += arg;
     }
     return _result;
