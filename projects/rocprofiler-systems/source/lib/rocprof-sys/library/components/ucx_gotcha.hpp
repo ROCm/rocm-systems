@@ -26,8 +26,6 @@ struct ucx_gotcha : tim::component::base<ucx_gotcha, void>
 
     using gotcha_data = tim::component::gotcha_data;
 
-    ROCPROFSYS_DEFAULT_OBJECT(ucx_gotcha)
-
     // string id for component
     static std::string label() { return "ucx_gotcha"; }
 

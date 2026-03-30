@@ -25,8 +25,6 @@ struct pthread_mutex_gotcha : comp::base<pthread_mutex_gotcha, void>
     using hash_array_t                      = std::array<size_t, gotcha_capacity>;
     using gotcha_data_t                     = comp::gotcha_data;
 
-    ROCPROFSYS_DEFAULT_OBJECT(pthread_mutex_gotcha)
-
     explicit pthread_mutex_gotcha(const gotcha_data_t&);
 
     // string id for component

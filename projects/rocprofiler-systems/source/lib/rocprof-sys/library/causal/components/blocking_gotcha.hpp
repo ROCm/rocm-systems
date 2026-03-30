@@ -41,8 +41,6 @@ struct blocking_gotcha : comp::base<blocking_gotcha, void>
         indexes_max               = gotcha_capacity - 1,
     };
 
-    ROCPROFSYS_DEFAULT_OBJECT(blocking_gotcha)
-
     // string id for component
     static std::string label();
     static std::string description();

@@ -69,8 +69,6 @@ struct comm_data : base<comm_data, void>
         static constexpr auto label = "UCX Comm Send";
     };
 
-    ROCPROFSYS_DEFAULT_OBJECT(comm_data)
-
     static void preinit();
     static void configure();
     static void global_finalize();

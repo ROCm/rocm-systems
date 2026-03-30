@@ -22,8 +22,6 @@ struct kill_gotcha : tim::component::base<kill_gotcha, void>
     using gotcha_data = tim::component::gotcha_data;
     using kill_func_t = int (*)(pid_t, int);
 
-    ROCPROFSYS_DEFAULT_OBJECT(kill_gotcha)
-
     static std::string label() { return "kill_gotcha"; }
 
     static void configure();

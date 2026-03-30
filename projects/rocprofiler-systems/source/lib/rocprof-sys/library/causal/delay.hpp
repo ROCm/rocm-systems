@@ -23,8 +23,6 @@ struct delay : comp::empty_base
 {
     using value_type = void;
 
-    ROCPROFSYS_DEFAULT_OBJECT(delay)
-
     static void    setup();
     static void    process();
     static void    credit();

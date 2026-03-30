@@ -48,8 +48,6 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
         wrapper_config m_config  = {};
     };
 
-    ROCPROFSYS_DEFAULT_OBJECT(pthread_create_gotcha)
-
     // string id for component
     static std::string label() { return "pthread_create_gotcha"; }
 

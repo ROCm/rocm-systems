@@ -251,7 +251,11 @@ struct fini_bundle
 {
     using data_type = std::tuple<Tp...>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(fini_bundle)
+    fini_bundle()                              = default;
+    fini_bundle(const fini_bundle&)            = default;
+    fini_bundle(fini_bundle&&)                 = default;
+    fini_bundle& operator=(const fini_bundle&) = default;
+    fini_bundle& operator=(fini_bundle&&)      = default;
 
     fini_bundle(std::string_view _label)
     : m_label{ _label }

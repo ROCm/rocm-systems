@@ -40,8 +40,6 @@ struct vaapi_gotcha : tim::component::base<vaapi_gotcha, void>
     using exit_func_t  = void (*)(int);
     using abort_func_t = void (*)();
 
-    ROCPROFSYS_DEFAULT_OBJECT(vaapi_gotcha)
-
     // string id for component
     static std::string label() { return "vaapi_gotcha"; }
 

@@ -34,8 +34,6 @@ struct unblocking_gotcha : comp::base<unblocking_gotcha, void>
     template <size_t Idx>
     using gotcha_index = std::integral_constant<size_t, Idx>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(unblocking_gotcha)
-
     // string id for component
     static std::string label();
     static std::string description();
