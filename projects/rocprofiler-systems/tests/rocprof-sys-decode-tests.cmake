@@ -88,6 +88,24 @@ rocprofiler_systems_add_validation_test(
     ARGS -l rocDecCreateVideoParser -c 2 -d 1 ${_vcn_counter_names} -p
 )
 
+if(ROCPROFSYS_VALIDATION_PYTHON AND TEST video-decode-sampling)
+    add_test(
+        NAME check-counters-video-decode-sampling
+        COMMAND
+            ${ROCPROFSYS_VALIDATION_PYTHON} ${CMAKE_CURRENT_LIST_DIR}/check_counters.py
+            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/video-decode-sampling/perfetto-trace.proto
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+    set_tests_properties(
+        check-counters-video-decode-sampling
+        PROPERTIES
+            DEPENDS video-decode-sampling
+            LABELS "decode;check-counters;rocm"
+            TIMEOUT 30
+            FIXTURES_REQUIRED rocprofsys-global-tmp-files
+    )
+endif()
+
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST video-decode-sampling)
     set_property(TEST video-decode-sampling APPEND PROPERTY LABELS rocpd)
 
@@ -123,6 +141,24 @@ rocprofiler_systems_add_validation_test(
     LABELS "decode"
     ARGS -l rocJpegCreate -c 1 -d 1 ${_jpeg_counter_names} -p
 )
+
+if(ROCPROFSYS_VALIDATION_PYTHON AND TEST jpeg-decode-sampling)
+    add_test(
+        NAME check-counters-jpeg-decode-sampling
+        COMMAND
+            ${ROCPROFSYS_VALIDATION_PYTHON} ${CMAKE_CURRENT_LIST_DIR}/check_counters.py
+            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/jpeg-decode-sampling/perfetto-trace.proto
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+    set_tests_properties(
+        check-counters-jpeg-decode-sampling
+        PROPERTIES
+            DEPENDS jpeg-decode-sampling
+            LABELS "decode;check-counters;rocm"
+            TIMEOUT 30
+            FIXTURES_REQUIRED rocprofsys-global-tmp-files
+    )
+endif()
 
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST jpeg-decode-sampling)
     set_property(TEST jpeg-decode-sampling APPEND PROPERTY LABELS rocpd)

@@ -1135,7 +1135,8 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
                 {
                     amd_smi_vcn_track::emplace(unique_key, track_name, "%");
                 }
-                LOG_INFO("ADDING VCN ACTIVITY ENTRY IN TRACK: {}", track_name);
+                LOG_INFO("ADDING VCN ACTIVITY ENTRY IN TRACK: {} WITH VALUE OF :{}",
+                         track_name, static_cast<double>(value));
                 TRACE_COUNTER("device_vcn_activity", amd_smi_vcn_track::at(unique_key, 0),
                               _ts, static_cast<double>(value));
             }
@@ -1145,7 +1146,8 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
                 {
                     amd_smi_jpeg_track::emplace(unique_key, track_name, "%");
                 }
-                LOG_INFO("ADDING JPEG ACTIVITY ENTRY IN TRACK: {}", track_name);
+                LOG_INFO("ADDING JPEG ACTIVITY ENTRY IN TRACK: {} WITH VALUE OF :{}",
+                         track_name, static_cast<double>(value));
                 TRACE_COUNTER("device_jpeg_activity",
                               amd_smi_jpeg_track::at(unique_key, 0), _ts,
                               static_cast<double>(value));
