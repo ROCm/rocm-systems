@@ -3538,7 +3538,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     hsa_status_t status = PtrInfo(ptrs[i], &ptr_info, nullptr, nullptr, nullptr);
     
     // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for discard
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
+    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
