@@ -197,8 +197,10 @@ uint64_t WDDMDevice::VramAvail(void) {
 
   if (IsDgpu()) {
     // local cpu-visible memory
-    if (!FindSegmentId(SegmentKind::kLocalMemory, &segmentId))
+    if (!FindSegmentId(SegmentKind::kLocalMemory, &segmentId)) {
+      pr_err("Failed to find local memory segment\n");
       return HSA_STATUS_ERROR;
+    }
 
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
     stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
@@ -223,6 +225,7 @@ uint64_t WDDMDevice::VramAvail(void) {
       }
 
       if (!foundInvisible) {
+        pr_err("Failed to find invisible memory segment\n");
         return HSA_STATUS_ERROR;
       }
       memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
@@ -238,8 +241,10 @@ uint64_t WDDMDevice::VramAvail(void) {
     return LocalHeapSize() - usedVis - usedInv;
   } else {
     // APU - NonLocal memory
-    if (!FindSegmentId(SegmentKind::kSystemMemory, &segmentId))
+    if (!FindSegmentId(SegmentKind::kSystemMemory, &segmentId)) {
+      pr_err("Failed to find system memory segment\n");
       return HSA_STATUS_ERROR;
+    }
 
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
     stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
