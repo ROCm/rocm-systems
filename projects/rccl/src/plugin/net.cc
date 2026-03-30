@@ -274,24 +274,9 @@ static void initPluginLibsOnceFunc() {
     strcpy(netPluginLibs[pluginCounter++].name, defaultNetPlugin);
   }
 
-  // Add 2 internal ib and socket plugins
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  {
-    const char* envNet = ncclGetEnv("NCCL_NET");
-    if (envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) {
-      netPluginLibs[pluginCounter].ncclNet = &netIbCast;
-      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
-    } else if ((rcclUseAinic() == 1) && !(envNetPlugin)) {
-      netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
-      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
-    } else {
-#endif
-      netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
-      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    }
-  }
-#endif
+  netPluginLibs[pluginCounter].ncclNet = &netIbCast;
+  netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+
   netPluginLibs[pluginCounter].ncclNet = &ncclNetSocket;
   netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
   pluginCount = pluginCounter;
