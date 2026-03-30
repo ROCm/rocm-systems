@@ -27,7 +27,8 @@ RUN zypper --non-interactive update -y && \
         gcc-c++ gcc-fortran git gmock gtest iproute2 libdrm-devel libnuma-devel \
         ninja nlohmann_json-devel openmpi3-devel python3-pip rpm-build \
         sqlite3-devel wget libucp-devel libuct-devel && \
-    python3 -m pip install 'cmake==3.21'
+    python3 -m pip install --upgrade pip && \
+    python3 -m pip install 'cmake==3.25'
 
 ARG ROCM_VERSION=0.0
 ARG ROCM_MAJOR=0

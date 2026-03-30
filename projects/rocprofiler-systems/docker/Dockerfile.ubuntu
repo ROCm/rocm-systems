@@ -34,9 +34,9 @@ RUN apt-get update && \
     OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
-        python3 -m pip install 'cmake==3.21'; \
+        python3 -m pip install 'cmake==3.25'; \
     else \
-        python3 -m pip install --break-system-packages 'cmake==3.21' perfetto; \
+        python3 -m pip install --break-system-packages 'cmake==3.25' perfetto; \
     fi
 
 RUN if [ "${ROCM_MAJOR}" != "0" ] || [ "${ROCM_MINOR}" != "0" ]; then \
