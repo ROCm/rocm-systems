@@ -1029,47 +1029,6 @@ def test_output_directory_no_name_no_output_dir(
 
 
 @pytest.mark.roofline_1
-def test_roof_standalone_benchmark():
-    """
-    Test standalone benchmarking by executing run_benchmark.py.
-    Validates benchmarking execution without running rocprof-compute profiling.
-    Ensures no changes to imports, benchmarking, etc. affects standalone bench feature.
-
-    Note: MUST be run from the same directory as run_benchmark.py due to imports.
-    """
-    if soc in ("MI100"):
-        # roofline is not supported on MI100
-        assert True
-        # Do not continue testing
-        return
-
-    # Save current and roofline directories, cd into roofline
-    current_path = os.getcwd()
-    # path for testing from libexec
-    roof_path = str(Path(__file__).parent.parent) + "/roofline/"
-    if not os.path.exists(roof_path):
-        # path for testing from build folder
-        roof_path = str(Path(__file__).parent.parent) + "/src/roofline/"
-    os.chdir(roof_path)
-
-    # Run benchmark, capture log
-    result = subprocess.run(
-        [sys.executable, "run_benchmark.py"], capture_output=True, text=True
-    )
-    lines = result.stdout.strip().split("\n")
-    last_line = lines[-1] if lines else ""
-
-    # Confirm last log line marks benchmark completed, and a roofline csv exists
-    assert "GPU Benchmarking completed" in last_line
-    assert (Path("./roofline.csv")).exists()
-
-    # Cleanup: rm the roofline csv and cd back to the working test directory
-    subprocess.run("rm roofline.csv", shell=True)
-    os.chdir(current_path)
-    print(os.getcwd())
-
-
-@pytest.mark.roofline_1
 def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     """
     Test basic roofline CSV generation in profile mode.

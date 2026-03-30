@@ -700,15 +700,6 @@ roofline HTML plots, use ``rocprof-compute analyze`` on the profiling output dir
 (see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
 ``--roofline-data-type``) are available in analyze mode.
 
-If you only want to run GPU benchmarking, there is a python file that executes the benchmarking and roofline.csv output:
-
-.. code-block:: shell-session
-
-   # Note: must be executed from the roofline directory at this time due to imports
-   $ cd <path to rocprof-compute>/rocprofiler-compute/src/roofline
-   $ python ./run_benchmark.py
-
-
 Roofline options (profile)
 --------------------------
 
