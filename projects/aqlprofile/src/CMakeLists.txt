@@ -45,7 +45,7 @@ if ( WIN32 )
   if ( NOT AMDHIP64_LIB OR AMDHIP64_LIB STREQUAL "AMDHIP64_LIB-NOTFOUND" )
     message ( FATAL_ERROR "Failed to find amdhip64 import library for Windows build. Install HIP or set AMDHIP64_LIB_DIR to the directory containing amdhip64.lib." )
   endif ()
-  message ( "---AMDHIP64_LIB: ${AMDHIP64_LIB}" )
+  message ( STATUS "---AMDHIP64_LIB: ${AMDHIP64_LIB}" )
 endif ()
 
 target_link_libraries( ${TARGET_LIB}

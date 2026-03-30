@@ -19,11 +19,12 @@
 #include "../logger.h"
 
 #ifdef _WIN32
-static inline void setenv(const char* name, const char* value, int) {
-    _putenv_s(name, value);
+static inline int setenv(const char* name, const char* value, int overwrite) {
+    (void)overwrite; // POSIX setenv uses overwrite; this shim always overwrites
+    return static_cast<int>(_putenv_s(name, value));
 }
-static inline void unsetenv(const char* name) {
-    _putenv_s(name, "");
+static inline int unsetenv(const char* name) {
+    return static_cast<int>(_putenv_s(name, ""));
 }
 #endif
 
@@ -259,10 +260,25 @@ TEST_F(LoggerTest, PidTidInLogs) {
     // regex engine on Windows does not support [0-9]+ quantifier syntax)
     size_t pid_pos = content.find("pid");
     ASSERT_NE(pid_pos, std::string::npos);
-    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[pid_pos + 3])));
+    // Scan forward from "pid" to the first digit to avoid out-of-bounds and format assumptions
+    size_t pid_digit_pos = pid_pos + 3;
+    while (pid_digit_pos < content.size() &&
+           !std::isdigit(static_cast<unsigned char>(content[pid_digit_pos]))) {
+        ++pid_digit_pos;
+    }
+    ASSERT_LT(pid_digit_pos, content.size());
+    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[pid_digit_pos])));
+
     size_t tid_pos = content.find("tid");
     ASSERT_NE(tid_pos, std::string::npos);
-    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[tid_pos + 3])));
+    // Scan forward from "tid" to the first digit to avoid out-of-bounds and format assumptions
+    size_t tid_digit_pos = tid_pos + 3;
+    while (tid_digit_pos < content.size() &&
+           !std::isdigit(static_cast<unsigned char>(content[tid_digit_pos]))) {
+        ++tid_digit_pos;
+    }
+    ASSERT_LT(tid_digit_pos, content.size());
+    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[tid_digit_pos])));
 }
 
 // Test empty message handling
