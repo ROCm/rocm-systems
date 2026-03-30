@@ -69,14 +69,6 @@ class gfx1151_soc(OmniSoC_Base):
         self._mspec.lds_banks_per_cu = 32  # Standard RDNA3.5 LDS config
         self._mspec.pipes_per_gpu = 2  # APU typically has fewer pipes
 
-    def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
-        """
-        Tier-0 metrics for metric-aware perfmon coalescing (scheduled before others,
-        larger counter sets first within the tier): 2.1.3, 8.3.0, 11.3.0. Overflow
-        still uses first-fit after whole-metric placement attempts.
-        """
-        return ("2.1.3", "8.3.0", "11.3.0")
-
     # -----------------------
     # Required child methods
     # -----------------------

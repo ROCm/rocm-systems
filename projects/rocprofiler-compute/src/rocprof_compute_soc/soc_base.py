@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import math
 import os
 import re
@@ -37,6 +38,76 @@ from utils.utils_common import (
     resolve_rocm_library_path,
 )
 from vendored import yaml
+
+
+def _same_bucket_priority_ids_from_policy_value(
+    arch_name: str,
+    ids: object,
+) -> tuple[str, ...] | None:
+    """
+    Normalize ``same_bucket_priority_metric_ids`` from YAML: list of ids, or
+    mapping id -> { name: ... } (id is the key; order preserved).
+    Returns None if invalid (caller should warn).
+    """
+    if ids is None:
+        return ()
+    if isinstance(ids, list):
+        return tuple(str(x) for x in ids)
+    if isinstance(ids, dict):
+        ordered: list[str] = []
+        for key, meta in ids.items():
+            token = str(key).strip()
+            if not token:
+                continue
+            if meta is not None and not isinstance(meta, dict):
+                console_warning(
+                    "profiling",
+                    f"Ignoring same_bucket_priority_metric_ids[{arch_name!r}][{token!r}]: "
+                    "expected a mapping or null.",
+                )
+                continue
+            ordered.append(token)
+        return tuple(ordered)
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _load_same_bucket_priority_policy_map() -> dict[str, tuple[str, ...]]:
+    """
+    Load ``utils/profiling_counter_grouping_policy.yaml`` into arch -> metric id tuple.
+    """
+    path = config.rocprof_compute_home / "utils" / "profiling_counter_grouping_policy.yaml"
+    if not path.is_file():
+        console_warning(
+            "profiling",
+            f"Profiling counter grouping policy missing ({path}); "
+            "same-bucket priority metrics disabled.",
+        )
+        return {}
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if raw is None:
+        return {}
+    archs = raw.get("architectures")
+    if not isinstance(archs, dict):
+        return {}
+    out: dict[str, tuple[str, ...]] = {}
+    for arch_name, cfg in archs.items():
+        if not isinstance(cfg, dict):
+            continue
+        key = str(arch_name)
+        parsed = _same_bucket_priority_ids_from_policy_value(
+            key,
+            cfg.get("same_bucket_priority_metric_ids"),
+        )
+        if parsed is None:
+            console_warning(
+                "profiling",
+                f"Ignoring same_bucket_priority_metric_ids for {key!r}: "
+                "expected a list of ids or a mapping id -> metadata.",
+            )
+            continue
+        out[key] = parsed
+    return out
 
 
 class OmniSoC_Base:
@@ -267,10 +338,14 @@ class OmniSoC_Base:
     def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
         """
         Optional metric ids (e.g. ``'2.1.3'``) whose PMCs should share the first
-        ``pmc_perf_*`` pass when IP block limits allow. Subclasses return arch-specific
-        tuples; default is no extra policy.
+        ``pmc_perf_*`` pass when IP block limits allow. Loaded from
+        ``utils/profiling_counter_grouping_policy.yaml`` for the current arch;
+        subclasses may override.
         """
-        return ()
+        arch = self.__arch
+        if not arch:
+            return ()
+        return _load_same_bucket_priority_policy_map().get(arch, ())
 
     def _expanded_hw_counters_for_metric_ids(
         self, metric_ids: tuple[str, ...]
