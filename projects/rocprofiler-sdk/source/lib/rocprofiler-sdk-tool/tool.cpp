@@ -1810,6 +1810,10 @@ initialize_rocprofv3()
                          "force configuration");
     }
 
+    // When running as a rocplaycap scan-only child process, rocprofiler_configure()
+    // returns nullptr (ROCPROFV3_PLAYBACK_CHILD is set), so client_identifier is never
+    // assigned. Skip initialization here to avoid the fatal assertion below.
+    if(getenv("ROCPROFV3_PLAYBACK_CHILD") != nullptr) return;
     ROCP_FATAL_IF(!client_identifier) << "nullptr to client identifier!";
     ROCP_FATAL_IF(!client_finalizer && !tool::get_config().list_metrics)
         << "nullptr to client finalizer!";  // exception for listing metrics
@@ -3232,12 +3236,20 @@ wait_pid(pid_t _pid, int _opts = 0)
     int   _status = 0;
     pid_t _pid_v  = -1;
     _opts |= WUNTRACED;
+    // Add a timeout to avoid an indefinite wait if the child exits via SIGABRT during
+    // roccap AQL replay teardown and the parent waitpid() blocks due to a race.
+    auto _deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
     do
     {
         if((_opts & WNOHANG) > 0)
         {
             std::this_thread::yield();
             std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            if(std::chrono::steady_clock::now() > _deadline)
+            {
+                ROCP_WARNING << fmt::format("wait_pid timeout waiting for child {}", _pid);
+                return std::nullopt;
+            }
         }
         _pid_v = waitpid(_pid, &_status, _opts);
     } while(_pid_v == 0);
@@ -3418,8 +3430,22 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
             this_func,
             signo);
 
-        finalize_rocprofv3(this_func);
-        if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
+        // When SIGABRT is received during roccap AQL replay, HSA has already been torn
+        // down before this handler runs. Calling finalize_rocprofv3() would invoke HSA
+        // shutdown functions on freed memory, triggering a second SIGABRT (re-entrant
+        // signal). Instead, flush buffers and write output directly before exiting.
+        if(signo != SIGABRT)
+        {
+            finalize_rocprofv3(this_func);
+            if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
+        }
+        else
+        {
+            ROCP_WARNING << "HSA already torn down on SIGABRT, skipping finalize to avoid re-entrant signal. Flushing output directly.";
+            flush();
+            generate_output(cleanup_mode::destroy);
+            _exit(128 + SIGABRT);  // Unix convention: 128 + signal number
+        }
 
         ROCP_INFO << fmt::format(
             "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}... complete",
@@ -3429,7 +3455,8 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
             this_func,
             signo);
 
-        if(get_chained_signals().at(signo))
+        // Skip chained handler for SIGABRT to avoid re-entrant abort when HSA is already torn down.
+        if(signo != SIGABRT && get_chained_signals().at(signo))
         {
             ROCP_INFO << fmt::format(
                 "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for {}",
@@ -3517,6 +3544,10 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
+    // Skip tool initialization in rocplaycap scan-only child processes to prevent
+    // duplicate /dev/kfd opens under the same PID with different memory mappings,
+    // which triggers a NULL ptr deref in the KFD driver and corrupts the GPU context.
+    if(getenv("ROCPROFV3_PLAYBACK_CHILD") != nullptr) return nullptr;
     initialize_logging();
 
     // set the client name

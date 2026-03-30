@@ -543,7 +543,12 @@ void
 queue_controller_fini()
 {
     if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+        get_queue_controller()->iterate_queues([](const Queue* _queue) {
+            // During roccap AQL replay, the process exits via SIGABRT and HSA is already
+            // torn down before fini runs. Calling sync() (hsa_signal_wait) on freed HSA
+            // memory causes a crash. Skip sync only in that scenario.
+            if(getenv("ROCPROFV3_PLAYBACK_CHILD") == nullptr) _queue->sync();
+        });
 }
 
 void

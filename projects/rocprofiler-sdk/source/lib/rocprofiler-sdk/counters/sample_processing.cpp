@@ -72,7 +72,16 @@ proccess_completed_cb(completed_cb_params_t&& params)
 
     if(info->buffer)
     {
-        buf = CHECK_NOTNULL(buffer::get_buffer(info->buffer->handle));
+        // During normal profiling this buffer should always be valid (CHECK_NOTNULL invariant).
+        // However during roccap AQL replay, the process exits via SIGABRT and the buffer can
+        // be destroyed before all in-flight AQL completion callbacks have fired.
+        buf = buffer::get_buffer(info->buffer->handle);
+        if(!buf)
+        {
+            ROCP_WARNING << fmt::format(
+                "Buffer {} destroyed before sample was processed (skipping)", info->buffer->handle);
+            return;
+        }
     }
 
     auto _corr_id_v =
