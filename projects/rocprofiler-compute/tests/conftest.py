@@ -28,6 +28,21 @@ except Exception:
     rocprof_compute_script_path = "rocprof-compute"
 
 
+def inject_mpirun(command, num_ranks):
+    """
+    Wrap a command with mpirun for multi-rank execution.
+    """
+    mpirun_cmd = ["mpirun"]
+    # Add --allow-run-as-root only when running as root
+    # (needed for OpenMPI in containers)
+    # This flag is OpenMPI-specific and would cause errors
+    # with other MPI implementations
+    if os.geteuid() == 0:
+        mpirun_cmd.append("--allow-run-as-root")
+    mpirun_cmd.extend(["-n", str(num_ranks)])
+    return mpirun_cmd + command
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--call-binary",
@@ -148,11 +163,9 @@ def binary_handler_profile_rocprof_compute(request):
 
             # Wrap with mpirun if num_ranks > 1
             if num_ranks > 1:
-                command_rocprof_compute = [
-                    "mpirun",
-                    "-n",
-                    str(num_ranks),
-                ] + command_rocprof_compute
+                command_rocprof_compute = inject_mpirun(
+                    command_rocprof_compute, num_ranks
+                )
 
             process = subprocess.run(
                 command_rocprof_compute,
@@ -212,11 +225,9 @@ def binary_handler_profile_rocprof_compute(request):
             if num_ranks > 1:
                 # Use rocprof_compute_script_path instead of rocprof-compute
                 command_rocprof_compute[0] = rocprof_compute_script_path
-                command_rocprof_compute = [
-                    "mpirun",
-                    "-n",
-                    str(num_ranks),
-                ] + command_rocprof_compute
+                command_rocprof_compute = inject_mpirun(
+                    command_rocprof_compute, num_ranks
+                )
 
             # For capture_output or multi-rank, run the command with subprocess
             if capture_output or num_ranks > 1:

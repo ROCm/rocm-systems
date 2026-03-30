@@ -2192,7 +2192,6 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
     }
     timestamp_ = nullptr;
   }
-  assert(retainExternalSignals_ || Barriers().IsExternalSignalListEmpty());
 
   // Certain commands like map/unmap memory may not need hw_events as its not a
   // queue operation. In such cases clear already set events which may have been for sync

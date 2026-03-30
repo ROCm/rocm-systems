@@ -450,7 +450,6 @@ ErrorCode GpuMemory::Evict() {
 ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
                                                D3DKMT_HANDLE device_handle,
                                                D3DKMT_OPENRESOURCE** out_open_resource) {
-#if defined(WIN32)
   D3DKMT_QUERYRESOURCEINFO query_args{};
   query_args.hDevice = device_handle;
   query_args.hGlobalShare = buffer_handle;
@@ -513,7 +512,6 @@ ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
   }
 
   return ret;
-#endif
 }
 
 ErrorCode GpuMemory::OpenResourceFromNTHandle(HANDLE buffer_handle, D3DKMT_HANDLE device_handle,
@@ -653,15 +651,6 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
   SharedHandleInfo shared_info{};
   SharedHandleInfo* shared_info_ptr = &shared_info;
   auto finalize_import = [&](SharedHandleInfo* shared_info_ptr) {
-    if (shared_info_ptr->pid == dxg_runtime->parent_pid && create_info.flags.alloc_va &&
-        IsSameAdapter(shared_info_ptr->adapter_luid) && shared_info_ptr->gpu_addr) {
-      pr_info(
-          "import from same device and same process, va is required. "
-          "a buffer can't be mapped to 2 va. delete the imported buffer, use the existing one.\n");
-      if (gpu_addr) *gpu_addr = shared_info_ptr->gpu_addr;
-      return ErrorCode::SameProcessSameDevice;
-    }
-
     desc_.size = shared_info_ptr->size;
     desc_.client_size = shared_info_ptr->client_size;
     desc_.domain = shared_info_ptr->domain;

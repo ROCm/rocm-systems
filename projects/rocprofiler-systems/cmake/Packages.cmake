@@ -48,9 +48,6 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-ucx
 rocprofiler_systems_add_interface_library(rocprofiler-systems-bfd
     "Provides Binary File Descriptor (BFD)"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-ptl
-    "Enables PTL support (tasking)"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-papi "Enable PAPI support")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-ompt "Enable OMPT support")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-python
@@ -84,7 +81,6 @@ set(ROCPROFSYS_EXTENSION_LIBRARIES
     rocprofiler-systems::rocprofiler-systems-rocm
     rocprofiler-systems::rocprofiler-systems-bfd
     rocprofiler-systems::rocprofiler-systems-mpi
-    rocprofiler-systems::rocprofiler-systems-ptl
     rocprofiler-systems::rocprofiler-systems-ompt
     rocprofiler-systems::rocprofiler-systems-papi
     rocprofiler-systems::rocprofiler-systems-perfetto
@@ -969,64 +965,6 @@ target_include_directories(
 
 find_package(UCX ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 target_include_directories(rocprofiler-systems-ucx INTERFACE ${UCX_HEADERS_INCLUDE_DIR})
-
-# ----------------------------------------------------------------------------------------#
-#
-# PTL (Parallel Tasking Library) submodule
-#
-# ----------------------------------------------------------------------------------------#
-
-# timemory might provide PTL::ptl-shared
-if(NOT TARGET PTL::ptl-shared)
-    rocprofiler_systems_checkout_git_submodule(
-        RELATIVE_PATH external/PTL
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/PTL.git
-        REPO_BRANCH omnitrace
-    )
-
-    set(PTL_BUILD_EXAMPLES OFF)
-    set(PTL_USE_TBB OFF)
-    set(PTL_USE_GPU OFF)
-    set(PTL_DEVELOPER_INSTALL OFF)
-
-    if(NOT DEFINED BUILD_OBJECT_LIBS)
-        set(BUILD_OBJECT_LIBS OFF)
-    endif()
-    rocprofiler_systems_save_variables(
-        BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
-        CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
-        CMAKE_VISIBILITY_INLINES_HIDDEN
-    )
-
-    set(BUILD_SHARED_LIBS OFF)
-    set(BUILD_STATIC_LIBS OFF)
-    set(BUILD_OBJECT_LIBS ON)
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
-    set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-
-    add_subdirectory(external/PTL EXCLUDE_FROM_ALL)
-
-    rocprofiler_systems_restore_variables(
-        BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
-        CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
-        CMAKE_VISIBILITY_INLINES_HIDDEN
-    )
-endif()
-
-target_sources(
-    rocprofiler-systems-ptl
-    INTERFACE $<BUILD_INTERFACE:$<TARGET_OBJECTS:PTL::ptl-object>>
-)
-target_include_directories(
-    rocprofiler-systems-ptl
-    INTERFACE
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/PTL/source>
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/PTL/source>
-)
 
 # ----------------------------------------------------------------------------------------#
 #
