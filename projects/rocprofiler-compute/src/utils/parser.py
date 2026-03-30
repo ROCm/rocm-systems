@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from utils import schema
+from utils.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
@@ -1221,6 +1222,7 @@ def eval_metric(
     metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
 
     exprs_to_eval = []
+    debug_tracker = DebugRowTracker() if debug else None
 
     # Hmmm... apply + lambda should just work
     # df['Value'] = df['Value'].apply(
@@ -1237,8 +1239,14 @@ def eval_metric(
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
                             if debug:
-                                debug_evaluate_metrics(
-                                    expr, row[expr], metric_evaluator, raw_pmc_df
+                                debug_row_tracker(
+                                    expr,
+                                    row[expr],
+                                    metric_evaluator,
+                                    raw_pmc_df,
+                                    show_inputs=debug_tracker.should_show_inputs(
+                                        df_id, row_id
+                                    ),
                                 )
                         else:
                             # If not insert nan, the whole col might be treated
@@ -1349,54 +1357,6 @@ def validate_dual_issue_metrics(
             except (ValueError, TypeError):
                 # Skip if the value or peak cannot be converted to a float
                 continue
-
-
-def debug_evaluate_metrics(
-    expr: str,
-    row_expr: str,
-    metric_evaluator: MetricEvaluator,
-    raw_pmc_df: Union[pd.DataFrame, dict],
-) -> None:
-    """Debug helper for expression evaluation."""
-    print("~" * 40 + "\nExpression:")
-    print(f"{expr} = {row_expr}")
-    print("Inputs:")
-
-    # Show matched variables
-    matched_vars = re.findall(r"ammolite__\w+", row_expr)
-    if matched_vars:
-        for vars in matched_vars:
-            if vars in metric_evaluator.sys_vars:
-                print(f"Var {vars}: {metric_evaluator.sys_vars[vars]}")
-            elif vars in metric_evaluator.empirical_peaks:
-                print(f"Var {vars}: {metric_evaluator.empirical_peaks[vars]}")
-            else:
-                print(f"Var {vars}: [not found]")
-
-    # Show matched columns
-    matched_cols = re.findall(r"raw_pmc_df\['\w+'\]\['\w+'\]", row_expr)
-    if matched_cols:
-        for cols in matched_cols:
-            col_match = re.match(r"raw_pmc_df\['(\w+)'\]\['(\w+)'\]", cols)
-            try:
-                if isinstance(raw_pmc_df, dict) and col_match.group(1) in raw_pmc_df:
-                    column_data = raw_pmc_df[col_match.group(1)][
-                        col_match.group(2)
-                    ].to_list()
-                    print(f"{cols}: {column_data}")
-            except KeyError as key_error:
-                console_warning(
-                    f"Skipping entry. Encountered a missing key: {key_error}"
-                )
-
-    print("\nOutput:")
-    try:
-        eval_result = metric_evaluator.eval_expression(row_expr)
-        print(eval_result)
-        print("~" * 40)
-    except Exception as e:
-        console_warning(f"Debug evaluation failed: {e}")
-        print("~" * 40)
 
 
 @demarcate

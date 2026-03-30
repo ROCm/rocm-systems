@@ -2429,23 +2429,24 @@ memory:
     <<: *level_2
     tags: [query]
   Unit_hipMemcpyToFromSymbol_GlobalConstVar: *level_2
-  test_svm_byte_granularity:
+  Unit_svm_byte_granularity:
     <<: *level_2
     tags: [multigpu]
-  test_svm_fine_grain_memory_consistency:
+  Unit_svm_fine_grain_memory_consistency:
     <<: *level_2
     tags: [multigpu]
-  test_svm_fine_grain_sync_buffers: *level_2
-  test_svm_shared_address_space_fine_grain_buffers:
+  Unit_svm_fine_grain_sync_buffers: *level_2
+  Unit_svm_shared_address_space_fine_grain_buffers:
     <<: *level_2
     tags: [multigpu]
-  test_svm_shared_address_space_fine_grain_system:
+  Unit_svm_shared_address_space_fine_grain_system:
     <<: *level_2
     tags: [multigpu]
   Unit_hipMemGetMemPool_Negative: *level_2
   Unit_hipMemGetMemPool_Basic: *level_2
   Unit_hipMemSetMemPool_Negative: *level_2
   Unit_hipMemSetMemPool_Basic: *level_2
+  Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister: *level_2
   Unit_hipFreeHost_Capture_negative:
     <<: *level_2
     # Huge memory usage, no point enabling them with ASAN

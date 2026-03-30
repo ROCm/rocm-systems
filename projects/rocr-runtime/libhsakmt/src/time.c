@@ -26,8 +26,7 @@
 #include "libhsakmt.h"
 #include "hsakmt/linux/kfd_ioctl.h"
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersCtx(HsaKFDContext *ctx,
-					       HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
 					       HsaClockCounters *Counters)
 {
 	HSAKMT_STATUS result;
@@ -37,13 +36,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersCtx(HsaKFDContext *ctx,
 
 	CHECK_KFD_OPEN();
 
-	result = hsakmt_validate_nodeid(ctx, NodeId, &gpu_id);
+	result = hsakmt_validate_nodeid(NodeId, &gpu_id);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
 
 	args.gpu_id = gpu_id;
 
-	err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &args);
+	err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &args);
 	if (err < 0) {
 		result = HSAKMT_STATUS_ERROR;
 	} else {
@@ -55,10 +54,4 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCountersCtx(HsaKFDContext *ctx,
 	}
 
 	return result;
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
-					       HsaClockCounters *Counters)
-{
-	return hsaKmtGetClockCountersCtx(&hsakmt_primary_kfd_ctx, NodeId, Counters);
 }

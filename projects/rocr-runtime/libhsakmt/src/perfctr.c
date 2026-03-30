@@ -37,7 +37,6 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <semaphore.h>
-#include <assert.h>
 
 #define BITS_PER_BYTE		CHAR_BIT
 
@@ -76,32 +75,8 @@ struct perf_counts_values {
 	};
 };
 
-struct hsa_kfd_perf_context
-{
-	HsaCounterProperties **counter_props;
-	unsigned int counter_props_count;
-};
-
-struct hsa_kfd_perf_context *hsakmt_kfdcontext_get_perf_context(HsaKFDContext *ctx)
-{
-	assert(ctx);
-	if (!ctx) {
-		pr_err("Expected a non-null ptr for HsaKFDContext");
-		return NULL;
-	}
-
-	if (ctx->perf_context)
-		return ctx->perf_context;
-
-	ctx->perf_context = calloc(1, sizeof(struct hsa_kfd_perf_context));
-	if (!ctx->perf_context) {
-		pr_err("Alloc memory failed for struct hsa_kfd_perf_context size %zu\n",
-				 sizeof(struct hsa_kfd_perf_context));
-		return NULL;
-	}
-
-	return ctx->perf_context;
-}
+static HsaCounterProperties **counter_props;
+static unsigned int counter_props_count;
 
 static ssize_t readn(int fd, void *buf, size_t n)
 {
@@ -124,35 +99,33 @@ static ssize_t readn(int fd, void *buf, size_t n)
 	return n;
 }
 
-HSAKMT_STATUS hsakmt_init_counter_props(HsaKFDContext *ctx, unsigned int NumNodes)
+HSAKMT_STATUS hsakmt_init_counter_props(unsigned int NumNodes)
 {
-	struct hsa_kfd_perf_context *perf_ctx = hsakmt_kfdcontext_get_perf_context(ctx);
-	perf_ctx->counter_props = calloc(NumNodes, sizeof(struct HsaCounterProperties *));
-	if (!perf_ctx->counter_props) {
+	counter_props = calloc(NumNodes, sizeof(struct HsaCounterProperties *));
+	if (!counter_props) {
 		pr_warn("Profiling is not available.\n");
 		return HSAKMT_STATUS_NO_MEMORY;
 	}
 
-	perf_ctx->counter_props_count = NumNodes;
+	counter_props_count = NumNodes;
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-void hsakmt_destroy_counter_props(HsaKFDContext *ctx)
+void hsakmt_destroy_counter_props(void)
 {
 	unsigned int i;
-	struct hsa_kfd_perf_context *perf_ctx = hsakmt_kfdcontext_get_perf_context(ctx);
 
-	if (!perf_ctx->counter_props)
+	if (!counter_props)
 		return;
 
-	for (i = 0; i < perf_ctx->counter_props_count; i++)
-		if (perf_ctx->counter_props[i]) {
-			free(perf_ctx->counter_props[i]);
-			perf_ctx->counter_props[i] = NULL;
+	for (i = 0; i < counter_props_count; i++)
+		if (counter_props[i]) {
+			free(counter_props[i]);
+			counter_props[i] = NULL;
 		}
 
-	free(perf_ctx->counter_props);
+	free(counter_props);
 }
 
 static int blockid2uuid(enum perf_block_id block_id, HSA_UUID *uuid)
@@ -238,12 +211,11 @@ static int blockid2uuid(enum perf_block_id block_id, HSA_UUID *uuid)
 	return rc;
 }
 
-static HSAuint32 get_block_concurrent_limit(struct hsa_kfd_perf_context *perf_ctx,
-						uint32_t node_id,
+static HSAuint32 get_block_concurrent_limit(uint32_t node_id,
 						HSAuint32 block_id)
 {
 	uint32_t i;
-	HsaCounterBlockProperties *block = &perf_ctx->counter_props[node_id]->Blocks[0];
+	HsaCounterBlockProperties *block = &counter_props[node_id]->Blocks[0];
 
 	for (i = 0; i < PERFCOUNTER_BLOCKID__MAX; i++) {
 		if (block->Counters[0].BlockIndex == block_id)
@@ -282,8 +254,7 @@ static HSAKMT_STATUS query_trace(int fd, uint64_t *buf)
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterPropertiesCtx(HsaKFDContext *ctx,
-						      HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterProperties(HSAuint32 NodeId,
 						      HsaCounterProperties **CounterProperties)
 {
 	HSAKMT_STATUS rc = HSAKMT_STATUS_SUCCESS;
@@ -294,24 +265,23 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterPropertiesCtx(HsaKFDContext *ctx,
 	struct perf_counter_block block = {0};
 	uint32_t total_blocks = 0;
 	HsaCounterBlockProperties *block_prop;
-	struct hsa_kfd_perf_context *perf_ctx = hsakmt_kfdcontext_get_perf_context(ctx);
 
-	if (!perf_ctx->counter_props)
+	if (!counter_props)
 		return HSAKMT_STATUS_NO_MEMORY;
 
 	if (!CounterProperties)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	if (hsakmt_validate_nodeid(ctx, NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
+	if (hsakmt_validate_nodeid(NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
-	if (perf_ctx->counter_props[NodeId]) {
-		*CounterProperties = perf_ctx->counter_props[NodeId];
+	if (counter_props[NodeId]) {
+		*CounterProperties = counter_props[NodeId];
 		return HSAKMT_STATUS_SUCCESS;
 	}
 
 	for (i = 0; i < PERFCOUNTER_BLOCKID__MAX; i++) {
-		rc = hsakmt_get_block_properties(ctx, NodeId, i, &block);
+		rc = hsakmt_get_block_properties(NodeId, i, &block);
 		if (rc != HSAKMT_STATUS_SUCCESS)
 			return rc;
 		total_concurrent += block.num_of_slots;
@@ -325,19 +295,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterPropertiesCtx(HsaKFDContext *ctx,
 			sizeof(HsaCounterBlockProperties) * (total_blocks - 1) +
 			sizeof(HsaCounter) * (total_counters - total_blocks);
 
-	perf_ctx->counter_props[NodeId] = malloc(counter_props_size);
-	if (!perf_ctx->counter_props[NodeId])
+	counter_props[NodeId] = malloc(counter_props_size);
+	if (!counter_props[NodeId])
 		return HSAKMT_STATUS_NO_MEMORY;
 
-	perf_ctx->counter_props[NodeId]->NumBlocks = total_blocks;
-	perf_ctx->counter_props[NodeId]->NumConcurrent = total_concurrent;
+	counter_props[NodeId]->NumBlocks = total_blocks;
+	counter_props[NodeId]->NumConcurrent = total_concurrent;
 
-	block_prop = &perf_ctx->counter_props[NodeId]->Blocks[0];
+	block_prop = &counter_props[NodeId]->Blocks[0];
 	for (block_id = 0; block_id < PERFCOUNTER_BLOCKID__MAX; block_id++) {
-		rc = hsakmt_get_block_properties(ctx, NodeId, block_id, &block);
+		rc = hsakmt_get_block_properties(NodeId, block_id, &block);
 		if (rc != HSAKMT_STATUS_SUCCESS) {
-			free(perf_ctx->counter_props[NodeId]);
-			perf_ctx->counter_props[NodeId] = NULL;
+			free(counter_props[NodeId]);
+			counter_props[NodeId] = NULL;
 			return rc;
 		}
 
@@ -359,14 +329,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterPropertiesCtx(HsaKFDContext *ctx,
 		block_prop = (HsaCounterBlockProperties *)&block_prop->Counters[block_prop->NumCounters];
 	}
 
-	*CounterProperties = perf_ctx->counter_props[NodeId];
+	*CounterProperties = counter_props[NodeId];
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
 /* Registers a set of (HW) counters to be used for tracing/profiling */
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTraceCtx(HsaKFDContext* ctx,
-					       HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTrace(HSAuint32 NodeId,
 					       HSAuint32 NumberOfCounters,
 					       HsaCounter *Counters,
 					       HsaPmcTraceRoot *TraceRoot)
@@ -384,7 +353,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTraceCtx(HsaKFDContext* ctx,
 	uint32_t block, num_blocks = 0, total_counters = 0;
 	uint64_t *counter_id_ptr;
 	int *fd_ptr;
-	struct hsa_kfd_perf_context *perf_ctx = hsakmt_kfdcontext_get_perf_context(ctx);
 
 	pr_debug("[%s] Number of counters %d\n", __func__, NumberOfCounters);
 
@@ -394,7 +362,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTraceCtx(HsaKFDContext* ctx,
 		return HSAKMT_STATUS_NO_MEMORY;
 	}
 
-	if (!perf_ctx->counter_props) {
+	if (!counter_props) {
 		pr_err("Profiling is not available, counter_props is NULL.\n");
 		goto no_memory_exit;
 	}
@@ -402,7 +370,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTraceCtx(HsaKFDContext* ctx,
 	if (!Counters || !TraceRoot || NumberOfCounters == 0)
 		goto invalid_parameter_exit;
 
-	if (hsakmt_validate_nodeid(ctx, NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
+	if (hsakmt_validate_nodeid(NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
 		free(counter_id);
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
 	}
@@ -440,7 +408,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTraceCtx(HsaKFDContext* ctx,
 	for (i = 0; i < PERFCOUNTER_BLOCKID__MAX; i++) {
 		if (!num_counters[i])
 			continue;
-		concurrent_limit = get_block_concurrent_limit(perf_ctx, NodeId, i);
+		concurrent_limit = get_block_concurrent_limit(NodeId, i);
 		if (!concurrent_limit) {
 			pr_err("Invalid block ID: %d\n", i);
 			goto invalid_parameter_exit;
@@ -541,8 +509,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTraceCtx(HsaKFDContext* ctx,
 
 /* Unregisters a set of (HW) counters used for tracing/profiling */
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTraceCtx(HsaKFDContext* ctx,
-						 HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTrace(HSAuint32 NodeId,
 						 HSATraceId TraceId)
 {
 	uint32_t gpu_id;
@@ -553,7 +520,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTraceCtx(HsaKFDContext* ctx,
 	if (TraceId == 0)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	if (hsakmt_validate_nodeid(ctx, NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
+	if (hsakmt_validate_nodeid(NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
 	trace = (struct perf_trace *)PORT_UINT64_TO_VPTR(TraceId);
@@ -577,8 +544,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTraceCtx(HsaKFDContext* ctx,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcAcquireTraceAccessCtx(HsaKFDContext* ctx,
-						    HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtPmcAcquireTraceAccess(HSAuint32 NodeId,
 						    HSATraceId TraceId)
 {
 	struct perf_trace *trace;
@@ -595,7 +561,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcAcquireTraceAccessCtx(HsaKFDContext* ctx,
 	if (trace->magic4cc != HSA_PERF_MAGIC4CC)
 		return HSAKMT_STATUS_INVALID_HANDLE;
 
-	if (hsakmt_validate_nodeid(ctx, NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
+	if (hsakmt_validate_nodeid(NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
 	return ret;
@@ -725,33 +691,4 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcStopTrace(HSATraceId TraceId)
 	trace->state = PERF_TRACE_STATE__STOPPED;
 
 	return ret;
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterProperties(HSAuint32 NodeId,
-						      HsaCounterProperties **CounterProperties)
-{
-	return hsaKmtPmcGetCounterPropertiesCtx(&hsakmt_primary_kfd_ctx, NodeId, CounterProperties);
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTrace(HSAuint32 NodeId,
-					       HSAuint32 NumberOfCounters,
-					       HsaCounter *Counters,
-					       HsaPmcTraceRoot *TraceRoot)
-{
-	return hsaKmtPmcRegisterTraceCtx(&hsakmt_primary_kfd_ctx,
-							NodeId, NumberOfCounters, Counters, TraceRoot);
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTrace(HSAuint32 NodeId,
-						 HSATraceId TraceId)
-{
-	return hsaKmtPmcUnregisterTraceCtx(&hsakmt_primary_kfd_ctx,
-							NodeId, TraceId);
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcAcquireTraceAccess(HSAuint32 NodeId,
-						    HSATraceId TraceId)
-{
-	return hsaKmtPmcAcquireTraceAccessCtx(&hsakmt_primary_kfd_ctx,
-							NodeId, TraceId);
 }

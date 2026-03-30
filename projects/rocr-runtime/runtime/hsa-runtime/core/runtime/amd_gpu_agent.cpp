@@ -216,9 +216,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   // Store CUID for this agent
   InitDerivedCuid();
 
-#if !defined(__linux__)
-  wallclock_frequency_ = 0;
-#else
   bool model_enabled;
   hsa_status_t status = driver().IsModelEnabled(&model_enabled);
   assert(status == HSA_STATUS_SUCCESS && "IsModelEnabled failed");
@@ -236,7 +233,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       }
     }
   }
-#endif
 
   auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
   auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());

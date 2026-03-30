@@ -1078,6 +1078,17 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
 
   if (need_print_waves)
     {
+      /* With --lazy,-z, code objects may not have been opened yet.
+         Open them now so we can resolve PCs to code objects.  */
+      for (auto it = code_object_map.begin (); it != code_object_map.end ();)
+        if (!it->second.is_open () && !it->second.open ())
+          {
+            agent_warning ("could not open code_object_%ld", it->first.handle);
+            it = code_object_map.erase (it);
+          }
+        else
+          ++it;
+
       auto code_objects_disassembled
           = print_wavefronts (process_id, all_wavefronts, code_object_map);
 
@@ -1087,15 +1098,8 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
           {
             auto it = code_object_map.find (code_object_id);
             agent_assert (it != code_object_map.end ());
+
             auto &code_object = it->second;
-
-            if (!code_object.is_open () && !code_object.open ())
-              {
-                agent_warning ("could not open %s",
-                               code_object.uri ().c_str ());
-                continue;
-              }
-
             if (!code_object.save (*g_code_objects_dir))
               agent_warning ("could not save code object %s to %s",
                              code_object.uri ().c_str (),

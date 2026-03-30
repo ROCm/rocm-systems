@@ -332,11 +332,11 @@ class MachineSpecs:
     # _are_ included in profiling/analysis, so we mark them as 'optional'
     # in the metadata to avoid erroring out on missing fields on
     # serialization
-    workload_name: Optional[str] = field(
+    workload_path: Optional[str] = field(
         default=None,
         metadata={
-            "doc": "The name of the workload data was collected for.",
-            "name": "Workload Name",
+            "doc": "Path to the workload data directory.",
+            "name": "Workload Path",
             "optional": True,
             "show_in_table": True,
         },

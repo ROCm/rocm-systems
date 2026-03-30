@@ -3,7 +3,6 @@
 
 import glob
 import importlib
-import json
 import logging
 import os
 import pkgutil
@@ -16,10 +15,10 @@ import traceback
 from pathlib import Path
 from typing import Any, Union, cast
 
-import pandas as pd
 import yaml
 
 import config
+import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
 from utils.logger import (
     console_debug,
@@ -30,8 +29,6 @@ from utils.logger import (
 )
 from utils.utils_common import (
     capture_subprocess_output,
-    get_agent_dict,
-    get_gpuid_dict,
     get_rocprof_cmd,
     parse_text,
     perform_attach_detach,
@@ -189,10 +186,12 @@ def run_prof(
         ):
             for db_name in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_name).stem.split("_")[0]
+                # Read CSV as list of dicts instead of pandas DataFrame
+                counter_rows, _ = csv_ops.read_csv_as_dicts(
+                    f"{workload_dir}/out/pmc_1/{pid}_native_counter_collection.csv"
+                )
                 rocpd_data.update_rocpd_pmc_events(
-                    pd.read_csv(
-                        f"{workload_dir}/out/pmc_1/{pid}_native_counter_collection.csv"
-                    ),
+                    counter_rows,
                     db_name,
                 )
                 console_debug(f"Updated rocpd db {db_name} with native tool counters.")
@@ -202,12 +201,14 @@ def run_prof(
             workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
             workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",
         )
-        combined_df = pd.read_csv(
+        # Read CSV as list of dicts
+        combined_rows, _ = csv_ops.read_csv_as_dicts(
             workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
         )
         # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
         # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
-        combined_df["Dispatch_ID"] = combined_df.groupby(
+        csv_ops.assign_group_ids(
+            combined_rows,
             [
                 "PID",
                 "Kernel_Name",
@@ -217,20 +218,24 @@ def run_prof(
                 "Start_Timestamp",
                 "End_Timestamp",
             ],
-            sort=False,
-        ).ngroup()
+            "Dispatch_ID",
+        )
         # Reset Kernel_ID based on Kernel_Name, Grid_Size,
         # Workgroup_Size, LDS_Per_Workgroup
-        combined_df["Kernel_ID"] = combined_df.groupby(
+        csv_ops.assign_group_ids(
+            combined_rows,
             ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
-            sort=False,
-        ).ngroup()
-        # Drop PID since its not required
-        combined_df = combined_df.drop(columns=["PID"])
-        combined_df.to_csv(
-            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv", index=False
+            "Kernel_ID",
         )
-        combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
+        # Drop PID since its not required
+        csv_ops.drop_column_from_rows(combined_rows, "PID")
+        # Write back to CSV
+        csv_ops.write_csv_from_dicts(
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv", combined_rows
+        )
+        csv_ops.write_csv_from_dicts(
+            workload_dir + f"/results_{fbase}.csv", combined_rows
+        )
         if torch_trace_enabled:
             # move counter collection and marker trace to workload dir
             save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
@@ -274,9 +279,7 @@ def run_prof(
             save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         # Combine results into single CSV file
         if results_files:
-            combined_results = pd.concat(
-                [pd.read_csv(f) for f in results_files], ignore_index=True
-            )
+            combined_results = csv_ops.concat_csv_files(results_files)
         else:
             console_warning(
                 f"Cannot write results for {fbase}.csv due to no counter "
@@ -285,17 +288,20 @@ def run_prof(
             return
 
         # Overwrite column to ensure unique IDs.
-        combined_results["Dispatch_ID"] = range(0, len(combined_results))
+        csv_ops.add_column_to_rows(
+            combined_results, "Dispatch_ID", list(range(0, len(combined_results)))
+        )
 
         # Reset Kernel_ID based on Kernel_Name, Grid_Size,
         # Workgroup_Size, LDS_Per_Workgroup
-        combined_results["Kernel_ID"] = combined_results.groupby(
+        csv_ops.assign_group_ids(
+            combined_results,
             ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
-            sort=False,
-        ).ngroup()
+            "Kernel_ID",
+        )
 
-        combined_results.to_csv(
-            workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
+        csv_ops.write_csv_from_dicts(
+            workload_dir + "/out/pmc_1/results_" + fbase + ".csv", combined_results
         )
 
         if Path(f"{workload_dir}/out").exists():
@@ -331,9 +337,9 @@ def run_prof(
             "ACCUM_VGPR": "Accum_VGPR",
         }
         csv_path = Path(workload_dir) / f"{fbase}.csv"
-        df = pd.read_csv(csv_path)
-        df.rename(columns=output_headers, inplace=True)
-        df.to_csv(csv_path, index=False)
+        rows, _ = csv_ops.read_csv_as_dicts(str(csv_path))
+        csv_ops.rename_columns(rows, output_headers)
+        csv_ops.write_csv_from_dicts(str(csv_path), rows)
     else:
         console_error(f"Unknown format_rocprof_output: {format_rocprof_output}")
 
@@ -408,7 +414,6 @@ def pc_sampling_prof(
 
 @demarcate
 def gen_sysinfo(
-    workload_name: str,
     workload_dir: str,
     app_cmd: str,
     skip_roof: bool,
@@ -419,7 +424,7 @@ def gen_sysinfo(
 
     # Append workload information to machine specs
     df["command"] = app_cmd
-    df["workload_name"] = workload_name
+    df["workload_path"] = workload_dir
 
     blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
     if not skip_roof:
@@ -445,128 +450,6 @@ def get_submodules(package_name: str) -> list[str]:
     return submodules
 
 
-def v3_json_get_counters(data: dict[str, Any]) -> dict[tuple[Any, Any], Any]:
-    """Create a dictionary that maps (agent_id, counter_id) to counter objects."""
-    counters = data["rocprofiler-sdk-tool"][0]["counters"]
-    counter_map: dict[tuple[Any, Any], Any] = {}
-
-    for counter in counters:
-        counter_id = counter["id"]["handle"]
-        agent_id = counter["agent_id"]["handle"]
-        counter_map[(agent_id, counter_id)] = counter
-
-    return counter_map
-
-
-def v3_json_get_dispatches(data: dict[str, Any]) -> dict[Any, Any]:
-    """Create a dictionary that maps correlation_id to dispatch records."""
-    records = data["rocprofiler-sdk-tool"][0]["buffer_records"]
-    records_map: dict[Any, Any] = {}
-
-    for rec in records["kernel_dispatch"]:
-        id = rec["correlation_id"]["internal"]
-        records_map[id] = rec
-
-    return records_map
-
-
-def v3_json_to_csv(json_file_path: str, csv_file_path: str) -> None:
-    with open(json_file_path) as f:
-        data = json.load(f)
-
-    dispatch_records = v3_json_get_dispatches(data)
-    dispatches = data["rocprofiler-sdk-tool"][0]["callback_records"][
-        "counter_collection"
-    ]
-    kernel_symbols = data["rocprofiler-sdk-tool"][0]["kernel_symbols"]
-    agents = get_agent_dict(data)
-    pid = data["rocprofiler-sdk-tool"][0]["metadata"]["pid"]
-    gpuid_map = get_gpuid_dict(data)
-    counter_info = v3_json_get_counters(data)
-
-    # CSV headers. If there are no dispatches we still end up with a valid CSV file.
-    csv_data: dict[str, list[Any]] = {
-        key: []
-        for key in [
-            "Dispatch_ID",
-            "GPU_ID",
-            "Queue_ID",
-            "PID",
-            "TID",
-            "Grid_Size",
-            "Workgroup_Size",
-            "LDS_Per_Workgroup",
-            "Scratch_Per_Workitem",
-            "Arch_VGPR",
-            "Accum_VGPR",
-            "SGPR",
-            "Wave_Size",
-            "Kernel_Name",
-            "Start_Timestamp",
-            "End_Timestamp",
-            "Correlation_ID",
-        ]
-    }
-
-    for d in dispatches:
-        dispatch_info = d["dispatch_data"]["dispatch_info"]
-        agent_id = dispatch_info["agent_id"]["handle"]
-        kernel_id = dispatch_info["kernel_id"]
-
-        row: dict[str, Any] = {}
-        row["Dispatch_ID"] = dispatch_info["dispatch_id"]
-        row["GPU_ID"] = gpuid_map[agent_id]
-        row["Queue_ID"] = dispatch_info["queue_id"]["handle"]
-        row["PID"] = pid
-        row["TID"] = d["thread_id"]
-
-        grid_size = dispatch_info["grid_size"]
-        row["Grid_Size"] = grid_size["x"] * grid_size["y"] * grid_size["z"]
-
-        wg = dispatch_info["workgroup_size"]
-        row["Workgroup_Size"] = wg["x"] * wg["y"] * wg["z"]
-
-        row["LDS_Per_Workgroup"] = d["lds_block_size_v"]
-        row["Scratch_Per_Workitem"] = kernel_symbols[kernel_id]["private_segment_size"]
-        row["Arch_VGPR"] = d["arch_vgpr_count"]
-        row["Accum_VGPR"] = 0  # TODO: Accum VGPR is missing from rocprofv3 output.
-        row["SGPR"] = d["sgpr_count"]
-        row["Wave_Size"] = agents[agent_id]["wave_front_size"]
-        row["Kernel_Name"] = kernel_symbols[kernel_id]["formatted_kernel_name"]
-
-        id = d["dispatch_data"]["correlation_id"]["internal"]
-        rec = dispatch_records[id]
-
-        row["Start_Timestamp"] = rec["start_timestamp"]
-        row["End_Timestamp"] = rec["end_timestamp"]
-        row["Correlation_ID"] = d["dispatch_data"]["correlation_id"]["external"]
-
-        # Get counters, summing repeated names.
-        ctrs: dict[str, Any] = {}
-
-        for r in d["records"]:
-            ctr_id = r["counter_id"]["handle"]
-            value = r["value"]
-            name = counter_info[(agent_id, ctr_id)]["name"]
-            if name.endswith("_ACCUM"):
-                # Omniperf expects accumulated value in SQ_ACCUM_PREV_HIRES.
-                name = "SQ_ACCUM_PREV_HIRES"
-            ctrs[name] = ctrs.get(name, 0) + value
-
-        # Append counter values
-        for ctr, value in ctrs.items():
-            row[ctr] = value
-
-        # Add row to CSV data
-        for col_name, value in row.items():
-            if col_name not in csv_data:
-                csv_data[col_name] = []
-            csv_data[col_name].append(value)
-
-    df = pd.DataFrame(csv_data)
-    df.to_csv(csv_file_path, index=False)
-
-
 def v3_counter_csv_to_v2_csv(
     counter_file: str, agent_info_filepath: str, converted_csv_file: str
 ) -> None:
@@ -575,15 +458,18 @@ def v3_counter_csv_to_v2_csv(
     to rocprfv2 format.
     This function is not for use of other csv out file such as kernel trace file.
     """
-    pd_counter_collections = pd.read_csv(counter_file)
-    pd_agent_info = pd.read_csv(agent_info_filepath)
+    counter_collections, _ = csv_ops.read_csv_as_dicts(counter_file)
+    agent_info, _ = csv_ops.read_csv_as_dicts(agent_info_filepath)
 
     # For backwards compatability. Older rocprof versions do not provide this.
-    if not "Accum_VGPR_Count" in pd_counter_collections.columns:
-        pd_counter_collections["Accum_VGPR_Count"] = 0
+    if counter_collections and "Accum_VGPR_Count" not in counter_collections[0]:
+        csv_ops.add_column_to_rows(
+            counter_collections, "Accum_VGPR_Count", [0] * len(counter_collections)
+        )
 
-    result = pd_counter_collections.pivot_table(
-        index=[
+    result = csv_ops.pivot_table(
+        counter_collections,
+        index_columns=[
             "Correlation_Id",
             "Dispatch_Id",
             "Agent_Id",
@@ -602,48 +488,57 @@ def v3_counter_csv_to_v2_csv(
             "Start_Timestamp",
             "End_Timestamp",
         ],
-        columns="Counter_Name",
-        values="Counter_Value",
-    ).reset_index()
+        pivot_column="Counter_Name",
+        value_column="Counter_Value",
+    )
 
     # NB: Agent_Id is int in older rocporfv3, now switched to string with prefix
     # "Agent ". We need to make sure handle both cases.
-    console_debug(
-        f"The type of Agent ID from counter csv file is {result['Agent_Id'].dtype}"
-    )
-
-    if result["Agent_Id"].dtype == "object":
-        # Apply the function to the 'Agent_Id' column and store it as int64
+    if result and isinstance(result[0].get("Agent_Id"), str):
+        console_debug("Agent ID is string type, converting to int")
+        # Apply the function to the 'Agent_Id' column to extract numeric
+        # part but keep it str to align with csv data
         try:
-            result["Agent_Id"] = (
-                result["Agent_Id"]
-                .apply(lambda x: int(re.search(r"Agent (\d+)", x).group(1)))
-                .astype("int64")
-            )
+            for row in result:
+                agent_id_str = row.get("Agent_Id", "")
+                if isinstance(agent_id_str, str) and "Agent " in agent_id_str:
+                    match = re.search(r"Agent (\d+)", agent_id_str)
+                    if match:
+                        row["Agent_Id"] = match.group(1)
         except Exception as e:
             console_error(
                 "v3_counter_csv_to_v2_csv",
                 f'Error getting "Agent_Id": {e}',
             )
+    else:
+        console_debug("Agent ID is already numeric type")
 
     # Grab the Wave_Front_Size column from agent info
-    result = result.merge(
-        pd_agent_info[["Node_Id", "Wave_Front_Size"]],
+    # Extract only needed columns from agent_info
+    agent_info_subset = [
+        {"Node_Id": row.get("Node_Id"), "Wave_Front_Size": row.get("Wave_Front_Size")}
+        for row in agent_info
+    ]
+    result = csv_ops.merge_rows(
+        result,
+        agent_info_subset,
         left_on="Agent_Id",
         right_on="Node_Id",
         how="left",
     )
 
     # Create GPU ID mapping from agent info
-    gpu_agents = pd_agent_info[pd_agent_info["Agent_Type"] == "GPU"].copy()
-    gpu_agents = gpu_agents.reset_index(drop=True)
-    gpu_id_map = dict(zip(gpu_agents["Node_Id"], gpu_agents.index))
+    gpu_agents = [row for row in agent_info if row.get("Agent_Type") == "GPU"]
+    gpu_id_map = {row.get("Node_Id"): idx for idx, row in enumerate(gpu_agents)}
 
-    # Map Agent_Id to GPU_ID using vectorized operation
-    result["Agent_Id"] = result["Agent_Id"].map(gpu_id_map)
+    # Map Agent_Id to GPU_ID
+    for row in result:
+        agent_id = row.get("Agent_Id")
+        if agent_id in gpu_id_map:
+            row["Agent_Id"] = gpu_id_map[agent_id]
 
     # Drop the temporary Node_Id column
-    result = result.drop(columns="Node_Id")
+    csv_ops.drop_column_from_rows(result, "Node_Id")
 
     name_mapping = {
         "Dispatch_Id": "Dispatch_ID",
@@ -665,9 +560,10 @@ def v3_counter_csv_to_v2_csv(
         "Correlation_Id": "Correlation_ID",
         "Kernel_Id": "Kernel_ID",
     }
-    result.rename(columns=name_mapping, inplace=True)
+    csv_ops.rename_columns(result, name_mapping)
 
-    index = [
+    # Column reordering: extract fieldnames and reorder
+    preferred_order = [
         "Dispatch_ID",
         "GPU_ID",
         "Queue_ID",
@@ -688,18 +584,32 @@ def v3_counter_csv_to_v2_csv(
         "Kernel_ID",
     ]
 
-    remaining_column_names = [col for col in result.columns if col not in index]
-    index = index + remaining_column_names
-    result = result.reindex(columns=index)
+    # Get all columns from first row if result is not empty
+    if result:
+        all_columns = list(result[0].keys())
+        remaining_columns = [col for col in all_columns if col not in preferred_order]
+        ordered_fieldnames = preferred_order + remaining_columns
+    else:
+        ordered_fieldnames = preferred_order
 
     # Rename accumulate counters to standard format
-    accum_columns = {
-        col: "SQ_ACCUM_PREV_HIRES" for col in result.columns if col.endswith("_ACCUM")
-    }
-    if accum_columns:
-        result = result.rename(columns=accum_columns)
+    accum_mapping = {}
+    if result:
+        for col in result[0].keys():
+            if col.endswith("_ACCUM"):
+                accum_mapping[col] = "SQ_ACCUM_PREV_HIRES"
 
-    result.to_csv(converted_csv_file, index=False)
+    if accum_mapping:
+        csv_ops.rename_columns(result, accum_mapping)
+        # Update fieldnames after rename
+        if result:
+            ordered_fieldnames = [
+                accum_mapping.get(col, col) for col in ordered_fieldnames
+            ]
+
+    csv_ops.write_csv_from_dicts(
+        converted_csv_file, result, fieldnames=ordered_fieldnames
+    )
 
 
 def convert_native_counter_collection_csv(workload_dir: str) -> None:
@@ -711,25 +621,30 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
     for native_filename in glob.glob(
         f"{workload_dir}/out/pmc_1/*_native_counter_collection.csv"
     ):
-        counter_data = pd.read_csv(native_filename, index_col=False)
+        counter_data, _ = csv_ops.read_csv_as_dicts(native_filename)
         # Group by on dispatch_id and counter_id and sum the counter_value,
         # Other rows in group have the same value, so take the first one
         groupby_cols = ["dispatch_id", "counter_name"]
-        agg_dict = {
-            col: "first" for col in counter_data.columns if col not in groupby_cols
-        }
+        if counter_data:
+            agg_dict = {
+                col: "first"
+                for col in counter_data[0].keys()
+                if col not in groupby_cols
+            }
+        else:
+            agg_dict = {}
         # Overwrite counter_value aggregation to sum
         agg_dict["counter_value"] = "sum"
-        counter_data = counter_data.groupby(groupby_cols, as_index=False).agg(agg_dict)
+        counter_data = csv_ops.groupby_aggregate(counter_data, groupby_cols, agg_dict)
 
         pid = Path(native_filename).stem.split("_")[0]
         kernel_data_filename = glob.glob(
             f"{workload_dir}/out/pmc_1/*/{pid}_kernel_trace.csv"
         )[0]
-        kernel_data = pd.read_csv(kernel_data_filename)
+        kernel_data, _ = csv_ops.read_csv_as_dicts(kernel_data_filename)
 
         # Merge counter_data with kernel_data on dispatch_id
-        merged_data = pd.merge(
+        merged_data = csv_ops.merge_rows(
             counter_data,
             kernel_data,
             left_on="dispatch_id",
@@ -737,36 +652,43 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
             how="inner",
         )
 
-        rocprofv3_counter_data = pd.DataFrame({
-            "Correlation_Id": merged_data["Correlation_Id"],
-            "Dispatch_Id": merged_data["dispatch_id"],
-            "Agent_Id": merged_data["Agent_Id"],
-            "Queue_Id": merged_data["Queue_Id"],
-            "Process_Id": merged_data["Thread_Id"],
-            "Thread_Id": merged_data["Thread_Id"],
-            "Grid_Size": (
-                merged_data[["Grid_Size_X", "Grid_Size_Y", "Grid_Size_Z"]].prod(axis=1)
-            ),
-            "Kernel_Id": merged_data["Kernel_Id"],
-            "Kernel_Name": merged_data["Kernel_Name"],
-            "Workgroup_Size": (
-                merged_data[
-                    ["Workgroup_Size_X", "Workgroup_Size_Y", "Workgroup_Size_Z"]
-                ].prod(axis=1)
-            ),
-            "LDS_Block_Size": merged_data["LDS_Block_Size"],
-            "Scratch_Size": merged_data["Scratch_Size"],
-            "VGPR_Count": merged_data["VGPR_Count"],
-            "Accum_VGPR_Count": merged_data["Accum_VGPR_Count"],
-            "SGPR_Count": merged_data["SGPR_Count"],
-            "Counter_Name": merged_data["counter_name"],
-            "Counter_Value": merged_data["counter_value"],
-            "Start_Timestamp": merged_data["Start_Timestamp"],
-            "End_Timestamp": merged_data["End_Timestamp"],
-        })
-        rocprofv3_counter_data.to_csv(
+        # Build new rows with calculated columns
+        rocprofv3_counter_data = []
+        for row in merged_data:
+            new_row = {
+                "Correlation_Id": row.get("Correlation_Id"),
+                "Dispatch_Id": row.get("dispatch_id"),
+                "Agent_Id": row.get("Agent_Id"),
+                "Queue_Id": row.get("Queue_Id"),
+                "Process_Id": row.get("Thread_Id"),
+                "Thread_Id": row.get("Thread_Id"),
+                "Grid_Size": (
+                    int(row.get("Grid_Size_X", 1))
+                    * int(row.get("Grid_Size_Y", 1))
+                    * int(row.get("Grid_Size_Z", 1))
+                ),
+                "Kernel_Id": row.get("Kernel_Id"),
+                "Kernel_Name": row.get("Kernel_Name"),
+                "Workgroup_Size": (
+                    int(row.get("Workgroup_Size_X", 1))
+                    * int(row.get("Workgroup_Size_Y", 1))
+                    * int(row.get("Workgroup_Size_Z", 1))
+                ),
+                "LDS_Block_Size": row.get("LDS_Block_Size"),
+                "Scratch_Size": row.get("Scratch_Size"),
+                "VGPR_Count": row.get("VGPR_Count"),
+                "Accum_VGPR_Count": row.get("Accum_VGPR_Count"),
+                "SGPR_Count": row.get("SGPR_Count"),
+                "Counter_Name": row.get("counter_name"),
+                "Counter_Value": row.get("counter_value"),
+                "Start_Timestamp": row.get("Start_Timestamp"),
+                "End_Timestamp": row.get("End_Timestamp"),
+            }
+            rocprofv3_counter_data.append(new_row)
+
+        csv_ops.write_csv_from_dicts(
             kernel_data_filename.replace("kernel_trace", "counter_collection"),
-            index=False,
+            rocprofv3_counter_data,
         )
 
 
@@ -894,13 +816,11 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     existing_marker_files_csv = [f for f in marker_api_trace_csvs if Path(f).is_file()]
 
     # concate and output marker api trace info
-    combined_results = pd.concat(
-        [pd.read_csv(f) for f in existing_marker_files_csv], ignore_index=True
-    )
+    combined_results = csv_ops.concat_csv_files(existing_marker_files_csv)
 
-    combined_results.to_csv(
+    csv_ops.write_csv_from_dicts(
         f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
-        index=False,
+        combined_results,
     )
 
     if Path(f"{workload_dir}/out").exists():
