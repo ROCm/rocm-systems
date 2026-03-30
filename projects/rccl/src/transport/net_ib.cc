@@ -2418,7 +2418,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
   // For small messages (< splitDataThreshold) with multiple QPs, avoid splitting:
   // send the entire payload through one QP selected via round-robin, post zero-length WRs on the rest.
-  int smallMsgActiveQp = slot % nqps;
+  int smallMsgActiveQp = comm->fifoHead % nqps;
   int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
 
   for (int i = 0; i < nqps; i++) {
