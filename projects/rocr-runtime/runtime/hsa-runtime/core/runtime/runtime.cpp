@@ -3530,6 +3530,18 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
                                       hsa_signal_t completion_signal) {
   // Get a CPU agent for migration target
   if (cpu_agents().empty()) return HSA_STATUS_ERROR;
+
+  // Validate the pointers
+  for (int i = 0; i < count; i++) {
+    hsa_amd_pointer_info_t ptr_info = {};
+    ptr_info.size = sizeof(ptr_info);
+    hsa_status_t status = PtrInfo(ptrs[i], &ptr_info, nullptr, nullptr, nullptr);
+    
+    // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for discard
+    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
                                         
   HSA_SVM_ATTRIBUTE attr;
   attr.type = HSA_SVM_ATTR_PREFERRED_LOC;

@@ -527,6 +527,15 @@ TEST(rocrtstFunc, SvmMemory_Basic_Test) {
   );
 }
 
+TEST(rocrtstFunc, SvmMemory_Negative_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    SvmMemoryTestBasic smt;
+    RunCustomTestProlog(&smt);
+    smt.TestSVMDiscardNegative();
+    RunCustomTestEpilog(&smt);
+  );
+}
+
 TEST(rocrtstFunc, VirtMemory_Basic_Test) {
   RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestBasic vmt;

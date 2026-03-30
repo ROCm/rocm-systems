@@ -405,6 +405,42 @@ void SvmMemoryTestBasic::TestSVMBatchDiscard(void) {
   }
 }
 
+void SvmMemoryTestBasic::TestSVMDiscardNegative() {
+  // Check if SVM is supported by the runtime
+  bool svm_supported = false;
+  hsa_status_t err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
+  
+  if (err != HSA_STATUS_SUCCESS || !svm_supported) {
+    std::cout << "  *** SVM is not supported - skipping TestSVMDiscardNegative test ***" << std::endl;
+    return;
+  }
+
+  // Check if XNACK is enabled
+  bool xnack_enabled = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_XNACK_ENABLED, &xnack_enabled);
+  if (err != HSA_STATUS_SUCCESS || !xnack_enabled) {
+    std::cout << "  *** XNACK not enabled - skipping TestSVMDiscardNegative test ***" << std::endl;
+    return;
+  }
+
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("TestSVMDiscardNegative Test");
+  }
+
+  ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
+  auto pool_idx = 0;
+  for (auto a : agent_pools) {
+    TestSVMDiscardNegative(a->agent);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
 void SvmMemoryTestBasic::SetUp(void) {
   hsa_status_t err;
 
@@ -742,5 +778,28 @@ void SvmMemoryTestBasic::TestSVMBatchDiscard(hsa_agent_t agent, hsa_amd_memory_p
 
   if (verbosity() > 0) {
     std::cout << "    Batch discard test completed successfully" << std::endl;
+  }
+}
+
+void SvmMemoryTestBasic::TestSVMDiscardNegative(hsa_agent_t agent) {
+  hsa_device_type_t ag_type;
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
+  if (ag_type != HSA_DEVICE_TYPE_GPU) return;
+
+  hsa_status_t err;
+
+  // Stack memory pointers passed to svm discard api should return error
+  {
+    char buf[4096];
+    void* ptrs[1] = {buf};
+    size_t sizes[1] = {sizeof(buf)};
+    hsa_signal_t null_signal = {0};
+
+    err = hsa_amd_svm_discard_batch_async(ptrs, sizes, 1, 0, nullptr, null_signal);
+    ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+    if (verbosity() > 0) {
+      std::cout << "    Stack memory discard rejected as expected" << std::endl;
+    }
   }
 }
