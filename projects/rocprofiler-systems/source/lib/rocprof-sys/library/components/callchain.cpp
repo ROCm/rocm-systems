@@ -29,7 +29,6 @@
 #include "core/state.hpp"
 #include "library/components/ensure_storage.hpp"
 #include "library/perf.hpp"
-#include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_info.hpp"

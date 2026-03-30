@@ -175,7 +175,7 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> None:
+def update_rocpd_pmc_events(counter_info: list[dict], rocpd_db_path: str) -> None:
     """Updates pmc_event table in the given rocpd database path."""
     try:
         with closing(sqlite3.connect(rocpd_db_path)) as conn:
@@ -200,29 +200,31 @@ def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> N
             # Native counter collection CSV has dispatch_id, but schema needs event_id
             # event_id may differ from dispatch_id when marker API tracing is enabled
             with closing(conn.execute(KERNEL_DISPATCH_QUERY, (guid,))) as cursor:
-                rows = cursor.fetchall()
-            if not rows:
+                db_rows = cursor.fetchall()
+            if not db_rows:
                 console_error("No kernel dispatch data found.")
                 return
+            # DB output (numeric) converted to str to align with counter_info
             dispatch_to_event = {
-                dispatch_id: event_id for dispatch_id, event_id, _ in rows
+                str(dispatch_id): str(event_id) for dispatch_id, event_id, _ in db_rows
             }
-            counter_info["event_id"] = counter_info["dispatch_id"].map(
-                dispatch_to_event
-            )
+
+            # Map dispatch_id to event_id for each row
+            # Create new event_id column without destroying dispatch_id
+            for row in counter_info:
+                dispatch_id = row.get("dispatch_id")
+                row["event_id"] = dispatch_to_event.get(dispatch_id)
+
             columns = ("guid", "event_id", "pmc_id", "value")
-            values = list(
-                zip(
-                    # guid
-                    [guid] * len(counter_info),
-                    # event_id
-                    counter_info["event_id"],
-                    # pmc_id
-                    counter_info["counter_id"],
-                    # value
-                    counter_info["counter_value"],
+            values = [
+                (
+                    guid,
+                    row.get("event_id"),
+                    row.get("counter_id"),
+                    row.get("counter_value"),
                 )
-            )
+                for row in counter_info
+            ]
 
             # insert into pmc_event table
             with conn:

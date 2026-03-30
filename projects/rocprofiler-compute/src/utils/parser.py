@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from utils import schema
+from utils.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
@@ -1238,7 +1239,7 @@ def eval_metric(
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
                             if debug:
-                                debug_evaluate_metrics(
+                                debug_row_tracker(
                                     expr,
                                     row[expr],
                                     metric_evaluator,
@@ -1369,9 +1370,9 @@ class DebugRowTracker:
     """Tracks which (df_id, row_id) pairs have already been debugged."""
 
     def __init__(self) -> None:
-        self._debugged_rows: set[tuple[int, object]] = set()
+        self._debugged_rows: set[tuple[int, Any]] = set()
 
-    def should_show_inputs(self, df_id: int, row_id: object) -> bool:
+    def should_show_inputs(self, df_id: int, row_id: Any) -> bool:
         """Check if this row's inputs should be displayed and mark it as seen."""
         key = (df_id, row_id)
         if key in self._debugged_rows:
