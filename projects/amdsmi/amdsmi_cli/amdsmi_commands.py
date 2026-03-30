@@ -9859,8 +9859,8 @@ class AMDSMICommands:
                 return
             if args.power_cap:
                 final_output = {
-                    "ppt0": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
-                    "ppt1": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
+                    "ppt0": "N/A",
+                    "ppt1": "N/A",
                 }
                 power_limit_types = {}
                 for power_type in amdsmi_interface.AmdSmiPowerCapType:
