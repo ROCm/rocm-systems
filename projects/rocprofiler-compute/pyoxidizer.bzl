@@ -30,8 +30,8 @@ def make_exe():
     # Use environment to avoid conflicts with system Python
     python_config.use_environment = False
     
-    # Set to run the main script
-    python_config.run_module = "__main__"
+    # Entry module (replaces former src/__main__.py)
+    python_config.run_module = "rocprof_compute_main"
     
     exe = dist.to_python_executable(
         name="rocprof-compute",
