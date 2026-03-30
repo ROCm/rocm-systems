@@ -67,7 +67,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-systems/
+        sparse-checkout: |
+          projects/rocprofiler-systems/
+          .gitmodules
 
     - name: Install Packages
       timeout-minutes: 25
