@@ -182,6 +182,19 @@ class RocProfCompute:
         ) and block:
             console_error("Cannot use --list-available-metrics with --blocks")
 
+        # profile --dry-run: arch must be explicit (YAML-only path); same idea as
+        # --list-metrics <arch>, which also requires an arch argument.
+        if (
+            self.__mode == "profile"
+            and getattr(self.__args, "profile_dry_run", False)
+            and getattr(self.__args, "profile_arch_override", None) is None
+        ):
+            console_error(
+                "profile --dry-run requires --arch <GFX> (e.g. gfx1151). "
+                "The arch selects analysis_configs/<arch> for bucket planning without "
+                "rocminfo or a live GPU, like --list-metrics <arch> for metric listing."
+            )
+
         # Validate block 30 requires --membw-analysis and --experimental
         filter_list: list[str] = []
         if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
