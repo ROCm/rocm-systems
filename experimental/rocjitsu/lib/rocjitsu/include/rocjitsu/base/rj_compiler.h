@@ -14,4 +14,25 @@
 #define RJ_API_EXPORT __attribute__((visibility("default")))
 #endif
 
+/// @brief Suppress specific compiler warnings around third-party headers.
+///
+/// Usage:
+/// @code
+///   RJ_DIAGNOSTIC_PUSH
+///   RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+///   #include "third_party/header.h"
+///   RJ_DIAGNOSTIC_POP
+/// @endcode
+#if defined(__GNUC__) || defined(__clang__)
+#define RJ_DIAGNOSTIC_PUSH _Pragma("GCC diagnostic push")
+#define RJ_DIAGNOSTIC_POP _Pragma("GCC diagnostic pop")
+#define RJ_DIAGNOSTIC_IGNORE_PEDANTIC _Pragma("GCC diagnostic ignored \"-Wpedantic\"")
+#elif defined(_MSC_VER)
+#define RJ_DIAGNOSTIC_PUSH __pragma(warning(push))
+#define RJ_DIAGNOSTIC_POP __pragma(warning(pop))
+#define RJ_DIAGNOSTIC_IGNORE_PEDANTIC __pragma(warning(disable : 4200))
+#else
+static_assert(false, "Unsupported compiler: define RJ_DIAGNOSTIC macros for your toolchain");
+#endif
+
 #endif // ROCJITSU_BASE_RJ_COMPILER_H_

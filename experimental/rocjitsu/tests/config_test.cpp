@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "aql_queue.h"
+
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/rj_vm.h"
@@ -8,9 +10,16 @@
 
 #include "simdojo/sim/simulation.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <string>
 
@@ -144,22 +153,28 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   loaded.wire_links(engine.topology());
   engine.build();
 
-  // Load an invalid instruction at 0x100 so wavefronts halt immediately.
-  soc->memory()->write32(0x100, 0xFFFFFFFF);
+  // Write a kernel descriptor + invalid instruction so wavefronts halt immediately.
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / 4) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+
+  constexpr uint64_t KD_ADDR = 0x1000;
+  soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
+  soc->memory()->write32(KD_ADDR + sizeof(kernel_descriptor_t), 0xFFFFFFFF); // invalid instruction
 
   auto *xcd = soc->xcd(0);
-  amdgpu::DispatchPacket pkt;
-  pkt.kernel_entry_pc = 0x100;
-  pkt.workgroup_count = 2;
-  pkt.wfs_per_workgroup = 1;
-  pkt.sgprs_per_wf = 104;
-  pkt.vgprs_per_wf = 256;
-  xcd->command_processor()->enqueue(pkt);
+  test::AqlQueue queue(soc->memory(), xcd->command_processor());
+  queue.dispatch(KD_ADDR, 128, 64); // grid_size=128 = 2 workgroups of 64
 
   engine.step();
 
-  // After event-driven execution, wavefronts have halted (one per CU).
-  // Verify round-robin distribution: 2 workgroups → 1 wavefront per CU.
+  // After one step, the doorbell event dispatched wavefronts to CUs
+  // (allocated but not yet executed). Verify round-robin distribution.
   EXPECT_EQ(xcd->command_processor()->dispatched_count(), 1u);
   auto *se = soc->xcd(0)->shader_engine(0);
   EXPECT_EQ(se->compute_unit(0)->num_wfs(), 1u);

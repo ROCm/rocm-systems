@@ -1058,7 +1058,7 @@ std::string Operand::name() const {
 namespace {
 
 uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
-  if (ev <= 101)
+  if (ev <= 105)
     return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
   if (ev == 106)
     return static_cast<uint32_t>(wf.vcc());
@@ -1102,7 +1102,7 @@ uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {
 }
 
 uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
-  if (ev <= 101) {
+  if (ev <= 105) {
     uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
     uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
     return static_cast<uint64_t>(hi) << 32 | lo;
@@ -1137,7 +1137,7 @@ uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {
 }
 
 void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
-  if (ev <= 101) {
+  if (ev <= 105) {
     wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
     return;
   }
@@ -1165,7 +1165,7 @@ void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {
 }
 
 void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
-  if (ev <= 101) {
+  if (ev <= 105) {
     wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
                        static_cast<uint32_t>(val));
     wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
