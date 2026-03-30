@@ -210,7 +210,7 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Number of GPUs insufficient for test");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   for (int dev = 0; dev < numDevices; dev++) {

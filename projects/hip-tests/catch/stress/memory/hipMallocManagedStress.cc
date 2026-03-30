@@ -310,6 +310,6 @@ HIP_TEST_CASE(Stress_hipMallocManaged_ExtremeSizes) {
     }
     REQUIRE(IfTestPassed);
   } else {
-    HipTest::HIP_SKIP_TEST("Gpu doesnt support HMM! Hence skipping the test with PASS result");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }

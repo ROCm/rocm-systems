@@ -55,7 +55,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
 
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -115,7 +115,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Negative) {
 
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

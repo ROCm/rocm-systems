@@ -99,7 +99,7 @@ static bool gpu_to_gpu_coherency() {
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < numTestDevices) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return true;
   }
   SECTION("With device fine grained buffer") {

@@ -460,6 +460,49 @@ inline bool areWarpMatchFunctionsSupported() {
 }
 
 /**
+ * Canonical skip reasons for HipTest::HIP_SKIP_TEST (stable strings for logs / ctest filters).
+ * Use these instead of duplicating slightly different wording for the same condition.
+ */
+namespace SkipReason {
+inline constexpr char const kPeerAccessUnavailable[] =
+    "Skipped: peer access is not available between devices.";
+inline constexpr char const kFewerThanTwoGpus[] =
+    "Skipped: fewer than two GPUs (numDevices < 2).";
+inline constexpr char const kMemoryPoolUnsupported[] =
+    "Skipped: runtime does not support memory pools.";
+inline constexpr char const kHostPinnedMemoryUnsupported[] =
+    "Skipped: host pinned memory mapping is not supported.";
+inline constexpr char const kManagedMemoryUnsupported[] =
+    "Skipped: GPU does not support managed memory.";
+inline constexpr char const kManagedMemoryDeviceRequired[] =
+    "Skipped: at least one device with managed memory support is required.";
+inline constexpr char const kNoGpuDevice[] = "Skipped: no GPU device available.";
+inline constexpr char const kCoherentHostAllocFailed[] =
+    "Skipped: coherent host allocation failed (SVM may be unsupported).";
+inline constexpr char const kNotEnoughGpusMaskedTests[] =
+    "Skipped: not enough GPUs for masked GPU tests.";
+inline constexpr char const kMipmappedArraysUnsupported[] =
+    "Skipped: mipmapped arrays are not supported on this device or configuration.";
+inline constexpr char const kAssemblyFileMissing[] = "Skipped: expected assembly file not found.";
+inline constexpr char const kCooperativeLaunchUnsupported[] =
+    "Skipped: cooperative launch is not supported.";
+inline constexpr char const kPcieAtomicUnsupported[] =
+    "Skipped: PCIe atomics are not supported on this device.";
+inline constexpr char const kStreamWaitValueUnsupported[] =
+    "Skipped: hipStreamWaitValue is not supported on this device.";
+inline constexpr char const kWarpShuffleUnsupported[] =
+    "Skipped: warp shuffle is not supported on this device.";
+inline constexpr char const kWarpVoteUnsupported[] =
+    "Skipped: warp vote is not supported on this device.";
+inline constexpr char const kWarpBallotUnsupported[] =
+    "Skipped: warp ballot is not supported on this device.";
+inline constexpr char const kFewerThanThreeGpus[] =
+    "Skipped: fewer than three GPUs (numDevices < 3).";
+inline constexpr char const kVmmUnsupported[] =
+    "Skipped: virtual memory management (VMM) is not supported.";
+}  // namespace SkipReason
+
+/**
  * Causes the test to stop and be skipped at runtime.
  * reason: Message describing the reason the test has been skipped.
  */
@@ -633,7 +676,7 @@ class BlockingContext {
 
 #define CHECK_PCIE_ATOMIC_SUPPORT                                                                 \
   if (!HipTest::isPcieAtomicSupported()) {                                                        \
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");                         \
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);                         \
     return;                                                                                        \
   }
 

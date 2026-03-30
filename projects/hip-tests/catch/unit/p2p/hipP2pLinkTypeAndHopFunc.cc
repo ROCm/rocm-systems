@@ -289,7 +289,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
   bool TestPassed = true;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   SECTION("Test running for testhipInvalidDevice") {
@@ -299,7 +299,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
 #ifdef __linux__
   getDeviceCount(&numDevices);
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   SECTION("Test running for testMaskedDevice") {

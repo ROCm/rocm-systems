@@ -197,7 +197,7 @@ HIP_TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount <= 0) {
-    HipTest::HIP_SKIP_TEST("No device found, skipping the test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
 

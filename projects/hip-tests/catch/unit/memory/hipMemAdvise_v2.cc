@@ -58,8 +58,7 @@ static std::vector<int> getSupportedDevices() {
 HIP_TEST_CASE(Unit_hipMemAdvise_v2_Device_Host) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryDeviceRequired);
     return;
   }
 
@@ -223,8 +222,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent) {
 HIP_TEST_CASE(Unit_hipMemAdvise_v2_Negative) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryDeviceRequired);
     return;
   }
 

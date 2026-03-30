@@ -69,7 +69,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxCoherentGlobalMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       double *A_h, *B_h;
       double* A_d;
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       double *A_h, *B_h;
       double* A_d;
@@ -173,7 +173,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       hiprtcProgram prog;
       hiprtcCreateProgram(&prog,          // prog
@@ -258,7 +258,7 @@ HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       hiprtcProgram prog;
       if (mem_type) {

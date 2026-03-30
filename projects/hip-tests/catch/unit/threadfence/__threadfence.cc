@@ -151,7 +151,7 @@ HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Managed) {
 HIP_TEST_CASE(Unit___threadfence_Positive_Basic_Peer) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("At least 2 devices are required");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

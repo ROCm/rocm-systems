@@ -5373,7 +5373,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
   if (HmmAttrPrint() != 1) {
-    HipTest::HIP_SKIP_TEST("Skipping test since managed memory not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -5667,7 +5667,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
 
   if (mem_pool_support != 1) {
-    HipTest::HIP_SKIP_TEST("Skipping test since Memory Pool is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
 
@@ -6011,7 +6011,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

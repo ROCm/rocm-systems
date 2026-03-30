@@ -57,7 +57,7 @@ HIP_TEST_CASE(Unit_hipMultiStream_multimeDevice) {
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    HipTest::HIP_SKIP_TEST("No GPU for Testing");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
   static int device = 0;

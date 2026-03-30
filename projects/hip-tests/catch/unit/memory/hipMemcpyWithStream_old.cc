@@ -179,7 +179,7 @@ void TestOnMultiGPUwithOneStream(void) {
   HIP_CHECK(hipGetDeviceCount(&NumDevices));
   // If you have single GPU machine the return
   if (NumDevices <= 1) {
-    HipTest::HIP_SKIP_TEST("NumDevices <2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
@@ -258,7 +258,7 @@ void TestkindDtoD(void) {
   HIP_CHECK(hipGetDeviceCount(&NumDevices));
   // If you have single GPU machine the return
   if (NumDevices <= 1) {
-    HipTest::HIP_SKIP_TEST("NumDevices are less than 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   int *A_d[MaxGPUDevices], *B_d[MaxGPUDevices], *C_d[MaxGPUDevices];
@@ -365,7 +365,7 @@ void TestkindDefaultForDtoD(void) {
   HIP_CHECK(hipGetDeviceCount(&NumDevices));
   // Test case will not run on single GPU setup.
   if (NumDevices <= 1) {
-    HipTest::HIP_SKIP_TEST("No of Devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   int *A_d[MaxGPUDevices], *B_d[MaxGPUDevices], *C_d[MaxGPUDevices];

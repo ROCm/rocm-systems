@@ -250,10 +250,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice) {
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(true, false);
     } else {
-      HipTest::HIP_SKIP_TEST("Machine does not seem to have P2P");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HipTest::HIP_SKIP_TEST("skipped the testcase as no of devices is less than 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 }
@@ -272,10 +272,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice) 
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(true, true);
     } else {
-      HipTest::HIP_SKIP_TEST("Machine does not seem to have P2P");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HipTest::HIP_SKIP_TEST("skipped the testcase as no of devices is less than 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 }

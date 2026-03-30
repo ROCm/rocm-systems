@@ -175,7 +175,7 @@ HIP_TEST_CASE(Unit_hipHostAlloc_Basic) {
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST("Doesn't support HostPinned Memory");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
   } else {
     float *A_h, *B_h, *C_h;
     float *A_d, *B_d, *C_d;

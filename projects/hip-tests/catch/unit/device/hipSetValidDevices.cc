@@ -247,7 +247,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_WithAllDevicesInSystem) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanThreeGpus);
     return;
   }
 
@@ -303,7 +303,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_Positive_Cases) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_MultiProcess) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanThreeGpus);
     return;
   }
 
@@ -369,7 +369,7 @@ void launchFunction(int deviceId) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanThreeGpus);
     return;
   }
 
@@ -411,7 +411,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_MultiThread) {
 HIP_TEST_CASE(Unit_hipSetValidDevices_with_hipMemcpyPeer) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping, as this test requires more than 2 GPUs");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanThreeGpus);
     return;
   }
   int canAccessPeer = -1;

@@ -42,7 +42,7 @@ HIP_TEST_CASE(Unit_threadfence_system) {
 
   volatile int* data = nullptr;
   if (hipHostMalloc(&data, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    HipTest::HIP_SKIP_TEST("Memory allocation failed. Skip test. Is SVM atomic supported?");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
     return;
   }
 
@@ -51,7 +51,7 @@ HIP_TEST_CASE(Unit_threadfence_system) {
 
   volatile int* flag = nullptr;
   if (hipHostMalloc(&flag, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    HipTest::HIP_SKIP_TEST("Memory allocation failed. Skip test. Is SVM atomic supported?");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
     HIP_CHECK(hipHostFree((void*)data));
     return;
   }

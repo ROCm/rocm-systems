@@ -365,7 +365,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemcpyNode_MulitDevice) {
       hipDrvGraphAddMemcpyNode_test(device);
     }
   } else {
-    HipTest::HIP_SKIP_TEST("skipped the testcase as no of devices is less than 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 }

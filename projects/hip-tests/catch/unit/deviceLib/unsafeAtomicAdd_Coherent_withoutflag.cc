@@ -40,7 +40,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_Coherentwithoutflag, float, double) 
   std::string gfxName(prop.gcnArchName);
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
     if (prop.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h{nullptr}, *result{nullptr};
       TestType *A_d{nullptr}, *result_d{nullptr};

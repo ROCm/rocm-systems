@@ -47,7 +47,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice
     int peerAccess = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0));
     if (!peerAccess) {
-      HipTest::HIP_SKIP_TEST("Skipped the test as there is no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       HIP_CHECK(hipFree(A_d));
       HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, nullptr, C_h, false);
       return;
@@ -94,7 +94,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice
       HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, A_h, nullptr, C_h, false);
     }
   } else {
-    HipTest::HIP_SKIP_TEST("skipping the testcases as numDevices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 }

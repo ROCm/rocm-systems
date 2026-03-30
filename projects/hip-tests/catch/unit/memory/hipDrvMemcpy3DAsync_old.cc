@@ -454,7 +454,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
     DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostDevice_DrvMemcpy3DAsync(true);
   } else {
-    HipTest::HIP_SKIP_TEST("skipped testcase as Device count is < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 }
@@ -480,7 +480,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
     DrvMemcpy3DAsync<float> memcpy3d(10, 10, 10, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostArray_DrvMemcpy3DAsync(true);
   } else {
-    HipTest::HIP_SKIP_TEST("skipped testcase as Device count is < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 }

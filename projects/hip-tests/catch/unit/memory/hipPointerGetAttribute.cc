@@ -160,10 +160,10 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
                                        reinterpret_cast<hipDeviceptr_t>(A_d)));
       REQUIRE(data == 0);
     } else {
-      HipTest::HIP_SKIP_TEST("Machine does not seem to have P2P");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HipTest::HIP_SKIP_TEST("skipped the testcase as no of devices is less than 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     HIP_CHECK(hipFree(A_d));
     return;
   }

@@ -79,7 +79,7 @@ void hipPerfDeviceConcurrency::open(void) {
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   setNumGpus(nGpu);
   if (nGpu < 1) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
 }

@@ -111,7 +111,7 @@ static bool cpu_to_gpu_coherency() {
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 1) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return true;
   }
 
