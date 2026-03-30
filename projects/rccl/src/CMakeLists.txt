@@ -458,8 +458,8 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   endforeach()
 endif()
 
-# Find the generated files in the output directory
-file(GLOB GENERATED_FILES "${GEN_DIR}/*")
+# Find the generated files in the output directory (recurse for symmetric/ subdir)
+file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
 
 # Append all found generated files to the list
 foreach(file ${GENERATED_FILES})

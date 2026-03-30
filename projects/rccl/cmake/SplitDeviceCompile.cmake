@@ -266,7 +266,7 @@ function(setup_split_device_compile)
   add_custom_command(
     OUTPUT  ${COMBINED_HIPFB}
     COMMAND ${BUNDLER}
-      --type=bc
+      --type=o
       --targets=${_bundler_targets}
       ${_bundler_inputs}
       --output=${COMBINED_HIPFB}

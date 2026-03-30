@@ -47,12 +47,10 @@ pointer was obtained or which TU the code lives in.
     `ds_`/`flat_` aliasing to the same memory.
   - `kernargPtr` field in `ncclShmemData` is non-volatile.
 
-- **`src/device/common.cu`**:
-  - Kernel entry points pass `LDSPtr<ncclShmemData>(&ncclShmem)` and
-    `ncclShmemPerWarpPtr(ncclShmemPerWarp)` to `ncclKernelMain`.
-  - `STORE_KERNARG_PTR` macro accesses `kernargPtr` through an `LDSPtr` cast
-    (not through the global `__shared__` variable directly) to avoid emitting
-    `flat_store` with `src_shared_base` aperture conversion.
+- **`src/device/common.h`** and **`src/device/common.cu`** are **not modified
+  in-tree**. The LDS pointer changes to these files (kernel entry points passing
+  `LDSPtr<ncclShmemData>`, `STORE_KERNARG_PTR` using LDS casts, etc.) are
+  applied automatically by the post-hipify transform described below.
 
 - **`src/device/op128.h`** — `loadShmem128`, `storeShmem128`, and
   `loadShmemMisaligned128` accept `LDSPtr` parameters directly.
@@ -61,9 +59,9 @@ pointer was obtained or which TU the code lives in.
   `ncclDevFuncPtr_t` typedef use `LDSPtr<ncclShmemData>` and
   `ncclShmemPerWarpPtr`.
 
-### Build-time sed transform (no source changes to NCCL-upstream files)
+### Build-time LDS pointer transform (no source changes to NCCL-upstream files)
 
-- **`cmake/scripts/lds_pointer_transform.sh`** — A post-hipify sed script
+- **`cmake/scripts/lds_pointer_transform.py`** — A post-hipify Python script
   that transforms NCCL-style code into LDS-pointer-style code at build time.
   Applied to all hipified device headers. Transformations include:
   - `ncclShmemData& ncclShmem` → `LDSPtr<ncclShmemData> ncclShmem`
