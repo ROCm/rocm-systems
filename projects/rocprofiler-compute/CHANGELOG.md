@@ -25,6 +25,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added AMD Strix Halo (gfx1151) support
   * New memory hierarchy visualization for RDNA 3.5 (gfx115X) in analyze CLI mode.
 
+* **Documentation (Sphinx)**: Reorganized CDNA and RDNA performance-model topics under `docs/conceptual/`; added **gfx1151 / RDNA 3.5** conceptual metrics, synced panel descriptions, and a **gfx1151 metrics** reference page (`docs/reference/gfx1151-metrics.rst`).
+
 * Introduced support for MI350P GPU
 
 * ``--view table`` option in analyze mode to force all TTY output to plain tables and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables). The ``--view`` argument is reserved for future TTY views (e.g. other chart styles).
