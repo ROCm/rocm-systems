@@ -1922,7 +1922,7 @@ def build_comparable_columns(time_unit: str) -> list[str]:
     """
     Build comparable columns/headers for display
     """
-    comparable_columns = SUPPORTED_FIELD
+    comparable_columns = list(SUPPORTED_FIELD)  # Copy to avoid mutating the original
     top_stat_base = [
         "Count",
         "Sum",
