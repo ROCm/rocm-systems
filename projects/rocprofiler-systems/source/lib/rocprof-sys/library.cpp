@@ -60,7 +60,6 @@
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
 #include "library/process_sampler.hpp"
-#include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
@@ -668,8 +667,6 @@ rocprofsys_init_tooling_hidden(void)
         rocprofsys::perfetto::setup();
     }
 
-    tasking::setup();
-
     if(get_use_causal()) causal::start_experimenting();
 
     if(get_use_timemory())
@@ -1074,10 +1071,6 @@ rocprofsys_finalize_hidden(void)
         LOG_DEBUG("Post-processing the system-level samples...");
         process_sampler::post_process();
     }
-
-    // shutdown tasking before timemory is finalized
-    LOG_DEBUG("Shutting down thread-pools...");
-    tasking::shutdown();
 
     if(get_use_code_coverage())
     {

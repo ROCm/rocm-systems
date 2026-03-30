@@ -256,6 +256,81 @@ static bool checkMaximumAndDefaultThreshold(hipStream_t stream, int N, enum eTes
   return results;
 }
 
+
+/**
+ * Local function to test hipMemPoolAttrReleaseThreshold with multiple threads.
+ * One thread per device; uses HIP_CHECK_THREAD and REQUIRE_THREAD.
+ */
+static void checkMaximumAndDefaultThresholdMultiThreaded(hipStream_t stream, int N,
+                                                         enum eTestValue testtype, int dev) {
+  HIP_CHECK_THREAD(hipSetDevice(dev));
+
+  size_t byte_size = N * sizeof(int);
+  int *A_h, *B_h, *C_h;
+  int *A_d, *B_d, *C_d;
+
+  A_h = reinterpret_cast<int*>(malloc(byte_size));
+  REQUIRE_THREAD(A_h != nullptr);
+  B_h = reinterpret_cast<int*>(malloc(byte_size));
+  REQUIRE_THREAD(B_h != nullptr);
+  C_h = reinterpret_cast<int*>(malloc(byte_size));
+  REQUIRE_THREAD(C_h != nullptr);
+  for (int i = 0; i < N; i++) {
+    A_h[i] = 2 * i + 1;
+    B_h[i] = 2 * i;
+    C_h[i] = 0;
+  }
+
+  hipMemPool_t mem_pool;
+  hipMemPoolProps pool_props{};
+  pool_props.allocType = hipMemAllocationTypePinned;
+  pool_props.location.id = dev;
+  pool_props.location.type = hipMemLocationTypeDevice;
+  HIP_CHECK_THREAD(hipMemPoolCreate(&mem_pool, &pool_props));
+  uint64_t setThreshold = 0;
+  if (testtype == testMaximum) {
+    setThreshold = UINT64_MAX;
+  }
+  HIP_CHECK_THREAD(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold, &setThreshold));
+
+  for (int iter = 0; iter < LAUNCH_ITERATIONS; iter++) {
+    HIP_CHECK_THREAD(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
+                     byte_size, mem_pool, stream));
+    HIP_CHECK_THREAD(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d),
+                     byte_size, mem_pool, stream));
+    HIP_CHECK_THREAD(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C_d),
+                     byte_size, mem_pool, stream));
+
+    HIP_CHECK_THREAD(hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice, stream));
+    HIP_CHECK_THREAD(hipMemcpyAsync(B_d, B_h, byte_size, hipMemcpyHostToDevice, stream));
+
+    int blocks = (N % THREADS_PER_BLOCK == 0) ? (N / THREADS_PER_BLOCK)
+                                              : ((N / THREADS_PER_BLOCK) + 1);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(THREADS_PER_BLOCK), 0, stream,
+                       static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, N);
+    HIP_CHECK_THREAD(hipGetLastError());
+
+    HIP_CHECK_THREAD(hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost, stream));
+
+    HIP_CHECK_THREAD(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
+    HIP_CHECK_THREAD(hipFreeAsync(reinterpret_cast<void*>(B_d), stream));
+    HIP_CHECK_THREAD(hipFreeAsync(reinterpret_cast<void*>(C_d), stream));
+
+    HIP_CHECK_THREAD(hipStreamSynchronize(stream));
+
+    for (int i = 0; i < N; i++) {
+      auto res = A_h[i] + B_h[i];
+      REQUIRE_THREAD(res == C_h[i]);
+    }
+  }
+
+  HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool));
+  free(A_h);
+  free(B_h);
+  free(C_h);
+}
+
+
 /**
  * Test Description
  * ------------------------
@@ -671,6 +746,65 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_MultiStream) {
 }
 #endif
 /**
+ * Common multithreaded test for release threshold (default or max).
+ * Runs one thread per device that supports memory pools.
+ */
+static void runMThreadReleaseThresholdTest(enum eTestValue testtype) {
+  constexpr int N = 1 << 10;
+
+  int num_devices = 0;
+  HIP_CHECK(hipGetDeviceCount(&num_devices));
+
+  // Determine which devices support memory pools
+  std::vector<int> supported_devices;
+  supported_devices.reserve(num_devices);
+  for (int idx = 0; idx < num_devices; ++idx) {
+    int mempool_supported = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&mempool_supported,
+                                    hipDeviceAttributeMemoryPoolsSupported, idx));
+    if (mempool_supported) {
+      supported_devices.push_back(idx);
+    }
+  }
+  // If no devices support memory pools, defer to common helper logic
+  if (supported_devices.empty()) {
+    checkMempoolSupported(0);
+    return;
+  }
+
+  std::vector<std::thread> tests;
+  std::vector<hipStream_t> streams(supported_devices.size());
+
+  // Initialize and create streams only on supported devices
+  for (std::size_t i = 0; i < supported_devices.size(); ++i) {
+    int device = supported_devices[i];
+    HIP_CHECK(hipSetDevice(device));
+    HIP_CHECK(hipStreamCreate(&streams[i]));
+  }
+
+  // Spawn the test threads for supported devices
+  for (std::size_t i = 0; i < supported_devices.size(); ++i) {
+    int device = supported_devices[i];
+    tests.push_back(
+        std::thread(checkMaximumAndDefaultThresholdMultiThreaded, streams[i], N, testtype, device));
+  }
+
+  // Wait for all threads to complete
+  for (std::thread& t : tests) {
+    t.join();
+  }
+
+  // Destroy streams on supported devices
+  for (std::size_t i = 0; i < supported_devices.size(); ++i) {
+    int device = supported_devices[i];
+    HIP_CHECK(hipSetDevice(device));
+    HIP_CHECK(hipStreamDestroy(streams[i]));
+  }
+
+  HIP_CHECK_THREAD_FINALIZE();
+}
+
+/**
  * Test Description
  * ------------------------
  *    - Validate memory pool creation, allocation of memory from the
@@ -681,12 +815,12 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_MultiStream) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_DefaultThresh) {
-  checkMempoolSupported(0) REQUIRE(true == test_hipMallocFromPoolAsync_MThread(testdefault));
+TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_DefaultThresh) {
+  runMThreadReleaseThresholdTest(testdefault);
 }
 
-HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_MaxThresh) {
-  checkMempoolSupported(0) REQUIRE(true == test_hipMallocFromPoolAsync_MThread(testMaximum));
+TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_MaxThresh) {
+  runMThreadReleaseThresholdTest(testMaximum);
 }
 
 /**
@@ -821,3 +955,4 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseAllowInternalDependencies) {
  * End doxygen group StreamOTest.
  * @}
  */
+
