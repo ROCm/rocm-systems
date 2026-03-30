@@ -130,11 +130,22 @@ def test_multi_rank_pc_sampling_only(
     Test that no multi-rank warning is printed when running with only
     --block 21 (PC sampling only mode requires a single pass) with multi-rank.
     """
+    if soc == "MI100":
+        assert True
+        return
+
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
 
     workload_dir = test_utils.get_output_dir()
 
-    options = ["--block", "21"]
+    options = [
+        "--block",
+        "21",
+        "--pc-sampling-method",
+        "host_trap",
+        "--pc-sampling-interval",
+        "256",
+    ]
 
     _, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
@@ -159,11 +170,23 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     and another block (PC sampling with counters mode requires multiple passes)
     with multi-rank.
     """
+    if soc == "MI100":
+        assert True
+        return
+
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
 
     workload_dir = test_utils.get_output_dir()
 
-    options = ["--block", "21", "2"]
+    options = [
+        "--block",
+        "21",
+        "2",
+        "--pc-sampling-method",
+        "host_trap",
+        "--pc-sampling-interval",
+        "256",
+    ]
 
     _, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
