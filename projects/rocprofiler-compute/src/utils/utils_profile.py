@@ -421,8 +421,8 @@ def gen_sysinfo(
     data = mspec.get_class_members()
 
     # Append workload information to machine specs
-    df["command"] = app_cmd
-    df["workload_path"] = workload_dir
+    data["command"] = app_cmd
+    data["workload_path"] = workload_dir
 
     blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
     if not skip_roof:
