@@ -385,11 +385,4 @@ mi_gpu_spec:
                   spx: 1
             chip_ids:
               physical: 5510
-          - gpu_model: krackan
-            partition_mode:
-              compute_partition_mode:
-                num_xcds:
-                  spx: 1
-            chip_ids:
-              physical: 4372
   #########################################################
