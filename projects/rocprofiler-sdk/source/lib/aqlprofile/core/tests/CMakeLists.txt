@@ -24,7 +24,6 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-aqlprofile
             -Wl,--end-group
-            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-drm
             aqlprofile-core-tests-flags
@@ -32,6 +31,10 @@ target_link_libraries(
             GTest::gtest_main
             GTest::gmock
             GTest::gmock_main)
+
+# Ensure hsa runtime is in DT_NEEDED
+target_link_options(aqlprofile-core-tests PRIVATE -Wl,--no-as-needed
+                    $<TARGET_FILE:hsa-runtime64::hsa-runtime64> -Wl,--as-needed)
 
 rocprofiler_add_unit_test(
     TARGET aqlprofile-core-tests

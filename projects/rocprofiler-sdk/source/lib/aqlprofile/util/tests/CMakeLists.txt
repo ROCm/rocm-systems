@@ -14,7 +14,6 @@ set(AQLPROFILE_UTIL_TEST_SOURCES util_tests.cpp)
 add_executable(aqlprofile-util-tests)
 
 target_sources(aqlprofile-util-tests PRIVATE ${AQLPROFILE_UTIL_TEST_SOURCES})
-target_link_options(aqlprofile-util-tests PRIVATE -Wl,--no-as-needed)
 
 target_link_libraries(
     aqlprofile-util-tests
@@ -23,7 +22,6 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-aqlprofile
             -Wl,--end-group
-            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-drm
             aqlprofile-util-tests-flags
@@ -31,6 +29,10 @@ target_link_libraries(
             GTest::gtest_main
             GTest::gmock
             GTest::gmock_main)
+
+# Ensure hsa runtime is in DT_NEEDED
+target_link_options(aqlprofile-util-tests PRIVATE -Wl,--no-as-needed
+                    $<TARGET_FILE:hsa-runtime64::hsa-runtime64> -Wl,--as-needed)
 
 rocprofiler_add_unit_test(
     TARGET aqlprofile-util-tests

@@ -8,7 +8,6 @@ include(GoogleTest)
 add_library(aqlprofile-pm4-tests-flags INTERFACE)
 target_compile_options(aqlprofile-pm4-tests-flags
                        INTERFACE -Wno-shadow -Wno-unused-parameter -Wno-unused-variable)
-target_link_options(aqlprofile-pm4-tests-flags INTERFACE -Wl,-no-as-needed)
 
 set(AQLPROFILE_PM4_TEST_SOURCES
     cmd_builder_tests.cpp gfx9_cmd_builder_tests.cpp pmc_builder_tests.cpp
@@ -25,13 +24,16 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-aqlprofile
             -Wl,--end-group
-            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-drm
             aqlprofile-pm4-tests-flags
             GTest::gtest
             GTest::gmock
             GTest::gtest_main)
+
+# Ensure hsa runtime is in DT_NEEDED
+target_link_options(aqlprofile-pm4-tests PRIVATE -Wl,--no-as-needed
+                    $<TARGET_FILE:hsa-runtime64::hsa-runtime64> -Wl,--as-needed)
 
 rocprofiler_add_unit_test(
     TARGET aqlprofile-pm4-tests
