@@ -5,6 +5,7 @@ import argparse
 import math
 import os
 import re
+import shutil
 import sys
 from abc import abstractmethod
 from pathlib import Path
@@ -27,6 +28,7 @@ from utils.utils_common import (
     SUPPORTED_DENOM,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
+    create_temp_rocprofiler_metrics_path,
     get_panel_alias,
     is_only_pc_sampling,
     is_tcc_channel_counter,
@@ -398,8 +400,15 @@ class OmniSoC_Base:
 
         # Point to counter definition
         old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
-        os.environ["ROCPROFILER_METRICS_PATH"] = str(
-            config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
+        with open(
+            config.rocprof_compute_home
+            / "rocprof_compute_soc"
+            / "profile_configs"
+            / "sdk_config.yaml",
+        ) as filename:
+            sdk_config = yaml.safe_load(filename)
+        os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
+            sdk_config
         )
 
         # Backward compatibility support for sdk avail module moved from
@@ -438,6 +447,11 @@ class OmniSoC_Base:
         }
         # Reset env. var.
         if old_rocprofiler_metrics_path is None:
+            # Delete counter definition temporary directory
+            if os.environ.get("ROCPROFILER_METRICS_PATH"):
+                shutil.rmtree(
+                    os.environ["ROCPROFILER_METRICS_PATH"], ignore_errors=True
+                )
             del os.environ["ROCPROFILER_METRICS_PATH"]
         else:
             os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
