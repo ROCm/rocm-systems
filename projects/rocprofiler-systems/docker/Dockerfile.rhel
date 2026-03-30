@@ -23,7 +23,12 @@ RUN OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr 
         pkgconf-pkg-config python3-devel python3-pip redhat-rpm-config rpm-build \
         rpm-sign sqlite-devel strace texinfo ucx-devel vim wget which zlib-devel && \
     if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then \
-        yum install -y gcc-toolset-10-binutils gcc-toolset-10-gcc gcc-toolset-10-gcc-c++ gcc-gfortran; \
+        yum install -y gcc-toolset-10-binutils gcc-toolset-10-gcc gcc-toolset-10-gcc-c++ && \
+        if [ ! -e /usr/lib64/libquadmath.so ] && [ -e /usr/lib64/libquadmath.so.0 ]; then \
+            ln -s libquadmath.so.0 /usr/lib64/libquadmath.so; \
+        elif [ ! -e /usr/lib64/libquadmath.so ]; then \
+            yum install -y libquadmath-devel || yum install -y gcc-gfortran; \
+        fi; \
     else \
         yum install -y binutils gcc gcc-c++; \
     fi && \

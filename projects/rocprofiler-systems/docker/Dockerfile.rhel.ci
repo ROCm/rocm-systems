@@ -30,7 +30,7 @@ RUN OS_VERSION_MAJOR=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr 
         rpm-sign sqlite-devel \
         strace texinfo ucx-devel vim wget which zlib-devel && \
     if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then \
-        yum install -y gcc-toolset-10-binutils gcc-toolset-10-gcc gcc-toolset-10-gcc-c++; \
+        yum install -y gcc-toolset-10-binutils gcc-toolset-10-gcc gcc-toolset-10-gcc-c++ libquadmath-devel; \
     else \
         yum install -y binutils gcc gcc-c++; \
     fi && \
