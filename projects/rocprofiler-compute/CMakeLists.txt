@@ -662,12 +662,17 @@ endif()
 # Test categorization
 # -------------------
 set(_test_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_categories.yaml")
-include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake)
-if(EXISTS "${_test_categories_yaml}")
-    message(STATUS "YAML-based test categorization")
-    apply_ctest_category_labels("${_test_categories_yaml}")
+include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
+
+if(COMMAND apply_ctest_category_labels)
+    if(EXISTS "${_test_categories_yaml}")
+        message(STATUS "YAML-based test categorization")
+        apply_ctest_category_labels("${_test_categories_yaml}")
+    else()
+        message(STATUS "No test categorization (YAML missing)")
+    endif()
 else()
-    message(STATUS "No test categorization (YAML missing)")
+    message(STATUS "Test categorization not available (TestCategories.cmake not found)")
 endif()
 
 # -------------------
