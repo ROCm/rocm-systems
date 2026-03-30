@@ -369,7 +369,6 @@ public:
         for (uint32_t i = 0; i < quantum && step(); ++i) {
         }
       }
-      retire_halted_wfs();
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
     }
