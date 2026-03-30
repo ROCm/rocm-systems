@@ -221,7 +221,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_
   free(streams);
   free(dstBuf);
   free(srcBuf);
-  SUCCEED("");
+  REQUIRE(true);
 }
 
 static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {

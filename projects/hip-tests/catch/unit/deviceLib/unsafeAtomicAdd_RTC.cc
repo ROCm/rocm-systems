@@ -15,6 +15,7 @@ unsafeAtomicAdd Scenarios with hipRTC:
 */
 
 #include <hip_test_checkers.hh>
+#include <string>
 #include <hip_test_common.hh>
 #include <hip_test_features.hh>
 #include <hip/hiprtc.h>
@@ -88,7 +89,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
     HIP_CHECK(hipModuleLoadData(&module, code.data()));
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
     if (props.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -120,10 +121,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+          "Hence skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }
 
@@ -181,7 +185,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -213,10 +217,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+          "Hence skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }
 
@@ -271,7 +278,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -303,10 +310,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+          "Hence skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }
 
@@ -359,7 +369,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
     HIP_CHECK(hipModuleLoadData(&module, code.data()));
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
     if (props.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -385,10 +395,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+          "Hence skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }
 
@@ -443,7 +456,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -469,10 +482,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+          "Hence skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }
 
@@ -527,7 +543,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -553,9 +569,12 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+          "Hence skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }

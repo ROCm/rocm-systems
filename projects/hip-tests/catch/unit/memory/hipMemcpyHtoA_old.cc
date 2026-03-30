@@ -38,7 +38,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyHtoA_multiDevice_PeerDeviceContext, char, i
     int peerAccess = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0));
     if (!peerAccess) {
-      SUCCEED("Skipped the test as there is no peer access");
+      HipTest::HIP_SKIP_TEST("Skipped the test as there is no peer access");
     } else {
       HIP_CHECK(hipSetDevice(0));
       hipArray_t A_d;
@@ -69,7 +69,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyHtoA_multiDevice_PeerDeviceContext, char, i
                                             false) == true);
     }
   } else {
-    SUCCEED("skipping the testcases as numDevices < 2");
+    HipTest::HIP_SKIP_TEST("skipping the testcases as numDevices < 2");
+    return;
   }
 }
 #endif

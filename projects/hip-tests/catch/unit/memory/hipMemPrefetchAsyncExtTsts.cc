@@ -104,12 +104,12 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
       HIP_CHECK(hipFree(Hmm));
       REQUIRE(IfTestPassed);
     } else {
-      SUCCEED(
-          "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-          "attribute. Hence skipping the testing with Pass result.\n");
+      HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
     }
   } else {
-    SUCCEED(
+    HipTest::HIP_SKIP_TEST(
         "This test needs atleast 2 gpus, but the system has less than"
         " 2 gpus hence skipping the test");
   }
@@ -199,12 +199,12 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
       HIP_CHECK(hipStreamDestroy(strm));
       REQUIRE(IfTestPassed);
     } else {
-      SUCCEED(
-          "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-          "attribute. Hence skipping the testing with Pass result.\n");
+      HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
     }
   } else {
-    SUCCEED(
+    HipTest::HIP_SKIP_TEST(
         "This test needs atleast 2 gpus, but the system has less than"
         " 2 gpus hence skipping the test");
   }
@@ -302,7 +302,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
     REQUIRE(IfTestPassed);
 
   } else {
-    SUCCEED(
+    HipTest::HIP_SKIP_TEST(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
         "attribute. Hence skipping the testing with Pass result.\n");
   }

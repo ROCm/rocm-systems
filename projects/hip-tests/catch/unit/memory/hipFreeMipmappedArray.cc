@@ -9,6 +9,7 @@
 #include "hipArrayCommon.hh"
 #include "utils.hh"
 #include <array>
+#include <string>
 
 
 /*
@@ -48,12 +49,13 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayImplicitSyncArray, char, float)
       // We would skip the test if the extent would require more than half of the global memory.
       // Note that totalGlobalMem is not an exact measurement of the available memory for
       // compute and we cannot use it as an exact value, so we use half
-      // (we use SUCCEED as no warning is needed)
-      SUCCEED(
-          "Device might not have enough global memory to allocate a mipmapped array using this "
-          "extent; "
-          "test will not be run. Total global memory: "
-          << props.totalGlobalMem);
+      std::string const skip_msg =
+          std::string(
+              "Device might not have enough global memory to allocate a mipmapped array using this "
+              "extent; "
+              "test will not be run. Total global memory: ") +
+          std::to_string(props.totalGlobalMem);
+      HipTest::HIP_SKIP_TEST(skip_msg.c_str());
       continue;
     }
 

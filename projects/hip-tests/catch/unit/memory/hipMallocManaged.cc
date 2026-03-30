@@ -16,6 +16,7 @@
 #include "hipMallocManagedCommon.hh"
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
+#include <string>
 
 
 // Kernel functions
@@ -96,7 +97,9 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
   HIP_CHECK(hipMemRangeGetAttribute(&read_only, sizeof(read_only), hipMemRangeAttributeReadMostly,
                                     A, numElements * sizeof(float)));
   if (read_only != 1) {
-    SUCCEED("hipMemRangeGetAttribute error, read_only = " << read_only);
+    std::string const skip_msg =
+        "hipMemRangeGetAttribute error, read_only = " + std::to_string(read_only);
+    HipTest::HIP_SKIP_TEST(skip_msg.c_str());
   }
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
@@ -120,7 +123,9 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
                                     hipMemRangeAttributeLastPrefetchLocation, A,
                                     numElements * sizeof(float)));
   if (device != hipCpuDeviceId) {
-    SUCCEED("hipMemRangeGetAttribute error device = " << device);
+    std::string const skip_msg =
+        "hipMemRangeGetAttribute error device = " + std::to_string(static_cast<int>(device));
+    HipTest::HIP_SKIP_TEST(skip_msg.c_str());
   }
 
   for (size_t i = 0; i < numElements; i++) {

@@ -152,7 +152,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_MaskedDevices) {
     ret = hipDeviceGetPCIBusIdTests::testWithMaskedDevices(count);
     REQUIRE(ret == true);
   } else {
-    SUCCEED("Not enough GPUs to run the masked GPU tests");
+    HipTest::HIP_SKIP_TEST("Not enough GPUs to run the masked GPU tests");
   }
 }
 

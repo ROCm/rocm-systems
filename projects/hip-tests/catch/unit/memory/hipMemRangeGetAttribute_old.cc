@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
     int isPageableHMM = 0;
     HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
     if (!isPageableHMM) {
-      SUCCEED(
+      HipTest::HIP_SKIP_TEST(
           "Running on a system  where all the memory requested in hipMallocManaged "
           "is allocated on the host.\nThis can cause instability because of out-of-memory "
           "failures.\n"
@@ -95,7 +95,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
 
     REQUIRE(IfTestPassed);
   } else {
-    SUCCEED(
+    HipTest::HIP_SKIP_TEST(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
         "attribute. Hence skipping the testing with Pass result.\n");
   }
@@ -150,7 +150,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
     }
     HIP_CHECK(hipFree(Hmm));
   } else {
-    SUCCEED(
+    HipTest::HIP_SKIP_TEST(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
         "attribute. Hence skipping the testing with Pass result.\n");
   }
@@ -197,7 +197,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
     HIP_CHECK(hipFree(Hmm));
     delete[] OutData;
   } else {
-    SUCCEED(
+    HipTest::HIP_SKIP_TEST(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
         "attribute. Hence skipping the testing with Pass result.\n");
   }

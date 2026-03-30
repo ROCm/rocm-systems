@@ -373,7 +373,7 @@ HIP_TEST_CASE(Perf_hipPerfBufferCopySpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices <= 0) {
-    SUCCEED(
+    HipTest::HIP_SKIP_TEST(
         "Skipped testcase hipPerfBufferCopySpeed as"
         "there is no device to test.");
   } else {

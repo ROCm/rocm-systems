@@ -42,7 +42,7 @@ HIP_TEST_CASE(Unit_threadfence_system) {
 
   volatile int* data;
   if (hipHostMalloc(&data, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    SUCCEED("Memory allocation failed. Skip test. Is SVM atomic supported?");
+    HipTest::HIP_SKIP_TEST("Memory allocation failed. Skip test. Is SVM atomic supported?");
   }
 
   constexpr int init_data = 1000;
@@ -50,7 +50,7 @@ HIP_TEST_CASE(Unit_threadfence_system) {
 
   volatile int* flag;
   if (hipHostMalloc(&flag, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    SUCCEED("Memory allocation failed. Skip test. Is SVM atomic supported?");
+    HipTest::HIP_SKIP_TEST("Memory allocation failed. Skip test. Is SVM atomic supported?");
   }
   *flag = 0;
 

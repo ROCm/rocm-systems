@@ -110,7 +110,7 @@ HIP_TEST_CASE(Stress_hipMemPrefetchAsyncOneToAll) {
     // Releasing the resources in case all the scenarios passed
     HIP_CHECK(hipFree(Hmm1));
   } else {
-    SUCCEED(
+    HipTest::HIP_SKIP_TEST(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
         "attribute. Hence skipping the testing with Pass result.\n");
   }

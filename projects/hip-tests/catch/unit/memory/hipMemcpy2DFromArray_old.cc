@@ -54,10 +54,11 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu) {
       HIP_CHECK(hipHostFree(E_h));
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, nullptr, nullptr, false);
     } else {
-      SUCCEED("Device Does not have P2P capability");
+      HipTest::HIP_SKIP_TEST("Device Does not have P2P capability");
     }
   } else {
-    SUCCEED("Number of devices are < 2");
+    HipTest::HIP_SKIP_TEST("Number of devices are < 2");
+    return;
   }
 }
 
@@ -103,9 +104,10 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDeviceContextChange) {
       HIP_CHECK(hipFreeArray(A_d));
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, hData, nullptr, false);
     } else {
-      SUCCEED("Device Does not have P2P capability");
+      HipTest::HIP_SKIP_TEST("Device Does not have P2P capability");
     }
   } else {
-    SUCCEED("Number of devices are < 2");
+    HipTest::HIP_SKIP_TEST("Number of devices are < 2");
+    return;
   }
 }

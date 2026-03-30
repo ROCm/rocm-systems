@@ -276,8 +276,8 @@ HIP_TEST_CASE(Perf_hipPerfVMMAllocSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices <= 0) {
-    SUCCEED(
-        "Skipped testcase hipPerfBufferCopySpeed as"
+    HipTest::HIP_SKIP_TEST(
+        "Skipped testcase hipPerfVMMAlloc as"
         "there is no device to test.");
   } else {
     // Test on Primary Device first

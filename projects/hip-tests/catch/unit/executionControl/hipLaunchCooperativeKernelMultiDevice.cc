@@ -19,7 +19,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic) {
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    SUCCEED("Test requires at least 2 devices");
+    HipTest::HIP_SKIP_TEST("Test requires at least 2 devices");
     return;
   }
 
@@ -55,7 +55,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    SUCCEED("Test requires at least 2 devices");
+    HipTest::HIP_SKIP_TEST("Test requires at least 2 devices");
     return;
   }
 
@@ -136,7 +136,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSam
 
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    SUCCEED("Test requires at least 2 devices");
+    HipTest::HIP_SKIP_TEST("Test requires at least 2 devices");
     return;
   }
 

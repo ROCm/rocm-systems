@@ -238,7 +238,7 @@ HIP_TEST_CASE(Perf_hipPerfSharedMemReadSpeed_test) {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    SUCCEED(
+    HipTest::HIP_SKIP_TEST(
         "Skipped testcase hipPerfSharedMemReadSpeed as"
         "there is no device to test.\n");
   } else {

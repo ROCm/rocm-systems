@@ -229,10 +229,10 @@ HIP_TEST_CASE(Unit_hipGraphClone_Functional) {
       if (canAccessPeer) {
         hipGraphClone_DeviceContextChange();
       } else {
-        SUCCEED("Machine does not seem to have P2P");
+        HipTest::HIP_SKIP_TEST("Machine does not seem to have P2P");
       }
     } else {
-      SUCCEED("skipped the testcase as no of devices is less than 2");
+      HipTest::HIP_SKIP_TEST("skipped the testcase as no of devices is less than 2");
     }
   }
 }
