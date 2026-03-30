@@ -167,6 +167,7 @@ class Tester {
   int num_loops = 0;
   int size_factor = 1;
   int bw_factor = 1;
+  int rtt_factor = 1;
   int num_warps = 0;
   int wf_size = 0;
   int device_id = 0;

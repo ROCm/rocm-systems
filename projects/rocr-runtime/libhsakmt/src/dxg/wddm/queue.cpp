@@ -139,7 +139,7 @@ hsa_status_t WDDMQueue::HwsSubmit(uint64_t command_addr,
 }
 
 hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
-  if (!use_hws) 
+  if (!use_hws)
     return HSA_STATUS_SUCCESS;
 
   Wkmi::SchedLevel new_prio = ConvertSchedLevel(priority);
@@ -260,8 +260,8 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
                uint32_t engine,
                bool use_hws)
     : WDDMQueue(
-          device, device->IsAqlSupported() ? reinterpret_cast<uintptr_t>(ring) : 0,
-               device->IsAqlSupported() ? ring_size * 64 : cmdbuf_size, engine, use_hws),
+          device, (use_hws && device->IsAqlSupported()) ? reinterpret_cast<uintptr_t>(ring) : 0,
+               (use_hws && device->IsAqlSupported()) ? ring_size * 64 : cmdbuf_size, engine, use_hws),
                ring(ring),
                ring_size(ring_size),
                error_code_(reinterpret_cast<volatile std::atomic<int64_t>*>(error_addr)),
@@ -285,9 +285,9 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
   ring_rptr = _ring_rptr;
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_t, read_dispatch_id));
   amd_queue_memory_ = GetGpuMemoryFromAddress(amd_queue_rocr_);
-  aql_ = device->DeviceInfo().hwsInfo.hwsMask.aql_queue;
+  native_aql_ = use_hws && device->IsAqlSupported();
   bool ret = device->CreateQueue(
-      this, !device->IsAqlSupported() ? reinterpret_cast<uint64_t>(_ring_rptr) : 0);
+      this, !native_aql_ ? reinterpret_cast<uint64_t>(_ring_rptr) : 0);
   assert(ret);
 
   GpuMemoryCreateInfo create_info{};
@@ -300,8 +300,8 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
   amd_queue_ = reinterpret_cast<amd_queue_v2_t*>(gpu_mem->GpuAddress());
 
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_v2_t, read_dispatch_id));
-  // Don't start the PM4 thread for AQL queue
-  if (!aql_) {
+  // Native AQL submission bypasses the PM4 translation thread.
+  if (!native_aql_) {
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
   }
 
@@ -312,7 +312,7 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
 }
 
 ComputeQueue::~ComputeQueue() {
-  if (!aql_) {
+  if (!native_aql_) {
     thread_cond_lock_.lock();
     thread_stop_ = true;
     thread_cond_lock_.unlock();
@@ -649,7 +649,7 @@ uint64_t ComputeQueue::GetKernelObjAddr(uint64_t addr) const {
 }
 
 void ComputeQueue::RingDoorbell(uint64_t value) {
-  if (!aql_) {
+  if (!native_aql_) {
     thread_cond_lock_.lock();
     thread_cond_lock_.unlock();
     pr_debug("notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, GetRingWptr()->load(),
