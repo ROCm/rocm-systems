@@ -50,6 +50,10 @@ logging.debug("AMDSMI_GPU_METRICS_CACHE_MS = %sms", gpu_metrics_cache_ms)
 asic_info_cache_ms = os.environ.setdefault("AMDSMI_ASIC_INFO_CACHE_MS", "10000")  # 10 seconds
 logging.debug("AMDSMI_ASIC_INFO_CACHE_MS = %sms", asic_info_cache_ms)
 
+# Set the environment variable for process info cache duration
+process_info_cache_ms = os.environ.setdefault("AMDSMI_PROCESS_INFO_CACHE_MS", "100")
+logging.debug("AMDSMI_PROCESS_INFO_CACHE_MS = %sms", process_info_cache_ms)
+
 try:
     from amdsmi_init import *
     from amdsmi_helpers import AMDSMIHelpers

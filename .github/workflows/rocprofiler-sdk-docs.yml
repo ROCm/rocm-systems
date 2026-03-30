@@ -30,7 +30,6 @@ concurrency:
 env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.2.0"
 
 jobs:
   build-docs:
@@ -91,8 +90,10 @@ jobs:
         shell: bash
         working-directory: /tmp
         run: |
-          tar -xf ${{ env.ROCM_PATH }}-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+          mv "${{ env.ROCM_PATH }}-gfx94X.tar.gz" .
+          rm -rf ${{ env.ROCM_PATH }}*
+          mkdir -p "${{ env.ROCM_PATH }}"
+          tar -xf rocm-gfx94X.tar.gz -C "${{ env.ROCM_PATH }}"
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
       - name: Install os essentials
