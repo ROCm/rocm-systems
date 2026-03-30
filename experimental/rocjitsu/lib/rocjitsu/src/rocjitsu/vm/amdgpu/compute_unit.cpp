@@ -9,7 +9,9 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/except.h"
 
+#include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 
@@ -71,6 +73,10 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs,
                                         uint32_t vgprs) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
+  // Free register allocations from previously halted wavefronts before claiming a new slot.
+  // Without this, completed wavefronts' SGPR/VGPR blocks remain allocated and each new
+  // dispatch wastes a fresh block rather than reusing the freed ones.
+  retire_halted_wfs();
   // Find an idle slot.
   size_t slot = config_.num_wf_slots;
   for (size_t i = 0; i < wfs_.size(); ++i) {
@@ -91,6 +97,19 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
   }
+
+  // Zero the allocated register blocks so reused slots don't inherit stale
+  // values from previous kernel runs. Without this, wavefronts reading
+  // uninitialized registers (e.g., user SGPRs not set by init_wavefront_regs)
+  // see leftover data from the prior occupant.
+  std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
+  std::memset(vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
+              config_.vgprs_per_wf * wf_size_ * sizeof(uint32_t));
+
+  // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
+  // arguments from L2/memory rather than stale lines from a prior kernel.
+  // On real hardware, the driver issues s_dcache_inv at kernel launch.
+  l1_scalar_.invalidate_all();
 
   auto *wf = wfs_[slot].get();
   wf->wg_id_ = wg_id;
@@ -149,8 +168,13 @@ void ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> inst, Wavef
 bool ComputeUnitCore::step() {
   tick_pipelines();
 
-  if (!has_active_wfs())
+  if (!has_active_wfs()) {
+    // Final pipeline drain: complete deferred load writebacks for wavefronts
+    // that halted on the previous step (after tick_pipelines ran but before
+    // the next tick could drain them).
+    tick_pipelines();
     return false;
+  }
 
   size_t start = next_wf_;
   Wavefront *active = nullptr;
