@@ -271,9 +271,8 @@ class RocProfCompute:
         if getattr(self.__args, "profile_dry_run", False):
             # Default workload layout still expects a path; use a fixed placeholder
             # when no --name so sanitize does not require a real workload directory.
-            if (
-                self.__args.name is None
-                and self.__args.output_directory == str(Path.cwd() / "workloads")
+            if self.__args.name is None and self.__args.output_directory == str(
+                Path.cwd() / "workloads"
             ):
                 dry = Path.cwd() / "workloads" / "_dry_run"
                 self.__args.output_directory = str(dry)

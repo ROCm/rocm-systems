@@ -685,9 +685,7 @@ def process_table_data(
     return result_df
 
 
-def _gfx115_mem_chart_heading(
-    panel: Optional[dict[str, Any]], normal_unit: str
-) -> str:
+def _gfx115_mem_chart_heading(panel: Optional[dict[str, Any]], normal_unit: str) -> str:
     """Section number from ``panel id // 100`` (panel 300 → ``3. Memory Chart``)."""
     panel_id = int((panel or {}).get("id", 300))
     return mem_chart_gfx11.format_mem_chart_heading(normal_unit, panel_id=panel_id)

@@ -42,9 +42,7 @@ def test_cp_sat_same_bin_group() -> None:
     groups = [frozenset({"SQ_A_sum", "TCP_REQ_sum"})]
     part = cp_sat_partition_counters(items, cfg, groups, time_limit_s=5.0)
     assert part is not None
-    bucket_with_pair = [
-        b for b in part if "SQ_A_sum" in b and "TCP_REQ_sum" in b
-    ]
+    bucket_with_pair = [b for b in part if "SQ_A_sum" in b and "TCP_REQ_sum" in b]
     assert len(bucket_with_pair) == 1
 
 

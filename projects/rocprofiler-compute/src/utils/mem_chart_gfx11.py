@@ -119,6 +119,7 @@ MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
     k for k, _ in _MEM_CHART_DEFAULT_ROWS
 )
 
+
 def _print_mem_chart_scope_bar(console: Console) -> None:
     """Horizontal rule: GPU span vs System Memory (above the diagram body)."""
     console.print(

@@ -135,17 +135,13 @@ def cp_sat_partition_counters(
             assign[(item_idx, bin_idx)] = model.NewBoolVar(f"x_{item_idx}_{bin_idx}")
 
     for item_idx in range(n):
-        model.Add(
-            sum(assign[(item_idx, bin_idx)] for bin_idx in range(num_bins)) == 1
-        )
+        model.Add(sum(assign[(item_idx, bin_idx)] for bin_idx in range(num_bins)) == 1)
 
     for bin_idx in range(num_bins):
         for block_name, cap in perfmon_config.items():
             idxs = [i for i in range(n) if block_of[i] == block_name]
             if idxs:
-                model.Add(
-                    sum(assign[(i, bin_idx)] for i in idxs) <= cap
-                )
+                model.Add(sum(assign[(i, bin_idx)] for i in idxs) <= cap)
 
     for gix, grp_idxs in enumerate(group_index_lists):
         group_vars_per_bin: list[object] = []

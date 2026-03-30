@@ -77,7 +77,9 @@ def _load_same_bucket_priority_policy_map() -> dict[str, tuple[str, ...]]:
     """
     Load ``utils/profiling_counter_grouping_policy.yaml`` into arch -> metric id tuple.
     """
-    path = config.rocprof_compute_home / "utils" / "profiling_counter_grouping_policy.yaml"
+    path = (
+        config.rocprof_compute_home / "utils" / "profiling_counter_grouping_policy.yaml"
+    )
     if not path.is_file():
         console_warning(
             "profiling",
@@ -298,8 +300,7 @@ class OmniSoC_Base:
 
         if file_id not in config_filename_dict:
             console_warning(
-                f"Skipping {block_id}: file id {file_id} not found in "
-                f"{config_root_dir}"
+                f"Skipping {block_id}: file id {file_id} not found in {config_root_dir}"
             )
             return
 
@@ -396,9 +397,13 @@ class OmniSoC_Base:
         """
         priority_keys = self._priority_metric_keys_for_coalescing()
         rows: list[tuple[int, int, str, str, int, str, frozenset[str]]] = []
-        for stem_id, panel_id, metric_idx, metric_name, metric_yaml in (
-            self._iter_arch_analysis_yaml_metrics()
-        ):
+        for (
+            stem_id,
+            panel_id,
+            metric_idx,
+            metric_name,
+            metric_yaml,
+        ) in self._iter_arch_analysis_yaml_metrics():
             hw = self.parse_counters(metric_yaml)
             hw = self._expand_tcc_template_counters(hw)
             intersection = frozenset(hw & active_counters)
@@ -407,9 +412,15 @@ class OmniSoC_Base:
             tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
             neg_sz = -len(intersection)
             panel_s = str(panel_id) if panel_id is not None else ""
-            rows.append(
-                (tier, neg_sz, stem_id, panel_s, metric_idx, metric_name, intersection)
-            )
+            rows.append((
+                tier,
+                neg_sz,
+                stem_id,
+                panel_s,
+                metric_idx,
+                metric_name,
+                intersection,
+            ))
         rows.sort(key=lambda r: (r[0], r[1], r[2], r[3], r[4]))
         return rows
 
@@ -490,9 +501,7 @@ class OmniSoC_Base:
         out: list[list[int]] = []
         for row in self._metric_counter_groups_for_coalescing(active):
             counter_group = row[-1]
-            idxs = sorted(
-                {item_index[c] for c in counter_group if c in item_index}
-            )
+            idxs = sorted({item_index[c] for c in counter_group if c in item_index})
             if len(idxs) >= 2:
                 out.append(idxs)
         return out
@@ -675,9 +684,7 @@ class OmniSoC_Base:
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 out.discard(counter_name)
                 base = counter_name.split("[")[0]
-                out.update(
-                    f"{base}[{i}]" for i in range(num_xcd * l2_banks)
-                )
+                out.update(f"{base}[{i}]" for i in range(num_xcd * l2_banks))
         return out
 
     @demarcate
@@ -878,9 +885,13 @@ class OmniSoC_Base:
         multi_rows: list[tuple[str, str, int, str, int, str]] = []
         single_rows: list[tuple[str, str, int, str, str]] = []
         total_metrics = 0
-        for file_id, panel_id, metric_idx, metric_name, metric_yaml in (
-            self._iter_arch_analysis_yaml_metrics()
-        ):
+        for (
+            file_id,
+            panel_id,
+            metric_idx,
+            metric_name,
+            metric_yaml,
+        ) in self._iter_arch_analysis_yaml_metrics():
             total_metrics += 1
             hw = self.parse_counters(metric_yaml)
             hw = self._expand_tcc_template_counters(hw)
@@ -893,26 +904,22 @@ class OmniSoC_Base:
             panel_s = str(panel_id) if panel_id is not None else "-"
             n_b = len(buckets)
             if n_b > 1:
-                multi_rows.append(
-                    (
-                        file_id,
-                        panel_s,
-                        metric_idx,
-                        metric_name,
-                        n_b,
-                        ", ".join(sorted(buckets)),
-                    )
-                )
+                multi_rows.append((
+                    file_id,
+                    panel_s,
+                    metric_idx,
+                    metric_name,
+                    n_b,
+                    ", ".join(sorted(buckets)),
+                ))
             elif n_b == 1:
-                single_rows.append(
-                    (
-                        file_id,
-                        panel_s,
-                        metric_idx,
-                        metric_name,
-                        next(iter(buckets)),
-                    )
-                )
+                single_rows.append((
+                    file_id,
+                    panel_s,
+                    metric_idx,
+                    metric_name,
+                    next(iter(buckets)),
+                ))
 
         multi_count = len(multi_rows)
         pct = (100.0 * multi_count / total_metrics) if total_metrics else 0.0
@@ -939,10 +946,7 @@ class OmniSoC_Base:
         else:
             _dry_run_print_markdown_metric_table(
                 ["File", "Panel", "Idx", "Metric name", "#Bkts", "Buckets"],
-                [
-                    [r[0], r[1], str(r[2]), r[3], str(r[4]), r[5]]
-                    for r in multi_rows
-                ],
+                [[r[0], r[1], str(r[2]), r[3], str(r[4]), r[5]] for r in multi_rows],
             )
 
         single_count = len(single_rows)
@@ -989,9 +993,7 @@ class OmniSoC_Base:
             )
 
         console_debug(f"Collecting following counters: {', '.join(counters)} ")
-        output_files, file_count, _accu = self._allocate_perfmon_counter_files(
-            counters
-        )
+        output_files, file_count, _accu = self._allocate_perfmon_counter_files(counters)
         console_debug("profiling", f"perfmon dry-run file_count {file_count}")
         self._log_perfmon_bucket_plan(output_files)
         self._print_dry_run_multi_bucket_metrics(output_files)
@@ -1454,11 +1456,9 @@ def _format_dry_run_bucket_markdown(
     for row_idx in range(height):
         lines.append(
             pipe_row([
-                (
-                    by_ip[c][row_idx]
-                    if row_idx < len(by_ip.get(c, []))
-                    else ""
-                ).ljust(widths[c])
+                (by_ip[c][row_idx] if row_idx < len(by_ip.get(c, [])) else "").ljust(
+                    widths[c]
+                )
                 for c in global_columns
             ])
         )
@@ -1497,9 +1497,11 @@ def _dry_run_print_markdown_metric_table(
     ]
 
     def pipe_line(parts: list[str]) -> str:
-        return "| " + " | ".join(
-            parts[i].ljust(widths[i]) for i in range(len(parts))
-        ) + " |"
+        return (
+            "| "
+            + " | ".join(parts[i].ljust(widths[i]) for i in range(len(parts)))
+            + " |"
+        )
 
     print(pipe_line(headers))
     print(pipe_line(["-" * widths[i] for i in range(len(widths))]))
