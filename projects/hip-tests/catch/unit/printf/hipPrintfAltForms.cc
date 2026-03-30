@@ -50,7 +50,8 @@ HIP_TEST_CASE(Unit_Printf_PrintfAltFormsTsts) {
     HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
   }
-  std::string reference(R"here(042
+  std::string reference =
+      std::string(R"here(042
 0x42
 0X42
 0x000042
@@ -64,8 +65,8 @@ HIP_TEST_CASE(Unit_Printf_PrintfAltFormsTsts) {
 -0X1.EDD2F1A9FBE77P+6
 0x00000042
       0x00000042
-0x00000042
-)here");
+)here") +
+      std::string("0x00000042") + std::string(6, ' ') + "\n";
   CaptureStream captured(stdout);
   hipLaunchKernelGGL(test_kernel, dim3(1), dim3(1), 0, 0);
   HIP_CHECK(hipStreamSynchronize(0));

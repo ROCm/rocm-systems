@@ -267,7 +267,7 @@ private:
   GpuMemoryHandle scratch_mem_;
 
   std::vector<int> scratch_base_offset_array_;
-  bool aql_;  //!< The queue is configured to the AQL execution
+  bool native_aql_ = false;  //!< Queue submits AQL packets directly without PM4 translation
 };
 
 class SDMAQueue : public WDDMQueue {

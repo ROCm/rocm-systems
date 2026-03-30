@@ -613,6 +613,9 @@ class Device : public NullDevice {
   //! Returns true if PM4 emulation is enabled
   bool IsPm4Emulation() const { return pm4_emulation_; }
 
+  //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
+  void WaitForHsaAsyncHandlersIdle();
+
  private:
   bool create();
 

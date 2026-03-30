@@ -36,11 +36,13 @@
 #include <algorithm>
 #include <future>
 #include "hsakmt/hsakmt.h"
-#include "hsakmt/hsakmtctx.h"
 #include "OSWrapper.hpp"
 #include "KFDTestUtil.hpp"
 #include "Assemble.hpp"
 #include "ShaderStore.hpp"
+#ifdef HSAKMT_CTX
+#include "hsakmt/hsakmtctx.h"
+#endif
 
 #define MAX_GPU 64
 
@@ -61,7 +63,12 @@ typedef struct _KFDTESTGPU_PARAMETERS
 //  @class KFDBaseComponentTest
 class KFDBaseComponentTest : public testing::Test {
  public:
-    KFDBaseComponentTest(void) { m_MemoryFlags.Value = 0; m_hsakmt_current_ctx = NULL; }
+    KFDBaseComponentTest(void) {
+        m_MemoryFlags.Value = 0;
+        #ifdef HSAKMT_CTX
+        m_hsakmt_current_ctx = NULL;
+        #endif
+    }
     ~KFDBaseComponentTest(void) {}
 
     HSAuint64 GetSysMemSize();
@@ -116,13 +123,15 @@ class KFDBaseComponentTest : public testing::Test {
                                             unsigned int gpu_num);
 
     HSAKMT_STATUS KFDTestLaunch(std::function<void(int)> test_func);
-
+#ifdef HSAKMT_CTX
     HsaKFDContext *m_hsakmt_current_ctx;
 
  protected:
     HsaKFDContext *m_hsakmt_primary_ctx;
     HsaKFDContext *m_hsakmt_secondary_ctx;
-
+#else
+ protected:
+#endif
     HsaVersionInfo  m_VersionInfo;
     HsaSystemProperties m_SystemProperties;
     unsigned int m_FamilyId;
