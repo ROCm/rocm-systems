@@ -1044,6 +1044,26 @@ template <unsigned int size, class ParentCGTy> class thread_block_tile_internal
   __CG_QUALIFIER__ thread_block_tile_internal(const thread_block& g)
       : thread_block_tile_type<size, ParentCGTy>() {}
 };
+
+// becomes to std::true_type if the group is tiled and has a size known at compile time
+template <class TyGroup>
+struct isTiledGroup : __hip_internal::false_type {
+};
+
+template <unsigned int N, class ParentCGTy>
+struct isTiledGroup<cooperative_groups::thread_block_tile<N, ParentCGTy>>
+  : __hip_internal::integral_constant<bool,
+        (N == 1  || N == 2  || N == 4  || N == 8 ||
+         N == 16 || N == 32 || N == 64)> {
+};
+
+template <class TyGroup>
+struct isCoalescedGroup : __hip_internal::false_type {
+};
+
+template <>
+struct isCoalescedGroup<cooperative_groups::coalesced_group> : __hip_internal::true_type {
+};
 }  // namespace impl
 
 /** \brief    Group type - thread_block_tile

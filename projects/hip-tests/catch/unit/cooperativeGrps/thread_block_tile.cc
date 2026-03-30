@@ -570,14 +570,24 @@ void testReduceForTileSize()
   void* devicePtr = d_result.ptr();
   void* args[] = { &devicePtr };
 
-  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSum<TileSize>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSum<TileSize>),
+                                       gridDim,
+                                       blockDim,
+                                       args,
+                                       0,
+                                       nullptr));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
   REQUIRE(*h_result.host_ptr() == TileSize);
 
-  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSumSubtiles<TileSize>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSumSubtiles<TileSize>),
+                                       gridDim,
+                                       blockDim,
+                                       args,
+                                       0,
+                                       nullptr));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
@@ -1043,7 +1053,51 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned
   } else {
     runReduceRandomForOps<true, TestType, 64>(ops);
   }
-} 
+}
+
+template <size_t TileSize>
+void __global__ simpleScan(int* result)
+{
+  int value = threadIdx.x;
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<TileSize>(mygroup);
+  result[threadIdx.x] = cg::inclusive_scan(mytile, value, cg::plus<int>());
+}
+
+template <size_t TileSize>
+void testScanForTileSize()
+{
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int) * getWarpSize());
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+  int accum = 0;
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleScan<TileSize>),
+                                       gridDim,
+                                       blockDim,
+                                       args,
+                                       0,
+                                       nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+
+  for (int i = 0; i < getWarpSize(); i++) {
+    accum += i;
+    INFO("Index: "<< i);
+    REQUIRE(h_result.host_ptr()[i] == accum);
+  }
+}
+
+// TODO g-h-c repeat the same tests 
+TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
+{
+  testScanForTileSize<32>();
+}
 
 /**
  * End doxygen group DeviceLanguageTest.
