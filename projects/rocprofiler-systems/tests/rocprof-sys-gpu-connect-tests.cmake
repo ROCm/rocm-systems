@@ -63,20 +63,44 @@ if(ENABLE_ROCPD_TEST)
     list(APPEND _gpu_connect_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
-# Add a runtime validation test that checks if transferBench can run successfully
-# This test runs before all other GPU connect tests and acts as a fixture
+# Marker file: only present when validation passed. A second test checks it and sets
+# the fixture so CTest skips dependent tests when validation was skipped (exit 77).
+set(_TRANSFERBENCH_VALIDATION_MARKER
+    "${PROJECT_BINARY_DIR}/.transferbench_validation_passed"
+)
+
+# Validation script: run transferBench and check output. Exit 77 = skip.
+# On success, creates _TRANSFERBENCH_VALIDATION_MARKER so transferbench-validation-passed
+# can set the fixture. Run via bash so the script does not require execute permission (CI-safe).
 add_test(
     NAME transferbench-validation-check
-    COMMAND $<TARGET_FILE:transferBench>
+    COMMAND
+        bash ${CMAKE_CURRENT_LIST_DIR}/transferbench-validation-check.sh
+        $<TARGET_FILE:transferBench> ${_TRANSFERBENCH_VALIDATION_MARKER}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
 set_tests_properties(
     transferbench-validation-check
+    PROPERTIES LABELS "transferbench;validation" SKIP_RETURN_CODE 77 TIMEOUT 60
+)
+
+# Only set the fixture when validation actually passed (marker exists). CTest sets
+# fixtures only when this test passes; when it is skipped (no marker), dependent
+# tests are skipped instead of running and failing.
+add_test(
+    NAME transferbench-validation-passed
+    COMMAND bash -c "test -f '${_TRANSFERBENCH_VALIDATION_MARKER}' && exit 0 || exit 77"
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+)
+
+set_tests_properties(
+    transferbench-validation-passed
     PROPERTIES
         LABELS "transferbench;validation"
+        DEPENDS transferbench-validation-check
         FIXTURES_SETUP transferbench_available
-        SKIP_REGULAR_EXPRESSION "Error: No valid transfers created"
+        SKIP_RETURN_CODE 77
 )
 
 rocprofiler_systems_add_test(
