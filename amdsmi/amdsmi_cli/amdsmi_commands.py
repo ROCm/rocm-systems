@@ -5154,12 +5154,24 @@ class AMDSMICommands():
                 num_hops = 0
                 if src_gpu != dest_gpu:
                     weight = amdsmi_interface.amdsmi_topo_get_link_weight(src_gpu, dest_gpu)
-                    num_hops = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['hops']
-                link_status = amdsmi_interface.amdsmi_is_P2P_accessible(src_gpu, dest_gpu)
-                if link_status:
-                    link_status = "ENABLED"
-                else:
-                    link_status = "DISABLED"
+                    try:
+                        num_hops = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['hops']
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        logging.debug("Failed to get link hops for %s to %s | %s",
+                                      self.helpers.get_gpu_id_from_device_handle(src_gpu),
+                                      self.helpers.get_gpu_id_from_device_handle(dest_gpu),
+                                      e.get_error_info())
+                link_status = "SELF"
+                if src_gpu != dest_gpu:
+                    try:
+                        _accessible = amdsmi_interface.amdsmi_is_P2P_accessible(src_gpu, dest_gpu)
+                        link_status = "ENABLED" if _accessible else "DISABLED"
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        logging.debug("Failed to get P2P accessible for %s to %s | %s",
+                                      self.helpers.get_gpu_id_from_device_handle(src_gpu),
+                                      self.helpers.get_gpu_id_from_device_handle(dest_gpu),
+                                      e.get_error_info())
+                        link_status = "N/A"
 
                 link_coherent = "SELF"
                 link_atomics = "SELF"

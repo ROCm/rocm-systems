@@ -134,9 +134,11 @@ def configure_logging_and_execute(args, amd_smi_commands):
         args.func(args)
     except amdsmi_cli_exceptions.AmdSmiException as e:
         _print_error(str(e), amd_smi_commands.logger.destination)
+        sys.exit(1)
     except amdsmi_exception.AmdSmiLibraryException as e:
         exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(amd_smi_commands.logger.format, e.get_error_code())
         _print_error(str(exc), amd_smi_commands.logger.destination)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

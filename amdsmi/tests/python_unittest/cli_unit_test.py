@@ -412,7 +412,8 @@ class TestAmdSmiCli(unittest.TestCase):
                     # Find power_type
                     for power_type in self.power_types:
                         if power_type in cmd:
-                            power_type = self.static_data['gpu_data'][gpu_index]['limit'][power_type]
+                            limit = self.static_data['gpu_data'][gpu_index].get('limit', 'N/A')
+                            power_type = limit[power_type] if limit != 'N/A' else 'N/A'
                         else:
                             power_type = 'N/A'
                     if power_type == 'N/A' or power_type['min_power_limit'] == 'N/A' or power_type['max_power_limit'] == 'N/A':
@@ -501,7 +502,7 @@ class TestAmdSmiCli(unittest.TestCase):
                     else:
                         cmd = ''
                 elif nameStr == '{soc_pstate}':
-                    soc_pstate = self.static_data['gpu_data'][gpu_index]['soc_pstate']
+                    soc_pstate = self.static_data['gpu_data'][gpu_index].get('soc_pstate', 'N/A')
                     if type(soc_pstate) is dict:
                         num_supported = int(soc_pstate['num_supported'])
                         if num_supported > 0:
@@ -516,7 +517,7 @@ class TestAmdSmiCli(unittest.TestCase):
                     else:
                         cmd = ''
                 elif nameStr == '{xgmi_plpd}':
-                    xgmi_plpd = self.static_data['gpu_data'][gpu_index]['xgmi_plpd']
+                    xgmi_plpd = self.static_data['gpu_data'][gpu_index].get('xgmi_plpd', 'N/A')
                     if type(xgmi_plpd) is dict:
                         num_supported = int(xgmi_plpd['num_supported'])
                         if num_supported > 0:
@@ -629,7 +630,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 continue
             (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
             error_code = rc
-            if rc and len(std_err):
+            if rc and std_err and len(std_err):
                 items = std_err.split()
                 if 'amdsmi_exception' in std_err:
                     # error code from amdsmi library exception
@@ -821,24 +822,26 @@ class TestAmdSmiCli(unittest.TestCase):
             cmds.append((f'amd-smi set --power-cap --gpu {index}', self.FAIL))
             for power_type in self.power_types:
                 cmds.append((f'amd-smi set --power-cap {power_type} --gpu {index}', self.FAIL))
-                _power_type = self.static_data['gpu_data'][index]['limit'][power_type]
-                socket_power_limit = _power_type['socket_power_limit']
-                if socket_power_limit != 'N/A':
-                    min_power = _power_type['min_power_limit']['value']
-                    max_power = _power_type['max_power_limit']['value']
-                    cmds.append((f'amd-smi set --power-cap {min_power - 1} {power_type} --gpu {index}', self.FAIL))
-                    cmds.append((f'amd-smi set --power-cap {max_power + 1} {power_type} --gpu {index}', self.FAIL))
-                    cmds.append((f'amd-smi set --power-cap {int(max_power * 1.10)} {power_type} --gpu {index}', self.FAIL))
+                limit = self.static_data['gpu_data'][index].get('limit', 'N/A')
+                _power_type = limit[power_type] if limit != 'N/A' else 'N/A'
+                if _power_type != 'N/A':
+                    socket_power_limit = _power_type['socket_power_limit']
+                    if socket_power_limit != 'N/A':
+                        min_power = _power_type['min_power_limit']['value']
+                        max_power = _power_type['max_power_limit']['value']
+                        cmds.append((f'amd-smi set --power-cap {min_power - 1} {power_type} --gpu {index}', self.FAIL))
+                        cmds.append((f'amd-smi set --power-cap {max_power + 1} {power_type} --gpu {index}', self.FAIL))
+                        cmds.append((f'amd-smi set --power-cap {int(max_power * 1.10)} {power_type} --gpu {index}', self.FAIL))
 
             # Test invalid soc-pstate values
-            soc_pstate = self.static_data['gpu_data'][index]['soc_pstate']
+            soc_pstate = self.static_data['gpu_data'][index].get('soc_pstate', 'N/A')
             if soc_pstate != 'N/A':
                 cmds.append((f'amd-smi set --soc-pstate --gpu {index}', self.FAIL))
                 num_supported = int(soc_pstate['num_supported'])
                 cmds.append((f'amd-smi set --soc-pstate {num_supported} --gpu {index}', self.FAIL))
 
             # Test invalid xgmi-plpd values
-            xgmi_plpd = self.static_data['gpu_data'][index]['xgmi_plpd']
+            xgmi_plpd = self.static_data['gpu_data'][index].get('xgmi_plpd', 'N/A')
             if xgmi_plpd != 'N/A':
                 cmds.append((f'amd-smi set --xgmi-plpd --gpu {index}', self.FAIL))
                 num_supported = int(xgmi_plpd['num_supported'])
@@ -1027,25 +1030,29 @@ class TestAmdSmiCli(unittest.TestCase):
         
             # set --power-cap defaults
             for power_type in self.power_types:
-                socket_power_limit = self.static_data['gpu_data'][index]['limit'][power_type]['socket_power_limit']
-                if socket_power_limit != 'N/A':
-                    socket_power = socket_power_limit['value']
-                    cmds.append((f'amd-smi set --power-cap {socket_power} {power_type} --gpu {index}', self.PASS))
+                limit = self.static_data['gpu_data'][index].get('limit', 'N/A')
+                _power_type = limit[power_type] if limit != 'N/A' else 'N/A'
+                if _power_type != 'N/A':
+                    socket_power_limit = _power_type['socket_power_limit']
+                    if socket_power_limit != 'N/A':
+                        socket_power = socket_power_limit['value']
+                        cmds.append((f'amd-smi set --power-cap {socket_power} {power_type} --gpu {index}', self.PASS))
         
             # set --soc-pstate defaults
-            soc_pstate = self.static_data['gpu_data'][index]['soc_pstate']
+            soc_pstate = self.static_data['gpu_data'][index].get('soc_pstate', 'N/A')
             if soc_pstate != 'N/A':
                 current = int(soc_pstate['current'])
                 cmds.append((f'amd-smi set --soc-pstate {current} --gpu {index}', self.PASS))
         
             # set --xgmi-plpd defaults
-            xgmi_plpd = self.static_data['gpu_data'][index]['xgmi_plpd']
+            xgmi_plpd = self.static_data['gpu_data'][index].get('xgmi_plpd', 'N/A')
             if xgmi_plpd != 'N/A':
                 current = int(xgmi_plpd['current'])
                 cmds.append((f'amd-smi set --xgmi-plpd {current} --gpu {index}', self.PASS))
         
             # set --ptl-status defaults
-            ptl_state = self.static_data['gpu_data'][index]['limit']['ptl_state']
+            limit = self.static_data['gpu_data'][index].get('limit', 'N/A')
+            ptl_state = limit['ptl_state'] if limit != 'N/A' else 'N/A'
             if ptl_state != 'N/A':
                 if ptl_state == 'Disabled':
                     ptl_state_value = 0
@@ -1054,7 +1061,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 cmds.append((f'amd-smi set --ptl-status {ptl_state_value} --gpu {index}', self.PASS))
 
             # set --ptl-format defaults
-            ptl_format = self.static_data['gpu_data'][index]['limit']['ptl_format']
+            ptl_format = limit['ptl_format'] if limit != 'N/A' else 'N/A'
             if ptl_format != 'N/A':
                 # TODO: get the right ptl-format
                 cmds.append((f'amd-smi set --ptl-format {ptl_format} --gpu {index}', self.PASS))

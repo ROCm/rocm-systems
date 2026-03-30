@@ -39,6 +39,12 @@ class BDF():
             if bdf.startswith("BDF("):
                 bdf = bdf.replace('BDF(', '').replace(')', '')
 
+            # Validate BDF string format strictly before parsing
+            _BDF_PATTERN = re.compile(
+                r'^(?:[0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]$'
+            )
+            if not _BDF_PATTERN.match(bdf):
+                raise self.BDFError(f"Invalid BDF format: '{bdf}'")
             try:
                 bdf_components = [int(x, 16) for x in re.split('[:.]', bdf)]
             except self.BDFError as e:
