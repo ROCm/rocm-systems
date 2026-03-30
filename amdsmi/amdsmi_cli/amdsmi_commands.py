@@ -7151,11 +7151,11 @@ class AMDSMICommands():
             args.pcie = pcie
         if process:
             args.process = process
-        if brcm_nic or args.brcm_nic:
+        if self.helpers.is_brcm_nic_initialized() and (brcm_nic or args.brcm_nic):
             self.monitor_nic(args, multiple_devices, watching_output, args.nic, watch, watch_time, iterations,
                             args.temperature, args.brcm_nic)
             return
-        if brcm_switch or args.brcm_switch:
+        if self.helpers.is_brcm_switch_initialized() and (brcm_switch or args.brcm_switch):
             self.monitor_switch(args, multiple_devices, watching_output, args.switch, watch, watch_time, iterations,
                             args.pcie, args.brcm_switch)
             return
