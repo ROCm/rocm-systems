@@ -32,12 +32,12 @@ add_subdirectory(complex)
 add_subdirectory(p2p)
 add_subdirectory(threadfence)
 add_subdirectory(virtualMemoryManagement)
+add_subdirectory(deviceLib)
 # TODO Rock build failures
 if(UNIX)
   add_subdirectory(atomics)
   add_subdirectory(math)
   # TODO compute build failures
-  add_subdirectory(deviceLib)
   add_subdirectory(syncthreads)
 endif()
 if(HIP_PLATFORM STREQUAL "amd")

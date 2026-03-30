@@ -1227,11 +1227,12 @@ void GDABackend::modify_qps_rtr_to_rts() {
 void GDABackend::create_queues() {
   int ncqes;
   size_t resize_length;
+  uint32_t sq_size = envvar::gda::sq_size;
 
   if (gda_provider == GDAProvider::IONIC) {
-    ncqes = envvar::sq_size << 1;
+    ncqes = sq_size << 1;
   } else {
-    ncqes = envvar::sq_size;
+    ncqes = sq_size;
   }
 
   resize_length = (envvar::max_num_contexts + 1) * num_pes;
@@ -1248,16 +1249,13 @@ void GDABackend::create_queues() {
 
   if (gda_provider == GDAProvider::BNXT) {
     bnxt_create_cqs(ncqes);
-    bnxt_create_qps(envvar::sq_size);
+    bnxt_create_qps(sq_size);
   } else if (gda_provider == GDAProvider::IONIC) {
     ionic_create_cqs(ncqes);
-    create_qps(envvar::sq_size);
+    create_qps(sq_size);
   } else if (gda_provider == GDAProvider::MLX5) {
     create_cqs(ncqes);
-    mlx5_create_qps(envvar::sq_size);
-  } else {
-    create_cqs(ncqes);
-    create_qps(envvar::sq_size);
+    mlx5_create_qps(sq_size);
   }
 
   alternate_qp_ports();
