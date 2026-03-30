@@ -36,7 +36,6 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.tty import get_table_string
 from utils.utils_common import get_version
 
 T = TypeVar("T")
@@ -890,6 +889,10 @@ class MachineSpecs:
             columns += ["Unit"]
         df = df[columns]
         df = df.fillna("")
+        # Local import: ``utils.tty`` pulls in tabulate; profile --dry-run never
+        # needs this repr, so avoid requiring tabulate for that path.
+        from utils.tty import get_table_string
+
         return topstr + get_table_string(df, transpose=False, decimal=2)
 
 
