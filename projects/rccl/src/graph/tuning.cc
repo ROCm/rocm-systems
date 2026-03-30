@@ -1088,7 +1088,9 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
 
   static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
     {"gfx906", 0}, {"gfx908", 0}, {"gfx90a", 0}, {"gfx942", 8},
-    {"gfx950", 6}, {"gfx1030", 0}, {"gfx1100", 0}, {"gfx1102", 0},
+    {"gfx950", 6}, {"gfx1030", 0}, {"gfx1031", 0},
+    {"gfx1100", 0}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1103", 0},
+    {"gfx1150", 0}, {"gfx1151", 0}, {"gfx1152", 0}, {"gfx1153", 0},
     {"gfx1200", 7}, {"gfx1201", 7}
   };
 
