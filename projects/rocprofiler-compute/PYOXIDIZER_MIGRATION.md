@@ -47,9 +47,7 @@ add_custom_target(
 
 ### 3. Documentation
 
-Created two new documentation files:
-- `BUILD_STANDALONE.md`: Comprehensive guide for building the standalone binary
-- `PYOXIDIZER_MIGRATION.md`: This file, documenting the migration
+- `PYOXIDIZER_MIGRATION.md`: This file, documenting the migration (standalone build: see `pyoxidizer.bzl` and `CMakeLists.txt`).
 
 ## Key Differences
 
@@ -140,8 +138,6 @@ Potential enhancements for the PyOxidizer build:
 - [PyOxidizer Documentation](https://pyoxidizer.readthedocs.io/)
 - [PyOxidizer GitHub](https://github.com/indygreg/PyOxidizer)
 - [Nuitka Documentation](https://nuitka.net/doc/user-manual.html) (for reference)
-- [BUILD_STANDALONE.md](BUILD_STANDALONE.md) (build instructions)
-
 ## Contact
 
 For questions or issues related to this migration, please file an issue in the rocprof-compute repository.
