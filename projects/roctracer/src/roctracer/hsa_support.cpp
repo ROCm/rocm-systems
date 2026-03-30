@@ -443,10 +443,9 @@ hsa_status_t MemoryASyncCopyOnEngineIntercept(
     hsa_amd_sdma_engine_id_t engine_id, bool force_copy_on_sdma) {
   bool is_enabled = IsEnabled(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY);
 
-  // FIXME: what happens if the state changes before returning?
-  [[maybe_unused]] hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
+  hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
       profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
-  assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
+  if (status != HSA_STATUS_SUCCESS) return status;
 
   if (!is_enabled) {
     return saved_amd_ext_api.hsa_amd_memory_async_copy_on_engine_fn(
@@ -473,10 +472,9 @@ hsa_status_t MemoryASyncCopyIntercept(void* dst, hsa_agent_t dst_agent, const vo
                                       hsa_signal_t completion_signal) {
   bool is_enabled = IsEnabled(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY);
 
-  // FIXME: what happens if the state changes before returning?
-  [[maybe_unused]] hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
+  hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
       profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
-  assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
+  if (status != HSA_STATUS_SUCCESS) return status;
 
   if (!is_enabled) {
     return saved_amd_ext_api.hsa_amd_memory_async_copy_fn(
@@ -504,10 +502,9 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
                                           hsa_signal_t completion_signal) {
   bool is_enabled = IsEnabled(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY);
 
-  // FIXME: what happens if the state changes before returning?
-  [[maybe_unused]] hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
+  hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
       profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
-  assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
+  if (status != HSA_STATUS_SUCCESS) return status;
 
   if (!is_enabled) {
     return saved_amd_ext_api.hsa_amd_memory_async_copy_rect_fn(
@@ -623,10 +620,19 @@ void Initialize(HsaApiTable* table) {
 }
 
 void Finalize() {
-  if (hsa_status_t status =
-          saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(profiling_async_copy_enable.load(std::memory_order_relaxed));
-      status != HSA_STATUS_SUCCESS)
-    assert(!"hsa_amd_profiling_async_copy_enable failed");
+  // Restore the async-copy profiling state that was active before Initialize().
+  // During process teardown the HSA runtime may already be shut down (the
+  // destruction order of globals across shared libraries is undefined), so
+  // this call can legitimately fail.  Log a warning instead of aborting —
+  // Finalize() is cleanup code and must not crash the process.
+  if (saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn) {
+    hsa_status_t status =
+        saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
+            profiling_async_copy_enable.load(std::memory_order_relaxed));
+    if (status != HSA_STATUS_SUCCESS)
+      warning("hsa_amd_profiling_async_copy_enable failed during finalization "
+              "(HSA runtime may already be shut down)");
+  }
 
   memset(&saved_core_api, '\0', sizeof(saved_core_api));
   memset(&saved_amd_ext_api, '\0', sizeof(saved_amd_ext_api));
