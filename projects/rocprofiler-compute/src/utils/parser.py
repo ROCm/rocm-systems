@@ -1512,6 +1512,87 @@ def search_pc_sampling_record(
     return sorted_counts
 
 
+def detect_method_from_json(json_file_path: Path) -> Optional[str]:
+    """
+    Determine the PC sampling method from JSON records.
+
+    Prioritises stochastic when both contain data.
+    Returns None when neither contains samples.
+    """
+    with open(json_file_path) as fh:
+        data = json.load(fh)
+
+    # Load tool data
+    tool_data = data["rocprofiler-sdk-tool"][0]
+    buf = tool_data["buffer_records"]
+
+    # Prioritize stochastic over host_trap when both contain data
+    if buf.get("pc_sample_stochastic"):
+        return "stochastic"
+    elif buf.get("pc_sample_host_trap"):
+        return "host_trap"
+
+    return None
+
+
+def load_pc_sampling_grouped_from_json(
+    json_file_path: Path,
+) -> pd.DataFrame:
+    """
+    Build grouped PC-sampling DataFrame from JSON (rocpd_format).
+
+    Returns the same column layout as the CSV-based path:
+    ``["source_line", "Kernel_Name", "instruction", "count"]``
+    sorted by *count* descending.
+    """
+    with open(json_file_path) as fh:
+        data = json.load(fh)
+    tool_data = data["rocprofiler-sdk-tool"][0]
+    buf = tool_data["buffer_records"]
+    all_samples = buf.get("pc_sample_stochastic", []) + buf.get(
+        "pc_sample_host_trap", []
+    )
+    if not all_samples:
+        return pd.DataFrame()
+
+    instructions = tool_data["strings"].get("pc_sample_instructions", [])
+    comments = tool_data["strings"].get("pc_sample_comments", [])
+    kernel_name_map: dict[int, str] = {
+        sym["code_object_id"]: sym["formatted_kernel_name"]
+        for sym in tool_data.get("kernel_symbols", [])
+    }
+
+    rows = []
+    for sample in all_samples:
+        idx = sample["inst_index"]
+        code_obj = sample["record"]["pc"]["code_object_id"]
+        comment = comments[idx] if idx < len(comments) else None
+        rows.append({
+            "source_line": (
+                f".../{Path(comment).name}"
+                if isinstance(comment, str) and comment
+                else comment
+            ),
+            "instruction": (instructions[idx] if idx < len(instructions) else None),
+            "Kernel_Name": kernel_name_map.get(code_obj),
+        })
+
+    df = pd.DataFrame(rows)
+    grouped = (
+        df
+        .groupby("source_line", dropna=False)
+        .agg(
+            count=("source_line", "count"),
+            instruction=("instruction", "first"),
+            Kernel_Name=("Kernel_Name", "first"),
+        )
+        .reset_index()
+    )
+    return grouped[["source_line", "Kernel_Name", "instruction", "count"]].sort_values(
+        by="count", ascending=False
+    )
+
+
 @demarcate
 def load_pc_sampling_data_per_kernel(
     method: str,
@@ -1733,60 +1814,62 @@ def load_pc_sampling_data(
         console_warning(f"PC sampling: can not read {csv_kernel_trace_file_path}")
         return pd.DataFrame()
 
+    csv_file_path: Optional[Path] = None
+
     if stochastic_path.exists():
         pc_sampling_method = "stochastic"
         csv_file_path = stochastic_path
     elif host_trap_path.exists():
         pc_sampling_method = "host_trap"
         csv_file_path = host_trap_path
+    elif json_file_path.exists():
+        pc_sampling_method = detect_method_from_json(json_file_path)
+        if pc_sampling_method is None:
+            console_warning("PC sampling: no samples collected")
+            return pd.DataFrame()
     else:
-        console_warning(
-            f"PC sampling: can not detect pc sampling method for {file_prefix}"
-        )
+        console_warning(f"PC sampling: no data files found for {file_prefix}")
         return pd.DataFrame()
 
-    # No kernel filter, return grouped and sorted csv dir_pathectly
+    # No kernel filter
     if not workload.filter_kernel_ids:
-        # Load instruction CSV
-        df = pd.read_csv(csv_file_path)
-
-        # Load kernel trace CSV
-        kernel_trace_df = pd.read_csv(csv_kernel_trace_file_path)
-
-        # Merge on Correlation_Id (instruction CSV) and Dispatch_Id (kernel trace CSV)
-        merged_df = df.merge(
-            kernel_trace_df[["Dispatch_Id", "Kernel_Name", "Kernel_Id"]],
-            how="left",
-            left_on="Correlation_Id",
-            right_on="Dispatch_Id",
-        )
-
-        # Group by Instruction_Comment and aggregate
-        grouped_counts = (
-            merged_df
-            .groupby("Instruction_Comment")
-            .agg(
-                count=("Instruction_Comment", "count"),
-                instruction=("Instruction", "first"),
-                Kernel_Id=("Kernel_Id", "first"),
-                Kernel_Name=("Kernel_Name", "first"),
+        if csv_file_path is not None:
+            df = pd.read_csv(csv_file_path)
+            kernel_trace_df = pd.read_csv(csv_kernel_trace_file_path)
+            merged_df = df.merge(
+                kernel_trace_df[["Dispatch_Id", "Kernel_Name", "Kernel_Id"]],
+                how="left",
+                left_on="Correlation_Id",
+                right_on="Dispatch_Id",
             )
-            .reset_index()
-            .rename(columns={"Instruction_Comment": "source_line"})
-        )
-        grouped_counts = grouped_counts[
-            [
-                "source_line",
-                "Kernel_Name",
-                "instruction",
-                "count",
+            grouped_counts = (
+                merged_df
+                .groupby("Instruction_Comment")
+                .agg(
+                    count=("Instruction_Comment", "count"),
+                    instruction=("Instruction", "first"),
+                    Kernel_Id=("Kernel_Id", "first"),
+                    Kernel_Name=("Kernel_Name", "first"),
+                )
+                .reset_index()
+                .rename(columns={"Instruction_Comment": "source_line"})
+            )
+            grouped_counts = grouped_counts[
+                [
+                    "source_line",
+                    "Kernel_Name",
+                    "instruction",
+                    "count",
+                ]
             ]
-        ]
-        grouped_counts["source_line"] = grouped_counts["source_line"].apply(
-            lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
-        )
+            grouped_counts["source_line"] = grouped_counts["source_line"].apply(
+                lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
+            )
+            return grouped_counts.sort_values(by="count", ascending=False)
 
-        return grouped_counts.sort_values(by="count", ascending=False)
+        return load_pc_sampling_grouped_from_json(
+            json_file_path, csv_kernel_trace_file_path
+        )
 
     elif len(workload.filter_kernel_ids) > 1:
         console_error(
@@ -1823,6 +1906,29 @@ def load_pc_sampling_data(
     else:
         console_warning("PC sampling: No data")
         return pd.DataFrame()
+
+
+def nullify_unevaluated_metric_values(
+    workload: schema.Workload,
+) -> None:
+    """Replace unevaluated formula strings with "N/A" in all metric tables.
+
+    In PC-sampling-only mode ``eval_metric`` is never called, so metric
+    table cells still contain raw formula strings produced by
+    ``build_metric_value_string``.  This helper walks every
+    ``metric_table`` in *workload* and sets each ``SUPPORTED_FIELD``
+    column to ``"N/A"`` so that downstream display code (``tty``,
+    ``webui``, ``tui``) can safely format the values.
+    """
+    for df_id, df_type in workload.dfs_type.items():
+        if df_type != "metric_table":
+            continue
+        df = workload.dfs.get(df_id)
+        if df is None or df.empty:
+            continue
+        for col in df.columns:
+            if col in schema.SUPPORTED_FIELD and col.lower() != "alias":
+                df[col] = "N/A"
 
 
 @demarcate

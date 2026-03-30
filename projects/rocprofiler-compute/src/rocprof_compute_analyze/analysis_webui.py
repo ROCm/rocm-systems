@@ -19,9 +19,15 @@ from roofline import Roofline
 from utils import file_io, parser, schema
 from utils.gui import build_bar_chart, build_table_chart
 from utils.gui_components.memchart import get_memchart
-from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_common import validate_roofline_csv
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 
 
 class webui_analysis(OmniAnalyze_Base):
@@ -112,86 +118,117 @@ class webui_analysis(OmniAnalyze_Base):
             base_data = self.initalize_runs(normalization_filter=norm_filt)
             panel_configs = copy.deepcopy(arch_configs.panel_configs)
 
-            # Generate original raw df
-            base_data[base_run].raw_pmc = file_io.create_df_pmc(
-                self.dest_dir,
-                args.nodes,
-                args.spatial_multiplexing,
-                args.kernel_verbose,
-                args.verbose,
-                self._profiling_config,
-            )
+            run_workload = base_data[base_run]
 
-            if args.spatial_multiplexing:
-                base_data[base_run].raw_pmc = self.spatial_multiplex_merge_counters(
-                    base_data[base_run].raw_pmc
+            if self.pc_sampling_only:
+                run_workload.raw_pmc = pd.DataFrame()
+                kt, di = file_io.create_df_kernel_top_stats_from_kernel_trace(
+                    raw_data_dir=self.dest_dir,
+                    time_unit=args.time_unit,
+                )
+                run_workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kt
+                run_workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = di
+                parser.load_non_mertrics_table(
+                    run_workload,
+                    self.dest_dir,
+                    args,
+                )
+                parser.nullify_unevaluated_metric_values(
+                    run_workload,
+                )
+            else:
+                # Generate original raw df
+                run_workload.raw_pmc = file_io.create_df_pmc(
+                    self.dest_dir,
+                    args.nodes,
+                    args.spatial_multiplexing,
+                    args.kernel_verbose,
+                    args.verbose,
+                    self._profiling_config,
                 )
 
-            if self._profiling_config.get("iteration_multiplexing") is not None:
-                base_data[base_run].raw_pmc = self.iteration_multiplex_impute_counters(
-                    base_data[base_run].raw_pmc,
-                    policy=self._profiling_config["iteration_multiplexing"],
+                if args.spatial_multiplexing:
+                    run_workload.raw_pmc = self.spatial_multiplex_merge_counters(
+                        run_workload.raw_pmc
+                    )
+
+                if self._profiling_config.get("iteration_multiplexing") is not None:
+                    run_workload.raw_pmc = self.iteration_multiplex_impute_counters(
+                        run_workload.raw_pmc,
+                        policy=self._profiling_config["iteration_multiplexing"],
+                    )
+
+                # Apply filters to workload data
+                console_debug("analysis", f"gui dispatch filter is {disp_filt}")
+                console_debug("analysis", f"gui kernel filter is {kernel_filter}")
+                console_debug("analysis", f"gui gpu filter is {gcd_filter}")
+                console_debug("analysis", f"gui top-n filter is {top_n_filt}")
+
+                run_workload.filter_kernel_ids = (
+                    [str(k) for k in kernel_filter] if kernel_filter else []
                 )
+                run_workload.filter_gpu_ids = (
+                    [int(g) for g in gcd_filter] if gcd_filter else []
+                )
+                run_workload.filter_dispatch_ids = (
+                    [int(d) for d in disp_filt] if disp_filt else []
+                )
+                run_workload.filter_top_n = top_n_filt
 
-            # Apply filters to workload data
-            console_debug("analysis", f"gui dispatch filter is {disp_filt}")
-            console_debug("analysis", f"gui kernel filter is {kernel_filter}")
-            console_debug("analysis", f"gui gpu filter is {gcd_filter}")
-            console_debug("analysis", f"gui top-n filter is {top_n_filt}")
+                # Regenerate kernel top stats for Top Stats panel
+                kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+                    df_in=run_workload.raw_pmc,
+                    raw_data_dir=str(self.dest_dir),
+                    filter_gpu_ids=run_workload.filter_gpu_ids,
+                    filter_dispatch_ids=run_workload.filter_dispatch_ids,
+                    filter_nodes=self._runs[self.dest_dir].filter_nodes,
+                    time_unit=args.time_unit,
+                    kernel_verbose=args.kernel_verbose,
+                )
+                run_workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+                run_workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
-            base_data[base_run].filter_kernel_ids = (
-                [str(k) for k in kernel_filter] if kernel_filter else []
-            )
-            base_data[base_run].filter_gpu_ids = (
-                [int(g) for g in gcd_filter] if gcd_filter else []
-            )
-            base_data[base_run].filter_dispatch_ids = (
-                [int(d) for d in disp_filt] if disp_filt else []
-            )
-            base_data[base_run].filter_top_n = top_n_filt
+                # Only display basic metrics if no filters are applied
+                if not (disp_filt or kernel_filter or gcd_filter):
+                    basic_dfs_keep = [
+                        1,
+                        2,
+                        101,
+                        201,
+                        301,
+                        401,
+                        402,
+                    ]
+                    basic_panels_keep = [
+                        0,
+                        100,
+                        200,
+                        300,
+                        400,
+                    ]
 
-            # Regenerate kernel top stats for Top Stats panel
-            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
-                df_in=base_data[base_run].raw_pmc,
-                raw_data_dir=str(self.dest_dir),
-                filter_gpu_ids=base_data[base_run].filter_gpu_ids,
-                filter_dispatch_ids=base_data[base_run].filter_dispatch_ids,
-                filter_nodes=self._runs[self.dest_dir].filter_nodes,
-                time_unit=args.time_unit,
-                kernel_verbose=args.kernel_verbose,
-            )
-            base_data[base_run].dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
-            base_data[base_run].dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = (
-                dispatch_info_df
-            )
+                    # Filter dataframes
+                    filtered_dfs = {
+                        key: run_workload.dfs[key]
+                        for key in run_workload.dfs
+                        if key in basic_dfs_keep
+                    }
+                    run_workload.dfs = filtered_dfs
 
-            # Only display basic metrics if no filters are applied
-            if not (disp_filt or kernel_filter or gcd_filter):
-                basic_dfs_keep = [1, 2, 101, 201, 301, 401, 402]
-                basic_panels_keep = [0, 100, 200, 300, 400]
+                    panel_configs = {
+                        key: panel_configs[key]
+                        for key in panel_configs
+                        if key in basic_panels_keep
+                    }
 
-                # Filter dataframes
-                filtered_dfs = {
-                    key: base_data[base_run].dfs[key]
-                    for key in base_data[base_run].dfs
-                    if key in basic_dfs_keep
-                }
-                base_data[base_run].dfs = filtered_dfs
-
-                panel_configs = {
-                    key: panel_configs[key]
-                    for key in panel_configs
-                    if key in basic_panels_keep
-                }
-
-            # All filtering will occur here
-            parser.load_table_data(
-                workload=base_data[base_run],
-                dir_path=self.dest_dir,
-                is_gui=True,
-                args=args,
-                config=self._profiling_config,
-            )
+                # All filtering will occur here
+                parser.load_table_data(
+                    workload=run_workload,
+                    dir_path=self.dest_dir,
+                    is_gui=True,
+                    args=args,
+                    config=self._profiling_config,
+                )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
             # Generate GUI content
@@ -366,8 +403,29 @@ class webui_analysis(OmniAnalyze_Base):
         args = self.get_args()
         self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
 
-        # create 'mega dataframe'
-        self._runs[self.dest_dir].raw_pmc = file_io.create_df_pmc(
+        workload = self._runs[self.dest_dir]
+
+        if self.pc_sampling_only:
+            console_log(
+                "analysis",
+                "PC sampling only -- skipping counter collection data loading",
+            )
+            workload.raw_pmc = pd.DataFrame()
+
+            kernel_top_df, dispatch_info_df = (
+                file_io.create_df_kernel_top_stats_from_kernel_trace(
+                    raw_data_dir=self.dest_dir,
+                    time_unit=args.time_unit,
+                )
+            )
+            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+            workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+
+            parser.load_non_mertrics_table(workload, self.dest_dir, args)
+            self.arch = workload.sys_info.iloc[0]["gpu_arch"]
+            return
+
+        workload.raw_pmc = file_io.create_df_pmc(
             self.dest_dir,
             args.nodes,
             args.spatial_multiplexing,
@@ -377,35 +435,29 @@ class webui_analysis(OmniAnalyze_Base):
         )
 
         if args.spatial_multiplexing:
-            self._runs[self.dest_dir].raw_pmc = self.spatial_multiplex_merge_counters(
-                self._runs[self.dest_dir].raw_pmc
-            )
+            workload.raw_pmc = self.spatial_multiplex_merge_counters(workload.raw_pmc)
 
         if self._profiling_config.get("iteration_multiplexing") is not None:
-            self._runs[
-                self.dest_dir
-            ].raw_pmc = self.iteration_multiplex_impute_counters(
-                self._runs[self.dest_dir].raw_pmc,
+            workload.raw_pmc = self.iteration_multiplex_impute_counters(
+                workload.raw_pmc,
                 policy=self._profiling_config["iteration_multiplexing"],
             )
 
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
-            df_in=self._runs[self.dest_dir].raw_pmc,
+            df_in=workload.raw_pmc,
             raw_data_dir=self.dest_dir,
-            filter_gpu_ids=self._runs[self.dest_dir].filter_gpu_ids,
-            filter_dispatch_ids=self._runs[self.dest_dir].filter_dispatch_ids,
-            filter_nodes=self._runs[self.dest_dir].filter_nodes,
+            filter_gpu_ids=workload.filter_gpu_ids,
+            filter_dispatch_ids=workload.filter_dispatch_ids,
+            filter_nodes=workload.filter_nodes,
             time_unit=args.time_unit,
             kernel_verbose=args.kernel_verbose,
         )
-        self._runs[self.dest_dir].dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
-        self._runs[self.dest_dir].dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = (
-            dispatch_info_df
-        )
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
         # Load remaining non-metric tables (sysinfo, etc.)
-        parser.load_non_mertrics_table(self._runs[self.dest_dir], self.dest_dir, args)
+        parser.load_non_mertrics_table(workload, self.dest_dir, args)
         # set architecture
-        self.arch = self._runs[self.dest_dir].sys_info.iloc[0]["gpu_arch"]
+        self.arch = workload.sys_info.iloc[0]["gpu_arch"]
 
     @demarcate
     def run_analysis(self) -> None:

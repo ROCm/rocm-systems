@@ -16,7 +16,14 @@ from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import utils_analysis
 from utils.analysis_orm import Database, get_views
-from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.file_io import build_agent_to_gpu_map
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 from utils.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
     CodeTransformer,
@@ -55,8 +62,28 @@ class db_analysis(OmniAnalyze_Base):
                 "Creation of analysis database is only supported "
                 "for profiling data with rocpd output format."
             )
-        self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
+
         self._pc_sampling_data_per_workload = self.calc_pc_sampling_data()
+
+        if self.pc_sampling_only:
+            console_log(
+                "analysis",
+                "PC sampling only -- skipping counter collection data loading",
+            )
+            self._roofline_ceilings_per_workload: dict[str, dict[str, Any]] = {}
+            self._pmc_df_per_workload: dict[str, pd.DataFrame] = {}
+            self._dispatch_data_per_workload = (
+                self.calc_dispatch_data_from_kernel_trace()
+            )
+            self._metrics_info_data_per_workload: dict[str, pd.DataFrame] = {}
+            self._metric_expression_data_per_workload: dict[str, pd.DataFrame] = {}
+            self._kernel_values_data_per_workload: dict[str, pd.DataFrame] = {}
+            self._workload_values_data_per_workload: dict[str, pd.DataFrame] = {}
+            self._roofline_data_per_kernel: dict[str, pd.DataFrame] = {}
+            self._roofline_data_per_workload: dict[str, dict] = {}
+            return
+
+        self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
         self._pmc_df_per_workload = self.calc_pmc_df_data()
         self._pmc_df_per_workload = self.apply_pmc_filters()
         self._dispatch_data_per_workload = self.calc_dispatch_data()
@@ -701,6 +728,45 @@ class db_analysis(OmniAnalyze_Base):
 
         console_debug("Calculated dispatch data")
         return dispatch_data_per_workload
+
+    def calc_dispatch_data_from_kernel_trace(
+        self,
+    ) -> dict[str, pd.DataFrame]:
+        """Build dispatch data from kernel trace for PC-sampling-only runs."""
+        dispatch_data: dict[str, pd.DataFrame] = {}
+
+        for workload_path in self._runs:
+            # Build dispatch data from kernel trace
+            trace_path = Path(workload_path) / "ps_file_kernel_trace.csv"
+            if not trace_path.exists():
+                console_warning(
+                    f"Kernel trace not found at {trace_path}. "
+                    "Cannot build dispatch data."
+                )
+                continue
+
+            trace_df = pd.read_csv(trace_path)
+
+            # Map agent IDs to GPU IDs
+            agent_to_gpu = build_agent_to_gpu_map(
+                Path(workload_path) / "ps_file_agent_info.csv"
+            )
+            trace_df["GPU_ID"] = (
+                trace_df["Agent_Id"].map(agent_to_gpu).fillna(0).astype(int)
+            )
+
+            dispatch_data[workload_path] = pd.DataFrame({
+                "dispatch_id": trace_df["Dispatch_Id"],
+                "kernel_name": trace_df["Kernel_Name"],
+                "gpu_id": trace_df["GPU_ID"],
+                "start_timestamp": trace_df["Start_Timestamp"],
+                "end_timestamp": trace_df["End_Timestamp"],
+            })
+
+        if dispatch_data:
+            console_debug("Built dispatch data from kernel trace")
+
+        return dispatch_data
 
     def apply_pmc_filters(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload = self._pmc_df_per_workload.copy()

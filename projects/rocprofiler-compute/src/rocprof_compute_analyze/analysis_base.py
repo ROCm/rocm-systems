@@ -28,7 +28,7 @@ from utils.utils_analysis import (
     is_workload_empty,
     merge_counters_spatial_multiplex,
 )
-from utils.utils_common import get_uuid, load_panel_configs, validate_roofline_csv
+from utils.utils_common import get_uuid, load_panel_configs, validate_roofline_csv, is_only_pc_sampling
 
 # the build-in config to list kernel names purpose only
 TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
@@ -121,6 +121,12 @@ class OmniAnalyze_Base:
 
     def get_profiling_config(self) -> dict[str, Any]:
         return self._profiling_config
+
+    @property
+    def pc_sampling_only(self) -> bool:
+        """True when profiling collected only PC sampling (block 21)."""
+        config = getattr(self, "_profiling_config", {})
+        return is_only_pc_sampling(config.get("filter_blocks", []))
 
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
@@ -327,7 +333,7 @@ class OmniAnalyze_Base:
             )
 
         for dir_info in args.path:
-            if not any([
+            if not self.pc_sampling_only and not any([
                 args.nodes,
                 args.list_nodes,
                 args.spatial_multiplexing,
@@ -732,10 +738,11 @@ class OmniAnalyze_Base:
             for path_info, filter_value in zip(args.path, filter_list):
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
-        # Join pmc_perf_*.csv or results_*.csv files if needed
-        for path_info in args.path:
-            workload_dir = Path(path_info[0])
-            self.join_workload_csvs(workload_dir)
+        if not self.pc_sampling_only:
+            # Join pmc_perf_*.csv or results_*.csv files if needed
+            for path_info in args.path:
+                workload_dir = Path(path_info[0])
+                self.join_workload_csvs(workload_dir)
 
     @abstractmethod
     def run_analysis(self) -> None:

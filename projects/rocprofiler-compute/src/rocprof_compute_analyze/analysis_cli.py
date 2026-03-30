@@ -59,7 +59,27 @@ class cli_analysis(OmniAnalyze_Base):
         for path_info in args.path:
             workload = self._runs[path_info[0]]
 
-            # create 'mega dataframe'
+            # PC sampling only -- skip counter collection data loading
+            if self.pc_sampling_only:
+                console_log(
+                    "analysis",
+                    "PC sampling only -- skipping counter collection data loading",
+                )
+                workload.raw_pmc = pd.DataFrame()
+
+                kernel_top_df, dispatch_info_df = (
+                    file_io.create_df_kernel_top_stats_from_kernel_trace(
+                        raw_data_dir=path_info[0],
+                        time_unit=args.time_unit,
+                    )
+                )
+                workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+                workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+
+                parser.load_non_mertrics_table(workload, path_info[0], args)
+                parser.nullify_unevaluated_metric_values(workload)
+                continue
+
             workload.raw_pmc = file_io.create_df_pmc(
                 path_info[0],
                 args.nodes,

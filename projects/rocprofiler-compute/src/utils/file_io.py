@@ -210,6 +210,129 @@ def create_df_kernel_top_stats(
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
 
+def build_agent_to_gpu_map(
+    agent_info_path: Path,
+) -> dict[str, int]:
+    """
+    Map ``"Agent N"`` strings to 0-indexed GPU IDs.
+
+    GPU agents are identified by ``Agent_Type == "GPU"`` in the
+    agent info CSV.  They are sorted by ``Node_Id`` so that the
+    first GPU agent maps to GPU 0, the second to GPU 1, etc.
+
+    Returns an empty dict when *agent_info_path* does not exist.
+    """
+    if not agent_info_path.exists():
+        return {}
+
+    agent_df = pd.read_csv(agent_info_path)
+    gpu_agents = (
+        agent_df[agent_df["Agent_Type"] == "GPU"]
+        .sort_values("Node_Id")
+        .reset_index(drop=True)
+    )
+    return {f"Agent {row.Node_Id}": idx for idx, row in gpu_agents.iterrows()}
+
+
+@demarcate
+def create_df_kernel_top_stats_from_kernel_trace(
+    raw_data_dir: str,
+    time_unit: str,
+    sortby: str = "sum",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Build kernel-top and dispatch-info tables from a kernel trace.
+
+    Used for PC-sampling-only runs where ``pmc_perf`` data is not
+    available.  Reads ``ps_file_kernel_trace.csv`` (and optionally
+    ``ps_file_agent_info.csv`` for GPU ID mapping) from
+    *raw_data_dir*.
+
+    Returns the same ``(kernel_top_df, dispatch_info_df)`` pair
+    produced by :func:`create_df_kernel_top_stats`.
+    """
+    workload_path = Path(raw_data_dir)
+    kernel_trace_path = workload_path / "ps_file_kernel_trace.csv"
+
+    if not kernel_trace_path.exists():
+        console_warning(
+            f"Kernel trace not found at {kernel_trace_path}. "
+            "Cannot build kernel top stats for PC sampling run."
+        )
+        return pd.DataFrame(), pd.DataFrame()
+
+    trace_df = pd.read_csv(kernel_trace_path)
+
+    agent_to_gpu = build_agent_to_gpu_map(workload_path / "ps_file_agent_info.csv")
+    trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu)
+    trace_df["GPU_ID"] = trace_df["GPU_ID"].fillna(0).astype(int)
+
+    dispatch_info = _build_dispatch_info(trace_df)
+    dispatch_info.to_csv(workload_path / "pmc_dispatch_info.csv", index=False)
+
+    kernel_top = _build_kernel_top(trace_df, time_unit, sortby)
+    kernel_top.to_csv(workload_path / "pmc_kernel_top.csv", index=False)
+
+    return (
+        kernel_top.reset_index(drop=True),
+        dispatch_info.reset_index(drop=True),
+    )
+
+
+def _build_dispatch_info(trace_df: pd.DataFrame) -> pd.DataFrame:
+    """Extract per-dispatch info from a kernel trace DataFrame."""
+    columns = ["Dispatch_Id", "Kernel_Name", "GPU_ID"]
+    return trace_df[columns].rename(columns={"Dispatch_Id": "Dispatch_ID"})
+
+
+def _build_kernel_top(
+    trace_df: pd.DataFrame,
+    time_unit: str,
+    sortby: str,
+) -> pd.DataFrame:
+    """Aggregate per-kernel timing stats from a kernel trace."""
+    execution_times = trace_df["End_Timestamp"] - trace_df["Start_Timestamp"]
+    time_stats = pd.DataFrame({
+        "Kernel_Name": trace_df["Kernel_Name"],
+        "ExeTime": execution_times,
+    })
+
+    grouped = (
+        time_stats
+        .groupby("Kernel_Name")["ExeTime"]
+        .agg(["count", "sum", "mean", "median"])
+        .reset_index()
+    )
+
+    time_unit_suffix = f"({time_unit})"
+    grouped = grouped.rename(
+        columns={
+            "count": "Count",
+            "sum": f"Sum{time_unit_suffix}",
+            "mean": f"Mean{time_unit_suffix}",
+            "median": f"Median{time_unit_suffix}",
+        }
+    )
+
+    time_divisor = config.TIME_UNITS[time_unit]
+    for col in [
+        f"Sum{time_unit_suffix}",
+        f"Mean{time_unit_suffix}",
+        f"Median{time_unit_suffix}",
+    ]:
+        grouped[col] = grouped[col] / time_divisor
+
+    sum_column = f"Sum{time_unit_suffix}"
+    grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
+
+    if sortby == "sum":
+        grouped = grouped.sort_values(sum_column, ascending=False)
+    elif sortby == "kernel":
+        grouped = grouped.sort_values("Kernel_Name")
+
+    return grouped
+
+
 @demarcate
 def create_df_pmc(
     raw_data_root_dir: str,
