@@ -62,7 +62,10 @@ public:
         valid.store(false);
         cv.notify_all();
 
-        if(!exited) cv.wait(lk, [&] { return exited.load(); });
+        if(!exited)
+            cv.wait_for(lk, std::chrono::seconds(5), [&] {
+                return exited.load();
+            });  // Fix ROCM-1214: timeout to avoid hang
         if(consumer.joinable()) consumer.join();
     }
 
