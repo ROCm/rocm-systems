@@ -26,6 +26,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <algorithm>
 #include <vector>
 #include <atomic>
 #include <cinttypes>
@@ -962,13 +963,31 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 }
 
 // ================================================================================================
-uint64_t VirtualGPU::getQueueID() {
+uint64_t VirtualGPU::getQueueID(const std::vector<uint32_t>* exclusionHint, bool forceAcquire) {
   std::scoped_lock lock(execution());
-  // Dedicated queues keep their HW queue, never acquire from pool
-  if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
+  if (dedicated_queue_) {
+    return (gpu_queue_ != nullptr) ? gpu_queue_->id : UINT64_MAX;
   }
-  return gpu_queue_->id;
+  if (forceAcquire && gpu_queue_ != nullptr && exclusionHint != nullptr && !exclusionHint->empty()) {
+    const uint32_t current_id = static_cast<uint32_t>(gpu_queue_->id);
+    bool collision =
+        (std::find(exclusionHint->begin(), exclusionHint->end(), current_id) != exclusionHint->end());
+    if (collision) {
+      if (roc_device_.ReleaseActiveQueue(gpu_queue_, priority_)) {
+        gpu_queue_ = nullptr;
+      }
+      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_, *exclusionHint);
+    }
+    return (gpu_queue_ != nullptr) ? gpu_queue_->id : UINT64_MAX;
+  }
+  if (gpu_queue_ == nullptr) {
+    if (exclusionHint != nullptr && !exclusionHint->empty()) {
+      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_, *exclusionHint);
+    } else {
+      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
+    }
+  }
+  return (gpu_queue_ != nullptr) ? gpu_queue_->id : UINT64_MAX;
 }
 
 // ================================================================================================
@@ -1832,10 +1851,9 @@ VirtualGPU::~VirtualGPU() {
 
 // ================================================================================================
 bool VirtualGPU::create() {
-  // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
-                                         dedicated_queue_);
+                                        dedicated_queue_, {});
   if (!gpu_queue_) return false;
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
@@ -3755,7 +3773,9 @@ static inline void nontemporalMemcpy(void* __restrict dst, const void* __restric
 }
 #endif
 
-void VirtualGPU::HiddenHeapInit() { const_cast<Device&>(dev()).HiddenHeapInit(*this); }
+void VirtualGPU::HiddenHeapInit() { 
+  getQueueID();
+  const_cast<Device&>(dev()).HiddenHeapInit(*this); }
 
 // ================================================================================================
 bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const amd::Kernel& kernel,

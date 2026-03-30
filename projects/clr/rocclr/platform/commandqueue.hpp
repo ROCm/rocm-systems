@@ -113,8 +113,7 @@ class CommandQueue : public RuntimeObject {
                uint rtCUs = RealTimeDisabled,            //!< Avaialble real time compute units
                Priority priority = Priority::Normal,     //!< Queue priority
                const std::vector<uint32_t>& cuMask = {}, //!< CU mask
-               bool dedicated_queue = false              //!< TRUE if requires dedicated HW queue
-               )
+               bool dedicated_queue = false)             //!< TRUE if requires dedicated HW queue
       : properties_(propMask, properties),
         rtCUs_(rtCUs),
         priority_(priority),
@@ -301,8 +300,13 @@ class HostQueue : public CommandQueue {
   //! Set the force destory to terminate queue without checking last command
   void SetForceDestroy(bool forceDestroy) { forceDestroy_ = forceDestroy; }
 
-  uint64_t getQueueID() { return thread_.vdev()->getQueueID(); }
-
+  uint64_t getQueueID(const std::vector<uint32_t>* exclusionHint = nullptr,
+                      bool forceAcquire = false) {
+    return thread_.vdev()->getQueueID(exclusionHint, forceAcquire);
+  }
+  bool hasAssignedQueue() const {
+    return (thread_.vdev() != nullptr) && thread_.vdev()->hasAssignedQueue();
+  }
   //! Returns Synchronization Policy for the current stream
   amd::SyncPolicy GetSyncPolicy() const { return sync_policy_; }
   //! Set Synchronization Policy used by Queue

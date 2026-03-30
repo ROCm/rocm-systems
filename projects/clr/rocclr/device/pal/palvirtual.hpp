@@ -302,7 +302,12 @@ class VirtualGPU : public device::VirtualDevice {
               amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal);
   ~VirtualGPU();
 
-  uint64_t getQueueID() { return hwRing_; }
+  uint64_t getQueueID(const std::vector<uint32_t>* exclusionHint = nullptr,
+                      bool forceAcquire = false) override {
+    (void)exclusionHint;
+    (void)forceAcquire;
+    return hwRing_;
+  }
   void submitReadMemory(amd::ReadMemoryCommand& vcmd);
   void submitWriteMemory(amd::WriteMemoryCommand& vcmd);
   void submitCopyMemory(amd::CopyMemoryCommand& vcmd);

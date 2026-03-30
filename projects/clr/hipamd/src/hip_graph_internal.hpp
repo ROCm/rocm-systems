@@ -487,6 +487,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     }
     if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
       out << "\nLaunchId:" << launch_id_;
+      out << "\nHW Queue:" << hw_queue_id_;
     }
     out << "\"";
     if (DEBUG_HIP_GRAPH_DOT_PRINT) {
@@ -1307,11 +1308,6 @@ class GraphKernelNode : public GraphNode {
         out << "\nStreamId:" << stream_id_;
         out << "\nHW Queue:" << hw_queue_id_;
       }
-      if (segment_id_ == -1) {
-        out << "\n\nStreamId:" << stream_id_;
-        // out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
-      }
-      // out << "\nDeviceId:" << dev_id_;
     }
     if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
       out << "\nLaunchId:" << launch_id_;

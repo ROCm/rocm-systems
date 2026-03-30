@@ -2865,7 +2865,8 @@ void Device::getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* 
 }
 
 // ================================================================================================
-hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse) {
+hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
+                                      const std::vector<uint32_t>* excludedHwQueueIds) {
   // Only reuse queues when we've reached the maximum limit, unless forced
   // Below the limit, return nullptr to allow creating new queues
   if (!force_reuse && queuePool_[qIndex].size() < settings().max_hw_queues_) {
@@ -2876,32 +2877,38 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse) {
   if (qIndex < QueuePriority::Total && queuePool_[qIndex].size() > 0) {
     typedef decltype(queuePool_)::value_type::const_reference PoolRef;
 
-    // Select queue based on dynamic_queues_ mode
+    // Select queue based on dynamic_queues_ mode; prefer queues not in excludedHwQueueIds
     decltype(queuePool_[qIndex].begin()) lowest;
     uint32_t mode = settings().dynamic_queues_;
 
-    // gfx9XX pipe distribution: queues map to pipes via queue_id % num_pipes
     const bool pipe_dist = settings().queue_pipe_dist_;
     const uint32_t num_pipes = numHwPipes_;
 
+    auto isExcluded = [excludedHwQueueIds](uint64_t queue_id) -> bool {
+      if (excludedHwQueueIds == nullptr || excludedHwQueueIds->empty()) return false;
+      const uint32_t id = static_cast<uint32_t>(queue_id);
+      return std::find(excludedHwQueueIds->begin(), excludedHwQueueIds->end(), id) !=
+             excludedHwQueueIds->end();
+    };
+
     lowest = std::min_element(
         queuePool_[qIndex].begin(), queuePool_[qIndex].end(),
-        [mode, pipe_dist, num_pipes](PoolRef A, PoolRef B) {
+        [mode, pipe_dist, num_pipes, isExcluded](PoolRef A, PoolRef B) {
+          const bool aExcl = isExcluded(A.first->id);
+          const bool bExcl = isExcluded(B.first->id);
+          if (aExcl != bExcl) return !aExcl;
+
           if (mode >= 1) {
-            // Mode 1+: Advanced weighted metric with dedicated queue penalty
-            // Metric = dedicated_queue_penalty + (depth << 4) + refCount
             uint64_t metricA = A.second.GetLoadMetric(A.first, mode);
             uint64_t metricB = B.second.GetLoadMetric(B.first, mode);
 
             if (metricA == metricB && pipe_dist) {
-              // gfx9XX pipe distribution: prefer lower pipe IDs for consistent distribution
               uint64_t pipeA = A.first->id % num_pipes;
               uint64_t pipeB = B.first->id % num_pipes;
               return pipeA < pipeB;
             }
             return metricA < metricB;
           } else {
-            // Mode 0: Simple refCount-based selection
             return A.second.refCount < B.second.refCount;
           }
         });
@@ -2920,10 +2927,11 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse) {
 }
 
 // ================================================================================================
-hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority) {
+hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority,
+                                        const std::vector<uint32_t>& excludedHwQueueIds) {
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   auto queue = acquireQueue(queue_size, false, std::vector<uint32_t>{},
-                            priority, true, false);
+                            priority, true, false, excludedHwQueueIds);
   return queue;
 }
 
@@ -2931,7 +2939,8 @@ hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority) {
 hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   const std::vector<uint32_t>& cuMask,
                                   amd::CommandQueue::Priority priority, bool managed,
-                                  bool dedicated_queue) {
+                                  bool dedicated_queue,
+                                  const std::vector<uint32_t>& excludedHwQueueIds) {
   hsa_amd_queue_priority_t queue_priority;
   uint qIndex;
   switch (priority) {
@@ -2983,7 +2992,9 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     // decide when to start reclaiming queues.
     if (!coop_queue && (cuMask.size() == 0) &&
         (queuePool_[qIndex].size() >= settings().max_hw_queues_)) {
-      hsa_queue_t* queue = getQueueFromPool(qIndex, false);
+      const std::vector<uint32_t>* pExcluded =
+          excludedHwQueueIds.empty() ? nullptr : &excludedHwQueueIds;
+      hsa_queue_t* queue = getQueueFromPool(qIndex, false, pExcluded);
       if (queue != nullptr) {
         if (!managed) {
           num_queues_[qIndex]++;
@@ -3021,7 +3032,9 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
         amd::ScopedLock l(active_queue_access_);
         if (queuePool_[qIndex].size() > 0) {
           bool kForceReuse = true;
-          return getQueueFromPool(qIndex, kForceReuse);
+          const std::vector<uint32_t>* pExcluded =
+              excludedHwQueueIds.empty() ? nullptr : &excludedHwQueueIds;
+          return getQueueFromPool(qIndex, kForceReuse, pExcluded);
         }
       }
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
