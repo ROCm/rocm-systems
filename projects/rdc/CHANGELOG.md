@@ -2,6 +2,13 @@
 
 Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](https://rocm.docs.amd.com/projects/rdc/en/latest/).
 
+## amd_smi_lib for ROCm 7.13.0
+
+### Resolved Issues
+
+- **Fixed broken partition metrics**.  
+  - Regardless if GPU was partitioned, RDC only saw the GPU index and no instances due to upstream gpu_metrics changes
+
 ## RDC 1.2.0 for ROCm 7.1.0
 
 ### Added
