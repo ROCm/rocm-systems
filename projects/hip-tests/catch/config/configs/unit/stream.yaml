@@ -91,7 +91,7 @@ stream:
   Unit_hipStreamCreateWithPriority_CheckPriorityVal:
     <<: *level_2
     tags: [lifecycle]
-  Unit_hipStreamCreateWithPriority_ValidateWithEvents:
+  Unit_hipStreamCreateWithPriority_VerifyKernelResults:
     <<: *level_2
     # Below tests fail in stress test on 24/07/23
     disabled: [amd_windows, amd_wsl]
