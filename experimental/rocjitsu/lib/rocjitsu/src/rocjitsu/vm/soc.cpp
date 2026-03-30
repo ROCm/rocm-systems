@@ -11,6 +11,30 @@
 
 namespace rocjitsu {
 
+void SoC::set_memory(amdgpu::GpuMemory *m) {
+  memory_ = m;
+  // Create a standalone HBM controller for the config-loader path where the
+  // parameterized constructor (which creates it) was not used.
+  if (m && !hbm_standalone_ && iods_.empty())
+    hbm_standalone_ = std::make_unique<amdgpu::HbmController>(m);
+}
+
+void SoC::wire_backing(simdojo::Topology &topo) {
+  if (!hbm_standalone_) {
+    return;
+  }
+  for (auto *x : xcds_) {
+    if (!x->l2_cache())
+      continue;
+    auto *l2_req = x->l2_cache()->req_port();
+    if (l2_req->link() == nullptr) {
+      auto *hbm_cpl = hbm_standalone_->create_cpl_port(x->name());
+      auto *link = topo.add_link(l2_req, hbm_cpl, /*latency=*/1);
+      link->set_exec_mode(exec_mode_);
+    }
+  }
+}
+
 SoC::SoC(std::string name, const Config &config)
     : simdojo::CompositeComponent(std::move(name)), arch_(config.arch),
       exec_mode_(config.exec_mode) {
@@ -76,6 +100,10 @@ void SoC::flush_all() {
 void SoC::initialize() {
   if (iods_.empty()) {
     // No IOD modeling: wire each L2's req port directly to the standalone HBM controller.
+    // Create the HBM controller lazily if set_memory() was called but the
+    // parameterized constructor (which creates it) was not used.
+    if (!hbm_standalone_ && memory_)
+      hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory_);
     if (hbm_standalone_) {
       auto &topo = engine()->topology();
       for (auto *x : xcds_) {

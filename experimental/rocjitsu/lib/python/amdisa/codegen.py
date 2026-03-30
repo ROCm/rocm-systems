@@ -547,8 +547,6 @@ class CodeGenerator:
             L.append('  uint8_t exp = (imm >> 4) & 0x7;')
             L.append(f'  uint8_t lgkm = (imm >> 8) & {lgkm_mask};')
             L.append('  wf.set_wait_target(vm, lgkm, exp);')
-            L.append('  if (!wf.wait_satisfied())')
-            L.append('    wf.set_state(amdgpu::WfState::WAITCNT);')
             return '\n'.join(L)
 
         if cls == 'wait_counter':
@@ -556,8 +554,6 @@ class CodeGenerator:
             # the counter threshold directly (no bit-packing).
             L.append(f'  uint16_t cnt = static_cast<uint16_t>({src_ops[0]}.encoding_value_);')
             L.append(f'  wf.set_wait_counter("{op}", cnt);')
-            L.append('  if (!wf.wait_satisfied())')
-            L.append('    wf.set_state(amdgpu::WfState::WAITCNT);')
             return '\n'.join(L)
 
         if cls == 'branch':
@@ -3951,7 +3947,7 @@ class CodeGenerator:
             'namespace {\n'
             '\n'
             'uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {\n'
-            '  if (ev <= 101)\n'
+            '  if (ev <= 105)\n'
             '    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
             '  if (ev == 106)\n'
             '    return static_cast<uint32_t>(wf.vcc());\n'
@@ -3995,7 +3991,7 @@ class CodeGenerator:
             '}\n'
             '\n'
             'uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {\n'
-            '  if (ev <= 101) {\n'
+            '  if (ev <= 105) {\n'
             '    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
             '    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
             '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
@@ -4030,7 +4026,7 @@ class CodeGenerator:
             '}\n'
             '\n'
             'void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {\n'
-            '  if (ev <= 101) {\n'
+            '  if (ev <= 105) {\n'
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
             '    return;\n'
             '  }\n'
@@ -4058,7 +4054,7 @@ class CodeGenerator:
             '}\n'
             '\n'
             'void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {\n'
-            '  if (ev <= 101) {\n'
+            '  if (ev <= 105) {\n'
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
             '    return;\n'

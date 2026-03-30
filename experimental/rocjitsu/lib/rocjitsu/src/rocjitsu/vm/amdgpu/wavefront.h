@@ -141,12 +141,18 @@ public:
   /// @returns Const reference to the wait counters.
   const WaitCounters &wait_counters() const { return wait_counters_; }
 
-  /// @brief Set the s_waitcnt target thresholds.
+  /// @brief Set the s_waitcnt target thresholds and stall if not yet satisfied.
+  ///
+  /// @details Sets the per-wavefront wait targets and transitions to WAITCNT
+  /// if any counter currently exceeds its target. The memory pipeline resumes
+  /// the wavefront (sets state back to RUNNING) once all counters are satisfied.
   /// @param vmcnt VM counter threshold.
   /// @param lgkmcnt LGKM counter threshold.
   /// @param expcnt Export counter threshold.
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
     wait_target_ = {vmcnt, lgkmcnt, expcnt};
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
   }
 
   /// @brief Check whether all wait counter thresholds are satisfied.

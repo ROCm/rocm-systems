@@ -147,8 +147,6 @@ void SWaitcntSopp::execute(amdgpu::Wavefront &wf) {
   uint8_t exp = (imm >> 4) & 0x7;
   uint8_t lgkm = (imm >> 8) & 0x1F;
   wf.set_wait_target(vm, lgkm, exp);
-  if (!wf.wait_satisfied())
-    wf.set_state(amdgpu::WfState::WAITCNT);
 }
 
 SSethaltSopp::SSethaltSopp(const MachineInst *inst)
