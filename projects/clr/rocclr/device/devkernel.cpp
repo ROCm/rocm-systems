@@ -861,6 +861,7 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
   // Iterate through the arguments and insert into parameterList
   device::Kernel::parameters_t params;
   device::Kernel::parameters_t hiddenParams;
+  hiddenParams.reserve(amd::KernelParameterDescriptor::Desc::MaxSize);
   size_t offset = 0;
 
   amd_comgr_metadata_node_t argsMeta;
@@ -874,6 +875,8 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
     hsaArgsMeta = true;
     status = amd::Comgr::get_metadata_list_size(argsMeta, &argsSize);
   }
+
+  params.reserve(argsSize);
 
   for (size_t i = 0; i < argsSize; ++i) {
     amd::KernelParameterDescriptor desc = {};
