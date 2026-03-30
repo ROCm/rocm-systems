@@ -41,7 +41,7 @@ def parse_table_dict(output: str) -> dict:
     """
     Parse an ASCII table into a dict mapping Spec -> Value.
     """
-    lines = [line for line in output.splitlines() if line.startswith("│")]
+    lines = [line for line in output.splitlines() if line.startswith("|")]
     # locate header row (the one containing 'Spec' and 'Value')
     header_idx = next(
         (i for i, ln in enumerate(lines) if "Spec" in ln and "Value" in ln), None
@@ -49,16 +49,17 @@ def parse_table_dict(output: str) -> dict:
     if header_idx is None:
         raise ValueError("Header row with Spec and Value not found")
 
-    header_cells = [c.strip() for c in lines[header_idx].strip("│").split("│")]
+    header_cells = [c.strip() for c in lines[header_idx].strip("|").split("|")]
 
     spec_i = header_cells.index("Spec")
     value_i = header_cells.index("Value")
 
     result = {}
-    for ln in lines[header_idx + 2 :]:
-        if ln.startswith("├") or ln.startswith("╘"):
+    for ln in lines[header_idx + 1 :]:
+        # Skip separator lines
+        if ln.startswith("+"):
             continue
-        cells = [c.strip() for c in ln.strip("│").split("│")]
+        cells = [c.strip() for c in ln.strip("|").split("|")]
         if len(cells) <= max(spec_i, value_i):
             continue
         spec = cells[spec_i]
