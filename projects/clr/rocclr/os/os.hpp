@@ -258,6 +258,18 @@ class Os : AllStatic {
   //! Uninstall SIGFPE handler for CPU device
   static void uninstallSigfpeHandler();
 
+  //! Callback type for crash handlers
+  typedef void (*CrashCallback)();
+
+  //! Install crash signal/exception handlers
+  //! POSIX: SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE
+  //! Windows: ACCESS_VIOLATION, STACK_OVERFLOW, ILLEGAL_INSTRUCTION, INT_DIVIDE_BY_ZERO
+  //! Callback is invoked before re-raising for default handling (core dump)
+  static bool installExceptionHandlers(CrashCallback callback = nullptr);
+
+  //! Uninstall crash handlers
+  static void uninstallExceptionHandlers();
+
   //! Return the current process id
   static int getProcessId();
 

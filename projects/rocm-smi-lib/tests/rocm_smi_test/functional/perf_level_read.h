@@ -49,7 +49,7 @@
 
 class TestPerfLevelRead : public TestBase {
  public:
-    TestPerfLevelRead();
+  TestPerfLevelRead();
 
   // @Brief: Destructor for test case of TestPerfLevelRead
   virtual ~TestPerfLevelRead();

@@ -180,7 +180,7 @@ class VirtualGPU : public device::VirtualDevice {
 
     static uint32_t AllocedQueues(const VirtualGPU& gpu, Pal::EngineType type);
 
-    amd::Monitor* lock_;                       //!< Lock PAL queue for access
+    std::recursive_mutex* lock_;               //!< Lock PAL queue for access
     Pal::IQueue* iQueue_;                      //!< PAL queue object
     std::vector<Pal::ICmdBuffer*> iCmdBuffs_;  //!< PAL command buffers
     std::vector<Pal::IFence*> iCmdFences_;     //!< PAL fences, associated with CMD

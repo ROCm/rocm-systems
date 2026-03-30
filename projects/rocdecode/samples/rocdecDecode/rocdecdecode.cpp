@@ -668,15 +668,15 @@ int main(int argc, char** argv) {
             bool b_sort_filenames = false;
             if (fs::is_directory(input_file_path)) {
                 for (const auto& entry : fs::directory_iterator(input_file_path)) {
-                    if (entry.is_directory()) {
+                    if (fs::is_directory(entry.path())) {
                         std::vector<std::string> file_names_sub_folder;
-                        for (const auto& sub_entry : fs::directory_iterator(entry)) {
+                        for (const auto& sub_entry : fs::directory_iterator(entry.path())) {
                             file_names_sub_folder.push_back(sub_entry.path());
                         }
                         std::sort(file_names_sub_folder.begin(), file_names_sub_folder.end(), compareFilenames);
                         input_file_names.insert(input_file_names.end(), file_names_sub_folder.begin(), file_names_sub_folder.end());
                         file_names_sub_folder.clear();
-                    } else if(entry.is_regular_file()) {
+                    } else if(fs::is_regular_file(entry.path())) {
                         b_sort_filenames = true;
                         input_file_names.push_back(entry.path());
                     }

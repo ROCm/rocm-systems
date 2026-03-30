@@ -2,6 +2,8 @@
 # configure packaging settings
 #
 
+include(CPackComponent)
+
 function(rocprofiler_set_package_depends _VARIABLE _VALUE _INFO _REPLACE_PARENTHESIS)
     string(REPLACE ";" ", " _DEPENDS "${_VALUE}")
     if(_REPLACE_PARENTHESIS)

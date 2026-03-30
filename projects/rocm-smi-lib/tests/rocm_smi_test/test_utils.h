@@ -48,9 +48,7 @@
 
 #include "rocm_smi/rocm_smi.h"
 
-const char *
-NameFromFWEnum(rsmi_fw_block_t blk);
-const char *
-NameFromEvtNotifType(rsmi_evt_notification_type_t evt);
+const char* NameFromFWEnum(rsmi_fw_block_t blk);
+const char* NameFromEvtNotifType(rsmi_evt_notification_type_t evt);
 
 #endif  // TESTS_ROCM_SMI_TEST_TEST_UTILS_H_

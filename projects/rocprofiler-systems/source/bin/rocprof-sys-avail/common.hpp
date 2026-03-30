@@ -82,23 +82,11 @@ constexpr size_t num_settings_options    = 4;
 constexpr size_t num_hw_counter_options  = 5;
 constexpr size_t num_dump_config_options = TOTAL;
 
-extern std::string       global_delim;
+extern bool              debug_msg;
 extern bool              csv;
 extern bool              markdown;
-extern bool              alphabetical;
-extern bool              available_only;
-extern bool              all_info;
-extern bool              force_brief;
-extern bool              debug_msg;
 extern bool              case_insensitive;
 extern bool              regex_hl;
-extern bool              expand_keys;
-extern bool              force_config;
-extern bool              print_advanced;
-extern int32_t           max_width;
-extern int32_t           num_cols;
-extern int32_t           min_width;
-extern int32_t           padding;
 extern int32_t           verbose_level;
 extern str_vec_t         regex_keys;
 extern str_vec_t         category_regex_keys;
@@ -108,12 +96,23 @@ extern std::stringstream lerr;
 // explicit setting names to exclude
 extern std::set<std::string> settings_exclude;
 
-// exclude some timemory settings which are not relevant to rocprof-sys
-//  exact matches, e.g. ROCPROFSYS_BANNER
-extern std::string settings_rexclude_exact;
-
-//  leading matches, e.g. ROCPROFSYS_MPI_[A-Z_]+
-extern std::string settings_rexclude_begin;
+struct format_options
+{
+    std::string delim          = "|";
+    bool        csv            = false;
+    bool        markdown       = false;
+    bool        alphabetical   = false;
+    bool        available_only = false;
+    bool        all_info       = false;
+    bool        force_brief    = false;
+    bool        expand_keys    = false;
+    bool        force_config   = false;
+    bool        print_advanced = false;
+    int32_t     max_width      = 0;
+    int32_t     num_cols       = 0;
+    int32_t     min_width      = 40;
+    int32_t     padding        = 4;
+};
 
 constexpr size_t max_error_message_buffer_length = 4096;
 

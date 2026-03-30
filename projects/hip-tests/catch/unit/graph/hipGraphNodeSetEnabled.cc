@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -63,7 +50,7 @@ static void callbackfunc(void* A_h) {
   }
 }
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_Basic") {
+HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_Basic) {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -191,7 +178,7 @@ TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_Basic") {
  11) Make ClonedGraph and disabled the kernel node in ClonedGraph and verify
  12) Enable the Kernel node in ClonedGraph and verify the result */
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_KernelNode") {
+HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_KernelNode) {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -310,7 +297,7 @@ TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_KernelNode") {
  15) Make ClonedGraph and disabled the MemSet node in ClonedGraph and verify
  16) Enable the MemSet node in ClonedGraph and verify the result */
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemSet") {
+HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_MemSet) {
   constexpr size_t Nbytes = N * sizeof(char);
   constexpr size_t val = 9;
   hipGraph_t graph, clonedGraph;
@@ -427,7 +414,7 @@ TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemSet") {
  19) Make ClonedGraph and disabled the MemCpy node in ClonedGraph and verify
  20) Enable the MemCpy node in ClonedGraph and verify the result */
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemCpy") {
+HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Functional_MemCpy) {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -556,7 +543,7 @@ TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemCpy") {
  12) Create graphExec and then delete the graphExec and verify a node
  */
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Negative_Functional") {
+HIP_TEST_CASE(Unit_hipGraphNodeSetEnabled_Negative_Functional) {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

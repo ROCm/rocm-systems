@@ -14,24 +14,17 @@
     "NCCL_DEBUG": "INFO"
   },
   "build_configuration": {
-    "cmake_options": {
-      "CMAKE_BUILD_TYPE": "Debug",
-      "ENABLE_CODE_COVERAGE": "ON",
-      "BUILD_TESTS": "ON",
-      "BUILD_LOCAL_GPU_TARGET_ONLY": "ON",
-      "TRACE": "ON",
-      "COLLTRACE": "ON"
-    },
-    "env_variables": {
-      "HIPCC_COMPILE_FLAGS_APPEND": "-g -Wno-format-nonliteral -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping -parallel-jobs=16"
-    },
-    "parallel_jobs": 64,
-    "generator": "Unix Makefiles"
+    "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-code-coverage", "--enable-mpi-tests", "--no_clean"],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "parallel_jobs": 64
   },
   "test_configurations": {
     "default": {
       "env_variables": {
         "NCCL_LAUNCH_MODE": "GROUP"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
       }
     },
     "shm_comprehensive": {
@@ -267,26 +260,92 @@
       "num_nodes": 1,
       "num_gpus": 8,
       "timeout": 0,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
       "tests": [
         {
-          "name": "NetIb_Debug",
-          "description": "InfiniBand unit tests with debug output using test fixtures",
-          "test_filter": "NetIbTests.*",
-          "env_variables": {
-            "NCCL_SOCKET_IFNAME": "eth1"
-          }
+          "name": "BitOps",
+          "description": "Bit operation utility tests",
+          "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"
         },
         {
-          "name": "Rcclwrap_All",
-          "description": "RCCL wrapper API unit tests with trace-level debugging",
-          "test_filter": "Rcclwrap.*",
-          "env_variables": {
-            "NCCL_DEBUG": "TRACE"
-	  }
+          "name": "CommTests",
+          "description": "Communicator unit tests",
+          "test_filter": "CommTests.*"
+        },
+        {
+          "name": "EnqueueCountTests",
+          "description": "Enqueue count operation tests",
+          "test_filter": "EnqueueCountTests.*"
         },
         {
           "name": "Fixtures_All",
-          "description": "All Fixtures tests",
+          "description": "All release fixture tests"
+        }
+      ]
+    },
+    "unit_tests_fixtures_debug": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 0,
+      "tests": [
+        {
+          "name": "Alloc",
+          "description": "Memory allocation tests",
+          "test_filter": "Alloc.*"
+        },
+        {
+          "name": "ParamTests",
+          "description": "Parameter handling tests",
+          "test_filter": "ParamTests.*"
+        },
+        {
+          "name": "ArgCheck",
+          "description": "Argument validation tests",
+          "test_filter": "ArgCheckTest.*"
+        },
+        {
+          "name": "Enqueue",
+          "description": "Enqueue operation tests",
+          "test_filter": "EnqueueTests.*"
+        },
+        {
+          "name": "Ipcsocket",
+          "description": "IPC socket tests",
+          "test_filter": "Ipcsocket.*"
+        },
+        {
+          "name": "NetSocket",
+          "description": "Network socket tests",
+          "test_filter": "NetSocketTests.*"
+        },
+        {
+          "name": "ProxyTests",
+          "description": "Proxy service tests",
+          "test_filter": "ProxyTests.*"
+        },
+        {
+          "name": "Rcclwrap",
+          "description": "RCCL wrapper API unit tests",
+          "test_filter": "Rcclwrap.*"
+        },
+        {
+          "name": "TransportTest",
+          "description": "Transport layer tests",
+          "test_filter": "TransportTest.*"
+        },
+        {
+          "name": "XmlTest",
+          "description": "XML topology parsing tests",
+          "test_filter": "XmlTest.*"
+        },
+        {
+          "name": "FixturesDebug_All",
+          "description": "All debug fixture tests",
           "env_variables": {
             "NCCL_DEBUG": "TRACE"
           }
@@ -302,6 +361,9 @@
       "timeout": 0,
       "env_variables": {
         "NCCL_DEBUG": ""
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
       },
       "tests": [
         {"name": "AllReduce.OutOfPlace", "description": "AllReduce out-of-place", "test_filter": "AllReduce.OutOfPlace"},
@@ -366,18 +428,6 @@
         {"name": "GroupCall.MixedDataType", "description": "GroupCall mixed data type", "test_filter": "GroupCall.MixedDataType"},
         {"name": "GroupCall.MultiGroupCall", "description": "GroupCall multi group call", "test_filter": "GroupCall.MultiGroupCall"},
         {"name": "NonBlocking.SingleCalls", "description": "NonBlocking single calls", "test_filter": "NonBlocking.SingleCalls"},
-        {"name": "CommTests.Sorter", "description": "CommTests sorter", "test_filter": "CommTests.Sorter"},
-        {"name": "Enqueue", "description": "Enqueue operation tests", "test_filter": "Enqueue.*"},
-        {"name": "Alloc", "description": "Memory allocation tests", "test_filter": "Alloc.*"},
-        {"name": "ParamTests", "description": "Parameter handling tests", "test_filter": "ParamTests.*"},
-        {"name": "ProxyTests", "description": "Proxy service tests", "test_filter": "ProxyTests.*"},
-        {"name": "Rcclwrap", "description": "RCCL wrapper tests", "test_filter": "Rcclwrap.*"},
-        {"name": "TransportTest", "description": "Transport layer tests", "test_filter": "TransportTest.*"},
-        {"name": "ArgCheck", "description": "Argument validation tests", "test_filter": "ArgCheck.*"},
-        {"name": "BitOps", "description": "Bit operation utility tests", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash"},
-        {"name": "AltRsmi", "description": "Alternative RSMI tests", "test_filter": "AltRsmi.*"},
-        {"name": "NetSocket", "description": "Network socket tests", "test_filter": "NetSocket.*"},
-        {"name": "Ipcsocket", "description": "IPC socket tests", "test_filter": "Ipcsocket.*"},
         {"name": "Standalone.SplitComms_RankCheck", "description": "Verify device assignment for each rank using ncclCommSplit API", "test_filter": "Standalone.SplitComms_RankCheck"},
         {"name": "Standalone.SplitComms_OneColor", "description": "Creates communicator for each device with same color", "test_filter": "Standalone.SplitComms_OneColor"},
         {"name": "Standalone.SplitComms_Reduce", "description": "Reduces communicators into fewer ranks", "test_filter": "Standalone.SplitComms_Reduce"},
@@ -421,16 +471,38 @@
     },
     "alt_rsmi_tests": {
       "is_gtest": true,
-      "binary": "rccl-UnitTestsFixtures",
+      "binary": "rccl-UnitTestsAltRsmi",
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 120,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
       "tests": [
         {
           "name": "AltRsmi_AllTests",
           "description": "All Alternative RSMI implementation tests using public API only",
           "test_filter": "AltRsmiTest.*"
+        }
+      ]
+    },
+    "implicit_launch_order": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_LAUNCH_ORDER_IMPLICIT": "1"
+      },
+      "tests": [
+        {
+          "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
+          "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
+          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
         }
       ]
     }
@@ -479,9 +551,15 @@
       "enabled": true
     },
     {
-      "name": "Unit Tests - Fixtures",
-      "description": "Non-MPI unit tests using fixtures",
+      "name": "Unit Tests - Fixtures (Release)",
+      "description": "Non-MPI unit tests using header-only fixtures (Release and Debug)",
       "config": "unit_tests_fixtures",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - Fixtures (Debug)",
+      "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
+      "config": "unit_tests_fixtures_debug",
       "enabled": true
     },
     {
@@ -500,6 +578,12 @@
       "name": "AltRsmi Tests - Complete Suite",
       "description": "All Alternative RSMI tests using public API only",
       "config": "alt_rsmi_tests",
+      "enabled": true
+    },
+    {
+      "name": "Implicit Launch Order Tests",
+      "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT for multi-communicator serialization",
+      "config": "implicit_launch_order",
       "enabled": true
     }
   ]

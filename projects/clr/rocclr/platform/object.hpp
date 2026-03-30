@@ -207,7 +207,7 @@ struct Coord3D {
 
 template <class T> class SysmemPool {
  public:
-  SysmemPool() : chunk_access_(true) /* Sysmem Pool Lock */ {}
+  SysmemPool() {}
   ~SysmemPool() {
     if (free_chunk_num_ != max_chunk_idx_) {
       for (int i = 0; i < kActiveAllocSize; ++i) {
@@ -234,7 +234,7 @@ template <class T> class SysmemPool {
     size_t current = current_alloc_++;
     auto idx = current / kAllocChunkSize;
     while (idx >= max_chunk_idx_) {
-      ScopedLock lock(chunk_access_);
+      std::scoped_lock lock(chunk_access_);
       // Second check in a case of multiple waiters
       if (idx == max_chunk_idx_) {
         auto allocs = new MemoryObject[kAllocChunkSize];
@@ -285,7 +285,7 @@ template <class T> class SysmemPool {
       auto base = obj->base_;
       {
         // Make sure active chunks don't have a stale pointer
-        ScopedLock lock(chunk_access_);
+        std::scoped_lock lock(chunk_access_);
         for (int i = 0; i < kActiveAllocSize; ++i) {
           if (base->allocs_ == active_allocs_[i]) {
             active_allocs_[i] = nullptr;
@@ -318,7 +318,7 @@ template <class T> class SysmemPool {
   std::atomic<uint64_t> current_alloc_ = 0;             //!< Current allocation, global index
   std::atomic<size_t> max_chunk_idx_ = 0;               //!< Current max chunk index
   size_t free_chunk_num_ = 0;                           //!< The number of freed chunks
-  amd::Monitor chunk_access_;                           //!< Lock for the chunk list access
+  std::recursive_mutex chunk_access_;                   //!< Lock for the chunk list access
   MemoryObject* active_allocs_[kActiveAllocSize] = {};  //!< Active chunks for fast access
 };
 

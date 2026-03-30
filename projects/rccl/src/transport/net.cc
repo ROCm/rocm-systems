@@ -27,6 +27,11 @@
 #include "npkit/npkit.h"
 #endif
 #include "msccl/msccl_lifecycle.h"
+#include <stdio.h>
+#include <glob.h>
+#include <dirent.h>
+#include <linux/limits.h>
+#include <mutex>
 
 static_assert(sizeof(ncclNetHandle_t) <= CONNECT_SIZE, "NET Connect info is too large");
 
@@ -198,7 +203,139 @@ struct setupReq {
 };
 
 NCCL_PARAM(NetOptionalRecvCompletion, "NET_OPTIONAL_RECV_COMPLETION", 1);
-RCCL_PARAM(AinicRoce, "AINIC_ROCE", 0);
+
+static rcclIBNicInfo rcclPrimaryNicInfo = {rcclIBNicTypeUnknown, 0, 0};
+
+RCCL_PARAM(AinicRoce, "AINIC_ROCE", -1);
+static const char* sysfsIBPath = "/sys/class/infiniband";
+
+static int readIBNicRate(const char* devName) {
+  std::string basePath = std::string(sysfsIBPath) + "/" + devName + "/ports/";
+  DIR* dir = opendir(basePath.c_str());
+  if (dir == NULL) return 0;
+  struct dirent* entry;
+  int maxRate = 0;
+  while ((entry = readdir(dir)) != NULL) {
+    if (entry->d_name[0] == '.') continue;
+    std::string portPath = basePath + entry->d_name + "/rate";
+    std::ifstream portFile(portPath);
+    std::string rate;
+    if (!std::getline(portFile, rate)) continue;
+    char* end = nullptr;
+    long val = strtol(rate.c_str(), &end, 10);
+    if (end != rate.c_str() && val > 0) {
+      maxRate = std::max(maxRate, (int)val);
+    }
+  }
+  closedir(dir);
+  return maxRate;
+}
+
+static void rcclDetectIBNics() {
+  #define MAX_VENDOR_LEN 16
+  #define MAX_IB_DEVS 32
+  /* Map of vendor/device pairs to rcclIBNicType:
+   Note: Vendor ID should be exact value, device id can be a prefix or a wildcard*/
+  std::map<std::pair<std::string, std::string>, rcclIBNicType> vendorNames = {
+    {{"0x15b3", "*"}, rcclIBNicTypeMLX},
+    {{"0x1dd8", "0x10"}, rcclIBNicTypeAINIC},
+    {{"0x14e4", "0x1760"}, rcclIBNicTypeBNXT2}
+  };
+
+  int _Nnics[rcclIBNicTypeMax]{};
+  int _NicsRate[rcclIBNicTypeMax]{};
+  int totalNnics = 0;
+
+  /* respect user preference for AINIC */
+  if (rcclParamAinicRoce() == 1) {
+    INFO(NCCL_NET|NCCL_INIT, "RCCL: AINIC detection: enforced by user settings");
+  }
+
+  struct netIf userIfs[MAX_IB_DEVS];
+  const char* userIbEnv = ncclGetEnv("NCCL_IB_HCA");
+  bool searchNot = userIbEnv && userIbEnv[0] == '^';
+  if (searchNot) userIbEnv++;
+  if (userIbEnv && (userIbEnv[0] == '=')) userIbEnv++;
+  int nUserIfs = parseStringList(userIbEnv, userIfs, MAX_IB_DEVS);
+
+  
+  DIR* dir = opendir(sysfsIBPath);
+  if (dir == NULL) {
+    INFO(NCCL_NET|NCCL_INIT, "RCCL: No InfiniBand devices found (cannot open %s)", sysfsIBPath);
+    rcclPrimaryNicInfo.type = rcclIBNicTypeDefault;
+    return;
+  }
+
+  struct dirent* entry;
+  while ((entry = readdir(dir)) != NULL) {
+    bool detected = false;
+    if (entry->d_name[0] == '.') continue;
+    if (!matchIfList(entry->d_name, -1, userIfs, nUserIfs, false) ^ searchNot) {
+      continue;
+    }
+
+    std::string basePath = std::string(sysfsIBPath) + "/" + entry->d_name + "/device/";
+    std::ifstream vendorFile(basePath + "vendor");
+    std::ifstream deviceFile(basePath + "device");
+    std::string vendor, device;
+    if (!std::getline(vendorFile, vendor) || !std::getline(deviceFile, device)) {
+      continue;
+    }
+
+    for (const auto& [key, nicType] : vendorNames) {
+      const auto& [vendorId, deviceId] = key;
+      if (vendorId == vendor && (deviceId == "*" || device.rfind(deviceId, 0) == 0)) {
+        /* respect user preference for AINIC */
+        if ((nicType == rcclIBNicTypeAINIC) && (rcclParamAinicRoce() == 0)) {
+          continue;
+        } else if (rcclParamAinicRoce() == 1 && nicType != rcclIBNicTypeAINIC) {
+          continue;
+        }
+
+        _Nnics[nicType]++;
+        totalNnics++;
+        detected = true;
+        if (_NicsRate[nicType] == 0) {
+          _NicsRate[nicType] = readIBNicRate(entry->d_name);
+        }
+        break;
+      }
+    }
+    if (!detected) {
+    /* Unknown vendor/device pair or generic device */
+      _Nnics[rcclIBNicTypeDefault]++;
+      totalNnics++;
+    }
+  }
+  closedir(dir);
+
+  int maxCount = 0;
+  rcclIBNicType primaryNicsType = rcclIBNicTypeDefault;
+  for (int i = 0; i < rcclIBNicTypeMax; i++) {
+    if (_Nnics[i] > maxCount) {
+      maxCount = _Nnics[i];
+      primaryNicsType = static_cast<rcclIBNicType>(i);
+    }
+  }
+
+  INFO(NCCL_NET|NCCL_INIT, "RCCL: Detected %d IB devices, primary type: %d (count: %d)", 
+       totalNnics, primaryNicsType, maxCount);
+  rcclPrimaryNicInfo.type = primaryNicsType;
+  rcclPrimaryNicInfo.rate = _NicsRate[primaryNicsType];
+  rcclPrimaryNicInfo.count = maxCount;
+}
+
+static std::once_flag rcclDetectIBNicsOnce;
+
+bool rcclUseAinic() {
+  std::call_once(rcclDetectIBNicsOnce, rcclDetectIBNics);
+  return (rcclPrimaryNicInfo.type == rcclIBNicTypeAINIC);
+}
+
+rcclIBNicInfo rcclPrimaryNic() {
+  std::call_once(rcclDetectIBNicsOnce, rcclDetectIBNics);
+  return rcclPrimaryNicInfo;
+}
 
 static_assert(sizeof(ncclNetHandle_t) + sizeof(int) <= CONNECT_SIZE, "Not large enough ncclConnect to hold ncclNetHandle_t and useGdr flag");
 
@@ -886,7 +1023,7 @@ static ncclResult_t ncclNetGetDeviceHandle(ncclNetDeviceType type, int version, 
 static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   ncclNet_ctxt_t ncclNetCtxt = {};
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
-  bool rcclAinicRoce = ((rcclParamAinicRoce() == 1) ? true : false);
+  bool rcclAinicRoce = rcclUseAinic();
   if (reqSize != sizeof(netSendConnectArgs)) return ncclInternalError;
   ncclResult_t ret = ncclSuccess;
   netSendConnectArgs* req = (netSendConnectArgs*) reqBuff;
@@ -1108,7 +1245,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   resources->tpRemoteProxyRank = req->proxyRank;
   ncclResult_t ret = ncclSuccess;
   ncclNet_ctxt_t ncclNetCtxt = {};
-  bool rcclAinicRoce = ((rcclParamAinicRoce() == 1) ? true : false);
+  bool rcclAinicRoce = rcclUseAinic();
 
   setNetAttrs(proxyState, &req->netAttr);
 

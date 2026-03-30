@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipGraphMemAllocNodeGetParams hipGraphMemAllocNodeGetParams
@@ -131,12 +118,11 @@ static void hipGraphMemAllocNodeGetParams_Functional(unsigned deviceId = 0) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional) {
   hipGraphMemAllocNodeGetParams_Functional();
 }
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice",
-          "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -164,7 +150,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice",
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2) {
   constexpr size_t N = 1024 * 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -277,7 +263,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3) {
   constexpr auto element_count{512 * 1024 * 1024};
   constexpr size_t num_bytes = element_count * sizeof(int);
 
@@ -370,7 +356,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative") {
+HIP_TEST_CASE(Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative) {
   hipError_t ret;
   constexpr size_t N = 1024 * 1024;
   constexpr size_t Nbytes = N * sizeof(int);

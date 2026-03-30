@@ -474,6 +474,50 @@ static struct tuningModel tuning_model_7 {
   },
 };
 
+static struct tuningModel tuning_model_8 {
+  .hwLat = {
+    /* NVLINK */
+    { /* Tree (LL/LL128/Simple)*/ { 0.9, 0.9, 2.3 }, /* Ring (LL/LL128/Simple)*/ { 0.8, 0.8, 2.1 }, /* CollNetDirect (Simple)*/ { 0.0, 0.0, 0.9 }, /* CollNetChain (Simple)*/ { 0.0, 0.0, 0.0 }, /* NVLS */ { 0, 0, 0 }, /* NVLS Tree */ { 0, 0, 0 }, /* PAT */ { 0, 0, 0} },
+    /* PCI */
+    { /* Tree (LL/LL128/Simple)*/ { 2.2, 2.2, 5.7 }, /* Ring (LL/LL128/Simple)*/ { 2.2, 2.2, 5.7 }, /* CollNetDirect (Simple)*/ { 0.0, 0.0, 5.7 }, /* CollNetChain (Simple)*/ { 0.0, 0.0, 5.7 }, /* NVLS */ { 0, 0, 0 }, /* NVLS Tree */ { 0, 0, 0 }, /* PAT */ { 0, 0, 0} },
+    /* NET */
+    { /* Tree (LL/LL128/Simple)*/ { 10.5, 10.5, 25.0 }, /* Ring (LL/LL128/Simple)*/ { 9.5, 9.5, 320.0 }, /* CollNetDirect (Simple)*/ { 0.0, 0.0, 10.5 }, /* CollNetChain (Simple)*/ { 0.0, 0.0, 0.0 }, /* NVLS */ { 0, 0, 0 }, /* NVLS Tree */ { 0, 0, 0 }, /* PAT */ { 0, 0, 0} },
+  },
+
+  .bwRatio = {
+    /* 2 nodes */
+    { /* Tree (LL/LL128/Simple)*/ { 0.06, 0.06, 0.11 }, /* Ring (LL/LL128/Simple)*/ { 0.08, 0.08, 1.00 }, /* CollNetDirect (Simple)*/ { 0.00, 0.00, 1.00 }, /* CollNetChain (Simple)*/ { 0.00, 0.00, 1.00 }, /* NVLS */ { 0, 0, 0 }, /* NVLS Tree */ { 0, 0, 0 }, /* PAT */ { 0, 0, 0} },
+    /* more than 2 nodes */
+    { /* Tree (LL/LL128/Simple)*/ { 0.06, 0.06, 0.59 }, /* Ring (LL/LL128/Simple)*/ { 0.08, 0.08, 1.00 }, /* CollNetDirect (Simple)*/ { 0.00, 0.00, 1.00 }, /* CollNetChain (Simple)*/ { 0.00, 0.00, 1.00 }, /* NVLS */ { 0, 0, 0 }, /* NVLS Tree */ { 0, 0, 0 }, /* PAT */ { 0, 0, 0} },
+  },
+
+  .treeCorrectionFactor = {
+    { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 0.9, 1.0, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, },
+    { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 0.9, 1.0, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, },
+    { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.7, 1.0, 1.0, 1.0, 1.0, 1.0, 0.7, 0.7, 0.5, 0.6, 0.6, 0.6, },
+  },
+
+  .ringCorrectionFactor = {
+    { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 0.2, 1.0, 0.4, 0.4, 0.1, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, },
+    { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 0.2, 1.0, 0.4, 0.4, 0.1, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, },
+    { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 0.8, 1.0, 1.0, 1.0, },
+  },
+  // Follow order in RcclTunableColls
+  .llProtoRanges = {
+    /*ReduceScatter*/
+    {/*LL (min/max/factor/thread_threshold)*/ {0, 655360, 1, 16}, /*LL64/128 (min/max/factor/thread_threshold)*/ {131072, 3211264, 1, 64}},
+    /*AllGather*/
+    {/*LL (min/max/factor/thread_threshold)*/ {0, 98304,  1, 16}, /*LL64/128 (min/max/factor/thread_threshold)*/ {98304, 5046272, 1, 64}},
+    /*AllReduce*/
+    {/*LL (min/max/factor/thread_threshold)*/ {0, 524288, 1, 0},/*LL64/128 (min/max/factor/thread_threshold)*/ {524288, 9437184, 3145728, 0}},
+    /*Reduce*/
+  {/*LL (min/max/factor/thread_threshold)*/ {0, 4096, 1, 0},/*LL64/128 (min/max/factor/thread_threshold)*/ {4096, 16777216, 1, 0}},
+  /*Broadcast*/
+  {/*LL (min/max/factor/thread_threshold)*/ {0, 8192, 1, 0},/*LL64/128 (min/max/factor/thread_threshold)*/ {8192, 33554432, 1, 0}},
+  },
+  .channelThresholds = {{{CHAN_THRESHOLDS_UNDEFINED}}},
+};
+
 static struct tuningModel rcclTuningModel[] = {
   tuning_model_0,
   tuning_model_1,
@@ -483,6 +527,7 @@ static struct tuningModel rcclTuningModel[] = {
   tuning_model_5,
   tuning_model_6,
   tuning_model_7,
+  tuning_model_8,
 };
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -581,6 +626,20 @@ NCCL_PARAM(Ll128C2c, "LL128_C2C", 1);
 ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm) {
 
   comm->tunerConstants = ncclTunerConstantsDefaults;
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  for (int hw = 0; hw < NCCL_NUM_HW_LINKS; hw++)
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+        comm->tunerConstants.hwLatencies[hw][a][p] =
+          rcclTuningModel[comm->topo->tuning].hwLat[hw][a][p];
+
+  for (int n = 0; n < 2; n++) // 0 = <=2 nodes, 1 = >2 nodes
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+        comm->tunerConstants.bwRatio[n][a][p] =
+          rcclTuningModel[comm->topo->tuning].bwRatio[n][a][p];
+#endif
 
   return ncclSuccess;
 }
@@ -688,9 +747,9 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
         // Various model refinements
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
         if (nNodes <= 2)
-          busBw *= rcclTuningModel[comm->topo->tuning].bwRatio[0][a][p];
+          busBw *= comm->tunerConstants.bwRatio[0][a][p];
         else
-          busBw *= rcclTuningModel[comm->topo->tuning].bwRatio[1][a][p];
+          busBw *= comm->tunerConstants.bwRatio[1][a][p];
         if (a == NCCL_ALGO_RING && p == NCCL_PROTO_LL && (coll == ncclFuncBroadcast || coll == ncclFuncReduce) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) && comm->topo->nodes[GPU].count == comm->topo->nRanks) { busBw = busBw * 1.65; }
 #else
         if (a == NCCL_ALGO_RING && p == NCCL_PROTO_LL) { busBw = std::min(llMaxBw, busBw * .5); }
@@ -743,19 +802,19 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
         }
         comm->bandwidths[coll][a][p] = busBw;
         comm->latencies[coll][a][p] = baseLat[a][p];
-        float intraLat = rcclTuningModel[comm->topo->tuning].hwLat[intraHw[a]][a][p];
-        float interLat =  ppn == 1 ? rcclTuningModel[comm->topo->tuning].hwLat[NCCL_HW_NET][NCCL_ALGO_TREE][p] : rcclTuningModel[comm->topo->tuning].hwLat[NCCL_HW_NET][a][p];
+        float intraLat = comm->tunerConstants.hwLatencies[intraHw[a]][a][p];
+        float interLat =  ppn == 1 ? comm->tunerConstants.hwLatencies[NCCL_HW_NET][NCCL_ALGO_TREE][p] : comm->tunerConstants.hwLatencies[NCCL_HW_NET][a][p];
         interLat += graphs[a]->latencyInter;
         // Also add the flush extra latency
         if (p == NCCL_PROTO_SIMPLE) interLat += graphs[a]->latencyInter;
 
         if (a == NCCL_ALGO_RING) {
-          float lat = rcclTuningModel[comm->topo->tuning].hwLat[hw[a]][a][p];
+          float lat = comm->tunerConstants.hwLatencies[hw[a]][a][p];
           if ((coll == ncclFuncReduce || coll == ncclFuncBroadcast)) {
             if (graphs[a]->sameChannels) {
               comm->latencies[coll][a][p] += lat;
             } else {
-              if (p == NCCL_PROTO_SIMPLE) lat = rcclTuningModel[comm->topo->tuning].hwLat[hw[a]][NCCL_ALGO_TREE][p]; // Add some chunk latency, waiting for proper chunk modeling
+              if (p == NCCL_PROTO_SIMPLE) lat = comm->tunerConstants.hwLatencies[hw[a]][NCCL_ALGO_TREE][p]; // Add some chunk latency, waiting for proper chunk modeling
               comm->latencies[coll][a][p] += nsteps*lat;
             }
           } else {
@@ -780,9 +839,9 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
         } else if (a == NCCL_ALGO_COLLNET_CHAIN) {
           comm->latencies[coll][a][p] += 2 * (nRanks/nNodes-1) * intraLat + interLat;
         } else if (a == NCCL_ALGO_NVLS) {
-          if (nNodes > 1) comm->latencies[coll][a][p] += rcclTuningModel[comm->topo->tuning].hwLat[NCCL_HW_NET][a][p];
+          if (nNodes > 1) comm->latencies[coll][a][p] += comm->tunerConstants.hwLatencies[NCCL_HW_NET][a][p];
         } else if (a == NCCL_ALGO_NVLS_TREE) {
-          comm->latencies[coll][a][p] += 2*(nNodes-1)*rcclTuningModel[comm->topo->tuning].hwLat[NCCL_HW_NET][a][p];
+          comm->latencies[coll][a][p] += 2*(nNodes-1)*comm->tunerConstants.hwLatencies[NCCL_HW_NET][a][p];
         } else if (a == NCCL_ALGO_PAT) {
           if (coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) {
             comm->latencies[coll][a][p] += log2i(nNodes) * (interLat/3.5) // Log latency
@@ -1025,9 +1084,18 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
     {"gfx1100", 0}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1151", 0},
     {"gfx1200", 7}, {"gfx1201", 7}
   };
+
+  static const std::vector<std::pair<std::string, int>> tuningIndexMapAINIC = {
+    {"gfx906", 0}, {"gfx908", 0}, {"gfx90a", 0}, {"gfx942", 8},
+    {"gfx950", 6}, {"gfx1030", 0}, {"gfx1100", 0}, {"gfx1102", 0},
+    {"gfx1200", 7}, {"gfx1201", 7}
+  };
+
   if (gfxarch == nullptr) return 0;
   std::string arch(gfxarch);
-  for (const auto& p : tuningIndexMap) {
+  auto nicInfo = rcclPrimaryNic();
+  const auto & tuningMap = (nicInfo.type == rcclIBNicTypeAINIC) ? tuningIndexMapAINIC : tuningIndexMap;
+  for (const auto& p : tuningMap) {
     const std::string& prefix = p.first;
     if (arch.size() >= prefix.size() &&
         arch.compare(0, prefix.size(), prefix) == 0) {
@@ -1037,3 +1105,15 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
   return 0;
 }
 
+void rcclApplyTuningOverrides(struct ncclTopoSystem* system) {
+  auto nicInfo = rcclPrimaryNic();
+  if(IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950")){
+    system->tuning = 6;
+  }
+
+  if (nicInfo.type == rcclIBNicTypeAINIC) {
+    if (IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942")){
+      system->tuning = 8;
+    }
+  }
+}

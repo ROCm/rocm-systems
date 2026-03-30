@@ -1,0 +1,74 @@
+# TODO(#4070): Optimize media libs
+name: Media Libs CI
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/rocdecode/**'
+      - 'projects/rocjpeg/**'
+      - '.github/workflows/media-libs-ci.yml'
+      - '!**/*.md'
+      - '!**/*.rst'
+      - '!**/*.rtf'
+      - '!**/docs/**'
+      - '!**/.readthedocs.yaml'
+  pull_request:
+    paths:
+      - 'projects/rocdecode/**'
+      - 'projects/rocjpeg/**'
+      - '.github/workflows/media-libs-ci.yml'
+      - '!**/*.md'
+      - '!**/*.rst'
+      - '!**/*.rtf'
+      - '!**/docs/**'
+      - '!**/.readthedocs.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  therock-ci-linux:
+    name: Build Media Libs
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/therock-ci-linux.yml
+    secrets: inherit
+    with:
+      cmake_options: >
+        -DTHEROCK_ENABLE_CORE=ON
+        -DTHEROCK_ENABLE_COMM_LIBS=OFF
+        -DTHEROCK_ENABLE_DEBUG_TOOLS=OFF
+        -DTHEROCK_ENABLE_MATH_LIBS=OFF
+        -DTHEROCK_ENABLE_ML_LIBS=OFF
+        -DTHEROCK_ENABLE_SYSDEPS_EXPAT=OFF
+        -DTHEROCK_ENABLE_SYSDEPS_GMP=OFF
+        -DTHEROCK_ENABLE_SYSDEPS_MPFR=OFF
+        -DTHEROCK_ENABLE_SYSDEPS_NCURSES=OFF
+        -DTHEROCK_ENABLE_SYSDEPS_LIBPCIACCESS=OFF
+        -DTHEROCK_ENABLE_SYSDEPS_HWLOC=OFF
+        -DTHEROCK_ENABLE_HIPIFY=OFF
+        -DTHEROCK_ENABLE_FLATBUFFERS=OFF
+        -DTHEROCK_ENABLE_FMT=OFF
+        -DTHEROCK_ENABLE_NLOHMANN_JSON=OFF
+        -DTHEROCK_ENABLE_SPDLOG=OFF
+        -DTHEROCK_ENABLE_OPENMPI=OFF
+        -DTHEROCK_ENABLE_CORE_HIPTESTS=OFF
+        -DTHEROCK_ENABLE_OCL_RUNTIME=OFF
+        -DTHEROCK_ENABLE_CORE_RUNTIME_TESTS=OFF
+        -DTHEROCK_ENABLE_RDC=OFF
+        -DTHEROCK_ENABLE_SPDLOG=OFF
+        -DTHEROCK_ENABLE_AQLPROFILE=OFF
+        -DTHEROCK_ENABLE_ROCPROFV3=OFF
+        -DTHEROCK_ENABLE_ROCPROFILER_COMPUTE=OFF
+        -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=OFF
+        -DTHEROCK_ENABLE_SYSDEPS_AMD_MESA=ON
+        -DTHEROCK_ENABLE_ROCDECODE=ON
+        -DTHEROCK_ENABLE_ROCJPEG=ON
+      projects_to_test: ""

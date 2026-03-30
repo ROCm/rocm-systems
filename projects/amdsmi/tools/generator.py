@@ -25,8 +25,7 @@ import platform
 from subprocess import run, PIPE
 from ctypeslib.clang2py import main as clangToPy
 
-HEADER = \
-"""# Copyright (C) Advanced Micro Devices. All rights reserved.
+HEADER = """# Copyright (C) Advanced Micro Devices. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -51,17 +50,17 @@ import os
 
 def parseArgument():
     parser = argparse.ArgumentParser(description="parse input arguments")
-    parser.add_argument('-o','--output', type=str, required=True,
-                        help='The output file name')
-    parser.add_argument('-i','--input', type=str, required=True,
-                        help='The input file name')
-    parser.add_argument('-l', '--library', type=str, required=True,
-                        help='Loading dynamic link libraries')
-    parser.add_argument('-e', '--extra-args', type=str, required=False,
-                        help='Parse extra arguments to clang')
+    parser.add_argument("-o", "--output", type=str, required=True, help="The output file name")
+    parser.add_argument("-i", "--input", type=str, required=True, help="The input file name")
+    parser.add_argument(
+        "-l", "--library", type=str, required=True, help="Loading dynamic link libraries"
+    )
+    parser.add_argument(
+        "-e", "--extra-args", type=str, required=False, help="Parse extra arguments to clang"
+    )
     args = vars(parser.parse_args())
 
-    return args['output'], args['input'], args['library'], args['extra_args']
+    return args["output"], args["input"], args["library"], args["extra_args"]
 
 
 def replace_line(full_path_file_name, string_to_replace, new_string):
@@ -77,8 +76,8 @@ def replace_line(full_path_file_name, string_to_replace, new_string):
         None
     """
     fh, abs_path = tempfile.mkstemp()
-    with os.fdopen(fh, 'w') as new_file:
-        with open(full_path_file_name, 'r+', encoding='UTF-8') as old_file:
+    with os.fdopen(fh, "w") as new_file:
+        with open(full_path_file_name, "r+", encoding="UTF-8") as old_file:
             for line in old_file:
                 new_file.write(line.replace(string_to_replace, new_string))
 
@@ -89,9 +88,9 @@ def replace_line(full_path_file_name, string_to_replace, new_string):
 
 def write_header(full_path_file_name):
     fh, abs_path = tempfile.mkstemp()
-    with os.fdopen(fh, 'w') as new_file:
+    with os.fdopen(fh, "w") as new_file:
         new_file.write(HEADER)
-        with open(full_path_file_name, 'r+', encoding='UTF-8') as old_file:
+        with open(full_path_file_name, "r+", encoding="UTF-8") as old_file:
             for line in old_file:
                 new_file.write(line)
 
@@ -102,9 +101,9 @@ def write_header(full_path_file_name):
 
 def write_file(full_path_file_name, contents):
     fh, abs_path = tempfile.mkstemp()
-    with os.fdopen(fh, 'w') as new_file:
+    with os.fdopen(fh, "w") as new_file:
         for line in contents:
-            new_file.write(f'{line}\n')
+            new_file.write(f"{line}\n")
 
     shutil.copymode(full_path_file_name, abs_path)
     os.remove(full_path_file_name)
@@ -114,23 +113,23 @@ def write_file(full_path_file_name, contents):
 def find_replacement(search_str1, search_str2, line):
     pos1 = line.find(search_str1)
     if pos1 < 0:
-        return ''
+        return ""
 
     if len(search_str2):
         pos2 = line.find(search_str2, pos1)
         if pos2 < 0:
-            return ''
+            return ""
     else:
         pos2 = len(line) - 1
 
-    return line[pos1:pos2+1]
+    return line[pos1 : pos2 + 1]
 
 
 def find_line_num(search_str, line):
     pos1 = line.find(search_str)
     if pos1 < 0:
         return 0
-    items = line[pos1:].split(':')
+    items = line[pos1:].split(":")
     if len(items) < 2:
         return 0
 
@@ -139,18 +138,18 @@ def find_line_num(search_str, line):
         return 0
 
     line_num = int(line_num)
-    return (line_num)
+    return line_num
 
 
 def main():
-    open_bracket = '['
-    close_bracket = ']'
-    open_parenthesis = '('
-    close_parenthesis = ')'
-    open_curly_brace = '{'
-    close_curly_brace = '}'
+    open_bracket = "["
+    close_bracket = "]"
+    open_parenthesis = "("
+    close_parenthesis = ")"
+    open_curly_brace = "{"
+    close_curly_brace = "}"
 
-    output_file, input_file, library, clang_extra_args =  parseArgument()
+    output_file, input_file, library, clang_extra_args = parseArgument()
 
     # make args string easy to append
     if clang_extra_args is None:
@@ -160,8 +159,9 @@ def main():
 
     library_name = os.path.basename(library)
 
-    clang_include_dir = \
-        run(["clang", "--print-resource-dir"], stdout=PIPE, stderr=PIPE, encoding="utf-8").stdout.strip()
+    clang_include_dir = run(
+        ["clang", "--print-resource-dir"], stdout=PIPE, stderr=PIPE, encoding="utf-8"
+    ).stdout.strip()
 
     os_platform = platform.system()
     if os_platform == "Windows":
@@ -172,7 +172,9 @@ def main():
             clang_include_dir = clang_include_dir.replace("Program Files", "Progra~1")
 
         arguments = [input_file, "-o", output_file]
-        line_to_replace = "_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL('FIXME_STUB')"
+        line_to_replace = (
+            "_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL('FIXME_STUB')"
+        )
         new_line = "_libraries['FIXME_STUB'] = ctypes.CDLL('{}')".format(library_name)
     elif os_platform == "Linux":
         clang_include_dir += "/include"
@@ -245,23 +247,23 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
 
     # Custom handling for <anonymous|unnamed> struct in Linux
     if os_platform == "Linux":
-        with open(input_file, 'r') as fin:
+        with open(input_file, "r") as fin:
             input_file_contents = fin.read()
-        input_file_array = input_file_contents.split('\n')
+        input_file_array = input_file_contents.split("\n")
 
-        with open(output_file, 'r') as fin:
+        with open(output_file, "r") as fin:
             output_file_contents = fin.read()
-        output_file_array = output_file_contents.split('\n')
+        output_file_array = output_file_contents.split("\n")
 
         # Find all unamed occurences in the output_file
         struct_name_dict = {}
         for index, line in enumerate(output_file_array):
-            if 'amdsmi.h:' in line:
+            if "amdsmi.h:" in line:
                 # Handling "struct_struct (<anonymous:unnamed> at amdsmi.h:<num>:<num>)"
-                if 'anonymous' in line or 'unnamed' in line:
-                    search_name = 'unnamed'
-                    if 'anonymous' in line:
-                        search_name = 'anonymous'
+                if "anonymous" in line or "unnamed" in line:
+                    search_name = "unnamed"
+                    if "anonymous" in line:
+                        search_name = "anonymous"
 
                     # Find the amdsmi.h line number for this instance
                     # Example 1:
@@ -272,7 +274,9 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
                     #    line_num = 782
                     line_num = find_line_num(search_name, line)
                     if line_num == 0:
-                        print(f'Error: {index+1}: Could determine amdsmi.h line number in {line}, skipping replacement')
+                        print(
+                            f"Error: {index + 1}: Could determine amdsmi.h line number in {line}, skipping replacement"
+                        )
                         continue
 
                     # Using in amdsmi.h starting at the line_num to find the structure name
@@ -289,17 +293,19 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
                     #    783:     uint64_t gfx;
                     #    786: } engine_usage;
                     #    struct_name = engine_usage
-                    struct_name = ''
+                    struct_name = ""
                     for i in range(1, 50):
                         input_line = input_file_array[line_num + i]
                         if close_curly_brace in input_line:
-                            struct_name = find_replacement(close_curly_brace, ';', input_line)
+                            struct_name = find_replacement(close_curly_brace, ";", input_line)
                             struct_name = struct_name[1:-1].strip()
                             if len(struct_name):
                                 struct_name = struct_name.split(open_bracket)[0]
                                 break
                     if not len(struct_name):
-                        print(f'Error: {index+1}: Could not find struct name using line number {line_num}, skipping replacement')
+                        print(
+                            f"Error: {index + 1}: Could not find struct name using line number {line_num}, skipping replacement"
+                        )
                         continue
 
                     # Generate the replacement for this line
@@ -307,17 +313,19 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
                     #     class struct_struct (unnamed at amdsmi.h:782:9)(Structure):
                     # becomes
                     #     class struct_engine_usage(Structure):
-                    str_replace = find_replacement('struct_struct', close_parenthesis, line)
+                    str_replace = find_replacement("struct_struct", close_parenthesis, line)
                     if len(str_replace) > 0:
-                        str_with = f'struct_{struct_name}'
+                        str_with = f"struct_{struct_name}"
                     else:
                         # Example
                         #     (unnamed at amdsmi.h:787:9)', 'uint32_t', 'uint64_t', 'uint8_t',
                         # becomes
                         #     'struct_memory_usage', 'uint32_t', 'uint64_t', 'uint8_t',
-                        str_replace = find_replacement(f'({search_name}', close_parenthesis, line)
+                        str_replace = find_replacement(f"({search_name}", close_parenthesis, line)
                         if len(str_replace) == 0:
-                            print(f'Error: {index+1}: Could not find structure name in {line}, skipping replacement')
+                            print(
+                                f"Error: {index + 1}: Could not find structure name in {line}, skipping replacement"
+                            )
                             continue
                         str_with = f"'struct_{struct_name}"
 
@@ -333,18 +341,18 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
                     #     ('_0', struct_struct (anonymous at amdsmi.h:370:9)),
                     # becomes
                     #     ('struct_amdsmi_bdf_t', struct_amdsmi_bdf_t),
-                    if '_0' in new_line:
-                        new_line = new_line.replace('_0', f'struct_{struct_name}')
+                    if "_0" in new_line:
+                        new_line = new_line.replace("_0", f"struct_{struct_name}")
 
                     # Look for special replacements that has an amdsmi.h:
                     # Example
                     #     amdsmi.h:370:9)', 'uint8_t',
                     # becomes
                     #     'uint8_t,
-                    if 'amdsmi.h:' in new_line:
-                        str_replace = find_replacement('amdsmi.h:', ',', line)
+                    if "amdsmi.h:" in new_line:
+                        str_replace = find_replacement("amdsmi.h:", ",", line)
                         if len(str_replace) > 0:
-                            new_line = new_line.replace(str_replace, '')
+                            new_line = new_line.replace(str_replace, "")
 
                     # Save the replaced line into the array
                     output_file_array[index] = new_line
@@ -356,8 +364,8 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
             #     union_amdsmi_bdf_t._anonymous_ = ('_0',)
             # becomes
             #
-            if '_anonymous_' in new_line:
-                new_line = ''
+            if "_anonymous_" in new_line:
+                new_line = ""
                 output_file_array[index] = new_line
 
             # Example
@@ -366,9 +374,9 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
             #     'struct_pcie_static_',
             name = ", 'struct_struct"
             if name in new_line:
-                str_replace = find_replacement(name, '', new_line)
+                str_replace = find_replacement(name, "", new_line)
                 if len(str_replace) > 0:
-                    new_line = new_line.replace(str_replace, ',')
+                    new_line = new_line.replace(str_replace, ",")
                     output_file_array[index] = new_line
 
             # Example
@@ -377,13 +385,14 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
             #     amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_utilization_counter_t), uint32_t, ctypes.POINTER(ctypes.c_uint64)]
             name = "amdsmi_get_utilization_count.argtypes"
             if name in new_line:
-                str_replace = find_replacement(name, '', new_line)
+                str_replace = find_replacement(name, "", new_line)
                 if len(str_replace) > 0:
-                    str_with = 'amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_utilization_counter_t), uint32_t, ctypes.POINTER(ctypes.c_uint64)]'
+                    str_with = "amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_utilization_counter_t), uint32_t, ctypes.POINTER(ctypes.c_uint64)]"
                     new_line = new_line.replace(str_replace, str_with)
                     output_file_array[index] = new_line
 
         write_file(output_file, output_file_array)
+
 
 if __name__ == "__main__":
     main()

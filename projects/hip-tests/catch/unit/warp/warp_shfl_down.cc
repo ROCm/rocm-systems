@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "warp_shfl_common.hh"
 
@@ -53,7 +40,7 @@ template <typename T> class WarpShflDown : public WarpShflTest<WarpShflDown<T>, 
     LinearAllocGuard<unsigned int> deltas_dev(LinearAllocs::hipMalloc, alloc_size);
     deltas_.resize(width_);
     std::generate(deltas_.begin(), deltas_.end(),
-                  [this] { return GenerateRandomInteger(0u, static_cast<unsigned int>(width_)); });
+                  [this] { return GenRandomInteger(0u, static_cast<unsigned int>(width_)); });
     HIP_CHECK(hipMemcpy(deltas_dev.ptr(), deltas_.data(), alloc_size, hipMemcpyHostToDevice));
     shfl_down<<<this->grid_.grid_dim_, this->grid_.block_dim_>>>(arr_dev, input_dev, active_masks,
                                                                  deltas_dev.ptr(), width_);
@@ -99,7 +86,7 @@ template <typename T> class WarpShflDown : public WarpShflTest<WarpShflDown<T>, 
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp shuffle
  */
-TEMPLATE_TEST_CASE("Unit_Warp_Shfl_Down_Positive_Basic", "", int, unsigned int, long, unsigned long,
+HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Down_Positive_Basic, int, unsigned int, long, unsigned long,
                    long long, unsigned long long, float, double, __half, __half2) {
   int device;
   hipDeviceProp_t device_properties;

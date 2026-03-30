@@ -544,7 +544,8 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts, int arg_cnt, char** arg_list
 
       case 'v':
 #ifdef CURRENT_GIT_HASH
-        std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH) << std::endl;
+        std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH)
+                  << std::endl;
 #else
         std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << std::endl;
 #endif
@@ -668,7 +669,7 @@ int main(int argc, char** argv) {
   // Detach the thread, sys will recycle the resource
   thr_ret = pthread_detach(sig_listen_thread);
   // Don't fail if detach is not successful
-  if (thr_ret !=0) {
+  if (thr_ret != 0) {
     std::cerr << "Failed to detach ProcessSignalLoop. pthread_detach() returned " << thr_ret;
   }
 

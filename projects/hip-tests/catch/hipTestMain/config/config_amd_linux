@@ -167,7 +167,14 @@
         "Unit_hipMallocAsync_MThread_ThreadLocalStream",
         "Unit_hipMallocAsync_StreamEvent_CrissCross",
         "Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem",
-        "Unit_hipHostRegister_Negative"
+        "Unit_hipHostRegister_Negative",
+        "Unit_hipStreamAttachMemAsync_Negative",
+        "Unit_hipGetProcAddress_IPC_Event",
+        "Unit_hipGetProcAddress_IPC_Event",
+        "Unit_hipP2pLinkTypeAndHopFunc",
+        "ChildMalloc",
+        "Unit_hipMemGetInfo_Functional_scenario4",
+        "Unit_hipMemGetInfo_SetHiddenFreeMemFromChild",
     #endif
     #if defined gfx1200 || defined gfx1201 || defined amdgcnspirv
         "=== SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.",

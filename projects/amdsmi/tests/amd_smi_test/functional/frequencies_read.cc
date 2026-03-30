@@ -20,24 +20,26 @@
  * THE SOFTWARE.
  */
 
-#include <cstdint>
-#include <iostream>
-#include <iomanip>
-#include <string>
+#include "frequencies_read.h"
 
 #include <gtest/gtest.h>
-#include "amd_smi/amdsmi.h"
-#include "frequencies_read.h"
+
+#include <cstdint>
+#include <iomanip>
+#include <iostream>
+#include <string>
+
 #include "../test_common.h"
+#include "amd_smi/amdsmi.h"
 
 TestFrequenciesRead::TestFrequenciesRead() : TestBase() {
   set_title("AMDSMI Frequencies Read Test");
-  set_description("The Frequency Read tests verifies that the "
-              "available and current frequency levels can be read properly.");
+  set_description(
+      "The Frequency Read tests verifies that the "
+      "available and current frequency levels can be read properly.");
 }
 
-TestFrequenciesRead::~TestFrequenciesRead(void) {
-}
+TestFrequenciesRead::~TestFrequenciesRead(void) {}
 
 void TestFrequenciesRead::SetUp(void) {
   TestBase::SetUp();
@@ -45,9 +47,7 @@ void TestFrequenciesRead::SetUp(void) {
   return;
 }
 
-void TestFrequenciesRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestFrequenciesRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestFrequenciesRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -60,19 +60,17 @@ void TestFrequenciesRead::Close() {
   TestBase::Close();
 }
 
-
-static void print_frequencies(amdsmi_frequencies_t *f, uint32_t *l = nullptr) {
+static void print_frequencies(amdsmi_frequencies_t* f, uint32_t* l = nullptr) {
   assert(f != nullptr);
   for (uint32_t clk_i = 0; clk_i < f->num_supported; ++clk_i) {
     std::string clk_i_str;
     if (f->has_deep_sleep) {
-      clk_i_str = (clk_i == 0) ? "S" : std::to_string(clk_i-1);
+      clk_i_str = (clk_i == 0) ? "S" : std::to_string(clk_i - 1);
     } else {
       clk_i_str = std::to_string(clk_i);
     }
-    std::cout << "\t**  " <<
-      std::setw(2) << std::right << clk_i_str << ": " <<
-      std::setw(11) << std::right << f->frequency[clk_i];
+    std::cout << "\t**  " << std::setw(2) << std::right << clk_i_str << ": " << std::setw(11)
+              << std::right << f->frequency[clk_i];
     if (l != nullptr) {
       std::cout << "T/s; x" << l[clk_i];
     } else {
@@ -99,26 +97,25 @@ void TestFrequenciesRead::Run(void) {
 
   for (uint32_t x = 0; x < num_iterations(); ++x) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
-      auto freq_output = [&](amdsmi_clk_type_t t, const char *name) {
-        err =  amdsmi_get_clk_freq(processor_handles_[i], t, &f);
+      auto freq_output = [&](amdsmi_clk_type_t t, const char* name) {
+        err = amdsmi_get_clk_freq(processor_handles_[i], t, &f);
         if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-          std::cout << "\t**Get " << name <<
-                               ": Not supported on this machine" << std::endl;
+          std::cout << "\t**Get " << name << ": Not supported on this machine" << std::endl;
           // Verify api support checking functionality is working
-          err =  amdsmi_get_clk_freq(processor_handles_[i], t, nullptr);
+          err = amdsmi_get_clk_freq(processor_handles_[i], t, nullptr);
           ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
           return;
         }
 
         if (err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
-          std::cout << "\t**Get " << name <<
-                               ": Not implemented on this machine" << std::endl;
+          std::cout << "\t**Get " << name << ": Not implemented on this machine" << std::endl;
           return;
         }
 
         if (err == AMDSMI_STATUS_UNEXPECTED_DATA) {
           // special driver issue, shouldn't normally occur
-          std::cerr << "WARN: Clock file [" << FreqEnumToStr(t) << "] exists on device [" << i << "] but empty!" << std::endl;
+          std::cerr << "WARN: Clock file [" << FreqEnumToStr(t) << "] exists on device [" << i
+                    << "] but empty!" << std::endl;
           std::cerr << "      Likely a driver issue!" << std::endl;
           return;
         }
@@ -129,7 +126,7 @@ void TestFrequenciesRead::Run(void) {
           std::cout << f.num_supported << std::endl;
           print_frequencies(&f);
           // Verify api support checking functionality is working
-          err =  amdsmi_get_clk_freq(processor_handles_[i], t, nullptr);
+          err = amdsmi_get_clk_freq(processor_handles_[i], t, nullptr);
           ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
         }
       };
@@ -144,14 +141,13 @@ void TestFrequenciesRead::Run(void) {
 
       err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], &b);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine"
-                                                              << std::endl;
+        std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine" << std::endl;
         // Verify api support checking functionality is working
         err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
         ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
       } else if (err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
-          std::cout << "\t**Get PCIE Bandwidth "
-                    << ": Not implemented on this machine" << std::endl;
+        std::cout << "\t**Get PCIE Bandwidth "
+                  << ": Not implemented on this machine" << std::endl;
       } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
@@ -162,12 +158,11 @@ void TestFrequenciesRead::Run(void) {
           // NOTE:  We expect AMDSMI_STATUS_NOT_SUPPORTED, if rsmi_pcie_bandwidth_t* is NULL
           err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
           if (err != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
-              ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-          }
-          else {
-              auto status_string("");
-              amdsmi_status_code_to_string(err, &status_string);
-              std::cout << "\t\t** amdsmi_get_gpu_pci_bandwidth(): " << status_string << "\n";
+            ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+          } else {
+            auto status_string("");
+            amdsmi_status_code_to_string(err, &status_string);
+            std::cout << "\t\t** amdsmi_get_gpu_pci_bandwidth(): " << status_string << "\n";
           }
         }
       }

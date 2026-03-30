@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+
 #pragma once
 
 #include "hip_internal.hpp"
@@ -68,10 +69,8 @@ class PlatformState {
   std::shared_ptr<UniqueFD> GetUniqueFileHandle(const std::string& file_path);
   bool CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd);
 
-  void GetLoadingMode(hipModuleLoadingMode_t* mode);
-
   // Logging lock accessor
-  amd::Monitor& GetLogLock() { return lg_lock_; }
+  std::recursive_mutex& GetLogLock() { return lg_lock_; }
 
   // Friend functions for logging access
   friend hipError_t hipExtEnableLogging();
@@ -79,17 +78,17 @@ class PlatformState {
   friend hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
 
   inline bool RegisterLibraryFunction(const hipKernel_t f, const hipLibrary_t l) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     return library_functions_.try_emplace(f, l).second;
   }
 
   inline bool UnregisterLibraryFunction(const hipKernel_t f) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     return library_functions_.erase(f) > 0;
   }
 
   inline bool GetFunctionLibrary(const hipKernel_t f, hipLibrary_t* lib) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     auto it = library_functions_.find(f);
     if (it != library_functions_.end()) {
       *lib = it->second;
@@ -105,9 +104,9 @@ class PlatformState {
   PlatformState() : statCO_(*this), log_level_(0), log_size_(0), log_mask_(0) {}
   ~PlatformState() {}
 
-  amd::Monitor lock_{true};         //!< Guards PlatformState globals
-  amd::Monitor ufd_lock_{true};     //!< Unique FD Store Lock
-  amd::Monitor lg_lock_{true};      //!< Lock for logging operations
+  std::recursive_mutex lock_;       //!< Guards PlatformState globals
+  std::recursive_mutex ufd_lock_;   //!< Unique FD Store Lock
+  std::recursive_mutex lg_lock_;    //!< Lock for logging operations
   static PlatformState* platform_;  //!< Singleton instance
 
   //! Dynamic Code Object map, keyin module to get the corresponding object

@@ -29,7 +29,6 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/components/ensure_storage.hpp"
-#include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
@@ -599,10 +598,8 @@ backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
 }
 
 void
-backtrace_metrics::cache_backtrace_data([[maybe_unused]] int64_t  _tid,
-                                        [[maybe_unused]] uint64_t _ts) const
+backtrace_metrics::cache_backtrace_data(int64_t _tid, uint64_t _ts) const
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto is_category_enabled = [&](const auto& _category) { return (*this)(_category); };
 
     if(is_category_enabled(category::thread_cpu_time{}))
@@ -634,7 +631,6 @@ backtrace_metrics::cache_backtrace_data([[maybe_unused]] int64_t  _tid,
         cache_backtrace_metrics_events<category::thread_hardware_counter,
                                        hw_counter_data_t>(0, _ts, m_hw_counter, _tid);
     }
-#endif
 }
 }  // namespace component
 }  // namespace rocprofsys

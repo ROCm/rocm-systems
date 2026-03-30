@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #if defined(_WIN32) || defined(__CYGWIN__)
 
@@ -239,6 +225,38 @@ static void SetThreadName(DWORD threadId, const char* name) {
 }
 
 void Os::setCurrentThreadName(const char* name) { SetThreadName(GetCurrentThreadId(), name); }
+
+// Crash exception handling for Windows
+static Os::CrashCallback crashCallback_ = nullptr;
+static PVOID crashExceptionHandler = NULL;
+
+static LONG WINAPI crashExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
+  DWORD code = ep->ExceptionRecord->ExceptionCode;
+
+  if (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_STACK_OVERFLOW ||
+      code == EXCEPTION_ILLEGAL_INSTRUCTION || code == EXCEPTION_INT_DIVIDE_BY_ZERO ||
+      code == EXCEPTION_INT_OVERFLOW) {
+    if (crashCallback_ != nullptr) {
+      crashCallback_();
+    }
+  }
+
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+bool Os::installExceptionHandlers(CrashCallback callback) {
+  crashCallback_ = callback;
+  crashExceptionHandler = AddVectoredExceptionHandler(1, crashExceptionFilter);
+  return crashExceptionHandler != NULL;
+}
+
+void Os::uninstallExceptionHandlers() {
+  if (crashExceptionHandler != NULL) {
+    RemoveVectoredExceptionHandler(crashExceptionHandler);
+    crashExceptionHandler = NULL;
+  }
+  crashCallback_ = nullptr;
+}
 
 static LONG WINAPI divExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
   DWORD code = ep->ExceptionRecord->ExceptionCode;

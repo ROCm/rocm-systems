@@ -54,6 +54,7 @@
 class DtifPlatform;
 typedef DtifPlatform* (DtifCreateFunc)(const char*);
 typedef void (DtifDestroyFunc)();
+typedef HSAKMT_STATUS (DxgAbiCheckFunc)(HsaStructureSizes*);
 
 namespace rocr {
 namespace core {
@@ -408,6 +409,7 @@ class ThunkLoader {
     void LoadThunkApiTable();
     bool CreateThunkInstance();
     bool DestroyThunkInstance();
+    bool CheckThunkAbi();
     bool IsDXG() const { return is_dxg_; }
     bool IsDTIF() const { return is_dtif_; }
     bool IsSharedLibraryLoaded() const { return is_loaded_; }

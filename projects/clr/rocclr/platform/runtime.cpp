@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/runtime.hpp"
 #include "os/os.hpp"
@@ -81,7 +67,7 @@ bool Runtime::init() {
     return false;
   }
 
-  ClPrint(LOG_INFO, LOG_MISC && !amd::IS_HIP, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
+  ClPrint(LOG_INFO, LOG_MISC, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
 
   initialized_ = true;
   pid_ = amd::Os::getProcessId();
@@ -115,6 +101,15 @@ class RuntimeTearDown runtime_tear_down{};
 
 // =================================================================================================
 RuntimeTearDown::~RuntimeTearDown() {
+  // Flush and stop async logging. Note: Windows will destroy other threads by now
+#ifdef _WIN32
+    FlushAsyncLogsInCurrentThread();
+#else
+    FlushAsyncLogs();
+#endif
+  if (IsAsyncLoggingEnabled()) {
+    EnableAsyncLogging(false);
+  }
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Begin runtime teardown");
 #if !defined(_WIN32) && !defined(BUILD_STATIC_LIBS)
   // Only perform destruction if process matches the initialization,

@@ -81,7 +81,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 
   switch (Type) {
   case HSA_QUEUE_COMPUTE_AQL: {
-    assert(QueueResource->ErrorReason == nullptr);
     uint64_t pkg_num = QueueSizeInBytes / 64;
     uint32_t cmdbuf_size = device_->GetCmdbufSize();
     uint32_t queue_engine = device_->GetComputeEngine();
@@ -189,7 +188,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
                                              void *TrapBufferBaseAddress,
                                              HSAuint64 TrapBufferSizeInBytes) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not implemented\n");
+
+  wsl::thunk::WDDMDevice* device = get_wddmdev(Node);
+  if (device == NULL) {
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
+
+  if (!device->SetTrapHandler(reinterpret_cast<uint64_t>(TrapHandlerBaseAddress),
+                              reinterpret_cast<uint64_t>(TrapBufferBaseAddress))) {
+    return HSAKMT_STATUS_ERROR;
+  }
+
   return HSAKMT_STATUS_SUCCESS;
 }
 

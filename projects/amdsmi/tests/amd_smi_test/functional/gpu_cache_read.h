@@ -27,8 +27,8 @@
 
 class TestGPUCacheRead : public TestBase {
  public:
-    TestGPUCacheRead();
- // @Brief: Destructor for test case of TestGPUBusyRead
+  TestGPUCacheRead();
+  // @Brief: Destructor for test case of TestGPUBusyRead
   virtual ~TestGPUCacheRead();
 
   // @Brief: Setup the environment for measurement

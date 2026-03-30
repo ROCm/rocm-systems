@@ -320,9 +320,6 @@ class RocprofsysConfig:
 
 def _find_rocm_path() -> Optional[Path]:
     """Find ROCm installation path."""
-    if os.environ.get("ROCPROFSYS_USE_ROCM") == "OFF":
-        return None
-
     for candidate in [
         os.environ.get("ROCM_PATH"),
         "/opt/rocm",
@@ -533,9 +530,6 @@ def discover_install_config(
     Raises:
         FileNotFoundError: If build/installation dirs and executables are not found
     """
-
-    if os.environ.get("ROCPROFSYS_USE_ROCM") == "OFF":
-        raise FileNotFoundError("Install mode does not support ROCPROFSYS_USE_ROCM=OFF")
 
     if install_dir is None:
         env_install = os.environ.get("ROCPROFSYS_INSTALL_DIR")

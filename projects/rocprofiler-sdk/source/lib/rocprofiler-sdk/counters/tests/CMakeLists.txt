@@ -61,7 +61,7 @@ target_link_libraries(
 
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
     metrics_test.cpp evaluate_ast_test.cpp dimension.cpp core.cpp code_object_loader.cpp
-    device_counting.cpp)
+    device_counting.cpp firmware_restrictions.cpp)
 set(ROCPROFILER_LIB_COUNTER_TEST_HEADERS code_object_loader.hpp device_counting.hpp)
 
 add_executable(counter-tests)

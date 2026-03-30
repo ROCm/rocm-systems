@@ -6,25 +6,41 @@
 # - How to skip:
 #     git commit --no-verify
 # or
-#     SKIP=clang-format-docker git commit
-#     SKIP=cpplint-docker git commit
+#     SKIP=clang-format git commit
+#     SKIP=ruff-format git commit
+#     SKIP=gersemi git commit
 
+exclude: |
+  (?x)
+    docs/
+    | .*\.(md|rst|rtf)$
+    | \.readthedocs\.yaml$
+    | build/
+    | build-.*/
+    | _build/
 fail_fast: false
 repos:
-  # For portability I decided to use Docker containers
-  - repo: https://github.com/dmitrii-galantsev/pre-commit-docker-cpplint
-    rev: 0.0.3
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
     hooks:
-      - id: clang-format-docker
-      - id: cpplint-docker
-  # Below is a local way of running formatters and linters
-  # NOTE: clang-tidy is not used in the above tests
-  #  - repo: https://github.com/pocc/pre-commit-hooks
-  #    rev: v1.3.5
-  #    hooks:
-  #      - id: clang-format
-  #        args: [--no-diff, -i]
-  #      - id: clang-tidy
-  #        args: [-p=build, --quiet]
-  #      - id: cpplint
-  #        args: [--verbose=5]
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.0
+    hooks:
+      - id: clang-format
+        files: '\.(c|cpp|cc|h|hpp|m|mm)$'
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.4
+    hooks:
+      - id: ruff-format
+        exclude: ^python_smi_tools/rsmiBindingsInit\.py$
+
+  - repo: https://github.com/BlankSpruce/gersemi
+    rev: 0.26.0
+    hooks:
+      - id: gersemi

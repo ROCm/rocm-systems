@@ -27,7 +27,7 @@
 
 class TestFrequenciesReadWrite : public TestBase {
  public:
-    TestFrequenciesReadWrite();
+  TestFrequenciesReadWrite();
 
   // @Brief: Destructor for test case of TestFrequenciesReadWrite
   virtual ~TestFrequenciesReadWrite();

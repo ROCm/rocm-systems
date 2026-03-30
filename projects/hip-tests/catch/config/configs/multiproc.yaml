@@ -129,4 +129,3 @@ multiproc:
   Unit_hipSetDevice_MinRvdMaxHvdDevicesList: *level_2
   Unit_hipSetDevice_MaxRvdMinHvdDevicesList: *level_2
   Unit_hipSetDevice_RvdCvdDevicesList: *level_2
-

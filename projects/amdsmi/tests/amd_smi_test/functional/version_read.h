@@ -27,7 +27,7 @@
 
 class TestVersionRead : public TestBase {
  public:
-    TestVersionRead();
+  TestVersionRead();
 
   // @Brief: Destructor for test case of TestVersionRead
   virtual ~TestVersionRead();

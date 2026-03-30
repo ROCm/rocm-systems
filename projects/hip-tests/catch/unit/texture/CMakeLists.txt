@@ -1,22 +1,6 @@
-# Copyright (c) 2024 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
@@ -66,6 +50,7 @@ set(TEST_SRC
     hipTexRefGetAddressMode.cc
     hipTexRefSetGetFilterMode.cc
     hipDeviceGetTexture1DLinearMaxWidth.cc
+    hipMipmappedArrayGetMemoryRequirements.cc
 )
 
 # tests not for gfx90a+
@@ -98,7 +83,6 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     hipTexRefSetGetMipmapLevelBias.cc
     hipTexRefSetGetMipmapLevelClamp.cc
     hipTexRefSetGetMipmappedArray.cc
-    hipMipmappedArrayGetMemoryRequirements.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")
@@ -124,7 +108,7 @@ endfunction()  # CheckAcceptedArchs
 
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST} -Wno-deprecated-declarations
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only -Wno-deprecated-declarations
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o tex_ref_get_module.code
@@ -158,6 +142,7 @@ else()
   set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
 endif()
 
+get_filename_component(HIP_TEST_LABELS ${CMAKE_CURRENT_SOURCE_DIR} NAME)
 hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)

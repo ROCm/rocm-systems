@@ -27,7 +27,7 @@
 
 class TestAPISupportRead : public TestBase {
  public:
-    TestAPISupportRead();
+  TestAPISupportRead();
 
   // @Brief: Destructor for test case of TestAPISupportRead
   virtual ~TestAPISupportRead();

@@ -216,11 +216,14 @@ void AieAqlQueue::SubmitPackets() {
 
   auto& driver = static_cast<XdnaDriver&>(agent_.driver());
   void* queue_base = amd_queue_.hsa_queue.base_address;
+  const uint32_t queue_size = amd_queue_.hsa_queue.size;
 
   uint64_t cur_id = LoadReadIndexRelaxed();
   const uint64_t end = LoadWriteIndexAcquire();
   while (cur_id < end) {
-    auto* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + cur_id;
+    // Use modulo to properly index into the ring buffer
+    const uint64_t pkt_idx = cur_id % queue_size;
+    auto* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + pkt_idx;
 
     // Get the packet header information
     if (pkt->header.header != HSA_PACKET_TYPE_VENDOR_SPECIFIC ||
@@ -235,7 +238,8 @@ void AieAqlQueue::SubmitPackets() {
         // packets there are. All can be combined into a single chain.
         uint64_t num_cont_start_cu_pkts = 1;
         for (uint64_t peak_pkt_id = cur_id + 1; peak_pkt_id < end; peak_pkt_id++) {
-          auto* peak_pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_id;
+          const uint64_t peak_pkt_idx = peak_pkt_id % queue_size;
+          auto* peak_pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_idx;
           if (peak_pkt->opcode != HSA_AMD_AIE_ERT_START_CU) {
             break;
           }

@@ -204,7 +204,6 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
                     [this]() -> amd::HostQueue& { return *device_->NullStream(false); }),
         busy_heap_(device, *this),
         free_heap_(device, *this),
-        lock_pool_ops_(true),
         device_(device),
         shared_(nullptr),
         max_total_size_(0) {
@@ -270,7 +269,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
 
   /// Add a safe stream for quick looks-ups if event dependencies option is enabled
   void AddSafeStream(Stream* event_stream, Stream* wait_stream) {
-    amd::ScopedLock lock(lock_pool_ops_);
+    std::scoped_lock lock(lock_pool_ops_);
     if (EventDependencies()) {
       free_heap_.AddSafeStream(event_stream, wait_stream);
     }
@@ -335,7 +334,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   } state_;
 
   hipMemPoolProps properties_;  //!< Properties of the memory pool
-  amd::Monitor lock_pool_ops_;  //!< Access to the pool must be lock protected
+  std::recursive_mutex lock_pool_ops_;  //!< Access to the pool must be lock protected
   std::map<hip::Device*, hipMemAccessFlags>
       access_map_;  //!< Map of access to the pool from devices
 

@@ -26,6 +26,7 @@
 #endif
 
 #include "profile_interface.hpp"
+#include "filenames.hpp"
 #include "perfcounter.hpp"
 
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
@@ -78,6 +79,28 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
         if(tool.config.realtime && trace_size != 0)
             tool.config.realtime->add(
                 tool.config.shader_engine, static_cast<realtime_t*>(trace_events), trace_size);
+    }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD)
+    {
+        using inst_t    = rocprofiler_thread_trace_decoder_inst_other_simd_t;
+        const auto* ptr = static_cast<const inst_t*>(trace_events);
+
+        if(trace_size > 0 && ptr != nullptr)
+        {
+            std::vector<inst_t> recs(ptr, ptr + trace_size);
+            const int           se = tool.config.shader_engine;
+            tool.config.filemgr->add_other_simd_data(se, recs);
+        }
+    }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
+    {
+        using shaderdata_t = rocprofiler_thread_trace_decoder_shaderdata_t;
+        const auto* ptr    = static_cast<const shaderdata_t*>(trace_events);
+        if(trace_size > 0)
+        {
+            const int se = tool.config.shader_engine;
+            tool.config.filemgr->add_shaderdata_data(se, ptr, trace_size);
+        }
     }
 
     if(trace_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;

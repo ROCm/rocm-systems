@@ -258,11 +258,6 @@ typedef enum hipMemoryType {
 
 } hipMemoryType;
 
-typedef enum hipModuleLoadingMode_t {
-  HIP_MODULE_EAGER_LOADING = 1,
-  HIP_MODULE_LAZY_LOADING = 2
-} hipModuleLoadingMode_t;
-
 /**
  * Pointer attributes
  */
@@ -6541,17 +6536,6 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library);
 
-
-/**
- * @brief Function gets the current module load mode
- *
- * @param [out] module  mode of current module load
- *
- * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidContext, #hipErrorNotInitialized,
- * #hipErrorNotFound,
- */
-hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode);                                      
-
 /**
  * @brief Returns a Library Handle
  *
@@ -9427,13 +9411,20 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
                                 unsigned long long flags);
 
 /**
- * @brief Creates a memory allocation described by the properties and size
+ * @brief Creates a memory handle for the allocation described by the properties and given size
  *
  * @param [out] handle - value of the returned handle.
  * @param [in] size - size of the allocation.
  * @param [in] prop - properties of the allocation.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ * 
+ * This API creates a memory allocation on the target device specified through the prop structure.
+ * The prop allocation type must be specified as either #hipMemAllocationTypePinned or
+ * #hipMemAllocationTypeUncached.
+ * The prop location type must be specified as #hipMemLocationTypeDevice or #hipMemLocationTypeHost.
+ * Any other value results in #hipErrorInvalidValue.
+ *
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.
  *

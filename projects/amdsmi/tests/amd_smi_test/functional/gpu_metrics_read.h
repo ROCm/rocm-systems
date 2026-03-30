@@ -27,7 +27,7 @@
 
 class TestGpuMetricsRead : public TestBase {
  public:
-    TestGpuMetricsRead();
+  TestGpuMetricsRead();
 
   // @Brief: Destructor for test case of TestVOltRead
   virtual ~TestGpuMetricsRead();

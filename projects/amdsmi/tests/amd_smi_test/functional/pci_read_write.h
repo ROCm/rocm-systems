@@ -27,7 +27,7 @@
 
 class TestPciReadWrite : public TestBase {
  public:
-    TestPciReadWrite();
+  TestPciReadWrite();
 
   // @Brief: Destructor for test case of TestPciReadWrite
   virtual ~TestPciReadWrite();

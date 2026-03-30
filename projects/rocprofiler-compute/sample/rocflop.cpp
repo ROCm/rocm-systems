@@ -151,9 +151,14 @@ __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float1
 }
 #endif // !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__)
 
+int g_current_device = -1;
+
 void HIP_CALL(hipError_t err)
 {
     if(err != hipSuccess) {
+        if(g_current_device >= 0) {
+            std::cout << "[GPU " << g_current_device << "] ";
+        }
         std::cout << "HIP Error: " << (int)err << " " << hipGetErrorString(err) << std::endl;
         exit(1);
     }
@@ -421,12 +426,13 @@ void print_result(const Result& res, uint32_t mask)
 
 Result run_tests(int device, int runs, uint32_t mask)
 {
+    g_current_device = device;
     int device_count;
 
     HIP_CALL(hipGetDeviceCount(&device_count));
 
     if(device >= device_count) {
-        std::cout << "Device " << device << " does not exist. Skipping..." << std::endl;
+        std::cout << "[GPU " << device << "] Device does not exist. Skipping..." << std::endl;
         exit(1);
     }
 
@@ -525,8 +531,37 @@ pid_t fork_process(int device, int runs, uint32_t mask, int fd)
     };
 
     execv("/proc/self/exe", args);
-    std::cout << "execv() failed: " << std::strerror(errno) << std::endl;
+    std::cout << "[GPU " << device << "] execv() failed: " << std::strerror(errno) << std::endl;
     exit(1);
+}
+
+std::vector<Result> read_records_from_pipe(int fd[2], size_t expected_count)
+{
+    int flags = fcntl(fd[0], F_GETFL, 0);
+    fcntl(fd[0], F_SETFL, flags | O_NONBLOCK);
+
+    std::vector<Result> results(expected_count);
+    ssize_t bytes_read = read(fd[0], results.data(), results.size() * sizeof(Result));
+
+    if(bytes_read < 0) {
+        std::cout << "Error reading results from child process(es): "
+                  << std::strerror(errno) << std::endl;
+        return {};
+    }
+
+    if(bytes_read == 0) {
+        std::cout << "No results received from child process(es)." << std::endl;
+        return {};
+    }
+
+    if(bytes_read % sizeof(Result) != 0) {
+        std::cout << "Warning: Incomplete result data received from child process(es); "
+                  << "some data may be ignored." << std::endl;
+    }
+
+    int count = static_cast<int>(bytes_read / sizeof(Result));
+    results.resize(count);
+    return results;
 }
 
 void run(std::vector<int>& devices, int runs, uint32_t mask)
@@ -549,24 +584,31 @@ void run(std::vector<int>& devices, int runs, uint32_t mask)
     }
 
     // Wait for all processes to finish
-    for(auto pid : pids) {
+    int failed = 0;
+    for(size_t i = 0; i < pids.size(); i++) {
         int status;
-        waitpid(pid, &status, 0);
+        waitpid(pids[i], &status, 0);
+        if(WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            std::cout << "Child process for device " << devices[i]
+                      << " exited with error (code " << WEXITSTATUS(status) << ")." << std::endl;
+            failed++;
+        } else if(WIFSIGNALED(status)) {
+            std::cout << "Child process for device " << devices[i]
+                      << " killed by signal " << WTERMSIG(status) << "." << std::endl;
+            failed++;
+        }
     }
 
-    // Set the read to non-blocking
-    int flags = fcntl(fd[0], F_GETFL, 0);
-    fcntl(fd[0], F_SETFL, flags | O_NONBLOCK);
+    if(failed == (int)pids.size()) {
+        std::cout << "All " << pids.size() << " child process(es) failed. No results to report." << std::endl;
+        exit(1);
+    }
 
-    // Read records from pipe
-    std::vector<Result> results(pids.size());
-    int count = read(fd[0], results.data(), results.size() * sizeof(Result)) / sizeof(Result);
-
-    results.resize(count);
+    std::vector<Result> results = read_records_from_pipe(fd, pids.size());
 
     // Sort results by GPU id
     std::sort(results.begin(), results.end());
- 
+
     // Print results
     for(auto r : results) {
         std::cout << std::endl << "GPU " << r.device << std::endl;
@@ -585,6 +627,12 @@ void run(std::vector<int>& devices, int runs, uint32_t mask)
     }
     std::cout << std::endl << "System total" << std::endl;
     print_result(total, mask);
+
+    if(failed > 0) {
+        std::cout << std::endl << failed << " of " << pids.size()
+                  << " child process(es) failed." << std::endl;
+        exit(1);
+    }
 }
 
 

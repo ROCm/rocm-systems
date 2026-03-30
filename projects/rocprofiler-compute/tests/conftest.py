@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import os
 import shutil
@@ -42,10 +20,27 @@ try:
     rocprof_compute = SourceFileLoader(
         "rocprof-compute", "src/rocprof-compute"
     ).load_module()
+    rocprof_compute_script_path = "src/rocprof-compute"
 except Exception:
     rocprof_compute = SourceFileLoader(
         "rocprof-compute", "rocprof-compute"
     ).load_module()
+    rocprof_compute_script_path = "rocprof-compute"
+
+
+def inject_mpirun(command, num_ranks):
+    """
+    Wrap a command with mpirun for multi-rank execution.
+    """
+    mpirun_cmd = ["mpirun"]
+    # Add --allow-run-as-root only when running as root
+    # (needed for OpenMPI in containers)
+    # This flag is OpenMPI-specific and would cause errors
+    # with other MPI implementations
+    if os.geteuid() == 0:
+        mpirun_cmd.append("--allow-run-as-root")
+    mpirun_cmd.extend(["-n", str(num_ranks)])
+    return mpirun_cmd + command
 
 
 def pytest_addoption(parser):
@@ -168,11 +163,9 @@ def binary_handler_profile_rocprof_compute(request):
 
             # Wrap with mpirun if num_ranks > 1
             if num_ranks > 1:
-                command_rocprof_compute = [
-                    "mpirun",
-                    "-n",
-                    str(num_ranks),
-                ] + command_rocprof_compute
+                command_rocprof_compute = inject_mpirun(
+                    command_rocprof_compute, num_ranks
+                )
 
             process = subprocess.run(
                 command_rocprof_compute,
@@ -230,19 +223,17 @@ def binary_handler_profile_rocprof_compute(request):
 
             # For multi-rank, use mpirun to run the command
             if num_ranks > 1:
-                # Use src/rocprof-compute instead of rocprof-compute
-                command_rocprof_compute[0] = "src/rocprof-compute"
-                command_rocprof_compute = [
-                    "mpirun",
-                    "-n",
-                    str(num_ranks),
-                ] + command_rocprof_compute
+                # Use rocprof_compute_script_path instead of rocprof-compute
+                command_rocprof_compute[0] = rocprof_compute_script_path
+                command_rocprof_compute = inject_mpirun(
+                    command_rocprof_compute, num_ranks
+                )
 
             # For capture_output or multi-rank, run the command with subprocess
             if capture_output or num_ranks > 1:
-                # Use src/rocprof-compute instead of rocprof-compute
+                # Use rocprof_compute_script_path instead of rocprof-compute
                 if num_ranks == 1:
-                    command_rocprof_compute[0] = "src/rocprof-compute"
+                    command_rocprof_compute[0] = rocprof_compute_script_path
 
                 process = subprocess.run(
                     command_rocprof_compute,

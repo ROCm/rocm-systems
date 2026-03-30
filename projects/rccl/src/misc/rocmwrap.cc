@@ -43,33 +43,55 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 
 static int ncclCuMemSupported = 0;
 
+#define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
+
+static int ncclGetKernelVersionCode() {
+  struct utsname u;
+  int major = 0, minor = 0;
+
+  if (uname(&u) != 0) return -1;
+  sscanf(u.release, "%d.%d", &major, &minor);
+  INFO(NCCL_INIT, "Kernel version %d.%d", major, minor);
+
+  return KERNEL_VERSION_CODE(major, minor);
+}
+
 // Determine whether CUMEM & VMM RDMA is supported on this platform
 int ncclIsCuMemSupported() {
   CUdevice currentDev;
   int cudaDev;
   int cudaDriverVersion;
   int flag = 0;
+  int supported = 1;
   ncclResult_t ret = ncclSuccess;
+
+  if (ncclGetKernelVersionCode() < KERNEL_VERSION_CODE(6, 8)) {
+    WARN("cuMem support requires Linux kernel >= 6.8");
+    supported = 0;
+  }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 71260540) return 0;
+  if (cudaDriverVersion < 71260540) {
+    WARN("cuMem support requires HIP_VERSION >= 7.12.60540");
+    supported = 0;
+  }
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
-  if (CUPFN(cuMemCreate) == NULL) return 0;
+  if (CUPFN(cuMemCreate) == NULL) supported = 0;
   CUCHECKGOTO(cuDeviceGet(&currentDev, cudaDev), ret, error);
   // Query device to see if CUMEM VMM support is available
   CUCHECKGOTO(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, currentDev), ret, error);
-  if (!flag) return 0;
+  if (!flag) {
+    WARN("cuMem support requires VMM RDMA support");
+    supported = 0;
+  }
 
+  return supported;
 error:
   return (ret == ncclSuccess);
 }
 
 int ncclCuMemEnable() {
   int param = ncclParamCuMemEnable();
-  if (param > 0 && !ncclCuMemSupported) {
-    WARN("cuMem support requires HIP_VERSION >= 71260540");
-    return 0;
-  }
-  return param;
+  return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
 }
 
 static int ncclCumemHostEnable = -1;

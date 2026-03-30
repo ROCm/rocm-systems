@@ -243,8 +243,8 @@ int run() {
                   << value_to_string(value) << std::endl;
         since_timestamp = next_timestamp;
       }  // while
-    }    // for findex
-  }      // for gindex
+    }  // for findex
+  }  // for gindex
 
   // Delete the field group and GPU group
   result = rdc_group_field_destroy(rdc_handle, field_group_id);

@@ -199,7 +199,11 @@ class KernelParameters : protected HeapObject {
   size_t localMemSize(size_t minDataTypeAlignment) const;
 
   //! Capture the state of the parameters and return the stack base pointer.
-  address capture(device::VirtualDevice& vDev, uint64_t lclMemSize, int32_t* error);
+  address captureOpenCLArgs(device::VirtualDevice& vDev, uint64_t lclMemSize, int32_t* error);
+
+  //! Capture the arguments from signature and set.
+  bool captureHIPArgs(void** kernelParams, address kernArgs, size_t kernArgsSize, address mem);
+
   //! Release the captured state of the parameters.
   void release(address parameters) const;
 
@@ -273,9 +277,6 @@ class KernelParameters : protected HeapObject {
 
   //! Allocate memory for kernel arguments to be set.
   address alloc(device::VirtualDevice& vDev);
-
-  //! Capture the arguments from signature and set.
-  bool captureAndSet(void** kernelParams, address kernArgs, size_t kernArgsSize, address mem);
 };
 
 /*! \brief Encapsulates a __kernel function and the argument values

@@ -23,6 +23,7 @@
 #define _GNU_SOURCE 1
 
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/common/dl.hpp"
 #include "lib/common/elf_utils.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
@@ -150,6 +151,90 @@ resolved_exists(std::string_view fname)
     }
 
     return fs::exists(fname);
+}
+
+auto
+get_this_library_path()
+{
+    const auto libnames = std::vector<std::string>{
+        fmt::format("librocprofiler-sdk.so.{}.{}.{}",
+                    ROCPROFILER_VERSION_MAJOR,
+                    ROCPROFILER_VERSION_MINOR,
+                    ROCPROFILER_VERSION_PATCH),
+        fmt::format("librocprofiler-sdk.so.{}", ROCPROFILER_SOVERSION),
+        "librocprofiler-sdk.so",
+    };
+
+    if(auto _this_lib_path =
+           common::dl::get_symbol_path(libnames,
+                                       "rocprofiler_set_api_table",
+                                       reinterpret_cast<const void*>(rocprofiler_set_api_table),
+                                       true);
+       _this_lib_path)
+        return *_this_lib_path;
+
+    for(const auto& libname : libnames)
+    {
+        if(auto _this_lib_path = common::dl::get_linked_path(libname, {RTLD_NOLOAD | RTLD_LAZY});
+           _this_lib_path)
+        {
+            if(!resolved_exists(*_this_lib_path))
+            {
+                ROCP_CI_LOG(FATAL) << fmt::format("{} resolved path '{}' does not exist",
+                                                  libname,
+                                                  fs::absolute(fs::path{*_this_lib_path}).string());
+            }
+            return fs::canonical(fs::path{*_this_lib_path}).string();
+        }
+    }
+
+    ROCP_CI_LOG(WARNING) << fmt::format(
+        "{} could not locate itself in the list of loaded libraries",
+        fmt::join(libnames.begin(), libnames.end(), "/"));
+
+    return std::string{};
+}
+
+void
+set_rocprofiler_register_library()
+{
+    // this function sets the ROCPROFILER_REGISTER_LIBRARY env var to the path of this library
+    // to ensure that rocprofiler-register will always use this instance of the rocprofiler-sdk
+    // library.
+
+    static auto _once = std::once_flag{};
+    std::call_once(_once, []() {
+        init_logging();
+        auto _this_library_path = get_this_library_path();
+        ROCP_INFO << fmt::format("rocprofiler-sdk library path: '{}'", _this_library_path);
+        // opt out of setting the ROCPROFILER_REGISTER_LIBRARY env var
+        auto enabled = common::get_env("ROCPROFILER_SET_ROCPROFILER_REGISTER_LIBRARY", true);
+        // ensures that rocprofiler-register uses this library path
+        if(!_this_library_path.empty() && enabled)
+        {
+            // used to check for conflicts if already set
+            auto _existing = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
+            if(_existing.empty() ||
+               common::get_env("ROCPROFILER_FORCE_ROCPROFILER_REGISTER_LIBRARY", false))
+            {
+                common::set_env("ROCPROFILER_REGISTER_LIBRARY", _this_library_path, 1);
+            }
+            else
+            {
+                // only report conflict if existing value differs from this library path
+                auto _existing_path = fs::path{_existing};
+                ROCP_CI_LOG_IF(WARNING,
+                               _existing_path.is_absolute() &&
+                                   fs::canonical(_existing_path).string() != _this_library_path)
+                    << fmt::format(
+                           "ROCPROFILER_REGISTER_LIBRARY is already set to '{}' (resolves to "
+                           "'{}'), not overriding with '{}'",
+                           _existing,
+                           fs::canonical(_existing_path).string(),
+                           _this_library_path);
+            }
+        }
+    });
 }
 
 // invoke all rocprofiler_configure symbols
@@ -823,6 +908,8 @@ initialize()
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         ROCP_INFO << "rocprofiler initialize started...";
+        // set the "ROCPROFILER_REGISTER_LIBRARY" env var
+        set_rocprofiler_register_library();
         // initialization is in process
         set_init_status(-1);
         std::atexit([]() {
@@ -967,7 +1054,8 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     // let's just make sure that the forced configure function is a nullptr
     if(forced_config) return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    setenv("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
+    rocprofiler::common::set_env("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
+    rocprofiler::registration::set_rocprofiler_register_library();
     forced_config = configure_func;
     rocprofiler::registration::initialize();
 

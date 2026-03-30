@@ -25,169 +25,158 @@
  * THE SOFTWARE.
  */
 
+#include "amd_smi/impl/nic/amd_smi_lspci_commands.h"
+
 #include <fstream>
+#include <iomanip>
 #include <memory>
 #include <regex>
-#include <iomanip>
 
-#include "amd_smi/impl/nic/amd_smi_lspci_commands.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 
-amdsmi_status_t get_lspci_device_data(std::string bdf_str, std::string search_key, std::string& version) {
-    std::string lspci_data;
-    std::string command = "lspci -s " + bdf_str + " -vv | grep -i '" + search_key + "'";
+amdsmi_status_t get_lspci_device_data(std::string bdf_str, std::string search_key,
+                                      std::string& version) {
+  std::string lspci_data;
+  std::string command = "lspci -s " + bdf_str + " -vv | grep -i '" + search_key + "'";
 
-    if (smi_brcm_execute_cmd_get_data(command, &lspci_data) != AMDSMI_STATUS_SUCCESS) {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << " | "
-           << "Failed to execute command: lspci -s " << bdf_str << " -vv | grep -i " << search_key << ".";
-        LOG_ERROR(ss);
+  if (smi_brcm_execute_cmd_get_data(command, &lspci_data) != AMDSMI_STATUS_SUCCESS) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "Failed to execute command: lspci -s " << bdf_str << " -vv | grep -i " << search_key
+       << ".";
+    LOG_ERROR(ss);
 
-        return AMDSMI_STATUS_NOT_SUPPORTED;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  int pos = lspci_data.find(search_key);
+  if (pos != std::string::npos) {
+    version = lspci_data.erase(0, lspci_data.find(search_key) + search_key.length());
+    if (!version.empty() && version[version.length() - 1] == '\n') {
+      version.erase(version.length() - 1);
     }
+  } else
+    version = "N/A";
 
-    int pos = lspci_data.find(search_key);
-    if (pos != std::string::npos) {
-        version = lspci_data.erase(0, lspci_data.find(search_key) + search_key.length());
-        if (!version.empty() && version[version.length() - 1] == '\n') {
-            version.erase(version.length() - 1);
-        }
-    }
-    else
-        version = "N/A";
-
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t get_lspci_root_switch(amdsmi_bdf_t device_bdf, amdsmi_bdf_t *switchBdf) {
+amdsmi_status_t get_lspci_root_switch(amdsmi_bdf_t device_bdf, amdsmi_bdf_t* switchBdf) {
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+  std::string lspci_data;
 
-    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-    std::string lspci_data;
+  status = smi_brcm_execute_cmd_get_data("lspci -tvv", &lspci_data);
 
-    status = smi_brcm_execute_cmd_get_data("lspci -tvv", &lspci_data);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "Failed to execute command: lspci -tvv.";
+    LOG_ERROR(ss);
+    return status;
+  }
 
-    if (status != AMDSMI_STATUS_SUCCESS) {
+  std::istringstream lines(lspci_data);
+
+  std::string line;
+  uint64_t bus_pos, dev_pos, fun_pos;
+
+  std::vector<amdsmi_bdf_t> switch_list;
+  amdsmi_bdf_t temp;
+
+  // Loop through and get the switch list
+  while (std::getline(lines, line)) {
+    if (line.find("LSI PCIe Switch management endpoint") != std::string::npos) {
+      // get Bus
+      bus_pos = line.rfind(']----');
+      if (bus_pos == std::string::npos) {
+        // Check if the Bus position is not found, then continue to the next line
+        continue;
+      }
+
+      // Get device
+      dev_pos = line.rfind('.');
+      if (dev_pos == std::string::npos) {
+        // Check if the device position is not found, then continue to the next line
+        continue;
+      }
+
+      // Get function
+      fun_pos = dev_pos + 1;
+
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | "
+         << "Found switch at " << line.substr(bus_pos - 6, 2) << ":" << line.substr(dev_pos - 2, 2)
+         << ":" << line.substr(fun_pos - 2, 1);
+      LOG_DEBUG(ss);
+
+      try {
+        // Parse the BDF
+        temp.bus_number = std::stoi(line.substr(bus_pos - 6, 2), NULL, 16);
+        temp.device_number = std::stoi(line.substr(dev_pos - 2, 2), NULL, 16);
+        temp.function_number = std::stoi(line.substr(fun_pos - 2, 1), NULL, 16);
+      } catch (const std::invalid_argument& e) {
         std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << " | "
-           << "Failed to execute command: lspci -tvv.";
+        ss << __PRETTY_FUNCTION__ << " | " << "Invalid input: Not a valid hexadecimal string.";
         LOG_ERROR(ss);
-        return status;
+      } catch (const std::out_of_range& e) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Invalid input: Number out of range.";
+        LOG_ERROR(ss);
+      }
+
+      switch_list.push_back(temp);
     }
-    
-    std::istringstream lines(lspci_data);
+  }
 
-    std::string line;
-    uint64_t bus_pos, dev_pos, fun_pos;
+  // Reset Stream
+  lines.clear();
+  lines.seekg(0, std::ios::beg);
 
-    std::vector<amdsmi_bdf_t> switch_list;
-    amdsmi_bdf_t temp;
+  for (const auto& d : switch_list) {
+    uint64_t switch_bus_start, switch_bus_end = 0x0;
+    std::stringstream ss;
+    ss << std::hex << std::setw(2) << std::setfill('0') << d.bus_number;
 
-
-    // Loop through and get the switch list
     while (std::getline(lines, line)) {
+      if ((line.rfind('-' + ss.str() + ']') != std::string::npos)) {
+        switch_bus_end = d.bus_number;
 
-        if (line.find("LSI PCIe Switch management endpoint") != std::string::npos) {
-            //get Bus
-            bus_pos = line.rfind(']----');
-            if (bus_pos == std::string::npos) {
-                // Check if the Bus position is not found, then continue to the next line
-                continue;
-            }
-            
-            //Get device
-            dev_pos = line.rfind('.');
-            if (dev_pos == std::string::npos) {
-                // Check if the device position is not found, then continue to the next line
-                continue;
-            }
+        bus_pos = line.rfind('-' + ss.str() + ']');
+        // std::cout << line.substr(bus_pos - 2, 2) << std::endl;
 
-            //Get function
-            fun_pos = dev_pos + 1;
-
-            std::ostringstream ss;
-            ss << __PRETTY_FUNCTION__ << " | "
-               << "Found switch at " << line.substr(bus_pos - 6, 2) << ":"
-               << line.substr(dev_pos - 2, 2) << ":"
-               << line.substr(fun_pos - 2, 1);
-            LOG_DEBUG(ss);
-
-            try
-            {
-                // Parse the BDF
-                temp.bus_number =  std::stoi(line.substr(bus_pos - 6, 2), NULL, 16);
-                temp.device_number =  std::stoi(line.substr(dev_pos - 2, 2), NULL, 16);
-                temp.function_number =  std::stoi(line.substr(fun_pos - 2, 1), NULL, 16);
-            } 
-            catch (const std::invalid_argument& e) {
-                std::ostringstream ss;
-                ss << __PRETTY_FUNCTION__ << " | " << "Invalid input: Not a valid hexadecimal string.";
-                LOG_ERROR(ss);
-            }
-            catch (const std::out_of_range& e) {
-                std::ostringstream ss;
-                ss << __PRETTY_FUNCTION__ << " | " << "Invalid input: Number out of range.";
-                LOG_ERROR(ss);
-            }
-            
-            switch_list.push_back(temp);
+        try {
+          switch_bus_start = std::stoi(line.substr(bus_pos - 2, 2), NULL, 16);
+        } catch (const std::invalid_argument& e) {
+          std::ostringstream ss;
+          ss << __PRETTY_FUNCTION__ << " | " << "Invalid input: Not a valid hexadecimal string.";
+          LOG_ERROR(ss);
+        } catch (const std::out_of_range& e) {
+          std::ostringstream ss;
+          ss << __PRETTY_FUNCTION__ << " | " << "Invalid input: Number out of range.";
+          LOG_ERROR(ss);
         }
+
+        std::ostringstream sst;
+        sst << __PRETTY_FUNCTION__ << " | " << "Switch bus range: " << switch_bus_start << "-"
+            << switch_bus_end;
+        LOG_DEBUG(sst);
+
+        break;
+      }
     }
 
-    //Reset Stream
-    lines.clear();
-    lines.seekg(0, std::ios::beg);
+    if (device_bdf.bus_number >= switch_bus_start && device_bdf.bus_number <= switch_bus_end) {
+      switchBdf->bus_number = d.bus_number;
+      switchBdf->device_number = d.device_number;
+      switchBdf->function_number = d.function_number;
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | " << "Found switch at BDF " << d.bus_number << ":"
+         << d.device_number << ":" << d.function_number;
+      LOG_DEBUG(ss);
 
-
-    for (const auto& d : switch_list){
-        uint64_t switch_bus_start, switch_bus_end = 0x0 ;
-        std::stringstream ss;
-        ss << std::hex << std::setw(2) << std::setfill('0') << d.bus_number;
-
-        while (std::getline(lines, line)) {
-
-            if ((line.rfind('-' + ss.str() + ']') != std::string::npos)) {
-                switch_bus_end = d.bus_number;
-                
-                bus_pos = line.rfind('-' + ss.str() + ']');
-                //std::cout << line.substr(bus_pos - 2, 2) << std::endl;
-                
-                try
-                {
-                    switch_bus_start = std::stoi(line.substr(bus_pos - 2, 2), NULL, 16);
-                } 
-                catch (const std::invalid_argument& e) {
-                    std::ostringstream ss;
-                    ss << __PRETTY_FUNCTION__ << " | " << "Invalid input: Not a valid hexadecimal string.";
-                    LOG_ERROR(ss);
-                }
-                catch (const std::out_of_range& e) {
-                    std::ostringstream ss;
-                    ss << __PRETTY_FUNCTION__ << " | " << "Invalid input: Number out of range.";
-                    LOG_ERROR(ss);
-
-                }
-
-                std::ostringstream sst;
-                sst << __PRETTY_FUNCTION__ << " | " << "Switch bus range: " << switch_bus_start << "-" << switch_bus_end;
-                LOG_DEBUG(sst);
-
-                break;
-            }
-            
-        }
-
-        if (device_bdf.bus_number >= switch_bus_start  && device_bdf.bus_number <= switch_bus_end){
-            switchBdf->bus_number = d.bus_number;
-            switchBdf->device_number = d.device_number;
-            switchBdf->function_number = d.function_number;
-            std::ostringstream ss;
-            ss << __PRETTY_FUNCTION__ << " | " << "Found switch at BDF " << d.bus_number << ":" << d.device_number << ":" << d.function_number;
-            LOG_DEBUG(ss);
-                        
-            break;
-        }
+      break;
     }
+  }
 
-      return status;
-
+  return status;
 }

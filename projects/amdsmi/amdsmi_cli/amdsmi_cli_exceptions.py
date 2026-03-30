@@ -69,8 +69,9 @@ AMDSMI_ERROR_MESSAGES = {
     54: "AMDGPU restart error",
     55: "Setting is not available",
     0xFFFFFFFE: "AMD-SMI Library error did not map to a status code",
-    0xFFFFFFFF: "Unknown error"
+    0xFFFFFFFF: "Unknown error",
 }
+
 
 def _get_error_message(error_code):
     if abs(error_code) in AMDSMI_ERROR_MESSAGES:
@@ -81,17 +82,17 @@ def _get_error_message(error_code):
 class AmdSmiException(Exception):
     def __init__(self):
         self.json_message = {}
-        self.csv_message = ''
-        self.stdout_message = ''
-        self.message = ''
-        self.output_format = ''
-        self.device_type = ''
+        self.csv_message = ""
+        self.stdout_message = ""
+        self.message = ""
+        self.output_format = ""
+        self.device_type = ""
 
     def __str__(self):
         # Return message according to the current output format
-        if self.output_format == 'json':
+        if self.output_format == "json":
             self.message = json.dumps(self.json_message)
-        elif self.output_format == 'csv':
+        elif self.output_format == "csv":
             self.message = self.csv_message
         else:
             self.message = self.stdout_message
@@ -125,7 +126,9 @@ class AmdSmiInvalidParameterException(AmdSmiException):
         self.arg = arg
         self.output_format = outputformat
 
-        common_message = f"Parameter '{self.arg}' is invalid. Run 'amd-smi {self.command} -h' for more info."
+        common_message = (
+            f"Parameter '{self.arg}' is invalid. Run 'amd-smi {self.command} -h' for more info."
+        )
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -213,7 +216,9 @@ class AmdSmiCommandNotSupportedException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
+        common_message = (
+            f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
+        )
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -273,7 +278,9 @@ class AmdSmiPermissionDeniedException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"AMD-SMI Command '{self.command}' requires elevation (sudo privileges required)"
+        common_message = (
+            f"AMD-SMI Command '{self.command}' requires elevation (sudo privileges required)"
+        )
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value

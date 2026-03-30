@@ -226,6 +226,8 @@ void _convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device){
 
             cpu_info.header.fields.cpu.physical_id = package;
             cpu_info.header.fields.cpu.core = core;
+            // Restore device_node for unique CPU identification (needed for SMT)
+            cpu_info.device_node = entry.device_node;
             device = std::make_shared<CuidCpu>(cpu_info);
             break;
         }

@@ -49,6 +49,7 @@ option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
 option(USE_HEAP_DEVICE_UNCACHED "Heap uses GPU memory in uncached mode" OFF)
 option(USE_HEAP_DEVICE_COARSEGRAIN "Heap uses GPU memory in coarsegrain mode" OFF)
+option(USE_HEAP_DEVICE_VMM_POSIX "Heap uses GPU memory with VMM and POSIX FD IPC (requires ROCm 7.0+)" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
 option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
@@ -56,7 +57,7 @@ option(USE_HDP_FLUSH "Force flush the HDP cache." OFF)
 option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on the host." OFF)
 
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (Requires MPI)" OFF)
-option(BUILD_EXAMPLES "Build the examples" ON)
+option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link agains rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
@@ -94,6 +95,14 @@ include(ROCMCheckTargetIds)
 
 rocm_setup_version(VERSION ${VERSION_STRING})
 
+#############################################################################
+# VALIDATE VMM POSIX ALLOCATOR OPTION
+#############################################################################
+if(USE_HEAP_DEVICE_VMM_POSIX)
+  if(${ROCM_MAJOR_VERSION} LESS 7)
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+  endif()
+endif()
 
 #############################################################################
 # SET GPU ARCHITECTURES
@@ -161,6 +170,7 @@ if (NOT BUILD_TESTS_ONLY)
   else()
     set(HAVE_EXTERNAL_MPI OFF)
     set(BUILD_UNIT_TESTS OFF)
+    set(BUILD_EXAMPLES OFF)
   endif()
 
   if (USE_EXTERNAL_MPI STREQUAL "ON")
@@ -175,6 +185,18 @@ if (NOT BUILD_TESTS_ONLY)
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
+
+  # Check if std::filesystem requires linking stdc++fs
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_QUIET TRUE)
+  check_cxx_source_compiles("
+    #include <filesystem>
+    int main() {
+      auto p = std::filesystem::current_path();
+      return 0;
+    }
+  " FILESYSTEM_NO_LINK_NEEDED)
+  set(CMAKE_REQUIRED_QUIET FALSE)
 
   if(${ROCM_MAJOR_VERSION} GREATER_EQUAL 6 )
     set(HAVE_DEVICE_MALLOC_UNCACHED ON)
@@ -215,12 +237,18 @@ if (NOT BUILD_TESTS_ONLY)
       dl
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
+      $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
     # ROCm 6.x requires us to explicitly enable warp sync builtins
     target_compile_definitions(${PROJECT_NAME} PRIVATE HIP_ENABLE_WARP_SYNC_BUILTINS=1)
   endif()
+
+  #############################################################################
+  # DEVICE BITCODE COMPILATION
+  #############################################################################
+  include(${CMAKE_SOURCE_DIR}/cmake/DeviceBitcode.cmake)
 
   #############################################################################
   # INSTALL

@@ -49,7 +49,7 @@
 
 class TestMeasureApiExecutionTime : public TestBase {
  public:
-    TestMeasureApiExecutionTime();
+  TestMeasureApiExecutionTime();
 
   // @Brief: Destructor for test case of TestMeasureApiExecutionTime
   virtual ~TestMeasureApiExecutionTime();

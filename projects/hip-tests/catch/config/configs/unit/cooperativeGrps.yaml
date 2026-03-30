@@ -4,126 +4,251 @@ cooperativeGrps:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic: *level_2
-  Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
-  Unit_Thread_Block_Sync_Positive_Basic: *level_2
+    tags: [cooperative, groups]
+  Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_Thread_Block_Sync_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, ops]
   Unit_Thread_Block_Tile_Getters_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
     disabled: [amd_windows]
+    tags: [cooperative, groups]
   Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
     disabled: [amd_windows]
+    tags: [cooperative, groups]
   Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
     disabled: [amd_windows]
+    tags: [cooperative, ops]
   Unit_Thread_Block_Tile_Shfl_Down_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
     disabled: [amd_windows]
+    tags: [cooperative, ops]
   Unit_Thread_Block_Tile_Shfl_XOR_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
     disabled: [amd_windows]
+    tags: [cooperative, ops]
   Unit_Thread_Block_Tile_Shfl_Positive_Basic:
     <<: *level_2
     # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
     disabled: [amd_windows]
+    tags: [cooperative, ops]
   Unit_Thread_Block_Tile_Sync_Positive_Basic:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
     disabled: [amd_windows]
+    tags: [cooperative, ops]
   Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic:
     <<: *level_2
     # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
     disabled: [amd_windows]
+    tags: [cooperative, groups]
   Unit_Coalesced_Group_Tiled_Partition_Shfl_Up_Positive_Basic:
     <<: *level_2
     # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
     disabled: [amd_windows]
+    tags: [cooperative, ops]
   Unit_Coalesced_Group_Tiled_Partition_Shfl_Down_Positive_Basic:
     <<: *level_2
     # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
     disabled: [amd_windows]
-  Unit_Coalesced_Group_Tiled_Partition_Shfl_Positive_Basic: *level_2
+    tags: [cooperative, ops]
+  Unit_Coalesced_Group_Tiled_Partition_Shfl_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, ops]
   Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic:
     <<: *level_2
     # (amd_linux) Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
     disabled: [amd_linux, amd_windows]
-  Unit_hipCGThreadBlockType: *level_2
+    tags: [cooperative, ops]
+  Unit_hipCGThreadBlockType:
+    <<: *level_2
+    tags: [cooperative, groups]
   Unit_hipCGMultiGridGroupType_Basic:
     <<: *level_2
-    tags: [multigpu]
+    tags: [cooperative, groups, multigpu]
   Unit_hipCGMultiGridGroupType_Barrier:
     <<: *level_2
-    tags: [multigpu]
-  Unit_hipCGGridGroupType_Basic: *level_2
-  Unit_hipCGGridGroupType_DataSharing: *level_2
-  Unit_hipCGGridGroupType_Barrier: *level_2
-  Unit_hipCGThreadBlockTileType: *level_2
-  Unit_hipCGThreadBlockTileType_Shfl: *level_2
+    tags: [cooperative, groups, multigpu]
+  Unit_hipCGGridGroupType_Basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_hipCGGridGroupType_DataSharing:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_hipCGGridGroupType_Barrier:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_hipCGThreadBlockTileType:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_hipCGThreadBlockTileType_Shfl:
+    <<: *level_2
+    tags: [cooperative, ops]
   Unit_coalesced_groups:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
     disabled: [amd_windows]
-  Unit_hipLaunchCooperativeKernel_Basic: *level_2
+    tags: [cooperative, groups]
+  Unit_hipLaunchCooperativeKernel_Basic:
+    <<: *level_2
+    tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_2
-    tags: [multigpu]
+    tags: [cooperative, launch, multigpu]
   Unit_Multi_Grid_Group_Getters_Positive_Basic:
     <<: *level_2
-    tags: [multigpu]
+    tags: [cooperative, groups, multigpu]
   Unit_Multi_Grid_Group_Getters_Positive_Base_Type:
     <<: *level_2
-    tags: [multigpu]
+    tags: [cooperative, groups, multigpu]
   Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions:
     <<: *level_2
-    tags: [multigpu]
+    tags: [cooperative, groups, multigpu]
   Unit_Multi_Grid_Group_Positive_Sync:
     <<: *level_2
-    tags: [multigpu]
+    tags: [cooperative, groups, multigpu]
     # SWDEV-443630 : Below test failed in stress test on 19/01/24
     disabled: [gfx90a, gfx942, gfx950]
   Unit_coalesced_groups_shfl_down:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
     disabled: [amd_windows]
+    tags: [cooperative, ops]
   Unit_coalesced_groups_shfl_up:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
     disabled: [amd_windows]
-  Unit_Coalesced_Group_Getters_Positive_Basic: *level_2
-  Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic: *level_2
-  Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
+    tags: [cooperative, ops]
+  Unit_Coalesced_Group_Getters_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, groups]
   Unit_Coalesced_Group_Shfl_Up_Positive_Basic:
     <<: *level_2
     # SWDEV-438524: Below tests taking long time to run in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
+    tags: [cooperative, ops]
   Unit_Coalesced_Group_Shfl_Down_Positive_Basic:
     <<: *level_2
     # SWDEV-438524: Below tests taking long time to run in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
+    tags: [cooperative, ops]
   Unit_Coalesced_Group_Shfl_Positive_Basic:
     <<: *level_2
     # SWDEV-438524: Below tests taking long time to run in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
+    tags: [cooperative, ops]
   Unit_Coalesced_Group_Sync_Positive_Basic:
     <<: *level_2
     # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
     disabled: [amd_windows]
-  Unit_Grid_Group_Getters_Positive_Basic: *level_2
-  Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
-  Unit_Grid_Group_Sync_Positive_Basic: *level_2
-  Unit_tiled_groups_metagrp_basic: *level_2
-  Unit_coalesced_groups_metagrp_basic: *level_2
-  Unit_cg_binary_part: *level_2
-  Unit_coopgroups_ballot: *level_2
-  Unit_binary_part_ballot: *level_2
-  Unit_coopgroups_any: *level_2
-  Unit_coopgroups_coal_all: *level_2
-  Unit_coopgroups_match_any_coal: *level_2
-  Unit_coopgroups_match_all_coal: *level_2
-  Unit_coop_grids_split_barrier: *level_2
-  Unit_coop_thread_block_split_barrier: *level_2
+    tags: [cooperative, ops]
+  Unit_Grid_Group_Getters_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_Grid_Group_Sync_Positive_Basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_tiled_groups_metagrp_basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_coalesced_groups_metagrp_basic:
+    <<: *level_2
+    tags: [cooperative, groups]
+  Unit_cg_binary_part:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coopgroups_ballot:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_binary_part_ballot:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coopgroups_any:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coopgroups_coal_all:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coopgroups_match_any_coal:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coopgroups_match_all_coal:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_grids_split_barrier:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_coop_thread_block_split_barrier:
+    <<: *level_2
+    tags: [cooperative, ops]
+  Unit_Thread_Block_Coalesced_Reduce_arithmetic: *level_2
+  Unit_Thread_Block_Tile_Reduce_Basic: *level_2
+  Unit_Thread_Block_Tile_Reduce_Custom_Op: *level_2
+  Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads: *level_2
+  Unit_Thread_Block_Tile_Reduce_Random_arithmetic: *level_2
+  Unit_Thread_Block_Tile_Reduce_Random_boolean: *level_2
+  Unit_Thread_Block_Coalesced_Reduce_arithmetic:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Coalesced_Reduce_boolean:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Basic:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Custom_Op:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Random_arithmetic:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Random_boolean:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]

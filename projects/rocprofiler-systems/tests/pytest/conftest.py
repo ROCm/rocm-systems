@@ -272,6 +272,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "rocprof_binary",
         "rocprof_config",
         "xgmi",
+        "sdma",
         "group_by_queue",
         "group_by_stream",
         "openmp",
@@ -796,8 +797,8 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         xnack_support = get_xnack_support(rocprof_config.rocm_path)
     else:
         rocm_version = "Not found"
-        rocminfo_err_msg = "Requires ROCPROFSYS_USE_ROCM=ON"
-        offload_msg = "Requires ROCPROFSYS_USE_ROCM=ON"
+        rocminfo_err_msg = "ROCm not found"
+        offload_msg = "ROCm not found"
         rocminfo_path = None
         xnack_support = False
 
