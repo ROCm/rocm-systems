@@ -54,10 +54,10 @@ union enabled_metrics
         uint32_t gfx_activity         : 1;
         uint32_t umc_activity         : 1;
         uint32_t mm_activity          : 1;
-        uint32_t vcn_activity         : 1;  // Device-level VCN activity (Radeon)
-        uint32_t jpeg_activity        : 1;  // Device-level JPEG activity (Radeon)
-        uint32_t vcn_busy             : 1;  // Per-XCP VCN busy (MI300)
-        uint32_t jpeg_busy            : 1;  // Per-XCP JPEG busy (MI300)
+        uint32_t vcn_activity         : 1;  // Device-level VCN activity
+        uint32_t jpeg_activity        : 1;  // Device-level JPEG activity
+        uint32_t vcn_busy             : 1;  // Per-XCP VCN busy
+        uint32_t jpeg_busy            : 1;  // Per-XCP JPEG busy
         uint32_t xgmi                 : 1;
         uint32_t pcie                 : 1;
         uint32_t sdma_usage           : 1;
@@ -87,8 +87,8 @@ struct metrics
 {
     struct xcp_metrics
     {
-        std::array<uint16_t, ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT> jpeg_busy;
-        std::array<uint16_t, AMDSMI_MAX_NUM_VCN>                  vcn_busy;
+        std::array<uint16_t, ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT> jpeg_busy = {};
+        std::array<uint16_t, AMDSMI_MAX_NUM_VCN>                  vcn_busy  = {};
     };
 
     uint32_t                                    current_socket_power = 0;
@@ -115,8 +115,8 @@ struct metrics
 
         struct
         {
-            std::array<uint64_t, AMDSMI_MAX_NUM_XGMI_LINKS> read;
-            std::array<uint64_t, AMDSMI_MAX_NUM_XGMI_LINKS> write;
+            std::array<uint64_t, AMDSMI_MAX_NUM_XGMI_LINKS> read  = {};
+            std::array<uint64_t, AMDSMI_MAX_NUM_XGMI_LINKS> write = {};
         } data_acc;
     } xgmi;
 

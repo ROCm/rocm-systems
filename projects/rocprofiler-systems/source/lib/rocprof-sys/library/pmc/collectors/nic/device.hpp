@@ -107,8 +107,6 @@ public:
             return nic_metrics;
         }
 
-        // Extract the 6 metrics we care about using O(1) hash lookup
-        // instead of O(n) strcmp chain for better performance in hot path
         static const std::unordered_map<std::string_view, uint64_t metrics::*>
             METRIC_MAP = { { "rx_rdma_ucast_bytes", &metrics::rx_rdma_ucast_bytes },
                            { "tx_rdma_ucast_bytes", &metrics::tx_rdma_ucast_bytes },
