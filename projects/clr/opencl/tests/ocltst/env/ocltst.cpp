@@ -258,7 +258,10 @@ class App {
   //! Function to scan for the different tests in the module
   void ScanForTests();
 
-  //! Function to run all the specified tests
+  //! Function to run all the specified tests.
+  //! \return true if all requested tests are executed and pass successfully;
+  //!         false if any test fails, if no tests are executed, or when
+  //!         running in list-only mode.
   bool RunAllTests();
 
   //! Free memory
@@ -887,7 +890,7 @@ bool App::RunAllTests() {
              percent_total, "%");
   oclTestLog(OCLTEST_LOG_ALWAYS, "\n\n");
   // fail the ocltst process if there are any failed tests
-  num_failures > 0 ? status = false : status = true;
+  status = (num_failures == 0);
   return status;
 }
 
@@ -1423,7 +1426,7 @@ int main(int argc, char** argv) {
     app.printOCLinfo();
     app.ScanForTests();
     for (int i = 0; i < app.GetNumItr(); i++) {
-      if(!app.RunAllTests()) {
+      if (!app.RunAllTests()) {
         status = false;
       }
     }
