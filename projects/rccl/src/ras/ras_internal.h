@@ -522,6 +522,7 @@ int rasLinkCalculatePeer(const struct rasLink* link, int peerIdx, bool isFallbac
 ncclResult_t rasPeerDeclareDead(const union ncclSocketAddress* addr);
 bool rasPeerIsDead(const union ncclSocketAddress* addr);
 int ncclSocketsCompare(const void* p1, const void* p2);
+int rasPeersHostPidCompare(const void* e1, const void* e2);
 bool ncclSocketsSameNode(const union ncclSocketAddress* a1, const union ncclSocketAddress* a2);
 void rasPeersTerminate();
 

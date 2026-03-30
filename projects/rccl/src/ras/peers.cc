@@ -852,6 +852,17 @@ static int rasRanksCompare(const void* e1, const void* e2) {
   return cmp;
 }
 
+// Sorting callback for struct rasPeerInfo. hostHash is the primary key; pid is secondary.
+// Used when printing missing-peer diagnostics -- sorts by node, then process, rather than
+// by socket address (which would include port, meaningless to end users).
+int rasPeersHostPidCompare(const void* e1, const void* e2) {
+  const struct rasPeerInfo* p1 = (const struct rasPeerInfo*)e1;
+  const struct rasPeerInfo* p2 = (const struct rasPeerInfo*)e2;
+  if (p1->hostHash != p2->hostHash)
+    return (p1->hostHash < p2->hostHash ? -1 : 1);
+  return (p1->pid < p2->pid ? -1 : (p1->pid > p2->pid ? 1 : 0));
+}
+
 // Sorting callback for ncclSocketAddress.  We want to sort by the address family (IPv4 first), then the address,
 // then port.  Unfortunately, that's not the order of how they are laid out in memory, so one big memcmp won't do.
 // memcmp is still useful though for individual elements in the network byte order.

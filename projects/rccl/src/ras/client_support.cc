@@ -709,8 +709,8 @@ static ncclResult_t rasClientRunInit(struct rasClient* client) {
     } // !consistentNPeersGlobal
   } // !consistentNGpusNode || !consistentNGpusGlobal || !consistentNPeersGlobal
 
-#if 0 // Commented out for now to focus the summary status report on the information most relevant to the users.
-      // To be revisited with future extensions to RAS.
+  // Commented out for now to focus the summary status report on the information most relevant to the users.
+  // To be revisited with future extensions to RAS.
   rasOutAppend("\nGathering data about the RAS network (timeout %lds)...", client->timeout / CLOCK_UNITS_PER_SEC);
   msgLen = rasOutLength();
   NCCLCHECKGOTO(rasClientAllocMsg(&msg, msgLen), ret, fail);
@@ -727,7 +727,7 @@ static ncclResult_t rasClientRunInit(struct rasClient* client) {
     if (!allDone)
       ret = ncclInProgress; // We need to wait for async. responses.
   }
-#endif
+
   rasOutAppend("\nCommunicators...");
   msgLen = rasOutLength();
   NCCLCHECKGOTO(rasClientAllocMsg(&msg, msgLen), ret, fail);
@@ -752,8 +752,8 @@ fail:
   goto exit;
 }
 
-#if 0 // Commented out for now to focus the summary status report on the information most relevant to the users.
-      // To be revisited with future extensions to RAS.
+// Commented out for now to focus the summary status report on the information most relevant to the users.
+// To be revisited with future extensions to RAS.
 // Processes the response from the RAS_COLL_CONNS collective operation and sends the data to the client (for now
 // primarily the list of missing processes).  Initiates the RAS_COLL_COMMS collective operation.
 static ncclResult_t rasClientRunConns(struct rasClient* client) {
@@ -879,7 +879,6 @@ exit:
 fail:
   goto exit;
 }
-#endif
 
 // Processes the response from the RAS_COLL_COMMS collective operation and sends the data to the client:
 // statistics on the communicators, missing data from ranks, inconsistent collective operation counts,
