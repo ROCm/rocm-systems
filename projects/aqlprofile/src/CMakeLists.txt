@@ -30,8 +30,8 @@ set ( LIB_SRC
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
 add_library (aqlprofile::aqlprofile-lib ALIAS ${TARGET_LIB})
 target_include_directories ( ${TARGET_LIB}
-  PRIVATE ${LIB_DIR}
-          ${API_PATH}
+  PUBLIC  ${LIB_DIR}
+  PRIVATE ${API_PATH}
           ${LIB_DIR}/core/include
 )
 if ( WIN32 )
