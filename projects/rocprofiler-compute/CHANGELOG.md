@@ -9,6 +9,16 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * ``--view table`` option in analyze mode to force all TTY output to plain tables and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables). The ``--view`` argument is reserved for future TTY views (e.g. other chart styles).
 * Added L2 memory bandwidth derived metrics under `--membw-analysis` to allow L2 memory bandwidth specific profiling and analysis metric block 30.
 
+* Added **AMD Strix Halo (`gfx1151`)** support: SoC module, `mi_gpu_spec` metadata, and analysis configuration set.
+
+* New **memory-chart front end** for **RDNA 3.x / gfx11** (`mem_chart_gfx11`) for CLI memory-hierarchy visualization in analyze mode.
+
+* **Perfmon counter grouping**: metric-aware heuristic coalescing plus optional **CP-SAT** bucket packing (`ROCPROF_COMPUTE_PERFMON_CP_SAT=1` with `ortools`) so **same-bucket priority** metrics (from `profiling_counter_grouping_policy.yaml`) can be placed in a **single** `pmc_perf_*` pass when IP block limits allow.
+
+* **`profile --dry-run`** with required **`--arch`** prints the **perfmon bucket plan** (counter → pass/bucket) and multi-bucket metric diagnostics to debug grouping policy without rocminfo, AMDGPU / profiler tool checks, workload execution, or writing perfmon files.
+
+* Added **mega-kernel** manual test harness under **`tests/mega_kernel/`** (HIP sources, Makefile, README).
+
 * Introduced support for MI350P GPU
 
 * ``--view table`` option in analyze mode to force all TTY output to plain tables and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables). The ``--view`` argument is reserved for future TTY views (e.g. other chart styles).
