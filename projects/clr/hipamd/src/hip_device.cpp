@@ -137,11 +137,11 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 void Device::Reset() {
   {
     std::scoped_lock lock(lock_);
-    for (auto* pool : mem_pools_) {
+    auto pools_to_delete = std::exchange(mem_pools_, {});
+    for (auto* pool : pools_to_delete) {
       pool->ReleaseAllMemory();
       delete pool;
     }
-    mem_pools_.clear();
   }
   flags_ = hipDeviceScheduleSpin;
   destroyAllStreams();

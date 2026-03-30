@@ -19,13 +19,13 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "version_read.h"
 
 #include <gtest/gtest.h>
 
 #include <iostream>
 
-#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 
 TestVersionRead::TestVersionRead() : TestBase() {
@@ -61,15 +61,12 @@ void TestVersionRead::Run(void) {
   amdsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
 
   TestBase::Run();
-  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
   }
 
-  DISPLAY_AMDSMI_API("amdsmi_get_lib_version", "", VERB(STANDARD));
   err = amdsmi_get_lib_version(&ver);
-  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
   CHK_ERR_ASRT(err)
 
   ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF && ver.release != 0xFFFFFFFF &&

@@ -116,11 +116,6 @@ static void PrintHelp(void) {
                "   >= 3 -- more debug output\n";
 }
 
-static uint32_t sGlobalVerbosity = 0;
-
-uint32_t GetTestVerbosity() { return sGlobalVerbosity; }
-void SetTestVerbosity(uint32_t verbosity) { sGlobalVerbosity = verbosity; }
-
 uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list) {
   int a;
   int ind = -1;

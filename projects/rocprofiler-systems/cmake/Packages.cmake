@@ -48,9 +48,6 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-ucx
 rocprofiler_systems_add_interface_library(rocprofiler-systems-bfd
     "Provides Binary File Descriptor (BFD)"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-ptl
-    "Enables PTL support (tasking)"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-papi "Enable PAPI support")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-ompt "Enable OMPT support")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-python
@@ -84,7 +81,6 @@ set(ROCPROFSYS_EXTENSION_LIBRARIES
     rocprofiler-systems::rocprofiler-systems-rocm
     rocprofiler-systems::rocprofiler-systems-bfd
     rocprofiler-systems::rocprofiler-systems-mpi
-    rocprofiler-systems::rocprofiler-systems-ptl
     rocprofiler-systems::rocprofiler-systems-ompt
     rocprofiler-systems::rocprofiler-systems-papi
     rocprofiler-systems::rocprofiler-systems-perfetto
@@ -269,6 +265,55 @@ if(ROCPROFSYS_USE_AINIC)
 endif()
 
 target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
+
+# Detect AMD SMI library version from header
+set(_AMDSMI_HEADER "${ROCM_PATH}/include/amd_smi/amdsmi.h")
+if(EXISTS "${_AMDSMI_HEADER}")
+    file(READ "${_AMDSMI_HEADER}" _AMDSMI_HEADER_CONTENTS)
+
+    string(
+        REGEX MATCH
+        "#define AMDSMI_LIB_VERSION_MAJOR ([0-9]+)"
+        _
+        "${_AMDSMI_HEADER_CONTENTS}"
+    )
+    set(ROCPROFSYS_AMDSMI_VERSION_MAJOR "${CMAKE_MATCH_1}")
+
+    string(
+        REGEX MATCH
+        "#define AMDSMI_LIB_VERSION_MINOR ([0-9]+)"
+        _
+        "${_AMDSMI_HEADER_CONTENTS}"
+    )
+    set(ROCPROFSYS_AMDSMI_VERSION_MINOR "${CMAKE_MATCH_1}")
+
+    message(
+        STATUS
+        "AMD SMI version detected: ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR}"
+    )
+endif()
+
+# AINIC requires AMD SMI >= 26.3 AND ROCPROFSYS_USE_AINIC option
+set(ROCPROFSYS_BUILD_AINIC OFF CACHE INTERNAL "Build AINIC support")
+if(ROCPROFSYS_USE_AINIC)
+    if(
+        ROCPROFSYS_AMDSMI_VERSION_MAJOR GREATER 26
+        OR (
+            ROCPROFSYS_AMDSMI_VERSION_MAJOR EQUAL 26
+            AND ROCPROFSYS_AMDSMI_VERSION_MINOR GREATER 2
+        )
+    )
+        set(ROCPROFSYS_BUILD_AINIC ON CACHE INTERNAL "Build AINIC support" FORCE)
+        message(STATUS "AINIC support enabled (AMD SMI >= 26.3)")
+    else()
+        message(
+            STATUS
+            "AINIC disabled: AMD SMI ${ROCPROFSYS_AMDSMI_VERSION_MAJOR}.${ROCPROFSYS_AMDSMI_VERSION_MINOR} < 26.3"
+        )
+    endif()
+else()
+    message(STATUS "AINIC disabled: ROCPROFSYS_USE_AINIC is OFF")
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -969,64 +1014,6 @@ target_include_directories(
 
 find_package(UCX ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 target_include_directories(rocprofiler-systems-ucx INTERFACE ${UCX_HEADERS_INCLUDE_DIR})
-
-# ----------------------------------------------------------------------------------------#
-#
-# PTL (Parallel Tasking Library) submodule
-#
-# ----------------------------------------------------------------------------------------#
-
-# timemory might provide PTL::ptl-shared
-if(NOT TARGET PTL::ptl-shared)
-    rocprofiler_systems_checkout_git_submodule(
-        RELATIVE_PATH external/PTL
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/PTL.git
-        REPO_BRANCH omnitrace
-    )
-
-    set(PTL_BUILD_EXAMPLES OFF)
-    set(PTL_USE_TBB OFF)
-    set(PTL_USE_GPU OFF)
-    set(PTL_DEVELOPER_INSTALL OFF)
-
-    if(NOT DEFINED BUILD_OBJECT_LIBS)
-        set(BUILD_OBJECT_LIBS OFF)
-    endif()
-    rocprofiler_systems_save_variables(
-        BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
-        CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
-        CMAKE_VISIBILITY_INLINES_HIDDEN
-    )
-
-    set(BUILD_SHARED_LIBS OFF)
-    set(BUILD_STATIC_LIBS OFF)
-    set(BUILD_OBJECT_LIBS ON)
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
-    set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-
-    add_subdirectory(external/PTL EXCLUDE_FROM_ALL)
-
-    rocprofiler_systems_restore_variables(
-        BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
-        CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
-        CMAKE_VISIBILITY_INLINES_HIDDEN
-    )
-endif()
-
-target_sources(
-    rocprofiler-systems-ptl
-    INTERFACE $<BUILD_INTERFACE:$<TARGET_OBJECTS:PTL::ptl-object>>
-)
-target_include_directories(
-    rocprofiler-systems-ptl
-    INTERFACE
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/PTL/source>
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/PTL/source>
-)
 
 # ----------------------------------------------------------------------------------------#
 #

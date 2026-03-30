@@ -998,7 +998,6 @@ rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint16_t* id) {
   if (id == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
-  DEVICE_MUTEX
   CHK_SUPPORT_NAME_ONLY(id)
   // Set the device ID to max value
   *id = std::numeric_limits<uint16_t>::max();
@@ -1901,8 +1900,8 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind, uint32_t* nu
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | Issue: could not retreive kDevPowerODVoltage"
-       << "; returning " << getRSMIStatusString(ret);
+    ss << __PRETTY_FUNCTION__ << " | Issue: could not retreive kDevPowerODVoltage" << "; returning "
+       << getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
   }
@@ -2917,11 +2916,11 @@ rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char* name, size_t len) 
   if (name == nullptr || len == 0) {
     return RSMI_STATUS_INVALID_ARGS;
   }
-  DEVICE_MUTEX
   CHK_SUPPORT_NAME_ONLY(name)
 
   assert(len > 0);
 
+  DEVICE_MUTEX
   ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_VENDOR);
   return ret;
   CATCH
@@ -2965,12 +2964,8 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t*
   LOG_TRACE(ss);
 
   GET_DEV_AND_KFDNODE_FROM_INDX
+  CHK_API_SUPPORT_ONLY((b), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
   DEVICE_MUTEX
-
-  if (b == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
   ret = get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind, &b->transfer_rate,
                         b->lanes);
   if (ret == RSMI_STATUS_SUCCESS) {
@@ -3221,7 +3216,6 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   amd::smi::MonitorTypes mon_type = amd::smi::kMonInvalid;
   uint16_t val_ui16;
   GET_DEV_FROM_INDX
-  DEVICE_MUTEX
 
   // handle gpu board temp
   if (sensor_type >= RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST &&
@@ -3372,6 +3366,8 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
     return RSMI_STATUS_SUCCESS;
   }  // end HBM temperature
 
+  DEVICE_MUTEX
+
   if (dev->monitor() == nullptr) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
@@ -3418,10 +3414,6 @@ rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sens
 
   rsmi_status_t ret;
   amd::smi::MonitorTypes mon_type;
-
-  if (voltage == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
 
   switch (metric) {
     case RSMI_VOLT_CURRENT:
@@ -4716,9 +4708,6 @@ rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t* counter
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (counter == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
   CHK_SUPPORT_NAME_ONLY(counter)
 
   rsmi_status_t ret;
@@ -7545,8 +7534,7 @@ rsmi_status_t rsmi_dev_metrics_log_get(uint32_t dv_ind) {
   auto status_code = dev->dev_log_gpu_metrics(ostrstream);
   ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= "
              << " | End Result "
-             << " | Device #:  " << dv_ind << " | Metric Type: "
-             << "All GPU Metrics..."
+             << " | Device #:  " << dv_ind << " | Metric Type: " << "All GPU Metrics..."
              << " | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
 
@@ -7583,17 +7571,7 @@ rsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
     return RSMI_STATUS_BUSY;
   }
 
-  // Use nanosleep in a loop so that signals (e.g. SIGCHLD) do not
-  // shorten the sleep and cause the mutex to be released prematurely.
-  struct timespec remaining = {static_cast<time_t>(seconds), 0};
-  while (remaining.tv_sec > 0 || remaining.tv_nsec > 0) {
-    struct timespec interval = remaining;
-    if (nanosleep(&interval, &remaining) == 0) {
-      break;
-    }
-    // EINTR: a signal interrupted the sleep; remaining has time left, retry.
-  }
-
+  sleep(seconds);
   return RSMI_STATUS_SUCCESS;
 }
 
