@@ -114,7 +114,7 @@ union ncclLLFifoLine {
   uint64_t v[2];
   int4 i4;
 #if defined(__HIP_DEVICE_COMPILE__) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  v4u v4u;
+  v4u v4u;  /* same layout as data1,flag1,data2,flag2 for b128 load/store */
 #endif
 };
 

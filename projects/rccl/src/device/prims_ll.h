@@ -275,6 +275,7 @@ private:
     i4.data2 = (val >> 32);
     i4.flag2 = flag;
     #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950.
     __builtin_amdgcn_global_store_b128((v4u_gptr) dst->v, i4.v4u, RCCL_SYSTEM_SYNCSCOPE);
     #else
     *((u64_gptr) dst->v) = *((u64_gptr) i4.v);

@@ -262,7 +262,7 @@ template<> __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack
   template<> \
   __device__ __forceinline__ BytePack<bytes> ld_volatile_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
-    tmp = __hip_atomic_load((__attribute__((address_space(1))) data_cxx_ty *)addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
+    tmp =  __hip_atomic_load((__attribute__((address_space(1))) data_cxx_ty *)addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
