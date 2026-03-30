@@ -402,11 +402,6 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   return hip::GetHipDispatchTable()->hipDeviceGetUuid_fn(uuid, device);
   CATCH;
 }
-hipError_t hipDeviceGetCuid(hipUUID* cuid, hipDevice_t device) {
-  TRY;
-  return hip::GetHipDispatchTable()->hipDeviceGetCuid_fn(cuid, device);
-  CATCH;
-}
 hipError_t hipDeviceGraphMemTrim(int device) {
   TRY;
   return hip::GetHipDispatchTable()->hipDeviceGraphMemTrim_fn(device);

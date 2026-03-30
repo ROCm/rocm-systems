@@ -109,7 +109,6 @@ hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPrio
 hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
                                                const hipChannelFormatDesc* fmtDesc, int device);
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
-hipError_t hipDeviceGetCuid(hipUUID* cuid, hipDevice_t device);
 hipError_t hipDeviceGraphMemTrim(int device);
 hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int* flags, int* active);
 hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev);
@@ -967,7 +966,6 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipDeviceGetTexture1DLinearMaxWidth_fn =
       hip::hipDeviceGetTexture1DLinearMaxWidth;
   ptrDispatchTable->hipDeviceGetUuid_fn = hip::hipDeviceGetUuid;
-  ptrDispatchTable->hipDeviceGetCuid_fn = hip::hipDeviceGetCuid;
   ptrDispatchTable->hipDeviceGraphMemTrim_fn = hip::hipDeviceGraphMemTrim;
   ptrDispatchTable->hipDevicePrimaryCtxGetState_fn = hip::hipDevicePrimaryCtxGetState;
   ptrDispatchTable->hipDevicePrimaryCtxRelease_fn = hip::hipDevicePrimaryCtxRelease;

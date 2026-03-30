@@ -71,20 +71,4 @@ static inline size_t getHostThreadCount(const size_t memPerThread, const size_t 
   return thread_count;
 }
 
-static inline void printUuid(const char* title, const int w, const hipUUID& uuid) {
-  // Print the title normally
-  std::cout << std::setw(w) << title;
-  // Now switch to hex formatting for the UUID bytes
-  std::cout << std::right << std::hex << std::setfill('0');
-  size_t uuidSize = sizeof(uuid.bytes) / sizeof(uuid.bytes[0]);
-  for (size_t i = 0; i < uuidSize; ++i) {
-    std::cout << std::setw(2) << (unsigned int)(unsigned char)uuid.bytes[i];
-    if (i == 3 || i == 5 || i == 7 || i == 9) {
-      std::cout << "-";
-    }
-  }
-  // Restore stream state
-  std::cout << std::setfill(' ') << std::dec << std::left << "\n";
-}
-
 }  // namespace HipTest

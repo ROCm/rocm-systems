@@ -31,7 +31,6 @@ hipDeviceGetLimit
 hipDeviceGetName
 hipDeviceGetTexture1DLinearMaxWidth
 hipDeviceGetUuid
-hipDeviceGetCuid
 hipDeviceGetPCIBusId
 hipDeviceGetSharedMemConfig
 hipDeviceGetP2PAttribute

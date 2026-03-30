@@ -560,7 +560,6 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDeviceGetAttribute: return "hipDeviceGetAttribute";
     case HIP_API_ID_hipDeviceGetByPCIBusId: return "hipDeviceGetByPCIBusId";
     case HIP_API_ID_hipDeviceGetCacheConfig: return "hipDeviceGetCacheConfig";
-    case HIP_API_ID_hipDeviceGetCuid: return "hipDeviceGetCuid";
     case HIP_API_ID_hipDeviceGetDefaultMemPool: return "hipDeviceGetDefaultMemPool";
     case HIP_API_ID_hipDeviceGetGraphMemAttribute: return "hipDeviceGetGraphMemAttribute";
     case HIP_API_ID_hipDeviceGetLimit: return "hipDeviceGetLimit";
@@ -1015,7 +1014,6 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDeviceGetAttribute", name) == 0) return HIP_API_ID_hipDeviceGetAttribute;
   if (strcmp("hipDeviceGetByPCIBusId", name) == 0) return HIP_API_ID_hipDeviceGetByPCIBusId;
   if (strcmp("hipDeviceGetCacheConfig", name) == 0) return HIP_API_ID_hipDeviceGetCacheConfig;
-  if (strcmp("hipDeviceGetCuid", name) == 0) return HIP_API_ID_hipDeviceGetCuid;
   if (strcmp("hipDeviceGetDefaultMemPool", name) == 0) return HIP_API_ID_hipDeviceGetDefaultMemPool;
   if (strcmp("hipDeviceGetGraphMemAttribute", name) == 0) return HIP_API_ID_hipDeviceGetGraphMemAttribute;
   if (strcmp("hipDeviceGetLimit", name) == 0) return HIP_API_ID_hipDeviceGetLimit;
@@ -1613,11 +1611,6 @@ typedef struct hip_api_data_s {
       hipFuncCache_t* cacheConfig;
       hipFuncCache_t cacheConfig__val;
     } hipDeviceGetCacheConfig;
-    struct {
-      hipUUID* cuid;
-      hipUUID cuid__val;
-      hipDevice_t device;
-    } hipDeviceGetCuid;
     struct {
       hipMemPool_t* mem_pool;
       hipMemPool_t mem_pool__val;
@@ -4345,11 +4338,6 @@ typedef struct hip_api_data_s {
 // hipDeviceGetCacheConfig[('hipFuncCache_t*', 'cacheConfig')]
 #define INIT_hipDeviceGetCacheConfig_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipDeviceGetCacheConfig.cacheConfig = (hipFuncCache_t*)cacheConfig; \
-};
-// hipDeviceGetCuid[('hipUUID*', 'cuid'), ('hipDevice_t', 'device')]
-#define INIT_hipDeviceGetCuid_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipDeviceGetCuid.cuid = (hipUUID*)cuid; \
-  cb_data.args.hipDeviceGetCuid.device = (hipDevice_t)device; \
 };
 // hipDeviceGetDefaultMemPool[('hipMemPool_t*', 'mem_pool'), ('int', 'device')]
 #define INIT_hipDeviceGetDefaultMemPool_CB_ARGS_DATA(cb_data) { \
@@ -7115,10 +7103,6 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipDeviceGetCacheConfig:
       if (data->args.hipDeviceGetCacheConfig.cacheConfig) data->args.hipDeviceGetCacheConfig.cacheConfig__val = *(data->args.hipDeviceGetCacheConfig.cacheConfig);
       break;
-// hipDeviceGetCuid[('hipUUID*', 'cuid'), ('hipDevice_t', 'device')]
-    case HIP_API_ID_hipDeviceGetCuid:
-      if (data->args.hipDeviceGetCuid.cuid) data->args.hipDeviceGetCuid.cuid__val = *(data->args.hipDeviceGetCuid.cuid);
-      break;
 // hipDeviceGetDefaultMemPool[('hipMemPool_t*', 'mem_pool'), ('int', 'device')]
     case HIP_API_ID_hipDeviceGetDefaultMemPool:
       if (data->args.hipDeviceGetDefaultMemPool.mem_pool) data->args.hipDeviceGetDefaultMemPool.mem_pool__val = *(data->args.hipDeviceGetDefaultMemPool.mem_pool);
@@ -9010,13 +8994,6 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "hipDeviceGetCacheConfig(";
       if (data->args.hipDeviceGetCacheConfig.cacheConfig == NULL) oss << "cacheConfig=NULL";
       else { oss << "cacheConfig="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetCacheConfig.cacheConfig__val); }
-      oss << ")";
-    break;
-    case HIP_API_ID_hipDeviceGetCuid:
-      oss << "hipDeviceGetCuid(";
-      if (data->args.hipDeviceGetCuid.cuid == NULL) oss << "cuid=NULL";
-      else { oss << "cuid="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetCuid.cuid__val); }
-      oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDeviceGetCuid.device);
       oss << ")";
     break;
     case HIP_API_ID_hipDeviceGetDefaultMemPool:
