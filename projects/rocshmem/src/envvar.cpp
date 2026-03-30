@@ -238,13 +238,9 @@ namespace envvar {
       {category::tag::GDA, "GPU Direct Async backend variables"}
     };
 
-    // Print header only for FULL_DOCUMENTATION mode
-    if (mode == print_mode::FULL_DOCUMENTATION) {
-      os << "\n";
-      os << "================================================================================\n";
-      os << "                    rocSHMEM Environment Variables\n";
-      os << "================================================================================\n";
-    }
+    os << "################################################################################\n";
+    os << "#                   rocSHMEM Environment Variables                             #\n";
+    os << "################################################################################\n";
 
     // Iterate through each category
     for (const auto& cat : {category::tag::ROCSHMEM,
@@ -261,9 +257,10 @@ namespace envvar {
 
       // Print category header only for FULL_DOCUMENTATION mode
       if (mode == print_mode::FULL_DOCUMENTATION) {
-        os << "\n" << category_names.at(cat) << "\n";
-        os << category_descriptions.at(cat) << "\n";
-        os << std::string(80, '-') << "\n";
+        os << "#" << std::string(78, '-') << "#\n";
+        os << "# " << category_names.at(cat) << ": "
+           << category_descriptions.at(cat) << "\n";
+        os << "#" << std::string(78, '-') << "#\n";
       }
 
       // Iterate through each variable in the category
@@ -291,21 +288,21 @@ namespace envvar {
 
           if (mode == print_mode::MODIFIED || mode == print_mode::ALL_VALUES) {
             // Simple format: NAME=value
-            os << v.get().get_name() << "=" << format_value(v.get().get_value()) << "\n";
+            os << "# " << v.get().get_name() << "=" << format_value(v.get().get_value()) << "\n";
           } else {
             // FULL_DOCUMENTATION mode
-            os << "\n  " << v.get().get_name() << "\n";
+            os << "# " << v.get().get_name() << "\n";
 
             // Print documentation if available
             if (!v.get().get_doc().empty()) {
-              os << "    Description:   " << v.get().get_doc() << "\n";
+              os << "#   Description:   " << v.get().get_doc() << "\n";
             }
 
             // Print default value
-            os << "    Default:       " << format_value(v.get().get_default()) << "\n";
+            os << "#   Default:       " << format_value(v.get().get_default()) << "\n";
 
             // Print current value and whether it was set
-            os << "    Current:       " << format_value(v.get().get_value());
+            os << "#   Current:       " << format_value(v.get().get_value());
 
             if (v.get().is_default()) {
               os << " (using default)";
@@ -318,13 +315,12 @@ namespace envvar {
       }
     }
 
-    // Print footer only for FULL_DOCUMENTATION mode
-    if (mode == print_mode::FULL_DOCUMENTATION) {
-      os << "\n";
-      os << "================================================================================\n";
-      os << "For more information, see:\n";
-      os << "https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/api/env_variables.html\n";
-      os << "================================================================================\n";
+    if (mode != print_mode::MODIFIED) {
+      os << "#\n";
+      os << "#------------------------------------------------------------------------------#\n";
+      os << "# For more information, see:\n";
+      os << "# https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/api/env_variables.html\n";
+      os << "#------------------------------------------------------------------------------#\n";
     }
   }
 

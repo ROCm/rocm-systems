@@ -153,23 +153,18 @@ void print_usage(const char* progname) {
   std::cout << "Options:\n";
   std::cout << "  -h, --help       Show this help message\n";
   std::cout << "  -o FILE          Write output to FILE instead of stdout\n";
-  std::cout << "  --env            Print only modified environment variables (name=value)\n";
-  std::cout << "  --envfull        Print all environment variables (name=value)\n";
-  std::cout << "  --envpretty      Print all environment variables with full documentation\n";
+  std::cout << "  --env:all        Print all environment variables (name=value)\n";
+  std::cout << "  --env:full       Print all environment variables with full documentation\n";
   std::cout << "\n";
-  std::cout << "Default mode: Display build information only\n";
+  std::cout << "Default mode: Display build information and modified env vars\n";
   std::cout << "\n";
   std::cout << "Examples:\n";
-  std::cout << "  " << progname << "                    # Show build information\n";
-  std::cout << "  " << progname << " --env              # Show build info + modified env vars\n";
-  std::cout << "  " << progname << " --envfull          # Show build info + all env vars\n";
-  std::cout << "  " << progname << " --envpretty        # Show build info + env vars with docs\n";
-  std::cout << "  " << progname << " --env -o info.txt  # Write to file\n";
+  std::cout << "  " << progname << " --env:all          # Show build info + all env vars\n";
+  std::cout << "  " << progname << " --env:full         # Show build info + env vars with docs\n";
 }
 
 int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
   const char* output_file = nullptr;
-  bool print_env = false;
   rocshmem::envvar::print_mode env_mode = rocshmem::envvar::print_mode::MODIFIED;
 
   // Parse command line arguments
@@ -185,14 +180,9 @@ int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
         print_usage(argv[0]);
         return 1;
       }
-    } else if (std::strcmp(argv[i], "--env") == 0) {
-      print_env = true;
-      env_mode = rocshmem::envvar::print_mode::MODIFIED;
-    } else if (std::strcmp(argv[i], "--envfull") == 0) {
-      print_env = true;
+    } else if (std::strcmp(argv[i], "--env:all") == 0) {
       env_mode = rocshmem::envvar::print_mode::ALL_VALUES;
-    } else if (std::strcmp(argv[i], "--envpretty") == 0) {
-      print_env = true;
+    } else if (std::strcmp(argv[i], "--env:full") == 0) {
       env_mode = rocshmem::envvar::print_mode::FULL_DOCUMENTATION;
     } else {
       std::cerr << "Error: Unknown option: " << argv[i] << "\n";
@@ -233,16 +223,15 @@ int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
   }
 
   printf("################################################################################\n");
+  std::cout << "\n";
+  rocshmem::envvar::print_envvars(env_mode, std::cout);
+  printf("################################################################################\n");
+
 #if defined(USE_GDA)
+  printf("\n################################################################################");
   rocshmem::DisplayTopology(false);
   printf("################################################################################\n");
 #endif //defined(USE_GDA)
-
-  // Print environment variables if requested
-  if (print_env) {
-    std::cout << "\n";
-    rocshmem::envvar::print_envvars(env_mode, std::cout);
-  }
 
   // Restore cout/cerr if redirected
   if (output_file) {
