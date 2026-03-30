@@ -2302,14 +2302,14 @@ class AMDSMIHelpers():
             else:
                 raise ValueError("Unexpected Error getting afids from CPER file") from e
 
-    def get_partition_id(self, device_handle, gpu_id = None) -> int:
-        partition_id = -1
+    def get_partition_id(self, device_handle, gpu_id = None) -> 'Optional[int]':
+        """Return the KFD partition id for the given device, or None if unavailable."""
         try:
             kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(device_handle)
-            partition_id = kfd_info['current_partition_id']
+            return kfd_info['current_partition_id']
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get kfd info for gpu %s | %s", gpu_id, e.get_error_info())
-        return partition_id
+            return None
 
     def get_primary_partition_gpu_id(self, device_handle) -> Union[int, None]:
         try:
@@ -2334,7 +2334,9 @@ class AMDSMIHelpers():
 
     def is_primary_partition(self, device_handle, gpu_id = None) -> bool:
         partition_id = self.get_partition_id(device_handle, gpu_id)
-        if partition_id != 0:
+        # None means KFD is unavailable (e.g. WSL/virtualized env);
+        # only skip if we have a confirmed non-zero partition id.
+        if partition_id is not None and partition_id != 0:
             logging.debug(f"Skipping gpu {gpu_id} on non zero partition {partition_id}")
             return False
         return True

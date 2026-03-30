@@ -8741,13 +8741,14 @@ class AMDSMICommands():
         for device_handle in args.gpu:
             # First get the partition
             partition_id = self.helpers.get_partition_id(device_handle)
-            # If there is a single primary partition within args.gpu then we don't need to print the warning
-            if partition_id == 0:
+            # If KFD is unavailable (partition_id is None) or this is the primary partition,
+            # no warning is needed.
+            if partition_id is None or partition_id == 0:
                 partition_warning_flag = False
                 break
             # Then attempt to get the primary GPU id for that partition
             primary_partition_gpu_id = self.helpers.get_primary_partition_gpu_id(device_handle)
-            # Add to the set if it's a non-primary partition and we found a valid primary GPU id
+            # Add to the set if it's a confirmed non-primary partition and we found a valid primary GPU id
             if partition_id != 0 and primary_partition_gpu_id is not None:
                 primary_partition_gpu_ids.add(primary_partition_gpu_id)
 
