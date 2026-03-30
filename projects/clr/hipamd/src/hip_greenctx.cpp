@@ -21,6 +21,7 @@
 #include "hip_greenctx.hpp"
 #include "hip_event.hpp"
 #include "hip_internal.hpp"
+#include "utils/util.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -203,13 +204,43 @@ hipError_t GreenCtx::recordEvent(hipEvent_t event) {
   if (snapshot.empty()) return hipSuccess;
 
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
-  hipError_t result = hipSuccess;
-  for (auto* s : snapshot) {
-    hipError_t err = e->addMarker(s, nullptr, true);
-    if (err != hipSuccess) result = err;
-    s->release();
+
+  // For single stream, use the existing addMarker path directly.
+  if (snapshot.size() == 1) {
+    hipError_t err = e->addMarker(snapshot[0], nullptr, true);
+    snapshot[0]->release();
+    return err;
   }
-  return result;
+  
+  std::scoped_lock lock(e->lock());
+
+  amd::Command::EventWaitList waitList;
+
+  MAKE_SCOPE_GUARD(cleanup, [&]() {
+    for (auto* cmd : waitList) {
+      cmd->release();
+    }
+    for (auto* s : snapshot) {
+      s->release();
+    }
+  });
+
+  // For multiple streams, enqueue independent markers on each stream.
+  for (auto* s : snapshot) {
+    amd::Command* cmd = nullptr;
+    hipError_t err = e->recordCommand(cmd, s, 0, true);
+    if (err != hipSuccess) {
+      return err;
+    }
+    cmd->enqueue();
+    waitList.push_back(&cmd->event());
+  }
+  
+  // Create a single Marker to wait on all events in waitlist
+  // Cache Flush not required for this fan-in marker
+  amd::Command* fanIn = new amd::Marker(*snapshot[0], kMarkerDisableFlush, waitList);
+  fanIn->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+  return e->enqueueRecordCommand(snapshot[0], fanIn);
 }
 
 hipError_t GreenCtx::waitEvent(hipEvent_t event) {

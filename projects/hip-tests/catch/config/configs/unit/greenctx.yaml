@@ -1,0 +1,18 @@
+---
+greenctx:
+  Unit_hipGreenCtxCreateDestroy_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamCreate_Sanity:
+    <<: *level_2
+  Unit_hipGreenCtxKernelLaunch_Basic:
+    <<: *level_2
+  Unit_hipGreenCtxCreate_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxStreamCreate_Negative:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordWaitEvent_Sanity:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordEventFunctional:
+    <<: *level_2
+  Unit_hipExecutionCtxRecordWait_Blocking:
+    <<: *level_2
