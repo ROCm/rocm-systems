@@ -17,12 +17,12 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 # Determine script path
-if Path("src/rocprof-compute").exists():
-    rocprof_compute_script_path = "src/rocprof-compute"
-elif Path("rocprof-compute").exists():
-    rocprof_compute_script_path = "rocprof-compute"
-else:
+rocprof_compute_script_path = Path(ROOT) / "src/rocprof-compute"
+if not rocprof_compute_script_path.exists():
+    rocprof_compute_script_path = Path(ROOT) / "rocprof-compute"
+if not rocprof_compute_script_path.exists():
     raise FileNotFoundError("Cannot find rocprof-compute script")
+rocprof_compute_script_path = str(rocprof_compute_script_path)
 
 
 class ProfileModeImportGuard:
