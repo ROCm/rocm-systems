@@ -638,6 +638,23 @@ hsa_status_t hsa_amd_profiling_async_copy_enable(bool enable) {
   CATCH;
 }
 
+hsa_status_t hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
+  TRY;
+  IS_OPEN();
+
+  core::Agent* agent_ptr = core::Agent::Convert(agent);
+  IS_VALID(agent_ptr);
+
+  if (agent_ptr->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(agent_ptr);
+  return gpu_agent->Preload(flags);
+
+  CATCH;
+}
+
 hsa_status_t hsa_amd_profiling_get_dispatch_time(
     hsa_agent_t agent_handle, hsa_signal_t hsa_signal,
     hsa_amd_profiling_dispatch_time_t* time) {

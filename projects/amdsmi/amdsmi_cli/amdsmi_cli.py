@@ -230,27 +230,37 @@ if __name__ == "__main__":
 
     try:
         if len(sys.argv) == 1:
-            args = amd_smi_parser.parse_args(args=['default'])
-        elif sys.tracebacklimit == 10 and (sys.argv[1] == '--loglevel'):
-            args = amd_smi_parser.parse_args(args=['default', '--loglevel'] + sys.argv[2:])
+            args = amd_smi_parser.parse_args(args=["default"])
+        elif sys.tracebacklimit == 10 and (sys.argv[1] == "--loglevel"):
+            args = amd_smi_parser.parse_args(args=["default", "--loglevel"] + sys.argv[2:])
         elif sys.argv[1] in valid_commands:
             args = amd_smi_parser.parse_args(args=None)
         else:
-            raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(sys.argv[1],amd_smi_commands.logger.destination)
+            raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(
+                sys.argv[1], amd_smi_commands.logger.destination
+            )
 
         # Handle command modifiers before subcommand execution
         # human readable is the default output format
-        if hasattr(args, 'json') and args.json:
+        if hasattr(args, "json") and args.json:
             amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.json.value
-        if hasattr(args, 'csv') and args.csv:
+        if hasattr(args, "csv") and args.csv:
             amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.csv.value
-        if hasattr(args, 'file') and args.file:
+        if hasattr(args, "file") and args.file:
             amd_smi_commands.logger.destination = args.file
         configure_logging_and_execute(args, amd_smi_commands)
     except amdsmi_cli_exceptions.AmdSmiException as e:
-        _print_error(f"{type(e).__module__}.{type(e).__name__}: {str(e)}", amd_smi_commands.logger.destination)
+        _print_error(
+            f"{type(e).__module__}.{type(e).__name__}: {str(e)}",
+            amd_smi_commands.logger.destination,
+        )
         sys.exit(abs(e.value))
     except amdsmi_exception.AmdSmiLibraryException as e:
-        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(amd_smi_commands.logger.format, e.get_error_code())
-        _print_error(f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}", amd_smi_commands.logger.destination)
+        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+            amd_smi_commands.logger.format, e.get_error_code()
+        )
+        _print_error(
+            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
+            amd_smi_commands.logger.destination,
+        )
         sys.exit(abs(exc.value))

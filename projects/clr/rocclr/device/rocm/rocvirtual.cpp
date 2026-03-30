@@ -251,15 +251,14 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
 bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   Timestamp* ts = reinterpret_cast<Timestamp*>(arg);
 
+  VirtualGPU* const gpu = ts->gpu();
+
   ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Handler: value(%d), timestamp(%p), handle(0x%lx)",
           static_cast<uint32_t>(value), arg,
           ts->HwProfiling() ? ts->Signals()[0]->signal_.handle : 0);
 
   // Save callback signal
   hsa_signal_t callback_signal = ts->GetCallbackSignal();
-
-  auto gpu = ts->gpu();
-  gpu->QueuedAsyncHandlers()--;
 
   bool isBlocking = ts->GetBlocking();
 
@@ -276,6 +275,7 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   }
 
   // Return false, so the callback will not be called again for this signal
+  gpu->QueuedAsyncHandlers()--;
   gpu->release();
   return false;
 }
@@ -581,6 +581,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
       hsa_status_t result = Hsa::signal_async_handler(
           prof_signal->signal_, HSA_SIGNAL_CONDITION_LT, init_value, &HsaAmdSignalHandler, ts);
       if (HSA_STATUS_SUCCESS != result) {
+        gpu_.QueuedAsyncHandlers()--;
+        ts->gpu()->release();
         LogError("hsa_amd_signal_async_handler() failed to set the handler!");
       } else {
         ClPrint(amd::LOG_INFO, amd::LOG_SIG,
@@ -2190,7 +2192,6 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
     }
     timestamp_ = nullptr;
   }
-  assert(retainExternalSignals_ || Barriers().IsExternalSignalListEmpty());
 
   // Certain commands like map/unmap memory may not need hw_events as its not a
   // queue operation. In such cases clear already set events which may have been for sync

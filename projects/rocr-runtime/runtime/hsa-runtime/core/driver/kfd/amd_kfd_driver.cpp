@@ -463,7 +463,7 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
   const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
   HsaExternalHandleDesc desc;
   desc.device_handle = gpu_agent.libThunkDev();
-  desc.fd = static_cast<HSAint32>(dmabuf_fd);
+  desc.fd = static_cast<HSAint64>(dmabuf_fd);
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
   desc.mem = mem;
   desc.metadata = 0;
