@@ -546,10 +546,9 @@ TEST_F(logger_test, parent_continues_logging_after_fork)
 TEST_F(logger_test, fork_child_gets_new_logger_instance)
 {
     auto& parent_logger = rocprofsys::logger_t::instance();
+    EXPECT_EQ(parent_logger.name(), "rocprofiler-systems");
+    EXPECT_FALSE(parent_logger.sinks().empty());
 
-    // Store parent's logger address as a uintptr_t to pass to child for comparison
-    // is not valid across fork, so instead verify child gets a freshly constructed logger
-    // by checking it has no sinks inherited from the parent's file sink configuration.
     pid_t child_pid = fork();
     if(child_pid == 0)
     {
@@ -577,6 +576,11 @@ TEST_F(logger_test, fork_child_gets_new_logger_instance)
     waitpid(child_pid, &status, 0);
     ASSERT_TRUE(WIFEXITED(status));
     EXPECT_EQ(WEXITSTATUS(status), 0) << "Child should get a fresh, functional logger";
+
+    // Parent logger should remain valid after fork
+    EXPECT_EQ(parent_logger.name(), "rocprofiler-systems");
+    EXPECT_FALSE(parent_logger.sinks().empty());
+    EXPECT_NO_THROW(parent_logger.info("Parent still works after child fork"));
 }
 
 TEST_F(logger_test, concurrent_logging_stress_with_fork)
