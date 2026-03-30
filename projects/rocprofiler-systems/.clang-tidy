@@ -35,7 +35,6 @@ modernize-*,\
 performance-*,\
 readability-*,\
 -readability-const-return-type,\
--readability-else-after-return,\
 -readability-function-cognitive-complexity,\
 -readability-function-size,\
 -readability-inconsistent-declaration-parameter-name,\
