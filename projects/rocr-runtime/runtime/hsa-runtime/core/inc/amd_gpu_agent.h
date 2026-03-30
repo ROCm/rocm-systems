@@ -629,8 +629,6 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session) override;
-  hsa_status_t PcSamplingFlushDeviceBuffers(pcs::PcsRuntime::PcSamplingSession& session);
-
   // @brief Node properties.
   const HsaNodeProperties properties_;
 
@@ -922,59 +920,64 @@ class GpuAgent : public GpuAgentInt {
   void* trap_handler_tma_region_;
 
   /* PC Sampling fields - begin */
-  /* 2nd level Trap handler code is based on the offsets within this structure */
+  /* 2nd level Trap handler code is based on the offsets within this structure.
+   * Buffers start at offset 0x40, so the header must be exactly 64 bytes. */
   typedef struct {
-    uint64_t buf_write_val;
-    uint32_t buf_size;
-    uint32_t reserved0;
-    uint32_t buf_written_val0;
-    uint32_t buf_watermark0;
-    hsa_signal_t done_sig0;
-    uint32_t buf_written_val1;
-    uint32_t buf_watermark1;
-    hsa_signal_t done_sig1;
-    uint8_t reserved1[16];
-    /* pc_sample_t buffer0[buf_size]; */
+    uint64_t buf_write_val;      // [0x00] Atomic entry counter (bit 63 = buffer select)
+    uint32_t buf_size;           // [0x08] Maximum samples per buffer
+    uint32_t reserved0;          // [0x0C] Reserved
+    uint32_t buf_written_val0;   // [0x10] Samples written to buffer 0
+    uint32_t buf_watermark0;     // [0x14] Trigger threshold for buffer 0
+    hsa_signal_t done_sig0;      // [0x18] Host notification signal for buffer 0
+    uint32_t buf_written_val1;   // [0x20] Samples written to buffer 1
+    uint32_t buf_watermark1;     // [0x24] Trigger threshold for buffer 1
+    hsa_signal_t done_sig1;      // [0x28] Host notification signal for buffer 1
+    uint8_t reserved1[16];       // [0x30] Reserved (padding to 0x40)
+    /* pc_sample_t buffer0[buf_size]; starts at [0x40] */
     /* pc_sample_t buffer1[buf_size]; */
   } pcs_sampling_data_t;
 
+  /* TMA2 structure - second-level trap handler entry point */
   typedef struct {
-    /* Sampling data - stored on device for trap handler access */
-    pcs_sampling_data_t* device_data;
+    pcs_sampling_data_t* host_trap_buffers;        // [0x00] Base of host trap buffer array
+    pcs_sampling_data_t* stochastic_trap_buffers;  // [0x08] Base of stochastic trap buffer array
+    uint64_t per_xcc_size;                         // [0x10] Per-XCC stride (gfx9.4+ only)
+    uint64_t reserved_pad;                         // [0x18] Alignment padding
+  } pcs_tma2_t;
 
-    /* Sampling host buffer - stored on host */
+  typedef struct {
+    /* Per-XCC architecture for reduced atomic contention */
+    uint32_t num_xcc;                       // Number of XCCs on this device
+    pcs_sampling_data_t** device_data;      // Array of pointers (size = num_xcc)
+    pcs_sampling_data_t* device_data_base;  // Base of contiguous allocation
+
+    /* Per-XCC host buffers with per-XCC atomic offsets */
     uint8_t* host_buffer;
     size_t host_buffer_size;
-    uint8_t* host_buffer_wrap_pos;
-    uint8_t* host_write_ptr;
-    uint8_t* host_read_ptr;
-    size_t lost_sample_count;
+    std::atomic<uint64_t>* host_write_offset;  // Per-XCC write offsets (array)
+    std::atomic<uint64_t>* host_read_offset;   // Per-XCC read offsets (array)
+    std::atomic<size_t> lost_sample_count;     // Thread-safe lost sample counter
     std::mutex host_buffer_mutex;
 
-    uint32_t which_buffer;
-    uint64_t* old_val;
-    uint32_t* cmd_data;
-    size_t cmd_data_sz;
-    // signal to pass into ExecutePM4() so that we do not need to re-allocate a
-    // new signal on each call
-    hsa_signal_t exec_pm4_signal;
+    /* Per-XCC thread resources (arrays of size num_xcc) */
+    os::Thread* threads;             // Array of threads
+    uint32_t* which_buffer;          // Per-XCC buffer selector
+    hsa_signal_t* done_signals;      // Cached signal handles (size = num_xcc * 2)
 
-    // Host-side copies - cannot read these from device_data on non-large BAR systems
-    hsa_signal_t done_sig0;
-    hsa_signal_t done_sig1;
-    uint32_t buf_size;
-
-    os::Thread thread;
     pcs::PcsRuntime::PcSamplingSession* session;
   } pcs_data_t;
   /* PC Sampling fields - end */
 
   hsa_status_t UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
-                                        pcs_sampling_data_t* pcs_stochastic_buffers);
+                                        pcs_sampling_data_t* pcs_stochastic_buffers,
+                                        uint32_t per_xcc_size);
 
-  // @brief Thread function to process PC sampling data collected via host-trap
-  // or Stochastic sampling.
-  void PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name);
+  // @brief Per-XCC thread function for PC sampling (monitors one XCC's device buffers)
+  void PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id, const char* thread_name);
+
+  // @brief Flush device buffers for per-XCC PC sampling architecture
+  hsa_status_t PcSamplingFlushDeviceBuffersPerXCC(pcs::PcsRuntime::PcSamplingSession& session,
+                                                  uint32_t xcc_id);
 
   // @brief device handle
   amdgpu_device_handle ldrm_dev_;
