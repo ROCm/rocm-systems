@@ -560,6 +560,12 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
   amd::Memory* mem = nullptr;
   IHIP_RETURN_ONFAIL(it->second->GetStatDeviceVar(&mem, deviceId));
 
+  if (mem == nullptr) {
+    // Handle size-0 globals: return null device pointer and size 0.
+    *dev_ptr = 0;
+    *size_ptr = 0;
+    return hipSuccess;
+  }
   *dev_ptr = memDevPtr(mem);
   *size_ptr = mem->getSize();
   return hipSuccess;
