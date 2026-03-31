@@ -43,10 +43,6 @@ struct hsa_kfd_event_context
 struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx)
 {
 	assert(ctx);
-	if (!ctx) {
-		pr_err("Expected a non-null ptr for HsaKFDContext");
-		return NULL;
-	}
 
 	if (ctx->event_context)
 		return ctx->event_context;
@@ -278,9 +274,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnEvent_ExtCtx(HsaKFDContext *ctx,
 static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, uint32_t gpu_id)
 {
 	struct kfd_ioctl_svm_args *args;
-	uint32_t node_id = 0;
-	HSAuint32 s_attr;
-	HSAuint32 i;
+        uint32_t node_id = 0;
+        HSAuint32 s_attr;
+        HSAuint32 i;
 	HSA_SVM_ATTRIBUTE attrs[] = {
 					{HSA_SVM_ATTR_PREFERRED_LOC, 0},
 					{HSA_SVM_ATTR_PREFETCH_LOC, 0},
@@ -309,7 +305,7 @@ static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, 
 		    args->attrs[i].value == KFD_IOCTL_SVM_LOCATION_UNDEFINED)
 			node_id = args->attrs[i].value;
 		else
-			hsakmt_gpuid_to_nodeid(ctx, args->attrs[i].value, &node_id);
+			hsakmt_gpuid_to_nodeid(args->attrs[i].value, &node_id);
 		switch (args->attrs[i].type) {
 		case KFD_IOCTL_SVM_ATTR_PREFERRED_LOC:
 			pr_err("Preferred location for address 0x%lx is Node id %d\n",
@@ -361,7 +357,7 @@ static void analysis_memory_exception(HsaKFDContext *ctx,
 	uint32_t node_id = 0;
 	unsigned int i;
 
-	hsakmt_gpuid_to_nodeid(ctx, memory_exception_data->gpu_id, &node_id);
+	hsakmt_gpuid_to_nodeid(memory_exception_data->gpu_id, &node_id);
 	pr_err("Memory exception on virtual address 0x%lx, ", addr);
 	pr_err("node id %d : ", node_id);
 	if (memory_exception_data->failure.NotPresent)
@@ -470,7 +466,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnMultipleEvents_ExtCtx(HsaKFDContext *ctx,
 			if (Events[i]->EventData.EventType == HSA_EVENTTYPE_MEMORY &&
 			    event_data[i].memory_exception_data.gpu_id) {
 				Events[i]->EventData.EventData.MemoryAccessFault.VirtualAddress = event_data[i].memory_exception_data.va;
-				result = hsakmt_gpuid_to_nodeid(ctx, event_data[i].memory_exception_data.gpu_id, &Events[i]->EventData.EventData.MemoryAccessFault.NodeId);
+				result = hsakmt_gpuid_to_nodeid(event_data[i].memory_exception_data.gpu_id, &Events[i]->EventData.EventData.MemoryAccessFault.NodeId);
 				if (result != HSAKMT_STATUS_SUCCESS)
 					goto out;
 				Events[i]->EventData.EventData.MemoryAccessFault.Failure.NotPresent = event_data[i].memory_exception_data.failure.NotPresent;
@@ -485,7 +481,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnMultipleEvents_ExtCtx(HsaKFDContext *ctx,
 			} else if (Events[i]->EventData.EventType == HSA_EVENTTYPE_HW_EXCEPTION &&
 				event_data[i].hw_exception_data.gpu_id) {
 
-				result = hsakmt_gpuid_to_nodeid(ctx, event_data[i].hw_exception_data.gpu_id, &Events[i]->EventData.EventData.HwException.NodeId);
+				result = hsakmt_gpuid_to_nodeid(event_data[i].hw_exception_data.gpu_id, &Events[i]->EventData.EventData.HwException.NodeId);
 				if (result != HSAKMT_STATUS_SUCCESS)
 					goto out;
 
@@ -517,7 +513,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSMICtx(HsaKFDContext *ctx, HSAuint32 NodeId, i
 
 	pr_debug("[%s] node %d\n", __func__, NodeId);
 
-	result = hsakmt_validate_nodeid(ctx, NodeId, &gpuid);
+	result = hsakmt_validate_nodeid(NodeId, &gpuid);
 	if (result != HSAKMT_STATUS_SUCCESS) {
 		pr_err("[%s] invalid node ID: %d\n", __func__, NodeId);
 		return result;
