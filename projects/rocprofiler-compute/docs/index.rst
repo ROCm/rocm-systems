@@ -60,15 +60,33 @@ in practice.
 
       * :doc:`conceptual/performance-model`
 
-        * :doc:`conceptual/compute-unit`
+        * :doc:`conceptual/cdna/cdna-performance-model`
 
-        * :doc:`conceptual/l2-cache`
+        * :doc:`conceptual/rdna/rdna-performance-model`
 
-        * :doc:`conceptual/shader-engine`
+        * :doc:`conceptual/cdna/compute-unit`
 
-        * :doc:`conceptual/command-processor`
+        * :doc:`conceptual/cdna/l2-cache`
 
-        * :doc:`conceptual/system-speed-of-light`
+        * :doc:`conceptual/cdna/shader-engine`
+
+        * :doc:`conceptual/cdna/command-processor`
+
+        * :doc:`conceptual/cdna/system-speed-of-light`
+
+        * :doc:`conceptual/rdna/compute-unit`
+
+        * :doc:`conceptual/rdna/l2-cache`
+
+        * :doc:`conceptual/rdna/shader-engine`
+
+        * :doc:`conceptual/rdna/command-processor`
+
+        * :doc:`conceptual/rdna/system-speed-of-light`
+
+        * :doc:`conceptual/cdna/references`
+
+        * :doc:`conceptual/rdna/references`
 
       * :doc:`conceptual/definitions`
 
