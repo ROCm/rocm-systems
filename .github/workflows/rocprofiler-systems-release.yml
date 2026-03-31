@@ -35,7 +35,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          sparse-checkout: projects/rocprofiler-systems/
+          sparse-checkout: |
+            projects/rocprofiler-systems/
+            .gitmodules
+
       - name: Generate generic installer script
         shell: bash
         working-directory: projects/rocprofiler-systems/

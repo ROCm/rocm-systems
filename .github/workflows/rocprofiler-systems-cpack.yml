@@ -111,6 +111,7 @@ jobs:
           sparse-checkout: |
             projects/rocprofiler-systems
             .github
+            .gitmodules
           submodules: recursive
 
       - name: Configure Build Arguments
