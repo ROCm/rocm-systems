@@ -21,6 +21,7 @@ ANSI_ESCAPE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
 def strip_ansi(text: str) -> str:
     return ANSI_ESCAPE.sub("", text)
 
+
 # =============================================================================
 # Tests for format_bw_human_readable function
 # =============================================================================
