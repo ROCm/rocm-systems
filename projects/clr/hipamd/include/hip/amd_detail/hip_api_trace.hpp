@@ -47,7 +47,7 @@
 // - Reset any of the *_STEP_VERSION defines to zero if the corresponding *_MAJOR_VERSION increases
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
-#define HIP_TOOLS_API_TABLE_STEP_VERSION 1
+#define HIP_TOOLS_API_TABLE_STEP_VERSION 0
 #define HIP_RUNTIME_API_TABLE_STEP_VERSION 25
 
 // HIP API interface
@@ -1759,10 +1759,7 @@ struct HipToolsDispatchTable {
 
   // DO NOT EDIT ABOVE!
   // HIP_TOOLS_API_TABLE_STEP_VERSION == 1
-  t___hipReportDevices __hipReportDevicesCuid_fn;
 
-  // DO NOT EDIT ABOVE!
-  // HIP_TOOLS_API_TABLE_STEP_VERSION == 2
   // ******************************************************************************************* //
   //
   //                                            READ BELOW

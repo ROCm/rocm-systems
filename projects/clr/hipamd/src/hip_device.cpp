@@ -508,7 +508,6 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   const auto& isa = deviceHandle->isa();
   ::strncpy(deviceProps.name, info.boardName_, sizeof(info.boardName_));
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
-  memcpy(deviceProps.cuid.bytes, info.cuid_, sizeof(info.cuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
   deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_;

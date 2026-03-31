@@ -905,7 +905,6 @@ void UpdateDispatchTable(HipCompilerDispatchTable* ptrCompilerDispatchTable) {
 void UpdateDispatchTable(HipToolsDispatchTable* ptrToolsDispatchTable) {
   ptrToolsDispatchTable->size = sizeof(HipToolsDispatchTable);
   ptrToolsDispatchTable->__hipReportDevices_fn = nullptr;
-  ptrToolsDispatchTable->__hipReportDevicesCuid_fn = nullptr;
 }
 
 void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
@@ -1581,16 +1580,16 @@ static_assert(HIP_COMPILER_API_TABLE_MAJOR_VERSION == 0 && HIP_COMPILER_API_TABL
 // HIP_TOOLS_API_TABLE_STEP_VERSION == 0
 HIP_ENFORCE_ABI(HipToolsDispatchTable, __hipReportDevices_fn, 0)
 // HIP_TOOLS_API_TABLE_STEP_VERSION == 1
-HIP_ENFORCE_ABI(HipToolsDispatchTable, __hipReportDevicesCuid_fn, 1)
+
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipToolsDispatchTable, 2)
+HIP_ENFORCE_ABI_VERSIONING(HipToolsDispatchTable, 1)
 
-static_assert(HIP_TOOLS_API_TABLE_MAJOR_VERSION == 0 && HIP_TOOLS_API_TABLE_STEP_VERSION == 1,
+static_assert(HIP_TOOLS_API_TABLE_MAJOR_VERSION == 0 && HIP_TOOLS_API_TABLE_STEP_VERSION == 0,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 
