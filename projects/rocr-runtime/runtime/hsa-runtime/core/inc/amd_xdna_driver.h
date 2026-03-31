@@ -294,8 +294,8 @@ public:
 
   std::map<void*, BOHandle> vmem_addr_mappings;
 
-  /// @brief Queue to PDI cache mapping.
-  std::unordered_map<HSA_QUEUEID, PDICache> hw_ctx_pdi_cache_map;
+  /// @brief Queue to PDI cache map.
+  std::unordered_map<HSA_QUEUEID, PDICache> queue_pdi_map_;
 
   /// @brief Virtual address range allocated for the device heap.
   ///

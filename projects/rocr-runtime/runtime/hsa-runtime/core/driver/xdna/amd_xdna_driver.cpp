@@ -444,7 +444,7 @@ hsa_status_t XdnaDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
   }
 
   // Drop PDI cache.
-  const_cast<std::unordered_map<HSA_QUEUEID, PDICache>&>(hw_ctx_pdi_cache_map).erase(queue_id);
+  const_cast<std::unordered_map<HSA_QUEUEID, PDICache>&>(queue_pdi_map_).erase(queue_id);
 
   // Destroy hardware context associated with the queue.
   amdxdna_drm_destroy_hwctx destroy_hwctx_args = {};
@@ -806,8 +806,8 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
   // hardware context will be created for the queue.
   PDICache pdi_cache;
   if (static_cast<uint32_t>(queue_id) != AMDXDNA_INVALID_CTX_HANDLE) {
-    auto pdi_cache_it = hw_ctx_pdi_cache_map.find(queue_id);
-    if (pdi_cache_it != hw_ctx_pdi_cache_map.end()) {
+    auto pdi_cache_it = queue_pdi_map_.find(queue_id);
+    if (pdi_cache_it != queue_pdi_map_.end()) {
       pdi_cache = pdi_cache_it->second;
     }
   }
@@ -876,7 +876,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
       assert(false && "Failed to configure hardware context for queue.");
       return status;
     }
-    hw_ctx_pdi_cache_map[queue_id] = pdi_cache;
+    queue_pdi_map_[queue_id] = pdi_cache;
   }
 
   assert(queue_id != AMDXDNA_INVALID_CTX_HANDLE &&
