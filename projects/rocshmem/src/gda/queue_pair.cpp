@@ -227,7 +227,7 @@ __device__ void QueuePair::quiet(ActiveWFInfo &wf_info) {
       switch (gda_provider_) {
     #if defined(GDA_IONIC)
       case GDAProvider::IONIC:
-        ionic_quiet();
+        ionic_quiet(wf_info);
         return;
     #endif
     #if defined(GDA_BNXT)
@@ -250,7 +250,7 @@ __device__ void QueuePair::quiet_single() {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_quiet();
+    ionic_quiet_single();
     return;
 #endif
 #if defined(GDA_BNXT)

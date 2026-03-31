@@ -198,10 +198,7 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
 }
 
 __device__ void QueuePair::bnxt_quiet(ActiveWFInfo &wf_info) {
-  // is this redundant, since the quiet is already called from only the PE group leader with the wavefront
-  if (0 == wf_info.pe_group_logical_lane_id) {
-    bnxt_poll_cq_until(bnxt_sq.depth);
-  }
+  bnxt_poll_cq_until(bnxt_sq.depth);
 }
 
 __device__ void QueuePair::bnxt_quiet_single() {
