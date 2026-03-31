@@ -44,6 +44,7 @@ generate_sym_kernels=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
 build_rocshmem_support=false
+rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
 custom_cmake_options=""
 
 # #################################################
@@ -105,6 +106,7 @@ function display_help()
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
     echo ""
     echo "  Environment variables:"
+    echo "    ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)"
     echo "    ONLY_FUNCS                 Build only specified collective functions (debug builds only)."
     echo "                               Restricts GPU kernel generation to the listed collectives, significantly"
     echo "                               reducing build time during development. Use '|' to separate multiple functions."
@@ -214,6 +216,58 @@ check_exit_code( )
     fi
 }
 
+# Set up a git worktree of the rocm-systems mono-repo so that
+# projects/rocshmem is checked out at a pinned commit hash while the
+# main working tree (which contains rccl at HEAD) stays untouched.
+setup_rocshmem_worktree()
+{
+    local mono_root
+    mono_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [[ -z "$mono_root" ]]; then
+        echo "ERROR: Not inside a git repository. Cannot set up rocSHMEM worktree."
+        echo "       Use ROCSHMEM_INSTALL_DIR to point to a pre-built rocSHMEM instead."
+        exit 1
+    fi
+
+    local pinned_hash="${rocshmem_mono_hash}"
+    local worktree_dir="${mono_root}/.rocshmem-worktree"
+
+    echo "=== Setting up rocSHMEM from mono-repo worktree ==="
+    echo "  Pinned hash  : ${pinned_hash:0:12}"
+    echo "  Worktree dir : ${worktree_dir}"
+
+    if [[ -d "$worktree_dir" ]]; then
+        local current_hash
+        current_hash=$(git -C "$worktree_dir" rev-parse HEAD 2>/dev/null)
+        if [[ "${current_hash}" == "${pinned_hash}"* ]] || [[ "${pinned_hash}" == "${current_hash}"* ]]; then
+            echo "  Worktree already at the correct hash — reusing."
+            rocshmem_source_dir="${worktree_dir}/projects/rocshmem"
+            return 0
+        fi
+        echo "  Removing stale worktree..."
+        git -C "$mono_root" worktree remove "$worktree_dir" --force 2>/dev/null || rm -rf "$worktree_dir"
+    fi
+
+    git -C "$mono_root" worktree add --no-checkout "$worktree_dir" "$pinned_hash"
+    check_exit_code "$?"
+
+    git -C "$worktree_dir" sparse-checkout init --cone
+    git -C "$worktree_dir" sparse-checkout set projects/rocshmem
+    check_exit_code "$?"
+
+    git -C "$worktree_dir" checkout
+    check_exit_code "$?"
+
+    if [[ ! -d "${worktree_dir}/projects/rocshmem" ]]; then
+        echo "ERROR: projects/rocshmem not found in worktree."
+        exit 1
+    fi
+
+    rocshmem_source_dir="${worktree_dir}/projects/rocshmem"
+    echo "  rocSHMEM source ready at: ${rocshmem_source_dir}"
+    echo "=================================================="
+}
+
 # set RCCL-UnitTests path
 if [[ "${build_release}" == true ]]; then
     unit_test_path="./build/release/test/rccl-UnitTests"
@@ -225,6 +279,14 @@ if [[ "${run_tests}" == true ]] && [[ -f "${unit_test_path}" ]]; then
     if [[ "${build_tests}" == false ]]; then
         clean_build=false
     fi
+fi
+
+# #################################################
+# rocSHMEM worktree setup (must run before cd-ing into the build directory)
+# #################################################
+rocshmem_source_dir=""
+if [[ "${build_rocshmem_support}" == true ]] && [[ -z "${ROCSHMEM_INSTALL_DIR}" ]]; then
+    setup_rocshmem_worktree
 fi
 
 # #################################################
@@ -380,7 +442,11 @@ fi
 # Enable rocSHMEM support
 if [[ "${build_rocshmem_support}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=ON"
-    cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+    if [[ -n "${ROCSHMEM_INSTALL_DIR}" ]]; then
+        cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+    elif [[ -n "${rocshmem_source_dir}" ]]; then
+        cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
+    fi
 else
     cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF"
 fi

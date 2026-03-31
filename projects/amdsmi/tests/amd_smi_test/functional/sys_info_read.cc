@@ -252,7 +252,7 @@ void TestSysInfoRead::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\t**KFD ID: " << std::dec << kfd_info.kfd_id << "\n";
         std::cout << "\t**Node ID: " << std::dec << kfd_info.node_id << "\n";
-        std::cout << "\t**Current Parition ID: " << std::dec << kfd_info.current_partition_id
+        std::cout << "\t**Current Partition ID: " << std::dec << kfd_info.current_partition_id
                   << "\n";
       }
       EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
