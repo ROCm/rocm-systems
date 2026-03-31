@@ -110,6 +110,15 @@ struct HrrState {
   // Track modules: module_ptr -> handle
   std::unordered_map<uintptr_t, uint64_t> modules;
   uint64_t next_module_handle = 1;
+
+  // Last kernel's pointer args (for full-mode output snapshots)
+  struct PtrArg {
+    void* dev_ptr;
+    size_t size;
+    uint64_t handle;
+  };
+  std::vector<PtrArg> last_kernel_ptrs;
+  std::string last_kernel_name;
 };
 
 HrrState g_state;
@@ -613,13 +622,36 @@ void record_kernel_launch(const char* kernel_name,
           memcpy(&ptr_val, arg.data.data(), 8);
           void* dev_ptr = reinterpret_cast<void*>(ptr_val);
 
-          // Buffer snapshot: copy device buffer to host for recording.
-          // TODO: Use ihipMemcpy for direct access without re-entrancy.
-          // For now, mark snapshot_size so the event records the intent,
-          // but skip the actual DtoH copy to avoid header dependency issues.
-          // The memcpy data is still captured via hipMemcpy H2D hooks.
-          arg.snapshot_hash = {};  // no snapshot data yet
-          arg.snapshot_size = 0;   // clear to skip snapshot record
+          // Buffer snapshot: copy device buffer to host via internal
+          // memcpy helper (bypasses HRR hooks to avoid re-entrancy).
+          std::vector<uint8_t> host_buf(arg.snapshot_size);
+          g_state.active = false;  // extra guard
+          int err = hrr_memcpy_d2h_internal(host_buf.data(), dev_ptr,
+                                            arg.snapshot_size);
+          g_state.active = true;
+          if (err == 0) {
+            arg.snapshot_hash = write_blob(host_buf.data(), arg.snapshot_size);
+          } else {
+            arg.snapshot_size = 0;  // failed, skip snapshot record
+          }
+        }
+      }
+    }
+  }
+
+  // Save pointer args for post-kernel output capture (full mode)
+  if (g_state.record_mode == RecordMode::Full) {
+    std::lock_guard<std::mutex> lock(g_state.mu);
+    g_state.last_kernel_ptrs.clear();
+    g_state.last_kernel_name = kernel_name ? kernel_name : "<unknown>";
+    for (const auto& arg : args) {
+      if (arg.value_kind == 1 && arg.data.size() >= 8) {
+        uint64_t handle;
+        memcpy(&handle, arg.data.data(), 8);
+        auto it = g_state.allocs.find(handle);
+        if (it != g_state.allocs.end()) {
+          g_state.last_kernel_ptrs.push_back(
+              {reinterpret_cast<void*>(handle), it->second.size, it->second.handle});
         }
       }
     }
@@ -695,10 +727,62 @@ void record_kernel_launch(const char* kernel_name,
               0, payload.data(), payload_len);
 }
 
+// --- Post-kernel output capture (full mode) ---
+
+void record_kernel_outputs() {
+  if (!g_state.active) return;
+  if (g_state.record_mode != RecordMode::Full) return;
+
+  std::vector<HrrState::PtrArg> ptrs;
+  {
+    std::lock_guard<std::mutex> lock(g_state.mu);
+    ptrs = std::move(g_state.last_kernel_ptrs);
+    g_state.last_kernel_ptrs.clear();
+  }
+
+  if (ptrs.empty()) return;
+
+  // Snapshot each pointer buffer as an output blob
+  for (const auto& pa : ptrs) {
+    if (pa.size == 0) continue;
+    if (g_state.max_blob_mb > 0 && pa.size > g_state.max_blob_mb * 1024 * 1024)
+      continue;
+
+    std::vector<uint8_t> host_buf(pa.size);
+    g_state.active = false;
+    int err = hrr_memcpy_d2h_internal(host_buf.data(), pa.dev_ptr, pa.size);
+    g_state.active = true;
+
+    if (err == 0) {
+      Hash128 h = write_blob(host_buf.data(), pa.size);
+
+      // Write a MEMCPY D2H event with the output blob hash
+      // This records the output state for verification during replay
+      struct {
+        uint64_t dst_addr;
+        uint64_t src_addr;
+        uint64_t size;
+        uint32_t kind;
+        uint64_t hash_lo;
+        uint64_t hash_hi;
+      } __attribute__((packed)) payload = {
+        0,  // dst = host (don't care for output record)
+        reinterpret_cast<uint64_t>(pa.dev_ptr),
+        pa.size,
+        2,  // D2H kind
+        h.lo, h.hi
+      };
+      write_event(EVENT_MEMCPY, 0, 0, &payload, sizeof(payload));
+    }
+  }
+}
+
 // --- Synchronization recording ---
 
 void record_device_sync() {
   if (!g_state.active) return;
+  // In full mode, capture output buffers after sync completes
+  record_kernel_outputs();
   write_event(EVENT_DEVICE_SYNC, 0, 0, nullptr, 0);
 }
 

@@ -27,6 +27,11 @@
 struct dim3;
 typedef struct ihipModule_t* hipModule_t;
 
+// --- Internal helper (implemented in hip_memory.cpp) ---
+// Does a device-to-host memcpy bypassing HRR hooks. Used for buffer snapshots.
+// Returns 0 on success (hipSuccess).
+int hrr_memcpy_d2h_internal(void* dst, const void* src, size_t size);
+
 namespace hrr {
 
 // ============================================================================
@@ -131,6 +136,10 @@ void record_kernel_launch(const char* kernel_name,
                           uint32_t shared_mem,
                           const void* stream,
                           void** kernel_args);
+
+// Post-kernel output capture (full mode only).
+// Call after hipDeviceSynchronize to snapshot output buffers of the last kernel.
+void record_kernel_outputs();
 
 // Synchronization
 void record_device_sync();

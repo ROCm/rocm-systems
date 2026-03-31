@@ -29,6 +29,16 @@
 #include "platform/memory.hpp"
 #include "platform/external_memory.hpp"
 #include "hip_hrr.h"
+
+// HRR internal D2H memcpy — bypasses recording hooks.
+// Implemented here because hip_memory.cpp has access to ihipMemcpy
+// and all required HIP internal headers.
+int hrr_memcpy_d2h_internal(void* dst, const void* src, size_t size) {
+  hip::Stream* stream = hip::getCurrentDevice()->NullStream();
+  return static_cast<int>(hip::ihipMemcpy(dst, src, size, hipMemcpyDeviceToHost,
+                                          *stream, false, false));
+}
+
 namespace hip {
 
 // Guards global hipArray set
