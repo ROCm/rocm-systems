@@ -351,7 +351,7 @@ memory:
   Unit_hipHostRegister_Capture:
     <<: *level_2
     tags: [alloc]
-  Unit_hipHostUnregister_MemoryNotAccessableAfterUnregister:
+  Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister:
     <<: *level_2
     tags: [alloc]
   Unit_hipHostUnregister_NullPtr:
@@ -2222,7 +2222,6 @@ memory:
   Unit_hipMemGetMemPool_Basic: *level_2
   Unit_hipMemSetMemPool_Negative: *level_2
   Unit_hipMemSetMemPool_Basic: *level_2
-  Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister: *level_2
   Unit_hipFreeHost_Capture_negative:
     <<: *level_2
   Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory: *level_2
