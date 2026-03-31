@@ -72,7 +72,7 @@ class FormatYAML(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         yaml = YAML()
         yaml.preserve_quotes = True
-        yaml.width = 120
+        yaml.width = 100
         yaml.indent(mapping=2, sequence=4, offset=2)
         config = (
             Path(os.path.dirname(__file__))
