@@ -262,8 +262,10 @@ __device__ void QueuePair::mlx5_quiet(ActiveWFInfo &wf_info) {
   mlx5_poll_cq_until(mlx5_sq.depth);
 }
 
-// called with all active lanes using different QPs
-// is this call redundant..? mlx5_quiet
+/**
+ * TODO: This function is redundant but kept because ionic has a different
+ * quiet_single implementation. Remove once ionic's quiet is unified.
+ */
 __device__ void QueuePair::mlx5_quiet_single() {
   mlx5_poll_cq_until(mlx5_sq.depth);
 }

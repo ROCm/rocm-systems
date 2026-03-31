@@ -201,6 +201,10 @@ __device__ void QueuePair::bnxt_quiet(ActiveWFInfo &wf_info) {
   bnxt_poll_cq_until(bnxt_sq.depth);
 }
 
+/**
+ * TODO: This function is redundant but kept because ionic has a different
+ * quiet_single implementation. Remove once ionic's quiet is unified.
+ */
 __device__ void QueuePair::bnxt_quiet_single() {
   bnxt_poll_cq_until(bnxt_sq.depth);
 }
