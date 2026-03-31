@@ -3528,6 +3528,9 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
 hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
                                       uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                       hsa_signal_t completion_signal) {
+
+  const size_t kPageSize = os::PageSize();
+  
   // Get a CPU agent for migration target
   if (cpu_agents().empty()) return HSA_STATUS_ERROR;
 
@@ -3542,116 +3545,133 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
-                                        
-  HSA_SVM_ATTRIBUTE attr;
-  attr.type = HSA_SVM_ATTR_PREFERRED_LOC;
-  attr.value = 0;
-  uint8_t* base = AlignDown((uint8_t*)ptrs[0], 4096);
-  uint8_t* end = AlignUp((uint8_t*)ptrs[0] + sizes[0], 4096);
-  size_t len = end - base;
-
-  AMD::CpuAgent* cpu = nullptr;
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, 1, &attr));
-
-  if (status == HSAKMT_STATUS_SUCCESS && (attr.value != 0xFFFFFFFF && attr.value != INVALID_NODEID)) {
-    core::Agent* agent = agents_by_node_[attr.value][0];
-    if (agent->device_type() == core::Agent::kAmdGpuDevice) {
-      AMD::GpuAgent* gpu = static_cast<AMD::GpuAgent*>(agent);
-      cpu = static_cast<AMD::CpuAgent*>(gpu->GetNearestCpuAgent());
-    }
-  } else {
-    // Use first available CPU agent as fallback mechanism
-    cpu = static_cast<AMD::CpuAgent*>(cpu_agents_[0]);
-  }
 
   // Discard operation context
   struct DiscardOp {
-    uint32_t cpu_node_id;
+    std::vector<uint32_t> target_cpus;
     std::vector<std::pair<void*, size_t>> regions;
-    std::vector<hsa_signal_t> dep_signals;
-    uint32_t remaining_deps;
+    std::atomic<uint32_t> remaining_deps;
     hsa_signal_t completion;
   };
 
   DiscardOp* op = new DiscardOp();
   MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
 
-  op->cpu_node_id = cpu->node_id();
+  
+  // Prepare memory regions with page alignment and store target cpu agent for each region
+  op->regions.reserve(count);
+  op->target_cpus.reserve(count);
   op->completion = completion_signal;
 
-  // Prepare memory regions with page alignment
-  op->regions.reserve(count);
   for (uint32_t i = 0; i < count; i++) {
-    uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptrs[i], 4096));
-    uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptrs[i]) + sizes[i], 4096);
+    uint8_t* base = AlignDown((uint8_t*)ptrs[i], kPageSize);
+    uint8_t* end = AlignUp((uint8_t*)ptrs[i] + sizes[i], kPageSize);
     size_t len = end - base;
-    op->regions.push_back(std::make_pair(reinterpret_cast<void*>(base), len));
-  }
 
-  // Setup dependency signals tracking
-  if (num_dep_signals > 1) {
-    op->remaining_deps = num_dep_signals - 1;
-    op->dep_signals.assign(dep_signals, dep_signals + num_dep_signals - 1);
-  } else {
-    op->remaining_deps = 0;
-  }
+    op->regions.emplace_back(std::make_pair(reinterpret_cast<void*>(base), len));
 
-  // Signal handler that is called once all dependencies are cleared
-  static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
-    DiscardOp* op = reinterpret_cast<DiscardOp*>(arg);
-
-    // Chain through remaining dependency signals
-    if (op->remaining_deps > 0) {
-      op->remaining_deps--;
-      Runtime::runtime_singleton_->SetAsyncSignalHandler(
-          op->dep_signals[op->remaining_deps], HSA_SIGNAL_CONDITION_EQ, 0, signal_handler, arg);
-      return false;
-    }
-
-    // process each memory region once all dep signals are cleared
+    // Query the nearest cpu agent for the region
     HSA_SVM_ATTRIBUTE attr;
-    attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
-    attr.value = op->cpu_node_id;
+    attr.type = HSA_SVM_ATTR_PREFERRED_LOC;
+    attr.value = 0;
 
-    // Loop through all regions -> prefetch to CPU, then call madvise
-    for (auto& region : op->regions) {
-      void* base = region.first;
-      size_t size = region.second;
+    AMD::CpuAgent* cpu = nullptr;
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, 1, &attr));
 
-      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &attr));
-      if (status != HSAKMT_STATUS_SUCCESS) {
-        printf("hsaKmtSVMSetAttr failed for region %p, size %zu\n", base, size);
-      }
-
-      int result = madvise(base, size, MADV_FREE);
-      if (result != 0) {
-        printf("madvise MADV_FREE failed for region %p, size %zu, errno %d\n", 
-                     base, size, errno);
+    if (status == HSAKMT_STATUS_SUCCESS && 
+        (attr.value != 0xFFFFFFFF && attr.value != INVALID_NODEID)) {
+      core::Agent* agent = agents_by_node_[attr.value][0];
+      
+      if (agent->device_type() == core::Agent::kAmdCpuDevice) {
+        // Already on a CPU agent; skip prefetch for this region
+        op->target_cpus.push_back(UINT32_MAX);
+        continue;
+      } else if (agent->device_type() == core::Agent::kAmdGpuDevice) {
+        AMD::GpuAgent* gpu = static_cast<AMD::GpuAgent*>(agent);
+        cpu = static_cast<AMD::CpuAgent*>(gpu->GetNearestCpuAgent());
       }
     }
 
-    // signal completion after all regions have been discarded
+    if (!cpu) {
+      // Fallback to use first available CPU agent when nearest fails
+      cpu = static_cast<AMD::CpuAgent*>(cpu_agents_[0]);
+    }
+    op->target_cpus.push_back(cpu->node_id());
+  }
+
+  // Dependancy signals already at 0 need not be monitored.
+  std::vector<hsa_signal_t> pending_deps;
+  pending_deps.reserve(num_dep_signals);
+  for (int i = 0; i < num_dep_signals; i++) {
+    if (Signal::Convert(dep_signals[i])->LoadRelaxed() != 0) {
+      pending_deps.push_back(dep_signals[i]);
+    }
+  }
+
+  /* Function to discard all memory regions once dependencies are cleared.
+  For every region, prefetch to target cpu (if not already on cpu), then discard pages */
+  static auto discard_all = [](DiscardOp* op) {
+    for (size_t i = 0; i < op->regions.size(); i++) {
+      void* base = op->regions[i].first;
+      size_t size = op->regions[i].second;
+      uint32_t target_cpu = op->target_cpus[i];
+
+      if (target_cpu != UINT32_MAX) {
+        HSA_SVM_ATTRIBUTE attr;
+        attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attr.value = target_cpu;
+
+        HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &attr));
+        if (err != HSAKMT_STATUS_SUCCESS) {
+          debug_warning(false && "hsaKmtSVMSetAttr prefetch failed in SvmBatchDiscard");
+        }
+      }
+
+      int res = madvise(base, size, MADV_FREE);
+      if (res != 0) {
+        debug_warning(false && "madvise MADV_FREE failed in SvmBatchDiscard");
+      }
+    }
+
+    // Signal completion and cleanup after all regions have been discarded
     if (op->completion.handle != 0) {
       Signal::Convert(op->completion)->SubRelaxed(1);
     }
-
     delete op;
+  };
+
+  /* Each pending dep signal calls this handler when it reaches 0. 
+  The last one to decrement remaining_deps to 0 will triggers the discard. */
+  static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
+    DiscardOp* op = reinterpret_cast<DiscardOp*>(arg);
+    
+    // the last call to signal_handler should trigger discard operation
+    if (op->remaining_deps.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      discard_all(op);
+    }
     return false;
   };
 
-  // wrapper for zero-dependency signals case
-  auto no_dependencies = [](void* arg) { signal_handler(0, arg); };
-
-  hsa_status_t err;
-  if (num_dep_signals == 0) {
-    err = AMD::hsa_amd_async_function(no_dependencies, op);
+  // Dispatch discard call directly if there are no pending deps
+  if (pending_deps.empty()) {
+    op->remaining_deps.store(1, std::memory_order_release);
+    auto no_dependencies = [](void* arg) { signal_handler(0, arg); };
+    hsa_status_t err = AMD::hsa_amd_async_function(no_dependencies, op);
+    if (err != HSA_STATUS_SUCCESS) {
+      throw AMD::hsa_exception(err, "Failed to schedule async discard operation");
+    }
   } else {
-    err = SetAsyncSignalHandler(dep_signals[num_dep_signals - 1], HSA_SIGNAL_CONDITION_EQ, 0,
-                                signal_handler, op);
-  }
-
-  if (err != HSA_STATUS_SUCCESS) {
-    throw AMD::hsa_exception(err, "Failed to schedule async discard operation");
+    // Set signal handlers for all pending dependencies
+    op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()),
+                             std::memory_order_release);
+    for (size_t i = 0; i < pending_deps.size(); i++) {
+      hsa_status_t err = SetAsyncSignalHandler(pending_deps[i], 
+                                              HSA_SIGNAL_CONDITION_EQ, 0, 
+                                              signal_handler, op);
+      if (err != HSA_STATUS_SUCCESS) {
+        throw AMD::hsa_exception(err, "Signal handler could not be set.");
+      }
+    }
   }
 
   OpGuard.Dismiss();
