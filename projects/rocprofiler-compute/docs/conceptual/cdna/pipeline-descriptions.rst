@@ -92,7 +92,7 @@ The local data share (LDS, a.k.a., "shared memory") is fast on-CU scratchpad
 that can be explicitly managed by software to effectively share data and to
 coordinate between wavefronts in a workgroup.
 
-.. figure:: ../data/performance-model/lds.*
+.. figure:: ../../data/performance-model/lds.*
    :align: center
    :alt: Performance model of the local data share (LDS) on AMD Instinct
          accelerators

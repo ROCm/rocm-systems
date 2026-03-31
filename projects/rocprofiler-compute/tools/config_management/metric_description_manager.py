@@ -50,8 +50,9 @@ def normalize_unit_for_docs(unit: str) -> str:
     return unit
 
 
-# Section to panel ID mapping for organizing descriptions
-SECTION_PANEL_MAP: dict[str, int] = {
+# CDNA / Instinct MI-series: section name <-> metric_table id.
+# These IDs are stable for gfx908, gfx90a, gfx942, gfx950 style configs.
+CDNA_SECTION_PANEL_MAP: dict[str, int] = {
     "Wavefront launch stats": 701,
     "Wavefront runtime stats": 702,
     "Overall instruction mix": 1001,
@@ -88,7 +89,78 @@ SECTION_PANEL_MAP: dict[str, int] = {
     "System Speed-of-Light": 201,
 }
 
-PANEL_ID_TO_SECTION: dict[int, str] = {v: k for k, v in SECTION_PANEL_MAP.items()}
+CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
+    v: k for k, v in CDNA_SECTION_PANEL_MAP.items()
+}
+
+# RDNA client GPU configs reuse numeric metric_table IDs with different meanings than
+# CDNA (e.g. 701 is WGP utilization on gfx1151 vs wavefront launch on MI). Keep a
+# separate map per client arch; add new keys here when a gfx120* tree ships.
+RDNA_PANEL_ID_TO_SECTION_BY_ARCH: dict[str, dict[int, str]] = {
+    "gfx1151": {
+    1: "Top Kernels",
+    2: "Dispatch List",
+    101: "System Info",
+    201: "System Speed-of-Light",
+    301: "Memory chart — Instruction Cache",
+    302: "Memory chart — Scalar Data Cache",
+    303: "Memory chart — TCP Cache (Vector L0)",
+    304: "Memory chart — LDS (Local Data Share)",
+    305: "Memory chart — TCP-GL1 Interface",
+    306: "Memory chart — GL1C Cache (L1)",
+    307: "Memory chart — GL1C-GL2 Interface",
+    308: "Memory chart — GL2C Cache (L2)",
+    309: "Memory chart — GCEA to System Memory",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
+    501: "CPC Utilization",
+    502: "CPC Interface Utilization",
+    503: "MEC Stall Cycles",
+    504: "CPC Memory Requests",
+    505: "MEC Instruction Cache",
+    601: "SPI Utilization",
+    602: "Wave Dispatch Statistics",
+    701: "WGP Utilization",
+    702: "Wavefront Launch Stats",
+    703: "Wave Dispatch",
+    704: "Wave Life",
+    705: "Wave Instruction Mix",
+    706: "VMEM Instruction Mix",
+    707: "LDS Instruction Mix",
+    709: "Wait State Analysis",
+    710: "WGP Instruction Cache",
+    711: "WGP Scalar Data Cache",
+    801: "TCP Utilization",
+    802: "TCP Request Statistics",
+    803: "TCP Cache Performance",
+    804: "TCP TCP-GL1 Interface",
+    805: "TCP Stalls",
+    1101: "GL1C Utilization",
+    1102: "GL1C Request Statistics",
+    1103: "GL1C Cache Performance",
+    1104: "GL1C GL1C-GL2 Interface",
+    1105: "GL1C Stalls",
+    1301: "GL2C Cache Performance",
+    1302: "GL2C Request Statistics",
+    1303: "GL2C Bandwidth",
+    1501: "DRAM Read Interface",
+    1502: "DRAM Write Interface",
+    1504: "System Arbiter (SARB)",
+    1505: "Return Interface",
+    1701: "GPU Utilization",
+    1702: "Shader Engine Utilization",
+    },
+}
+
+
+def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
+    """Resolve documentation section name for a metric_table id (arch-specific)."""
+    if table_id is None:
+        return None
+    rdna_map = RDNA_PANEL_ID_TO_SECTION_BY_ARCH.get(arch_name)
+    if rdna_map is not None:
+        return rdna_map.get(table_id)
+    return CDNA_PANEL_ID_TO_SECTION.get(table_id)
 
 
 def validate_rst_syntax(text: str) -> tuple[bool, str]:
@@ -132,6 +204,7 @@ def extract_descriptions_from_arch(
     Returns dict organized by section name.
     """
     arch_path = Path(arch_dir)
+    arch_name = arch_path.name
     descriptions_by_section: dict[str, dict[str, dict]] = {}
 
     for yaml_file in sorted(arch_path.glob("*.yaml")):
@@ -149,7 +222,7 @@ def extract_descriptions_from_arch(
             for key, value in ds.items():
                 if isinstance(value, dict) and "metric" in value:
                     table_id = value.get("id")
-                    section_name = PANEL_ID_TO_SECTION.get(table_id)
+                    section_name = panel_id_to_section(arch_name, table_id)
                     if not section_name:
                         continue
                     for metric_name, metric_data in value["metric"].items():
@@ -471,7 +544,7 @@ def main() -> int:
         ok = generate_docs_from_per_arch(
             args.per_arch_output,
             args.docs_output_dir,
-            target_archs=["gfx908", "gfx90a", "gfx942", "gfx950"],
+            target_archs=["gfx908", "gfx90a", "gfx942", "gfx950", "gfx1151"],
         )
         return 0 if ok else 1
 
