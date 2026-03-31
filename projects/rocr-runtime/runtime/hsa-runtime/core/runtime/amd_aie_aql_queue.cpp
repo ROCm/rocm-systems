@@ -124,14 +124,13 @@ AieAqlQueue::~AieAqlQueue() {
 }
 
 hsa_status_t AieAqlQueue::Inactivate() {
-  bool active(active_.exchange(false, std::memory_order_relaxed));
-  hsa_status_t status(HSA_STATUS_SUCCESS);
-
+  bool active = active_.exchange(false, std::memory_order_relaxed);
   if (active) {
-    agent_.driver().DestroyQueue(queue_id_);
+    auto err = agent_.driver().DestroyQueue(queue_id_);
+    assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+    atomic::Fence(std::memory_order_acquire);
   }
-
-  return status;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t AieAqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
