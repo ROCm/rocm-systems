@@ -4,9 +4,9 @@
 
 .. _rdna-performance-model:
 
-*********************************
+=================================
 RDNA client GPU performance model
-*********************************
+=================================
 
 This chapter covers **AMD Radeon™ / RDNA™** configurations exposed in ROCm Compute Profiler.
 It complements the :doc:`../cdna/cdna-performance-model` chapter, which is written around Instinct
@@ -46,10 +46,12 @@ in the shipped YAML for each supported generation.
 
       .. rubric:: Where to read metric text
 
-      * :ref:`RDNA3.5 (gfx1151) metrics <gfx1151-metrics-ref>` — full table of documented metrics for
-        ``gfx1151``, generated from panel ``metrics_description`` fields.
-      * :doc:`system-speed-of-light` — **System Speed-of-Light** tab **RDNA3.5 (gfx1151)** uses the same
-        metric names as the analysis panel.
+      * :ref:`RDNA3.5 (gfx1151) metrics <gfx1151-metrics-ref>` — single-page index of every documented
+        metric (same tables, flat outline).
+      * Conceptual sub-pages below group those tables by block (**WGP**, **GL1** / **TCP** + **GL1C**,
+        **GL2** / **GL2C** + **GCEA**, **shader engine** / **SPI**, **command processor** / **CPC**,
+        **System Speed-of-Light**).
+      * :doc:`system-speed-of-light` — SoL tab uses the same metric keys as the analysis panel.
       * Panel YAMLs under ``src/rocprof_compute_soc/analysis_configs/gfx1151/`` —
         formulas, peaks, and counter bindings.
 
@@ -60,19 +62,22 @@ in the shipped YAML for each supported generation.
       panel set ships, this tab will be expanded to match the RDNA3.5 layout (tables, metric
       reference, and Speed-of-Light tab).
 
-In this chapter, profiler concepts for RDNA are grouped to mirror the Instinct track:
+In this chapter, profiler concepts for RDNA use **client GPU naming** (WGP, GL1/GL2, …) and embed the
+**RDNA3.5 (gfx1151)** metric tables under each block:
 
-* :doc:`compute-unit`
+* :doc:`wgp` — roofline, WGP utilization, waves, instruction mix, WGP I$/scalar caches.
 
-* :doc:`l2-cache`
+* :doc:`gl1-cache` — **TCP** (vector L0), **GL1C** (L1), and Memory Chart rows through GL1C.
 
-* :doc:`shader-engine`
+* :doc:`gl2-cache` — **GL2C**, **GCEA** / DRAM / arbiter, and Memory Chart rows from GL1C–GL2 through system memory.
 
-* :doc:`command-processor`
+* :doc:`shader-engine` — GRBM GPU/SE utilization and **SPI** dispatch statistics.
 
-* :doc:`system-speed-of-light`
+* :doc:`command-processor` — **CPC** / **MEC** metrics (same role as CDNA CP, different tab layout in ``gfx1151``).
 
-* :doc:`references`
+* :doc:`system-speed-of-light` — SoL table for **gfx1151**.
+
+* :doc:`references` — public references and link to Instinct citations.
 
 Related
 =======

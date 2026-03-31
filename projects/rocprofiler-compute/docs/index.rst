@@ -74,9 +74,11 @@ in practice.
 
         * :doc:`conceptual/cdna/system-speed-of-light`
 
-        * :doc:`conceptual/rdna/compute-unit`
+        * :doc:`conceptual/rdna/wgp`
 
-        * :doc:`conceptual/rdna/l2-cache`
+        * :doc:`conceptual/rdna/gl1-cache`
+
+        * :doc:`conceptual/rdna/gl2-cache`
 
         * :doc:`conceptual/rdna/shader-engine`
 

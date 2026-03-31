@@ -148,9 +148,9 @@ Panel Config:
       Estimated TCP utilization: 100 × TCP_GATE_EN2 / (GRBM_GUI_ACTIVE × NUM_TCP), with
       NUM_TCP = max(1, ⌊$cu_per_gpu / 2⌋) (one TCP per WGP, 2 CUs per WGP on RDNA3.5).
       Uses aggregate TCP_GATE_EN2 (not TCP_GATE_EN2_sum). GRBM_GUI_ACTIVE is scaled by
-      NUM_TCP so the denominator matches multi-TCP capacity. GATE_EN2 is tcp_perf_sel_gate_en2
-      (core clocks on, not windowed). If only per-instance *_sum is available, align the
-      numerator/denominator with your CSV layout.
+      NUM_TCP so the denominator matches multi-TCP capacity. GATE_EN2 is TCP_PERF_SEL_GATE_EN2
+      (core clocks on, not windowed). If only per-instance counter sums (typically ``_sum``
+      columns) are available, align the numerator/denominator with your CSV layout.
     Total Requests: |-
       Total number of requests to the TCP cache including reads, writes, and atomics.
     Read Requests: |-
@@ -168,3 +168,14 @@ Panel Config:
       Cycles TCP stalled the Texture Addresser request interface due to backpressure.
     GL1 Back Pressure: |-
       Cycles TCP was stalled due to back pressure from GL1C.
+
+    GL1 Read 128B Requests: |-
+      TCP→GL1 read requests that transferred 128 bytes (TCP_GL1_REQ_READ_128B_sum / $denom).
+      Subset of total GL1 read requests; large-line fills show up here.
+
+    GL1 Write Requests: |-
+      TCP→GL1 write or writeback requests (TCP_GL1_REQ_WRITE_sum / $denom).
+
+    Data FIFO Stall: |-
+      Cycles TCP stalled because the internal data FIFO could not accept progress
+      (TCP_DATA_FIFO_STALL_sum / $denom). Often correlates with downstream backpressure.

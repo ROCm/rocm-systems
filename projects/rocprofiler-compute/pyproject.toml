@@ -6,6 +6,7 @@ requires-python = ">=3.9"
 developer = [
     "ruff>=0.14.11",
     "pre-commit",
+    "ruamel.yaml>=0.18",
 ]
 
 [tool.ruff]

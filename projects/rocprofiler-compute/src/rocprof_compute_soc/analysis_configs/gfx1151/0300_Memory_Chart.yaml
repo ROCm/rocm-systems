@@ -408,3 +408,144 @@ Panel Config:
       Definition: Bandwidth for write requests to system memory (DRAM).
       Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM.
       Formula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time
+
+    ICache Requests: |-
+      Count of instruction-cache (SQC ICache) requests issued, per normalization unit.
+      Formula: SQC_ICACHE_REQ_sum / $denom
+
+    ICache Request Stall Rate: |-
+      Percent of shader busy cycles where the instruction cache input interface was stalled
+      (valid without ready). Formula: 100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.
+
+    ICache-GL1 Read Bandwidth: |-
+      Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path
+      instruction requests), using 128 B per SQC_TC_INST_REQ event.
+
+    Dcache Requests: |-
+      Count of scalar data-cache (SQC DCache) requests, per normalization unit.
+      Formula: SQC_DCACHE_REQ_sum / $denom
+
+    Dcache Request Stall Rate: |-
+      Percent of shader busy cycles where the scalar data cache input interface was stalled.
+      Formula: 100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum.
+
+    Dcache-GL1 Read Bandwidth: |-
+      Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B
+      per request).
+
+    TCP Total Requests: |-
+      Total TCP (vector L0) requests per normalization unit (reads, writes, and related traffic
+      aggregated in TCP_REQ_sum).
+
+    TCP Read Requests: |-
+      TCP read requests per normalization unit (TCP_REQ_READ_sum).
+
+    TCP Write Requests: |-
+      TCP write requests per normalization unit (TCP_REQ_WRITE_sum).
+
+    TCP Miss Requests: |-
+      TCP requests that missed in the L0 vector cache and required a fill from GL1C
+      (TCP_REQ_MISS_sum / $denom).
+
+    TCP Request Bandwidth: |-
+      Heuristic TCP request throughput using 64 B per TCP_REQ event over the kernel window.
+
+    TCP-GL1 Read Requests: |-
+      Read requests from TCP to GL1C (miss/refill path), per normalization unit.
+
+    TCP-GL1 Write Requests: |-
+      Write-related requests from TCP toward GL1C, per normalization unit.
+
+    TCP-GL1 Read Bandwidth: |-
+      Bytes per second for TCP→GL1 read traffic (64 B per TCP_GL1_REQ_READ event).
+
+    TCP-GL1 Write Bandwidth: |-
+      Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
+
+    LDS Instructions: |-
+      Total LDS (Local Data Share) instructions executed per normalization unit (SQ_INSTS_LDS_sum).
+
+    LDS Instruction Cycles: |-
+      Cycles spent executing LDS instructions per normalization unit (SQ_INST_CYCLES_LDS_sum).
+
+    LDS Wait Cycles: |-
+      Cycles waves spent waiting on LDS (wait-state attribution), per normalization unit
+      (SQ_WAIT_INST_LDS_sum).
+
+    GL1C Total Requests: |-
+      Total GL1C cache requests per normalization unit (GL1C_REQ_sum).
+
+    GL1C Read Requests: |-
+      GL1C read requests per normalization unit (GL1C_REQ_READ_sum).
+
+    GL1C Write Requests: |-
+      GL1C write requests per normalization unit (GL1C_REQ_WRITE_sum).
+
+    GL1C Miss Requests: |-
+      GL1C miss events per normalization unit (GL1C_REQ_MISS_sum).
+
+    GL1C Starve Rate: |-
+      Percent of GL1C cycles with no requests from TCP (starvation). Formula:
+      100 * GL1C_STARVE_sum / GL1C_CYCLE_sum.
+
+    GL1C Stall GL2 Backpressure: |-
+      Percent of GL1C busy cycles spent stalled on GL2 backpressure. Formula:
+      100 * GL1C_STALL_GL2_GL1_sum / GL1C_BUSY_sum.
+
+    GL1-GL2 Read Requests: |-
+      Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
+
+    GL1-GL2 Write Requests: |-
+      Write requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_WRITE_sum).
+
+    GL1-GL2 Read Bandwidth: |-
+      Bytes per second on the GL1C→GL2C read interface (32/64/128 B request bins).
+
+    GL1-GL2 Write Bandwidth: |-
+      Bytes per second on the GL1C→GL2C write interface (32/64 B request bins).
+
+    GL1-GL2 Read Latency: |-
+      Average cycles from GL1C read request to response (GL1C_GL2_REQ_READ_LATENCY_sum /
+      GL1C_GL2_REQ_READ_sum) when the denominator is non-zero.
+
+    GL1-GL2 Write Latency: |-
+      Average cycles from GL1C write request to completion (GL1C_GL2_REQ_WRITE_LATENCY_sum /
+      GL1C_GL2_REQ_WRITE_sum) when the denominator is non-zero.
+
+    GL2C Utilization: |-
+      Percent of GL2C cycles the L2 cache was busy. Formula:
+      100 * GL2C_BUSY_sum / GL2C_CYCLE_sum.
+
+    GL2C Total Requests: |-
+      Total L2 client requests per normalization unit (GL2C_REQ_sum).
+
+    GL2C Read Requests: |-
+      L2 read requests per normalization unit (GL2C_READ_sum).
+
+    GL2C Write Requests: |-
+      L2 write requests per normalization unit (GL2C_WRITE_sum).
+
+    GL2C Atomic Requests: |-
+      L2 atomic requests per normalization unit (GL2C_ATOMIC_sum).
+
+    GL2C Read Bandwidth: |-
+      Bytes per second for L2 read traffic (32/64/128 B and compressed 96 B read bins).
+
+    GL2C Write Bandwidth: |-
+      Bytes per second for L2 write traffic (64 B per write request in this panel).
+
+    SARB Stall Rate: |-
+      Percent of GCEA sample cycles the System Arbiter (SARB) was stalled.
+      Formula: 100 * GCEA_SARB_STALLED_sum / GCEA_ALWAYS_COUNT_sum.
+
+    DRAM Read Requests: |-
+      DRAM read requests per client group from the GCEA memory path (GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom).
+
+    DRAM Write Requests: |-
+      DRAM write requests per client group from the GCEA memory path (GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom).
+
+    Read Returns: |-
+      Valid read-return events on the GCEA return path per normalization unit (GCEA_RRET_VLD_sum / $denom).
+
+    Write Returns: |-
+      Valid write-return events on the GCEA return path per normalization unit (GCEA_WRET_VLD_sum / $denom).
