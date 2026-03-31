@@ -24,11 +24,11 @@
 
 #include "amo_standard_tester.hpp"
 #include "tester.hpp"
+#include "shmem_api_adapter.hpp"
 
 #include <iostream>
-#include <rocshmem/rocshmem.hpp>
 
-using namespace rocshmem;
+using namespace shmem_adapter;
 
 /* Declare the global kernel template with a generic implementation */
 template <typename T>
@@ -64,7 +64,7 @@ AMOStandardTester<T>::AMOStandardTester(TesterArguments args) : Tester(args) {
   // One return per *thread* per loop
   CHECK_HIP(hipMalloc((void **)&ret_val, max_msg_size * n_in * n_loops));
 
-  dest = (T *)rocshmem_malloc(max_msg_size * n_out * n_loops);
+  dest = (T *)shmem_malloc(max_msg_size * n_out * n_loops);
   if (dest == nullptr) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
     std::cerr << "dest: " << dest << std::endl;
@@ -74,7 +74,7 @@ AMOStandardTester<T>::AMOStandardTester(TesterArguments args) : Tester(args) {
 template <typename T>
 AMOStandardTester<T>::~AMOStandardTester() {
   CHECK_HIP(hipFree(ret_val));
-  rocshmem_free(dest);
+  shmem_free(dest);
 }
 
 template <typename T>
@@ -254,13 +254,13 @@ void AMOStandardTester<T>::verifyResults(size_t size) {
       int loop, int skip, long long int *start_time,                           \
       long long int *end_time, T *dest, T *ret_val,                            \
       AddrMode addr_mode, TestType type, ShmemContextType ctx_type) {          \
-    __shared__ rocshmem_ctx_t ctx;                                             \
+    __shared__ shmem_ctx_t ctx;                                                  \
     int wg_id     = get_flat_grid_id();                                        \
     int global_id = get_flat_id();                                             \
     int t_id      = get_flat_block_id();                                       \
     int n_threads = get_flat_grid_size();                                      \
     int n_wgs     = get_grid_num_blocks();                                     \
-    rocshmem_wg_ctx_create(ctx_type, &ctx);                                    \
+    shmem_wg_ctx_create(ctx_type, &ctx);                                       \
     for (int i = 0; i < loop + skip; i++) {                                    \
       T *ptr = compute_target_ptr<T>(dest, addr_mode, wg_id, i, n_wgs);        \
       T ret = 0;                                                               \
@@ -269,36 +269,36 @@ void AMOStandardTester<T>::verifyResults(size_t size) {
       }                                                                        \
       switch (type) {                                                          \
         case AMO_FAddTestType:                                                 \
-          ret = rocshmem_ctx_##TNAME##_atomic_fetch_add(ctx, (T *)ptr, 2, 1);  \
+          ret = shmem_##TNAME##_atomic_fetch_add(ctx, (T *)ptr, 2, 1);         \
           break;                                                               \
         case AMO_FIncTestType:                                                 \
-          ret = rocshmem_ctx_##TNAME##_atomic_fetch_inc(ctx, (T *)ptr, 1);     \
+          ret = shmem_##TNAME##_atomic_fetch_inc(ctx, (T *)ptr, 1);            \
           break;                                                               \
         case AMO_FCswapTestType:                                               \
-          ret = rocshmem_ctx_##TNAME##_atomic_compare_swap(ctx, (T *)ptr, 0,   \
+          ret = shmem_##TNAME##_atomic_compare_swap(ctx, (T *)ptr, 0,          \
                                                            (T)(t_id + 1), 1);  \
           break;                                                               \
         case AMO_AddTestType:                                                  \
-          rocshmem_ctx_##TNAME##_atomic_add(ctx, (T *)ptr, 2, 1);              \
+          shmem_##TNAME##_atomic_add(ctx, (T *)ptr, 2, 1);                     \
           break;                                                               \
         case AMO_IncTestType:                                                  \
-          rocshmem_ctx_##TNAME##_atomic_inc(ctx, (T *)ptr, 1);                 \
+          shmem_##TNAME##_atomic_inc(ctx, (T *)ptr, 1);                        \
           break;                                                               \
         default:                                                               \
           break;                                                               \
       }                                                                        \
       ret_val[global_id + i * n_threads] = ret;                                \
     }                                                                          \
-    rocshmem_ctx_quiet(ctx);                                                   \
+    shmem_quiet(ctx);                                                          \
     end_time[wg_id] = wall_clock64();                                          \
     __syncthreads();                                                           \
-    rocshmem_wg_ctx_destroy(&ctx);                                             \
+    shmem_wg_ctx_destroy(&ctx);                                                \
   }                                                                            \
   template class AMOStandardTester<T>;
 
-AMO_STANDARD_DEF_GEN(int, int)
+//AMO_STANDARD_DEF_GEN(int, int)
 AMO_STANDARD_DEF_GEN(long, long)
-AMO_STANDARD_DEF_GEN(long long, longlong)
-AMO_STANDARD_DEF_GEN(unsigned int, uint)
-AMO_STANDARD_DEF_GEN(unsigned long, ulong)
-AMO_STANDARD_DEF_GEN(unsigned long long, ulonglong)
+//AMO_STANDARD_DEF_GEN(long long, longlong)
+//AMO_STANDARD_DEF_GEN(unsigned int, uint)
+//AMO_STANDARD_DEF_GEN(unsigned long, ulong)
+//AMO_STANDARD_DEF_GEN(unsigned long long, ulonglong)

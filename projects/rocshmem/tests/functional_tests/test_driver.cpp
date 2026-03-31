@@ -22,7 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include <rocshmem/rocshmem.hpp>
+#include "shmem_api_adapter.hpp"
 #include <vector>
 
 #include "tester.hpp"
@@ -126,7 +126,7 @@ static void pmix_bcast(void *buf, size_t nbytes, char *key, int root)
 }
 #endif
 
-using namespace rocshmem;
+using namespace shmem_adapter;
 
 int main(int argc, char *argv[]) {
   /**
@@ -145,8 +145,13 @@ int main(int argc, char *argv[]) {
   CHECK_HIP(hipSetDevice(atoi(ompi_local_rank)));
 
   /**
-   * Must initialize rocshmem to access arguments needed by the tester.
+   * Must initialize SHMEM to access arguments needed by the tester.
    */
+#ifdef USE_MORI_BACKEND
+  // Mori backend initialization
+  shmem_init();
+#else
+  // rocSHMEM backend initialization
 #ifdef HAVE_PMIX
   int test_uuid = 0;
   char *rocshmem_test_uuid = getenv("ROCSHMEM_TEST_UUID");
@@ -196,6 +201,7 @@ int main(int argc, char *argv[]) {
 #else
   rocshmem_init();
 #endif
+#endif // USE_MORI_BACKEND
 
   /**
    * Now grab the arguments from rocshmem.
@@ -222,10 +228,10 @@ int main(int argc, char *argv[]) {
   }
 
   /**
-   * The rocshmem library needs to be cleaned up with this call. It pairs
+   * The SHMEM library needs to be cleaned up with this call. It pairs
    * with the init function above.
    */
-  rocshmem_finalize();
+  shmem_finalize();
 
   return 0;
 }

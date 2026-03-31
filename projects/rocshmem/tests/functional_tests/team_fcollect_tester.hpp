@@ -67,6 +67,6 @@ class TeamFcollectTester : public Tester {
   rocshmem_team_t *team_fcollect_world_dup;
 };
 
-#include "team_fcollect_tester.cpp"
+//#include "team_fcollect_tester.cpp"
 
 #endif

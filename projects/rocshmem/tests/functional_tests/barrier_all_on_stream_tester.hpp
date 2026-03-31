@@ -61,7 +61,7 @@ class BarrierAllOnStreamTester : public Tester {
   std::vector<hipEvent_t> stop_events_timed;
 };
 
-#include "barrier_all_on_stream_tester.cpp"
+//#include "barrier_all_on_stream_tester.cpp"
 
 #endif
 

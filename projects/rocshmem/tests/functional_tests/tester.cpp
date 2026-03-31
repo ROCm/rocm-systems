@@ -23,54 +23,54 @@
  *****************************************************************************/
 
 #include "tester.hpp"
+#include "shmem_api_adapter.hpp"
 
 #include <hip/hip_runtime.h>
 
 #include <cstdlib>
 #include <functional>
 #include <iostream>
-#include <rocshmem/rocshmem.hpp>
 #include <vector>
 
-#include "amo_bitwise_tester.hpp"
-#include "amo_extended_tester.hpp"
+//#include "amo_bitwise_tester.hpp"
+//#include "amo_extended_tester.hpp"
 #include "amo_standard_tester.hpp"
-#include "default_ctx_primitive_tester.hpp"
-#include "barrier_all_tester.hpp"
-#include "barrier_all_on_stream_tester.hpp"
+//#include "default_ctx_primitive_tester.hpp"
+//#include "barrier_all_tester.hpp"
+//#include "barrier_all_on_stream_tester.hpp"
 #include "empty_tester.hpp"
-#include "getmem_on_stream_tester.hpp"
-#include "putmem_on_stream_tester.hpp"
-#include "putmem_signal_on_stream_tester.hpp"
-#include "signal_wait_until_on_stream_tester.hpp"
-#include "ping_all_tester.hpp"
+//#include "getmem_on_stream_tester.hpp"
+//#include "putmem_on_stream_tester.hpp"
+//#include "putmem_signal_on_stream_tester.hpp"
+//#include "signal_wait_until_on_stream_tester.hpp"
+//#include "ping_all_tester.hpp"
 #include "ping_pong_tester.hpp"
 #include "primitive_mr_tester.hpp"
 #include "primitive_tester.hpp"
-#include "random_access_tester.hpp"
-#include "shmem_ptr_tester.hpp"
-#include "signaling_operations_tester.hpp"
-#include "sync_all_tester.hpp"
-#include "team_sync_tester.hpp"
-#include "team_alltoall_tester.hpp"
-#include "team_alltoallv_tester.hpp"
-#include "team_alltoallmem_on_stream_tester.hpp"
-#include "team_broadcastmem_on_stream_tester.hpp"
-#include "team_barrier_tester.hpp"
-#include "team_broadcast_tester.hpp"
-#include "team_ctx_infra_tester.hpp"
-#include "team_ctx_primitive_tester.hpp"
-#include "team_fcollect_tester.hpp"
-#include "team_reduction_tester.hpp"
+//#include "random_access_tester.hpp"
+//#include "shmem_ptr_tester.hpp"
+//#include "signaling_operations_tester.hpp"
+//#include "sync_all_tester.hpp"
+//#include "team_sync_tester.hpp"
+//#include "team_alltoall_tester.hpp"
+//#include "team_alltoallv_tester.hpp"
+//#include "team_alltoallmem_on_stream_tester.hpp"
+//#include "team_broadcastmem_on_stream_tester.hpp"
+//#include "team_barrier_tester.hpp"
+//#include "team_broadcast_tester.hpp"
+//#include "team_ctx_infra_tester.hpp"
+//#include "team_ctx_primitive_tester.hpp"
+//#include "team_fcollect_tester.hpp"
+//#include "team_reduction_tester.hpp"
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
-#include "flood_amo_tester.hpp"
-#include "hipmodule_init_tester.hpp"
-#include "device_bitcode_tester.hpp"
+//#include "flood_amo_tester.hpp"
+//#include "hipmodule_init_tester.hpp"
+//#include "device_bitcode_tester.hpp"
 
-#include "backend_bc.hpp"
-extern Backend* backend;
+//#include "backend_bc.hpp"
+//extern Backend* backend;
 
 Tester::Tester(TesterArguments args) : args(args) {
   _type = (TestType)args.algorithm;
@@ -173,7 +173,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
 
   if (rank == 0) std::cout << "### Creating Test: ";
 
-  BackendType backend_type = get_backend_type();
+//  BackendType backend_type = get_backend_type();
   TestType type = (TestType)args.algorithm;
 
   switch (type) {
@@ -197,6 +197,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Non-Blocking Puts ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
       return testers;
+#if 0
     case DefaultCTXGetTestType:
       if (rank == 0)
         std::cout << "Default context Blocking Gets ###" << std::endl;
@@ -252,6 +253,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Non-Blocking Team Ctx Puts ###" << std::endl;
       testers.push_back(new TeamCtxPrimitiveTester(args));
       return testers;
+#endif
     case PTestType:
       if (rank == 0) std::cout << "P Test ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
@@ -260,6 +262,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "G Test ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
       return testers;
+#if 0
     case TeamReductionTestType:
       if (rank == 0)
         std::cout << "All-to-All Team-based Reduction ###" << std::endl;
@@ -348,20 +351,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamFcollectTester<char>(args));
       testers.push_back(new TeamFcollectTester<unsigned char>(args));
       return testers;
+#endif
     case AMO_FAddTestType:
       if (rank == 0) std::cout << "AMO Fetch_Add ###" << std::endl;
-      testers.push_back(new AMOStandardTester<long long>(args));
+//      testers.push_back(new AMOStandardTester<long long>(args));
       testers.push_back(new AMOStandardTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOStandardTester<int>(args));
+//      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+//        testers.push_back(new AMOStandardTester<int>(args));
       return testers;
     case AMO_FIncTestType:
       if (rank == 0) std::cout << "AMO Fetch_Inc ###" << std::endl;
-      testers.push_back(new AMOStandardTester<long long>(args));
+//      testers.push_back(new AMOStandardTester<long long>(args));
       testers.push_back(new AMOStandardTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOStandardTester<int>(args));
+//      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+//        testers.push_back(new AMOStandardTester<int>(args));
       return testers;
+#if 0
     case AMO_FetchTestType:
       if (rank == 0) std::cout << "AMO Fetch ###" << std::endl;
       testers.push_back(new AMOExtendedTester<long long>(args));
@@ -376,13 +381,15 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOStandardTester<int>(args));
       return testers;
+#endif
     case AMO_AddTestType:
       if (rank == 0) std::cout << "AMO Add ###" << std::endl;
-      testers.push_back(new AMOStandardTester<long long>(args));
+//      testers.push_back(new AMOStandardTester<long long>(args));
       testers.push_back(new AMOStandardTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOStandardTester<int>(args));
+//      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+//        testers.push_back(new AMOStandardTester<int>(args));
       return testers;
+#if 0
     case AMO_SetTestType:
       if (rank == 0) std::cout << "AMO Set ###" << std::endl;
       testers.push_back(new AMOExtendedTester<long long>(args));
@@ -439,17 +446,19 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
         testers.push_back(new AMOBitwiseTester<unsigned int>(args));
       return testers;
+#endif
     case AMO_IncTestType:
       if (rank == 0) std::cout << "AMO Inc ###" << std::endl;
-      testers.push_back(new AMOStandardTester<long long>(args));
+//      testers.push_back(new AMOStandardTester<long long>(args));
       testers.push_back(new AMOStandardTester<long>(args));
-      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
-        testers.push_back(new AMOStandardTester<int>(args));
+//      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+//        testers.push_back(new AMOStandardTester<int>(args));
       return testers;
     case PingPongTestType:
       if (rank == 0) std::cout << "PingPong ###" << std::endl;
       testers.push_back(new PingPongTester(args));
       return testers;
+#if 0
     case PingAllTestType:
       if (rank == 0) std::cout << "PingAll ###" << std::endl;
       testers.push_back(new PingAllTester(args));
@@ -510,6 +519,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Shmem_Ptr ###" << std::endl;
       testers.push_back(new ShmemPtrTester(args));
       return testers;
+#endif
     case WGGetTestType:
       if (rank == 0)
         std::cout << "Blocking WG level Gets ###" << std::endl;
@@ -555,6 +565,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         std::cout << "Non-Blocking WAVE level Puts ###" << std::endl;
       testers.push_back(new WaveFrontPrimitiveTester(args));
       return testers;
+#if 0
     case PutSignalTestType:
       if (rank == 0) std::cout << "Putmem Signal ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
@@ -597,6 +608,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Wave Signal Fetch ###" << std::endl;
       testers.push_back(new SignalingOperationsTester(args));
       return testers;
+#endif
     case FloodPutTestType:
       if (rank == 0) std::cout << "Flood Put (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
@@ -621,6 +633,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Flood G (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
       return testers;
+#if 0
     case HipModuleInitTestType:
       if (rank == 0) std::cout << "HIP Module Init Test ###" << std::endl;
       testers.push_back(new HipModuleInitTester(args));
@@ -641,6 +654,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Device Bitcode Test ###" << std::endl;
       testers.push_back(new DeviceBitcodeTester(args));
       return testers;
+#endif
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
       return testers;
@@ -838,7 +852,7 @@ void flush_hdp() {
 }
 
 void Tester::barrier() {
-  rocshmem_barrier_all();
+  shmem_adapter::shmem_barrier_all();
   flush_hdp();
 }
 

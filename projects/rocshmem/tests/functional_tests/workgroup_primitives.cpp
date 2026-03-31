@@ -23,12 +23,11 @@
  *****************************************************************************/
 
 #include "workgroup_primitives.hpp"
-
-#include <rocshmem/rocshmem.hpp>
+#include "shmem_api_adapter.hpp"
 
 #include <numeric>
 
-using namespace rocshmem;
+using namespace shmem_adapter;
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -38,9 +37,9 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
                                       long long int *end_time, char *source,
                                       char *dest, size_t size, TestType type,
                                       ShmemContextType ctx_type) {
-  __shared__ rocshmem_ctx_t ctx;
+  __shared__ shmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
-  rocshmem_wg_ctx_create(ctx_type, &ctx);
+  shmem_wg_ctx_create(ctx_type, &ctx);
 
   // Calculate start index for each work group
   size_t offset = size * wg_id;
@@ -51,7 +50,7 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
     if (i == skip) {
       // Ensures all RMA calls from the skip loops are completed
       if (is_thread_zero_in_block()) {
-        rocshmem_ctx_quiet(ctx);
+        shmem_quiet(ctx);
       }
       __syncthreads();
       start_time[wg_id] = wall_clock64();
@@ -59,16 +58,16 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
 
     switch (type) {
       case WGGetTestType:
-        rocshmem_ctx_getmem_wg(ctx, dest, source, size, 1);
+        shmem_getmem_wg(ctx, dest, source, size, 1);
         break;
       case WGGetNBITestType:
-        rocshmem_ctx_getmem_nbi_wg(ctx, dest, source, size, 1);
+        shmem_getmem_nbi_wg(ctx, dest, source, size, 1);
         break;
       case WGPutTestType:
-        rocshmem_ctx_putmem_wg(ctx, dest, source, size, 1);
+        shmem_putmem_wg(ctx, dest, source, size, 1);
         break;
       case WGPutNBITestType:
-        rocshmem_ctx_putmem_nbi_wg(ctx, dest, source, size, 1);
+        shmem_putmem_nbi_wg(ctx, dest, source, size, 1);
         break;
       default:
         break;
@@ -76,11 +75,11 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
   }
 
   if (is_thread_zero_in_block()) {
-    rocshmem_ctx_quiet(ctx);
+    shmem_quiet(ctx);
     end_time[wg_id] = wall_clock64();
   }
 
-  rocshmem_wg_ctx_destroy(&ctx);
+  shmem_wg_ctx_destroy(&ctx);
 }
 
 /******************************************************************************
@@ -89,19 +88,19 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
 WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
     : Tester(args) {
   size_t buff_size = max_msg_size * args.num_wgs;
-  source = (char *)rocshmem_malloc(buff_size);
-  dest = (char *)rocshmem_malloc(buff_size);
+  source = (char *)shmem_malloc(buff_size);
+  dest = (char *)shmem_malloc(buff_size);
 
   if (source == nullptr || dest == nullptr) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
     std::cerr << "source: " << source << ", dest: " << dest << std::endl;
     if (source) {
-      rocshmem_free(source);
+      shmem_free(source);
     }
     if (dest) {
-      rocshmem_free(dest);
+      shmem_free(dest);
     }
-    rocshmem_global_exit(1);
+    shmem_global_exit(1);
   }
 
   for(size_t i = 0; i < buff_size; i++) {
@@ -110,8 +109,8 @@ WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
 }
 
 WorkGroupPrimitiveTester::~WorkGroupPrimitiveTester() {
-  rocshmem_free(source);
-  rocshmem_free(dest);
+  shmem_free(source);
+  shmem_free(dest);
 }
 
 void WorkGroupPrimitiveTester::resetBuffers(size_t size) {
@@ -141,7 +140,7 @@ void WorkGroupPrimitiveTester::verifyResults(size_t size) {
     size_t verify_wg_size = std::min((size_t) 1024, buff_size);
     size_t verify_num_wgs = buff_size / verify_wg_size;
 
-    hipLaunchKernelGGL(verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
+    hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
                        source, dest, buff_size, verification_error);
     CHECK_HIP(hipStreamSynchronize(stream));
 

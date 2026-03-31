@@ -23,10 +23,9 @@
  *****************************************************************************/
 
 #include "ping_pong_tester.hpp"
+#include "shmem_api_adapter.hpp"
 
-#include <rocshmem/rocshmem.hpp>
-
-using namespace rocshmem;
+using namespace shmem_adapter;
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -34,12 +33,12 @@ using namespace rocshmem;
 __global__ void PingPongTest(int loop, int skip, long long int *start_time,
                              long long int *end_time, int *r_buf,
                              ShmemContextType ctx_type) {
-  __shared__ rocshmem_ctx_t ctx;
+  __shared__ shmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
-  rocshmem_wg_ctx_create(ctx_type, &ctx);
+  shmem_wg_ctx_create(ctx_type, &ctx);
 
-  int pe = rocshmem_ctx_my_pe(ctx);
+  int pe = shmem_my_pe(ctx);
 
   if (is_thread_zero_in_block()) {
 
@@ -49,31 +48,31 @@ __global__ void PingPongTest(int loop, int skip, long long int *start_time,
       }
 
       if (pe == 0) {
-        rocshmem_ctx_int_p(ctx, &r_buf[hipBlockIdx_x], i + 1, 1);
-        rocshmem_int_wait_until(&r_buf[hipBlockIdx_x], ROCSHMEM_CMP_EQ,
+        shmem_int_p(ctx, &r_buf[hipBlockIdx_x], i + 1, 1);
+        shmem_int_wait_until(&r_buf[hipBlockIdx_x], SHMEM_CMP_EQ,
                                  i + 1);
       } else {
-        rocshmem_int_wait_until(&r_buf[hipBlockIdx_x], ROCSHMEM_CMP_EQ,
+        shmem_int_wait_until(&r_buf[hipBlockIdx_x], SHMEM_CMP_EQ,
                                  i + 1);
-        rocshmem_ctx_int_p(ctx, &r_buf[hipBlockIdx_x], i + 1, 0);
+        shmem_int_p(ctx, &r_buf[hipBlockIdx_x], i + 1, 0);
       }
     }
     end_time[wg_id] = wall_clock64();
 
-    rocshmem_ctx_quiet(ctx);
+    shmem_quiet(ctx);
   }
 
-  rocshmem_wg_ctx_destroy(&ctx);
+  shmem_wg_ctx_destroy(&ctx);
 }
 
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 PingPongTester::PingPongTester(TesterArguments args) : Tester(args) {
-  r_buf = (int *)rocshmem_malloc(sizeof(int) * args.num_wgs);
+  r_buf = (int *)shmem_malloc(sizeof(int) * args.num_wgs);
 }
 
-PingPongTester::~PingPongTester() { rocshmem_free(r_buf); }
+PingPongTester::~PingPongTester() { shmem_free(r_buf); }
 
 void PingPongTester::resetBuffers(size_t size) {
   memset(r_buf, 0, sizeof(int) * args.num_wgs);

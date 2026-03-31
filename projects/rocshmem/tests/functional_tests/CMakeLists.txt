@@ -41,6 +41,64 @@ target_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+###############################################################################
+# MORI BACKEND OPTION
+###############################################################################
+option(USE_MORI_BACKEND "Use Mori SHMEM backend instead of rocSHMEM" OFF)
+
+if(USE_MORI_BACKEND)
+  message(STATUS "Building functional tests with Mori SHMEM backend")
+
+  # Set the path to Mori include directory
+  set(MORI_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../../../mori/include" CACHE PATH "Path to Mori include directory")
+
+  if(NOT EXISTS "${MORI_INCLUDE_DIR}")
+    message(FATAL_ERROR "Mori include directory not found: ${MORI_INCLUDE_DIR}")
+  endif()
+
+  target_include_directories(
+    ${PROJECT_NAME}
+    PRIVATE
+      ${MORI_INCLUDE_DIR}
+  )
+
+  target_compile_definitions(
+    ${PROJECT_NAME}
+    PRIVATE
+      USE_MORI_BACKEND
+  )
+target_sources(
+  ${PROJECT_NAME}
+  PRIVATE
+#    barrier_all_tester.cpp
+#    sync_all_tester.cpp
+    test_driver.cpp
+    tester.cpp
+    tester_arguments.cpp
+    ping_pong_tester.cpp
+#    ping_all_tester.cpp
+    primitive_tester.cpp
+#    primitive_mr_tester.cpp
+#    default_ctx_primitive_tester.cpp
+#    team_ctx_primitive_tester.cpp
+#    team_ctx_infra_tester.cpp
+#    amo_bitwise_tester.cpp
+#    amo_extended_tester.cpp
+    amo_standard_tester.cpp
+#    random_access_tester.cpp
+#    shmem_ptr_tester.cpp
+#    signaling_operations_tester.cpp
+#    signaling_operations_tester.hpp
+    workgroup_primitives.cpp
+#    empty_tester.cpp
+    wavefront_primitives.cpp
+    flood_tester.cpp
+#    flood_amo_tester.cpp
+#    device_bitcode_tester.cpp
+)
+
+
+else()
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
@@ -70,6 +128,7 @@ target_sources(
     flood_amo_tester.cpp
     device_bitcode_tester.cpp
 )
+endif()
 
 ###############################################################################
 # ROCSHMEM
@@ -106,7 +165,7 @@ rocm_install(TARGETS rocshmem_functional_tests COMPONENT tests)
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE
-    roc::rocshmem
+  #    $<TARGET_NAME_IF_EXISTS:roc::rocshmem>
     $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
     $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
     hiprtc
@@ -115,4 +174,4 @@ target_link_libraries(
 ###############################################################################
 # DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
 ###############################################################################
-include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeDeviceBitcodeTester.cmake)
+#include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeDeviceBitcodeTester.cmake)

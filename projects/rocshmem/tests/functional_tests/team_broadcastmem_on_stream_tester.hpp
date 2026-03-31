@@ -65,7 +65,7 @@ class TeamBroadcastmemOnStreamTester : public Tester {
   std::vector<hipEvent_t> stop_events_timed;
 };
 
-#include "team_broadcastmem_on_stream_tester.cpp"
+//#include "team_broadcastmem_on_stream_tester.cpp"
 
 #endif
 

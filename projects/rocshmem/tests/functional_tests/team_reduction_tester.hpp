@@ -67,6 +67,6 @@ class TeamReductionTester : public Tester {
       verify_buf;
 };
 
-#include "team_reduction_tester.cpp"
+//#include "team_reduction_tester.cpp"
 
 #endif

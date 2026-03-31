@@ -65,7 +65,7 @@ class PutmemOnStreamTester : public Tester {
   std::vector<hipEvent_t> stop_events_timed;
 };
 
-#include "putmem_on_stream_tester.cpp"
+//#include "putmem_on_stream_tester.cpp"
 
 #endif
 

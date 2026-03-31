@@ -23,12 +23,11 @@
  *****************************************************************************/
 
 #include "wavefront_primitives.hpp"
-
-#include <rocshmem/rocshmem.hpp>
+#include "shmem_api_adapter.hpp"
 
 #include <numeric>
 
-using namespace rocshmem;
+using namespace shmem_adapter;
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -39,10 +38,10 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
                                        char *dest, size_t size, TestType type,
                                        ShmemContextType ctx_type,
                                        int wf_size) {
-  __shared__ rocshmem_ctx_t ctx;
+  __shared__ shmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
-  rocshmem_wg_ctx_create(ctx_type, &ctx);
+  shmem_wg_ctx_create(ctx_type, &ctx);
 
   // Calculate start index for each wavefront
   int wf_id = get_flat_block_id() / wf_size;
@@ -55,7 +54,7 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
       // Ensures all RMA calls from the skip loops are completed
-      rocshmem_ctx_quiet(ctx);
+      shmem_quiet(ctx);
       __syncthreads();
       if (is_thread_zero_in_wave()) {
         start_time[idx] = wall_clock64();
@@ -63,28 +62,28 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
     }
     switch (type) {
       case WAVEGetTestType:
-        rocshmem_ctx_getmem_wave(ctx, dest, source, size, 1);
+        shmem_getmem_wave(ctx, dest, source, size, 1);
         break;
       case WAVEGetNBITestType:
-        rocshmem_ctx_getmem_nbi_wave(ctx, dest, source, size, 1);
+        shmem_getmem_nbi_wave(ctx, dest, source, size, 1);
         break;
       case WAVEPutTestType:
-        rocshmem_ctx_putmem_wave(ctx, dest, source, size, 1);
+        shmem_putmem_wave(ctx, dest, source, size, 1);
         break;
       case WAVEPutNBITestType:
-        rocshmem_ctx_putmem_nbi_wave(ctx, dest, source, size, 1);
+        shmem_putmem_nbi_wave(ctx, dest, source, size, 1);
         break;
       default:
         break;
     }
   }
 
-  rocshmem_ctx_quiet(ctx);
+  shmem_quiet(ctx);
   if (is_thread_zero_in_wave()) {
     end_time[idx] = wall_clock64();
   }
 
-  rocshmem_wg_ctx_destroy(&ctx);
+  shmem_wg_ctx_destroy(&ctx);
 }
 
 /******************************************************************************
@@ -93,19 +92,19 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
 WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
     : Tester(args) {
   size_t buff_size = max_msg_size * args.num_wgs * num_warps;
-  source = (char *)rocshmem_malloc(buff_size);
-  dest = (char *)rocshmem_malloc(buff_size);
+  source = (char *)shmem_malloc(buff_size);
+  dest = (char *)shmem_malloc(buff_size);
 
   if (source == nullptr || dest == nullptr) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
     std::cerr << "source: " << source << ", dest: " << dest << std::endl;
     if (source) {
-      rocshmem_free(source);
+      shmem_free(source);
     }
     if (dest) {
-      rocshmem_free(dest);
+      shmem_free(dest);
     }
-    rocshmem_global_exit(1);
+    shmem_global_exit(1);
   }
 
   for(size_t i = 0; i < buff_size; i++) {
@@ -114,8 +113,8 @@ WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
 }
 
 WaveFrontPrimitiveTester::~WaveFrontPrimitiveTester() {
-  rocshmem_free(source);
-  rocshmem_free(dest);
+  shmem_free(source);
+  shmem_free(dest);
 }
 
 void WaveFrontPrimitiveTester::resetBuffers(size_t size) {
@@ -146,7 +145,7 @@ void WaveFrontPrimitiveTester::verifyResults(size_t size) {
     size_t verify_wg_size = std::min((size_t) 1024, buff_size);
     size_t verify_num_wgs = buff_size / verify_wg_size;
 
-    hipLaunchKernelGGL(verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
+    hipLaunchKernelGGL(rocshmem::verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
                        source, dest, buff_size, verification_error);
     CHECK_HIP(hipStreamSynchronize(stream));
 

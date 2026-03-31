@@ -33,7 +33,7 @@
 #include <cassert>
 #include <vector>
 
-#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+//#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "constants.hpp"
 #include "assembly.hpp"
 
@@ -341,21 +341,21 @@ __device__ __forceinline__ bool is_last_active_lane() {
   __syncthreads();
 }
 
-#define SPIN_LOCK_INVALID  0xdead
-#define SPIN_LOCK_UNLOCKED 0x1234
-#define SPIN_LOCK_LOCKED   0xabcd
+#define ROCSHMEM_SPIN_LOCK_INVALID  0xdead
+#define ROCSHMEM_SPIN_LOCK_UNLOCKED 0x1234
+#define ROCSHMEM_SPIN_LOCK_LOCKED   0xabcd
 
 /*
  * Each thread in wave tries to acquire a different lock.
  */
 [[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_unique(uint32_t *lock) {
-  uint32_t lock_val = SPIN_LOCK_UNLOCKED;
+  uint32_t lock_val = ROCSHMEM_SPIN_LOCK_UNLOCKED;
 
-  __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
+  __hip_atomic_compare_exchange_strong(lock, &lock_val, ROCSHMEM_SPIN_LOCK_LOCKED,
                                        __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
                                        __HIP_MEMORY_SCOPE_AGENT);
 
-  return lock_val == SPIN_LOCK_UNLOCKED;
+  return lock_val == ROCSHMEM_SPIN_LOCK_UNLOCKED;
 }
 
 /*
@@ -372,7 +372,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
  * Each thread in wave releases a different lock.
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_unique(uint32_t *lock) {
-  __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
+  __hip_atomic_store(lock, ROCSHMEM_SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
                      __HIP_MEMORY_SCOPE_AGENT);
 }
 
@@ -380,17 +380,17 @@ __device__ __forceinline__ bool is_last_active_lane() {
  * Threads in activemask together try to acquire the same lock.
  */
 [[maybe_unused]] __device__ __forceinline__ bool spin_lock_try_acquire_shared(uint32_t *lock, uint64_t activemask) {
-  uint32_t lock_val = SPIN_LOCK_INVALID;
+  uint32_t lock_val = ROCSHMEM_SPIN_LOCK_INVALID;
 
   if (is_first_active_lane(activemask)) {
-    lock_val = SPIN_LOCK_UNLOCKED;
-    __hip_atomic_compare_exchange_strong(lock, &lock_val, SPIN_LOCK_LOCKED,
+    lock_val = ROCSHMEM_SPIN_LOCK_UNLOCKED;
+    __hip_atomic_compare_exchange_strong(lock, &lock_val, ROCSHMEM_SPIN_LOCK_LOCKED,
                                          __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
                                          __HIP_MEMORY_SCOPE_AGENT);
   }
   lock_val = __shfl(lock_val, get_first_active_lane_id(activemask));
 
-  return lock_val == SPIN_LOCK_UNLOCKED;
+  return lock_val == ROCSHMEM_SPIN_LOCK_UNLOCKED;
 }
 
 /*
@@ -407,7 +407,7 @@ __device__ __forceinline__ bool is_last_active_lane() {
  */
 [[maybe_unused]] __device__ __forceinline__ void spin_lock_release_shared(uint32_t *lock, uint64_t activemask) {
   if (is_first_active_lane(activemask)) {
-    __hip_atomic_store(lock, SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
+    __hip_atomic_store(lock, ROCSHMEM_SPIN_LOCK_UNLOCKED, __ATOMIC_RELEASE,
                        __HIP_MEMORY_SCOPE_AGENT);
   }
 }

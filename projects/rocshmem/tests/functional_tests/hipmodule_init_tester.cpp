@@ -41,7 +41,7 @@
     } \
   } while(0)
 
-// Kernel source that defines ROCSHMEM_CTX_DEFAULT
+// Kernel source that defines ROCshmem_ctx_t_DEFAULT
 // This kernel mimics the rocshmem device context definition to ensure 
 // the device global symbol exists in the module's device symbol table and 
 // can be queried later in rocshmem_hipmodule_init() host API for verification.
@@ -55,16 +55,16 @@ typedef struct rocshmem_ctx {
 
 typedef unsigned long long* rocshmem_team_t;
 
-// Define the ROCSHMEM_CTX_DEFAULT symbol. rocshmem_hipmodule_init() looks for
+// Define the ROCshmem_ctx_t_DEFAULT symbol. rocshmem_hipmodule_init() looks for
 // this device symbol in the given kernel module
-extern "C" __device__ rocshmem_ctx_t __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
+extern "C" __device__ rocshmem_ctx_t __attribute__((visibility("default"))) ROCshmem_ctx_t_DEFAULT{};
 
 // Define ROCSHMEM_TEAM_WORLD so rocshmem_hipmodule_init() can copy the team world into this module
 extern "C" __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD {nullptr};
 
 // stub kernel function used for module verification
 extern "C" __global__ void simple_test_kernel(int *result) {
-  // Simple test kernel that has the ROCSHMEM_CTX_DEFAULT symbol compiled in its module
+  // Simple test kernel that has the ROCshmem_ctx_t_DEFAULT symbol compiled in its module
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     // Just write a test value
     *result = 42;
@@ -137,7 +137,7 @@ HipModuleInitTester::HipModuleInitTester(TesterArguments args)
 
   // Load the compiled module
   // Note: This creates a HIP module that we'll pass to rocshmem_hipmodule_init
-  // this HIP module has device global symbol ROCSHMEM_CTX_DEFAULT in device symbol table.
+  // this HIP module has device global symbol ROCshmem_ctx_t_DEFAULT in device symbol table.
   CHECK_HIP(hipModuleLoadData(&test_module, code));
 
   // Clean up

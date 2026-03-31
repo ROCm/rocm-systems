@@ -27,17 +27,18 @@
 
 #include <climits>
 #include <cstdint>
-#include <rocshmem/rocshmem.hpp>
+//#include <rocshmem/rocshmem.hpp>
 #include <string>
 #include <iostream>
 
-
+#if !defined(USE_MORI_BACKEND)
 enum TeamSplitType {
   ROCSHMEM_TEST_TEAM_DUP = 0,    // Dup parent team
   ROCSHMEM_TEST_TEAM_SINGLE,     // each PE will be its own team
   ROCSHMEM_TEST_TEAM_BLOCK,      // split parent into two halfs
   ROCSHMEM_TEST_TEAM_ODDEVEN,    // odd-even splitting
 };
+#endif
 
 /*-----------------------------------------
  * Atomics Addressing modes (contention model)
@@ -82,7 +83,7 @@ public:
   unsigned thread_access = 64;
   unsigned coal_coef = 64;
   unsigned op_type = 0;
-  unsigned shmem_context = rocshmem::ROCSHMEM_CTX_WG_PRIVATE;
+  unsigned shmem_context = -1;//rocshmem::ROCshmem_ctx_t_WG_PRIVATE;
   AddrMode addr_mode = AddrMode::PerBlock;
 
   /**
@@ -100,7 +101,7 @@ public:
   bool verif = true;
   size_t large_message_size = 32768;
 
-  TeamSplitType team_type = ROCSHMEM_TEST_TEAM_DUP;
+//  TeamSplitType team_type = ROCSHMEM_TEST_TEAM_DUP;
 };
 
 #endif
