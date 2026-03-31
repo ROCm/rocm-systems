@@ -44,9 +44,6 @@ get_verbose();
 const std::unordered_set<std::string_view>&
 get_updated_envs();
 
-int
-get_verbose_level();
-
 std::vector<char*>
 get_initial_environment();
 

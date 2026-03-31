@@ -88,9 +88,9 @@ main(int argc, char** argv)
             auto _env = _base_env;
             for(const auto& eitr : _causal_env.front())
                 update_env(_env, eitr.first, eitr.second);
-            output::print_updated_environment(_env, get_updated_envs(), get_verbose(),
-                                              "0: ");
-            output::print_command(_argv, get_verbose_level(), "0: ");
+            auto _verbose = get_verbose();
+            output::print_updated_environment(_env, get_updated_envs(), _verbose, "0: ");
+            output::print_command(_argv, _verbose, "0: ");
             _argv.emplace_back(nullptr);
             _env.emplace_back(nullptr);
             return execvpe(_argv.front(), _argv.data(), _env.data());
@@ -121,9 +121,10 @@ main(int argc, char** argv)
                 auto _env = _base_env;
                 for(const auto& eitr : citr)
                     update_env(_env, eitr.first, eitr.second);
-                output::print_updated_environment(_env, get_updated_envs(), get_verbose(),
+                auto _verbose = get_verbose();
+                output::print_updated_environment(_env, get_updated_envs(), _verbose,
                                                   _prefix.str());
-                output::print_command(_argv, get_verbose_level(), _prefix.str());
+                output::print_command(_argv, _verbose, _prefix.str());
                 _argv.emplace_back(nullptr);
                 _env.emplace_back(nullptr);
                 return execvpe(_argv.front(), _argv.data(), _env.data());

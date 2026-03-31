@@ -155,12 +155,6 @@ get_updated_envs()
     return updated_envs;
 }
 
-int
-get_verbose_level()
-{
-    return verbose;
-}
-
 std::vector<char*>
 get_initial_environment()
 {

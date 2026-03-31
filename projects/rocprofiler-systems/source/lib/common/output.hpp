@@ -44,8 +44,7 @@ print_command(const std::vector<char*>& _argv, int _verbose,
     if(_verbose < 1) return;
 
     auto _cmd = build_command_string(_argv);
-    std::cout << _prefix << "Executing '" << _cmd << "'...\n";
-    std::cout << std::flush;
+    std::cout << _prefix << "Executing '" << _cmd << "'..." << std::endl;
 }
 
 template <typename UpdatedEnvsT>
