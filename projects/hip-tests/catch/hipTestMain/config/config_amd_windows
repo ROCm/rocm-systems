@@ -748,6 +748,10 @@
         "=== ROCM-2924 - section 'Invalid device pointer' of this test fails on Windows ===",
         "=== the runtime is not really able to detect invalid device pointers a.t.m. ===",
         "Unit_TexObjectCreate_TypePitch2D_EdgeCases",
+        "============================TheRock_Bump_Windows_timeout #4547===========================",
+        "=== This is newly added test to check ASAN memory errors deduced from rocDecode ===",
+        "=== during ASAN/memleak detection work on Linux ===",
+        "Unit_MemcpyToSymbolInParallelWithStreamLaunch",
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
