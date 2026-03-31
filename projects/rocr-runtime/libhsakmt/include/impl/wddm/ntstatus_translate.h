@@ -53,6 +53,9 @@
 #include "ntstatus.h"
 #include "impl/wddm/status.h"
 
+namespace wsl {
+namespace thunk {
+
 inline ErrorCode TranslateNtStatus(NTSTATUS status) {
   switch (status) {
   case STATUS_SUCCESS:
@@ -76,3 +79,6 @@ inline ErrorCode TranslateNtStatus(NTSTATUS status) {
   }
   return ErrorCode::Unknown;
 }
+
+} // namespace thunk
+} // namespace wsl
