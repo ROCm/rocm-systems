@@ -56,13 +56,13 @@ static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 
 // Check whether a given PID has /dev/kfd open by scanning its fd links.
-static bool PidHasKfdOpen(const std::string &pid_str) {
+static bool PidHasKfdOpen(const std::string& pid_str) {
   std::string fd_dir_path = "/proc/" + pid_str + "/fd";
-  DIR *fd_dir = opendir(fd_dir_path.c_str());
+  DIR* fd_dir = opendir(fd_dir_path.c_str());
   if (!fd_dir) return false;
 
   bool found = false;
-  struct dirent *fd_entry;
+  struct dirent* fd_entry;
   while ((fd_entry = readdir(fd_dir)) != nullptr) {
     if (fd_entry->d_name[0] == '.') continue;
     std::string fd_link = fd_dir_path + "/" + fd_entry->d_name;
@@ -83,10 +83,15 @@ static bool PidHasKfdOpen(const std::string &pid_str) {
 // Detect whether KFD sysfs PIDs are in a different PID namespace from ours.
 // When running inside a container with PID namespace isolation, KFD sysfs
 // reports host PIDs that are not visible in the container's /proc. We detect
-// this by checking whether the first numeric entry under kKFDProcPathRoot
-// corresponds to a process visible in /proc that also has /dev/kfd open.
-// A mere PID existence check is insufficient because a different process in
-// the container's namespace could coincidentally share the same PID number.
+// this by checking numeric entries under kKFDProcPathRoot against /proc.
+// For each KFD PID we check three cases:
+//   1. PID exists in /proc AND has /dev/kfd open → same namespace (not namespaced).
+//   2. PID exists in /proc but does NOT have /dev/kfd open → different namespace.
+//   3. PID does NOT exist in /proc → inconclusive (process may have exited);
+//      skip to the next entry to avoid a false positive from a short-lived process.
+// If all KFD entries are inconclusive (all exited), we conservatively assume
+// we are not namespaced (the KFD entries will be cleaned up shortly anyway).
+// Result is cached for the lifetime of the process; PID namespace is assumed stable.
 static bool IsKfdPidNamespaced() {
   static std::atomic<int> cached{-1};
   int val = cached.load(std::memory_order_acquire);
@@ -99,23 +104,35 @@ static bool IsKfdPidNamespaced() {
   }
 
   bool namespaced = false;
+  bool determined = false;
   struct dirent* de;
   while ((de = readdir(kfd_dir)) != nullptr) {
     std::string name(de->d_name);
     if (!is_number(name)) continue;
 
-    // Found a numeric KFD proc entry; verify the PID both exists in /proc
-    // and actually has /dev/kfd open. If the PID doesn't exist at all, or
-    // exists but belongs to a different process (no /dev/kfd fd), we are
-    // in a different PID namespace.
     std::string proc_path = "/proc/" + name;
     struct stat st;
-    if (stat(proc_path.c_str(), &st) != 0 || !PidHasKfdOpen(name)) {
+    if (stat(proc_path.c_str(), &st) != 0) {
+      // PID not in /proc — could be a short-lived process that already exited.
+      // Skip to the next KFD entry to avoid a false positive race condition.
+      continue;
+    }
+    // PID exists in /proc; check whether the same process has /dev/kfd open.
+    // If it does, we share the same PID namespace. If not, a different
+    // container-local process coincidentally has the same PID number.
+    if (!PidHasKfdOpen(name)) {
       namespaced = true;
     }
+    determined = true;
     break;
   }
   closedir(kfd_dir);
+
+  // If every KFD entry was inconclusive (all processes exited), conservatively
+  // assume we are not namespaced — the stale KFD entries will be reaped soon.
+  if (!determined) {
+    namespaced = false;
+  }
 
   cached.store(namespaced ? 1 : 0, std::memory_order_release);
   return namespaced;
@@ -137,7 +154,7 @@ static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated
     std::string pid_str(dentry->d_name);
     if (!is_number(pid_str)) continue;
 
-    uint32_t pid = static_cast<uint32_t>(std::stoul(pid_str));
+    uint32_t pid = static_cast<uint32_t>(strtoul(pid_str.c_str(), nullptr, 10));
     if (pid == static_cast<uint32_t>(self)) continue;
 
     if (PidHasKfdOpen(pid_str)) {
@@ -521,7 +538,6 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   DIR* d = opendir(pdir.c_str());
 
   if (!d) {
-    
     // Return success with empty set so 'GetProcessGPUs()' can use 'vram_*' fallback.
     if (IsKfdPidNamespaced()) {
       return 0;
@@ -689,7 +705,12 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
   // PID namespace: fall back to discovering GPU IDs from KFD vram_* files.
   // NOTE: Uses the first host-PID KFD entry found; assumes all container
   // processes share the same GPU set (valid for typical container deployments).
+  // This assumption may not hold in multi-tenant GPU partitioning scenarios.
   if (gpu_set->empty() && IsKfdPidNamespaced()) {
+    std::stringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | PID namespace detected, falling back to "
+       << "KFD vram_* files for GPU discovery (pid=" << pid << ")";
+    LOG_DEBUG(ss);
     DIR* kfd_proc_dir = opendir(kKFDProcPathRoot);
     if (kfd_proc_dir) {
       struct dirent* de;
