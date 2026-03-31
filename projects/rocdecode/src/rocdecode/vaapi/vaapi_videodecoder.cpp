@@ -688,7 +688,7 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
     uint32_t va_ctx_id;
     rocdec_status = GetVaContext(dec_cap->device_id, &va_ctx_id);
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, "Failed to initilize.");
+        CriticalLog(logger_, "Failed to initialize.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }

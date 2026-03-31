@@ -85,8 +85,8 @@ public:
 
 private:
     int log_level_ = kRocDecLogCritical;
-    uint64_t start_time_; // in us
-    uint64_t end_time_; // in us
+    uint64_t start_time_ = 0; // in us
+    uint64_t end_time_ = 0; // in us
 };
 
 #define CriticalLog(logger, msg) \
