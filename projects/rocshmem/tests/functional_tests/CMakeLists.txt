@@ -34,8 +34,7 @@ option(TEST_WITH_ROCSHMEM "Test the rocSHMEM SHMEM library" ON)
 option(TEST_WITH_MORI "Test the Mori SHMEM library" OFF)
 
 include_directories(
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 if (BUILD_TESTS_ONLY)
@@ -48,7 +47,6 @@ if (BUILD_TESTS_ONLY)
   endif()
 
   include_directories(
-    PRIVATE
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../src>
   )
