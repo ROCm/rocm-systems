@@ -58,39 +58,19 @@ in practice.
 
    .. grid-item-card:: Conceptual
 
-      * :doc:`/conceptual/performance-model`
+      * :doc:`conceptual/performance-model`
 
-        * :doc:`/conceptual/cdna/cdna-performance-model`
+        * :doc:`conceptual/compute-unit`
 
-        * :doc:`/conceptual/rdna/rdna-performance-model`
+        * :doc:`conceptual/l2-cache`
 
-        * :doc:`/conceptual/cdna/compute-unit`
+        * :doc:`conceptual/shader-engine`
 
-        * :doc:`/conceptual/cdna/l2-cache`
+        * :doc:`conceptual/command-processor`
 
-        * :doc:`/conceptual/cdna/shader-engine`
+        * :doc:`conceptual/system-speed-of-light`
 
-        * :doc:`/conceptual/cdna/command-processor`
-
-        * :doc:`/conceptual/cdna/system-speed-of-light`
-
-        * :doc:`/conceptual/rdna/wgp`
-
-        * :doc:`/conceptual/rdna/gl1-cache`
-
-        * :doc:`/conceptual/rdna/gl2-cache`
-
-        * :doc:`/conceptual/rdna/shader-engine`
-
-        * :doc:`/conceptual/rdna/command-processor`
-
-        * :doc:`/conceptual/rdna/system-speed-of-light`
-
-        * :doc:`/conceptual/cdna/references`
-
-        * :doc:`/conceptual/rdna/references`
-
-      * :doc:`/conceptual/definitions`
+      * :doc:`conceptual/definitions`
 
         * :ref:`normalization-units`
 

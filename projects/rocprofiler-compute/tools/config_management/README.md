@@ -286,17 +286,10 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,942,950,1151}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,942,950}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
-  └── gfx{908,90a,942,950,1151}_metrics.yaml               # rst + unit (generated)
-```
-
-**Dependencies:** `metric_description_manager.py` requires **ruamel.yaml** (declared in
-``pyproject.toml`` under optional dependency **developer**). Install with:
-
-```bash
-pip install -e ".[developer]"
+  └── gfx{908,90a,942,950}_metrics.yaml               # rst + unit (generated)
 ```
 
 **After editing panel `metrics_description` sections:**

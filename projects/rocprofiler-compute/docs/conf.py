@@ -38,17 +38,11 @@ exclude_patterns = ["archive", "*/includes"]
 html_static_path = ["sphinx/static/css"]
 html_css_files = ["o_custom.css"]
 
-# Load per-arch metrics YAMLs (skip missing files for optional arches)
+# Load per-arch metrics YAMLs
 arch_metrics = {}
-for arch in ["gfx908", "gfx90a", "gfx942", "gfx950", "gfx1151"]:
-    metrics_path = f"data/metrics/{arch}_metrics.yaml"
-    try:
-        with open(metrics_path, encoding="utf-8") as f:
-            arch_metrics[arch] = yaml.safe_load(f)
-    except OSError:
-        pass
-
-ARCH_ORDER = list(arch_metrics.keys())
+for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
+    with open(f"data/metrics/{arch}_metrics.yaml") as f:
+        arch_metrics[arch] = yaml.safe_load(f)
 
 # Section name mapping: context-name -> YAML section name
 section_map = {
@@ -88,25 +82,15 @@ section_map = {
     "sys-sol": "System Speed-of-Light",
 }
 
-# Generate per-arch jinja contexts (CDNA conceptual pages + gfx1151 where shared)
+# Generate per-arch jinja contexts (4 contexts per section)
 jinja_contexts = {}
 for context_name, section_name in section_map.items():
-    for arch in ARCH_ORDER:
+    for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
+        # Handle missing sections in gfx908 (only 30 sections vs 34)
         if section_name in arch_metrics[arch]:
             jinja_contexts[f"{context_name}-{arch}"] = {
                 "data": arch_metrics[arch][section_name],
             }
-
-# gfx1151-only metric sections (RDNA3.5 panels; IDs collide with CDNA otherwise)
-_section_names_in_map = frozenset(section_map.values())
-for section_name in arch_metrics.get("gfx1151", {}):
-    if section_name in _section_names_in_map:
-        continue
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", section_name.lower()).strip("-")
-    ctx = f"rdna1151-{slug}"
-    jinja_contexts[f"{ctx}-gfx1151"] = {
-        "data": arch_metrics["gfx1151"][section_name],
-    }
 
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocprofiler-compute"

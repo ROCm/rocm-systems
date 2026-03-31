@@ -41,7 +41,7 @@ operations issued by a wavefront. The vL1D cache consists of several components:
 Together, this complex is known as the vL1D, or Texture Cache per Pipe
 (TCP). A simplified diagram of the vL1D is presented below:
 
-.. figure:: ../../data/performance-model/l1perf_model.png
+.. figure:: ../data/performance-model/l1perf_model.png
    :align: center
    :alt: Performance model of the vL1D Cache on AMD Instinct
    :width: 800

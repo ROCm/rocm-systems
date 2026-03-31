@@ -7,6 +7,6 @@
 
     {% for metric, metric_info in data.items() %}
     * - {{ metric }}
-      - {{ (metric_info.rst | default('')) | replace('\n', ' ') | trim }}
-      - {{ metric_info.unit | default('') }}
+      - {{ metric_info.rst }}
+      - {{ metric_info.unit }}
     {% endfor %}
