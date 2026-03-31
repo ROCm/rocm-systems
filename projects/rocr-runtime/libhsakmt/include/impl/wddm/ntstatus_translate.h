@@ -63,7 +63,7 @@ inline ErrorCode TranslateNtStatus(NTSTATUS status) {
      return ErrorCode::OutOfMemory;
   case STATUS_DEVICE_REMOVED:
     return ErrorCode::DeviceLost;
-   case STATUS_GRAPHICS_NO_VIDEO_MEMORY:
+  case STATUS_GRAPHICS_NO_VIDEO_MEMORY:
     return ErrorCode::OutOfGpuMemory;
   case STATUS_TIMEOUT:
     return ErrorCode::Timeout;

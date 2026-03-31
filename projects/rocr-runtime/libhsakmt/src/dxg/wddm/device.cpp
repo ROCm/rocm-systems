@@ -180,8 +180,8 @@ bool WDDMDevice::FindSegmentId(SegmentKind segment_kind, uint32_t* segment_id)
   return false;
 }
 
-/*Local heap(dedicated GPU memory) includes visiable heap and invisiable heap.
- *Non local heap refers to shared GPU memory and it is sytem memory.
+/*Local heap(dedicated GPU memory) includes visible heap and invisible heap.
+ *Non local heap refers to shared GPU memory and it is system memory.
  */
 ErrorCode WDDMDevice::VramAvail(uint64_t* available_bytes) {
   D3DKMT_QUERYSTATISTICS stats;
