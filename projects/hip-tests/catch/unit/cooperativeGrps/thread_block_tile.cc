@@ -613,7 +613,6 @@ void __global__ partialSum(int* result)
   }
 }
 
-// Not all the threads of a tile have to participate in a reduce (unlike reduce sync operations)
 TEST_CASE(Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads)
 {
   LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
@@ -631,7 +630,8 @@ TEST_CASE(Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads)
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
-  // because a thread did not participate; we get a partial sum
+  // because a thread did not participate; we get a partial sum; note: this is undefined behaviour
+  // on Nvidia
   REQUIRE(*h_result.host_ptr() == getWarpSize() - 1);
 }
 

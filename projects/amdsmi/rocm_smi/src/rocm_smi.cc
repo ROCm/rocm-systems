@@ -1900,7 +1900,7 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind, uint32_t* nu
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | Issue: could not retreive kDevPowerODVoltage" << "; returning "
+    ss << __PRETTY_FUNCTION__ << " | Issue: could not retrieve kDevPowerODVoltage" << "; returning "
        << getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
@@ -5558,10 +5558,10 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
 
     /*
      *  Note: Adjust tmp_capability for the returned capabilities.
-     *  Todo: We need to fix it directy as part of the KFD Nodes 'KFDNode::Initialize(void)'
+     *  Todo: We need to fix it directly as part of the KFD Nodes 'KFDNode::Initialize(void)'
      *        However, it involves a more complex change, so we will discuss it and fix in in the
      * future. Ideally, due to the fact we would need to check every IO link (for each KFD node),
-     * and considering the topology could change (ie; new GPUs added, partioning changed, etc), we
+     * and considering the topology could change (ie; new GPUs added, partitioning changed, etc), we
      *          are looking into O(N^2) time complexity, no to mention the fact that the IO links
      * then need to be changed/updated too. I have some ideas about how to do this, but it will take
      *          some time to implement and test it, should we consider it is *really necessary*.
@@ -6377,7 +6377,7 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: issue writing reqested setting of " + newMemoryPartition
+       << " | Cause: issue writing requested setting of " + newMemoryPartition
        << " | Returning = " << getRSMIStatusString(status, false);
     LOG_ERROR(ss);
     return status;
