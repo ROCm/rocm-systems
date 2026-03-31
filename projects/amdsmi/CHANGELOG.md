@@ -98,7 +98,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Optimized
 
-- N/A
+- **Adjusted the KFD Process cache to be more responsive and have and adjustable cache duration**.  
+  - Users may adjust the cache duration by setting the environment variable 'AMDSMI_PROCESS_INFO_CACHE_MS'.
 
 ### Resolved Issues
 

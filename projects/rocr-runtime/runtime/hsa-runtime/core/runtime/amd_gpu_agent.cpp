@@ -216,9 +216,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   // Store CUID for this agent
   InitDerivedCuid();
 
-#if !defined(__linux__)
-  wallclock_frequency_ = 0;
-#else
   bool model_enabled;
   hsa_status_t status = driver().IsModelEnabled(&model_enabled);
   assert(status == HSA_STATUS_SUCCESS && "IsModelEnabled failed");
@@ -236,7 +233,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       }
     }
   }
-#endif
 
   auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
   auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
@@ -3865,6 +3861,19 @@ hsa_status_t GpuAgent::AcquireCountedQueue(hsa_queue_type_t type,
 
 hsa_status_t GpuAgent::ReleaseCountedQueue(hsa_queue_t* queue) {
   return queue_pool_.ReleaseQueue(queue);
+}
+
+hsa_status_t GpuAgent::Preload(uint64_t flags) {
+  // By default preload everything; flags are used to skip specific resources
+  if (!(flags & HSA_AMD_AGENT_PRELOAD_SKIP_CLOCK_SYNC)) {
+    CheckClockTicks();
+  }
+
+  if (!(flags & HSA_AMD_AGENT_PRELOAD_SKIP_BLITS)) {
+    PreloadBlits();
+  }
+
+  return HSA_STATUS_SUCCESS;
 }
 
 }  // namespace amd

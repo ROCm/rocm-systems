@@ -74,9 +74,6 @@
 	path = projects/rocprofiler-systems/external/dyninst
 	url = https://github.com/ROCm/dyninst.git
 	branch = dyninst_13
-[submodule "projects/rocprofiler-systems/external/PTL"]
-	path = projects/rocprofiler-systems/external/PTL
-	url = https://github.com/jrmadsen/PTL.git
 [submodule "projects/rocprofiler-systems/external/kokkos"]
 	path = projects/rocprofiler-systems/examples/lulesh/external/kokkos
 	url = https://github.com/kokkos/kokkos.git
