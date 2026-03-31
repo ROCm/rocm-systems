@@ -139,18 +139,12 @@ __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr,
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    if ((wf_info.scope == ThreadScope::thread) ||
-        (wf_info.scope != ThreadScope::thread && wf_info.is_pe_group_leader)) {
-      bnxt_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
-    }
+    bnxt_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    if ((wf_info.scope == ThreadScope::thread) ||
-        (wf_info.scope != ThreadScope::thread && wf_info.is_pe_group_leader)) {
-      mlx5_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
-    }
+    mlx5_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
   default:
@@ -230,25 +224,25 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
 
 __device__ void QueuePair::quiet(ActiveWFInfo &wf_info) {
   if(wf_info.is_pe_group_leader) {
-    switch (gda_provider_) {
-  #if defined(GDA_IONIC)
-    case GDAProvider::IONIC:
-      ionic_quiet();
-      return;
-  #endif
-  #if defined(GDA_BNXT)
-    case GDAProvider::BNXT:
-        bnxt_quiet(wf_info);
-      return;
-  #endif
-  #if defined(GDA_MLX5)
-    case GDAProvider::MLX5:
-        mlx5_quiet(wf_info);
-      return;
-  #endif
-    default:
-      assert(false /* invalid nic provider */);
-    }
+      switch (gda_provider_) {
+    #if defined(GDA_IONIC)
+      case GDAProvider::IONIC:
+        ionic_quiet();
+        return;
+    #endif
+    #if defined(GDA_BNXT)
+      case GDAProvider::BNXT:
+          bnxt_quiet(wf_info);
+        return;
+    #endif
+    #if defined(GDA_MLX5)
+      case GDAProvider::MLX5:
+          mlx5_quiet(wf_info);
+        return;
+    #endif
+      default:
+        assert(false /* invalid nic provider */);
+      }
   }
 }
 
