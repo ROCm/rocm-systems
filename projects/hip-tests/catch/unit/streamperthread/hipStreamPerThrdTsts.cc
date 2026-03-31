@@ -332,9 +332,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
       REQUIRE(false);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 

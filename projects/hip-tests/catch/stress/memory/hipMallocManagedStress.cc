@@ -168,9 +168,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_MultiSize) {
     }
     HIP_CHECK(hipStreamDestroy(strm));
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -213,9 +211,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_KrnlWth2MemTypes) {
     delete[] Hptr;
     REQUIRE(IfTestPassed);
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -228,9 +224,7 @@ HIP_TEST_CASE(Stress_hipMallocManaged_MultiKrnlHmmAccess) {
     int InitVal = 123, NumElms = (1024 * 1024);
     LaunchKrnl4(NumElms, InitVal);
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 

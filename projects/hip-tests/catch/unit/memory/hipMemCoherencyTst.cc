@@ -138,9 +138,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTst) {
     HIP_CHECK(hipFree(Ptr));
     REQUIRE(YES_COHERENT);
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support ManagedMemory "
-        "device attribute. Hence skipping the test with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 #endif
@@ -179,9 +177,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_CoherentTstWthAdvise) {
     HIP_CHECK(hipStreamDestroy(strm));
     REQUIRE(YES_COHERENT);
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the test with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 

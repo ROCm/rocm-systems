@@ -95,9 +95,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
 
     REQUIRE(IfTestPassed);
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -150,9 +148,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
     }
     HIP_CHECK(hipFree(Hmm));
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -197,8 +193,6 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
     HIP_CHECK(hipFree(Hmm));
     delete[] OutData;
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
