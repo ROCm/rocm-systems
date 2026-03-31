@@ -65,6 +65,8 @@ auto               print_lock          = std::mutex{};
 size_t             nthreads            = 2;
 size_t             nitr                = 500;
 size_t             nsync               = 10;
+unsigned int       matrix_rows         = 4960 * 2;
+unsigned int       matrix_cols         = 4960 * 2;
 constexpr unsigned shared_mem_tile_dim = 32;
 
 void
@@ -92,20 +94,31 @@ main(int argc, char** argv)
         {
             fprintf(stderr,
                     "usage: transpose [NUM_THREADS (%zu)] [NUM_ITERATION (%zu)] "
-                    "[SYNC_EVERY_N_ITERATIONS (%zu)]\n",
+                    "[SYNC_EVERY_N_ITERATIONS (%zu)] [NUM_ROWS (%u)] [NUM_COLS (%u)]\n",
                     nthreads,
                     nitr,
-                    nsync);
+                    nsync,
+                    matrix_rows,
+                    matrix_cols);
             exit(EXIT_SUCCESS);
         }
     }
     if(argc > 1) nthreads = atoll(argv[1]);
     if(argc > 2) nitr = atoll(argv[2]);
     if(argc > 3) nsync = atoll(argv[3]);
+    if(argc > 4) matrix_rows = static_cast<unsigned int>(atoll(argv[4]));
+    if(argc > 5) matrix_cols = static_cast<unsigned int>(atoll(argv[5]));
+
+    if(matrix_rows == 0 || matrix_cols == 0)
+    {
+        fprintf(stderr, "transpose requires non-zero matrix dimensions\n");
+        return EXIT_FAILURE;
+    }
 
     printf("[transpose] Number of threads: %zu\n", nthreads);
     printf("[transpose] Number of iterations: %zu\n", nitr);
     printf("[transpose] Syncing every %zu iterations\n", nsync);
+    printf("[transpose] Matrix dimensions: %u x %u\n", matrix_rows, matrix_cols);
 
 #if defined(USE_ROCTRACER_ROCTX)
     {
@@ -201,8 +214,8 @@ run(int rank, int tid, int devid, int argc, char** argv)
 
     mark("begin");
 
-    constexpr unsigned int M = 4960 * 2;
-    constexpr unsigned int N = 4960 * 2;
+    const auto M = matrix_rows;
+    const auto N = matrix_cols;
 
     if(argc > 2) nitr = atoll(argv[2]);
     if(argc > 3) nsync = atoll(argv[3]);
@@ -220,9 +233,10 @@ run(int rank, int tid, int devid, int argc, char** argv)
     std::default_random_engine         _engine{std::random_device{}() * (rank + 1) * (tid + 1)};
     std::uniform_int_distribution<int> _dist{0, 1000};
 
-    size_t size       = sizeof(int) * M * N;
-    int*   inp_matrix = new int[size];
-    int*   out_matrix = new int[size];
+    size_t size          = sizeof(int) * M * N;
+    size_t element_count = static_cast<size_t>(M) * static_cast<size_t>(N);
+    int*   inp_matrix    = new int[element_count];
+    int*   out_matrix    = new int[element_count];
     for(size_t i = 0; i < M * N; i++)
     {
         inp_matrix[i] = _dist(_engine);
