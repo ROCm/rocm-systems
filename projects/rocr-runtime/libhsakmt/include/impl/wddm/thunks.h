@@ -44,11 +44,34 @@
 
 #include "impl/wddm/status.h"
 #include "impl/wddm/types.h"
-#include "impl/wddm/ntstatus_translate.h"
 #include "dxcore_loader.h"
 
 namespace wsl {
 namespace thunk {
+
+inline ErrorCode TranslateNtStatus(NTSTATUS status) {
+  switch (status) {
+  case STATUS_SUCCESS:
+    return ErrorCode::Success;
+  case STATUS_PENDING:
+    return ErrorCode::NotReady;
+  case STATUS_NO_MEMORY:
+     return ErrorCode::OutOfMemory;
+  case STATUS_DEVICE_REMOVED:
+    return ErrorCode::DeviceLost;
+   case STATUS_GRAPHICS_NO_VIDEO_MEMORY:
+    return ErrorCode::OutOfGpuMemory;
+  case STATUS_TIMEOUT:
+    return ErrorCode::Timeout;
+  case STATUS_INVALID_PARAMETER:
+    return ErrorCode::InvalidateParams;
+  case STATUS_INVALID_HANDLE:
+    return ErrorCode::InvalidHandle;
+  default:
+    break;
+  }
+  return ErrorCode::Unknown;
+}
 
 namespace d3dthunk {
 

@@ -160,7 +160,7 @@ public:
   }
   uint32_t GetComputeEngine() { return device_info_.compute_schedid; }
 
-  ErrorCode VramAvail(uint64_t* available_bytes);
+  hsa_status_t VramAvail(uint64_t* available_bytes);
 
   void GetClockCounters(uint64_t *gpu, uint64_t *cpu);
   uint32_t GetNumCpQueues() { return device_info_.num_cp_queues; }
