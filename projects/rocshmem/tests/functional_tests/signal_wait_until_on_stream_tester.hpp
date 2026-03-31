@@ -64,6 +64,6 @@ protected:
   std::vector<hipEvent_t> stop_events_timed;
 };
 
-//#include "signal_wait_until_on_stream_tester.cpp"
+#include "signal_wait_until_on_stream_tester.cpp"
 
 #endif

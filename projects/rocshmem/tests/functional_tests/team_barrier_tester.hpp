@@ -63,6 +63,6 @@ class TeamBarrierTester : public Tester {
   rocshmem_team_t *team_barrier_world_dup;
 };
 
-//#include "team_barrier_tester.cpp"
+#include "team_barrier_tester.cpp"
 
 #endif

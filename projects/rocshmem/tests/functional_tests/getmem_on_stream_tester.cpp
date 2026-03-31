@@ -24,7 +24,7 @@
 
 #include "getmem_on_stream_tester.hpp"
 
-#include <rocshmem/rocshmem.hpp>
+#include "rocshmem_api_adapter.hpp"
 #include <hip/hip_runtime.h>
 #include <cstring>
 #include <cassert>

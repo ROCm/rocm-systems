@@ -24,7 +24,7 @@
 
 #include "team_alltoallv_tester.hpp"
 
-#include <rocshmem/rocshmem.hpp>
+#include "rocshmem_api_adapter.hpp"
 
 using namespace rocshmem;
 

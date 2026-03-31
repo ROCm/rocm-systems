@@ -25,7 +25,7 @@
 #ifndef _TESTER_HPP_
 #define _TESTER_HPP_
 
-//#include <rocshmem/rocshmem.hpp>
+#include <rocshmem_api_adapter.hpp>
 #include <vector>
 #include <climits>
 
@@ -175,7 +175,7 @@ class Tester {
   TesterArguments args;
 
   TestType _type;
-  ShmemContextType _shmem_context = 8;  // shmem_ctx_t_WP_PRIVATE
+  ShmemContextType _shmem_context = 8;  // SHMEM_CTX_WP_PRIVATE
 
   hipStream_t stream;
   hipDeviceProp_t deviceProps;

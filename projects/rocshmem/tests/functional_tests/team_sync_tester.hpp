@@ -63,6 +63,6 @@ class TeamSyncTester : public Tester {
   rocshmem_team_t *team_sync_world_dup;
 };
 
-//#include "team_sync_tester.cpp"
+#include "team_sync_tester.cpp"
 
 #endif

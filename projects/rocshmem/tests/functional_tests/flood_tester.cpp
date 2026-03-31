@@ -23,9 +23,10 @@
  *****************************************************************************/
 
 #include "flood_tester.hpp"
-#include "shmem_api_adapter.hpp"
 
-using namespace shmem_adapter;
+#include "rocshmem_api_adapter.hpp"
+
+using namespace rocshmem;
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -33,7 +34,7 @@ using namespace shmem_adapter;
 __global__ void FloodTest(int loop, int skip, long long int *start_time,
                            long long int *end_time, uint64_t *r_buf, uint64_t *s_buf,
                            TestType type, ShmemContextType ctx_type, int wf_size) {
-  __shared__ shmem_ctx_t ctx;
+  __shared__ rocshmem_ctx_t ctx;
 
   /**
    * Shared array to capture the start time for each wavefront
@@ -44,12 +45,12 @@ __global__ void FloodTest(int loop, int skip, long long int *start_time,
    */
   __shared__ long long int wf_start_time[32];
 
-  shmem_wg_ctx_create(ctx_type, &ctx);
+  rocshmem_wg_ctx_create(ctx_type, &ctx);
 
-  int num_pe {shmem_n_pes(ctx)};
+  int num_pe {rocshmem_ctx_n_pes(ctx)};
   int num_wg {get_grid_num_blocks()};
   int num_th {get_flat_block_size()};
-  int my_pe {shmem_my_pe(ctx)};
+  int my_pe {rocshmem_ctx_my_pe(ctx)};
   int wg_id {get_flat_grid_id()};
   int t_id {get_flat_block_id()};
   int wf_id {t_id / wf_size};
@@ -70,32 +71,32 @@ __global__ void FloodTest(int loop, int skip, long long int *start_time,
       auto pe = (t_id + j) % num_pe;
       switch (type) {
       case FloodPutTestType:
-        shmem_putmem(ctx, &r_buf[tgt_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
+        rocshmem_ctx_putmem(ctx, &r_buf[tgt_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
         break;
       case FloodPutNBITestType:
-        shmem_putmem_nbi(ctx, &r_buf[tgt_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
+        rocshmem_ctx_putmem_nbi(ctx, &r_buf[tgt_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
         break;
       case FloodPTestType:
-        shmem_ulong_p(ctx, &r_buf[tgt_offset], s_buf[t_offset], pe);
+        rocshmem_ctx_ulong_p(ctx, &r_buf[tgt_offset], s_buf[t_offset], pe);
         break;
       case FloodGetTestType:
         dst_offset = pe * num_wg * num_th + t_offset;
-        shmem_getmem(ctx, &r_buf[dst_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
+        rocshmem_ctx_getmem(ctx, &r_buf[dst_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
         break;
       case FloodGetNBITestType:
         dst_offset = pe * num_wg * num_th + t_offset;
-        shmem_getmem_nbi(ctx, &r_buf[dst_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
+        rocshmem_ctx_getmem_nbi(ctx, &r_buf[dst_offset], &s_buf[t_offset], sizeof(uint64_t), pe);
         break;
       case FloodGTestType:
         dst_offset = pe * num_wg * num_th + t_offset;
-        r_buf[dst_offset] = shmem_ulong_g(ctx, &s_buf[t_offset], pe);
+        r_buf[dst_offset] = rocshmem_ctx_ulong_g(ctx, &s_buf[t_offset], pe);
         break;
       default:
         break;
       }
       __syncthreads();
       if (is_thread_zero_in_block()) {
-        shmem_quiet(ctx);
+        rocshmem_ctx_quiet(ctx);
       }
     }
   }
@@ -116,15 +117,15 @@ __global__ void FloodTest(int loop, int skip, long long int *start_time,
     start_time[wg_id] = wf_start_time[0];
   }
 
-  shmem_wg_ctx_destroy(&ctx);
+  rocshmem_wg_ctx_destroy(&ctx);
 }
 
 static __global__ void verify_results_kernel(uint64_t *dest, size_t buf_size,
                                              bool *verification_error) {
-  int num_pe {shmem_n_pes()};
+  int num_pe {rocshmem_n_pes()};
   int num_wg {get_grid_num_blocks()};
   int num_th {get_flat_block_size()};
-  int my_pe {shmem_my_pe()};
+  int my_pe {rocshmem_my_pe()};
   int wg_id {get_flat_grid_id()};
   int t_id {get_flat_block_id()};
 
@@ -147,29 +148,29 @@ static __global__ void verify_results_kernel(uint64_t *dest, size_t buf_size,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 FloodTester::FloodTester(TesterArguments args) : Tester(args) {
-  int num_pes {shmem_n_pes()};
-  int my_pe {shmem_my_pe()};
-  s_buf = (uint64_t*)shmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size);
+  int num_pes {rocshmem_n_pes()};
+  int my_pe {rocshmem_my_pe()};
+  s_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size);
   for(int wg = 0; wg < args.num_wgs; wg++) for(int th = 0; th < args.wg_size; th++) {
     s_buf[wg * args.wg_size + th] = (((uint64_t)my_pe)<<44) + (wg<<12) + th; // set value for verification
   }
-  r_buf = (uint64_t*)shmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
+  r_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
 }
 
 FloodTester::~FloodTester() {
-  shmem_free(s_buf);
-  shmem_free(r_buf);
+  rocshmem_free(s_buf);
+  rocshmem_free(r_buf);
 }
 
 void FloodTester::resetBuffers(size_t size) {
-  int num_pes {shmem_n_pes()};
+  int num_pes {rocshmem_n_pes()};
   memset(r_buf, 0, sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
 }
 
 void FloodTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                 size_t size) {
   size_t shared_bytes = 0;
-  int num_pes {shmem_n_pes()};
+  int num_pes {rocshmem_n_pes()};
 
   hipLaunchKernelGGL(FloodTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, r_buf, s_buf,
@@ -181,8 +182,8 @@ void FloodTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 }
 
 void FloodTester::verifyResults(size_t size) {
-  int num_pes {shmem_n_pes()};
-  int my_pe {shmem_my_pe()};
+  int num_pes {rocshmem_n_pes()};
+  int my_pe {rocshmem_my_pe()};
 
   if (num_pes > 1<<20 || args.num_wgs > 1<<31 || args.wg_size > 1<<12) {
     // can't check

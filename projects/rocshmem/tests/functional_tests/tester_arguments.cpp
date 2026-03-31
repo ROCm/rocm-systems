@@ -23,14 +23,13 @@
  *****************************************************************************/
 
 #include "tester_arguments.hpp"
-#include "shmem_api_adapter.hpp"
 
 #include <cstdlib>
 #include <iostream>
 
 #include "tester.hpp"
 
-using namespace shmem_adapter;
+using namespace rocshmem;
 
 TesterArguments::TesterArguments(int argc, char *argv[]) {
   if (argc > 0 && argv[0] != nullptr) {
@@ -196,8 +195,8 @@ void TesterArguments::show_usage(std::string executable_name) {
 }
 
 void TesterArguments::get_arguments() {
-  numprocs = shmem_n_pes();
-  myid = shmem_my_pe();
+  numprocs = rocshmem_n_pes();
+  myid = rocshmem_my_pe();
 
   TestType type = (TestType)algorithm;
   // Check if test requires exactly 2 PEs

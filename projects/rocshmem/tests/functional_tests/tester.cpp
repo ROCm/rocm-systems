@@ -23,7 +23,6 @@
  *****************************************************************************/
 
 #include "tester.hpp"
-#include "shmem_api_adapter.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -32,45 +31,55 @@
 #include <iostream>
 #include <vector>
 
-//#include "amo_bitwise_tester.hpp"
-//#include "amo_extended_tester.hpp"
+#if !defined(TEST_WITH_MORI)
+#include "amo_bitwise_tester.hpp"
+#include "amo_extended_tester.hpp"
+#endif //!defined(TEST_WITH_MORI)
 #include "amo_standard_tester.hpp"
-//#include "default_ctx_primitive_tester.hpp"
-//#include "barrier_all_tester.hpp"
-//#include "barrier_all_on_stream_tester.hpp"
+#if !defined(TEST_WITH_MORI)
+#include "default_ctx_primitive_tester.hpp"
+#include "barrier_all_tester.hpp"
+#include "barrier_all_on_stream_tester.hpp"
+#endif //!defined(TEST_WITH_MORI)
 #include "empty_tester.hpp"
-//#include "getmem_on_stream_tester.hpp"
-//#include "putmem_on_stream_tester.hpp"
-//#include "putmem_signal_on_stream_tester.hpp"
-//#include "signal_wait_until_on_stream_tester.hpp"
-//#include "ping_all_tester.hpp"
+#if !defined(TEST_WITH_MORI)
+#include "getmem_on_stream_tester.hpp"
+#include "putmem_on_stream_tester.hpp"
+#include "putmem_signal_on_stream_tester.hpp"
+#include "signal_wait_until_on_stream_tester.hpp"
+#include "ping_all_tester.hpp"
+#endif //!defined(TEST_WITH_MORI)
 #include "ping_pong_tester.hpp"
 #include "primitive_mr_tester.hpp"
 #include "primitive_tester.hpp"
-//#include "random_access_tester.hpp"
-//#include "shmem_ptr_tester.hpp"
-//#include "signaling_operations_tester.hpp"
-//#include "sync_all_tester.hpp"
-//#include "team_sync_tester.hpp"
-//#include "team_alltoall_tester.hpp"
-//#include "team_alltoallv_tester.hpp"
-//#include "team_alltoallmem_on_stream_tester.hpp"
-//#include "team_broadcastmem_on_stream_tester.hpp"
-//#include "team_barrier_tester.hpp"
-//#include "team_broadcast_tester.hpp"
-//#include "team_ctx_infra_tester.hpp"
-//#include "team_ctx_primitive_tester.hpp"
-//#include "team_fcollect_tester.hpp"
-//#include "team_reduction_tester.hpp"
+#if !defined(TEST_WITH_MORI)
+#include "random_access_tester.hpp"
+#include "shmem_ptr_tester.hpp"
+#include "signaling_operations_tester.hpp"
+#include "sync_all_tester.hpp"
+#include "team_sync_tester.hpp"
+#include "team_alltoall_tester.hpp"
+#include "team_alltoallv_tester.hpp"
+#include "team_alltoallmem_on_stream_tester.hpp"
+#include "team_broadcastmem_on_stream_tester.hpp"
+#include "team_barrier_tester.hpp"
+#include "team_broadcast_tester.hpp"
+#include "team_ctx_infra_tester.hpp"
+#include "team_ctx_primitive_tester.hpp"
+#include "team_fcollect_tester.hpp"
+#include "team_reduction_tester.hpp"
+#endif //!defined(TEST_WITH_MORI)
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
-//#include "flood_amo_tester.hpp"
-//#include "hipmodule_init_tester.hpp"
-//#include "device_bitcode_tester.hpp"
+#if !defined(TEST_WITH_MORI)
+#include "flood_amo_tester.hpp"
+#include "hipmodule_init_tester.hpp"
+#include "device_bitcode_tester.hpp"
 
-//#include "backend_bc.hpp"
-//extern Backend* backend;
+#include "backend_bc.hpp"
+extern Backend* backend;
+#endif //!defined(TEST_WITH_MORI)
 
 Tester::Tester(TesterArguments args) : args(args) {
   _type = (TestType)args.algorithm;
@@ -852,7 +861,7 @@ void flush_hdp() {
 }
 
 void Tester::barrier() {
-  shmem_adapter::shmem_barrier_all();
+  rocshmem::rocshmem_barrier_all();
   flush_hdp();
 }
 

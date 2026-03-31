@@ -30,75 +30,55 @@ cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_functional_tests VERSION 1.0.0 LANGUAGES CXX)
 
-###############################################################################
-# SOURCES
-###############################################################################
-add_executable(${PROJECT_NAME} "")
+option(TEST_WITH_ROCSHMEM "Test the rocSHMEM SHMEM library" ON)
+option(TEST_WITH_MORI "Test the Mori SHMEM library" OFF)
 
-target_include_directories(
-  ${PROJECT_NAME}
+include_directories(
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-###############################################################################
-# MORI BACKEND OPTION
-###############################################################################
-option(USE_MORI_BACKEND "Use Mori SHMEM backend instead of rocSHMEM" OFF)
-
-if(USE_MORI_BACKEND)
-  message(STATUS "Building functional tests with Mori SHMEM backend")
-
-  # Set the path to Mori include directory
-  set(MORI_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../../../mori/include" CACHE PATH "Path to Mori include directory")
-
-  if(NOT EXISTS "${MORI_INCLUDE_DIR}")
-    message(FATAL_ERROR "Mori include directory not found: ${MORI_INCLUDE_DIR}")
+if (BUILD_TESTS_ONLY)
+  #TODO these find_packages should be performed as-needed in rocshmem-config.cmake
+  find_package(hip REQUIRED PATHS /opt/rocm)
+  find_package(MPI)
+  find_package(Threads REQUIRED)
+  if(TEST_WITH_ROCSHMEM)
+    find_package(rocshmem REQUIRED PATHS /opt/rocm)
   endif()
 
-  target_include_directories(
-    ${PROJECT_NAME}
+  include_directories(
     PRIVATE
-      ${MORI_INCLUDE_DIR}
+      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../src>
   )
+endif()
 
-  target_compile_definitions(
-    ${PROJECT_NAME}
-    PRIVATE
-      USE_MORI_BACKEND
-  )
-target_sources(
+find_package(PMIx)
+
+###############################################################################
+# ROCSHMEM
+###############################################################################
+if(TEST_WITH_ROCSHMEM)
+add_executable(${PROJECT_NAME} "")
+
+target_compile_definitions(
   ${PROJECT_NAME}
   PRIVATE
-#    barrier_all_tester.cpp
-#    sync_all_tester.cpp
-    test_driver.cpp
-    tester.cpp
-    tester_arguments.cpp
-    ping_pong_tester.cpp
-#    ping_all_tester.cpp
-    primitive_tester.cpp
-#    primitive_mr_tester.cpp
-#    default_ctx_primitive_tester.cpp
-#    team_ctx_primitive_tester.cpp
-#    team_ctx_infra_tester.cpp
-#    amo_bitwise_tester.cpp
-#    amo_extended_tester.cpp
-    amo_standard_tester.cpp
-#    random_access_tester.cpp
-#    shmem_ptr_tester.cpp
-#    signaling_operations_tester.cpp
-#    signaling_operations_tester.hpp
-    workgroup_primitives.cpp
-#    empty_tester.cpp
-    wavefront_primitives.cpp
-    flood_tester.cpp
-#    flood_amo_tester.cpp
-#    device_bitcode_tester.cpp
+    $<$<TARGET_EXISTS:PMIx::pmix>:HAVE_PMIX=1>
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
 )
 
+target_link_libraries(
+  ${PROJECT_NAME}
+  PRIVATE
+    roc::rocshmem
+    $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
+    $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
+    hiprtc
+)
 
-else()
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
@@ -128,50 +108,91 @@ target_sources(
     flood_amo_tester.cpp
     device_bitcode_tester.cpp
 )
-endif()
 
 ###############################################################################
-# ROCSHMEM
+# DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
 ###############################################################################
-if (BUILD_TESTS_ONLY)
-  #TODO these find_packages should be performed as-needed in rocshmem-config.cmake
-  find_package(hip REQUIRED PATHS /opt/rocm)
-  find_package(MPI)
-  find_package(Threads REQUIRED)
-  find_package(rocshmem REQUIRED PATHS /opt/rocm)
+include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeDeviceBitcodeTester.cmake)
 
-  target_include_directories(
-    ${PROJECT_NAME}
-    PRIVATE
-      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../src>
-  )
-endif()
-
-find_package(PMIx)
-
-target_compile_definitions(
-  ${PROJECT_NAME}
-  PRIVATE
-    $<$<TARGET_EXISTS:PMIx::pmix>:HAVE_PMIX=1>
-    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-    CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
-)
-
+###############################################################################
+# CI scripts
+###############################################################################
 configure_file(../../scripts/functional_tests/driver.sh rocshmem_functional_driver.sh COPYONLY)
 rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_functional_driver.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 rocm_install(TARGETS rocshmem_functional_tests COMPONENT tests)
+endif(TEST_WITH_ROCSHMEM)
+
+
+###############################################################################
+# MORI
+###############################################################################
+if(TEST_WITH_MORI)
+message(STATUS "Building functional tests with Mori SHMEM library")
+find_package(mori REQUIRED PATHS /opt/rocm)
+
+
+add_executable(${PROJECT_NAME}_mori "")
+
+target_compile_definitions(
+  ${PROJECT_NAME}_mori
+  PRIVATE
+    $<$<TARGET_EXISTS:PMIx::pmix>:HAVE_PMIX=1>
+)
+
+target_compile_definitions(
+  ${PROJECT_NAME}_mori
+  PRIVATE
+    TEST_WITH_MORI
+)
 
 target_link_libraries(
-  ${PROJECT_NAME}
+  ${PROJECT_NAME}_mori
   PRIVATE
-  #    $<TARGET_NAME_IF_EXISTS:roc::rocshmem>
+    mori::shmem
     $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
     $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
     hiprtc
 )
 
-###############################################################################
-# DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
-###############################################################################
-#include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeDeviceBitcodeTester.cmake)
+# Set the path to Mori include directory    TODO: remove
+set(MORI_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../../../mori/include" CACHE PATH "Path to Mori include directory")
+if(NOT EXISTS "${MORI_INCLUDE_DIR}")
+  message(FATAL_ERROR "Mori include directory not found: ${MORI_INCLUDE_DIR}")
+endif()
+target_include_directories(
+  ${PROJECT_NAME}_mori
+  PRIVATE
+    ${MORI_INCLUDE_DIR}
+)
+
+target_sources(
+  ${PROJECT_NAME}_mori
+  PRIVATE
+#    barrier_all_tester.cpp
+#    sync_all_tester.cpp
+    test_driver.cpp
+    tester.cpp
+    tester_arguments.cpp
+    ping_pong_tester.cpp
+#    ping_all_tester.cpp
+    primitive_tester.cpp
+    primitive_mr_tester.cpp
+    default_ctx_primitive_tester.cpp
+#    team_ctx_primitive_tester.cpp
+#    team_ctx_infra_tester.cpp
+#    amo_bitwise_tester.cpp
+#    amo_extended_tester.cpp
+    amo_standard_tester.cpp
+#    random_access_tester.cpp
+#    shmem_ptr_tester.cpp
+#    signaling_operations_tester.cpp
+#    signaling_operations_tester.hpp
+    workgroup_primitives.cpp
+    empty_tester.cpp
+    wavefront_primitives.cpp
+    flood_tester.cpp
+#    flood_amo_tester.cpp
+#    device_bitcode_tester.cpp
+)
+endif(TEST_WITH_MORI)
+

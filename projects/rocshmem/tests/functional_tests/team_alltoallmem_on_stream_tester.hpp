@@ -64,7 +64,7 @@ class TeamAlltoallmemOnStreamTester : public Tester {
   std::vector<hipEvent_t> stop_events_timed;
 };
 
-//#include "team_alltoallmem_on_stream_tester.cpp"
+#include "team_alltoallmem_on_stream_tester.cpp"
 
 #endif
 

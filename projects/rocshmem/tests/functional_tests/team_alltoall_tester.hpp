@@ -68,6 +68,6 @@ class TeamAlltoallTester : public Tester {
   rocshmem_team_t *team_alltoall_world_dup;
 };
 
-//#include "team_alltoall_tester.cpp"
+#include "team_alltoall_tester.cpp"
 
 #endif

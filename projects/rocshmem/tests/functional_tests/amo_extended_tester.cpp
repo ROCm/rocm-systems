@@ -25,7 +25,7 @@
 #include "amo_extended_tester.hpp"
 
 #include <iostream>
-#include <rocshmem/rocshmem.hpp>
+#include "rocshmem_api_adapter.hpp"
 
 using namespace rocshmem;
 

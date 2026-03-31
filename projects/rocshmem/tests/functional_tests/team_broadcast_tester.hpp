@@ -67,6 +67,6 @@ class TeamBroadcastTester : public Tester {
   rocshmem_team_t *team_bcast_world_dup;
 };
 
-//#include "team_broadcast_tester.cpp"
+#include "team_broadcast_tester.cpp"
 
 #endif

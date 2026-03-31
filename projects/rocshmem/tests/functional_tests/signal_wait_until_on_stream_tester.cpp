@@ -22,7 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include <rocshmem/rocshmem.hpp>
+#include "rocshmem_api_adapter.hpp"
 #include <hip/hip_runtime.h>
 
 #include <cstring>

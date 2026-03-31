@@ -23,7 +23,7 @@
  *****************************************************************************/
 
 #include "device_bitcode_tester.hpp"
-#include <rocshmem/rocshmem.hpp>
+#include "rocshmem_api_adapter.hpp"
 #include <cinttypes>
 #include <cstdio>
 #include <fstream>
