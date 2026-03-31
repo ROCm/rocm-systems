@@ -23,6 +23,7 @@ import argparse
 import functools
 import json
 import logging
+import math
 import multiprocessing
 import os
 import signal
@@ -8314,12 +8315,37 @@ class AMDSMICommands:
                 input_value, is_percentage = args.fan
 
                 # Check if gpu_od interface is available
+                # Get the correct DRM device path using BDF
+                has_gpu_od = False
+                gpu_od_path = None
                 try:
-                    gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
-                    gpu_od_path = f"/sys/class/drm/renderD{128 + gpu_id}/device/gpu_od/"
-                    has_gpu_od = os.path.exists(gpu_od_path)
-                except Exception:
+                    bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
+                    # BDF format is "XXXX:XX:XX.X", matches PCI device path
+                    drm_base = "/sys/class/drm"
+                    # Find card* that matches this BDF
+                    for card_dir in sorted(os.listdir(drm_base)):
+                        if not card_dir.startswith("card"):
+                            continue
+                        device_link = os.path.join(drm_base, card_dir, "device")
+                        try:
+                            device_path = os.readlink(device_link)
+                            # device_path is like "../../../0000:44:00.0"
+                            if bdf in device_path:
+                                gpu_od_path = os.path.join(drm_base, card_dir, "device", "gpu_od")
+                                has_gpu_od = os.path.isdir(gpu_od_path)
+                                break
+                        except (OSError, IOError):
+                            continue
+                except (amdsmi_exception.AmdSmiLibraryException, OSError, IOError) as e:
+                    # If we can't determine the interface, fall back to legacy
                     has_gpu_od = False
+
+                # Helper function for consistent error formatting
+                def format_fan_error(message, include_driver_note=False):
+                    error_msg = message
+                    if include_driver_note:
+                        error_msg += "\nNote: For Navi3x/4x GPUs, load the amdgpu driver with: sudo modprobe amdgpu ppfeaturemask=0xfff7ffff"
+                    return error_msg
 
                 # Convert based on interface type and input format
                 if has_gpu_od:
@@ -8334,7 +8360,10 @@ class AMDSMICommands:
                             hw_value = input_value
                             fan_percentage = int(((input_value - 23) / 77) * 100)
                         else:
-                            result = f"Invalid fan speed value {input_value} for gpu_od interface. Valid range: 23-100 or use percentage (0-100%)"
+                            result = format_fan_error(
+                                f"Invalid fan speed value {input_value} for gpu_od interface. Valid range: 23-100 or use percentage (0-100%)",
+                                include_driver_note=True
+                            )
                             self.logger.store_output(args.gpu, 'fan', result)
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_output()
@@ -8343,9 +8372,7 @@ class AMDSMICommands:
                     # For legacy hwmon: range 0-255
                     if is_percentage:
                         # Convert percentage (0-100%) to PWM (0-255) using ceiling rounding
-                        converted = (input_value / 100) * 255
-                        # Custom ceiling: if already int, use it; else round up for positive
-                        hw_value = int(converted) if converted == int(converted) else int(converted) + 1
+                        hw_value = math.ceil((input_value / 100) * 255)
                         fan_percentage = input_value
                     else:
                         # Direct PWM value
@@ -8364,8 +8391,10 @@ class AMDSMICommands:
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
-                    result = f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM ({fan_percentage}%)"
-                    result += "\nNote: For Navi3x GPUs, you need to load the amdgpu driver with \"sudo modprobe amdgpu ppfeaturemask=0xfff7ffff\""
+                    result = format_fan_error(
+                        f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM ({fan_percentage}%)",
+                        include_driver_note=has_gpu_od
+                    )
                     self.logger.store_output(args.gpu, "fan", result)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()

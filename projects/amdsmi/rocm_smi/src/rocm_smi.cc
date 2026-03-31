@@ -3535,6 +3535,14 @@ rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
     // Use gpu_od interface for fan reset - write 'r' to reset to automatic control
     int write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, "r");
     if (write_ret != 0) {
+      // Map errno to appropriate RSMI status
+      if (write_ret == EACCES || write_ret == EPERM) {
+        return RSMI_STATUS_PERMISSION;
+      } else if (write_ret == ENOENT) {
+        return RSMI_STATUS_NOT_SUPPORTED;
+      } else if (write_ret == EINVAL) {
+        return RSMI_STATUS_INVALID_ARGS;
+      }
       return RSMI_STATUS_FILE_ERROR;
     }
     return RSMI_STATUS_SUCCESS;
@@ -3579,12 +3587,32 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
     std::string speed_str = std::to_string(speed);
     int write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, speed_str);
     if (write_ret != 0) {
+      // Map errno to appropriate RSMI status
+      if (write_ret == EACCES || write_ret == EPERM) {
+        return RSMI_STATUS_PERMISSION;
+      } else if (write_ret == ENOENT) {
+        return RSMI_STATUS_NOT_SUPPORTED;
+      } else if (write_ret == EINVAL) {
+        return RSMI_STATUS_INVALID_ARGS;
+      }
       return RSMI_STATUS_FILE_ERROR;
     }
 
     // Step 2: Commit the change by writing 'c'
     write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, "c");
     if (write_ret != 0) {
+      // If commit fails, attempt to reset to automatic control to avoid
+      // leaving the interface in an inconsistent state
+      amd::smi::WriteSysfsStr(fan_ctrl_path, "r");
+
+      // Map errno to appropriate RSMI status
+      if (write_ret == EACCES || write_ret == EPERM) {
+        return RSMI_STATUS_PERMISSION;
+      } else if (write_ret == ENOENT) {
+        return RSMI_STATUS_NOT_SUPPORTED;
+      } else if (write_ret == EINVAL) {
+        return RSMI_STATUS_INVALID_ARGS;
+      }
       return RSMI_STATUS_FILE_ERROR;
     }
 

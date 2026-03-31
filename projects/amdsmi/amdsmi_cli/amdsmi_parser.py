@@ -1138,7 +1138,16 @@ class AMDSMIParser(argparse.ArgumentParser):
             return int(x)
 
     def _validate_fan_speed(self):
-        """Validate fan speed input"""
+        """Validate fan speed input
+
+        Accepts:
+        - Percentage: 0-100% (converted at command layer based on GPU interface)
+        - Direct value: 0-255 (legacy hwmon) or 23-100 (gpu_od interface)
+
+        Note: For direct values, we accept 0-255 here for backward compatibility.
+        The command layer will validate against the correct range (23-100 for gpu_od,
+        0-255 for legacy) after detecting the GPU interface type.
+        """
         amdsmi_helpers = self.helpers
 
         class _ValidateFanSpeed(argparse.Action):
@@ -1169,6 +1178,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                         if 0 <= values <= 255:
                             amdsmi_helpers.confirm_out_of_spec_warning()
                             # Store as tuple: (direct_value, is_percentage=False)
+                            # Note: Accepts 0-255 for legacy compatibility.
+                            # Command layer validates against interface-specific range.
                             setattr(args, self.dest, (values, False))
                         else:
                             raise argparse.ArgumentError(
