@@ -1109,6 +1109,7 @@ def show_all(
                 print(panel_content, file=output)
 
 
+
 def show_roof_plot(roof_plot: str) -> None:
     # TODO: short term solution to display roofline plot
     print("4.3 Roofline Plot:")

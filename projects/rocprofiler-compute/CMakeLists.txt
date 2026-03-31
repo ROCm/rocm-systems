@@ -82,74 +82,21 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 message(STATUS "Installation path: ${CMAKE_INSTALL_PREFIX}")
 
-option(CHECK_PYTHON_DEPS "Verify necessary python dependencies" ON)
+# Profile mode requires only Python 3.8+ standard library (no external dependencies)
+# Analyze mode dependencies are checked at runtime via verify_deps()
+# Standalone binary handles its own dependencies via bundled venv
+
 option(STANDALONEBINARY "Whether to build standalone binary" OFF)
-if(CHECK_PYTHON_DEPS AND NOT STANDALONEBINARY)
-    # Python 3 is required
+
+# Only find Python interpreter - no dependency checking
+if(NOT STANDALONEBINARY)
     message(STATUS "Detecting Python interpreter...")
-    find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
-
-    # Allow user-provided python search path
-    if(DEFINED PYTHON_DEPS)
-        set(ENV{PYTHONPATH} "${PYTHON_DEPS}")
-        message(STATUS "Optional PYTHON_DEPS provided:")
-        list(APPEND CMAKE_MESSAGE_INDENT "  ")
-        message(STATUS "including ${PYTHON_DEPS} in search path")
-        list(POP_BACK CMAKE_MESSAGE_INDENT)
-    endif()
-
-    # Check required Python packages
-    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/requirements.txt" pythonDeps)
-
-    message(STATUS "Checking for required Python package dependencies...")
-    set_property(GLOBAL PROPERTY pythonDepsFlag "groovy")
-
-    function(checkPythonPackage [package])
-        # mapping for non-default package names
-        set(PACKAGE ${ARGV0})
-        if(${ARGV0} STREQUAL "pyyaml")
-            set(PACKAGE "yaml")
-        endif()
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} -c "import ${PACKAGE}"
-            OUTPUT_QUIET
-            ERROR_QUIET
-            RESULT_VARIABLE EXIT_CODE
-        )
-        if(${EXIT_CODE} EQUAL 0)
-            message(STATUS "${ARGV0} = yes")
-        else()
-            message(STATUS "${ARGV0} = missing")
-            set_property(GLOBAL PROPERTY pythonDepsFlag "missing")
-        endif()
-    endfunction()
-
-    list(APPEND CMAKE_MESSAGE_INDENT "  ")
-    foreach(package IN LISTS pythonDeps)
-        # Filter out any version requirements from requirements.txt
-        string(REGEX REPLACE "[><=].*" "" package "${package}")
-        string(REPLACE "-" "_" package "${package}")
-        checkpythonpackage(${package})
-    endforeach()
-    list(POP_BACK CMAKE_MESSAGE_INDENT)
-
-    get_property(pythonDepsInstalled GLOBAL PROPERTY pythonDepsFlag)
-    if(${pythonDepsInstalled} STREQUAL "groovy")
-        message(STATUS "OK: Python dependencies available in current environment.")
-    else()
-        message(
-            FATAL_ERROR
-            "\nNecessary Python package dependencies not found. Please install required dependencies "
-            "above using your favorite package manager. If using pip, consider running:\n"
-            "python3 -m pip install -r requirements.txt\n"
-            "at the top-level of this repository. If preparing a shared installation for "
-            "multiple users, consider adding the -t <target-dir> option to install necessary dependencies "
-            "into a shared directory, e.g.\n"
-            "python3 -m pip install -t <shared-install-path> -r requirements.txt\n"
-            "Note that the -DPYTHON_DEPS=<shared-install-path> can be used to provide an "
-            "additional search path to cmake for python packages."
-        )
-    endif()
+    find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+    message(STATUS "Python ${Python3_VERSION} found")
+    message(
+        STATUS
+        "Note: Profile mode uses stdlib only. Analyze mode deps checked at runtime."
+    )
 endif()
 
 # ----------------------
@@ -302,6 +249,20 @@ option(
     "Skip building native counter collection tool library (for runtime compilation)"
     OFF
 )
+
+# ---------------------------
+# Profile mode import guard
+# ---------------------------
+
+# Import guard only works when calling main() directly (not in binary subprocess mode)
+if(NOT STANDALONEBINARY)
+    add_test(
+        NAME test_import_guard
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_import_guard.xml
+            ${COV_OPTION} tests/test_import_guard.py ${WORKING_DIR_OPTION}
+    )
+endif()
 
 # ---------------------------
 # profile mode tests

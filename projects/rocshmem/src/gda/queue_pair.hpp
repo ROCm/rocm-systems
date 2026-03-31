@@ -181,8 +181,8 @@ class QueuePair {
 #if defined(GDA_MLX5)
   __device__ uint64_t mlx5_post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
   __device__ uint64_t mlx5_post_wqe_amo_single(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
-  __device__ void mlx5_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
-  __device__ void mlx5_post_wqe_rma_single(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
+  __device__ void mlx5_post_wqe_rma(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
+  __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void mlx5_quiet();
   __device__ void mlx5_quiet_single();
 #endif
@@ -194,7 +194,7 @@ class QueuePair {
   __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
   __device__ uint64_t bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
 
-  __device__ void bnxt_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
+  __device__ void bnxt_post_wqe_rma(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
 
   __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void bnxt_quiet();
@@ -203,8 +203,8 @@ class QueuePair {
 #if defined(GDA_IONIC)
   __device__ uint64_t ionic_post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
   __device__ uint64_t ionic_post_wqe_amo_single(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
-  __device__ void ionic_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-  __device__ void ionic_post_wqe_rma_single(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
+  __device__ void ionic_post_wqe_rma(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
+  __device__ void ionic_post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
   __device__ void ionic_quiet();
   __device__ void ionic_quiet_single();
 #endif

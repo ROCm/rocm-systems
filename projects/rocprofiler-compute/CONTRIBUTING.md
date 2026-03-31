@@ -205,3 +205,84 @@ For detailed vendoring workflow (adding/updating packages), see [`src/vendored/R
 This project uses AI coding assistants (Claude Code, Cursor, GitHub Copilot). All AI-specific guidelines live in [`AGENTS.md`](AGENTS.md), which serves as the single source of truth. Tool-specific adapter files (e.g., `CLAUDE.md`, `.github/copilot-instructions.md`) reference `AGENTS.md` without duplicating content.
 
 To add or update AI guidelines, edit the appropriate file under `.ai/` and add a reference in `AGENTS.md`.
+## Profile Mode Dependency Policy
+
+Profile mode code should not use non-standard Python libraries.
+
+### Why This Matters
+
+Profile mode uses only stdlib to:
+1. **Avoid dependency conflicts** - Users can profile without creating virtual environments or worrying about package version conflicts with their own projects
+2. **Work everywhere** - No `pip install` needed:
+   - HPC systems with locked-down Python environments
+   - Security-sensitive systems requiring minimal dependencies
+   - Any system with Python 3.8+ installed
+
+### Enforcement
+
+**Python Version Requirement:**
+- Import enforcement requires Python 3.10+ (uses `sys.stdlib_module_names`)
+- Python 3.8-3.9: Tests run but import enforcement is disabled (warning issued)
+- CI uses Python 3.10+ to ensure full enforcement coverage
+
+Enforcement is automatically done for tests which execute profile pipeline using main
+function instead of subprocess (unlike tests using --call-binary and multi mpi rank tests).
+These tests are automatically protected by guards in `tests/conftest.py` when testing with Python 3.10 and above.
+The guard intercepts ALL imports (direct, nested, dynamic) and fails tests immediately if
+non-stdlib packages are imported.
+
+### What's Allowed
+
+**Python standard library** (Python 3.8+):
+- `json`, `csv`, `sqlite3`, `subprocess`, `pathlib`, `logging`, `sys`, `os`, etc.
+
+**Project modules**:
+- `rocprof_compute`, `utils`, `vendored.*`, `roofline`, `config`, `argparser`
+
+**ROCm system libraries** (bundled with ROCm, not pip packages):
+- `amdsmi` - AMD System Management Interface
+- `hip` - HIP runtime Python bindings
+- `rocprofv3` - rocprofv3 Python bindings
+
+### What's NOT Allowed
+
+These are forbidden in profile mode
+
+**External packages**:
+- `pandas`, `yaml`, `numpy`, `plotly`, `dash`, `textual`, etc.
+- Anything from `requirements.txt`
+
+### Common Mistakes
+
+**Don't do this in profile code:**
+```python
+import pandas  # External package
+import yaml    # Use json or vendored.pyyaml instead
+import numpy   # Use stdlib math/statistics
+```
+
+**Do this instead:**
+```python
+import json              # Stdlib for config/data
+import csv               # Stdlib for CSV operations
+import sqlite3           # Stdlib for data manipulation
+from vendored.pyyaml import yaml  # Vendored package (if needed)
+```
+
+### If Your Test Fails
+
+**Error message:**
+```
+PROFILE MODE DEPENDENCY VIOLATION
+Forbidden package: pandas
+```
+
+**How to fix:**
+
+1. **Move import to analyze mode**
+   - Move the import and relevant code to analysis mode
+
+2. **Use stdlib alternative**
+   - `pandas` → `csv` module + `sqlite3` for dataframes
+   - `yaml` → `json` module (or `vendored.pyyaml` if YAML required)
+   - `numpy` → `math`/`statistics` modules

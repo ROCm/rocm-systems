@@ -139,31 +139,26 @@ void TestFrequenciesRead::Run(void) {
       freq_output(AMDSMI_CLK_TYPE_DCEF, "Display Controller Engine Clock");
       freq_output(AMDSMI_CLK_TYPE_SOC, "SOC Clock");
 
+      // Verify api support checking functionality is working
+      err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
+      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
       err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], &b);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine" << std::endl;
-        // Verify api support checking functionality is working
-        err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
-        ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+        ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine" << std::endl;
+        }
       } else if (err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
-        std::cout << "\t**Get PCIE Bandwidth "
-                  << ": Not implemented on this machine" << std::endl;
+        ASSERT_EQ(err, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Get PCIE Bandwidth: Not implemented on this machine" << std::endl;
+        }
       } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Supported PCIe bandwidths: ";
           std::cout << b.transfer_rate.num_supported << std::endl;
           print_frequencies(&b.transfer_rate, b.lanes);
-          // Verify api support checking functionality is working
-          // NOTE:  We expect AMDSMI_STATUS_NOT_SUPPORTED, if rsmi_pcie_bandwidth_t* is NULL
-          err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
-          if (err != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
-            ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-          } else {
-            auto status_string("");
-            amdsmi_status_code_to_string(err, &status_string);
-            std::cout << "\t\t** amdsmi_get_gpu_pci_bandwidth(): " << status_string << "\n";
-          }
         }
       }
     }

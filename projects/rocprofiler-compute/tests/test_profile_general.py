@@ -459,7 +459,7 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
 
     # Check if all test dataframes have the same group keys as the baseline
     if not all(baseline_group_keys == keys for keys in tests_group_keys):
-        return False
+        return False, "Group keys do not match between baseline and test dataframes"
 
     # series prior to MI350 use CSN, MI350 uses CS{0,1,2,3}
     deterministic_counter_patterns = list(
@@ -502,9 +502,12 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
             ):
                 continue
 
-            return False
+            return (
+                False,
+                f"{counter_name} is not equal between baseline and test dataframes",
+            )
 
-    return True
+    return True, "All deterministic counters are equal"
 
 
 # --
@@ -2489,6 +2492,9 @@ def test_iteration_multiplexing_kernel_launch_params(
 
 
 @pytest.mark.iteration_multiplexing_2
+@pytest.mark.xfail(
+    reason="Multiple profiling workloads mapped to the same GPU corrupts the counters"
+)
 def test_iteration_multiplexing_deterministic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,

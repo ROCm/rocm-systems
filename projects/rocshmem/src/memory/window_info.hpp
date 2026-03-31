@@ -54,7 +54,7 @@ class WindowInfo {
   /**
    * @brief Destructor
    */
-  ~WindowInfo() = default;
+  virtual ~WindowInfo() = default;
 
   /**
    * @brief Copy constructor

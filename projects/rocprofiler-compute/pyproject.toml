@@ -66,6 +66,7 @@ docstring-code-line-length = "dynamic"
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+    "-rx",
 ]
 
 pythonpath = [
