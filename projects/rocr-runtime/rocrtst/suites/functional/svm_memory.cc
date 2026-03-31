@@ -626,7 +626,8 @@ void SvmMemoryTestBasic::TestSVMBatchDiscard(hsa_agent_t agent, hsa_amd_memory_p
     ASSERT_SUCCESS(hsa_amd_svm_attributes_set(ptrs[i], sizes[i], dev_attrs.data(), dev_attrs.size()));
   }
 
-  // Launch a kernel to write to the 4 regions in device memory
+  /* Launch a kernel to write to the 4 svm memory regions which 
+  would trigger migration from host memory to device memory */
   hsa_queue_t* queue = nullptr;  // command queue
   uint32_t queue_size = 0;
 
@@ -738,6 +739,17 @@ void SvmMemoryTestBasic::TestSVMBatchDiscard(hsa_agent_t agent, hsa_amd_memory_p
   
   // Discard all of the above 4 regions
   ASSERT_SUCCESS(hsa_amd_svm_discard_batch_async(ptrs.data(), sizes.data(), ptrs.size(), kNumDepSignals, dep_signals, completion));
+
+  /* Confirm that memory is still on GPU until discard completes, which is 
+  supposed to only execute once all dependency signals are 0. */
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  for (int i = 0; i < kNumRegions; ++i) {    
+    hsa_amd_svm_attribute_pair_t attr;
+    attr.attribute = HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION;
+    attr.value = 0;
+    ASSERT_SUCCESS(hsa_amd_svm_attributes_get(regions[i].ptr, kRegionSize, &attr, 1));
+    ASSERT_EQ(attr.value, agent.handle);
+  }
 
   // Resolve all dependency signals with 1ms delay
   for (int i = 0; i < kNumDepSignals; i++) {
