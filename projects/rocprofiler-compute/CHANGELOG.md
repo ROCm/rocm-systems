@@ -21,6 +21,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Profile mode now creates separate counter collection files for each application replay (pmc_perf_*.csv or results_*.csv).
   * Analyze mode automatically merges these files into a unified pmc_perf.csv containing information from all application replays during pre-processing.
 
+* ROCm Compute Profiler now builds and runs profile mode with vanilla python without requiring to pip install any python dependencies
+  * Note that analysis mode will still require and complain about missing python dependencies
+
 ### Removed
 
 * Removed HIP API tracing since it's out-of-scope for ROCm Compute Profiler and the trace files were not being analyzed.
