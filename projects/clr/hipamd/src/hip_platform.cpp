@@ -972,7 +972,9 @@ hipError_t PlatformState::GetDynTexRef(const char* hostVar, hipModule_t hmod,
   }
 
   hip::Var* var = it->second->getVar(hostVar);
-  var->shadowVptr = new texture<char>();
+  if (var->shadowVptr == nullptr) {
+    var->shadowVptr = new texture<char>();
+  }
   *texRef = reinterpret_cast<textureReference*>(var->shadowVptr);
   return hipSuccess;
 }
