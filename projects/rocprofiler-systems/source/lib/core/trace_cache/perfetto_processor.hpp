@@ -62,10 +62,10 @@ public:
     void handle(const region_sample& sample);
     void handle(const in_time_sample& sample);
     void handle(const pmc_event_with_sample& sample);
-    void handle(const amd_smi_sample& sample);
+    void handle(const gpu_pmc_sample& sample);
+    void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_freq_sample& sample);
     void handle(const backtrace_region_sample& sample);
-    void handle(const ainic_sample& sample);
 
 private:
     void       initialize_perfetto();

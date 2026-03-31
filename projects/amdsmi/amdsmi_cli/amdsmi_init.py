@@ -44,7 +44,7 @@ except ImportError as e:
 
 # Using basic python logging for user errors and development
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR)  # User level logging
-# This traceback limit only affects this file, once the code hit's the cli portion it get's reset to the user's preference
+# This traceback limit only affects this file, once the code hit's the cli portion it gets reset to the user's preference
 sys.tracebacklimit = -1  # Disable traceback when raising errors
 
 # On initial import set initialized variable
@@ -138,7 +138,7 @@ def amdsmi_cli_init():
             raise e
 
     logging.debug(
-        f"AMDSMI initialized with atleast one driver successfully | init flag: {init_flag}"
+        f"AMDSMI initialized with at least one driver successfully | init flag: {init_flag}"
     )
 
     return init_flag

@@ -59,6 +59,7 @@
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
+#include "suites/functional/time_stamp.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #if ENABLE_COPY_NUMA
@@ -324,6 +325,13 @@ TEST(rocrtstFunc, Memory_Available) {
     mt.MemAvailableTest();
     RunCustomTestEpilog(&mt);
   );
+}
+
+TEST(rocrtstFunc, Time_Stamp) {
+  TimeStamp ts;
+  RunCustomTestProlog(&ts);
+  ts.TimeStampTest();
+  RunCustomTestEpilog(&ts);
 }
 
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {

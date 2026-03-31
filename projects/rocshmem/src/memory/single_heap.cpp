@@ -87,7 +87,7 @@ void SingleHeap::malloc(void** ptr, size_t size) {
   strat_->alloc(reinterpret_cast<char**>(ptr), size);
 }
 
-__device__ void SingleHeap::malloc(void** ptr, size_t size) {}
+__device__ void SingleHeap::malloc([[maybe_unused]] void** ptr, [[maybe_unused]] size_t size) {}
 
 void SingleHeap::free(void* ptr) {
   if (!ptr) {
@@ -96,11 +96,11 @@ void SingleHeap::free(void* ptr) {
   strat_->free(reinterpret_cast<char*>(ptr));
 }
 
-__device__ void SingleHeap::free(void* ptr) {}
+__device__ void SingleHeap::free([[maybe_unused]] void* ptr) {}
 
-void* SingleHeap::realloc(void* ptr, size_t size) { return nullptr; }
+void* SingleHeap::realloc([[maybe_unused]] void* ptr, [[maybe_unused]] size_t size) { return nullptr; }
 
-void* SingleHeap::malign(size_t alignment, size_t size) { return nullptr; }
+void* SingleHeap::malign([[maybe_unused]] size_t alignment, [[maybe_unused]] size_t size) { return nullptr; }
 
 char* SingleHeap::get_base_ptr() { return heap_mem_->get_ptr(); }
 
