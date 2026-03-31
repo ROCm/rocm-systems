@@ -67,6 +67,7 @@ hipError_t hipInit(unsigned int flags) {
 
 hipError_t hipMalloc(void** ptr, size_t size) {
   LOAD_SYM(hipMalloc);
+  ensure_init();
   hipError_t ret = real_hipMalloc(ptr, size);
   if (ret == 0 && hrr_writer_enabled()) {
     hrr_record_malloc(*ptr, size, 0);
@@ -151,6 +152,29 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
       kernelParams, extra);
 }
 
+/* hipLaunchKernel is used by <<<>>> syntax via hipLaunchKernelGGL */
+typedef struct { unsigned int x, y, z; } dim3_t;
+
+static hipError_t (*real_hipLaunchKernel)(const void*, dim3_t, dim3_t,
+    void**, size_t, hipStream_t) = NULL;
+
+hipError_t hipLaunchKernel(const void* function_address,
+    dim3_t numBlocks, dim3_t dimBlocks,
+    void** args, size_t sharedMemBytes, hipStream_t stream) {
+  LOAD_SYM(hipLaunchKernel);
+  ensure_init();
+
+  if (hrr_writer_enabled()) {
+    hrr_record_kernel_launch(NULL, NULL, 0,
+                             numBlocks.x, numBlocks.y, numBlocks.z,
+                             dimBlocks.x, dimBlocks.y, dimBlocks.z,
+                             (uint32_t)sharedMemBytes, stream, args);
+  }
+
+  return real_hipLaunchKernel(function_address, numBlocks, dimBlocks,
+                              args, sharedMemBytes, stream);
+}
+
 hipError_t hipDeviceSynchronize(void) {
   LOAD_SYM(hipDeviceSynchronize);
   hipError_t ret = real_hipDeviceSynchronize();
@@ -172,8 +196,8 @@ hipError_t hipStreamSynchronize(hipStream_t stream) {
 /* Constructor/destructor for shared library lifecycle */
 __attribute__((constructor))
 static void hrr_lib_init(void) {
-  /* Delay actual init until hipInit is called, to avoid
-   * issues with library load ordering */
+  /* Initialize early so recording is active before any HIP calls */
+  ensure_init();
 }
 
 __attribute__((destructor))

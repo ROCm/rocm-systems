@@ -370,7 +370,7 @@ int main(int argc, char** argv) {
 
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  printf("[HRR] Replaying on: %s (gfx%x)\n", props.name, props.gcnArch);
+  printf("[HRR] Replaying on: %s (%s)\n", props.name, props.gcnArchName);
 
   // Replay events
   auto wall_start = std::chrono::high_resolution_clock::now();
