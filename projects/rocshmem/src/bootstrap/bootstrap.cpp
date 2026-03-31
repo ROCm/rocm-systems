@@ -68,7 +68,7 @@ struct ExtInfo {
    int rank_pos = -1;
 
    // Confirm that rank is in the vectors of ranks
-   for (int i = 0; i < ranks.size(); i++) {
+   for (size_t i = 0; i < ranks.size(); i++) {
      if (rank == ranks[i]) {
        rank_pos = i;
        break;
@@ -104,7 +104,7 @@ struct ExtInfo {
    int rank_pos = -1;
 
    // Confirm that rank is in the vectors of ranks
-   for (int i = 0; i < ranks.size(); i++) {
+   for (size_t i = 0; i < ranks.size(); i++) {
      if (rank == ranks[i]) {
        rank_pos = i;
        break;

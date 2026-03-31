@@ -104,7 +104,7 @@ namespace rocshmem {
 #endif
   }
 
-  static HIPAllocator* get_default_allocator()
+  [[maybe_unused]] static HIPAllocator* get_default_allocator()
   {
     if (default_allocator_ == nullptr) {
       set_default_allocator();
@@ -113,7 +113,7 @@ namespace rocshmem {
     return default_allocator_;
   }
 
-  static void delete_default_allocator()
+  [[maybe_unused]] static void delete_default_allocator()
   {
     if (default_allocator_ != nullptr) {
       delete default_allocator_;
