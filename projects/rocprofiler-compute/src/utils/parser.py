@@ -1227,21 +1227,6 @@ def validate_dual_issue_metrics(
 _MAX_DEBUG_ROWS = 5
 
 
-class DebugRowTracker:
-    """Tracks which (df_id, row_id) pairs have already been debugged."""
-
-    def __init__(self) -> None:
-        self._debugged_rows: set[tuple[int, Any]] = set()
-
-    def should_show_inputs(self, df_id: int, row_id: Any) -> bool:
-        """Check if this row's inputs should be displayed and mark it as seen."""
-        key = (df_id, row_id)
-        if key in self._debugged_rows:
-            return False
-        self._debugged_rows.add(key)
-        return True
-
-
 def _print_debug_global_vars(row_expr: str, metric_evaluator: MetricEvaluator) -> None:
     """Print global $xxx variables used in the expression."""
     matched_vars = re.findall(r"ammolite__\w+", row_expr)

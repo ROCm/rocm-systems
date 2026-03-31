@@ -65,8 +65,11 @@ def _same_bucket_priority_ids_from_policy_value(
             if meta is not None and not isinstance(meta, dict):
                 console_warning(
                     "profiling",
-                    f"Ignoring same_bucket_priority_metric_ids[{arch_name!r}][{token!r}]: "
-                    "expected a mapping or null.",
+                    (
+                        "Ignoring same_bucket_priority_metric_ids["
+                        f"{arch_name!r}][{token!r}]: "
+                        "expected a mapping or null."
+                    ),
                 )
                 continue
             ordered.append(token)
