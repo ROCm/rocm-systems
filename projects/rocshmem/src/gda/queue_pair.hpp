@@ -61,7 +61,7 @@ class GDABackend;
  * wg: Thread 0 of WAVE 0 issues WQE
  */
 
-enum class ThreadScope {
+enum class ThreadScope: int {
   thread,
   wave,
   wg
@@ -103,7 +103,7 @@ class ActiveWFInfo {
       case ThreadScope::wg: {
         pe_group_mask       = 1;
         num_pe_group_lanes  = 1;
-        pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
+        pe_group_logical_lane_id = get_active_lane_num(activemask);
         pe_group_leader_phys_lane_id = 0;
       }
     }
@@ -124,14 +124,17 @@ class ActiveWFInfo {
   }
 
   __device__ void printInfo() {
-    printf("PE: %d, Scope: %d, activemask: %lx, "
-           "pe_group_mask: %lx, num_pe_group_lanes: %d, "
+    printf("PE: %d, Scope: %d, activemask: %llx, "
+           "pe_group_mask: %llx, num_pe_group_lanes: %d, "
+           "thread_id: %u, "
            "pe_group_logical_lane_id: %d, is_pe_group_leader: %d, "
-           "pe_group_leader_phys_lane_id: %lx\n",
-           pe, static_cast<int>(scope), activemask,
-           pe_group_mask, num_pe_group_lanes,
-           pe_group_logical_lane_id, is_pe_group_leader,
-           pe_group_leader_phys_lane_id);
+           "pe_group_leader_phys_lane_id: %llx\n",
+           pe, static_cast<int>(scope),
+           static_cast<unsigned long long>(activemask),
+           static_cast<unsigned long long>(pe_group_mask),
+           num_pe_group_lanes, threadIdx.x, (int)pe_group_logical_lane_id,
+           is_pe_group_leader,
+           static_cast<unsigned long long>(pe_group_leader_phys_lane_id));
   }
 };
 
