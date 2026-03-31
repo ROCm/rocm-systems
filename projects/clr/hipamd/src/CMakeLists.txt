@@ -122,6 +122,7 @@ target_sources(amdhip64 PRIVATE
   hip_global.cpp
   hip_graph_internal.cpp
   hip_graph.cpp
+  hip_apex.cpp
   hip_hmm.cpp
   hip_intercept.cpp
   hip_log.cpp

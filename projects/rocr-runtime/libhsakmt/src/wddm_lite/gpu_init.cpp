@@ -5814,6 +5814,23 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
                 flush_gpu_tlb(dev, 1, 1);
             }
 
+            /* CRITICAL: Enable CONTEXT0 (VMID 0 page table walks).
+             * AUTOLOAD leaves CONTEXT0_CNTL with enable bit CLEARED (0x03fffc00).
+             * amdgpu sets bit 0 = 1 in gfxhub_gart_enable. Without this, MEC/MES
+             * firmware can't walk the page table for firmware VA → TMR access,
+             * causing them to get stuck at instruction 0x4044 during init. */
+            {
+                ULONG ctx0 = gfxhub_rreg(dev, regGCVM_CONTEXT0_CNTL);
+                if (!(ctx0 & 1)) {
+                    ctx0 |= 1;  /* VM_CONTEXT_ENABLE_CONTEXT */
+                    gfxhub_wreg(dev, regGCVM_CONTEXT0_CNTL, ctx0);
+                    pr_info("gpu_gfx: CONTEXT0 ENABLED (was 0x%08x → 0x%08x)\n",
+                            ctx0 & ~1, ctx0);
+                } else {
+                    pr_info("gpu_gfx: CONTEXT0 already enabled (0x%08x)\n", ctx0);
+                }
+            }
+
             /* Read system aperture AFTER */
             {
                 ULONG sa_lo_post = gfxhub_rreg(dev, 0x1619);

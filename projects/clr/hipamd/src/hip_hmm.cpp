@@ -25,6 +25,7 @@
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
 #include "os/os.hpp"
+#include "hip_apex.h"
 
 namespace hip {
 
@@ -286,6 +287,12 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
   memObj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
 
   ClPrint(amd::LOG_INFO, amd::LOG_API, "ihipMallocManaged ptr=0x%zx", *ptr);
+
+  // APEX: Track managed allocation
+  if (apex::enabled()) {
+    apex::track_alloc(*ptr, size, 0, true);
+  }
+
   return hipSuccess;
 }
 // ================================================================================================
@@ -355,6 +362,12 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
       *hip_stream, waitList, dev_ptr, count, dev, cpuAccess, targetDevice);
   command->enqueue();
   command->release();
+
+  // APEX: Record prefetch for policy feedback
+  if (apex::enabled()) {
+    apex::record_prefetch(dev_ptr, count, targetDevice);
+  }
+
   return hipSuccess;
 }
 // ================================================================================================
