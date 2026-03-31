@@ -94,8 +94,7 @@ metadata_initialize_cpu_freq_tracks()
 {
     do_for_enabled_cpus([&](size_t cpu_id) {
         trace_cache::get_metadata_registry().add_track(
-            { trace_cache::info::annotate_with_device_id<category::cpu_freq>(cpu_id)
-                  .c_str(),
+            { trace_cache::info::format_track_name<category::cpu_freq>(cpu_id).c_str(),
               std::nullopt, "{}" });
     });
 }
@@ -137,8 +136,7 @@ metadata_initialize_cpu_freq_pmc(size_t dev_id)
     do_for_enabled_cpus([&](size_t cpu_id) {
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trace_cache::info::annotate_with_device_id<category::cpu_freq>(cpu_id)
-                  .c_str(),
+              trace_cache::info::format_track_name<category::cpu_freq>(cpu_id).c_str(),
               "Frequency", trait::name<category::cpu_freq>::description, LONG_DESCRIPTION,
               COMPONENT, component::cpu_freq::display_unit().c_str(),
               rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });

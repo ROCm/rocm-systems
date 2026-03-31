@@ -80,7 +80,7 @@ Command-line options
    using tools like ``ps``, ``pgrep``, or ``top``.
 
 ``-o, --output PATH``
-   Specifies the output directory for profiling the results. If not specified,
+   Specifies the directory for writing the output of the profiling results. If not specified, the
    results are written to the default location (``rocprof-sys-output/``).
 
 ``-F, --format FORMAT[,FORMAT,...]``

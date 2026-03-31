@@ -287,6 +287,48 @@ struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
   }
 };
 
+/*
+ * QP layout:
+ * [ [ WQ: WQE | WQE | WQE | ... | WQE ] : 64 * 2^N
+ *   [ CQ: CQE | CQE ]                   : 64 * 2
+ *   [ padding - to page table - 256   ] : 3712 - max(4096 - 64 * 2^N, 0)
+ *   [ SQ DBREC ]                        : 8
+ *   [ padding - to AMDGPU cache line  ] : 120
+ *   [ CQ DBREC ]                        : 8
+ *   [ padding - to AMDGPU cache line  ] : 120
+ * ]
+ * Total size: 4096 if sq_depth < 64, else 4096 + 64 * 2^N
+ */
+struct mlx5_devx_qp {
+  ibv_context*      ctx;
+  mlx5dv_devx_obj*  devx_cq_obj;
+  mlx5dv_devx_obj*  devx_qp_obj;
+  mlx5dv_devx_uar*  uar;
+  mlx5dv_devx_umem* umem;
+  void*             cq;
+  void*             sq;
+  uint32_t*         cq_dbrec;
+  uint32_t*         qp_dbrec;
+  uint32_t          cqn;
+  uint32_t          qpn;
+  uint16_t          sq_depth;
+
+  void dump(int conn_num);
+
+  inline size_t cq_offset() {
+    return reinterpret_cast<uint8_t*>(cq) - reinterpret_cast<uint8_t*>(sq);
+  }
+  inline size_t wq_offset() {
+    return reinterpret_cast<uint8_t*>(sq) - reinterpret_cast<uint8_t*>(sq);
+  }
+  inline size_t cq_dbrec_offset() {
+    return reinterpret_cast<uint8_t*>(cq_dbrec) - reinterpret_cast<uint8_t*>(sq);
+  }
+  inline size_t qp_dbrec_offset() {
+    return reinterpret_cast<uint8_t*>(qp_dbrec) - reinterpret_cast<uint8_t*>(sq);
+  }
+};
+
 struct mlx5dv_funcs_t {
   int (*init_obj)(struct mlx5dv_obj *obj, uint64_t obj_type);
   struct ibv_context * (*open_device)(struct ibv_device *device, struct mlx5dv_context_attr *attr);
@@ -295,29 +337,16 @@ struct mlx5dv_funcs_t {
   int (*devx_obj_modify)(
       struct mlx5dv_devx_obj *obj, const void *in, size_t inlen, void *out, size_t outlen);
   int (*devx_obj_destroy)(struct mlx5dv_devx_obj *obj);
-  struct mlx5dv_devx_uar * (*devx_alloc_uar)(struct ibv_context *context, uint32_t flags);
-  void (*devx_free_uar)(struct mlx5dv_devx_uar *devx_uar);
   struct mlx5dv_devx_umem * (*devx_umem_reg_ex)(
       struct ibv_context *ctx, struct mlx5dv_devx_umem_in *umem_in);
   int (*devx_umem_dereg)(struct mlx5dv_devx_umem *umem);
-};
+  struct mlx5dv_devx_uar * (*devx_alloc_uar)(struct ibv_context *context, uint32_t flags);
+  void (*devx_free_uar)(struct mlx5dv_devx_uar *devx_uar);
+  int (*devx_query_eqn)(struct ibv_context *context, uint32_t vector, uint32_t *eqn);
 
-struct mlx5_devx_qp {
-  ibv_context*      ctx;
-  mlx5dv_devx_obj*  devx_obj;
-  mlx5dv_devx_uar*  uar;
-  mlx5dv_devx_umem* umem;
-  void*             sq;
-  uint32_t*         dbrec;
-  uint32_t          qpn;
-  uint16_t          sq_depth;
-
-  int create(const mlx5dv_funcs_t& mlx5dv, struct ibv_context *ctx,
-             struct ibv_qp_init_attr_ex *attr);
-  int modify(const mlx5dv_funcs_t& mlx5dv, struct ibv_qp_attr *attr, int attr_mask,
-             uint32_t gid_type);
-  int destroy(const mlx5dv_funcs_t& mlx5dv);
-  void dump(int conn_num);
+  int create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx, struct ibv_pd* pd, uint16_t sq_depth);
+  int modify_qp(mlx5_devx_qp& qp, struct ibv_qp_attr *attr, int attr_mask, uint32_t gid_type);
+  int destroy_qp(mlx5_devx_qp& qp);
 };
 
 }  // namespace rocshmem

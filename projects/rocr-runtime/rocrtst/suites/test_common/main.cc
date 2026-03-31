@@ -59,6 +59,7 @@
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
+#include "suites/functional/time_stamp.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #if ENABLE_COPY_NUMA
@@ -66,6 +67,7 @@
 #endif
 #include "suites/performance/memory_async_copy_on_engine.h"
 #include "suites/performance/enqueueLatency.h"
+#include "suites/performance/agent_preload.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
 #include "suites/negative/queue_validation.h"
 #include "suites/stress/memory_concurrent_tests.h"
@@ -323,6 +325,13 @@ TEST(rocrtstFunc, Memory_Available) {
     mt.MemAvailableTest();
     RunCustomTestEpilog(&mt);
   );
+}
+
+TEST(rocrtstFunc, Time_Stamp) {
+  TimeStamp ts;
+  RunCustomTestProlog(&ts);
+  ts.TimeStampTest();
+  RunCustomTestEpilog(&ts);
 }
 
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
@@ -813,6 +822,11 @@ TEST(rocrtstPerf, AQL_Dispatch_Time_Multi_SpinWait) {
 TEST(rocrtstPerf, AQL_Dispatch_Time_Multi_Interrupt) {
   DispatchTime dt(false, false);
   RunGenericTest(&dt);
+}
+
+TEST(rocrtstPerf, Agent_Preload_Latency) {
+  AgentPreloadTest apt;
+  RunGenericTest(&apt);
 }
 
 int main(int argc, char** argv) {
