@@ -83,41 +83,36 @@ public:
         OutputMsg(msg);
     };
 
-    void CriticalLog(std::string msg) {
-        if (log_level_ >= kRocDecLogCritical) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogCritical) + ", Critical] "  + msg);
-        }
-    };
-
-    void ErrorLog(std::string msg) {
-        if (log_level_ >= kRocDecLogError) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogError) + ", Error] "  + msg);
-        }
-    };
-
-    void WarningLog(std::string msg) {
-        if (log_level_ >= kRocDecLogWarning) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogWarning) + ", Warning] "  + msg);
-        }
-    };
-
-    void InfoLog(std::string msg) {
-        if (log_level_ >= kRocDecLogInfo) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] "  + msg);
-        }
-    };
-
-    void DebugLog(std::string msg) {
-        if (log_level_ >= kRocDecLogDebug) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogDebug) + ", Debug] "  + msg);
-        }
-    };
-
 private:
     int log_level_ = kRocDecLogCritical;
     uint64_t start_time_; // in us
     uint64_t end_time_; // in us
 };
+
+#define CriticalLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogCritical) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogCritical) + ", Critical] " + MakeMsg(msg)); \
+    }
+
+#define ErrorLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogError) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogError) + ", Error] " + MakeMsg(msg)); \
+    }
+
+#define WarningLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogWarning) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogWarning) + ", Warning] " + MakeMsg(msg)); \
+    }
+
+#define InfoLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogInfo) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg(msg)); \
+    }
+
+#define DebugLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogDebug) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogDebug) + ", Debug] " + MakeMsg(msg)); \
+    }
 
 #define FunctionEntryLog(logger) \
     if (logger.GetLogLevel() >= kRocDecLogInfo) { \
