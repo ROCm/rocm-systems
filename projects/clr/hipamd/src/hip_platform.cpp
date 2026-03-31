@@ -28,6 +28,8 @@
 
 #include <unordered_map>
 #include <mutex>
+#include "hip_hrr.h"
+#include "hip_global.hpp"
 
 namespace hip_impl {
 // ================================================================================================
@@ -721,6 +723,20 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
                                      blockDim.z, sharedMemBytes);
   if (!launch_params.IsValidConfig()) {
     return hipErrorInvalidConfiguration;
+  }
+
+  if (hrr::enabled()) {
+    std::string kname_str;
+    hip::DeviceFunc* devFunc = hip::DeviceFunc::asFunction(func);
+    if (devFunc) {
+      kname_str = devFunc->name();
+    }
+    const char* kname = kname_str.empty() ? nullptr : kname_str.c_str();
+    hrr::record_kernel_launch(kname, reinterpret_cast<void*>(func),
+                              gridDim.x, gridDim.y, gridDim.z,
+                              blockDim.x, blockDim.y, blockDim.z,
+                              static_cast<uint32_t>(sharedMemBytes),
+                              stream, args);
   }
 
   return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,

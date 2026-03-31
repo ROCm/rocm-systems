@@ -607,13 +607,14 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   }
 
   if (hrr::enabled()) {
-    const char* kname = nullptr;
+    std::string kname_str;
     if (f) {
       hip::DeviceFunc* devFunc = hip::DeviceFunc::asFunction(f);
       if (devFunc) {
-        kname = devFunc->name().c_str();
+        kname_str = devFunc->name();
       }
     }
+    const char* kname = kname_str.empty() ? nullptr : kname_str.c_str();
     hrr::record_kernel_launch(kname, reinterpret_cast<void*>(f),
                               gridDimX, gridDimY, gridDimZ,
                               blockDimX, blockDimY, blockDimZ,
