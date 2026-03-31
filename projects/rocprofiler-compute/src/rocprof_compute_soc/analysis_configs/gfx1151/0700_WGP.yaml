@@ -369,3 +369,58 @@ Panel Config:
     Dcache Hit Rate: |-
       Scalar data cache hit percentage: 100 × SQC_DCACHE_HITS / (SQC_DCACHE_HITS +
       SQC_DCACHE_MISSES). Same rationale as Icache (HITS vs REQ can exceed 100%).
+
+    Grid Size: |-
+      Number of work-items in the dispatch grid for the kernel (Grid_Size), averaged/min/maxed
+      across samples. Defines total parallel work launched.
+
+    Workgroup Size: |-
+      Number of work-items per workgroup (Workgroup_Size). Together with grid size and resource
+      limits it determines wave/wavefront count.
+
+    VGPRs: |-
+      Vector general-purpose registers allocated per wave (Arch_VGPR). Limits occupancy when
+      the per-CU VGPR capacity is exhausted.
+
+    SGPRs: |-
+      Scalar general-purpose registers allocated for the wave (SGPR). Uniform data and
+      execution state live in the scalar path.
+
+    LDS Allocation: |-
+      Local Data Share bytes reserved per workgroup (LDS_Per_Workgroup). High LDS per group
+      reduces how many workgroups can run concurrently on a CU/WGP.
+
+    Scratch Allocation: |-
+      Scratch (private) memory bytes per work-item (Scratch_Per_Workitem). Backed by off-chip
+      memory when spill/stack exceeds limits.
+
+    Dispatched Waves: |-
+      Number of shader waves launched (SQ_WAVES_sum), averaged/min/maxed. Each wave is a
+      SIMD execution entity (typically wave32 on this configuration).
+
+    Dispatched Threads: |-
+      Number of work-items launched as attributed in SQ_ITEMS_sum (threads), averaged/min/maxed.
+
+    Instructions - Internal: |-
+      Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit — bookkeeping or
+      non-user-visible work attributed to the scheduler.
+
+    Instructions - Transcendental: |-
+      Transcendental VALU instructions (SQ_INSTS_VALU_TRANS), per normalization unit — e.g.
+      sin/cos/log approximations on the vector ALU.
+
+    Instructions - VMEM Flat: |-
+      Flat-addressing vector memory instructions (SQ_INSTS_FLAT) per normalization unit.
+      Flat can resolve to global, scratch, or LDS depending on address.
+
+    Instructions - TEX Load: |-
+      Texture / image load instructions (SQ_INSTS_TEX_LOAD) per normalization unit.
+
+    Instructions - TEX Store: |-
+      Texture / image store instructions (SQ_INSTS_TEX_STORE) per normalization unit.
+
+    Instructions - Flat Load: |-
+      Flat load instructions (SQ_INSTS_FLAT_LOAD) per normalization unit.
+
+    Instructions - Flat Store: |-
+      Flat store instructions (SQ_INSTS_FLAT_STORE) per normalization unit.

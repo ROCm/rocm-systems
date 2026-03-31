@@ -2,9 +2,9 @@
    :description: ROCm Compute Profiler performance model — RDNA references
    :keywords: ROCm Compute Profiler, RDNA, HIP, documentation
 
-**********
+==========
 References
-**********
+==========
 
 This chapter points to public material that complements the **gfx1151** panels and
 metric names in ROCm Compute Profiler.

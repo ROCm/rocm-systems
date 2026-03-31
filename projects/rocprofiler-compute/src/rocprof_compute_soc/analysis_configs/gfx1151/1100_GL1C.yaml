@@ -161,3 +161,13 @@ Panel Config:
       Number of read requests sent from GL1C to GL2C due to cache misses.
     GL2 Stall: |-
       Cycles GL1C was stalled due to backpressure from GL2C.
+
+    GL2 Read 128B Requests: |-
+      GL1C→GL2 read requests using 128-byte lines (GL1C_GL2_REQ_READ_128B_sum / $denom).
+
+    GL2 Write Requests: |-
+      GL1C→GL2 write requests (GL1C_GL2_REQ_WRITE_sum / $denom).
+
+    LFIFO Full Stall: |-
+      Cycles GL1C stalled because the return/load FIFO was full (GL1C_STALL_LFIFO_FULL_sum / $denom),
+      often indicating downstream or consumer backpressure.
