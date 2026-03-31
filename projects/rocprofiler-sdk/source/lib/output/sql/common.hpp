@@ -51,7 +51,10 @@ int
 exec_callback(void* user_data, int ncols, char** coltext, char** colnames);
 
 void
-check(std::string_view function, int status, std::string_view stmt);
+check(std::string_view               function,
+      int                            status,
+      std::string_view               stmt,
+      const std::unordered_set<int>& valid_statuses = {SQLITE_OK});
 
 int
 busy_handler(void* data, int count);
@@ -127,3 +130,7 @@ column_data_is_null(sqlite3_stmt* stmt, int32_t col)
 
 #define SQLITE3_CHECK(RESULT)                                                                      \
     ::rocprofiler::tool::sql::check(__FUNCTION__, (RESULT), std::string_view{#RESULT})
+
+#define SQLITE3_CHECK2(RESULT, ...)                                                                \
+    ::rocprofiler::tool::sql::check(                                                               \
+        __FUNCTION__, (RESULT), std::string_view{#RESULT}, {__VA_ARGS__})

@@ -230,7 +230,7 @@ TEST_F(logger_test, fork_child_gets_different_pid_in_filename)
         bool pid_differs      = (current_pid != parent_pid);
         bool filename_correct = (child_filename == expected_filename);
 
-        exit((pid_differs && filename_correct) ? 0 : 1);
+        _exit((pid_differs && filename_correct) ? 0 : 1);
     }
     else
     {
@@ -363,7 +363,7 @@ TEST_F(logger_test, fork_child_creates_log_file_with_child_pid)
 
         std::remove(expected_child_log_file.c_str());
 
-        exit(child_log_exists && has_content ? 0 : 1);
+        _exit(child_log_exists && has_content ? 0 : 1);
     }
     else
     {

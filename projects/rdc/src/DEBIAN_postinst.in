@@ -9,7 +9,7 @@ do_update_alternatives(){
     # The reason for this approach rather than using the build number
     # is to allow for jobs from different builds. In one build job the
     # job number might be at 1200, whilst in a release job the number
-    # may be only 1. This approach assums that if you install a build
+    # may be only 1. This approach assumes that if you install a build
     # with a different semantic version then the highest is the
     # desired one, but if you install two with the same semver then
     # the newest is the desired version.
@@ -22,7 +22,7 @@ do_update_alternatives(){
     # So far if the version is less than 9 we have a number (altscore)
     # that is less than 1175.  2**31/1175 is about 1.8 million. So
     # multiply altscore by 1,000,000 and add in a factor of how many
-    # minutes have passed from an arbitary point in time (1,600,000,000
+    # minutes have passed from an arbitrary point in time (1,600,000,000
     # seconds after 1 Jan 1970 or Sep 13 12:26:40 2020) on the
     # basis that no one is going to be installing a new version more
     # often than every minute. This does get things wrong if a million
