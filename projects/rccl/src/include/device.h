@@ -166,12 +166,33 @@ union ncclLLFifoLine {
 // Make sure the clean mask will last for at least NCCL_NSTEPS
 static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK value");
 
+ /* IMPORTANT Note ragarding LL128 macros settings below:
+  * These fallbacks are defined here as a workaround to allow RCCL to compile 
+  * when these values are referenced by host code but need to be set based on 
+  * GFX architecture. */ 
+
+#if __HIP_DEVICE_COMPILE__
+#if defined (__gfx1250__)
+#define NCCL_LL128_LINESIZE 128
+#else
 #define NCCL_LL128_LINESIZE 64
+#endif
+#else
+#define NCCL_LL128_LINESIZE 64
+#endif
 #define NCCL_LL128_LINEELEMS (NCCL_LL128_LINESIZE/sizeof(uint64_t))
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
 
 #define NCCL_LL128_MAX_NTHREADS 256
+#if __HIP_DEVICE_COMPILE__
+#if defined (__gfx1250__)
+#define NCCL_LL128_ELEMS_PER_THREAD 120
+#else
 #define NCCL_LL128_ELEMS_PER_THREAD 28
+#endif
+#else
+#define NCCL_LL128_ELEMS_PER_THREAD 28
+#endif
 
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
 #define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD*NCCL_LL128_MAX_NTHREADS)

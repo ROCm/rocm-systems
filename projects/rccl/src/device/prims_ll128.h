@@ -492,7 +492,13 @@ public:
     redOp(redOpArg),
     tid(tid), nthreads(nthreads), wid(tid%WARP_SIZE),                                /*compiler warnings*/
     stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_LL128]/NCCL_STEPS/sizeof(uint64_t)),
-    warp(tid/WARP_SIZE), warpInBlock(threadIdx.x/WARP_SIZE), flagThread((tid%4)==3), group(group), threadsPerBlock(blockDim.x){
+    warp(tid/WARP_SIZE), warpInBlock(threadIdx.x/WARP_SIZE), 
+#if defined (__gfx1250__)
+    flagThread((tid%8)==7), 
+#else
+    flagThread((tid%4)==3),
+#endif
+    group(group), threadsPerBlock(blockDim.x){
 #ifdef ENABLE_WARP_SPEED
     auto *channel = &ncclShmem.warpChannel[warpInBlock];
 #else
