@@ -154,17 +154,6 @@ target_link_libraries(
     hiprtc
 )
 
-# Set the path to Mori include directory    TODO: remove
-set(MORI_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../../../mori/include" CACHE PATH "Path to Mori include directory")
-if(NOT EXISTS "${MORI_INCLUDE_DIR}")
-  message(FATAL_ERROR "Mori include directory not found: ${MORI_INCLUDE_DIR}")
-endif()
-target_include_directories(
-  ${PROJECT_NAME}_mori
-  PRIVATE
-    ${MORI_INCLUDE_DIR}
-)
-
 target_sources(
   ${PROJECT_NAME}_mori
   PRIVATE

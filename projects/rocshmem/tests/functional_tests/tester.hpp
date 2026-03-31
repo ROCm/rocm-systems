@@ -30,7 +30,7 @@
 #include <climits>
 
 #include "tester_arguments.hpp"
-#include "../src/util.hpp"
+#include "../../src/util.hpp"
 #include "verify_results_kernels.hpp"
 
 /******************************************************************************
