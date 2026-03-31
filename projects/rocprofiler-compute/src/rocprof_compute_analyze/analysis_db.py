@@ -18,7 +18,6 @@ from utils import utils_analysis
 from utils.analysis_orm import Database, get_views
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.parser import (
-    BUILD_IN_VARS,
     PC_SAMPLING_NOT_ISSUE_PREFIX,
     CodeTransformer,
     to_avg,
@@ -40,7 +39,7 @@ from utils.roofline_calc import (
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
-from utils.utils_common import get_uuid, get_version
+from utils.utils_common import BUILD_IN_VARS, get_uuid, get_version
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -506,10 +505,10 @@ class db_analysis(OmniAnalyze_Base):
 
             # eval_result can be None if expression has None explicitly specified
             # Do not give warning for this case and simply return None
-            if eval_result is None or "None" in value:
+            if eval_result is None:
                 return None
 
-            # Only return None for scalar NA values
+            # Only return None for scalar NA values (NaN, pd.NA)
             # For vectors/Series, return as-is to preserve shape for downstream
             # operations. Note: pd.NA is not detected as scalar by np.isscalar()
             is_scalar_na = eval_result is pd.NA or (
@@ -517,10 +516,13 @@ class db_analysis(OmniAnalyze_Base):
             )
 
             if is_scalar_na:
-                console_warning(
-                    f"Could not evaluate expression for {name}: {value} - "
-                    "likely due to missing counter data."
-                )
+                # Only warn if expression doesn't have "None" as an explicit fallback
+                # Expressions with .where(..., None) are expected to return NA
+                if "None" not in value:
+                    console_warning(
+                        f"Could not evaluate expression for {name}: {value} - "
+                        "likely due to missing counter data."
+                    )
                 return None
             else:
                 return eval_result

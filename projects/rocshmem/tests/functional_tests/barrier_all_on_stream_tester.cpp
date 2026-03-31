@@ -91,7 +91,7 @@ void BarrierAllOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each stream from HIP events
-  for (int stream_id = 0; stream_id < num_streams && stream_id < num_timers;
+  for (uint32_t stream_id = 0; stream_id < static_cast<uint32_t>(num_streams) && stream_id < static_cast<uint32_t>(num_timers);
        stream_id++) {
     float elapsed_time_ms = 0.0f;
     CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms,
@@ -109,16 +109,16 @@ void BarrierAllOnStreamTester::postLaunchKernel() {
   }
 
   // Fill remaining timers with zero if num_timers > num_streams
-  for (int i = num_streams; i < num_timers; i++) {
+  for (uint32_t i = num_streams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
     end_time[i] = 0;
   }
 }
 
-void BarrierAllOnStreamTester::resetBuffers(size_t size) {}
+void BarrierAllOnStreamTester::resetBuffers([[maybe_unused]] size_t size) {}
 
-void BarrierAllOnStreamTester::launchKernel(dim3 gridSize, dim3 blockSize,
-                                            int loop, size_t size) {
+void BarrierAllOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
+                                            int loop, [[maybe_unused]] size_t size) {
   // Execute warmup iterations (skip)
   for (int i = 0; i < args.skip; i++) {
     for (int stream_id = 0; stream_id < num_streams; stream_id++) {
@@ -148,4 +148,4 @@ void BarrierAllOnStreamTester::launchKernel(dim3 gridSize, dim3 blockSize,
   num_timed_msgs = loop * num_streams;
 }
 
-void BarrierAllOnStreamTester::verifyResults(size_t size) {}
+void BarrierAllOnStreamTester::verifyResults([[maybe_unused]] size_t size) {}

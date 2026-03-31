@@ -21,27 +21,15 @@
 // SOFTWARE.
 
 #include "library/rocm.hpp"
-#include "core/config.hpp"
-#include "core/dynamic_library.hpp"
-#include "core/gpu.hpp"
-#include "library/amd_smi.hpp"
 #include "library/rocprofiler-sdk.hpp"
-#include "library/runtime.hpp"
-#include "library/thread_data.hpp"
-#include "library/tracing.hpp"
 
 #include <timemory/backends/cpu.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/utility/types.hpp>
 
-#include <atomic>
-#include <chrono>
-#include <cstdint>
 #include <cstdlib>
-#include <mutex>
-#include <tuple>
-
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <vector>
 
 namespace rocprofsys
 {

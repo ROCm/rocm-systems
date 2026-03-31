@@ -51,7 +51,7 @@ __host__ void AtomicWFQueue<TYPE, ALLOCATOR>::deallocate_queue() {
 
 template <typename TYPE, typename ALLOCATOR>
 AtomicWFQueue<TYPE, ALLOCATOR>::AtomicWFQueue(const ALLOCATOR& allocator)
-    : allocator_{allocator}, size_{0}, curr_size_{0}, head_{0}, tail_{0} {}
+    : allocator_{allocator}, head_{0}, tail_{0}, size_{0}, curr_size_{0} {}
 
 template <typename TYPE, typename ALLOCATOR>
 __host__ void AtomicWFQueue<TYPE, ALLOCATOR>::allocate_queue(

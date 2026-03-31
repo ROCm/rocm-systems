@@ -480,22 +480,6 @@ class VirtualGPU : public device::VirtualDevice {
   }
 
  private:
-  //! OpenCL-specific version of processMemObjects.
-  //! Detects memory dependency for HSA kernels and uses appropriate AQL header
-  bool processOpenCLMemObjects(
-      const amd::Kernel& kernel,                        //!< AMD kernel object for execution
-      const_address params,                             //!< Pointer to the param's store
-      size_t& ldsAddress,                               //!< LDS usage
-      bool cooperativeGroups,                           //!< Dispatch with cooperative groups
-      bool& imageBufferWrtBack,                         //!< Image buffer write back is required
-      std::vector<device::Memory*>& wrtBackImageBuffer  //!< Images for writeback
-  );
-  //! HIP-specific version of processMemObjects.
-  //! Does nothing except logging
-  bool processHIPMemObjects(const amd::Kernel& kernel,  //!< AMD kernel object for execution
-                            const_address params        //!< Pointer to the param's store
-  );
-
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait();
 
