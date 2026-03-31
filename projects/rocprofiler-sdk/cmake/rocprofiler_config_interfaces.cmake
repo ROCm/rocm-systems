@@ -310,9 +310,14 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
+if (NOT ROCPROFILER_BUILD_ELFIO)
+    # search system installed elfio
+    find_package(elfio CONFIG REQUIRED)
+endif()
+target_link_libraries(rocprofiler-sdk-elfio INTERFACE elfio::elfio)
+
 # get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
 # target_include_directories(rocprofiler-sdk-elfio SYSTEM INTERFACE ${ELFIO_INCLUDE_DIR})
-target_link_libraries(rocprofiler-sdk-elfio INTERFACE elfio::elfio)
 
 # ----------------------------------------------------------------------------------------#
 #
