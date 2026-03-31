@@ -38,6 +38,9 @@ struct ReplayState {
 
   bool verify = false;
   bool timing = false;
+  bool skip_device_sync = false;
+  bool sync_after_launch = false;
+  bool verbose = false;
   std::string kernel_filter;
 
   size_t kernels_launched = 0;
@@ -71,18 +74,22 @@ static hipModule_t get_module_for_co(ReplayState& state,
 
   std::vector<uint8_t> co_data;
   if (!hrr::read_code_object(archive, hash_lo, hash_hi, co_data)) {
-    fprintf(stderr, "[HRR] Code object %s not found\n", hex.c_str());
+    fprintf(stderr, "[HRR] Code object %s not found in archive\n", hex.c_str());
     return nullptr;
   }
 
+  fprintf(stderr, "[HRR] Loading code object %s (%zu bytes)\n",
+          hex.c_str(), co_data.size());
   hipModule_t mod = nullptr;
   hipError_t err = hipModuleLoadData(&mod, co_data.data());
   if (err != hipSuccess) {
-    fprintf(stderr, "[HRR] Failed to load code object %s: %d\n",
-            hex.c_str(), err);
+    fprintf(stderr, "[HRR] Failed to load code object %s: %d (%s)\n",
+            hex.c_str(), err, hipGetErrorString(err));
     return nullptr;
   }
 
+  fprintf(stderr, "[HRR] Code object %s loaded OK (mod=%p)\n",
+          hex.c_str(), (void*)mod);
   state.co_modules[hex] = mod;
   return mod;
 }
@@ -206,8 +213,15 @@ static int replay_event(ReplayState& state, const hrr::Archive& archive,
       std::vector<void*> arg_ptrs;
       std::vector<std::vector<uint8_t>> arg_storage;
 
+      size_t arg_idx = 0;
       for (const auto& arg : kl.args) {
-        if (arg.value_kind == 2) continue;  // skip hidden
+        if (arg.value_kind == 2) {
+          if (state.verbose) {
+            fprintf(stderr, "  arg[%zu]: hidden (skipped)\n", arg_idx);
+          }
+          arg_idx++;
+          continue;  // skip hidden
+        }
 
         arg_storage.emplace_back();
         auto& storage = arg_storage.back();
@@ -219,11 +233,23 @@ static int replay_event(ReplayState& state, const hrr::Archive& archive,
           void* live_ptr = translate_ptr(state, handle);
           storage.resize(sizeof(void*));
           memcpy(storage.data(), &live_ptr, sizeof(void*));
+          if (state.verbose) {
+            fprintf(stderr, "  arg[%zu]: ptr handle=0x%llx -> %p%s\n",
+                    arg_idx, (unsigned long long)handle, live_ptr,
+                    live_ptr ? "" : " (NULL - missing alloc!)");
+          }
         } else {
           // Scalar arg: use raw bytes
           storage = arg.data;
+          if (state.verbose && arg.data.size() <= 8) {
+            uint64_t val = 0;
+            memcpy(&val, arg.data.data(), std::min(arg.data.size(), sizeof(val)));
+            fprintf(stderr, "  arg[%zu]: scalar size=%u val=0x%llx\n",
+                    arg_idx, arg.size, (unsigned long long)val);
+          }
         }
         arg_ptrs.push_back(storage.data());
+        arg_idx++;
       }
 
       // Launch with optional timing
@@ -252,6 +278,17 @@ static int replay_event(ReplayState& state, const hrr::Archive& archive,
       }
 
       state.kernels_launched++;
+
+      // Sync after launch for debugging (shows GPU errors immediately)
+      if (state.sync_after_launch) {
+        hipError_t sync_err = hipDeviceSynchronize();
+        if (sync_err != hipSuccess) {
+          fprintf(stderr, "[HRR] GPU error after kernel '%s': %d (%s)\n",
+                  kl.kernel_name.c_str(), sync_err, hipGetErrorString(sync_err));
+        } else {
+          fprintf(stderr, "[HRR] Kernel '%s' OK\n", kl.kernel_name.c_str());
+        }
+      }
 
       // Verify output buffers if requested
       if (state.verify) {
@@ -297,7 +334,17 @@ static int replay_event(ReplayState& state, const hrr::Archive& archive,
     }
 
     case hrr::EVENT_DEVICE_SYNC:
-      HIP_CHECK(hipDeviceSynchronize());
+      if (!state.skip_device_sync) {
+        if (state.verbose) fprintf(stderr, "[HRR] hipDeviceSynchronize()...\n");
+        HIP_CHECK(hipDeviceSynchronize());
+      }
+      break;
+
+    case hrr::EVENT_STREAM_SYNC:
+      if (!state.skip_device_sync) {
+        if (state.verbose) fprintf(stderr, "[HRR] STREAM_SYNC -> hipDeviceSynchronize()...\n");
+        HIP_CHECK(hipDeviceSynchronize());
+      }
       break;
 
     default:
@@ -314,6 +361,9 @@ static void print_usage(const char* argv0) {
     "  --verify            Compare output buffers with recorded snapshots\n"
     "  --timing            Report per-kernel GPU timing\n"
     "  --kernel-filter STR Only replay kernels containing STR in name\n"
+    "  --skip-device-sync  Skip all device/stream sync calls (for debugging)\n"
+    "  --sync-after-launch Sync after every kernel launch (shows GPU errors)\n"
+    "  --verbose           Print each event as it is processed\n"
     "  --help              Show this help\n",
     argv0);
 }
@@ -332,6 +382,12 @@ int main(int argc, char** argv) {
       state.verify = true;
     } else if (strcmp(argv[i], "--timing") == 0) {
       state.timing = true;
+    } else if (strcmp(argv[i], "--skip-device-sync") == 0) {
+      state.skip_device_sync = true;
+    } else if (strcmp(argv[i], "--sync-after-launch") == 0) {
+      state.sync_after_launch = true;
+    } else if (strcmp(argv[i], "--verbose") == 0) {
+      state.verbose = true;
     } else if (strcmp(argv[i], "--kernel-filter") == 0 && i + 1 < argc) {
       state.kernel_filter = argv[++i];
     } else if (strcmp(argv[i], "--help") == 0) {
@@ -376,6 +432,10 @@ int main(int argc, char** argv) {
   auto wall_start = std::chrono::high_resolution_clock::now();
 
   for (size_t i = 0; i < archive.events.size(); i++) {
+    if (state.verbose) {
+      fprintf(stderr, "[HRR] Event %zu: %s\n",
+              i, hrr::event_type_name(archive.events[i].header.event_type));
+    }
     int ret = replay_event(state, archive, archive.events[i]);
     if (ret != 0) {
       fprintf(stderr, "[HRR] Replay failed at event %zu (%s)\n",

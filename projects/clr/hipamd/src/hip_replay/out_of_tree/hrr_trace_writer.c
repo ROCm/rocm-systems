@@ -87,6 +87,8 @@ static hash128_t hash_buffer(const void* data, size_t len) {
 #define MAX_ALLOCS 65536
 #define MAX_MODULES 256
 #define MAX_CO_KERNELS 512
+#define MAX_FUNC_ENTRIES 4096
+#define MAX_FUNC_NAME 256
 
 typedef struct {
   uintptr_t ptr;
@@ -103,6 +105,11 @@ typedef struct {
   hrr_kernel_meta_t kernels[32];
   int num_kernels;
 } module_entry_t;
+
+typedef struct {
+  uintptr_t handle;
+  char name[MAX_FUNC_NAME];
+} func_entry_t;
 
 static struct {
   int active;
@@ -123,7 +130,12 @@ static struct {
   module_entry_t modules[MAX_MODULES];
   int num_modules;
 
+  /* Function handle → kernel name mapping (always active, not gated by HRR_RECORD) */
+  func_entry_t funcs[MAX_FUNC_ENTRIES];
+  int num_funcs;
+
   size_t blob_count;
+  int verbose;  /* HRR_VERBOSE=1 — print diagnostic messages to stderr */
 } g;
 
 static void hash_hex(hash128_t h, char buf[33]) {
@@ -226,6 +238,9 @@ int hrr_writer_init(void) {
 
   const char* max_blob = getenv("HRR_MAX_BLOB_MB");
   if (max_blob) g.max_blob_mb = (size_t)atol(max_blob);
+
+  const char* verbose = getenv("HRR_VERBOSE");
+  if (verbose && verbose[0] == '1') g.verbose = 1;
 
   HRR_MKDIR(g.output_dir);
   char tmp[600];
@@ -434,7 +449,16 @@ void hrr_record_kernel_launch(const char* kernel_name,
       uint16_t sz = 8;
       memcpy(p, &sz, 2); p += 2;
       if (kernel_args && kernel_args[i]) {
-        memcpy(p, kernel_args[i], 8);
+        /* Translate raw device pointer to allocation handle so the replay
+         * can remap it to a live GPU address on the target machine. */
+        uint64_t dev_ptr = 0;
+        memcpy(&dev_ptr, kernel_args[i], 8);
+        uint64_t handle = 0;
+        HRR_MUTEX_LOCK(&g.mu);
+        alloc_entry_t* ae = find_alloc((uintptr_t)dev_ptr);
+        if (ae) handle = ae->handle;
+        HRR_MUTEX_UNLOCK(&g.mu);
+        memcpy(p, &handle, 8);
       } else {
         memset(p, 0, 8);
       }
@@ -456,6 +480,121 @@ void hrr_record_kernel_launch(const char* kernel_name,
   free(pl);
 }
 
+void hrr_record_kernel_launch_packed(const char* kernel_name,
+                                      uint32_t gx, uint32_t gy, uint32_t gz,
+                                      uint32_t bx, uint32_t by, uint32_t bz,
+                                      uint32_t shared_mem,
+                                      const void* stream,
+                                      const void* packed_buf,
+                                      size_t packed_size) {
+  if (!g.active) return;
+  if (g.kernel_filter[0] != '\0' && kernel_name) {
+    size_t flen = strlen(g.kernel_filter);
+    if (g.kernel_filter[flen-1] == '*') {
+      if (strncmp(kernel_name, g.kernel_filter, flen-1) != 0) return;
+    } else {
+      if (strcmp(kernel_name, g.kernel_filter) != 0) return;
+    }
+  }
+
+  /* Find kernel metadata for arg introspection */
+  const hrr_kernel_meta_t* meta = NULL;
+  if (kernel_name) {
+    HRR_MUTEX_LOCK(&g.mu);
+    for (int i = 0; i < g.num_modules && !meta; i++) {
+      meta = hrr_find_kernel(g.modules[i].kernels,
+                             g.modules[i].num_kernels, kernel_name);
+    }
+    HRR_MUTEX_UNLOCK(&g.mu);
+  }
+
+  const char* name = kernel_name ? kernel_name : "<unknown>";
+  uint16_t name_len = (uint16_t)strlen(name);
+  uint16_t num_args = meta ? (uint16_t)meta->num_args : 0;
+  uint16_t num_snaps = 0;
+
+  size_t pl_size = 2 + name_len + 12 + 12 + 4 + 2 + 2;
+  for (uint32_t i = 0; i < num_args; i++) {
+    pl_size += 1 + 2 + (meta->args[i].kind == HRR_ARG_GLOBAL_BUFFER ? 8 :
+                         meta->args[i].size);
+  }
+
+  uint8_t* pl = (uint8_t*)malloc(pl_size);
+  if (!pl) return;
+  uint8_t* p = pl;
+
+  memcpy(p, &name_len, 2); p += 2;
+  memcpy(p, name, name_len); p += name_len;
+  memcpy(p, &gx, 4); p += 4;
+  memcpy(p, &gy, 4); p += 4;
+  memcpy(p, &gz, 4); p += 4;
+  memcpy(p, &bx, 4); p += 4;
+  memcpy(p, &by, 4); p += 4;
+  memcpy(p, &bz, 4); p += 4;
+  memcpy(p, &shared_mem, 4); p += 4;
+  memcpy(p, &num_args, 2); p += 2;
+  memcpy(p, &num_snaps, 2); p += 2;
+
+  for (uint32_t i = 0; i < num_args; i++) {
+    const hrr_arg_desc_t* ad = &meta->args[i];
+    uint8_t vk = (uint8_t)ad->kind;
+    *p++ = vk;
+
+    const char* arg_data = packed_buf ?
+        (const char*)packed_buf + ad->offset : NULL;
+    int arg_in_bounds = packed_buf &&
+        (size_t)(ad->offset + (ad->kind == HRR_ARG_GLOBAL_BUFFER ? 8 : ad->size))
+        <= packed_size;
+
+    if (ad->kind == HRR_ARG_GLOBAL_BUFFER) {
+      uint16_t sz = 8;
+      memcpy(p, &sz, 2); p += 2;
+      if (arg_in_bounds) {
+        uint64_t dev_ptr = 0;
+        memcpy(&dev_ptr, arg_data, 8);
+        uint64_t handle = 0;
+        HRR_MUTEX_LOCK(&g.mu);
+        alloc_entry_t* ae = find_alloc((uintptr_t)dev_ptr);
+        if (ae) handle = ae->handle;
+        HRR_MUTEX_UNLOCK(&g.mu);
+        if (!ae && dev_ptr != 0) {
+          /* Pointer not tracked — likely allocated via an API we don't intercept
+           * (e.g. HSA-level, hipGraph, or internal runtime pool). Emit a synthetic
+           * MALLOC event so the replayer can create a backing buffer for it.
+           * We don't know the true size; use 1MB as a safe upper bound. */
+          if (g.verbose) {
+            fprintf(stderr, "[HRR] kernel '%s' arg[%u]: ptr=0x%llx untracked, "
+                    "registering synthetic alloc (1MB)\n",
+                    name, i, (unsigned long long)dev_ptr);
+          }
+          hrr_record_malloc((const void*)(uintptr_t)dev_ptr, 1024*1024, 0);
+          HRR_MUTEX_LOCK(&g.mu);
+          ae = find_alloc((uintptr_t)dev_ptr);
+          if (ae) handle = ae->handle;
+          HRR_MUTEX_UNLOCK(&g.mu);
+        }
+        memcpy(p, &handle, 8);
+      } else {
+        memset(p, 0, 8);
+      }
+      p += 8;
+    } else {
+      uint16_t sz = ad->size;
+      memcpy(p, &sz, 2); p += 2;
+      if (arg_in_bounds && ad->kind != HRR_ARG_HIDDEN) {
+        memcpy(p, arg_data, ad->size);
+      } else {
+        memset(p, 0, ad->size);
+      }
+      p += ad->size;
+    }
+  }
+
+  uint16_t pl_len = (uint16_t)(pl_size > 65535 ? 65535 : pl_size);
+  write_event(EVT_KERNEL_LAUNCH, (uint32_t)(uintptr_t)stream, pl, pl_len);
+  free(pl);
+}
+
 void hrr_record_device_sync(void) {
   if (!g.active) return;
   write_event(EVT_DEVICE_SYNC, 0, NULL, 0);
@@ -464,4 +603,41 @@ void hrr_record_device_sync(void) {
 void hrr_record_stream_sync(const void* stream) {
   if (!g.active) return;
   write_event(EVT_STREAM_SYNC, (uint32_t)(uintptr_t)stream, NULL, 0);
+}
+
+void hrr_register_function(const void* func_handle, const char* kernel_name) {
+  if (!func_handle || !kernel_name) return;
+  HRR_MUTEX_LOCK(&g.mu);
+  /* Check if already registered (update in place) */
+  uintptr_t h = (uintptr_t)func_handle;
+  for (int i = 0; i < g.num_funcs; i++) {
+    if (g.funcs[i].handle == h) {
+      strncpy(g.funcs[i].name, kernel_name, MAX_FUNC_NAME - 1);
+      g.funcs[i].name[MAX_FUNC_NAME - 1] = '\0';
+      HRR_MUTEX_UNLOCK(&g.mu);
+      return;
+    }
+  }
+  if (g.num_funcs < MAX_FUNC_ENTRIES) {
+    g.funcs[g.num_funcs].handle = h;
+    strncpy(g.funcs[g.num_funcs].name, kernel_name, MAX_FUNC_NAME - 1);
+    g.funcs[g.num_funcs].name[MAX_FUNC_NAME - 1] = '\0';
+    g.num_funcs++;
+  }
+  HRR_MUTEX_UNLOCK(&g.mu);
+}
+
+const char* hrr_lookup_function_name(const void* func_handle) {
+  if (!func_handle) return NULL;
+  uintptr_t h = (uintptr_t)func_handle;
+  HRR_MUTEX_LOCK(&g.mu);
+  for (int i = 0; i < g.num_funcs; i++) {
+    if (g.funcs[i].handle == h) {
+      const char* name = g.funcs[i].name;
+      HRR_MUTEX_UNLOCK(&g.mu);
+      return name;
+    }
+  }
+  HRR_MUTEX_UNLOCK(&g.mu);
+  return NULL;
 }

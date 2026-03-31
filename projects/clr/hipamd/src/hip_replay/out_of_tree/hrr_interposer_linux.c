@@ -28,6 +28,10 @@ typedef unsigned int hipMemcpyKind;
 
 /* Real function pointers */
 static hipError_t (*real_hipMalloc)(void**, size_t) = NULL;
+static hipError_t (*real_hipExtMallocWithFlags)(void**, size_t, unsigned int) = NULL;
+static hipError_t (*real_hipMallocManaged)(void**, size_t, unsigned int) = NULL;
+static hipError_t (*real_hipMallocAsync)(void**, size_t, hipStream_t) = NULL;
+static hipError_t (*real_hipFreeAsync)(void*, hipStream_t) = NULL;
 static hipError_t (*real_hipFree)(void*) = NULL;
 static hipError_t (*real_hipMemcpy)(void*, const void*, size_t, hipMemcpyKind) = NULL;
 static hipError_t (*real_hipMemset)(void*, int, size_t) = NULL;
@@ -42,8 +46,34 @@ static hipError_t (*real_hipDeviceSynchronize)(void) = NULL;
 static hipError_t (*real_hipStreamSynchronize)(hipStream_t) = NULL;
 static hipError_t (*real_hipInit)(unsigned int) = NULL;
 
+/* Explicit handle to the real HIP library.
+ * RTLD_NEXT fails during early init if libamdhip64 isn't in the chain yet
+ * (e.g. called from another library's constructor). We fall back to
+ * dlopen("libamdhip64.so.6") to get the real functions. */
+static void* s_hip_lib = NULL;
+
+static void* hrr_load_hip_sym(const char* name) {
+  void* sym = dlsym(RTLD_NEXT, name);
+  if (sym) return sym;
+
+  /* RTLD_NEXT returned NULL — libamdhip64 not yet in chain. Try explicit load. */
+  if (!s_hip_lib) {
+    s_hip_lib = dlopen("libamdhip64.so.6", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+    if (!s_hip_lib)
+      s_hip_lib = dlopen("libamdhip64.so", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
+    /* RTLD_NOLOAD: only find it if already mapped; don't pull in a new copy. */
+  }
+  if (s_hip_lib) return dlsym(s_hip_lib, name);
+  return NULL;
+}
+
 #define LOAD_SYM(name) \
-  if (!real_##name) real_##name = dlsym(RTLD_NEXT, #name)
+  if (!real_##name) real_##name = hrr_load_hip_sym(#name)
+
+/* Forward a call to a real HIP function, returning hipErrorUnknown if the
+ * symbol could not be resolved (prevents null-pointer dereference). */
+#define FORWARD_OR_ERROR(name, args) \
+  do { if (!real_##name) return -1; return real_##name args; } while(0)
 
 static int g_initialized = 0;
 
@@ -60,14 +90,14 @@ static void ensure_init(void) {
 
 hipError_t hipInit(unsigned int flags) {
   LOAD_SYM(hipInit);
-  hipError_t ret = real_hipInit(flags);
   ensure_init();
-  return ret;
+  FORWARD_OR_ERROR(hipInit, (flags));
 }
 
 hipError_t hipMalloc(void** ptr, size_t size) {
   LOAD_SYM(hipMalloc);
   ensure_init();
+  if (!real_hipMalloc) return -1;
   hipError_t ret = real_hipMalloc(ptr, size);
   if (ret == 0 && hrr_writer_enabled()) {
     hrr_record_malloc(*ptr, size, 0);
@@ -75,12 +105,53 @@ hipError_t hipMalloc(void** ptr, size_t size) {
   return ret;
 }
 
+hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flags) {
+  LOAD_SYM(hipExtMallocWithFlags);
+  ensure_init();
+  if (!real_hipExtMallocWithFlags) return -1;
+  hipError_t ret = real_hipExtMallocWithFlags(ptr, sizeBytes, flags);
+  if (ret == 0 && hrr_writer_enabled()) {
+    hrr_record_malloc(*ptr, sizeBytes, flags);
+  }
+  return ret;
+}
+
+hipError_t hipMallocManaged(void** ptr, size_t size, unsigned int flags) {
+  LOAD_SYM(hipMallocManaged);
+  ensure_init();
+  if (!real_hipMallocManaged) return -1;
+  hipError_t ret = real_hipMallocManaged(ptr, size, flags);
+  if (ret == 0 && hrr_writer_enabled()) {
+    hrr_record_malloc(*ptr, size, flags);
+  }
+  return ret;
+}
+
+hipError_t hipMallocAsync(void** ptr, size_t size, hipStream_t stream) {
+  LOAD_SYM(hipMallocAsync);
+  ensure_init();
+  if (!real_hipMallocAsync) return -1;
+  hipError_t ret = real_hipMallocAsync(ptr, size, stream);
+  if (ret == 0 && hrr_writer_enabled()) {
+    hrr_record_malloc(*ptr, size, 0);
+  }
+  return ret;
+}
+
+hipError_t hipFreeAsync(void* ptr, hipStream_t stream) {
+  LOAD_SYM(hipFreeAsync);
+  if (hrr_writer_enabled()) {
+    hrr_record_free(ptr);
+  }
+  FORWARD_OR_ERROR(hipFreeAsync, (ptr, stream));
+}
+
 hipError_t hipFree(void* ptr) {
   LOAD_SYM(hipFree);
   if (hrr_writer_enabled()) {
     hrr_record_free(ptr);
   }
-  return real_hipFree(ptr);
+  FORWARD_OR_ERROR(hipFree, (ptr));
 }
 
 hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
@@ -89,7 +160,7 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
   if (hrr_writer_enabled()) {
     hrr_record_memcpy(dst, src, sizeBytes, (unsigned int)kind, NULL);
   }
-  return real_hipMemcpy(dst, src, sizeBytes, kind);
+  FORWARD_OR_ERROR(hipMemcpy, (dst, src, sizeBytes, kind));
 }
 
 hipError_t hipMemset(void* dst, int value, size_t count) {
@@ -97,11 +168,12 @@ hipError_t hipMemset(void* dst, int value, size_t count) {
   if (hrr_writer_enabled()) {
     hrr_record_memset(dst, value, count, NULL);
   }
-  return real_hipMemset(dst, value, count);
+  FORWARD_OR_ERROR(hipMemset, (dst, value, count));
 }
 
 hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
   LOAD_SYM(hipModuleLoadData);
+  if (!real_hipModuleLoadData) return -1;
   hipError_t ret = real_hipModuleLoadData(module, image);
   if (ret == 0 && hrr_writer_enabled() && module && *module && image) {
     /* Estimate code object size from ELF */
@@ -127,7 +199,20 @@ hipError_t hipModuleUnload(hipModule_t module) {
   if (hrr_writer_enabled()) {
     hrr_record_module_unload(module);
   }
-  return real_hipModuleUnload(module);
+  FORWARD_OR_ERROR(hipModuleUnload, (module));
+}
+
+hipError_t hipModuleGetFunction(hipFunction_t* hfunc, hipModule_t hmod,
+                                const char* name) {
+  LOAD_SYM(hipModuleGetFunction);
+  if (!real_hipModuleGetFunction) return -1;
+  hipError_t ret = real_hipModuleGetFunction(hfunc, hmod, name);
+  /* Always register the handle→name mapping regardless of recording state.
+   * Used by hipExtModuleLaunchKernel to recover the kernel name. */
+  if (ret == 0 && hfunc && *hfunc && name) {
+    hrr_register_function(*hfunc, name);
+  }
+  return ret;
 }
 
 hipError_t hipModuleLaunchKernel(hipFunction_t f,
@@ -138,45 +223,28 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
   LOAD_SYM(hipModuleLaunchKernel);
 
   if (hrr_writer_enabled()) {
-    /* We don't have the kernel name from hipFunction_t in the out-of-tree
-     * path without accessing CLR internals. Record as "<unknown>" for now.
-     * A future enhancement could use hipFuncGetName if available. */
+    /* Kernel name not available without CLR internals; recorded as anonymous. */
     hrr_record_kernel_launch(NULL, NULL, 0,
                              gridDimX, gridDimY, gridDimZ,
                              blockDimX, blockDimY, blockDimZ,
                              sharedMemBytes, hStream, kernelParams);
   }
 
+  if (!real_hipModuleLaunchKernel) return -1;
   return real_hipModuleLaunchKernel(f, gridDimX, gridDimY, gridDimZ,
       blockDimX, blockDimY, blockDimZ, sharedMemBytes, hStream,
       kernelParams, extra);
 }
 
-/* hipLaunchKernel is used by <<<>>> syntax via hipLaunchKernelGGL */
-typedef struct { unsigned int x, y, z; } dim3_t;
-
-static hipError_t (*real_hipLaunchKernel)(const void*, dim3_t, dim3_t,
-    void**, size_t, hipStream_t) = NULL;
-
-hipError_t hipLaunchKernel(const void* function_address,
-    dim3_t numBlocks, dim3_t dimBlocks,
-    void** args, size_t sharedMemBytes, hipStream_t stream) {
-  LOAD_SYM(hipLaunchKernel);
-  ensure_init();
-
-  if (hrr_writer_enabled()) {
-    hrr_record_kernel_launch(NULL, NULL, 0,
-                             numBlocks.x, numBlocks.y, numBlocks.z,
-                             dimBlocks.x, dimBlocks.y, dimBlocks.z,
-                             (uint32_t)sharedMemBytes, stream, args);
-  }
-
-  return real_hipLaunchKernel(function_address, numBlocks, dimBlocks,
-                              args, sharedMemBytes, stream);
-}
+/* Note: hipLaunchKernel (<<<>>> / hipLaunchKernelGGL path) is intentionally
+ * NOT intercepted here. Its ABI uses dim3 (a C++ struct with user-provided
+ * constructor) which cannot be safely forwarded from a plain-C interposer.
+ * MIGraphX and other ONNX-compiled workloads use hipModuleLaunchKernel for
+ * pre-compiled code objects, which is captured above. */
 
 hipError_t hipDeviceSynchronize(void) {
   LOAD_SYM(hipDeviceSynchronize);
+  if (!real_hipDeviceSynchronize) return -1;
   hipError_t ret = real_hipDeviceSynchronize();
   if (hrr_writer_enabled()) {
     hrr_record_device_sync();
@@ -186,6 +254,7 @@ hipError_t hipDeviceSynchronize(void) {
 
 hipError_t hipStreamSynchronize(hipStream_t stream) {
   LOAD_SYM(hipStreamSynchronize);
+  if (!real_hipStreamSynchronize) return -1;
   hipError_t ret = real_hipStreamSynchronize(stream);
   if (hrr_writer_enabled()) {
     hrr_record_stream_sync(stream);

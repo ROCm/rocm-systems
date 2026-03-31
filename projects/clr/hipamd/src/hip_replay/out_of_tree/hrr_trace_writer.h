@@ -52,11 +52,31 @@ void hrr_record_kernel_launch(const char* kernel_name,
                               const void* stream,
                               void** kernel_args);
 
+/* Record a kernel launch using the packed kernarg buffer (hipExtModuleLaunchKernel
+ * 'extra' path). Uses arg offsets from parsed code object metadata to extract
+ * each argument from the flat kernarg buffer. */
+void hrr_record_kernel_launch_packed(const char* kernel_name,
+                                      uint32_t gx, uint32_t gy, uint32_t gz,
+                                      uint32_t bx, uint32_t by, uint32_t bz,
+                                      uint32_t shared_mem,
+                                      const void* stream,
+                                      const void* packed_buf,
+                                      size_t packed_size);
+
 /* Record a device synchronize event */
 void hrr_record_device_sync(void);
 
 /* Record a stream synchronize event */
 void hrr_record_stream_sync(const void* stream);
+
+/* Function handle → kernel name registry.
+ * Called from hipModuleGetFunction hook to associate the returned handle with
+ * the kernel name. Used by hipExtModuleLaunchKernel to recover the name. */
+void hrr_register_function(const void* func_handle, const char* kernel_name);
+
+/* Look up a kernel name by its hipFunction_t handle.
+ * Returns the registered name, or NULL if unknown. */
+const char* hrr_lookup_function_name(const void* func_handle);
 
 #ifdef __cplusplus
 }
