@@ -1,0 +1,86 @@
+---
+errorHandling:
+  Unit_hipGetErrorName_Positive_Basic: *level_2
+  Unit_hipGetErrorName_Negative_Parameters: *level_2
+  Unit_hipGetErrorString_Positive_Basic: *level_2
+  Unit_hipGetErrorString_Negative_Parameters: *level_2
+  Unit_hipDrvGetErrorName_Positive_Basic: *level_2
+  Unit_hipDrvGetErrorName_Negative_Parameters: *level_2
+  Unit_hipDrvGetErrorString_Positive_Basic: *level_2
+  Unit_hipDrvGetErrorString_Negative_Parameters: *level_2
+  Unit_hipGetLastError_Positive_Basic: *level_2
+  Unit_hipGetLastError_Positive_Threaded: *level_2
+  Unit_hipGetLastError_with_hipMemcpyPeerAsync:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipGetLastError_with_hipMemcpyDtoHAsync: *level_2
+  Unit_hipGetLastError_with_hipMemcpyParam2DAsync: *level_2
+  Unit_hipGetLastError_with_hipDrvMemcpy3DAsync: *level_2
+  Unit_hipGetLastError_with_hipMemcpy3DAsync: *level_2
+  Unit_hipGetLastError_with_hipMemcpy2D_To_From_ArrayAsync: *level_2
+  Unit_hipGetLastError_with_hipStreamAttachMemAsync: *level_2
+  Unit_hipGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2
+  Unit_hipGetLastError_with_hipSignalExternalSemaphoresAsync: *level_2
+  Unit_hipGetLastError_with_hipMemPrefetchAsync: *level_2
+  Unit_hipGetLastError_with_hipMemcpy2DAsync: *level_2
+  Unit_hipGetLastError_with_hipMemsetAsync: *level_2
+  Unit_hipGetLastError_with_MemCpyAsync: *level_2
+  Unit_hipGetLastError_with_MemCpyAsync_thread: *level_2
+  Unit_hipGetLastError_with_hipGraphAddMemcpyNode1D: *level_2
+  Unit_hipGetLastError_with_hipStreamBegin_EndCapture: *level_2
+  Unit_hipGetLastError_error_check_with_hipGraphCreate: *level_2
+  Unit_hipGetLastError_success_before_hipGetLastError: *level_2
+  Unit_hipGetLastError_success_before_hipGetLastError_check_again: *level_2
+  Unit_hipGetLastError_with_Kernel_divide_by_zero: *level_2
+  Unit_hipGetLastError_with_Kernel_Invalid_Configuration: *level_2
+  Unit_hipGetLastError_With_Chk_Updated_Status: *level_2
+  Unit_hipGetLastError_Chk_Along_hipPeekAtLastError: *level_2
+  Unit_hipGetLastError_Error_Combinations: *level_2
+  Unit_hipGetLastError_With_Thread: *level_2
+  Unit_hipGetLastError_MultiProcess: *level_2
+  Unit_hipGetLastError_Kernel_Invalid_Config: *level_2
+  Unit_hipPeekAtLastError_Positive_Basic: *level_2
+  Unit_hipPeekAtLastError_Positive_Threaded: *level_2
+  Unit_hipPeekAtLastError_Positive: *level_2
+  Unit_hipPeekAtLastError_Chk_Updated_Status: *level_2
+  Unit_hipPeekAtLastError_Chk_Along_hipGetLastError: *level_2
+  Unit_hipPeekAtLastError_Error_Combinations: *level_2
+  Unit_hipPeekAtLastError_With_Thread: *level_2
+  Unit_hipPeekAtLastError_MultiProcess: *level_2
+  Unit_hipPeekAtLastError_Kernel_Invalid_Config: *level_2
+  Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations: *level_2
+  Unit_hipGetLastError_KernelFailure_TwoDevices:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipGetLastError_KernelFailure_TwoStreams: *level_2
+  Unit_hipExtGetLastError_Positive_Basic: *level_2
+  Unit_hipExtGetLastError_Positive_Threaded: *level_2
+  Unit_hipExtGetLastError_with_hipMemcpyPeerAsync:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync: *level_2
+  Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync: *level_2
+  Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync: *level_2
+  Unit_hipExtGetLastError_with_hipMemcpy3DAsync: *level_2
+  Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync: *level_2
+  Unit_hipExtGetLastError_with_hipStreamAttachMemAsync: *level_2
+  Unit_hipExtGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2
+  Unit_hipExtGetLastError_with_hipSignalExternalSemaphoresAsync: *level_2
+  Unit_hipExtGetLastError_with_hipMemPrefetchAsync: *level_2
+  Unit_hipExtGetLastError_with_hipMemcpy2DAsync: *level_2
+  Unit_hipExtGetLastError_with_hipMemsetAsync: *level_2
+  Unit_hipExtGetLastError_with_MemCpyAsync: *level_2
+  Unit_hipExtGetLastError_with_MemCpyAsync_thread: *level_2
+  Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D: *level_2
+  Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture: *level_2
+  Unit_hipExtGetLastError_error_check_with_hipGraphCreate: *level_2
+  Unit_hipExtGetLastError_success_before_error_check_again: *level_2
+  Unit_hipExtGetLastError_with_Kernel_divide_by_zero: *level_2
+  Unit_hipDynamicLogging_Positive_Basic:
+    <<: *level_2
+    # Following tests disabled as it should be a local perf test
+    disabled: [amd_windows]
+  Unit_hipDynamicLogging_Positive_MultipleEnableDisable:
+    <<: *level_2
+    # Following tests disabled as it should be a local perf test
+    disabled: [amd_windows]

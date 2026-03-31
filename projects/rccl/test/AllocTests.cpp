@@ -104,6 +104,9 @@ TEST(Alloc, NcclCudaMemcpy)
         "NcclCudaMemcpy",
         []()
         {
+            // Initialize HIP device in forked process
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
             constexpr size_t N     = 128;
             float *          d_src = nullptr, *d_dst = nullptr;
             float            h_src[N], h_dst[N];
@@ -138,8 +141,8 @@ TEST(Alloc, NcclCudaMemcpy)
                 EXPECT_EQ(h_src[i], h_dst[i]) << "Mismatch at index " << i;
             }
             // Free memory
-            hipFree(d_src);
-            hipFree(d_dst);
+            ASSERT_EQ(hipFree(d_src), hipSuccess);
+            ASSERT_EQ(hipFree(d_dst), hipSuccess);
         }
     );
 }
@@ -150,6 +153,9 @@ TEST(Alloc, ZeroElementMemcpy)
         "ZeroElementMemcpy",
         []()
         {
+            // Initialize HIP device in forked process
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
             float *d_src = nullptr, *d_dst = nullptr;
             ASSERT_EQ(hipMalloc(&d_src, sizeof(float)), hipSuccess);
             ASSERT_EQ(hipMalloc(&d_dst, sizeof(float)), hipSuccess);
@@ -157,8 +163,8 @@ TEST(Alloc, ZeroElementMemcpy)
             ncclResult_t result = ncclCudaMemcpy<float>(d_dst, d_src, 0);
             EXPECT_EQ(result, ncclSuccess) << "Zero-element copy should succeed (no-op)";
 
-            hipFree(d_src);
-            hipFree(d_dst);
+            ASSERT_EQ(hipFree(d_src), hipSuccess);
+            ASSERT_EQ(hipFree(d_dst), hipSuccess);
         }
     );
 }
@@ -169,6 +175,9 @@ TEST(Alloc, MemcpyNullSrcOrDstPointer)
         "MemcpyNullSrcOrDstPointer",
         []()
         {
+            // Initialize HIP device in forked process
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
             constexpr size_t N       = 16;
             float*           d_valid = nullptr;
             ASSERT_EQ(hipMalloc(&d_valid, N * sizeof(float)), hipSuccess);
@@ -183,7 +192,7 @@ TEST(Alloc, MemcpyNullSrcOrDstPointer)
             EXPECT_EQ(result, ncclUnhandledCudaError)
                 << "Expected ncclUnhandledCudaError when dst is nullptr";
 
-            hipFree(d_valid);
+            ASSERT_EQ(hipFree(d_valid), hipSuccess);
         }
     );
 }

@@ -38,7 +38,7 @@ class DLMallocTestFixture : public ::testing::Test
     /**
      * @brief Helper type for heap memory
      */
-    using HEAP_T = HeapMemory<HIPAllocator>;
+    using HEAP_T = HeapMemoryType<HIPAllocator>;
 
     /**
      * @brief Helper type for allocation strategy

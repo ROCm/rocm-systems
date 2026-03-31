@@ -12,6 +12,12 @@
 
 #include <thread>
 
+#define HIPCALL(cmd)                                                                          \
+    do {                                                                                      \
+        hipError_t error = (cmd);                                                             \
+        GTEST_ASSERT_EQ(error, hipSuccess);                                                   \
+    } while (0)
+
 namespace RcclUnitTesting
 {
   /**
@@ -27,11 +33,11 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Recorder, ParseJson)
   {
-    setenv("RCCL_REPLAY_FILE", "/tmp/test.json", 1);
-
     int pid = getpid();
     hipStream_t stream;
-    hipStreamCreate(&stream);
+    HIPCALL(hipStreamCreate(&stream));
+
+    setenv("RCCL_REPLAY_FILE", "/tmp/test.json", 1);
 
     int array[] = {2, 3, 5};
     ncclComm comm{.nRanks = 1, .localRank = 1, .localRankToRank = array, .opCount = 8, .planner = {.nTasksColl = 13, .nTasksP2p = 21}};

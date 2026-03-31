@@ -22,7 +22,7 @@ rocDecode has been tested on the following Linux environments:
 
 See `Supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_ for the complete list of ROCm supported Linux environments.
 
-The following prerequisites are installed by the package installer. If you are building and installing using the source code, use the `rocDecode-setup.py <https://github.com/ROCm/rocDecode/blob/develop/rocDecode-setup.py>`_ to install these prerequisites. 
+The following prerequisites are installed by the package installer. If you are building and installing using the source code, use the `rocDecode-setup.py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/rocDecode-setup.py>`_ to install these prerequisites. 
 
 .. note:: 
 

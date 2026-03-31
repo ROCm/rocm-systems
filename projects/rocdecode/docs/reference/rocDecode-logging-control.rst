@@ -12,11 +12,11 @@ The log level can be changed by either setting the log level through the ``ROCDE
 
 The logging levels are:
 
-| 0: Critical (Default level)
-| 1: Error
-| 2: Warning
-| 3: Info
-| 4: Debug
+| 0: Critical (Default level, Only output critical messages)
+| 1: Error (Output critical and error messages)
+| 2: Warning (Output critical, error and warning messages)
+| 3: Info (Output critical, error, warning and info messages)
+| 4: Debug (Output critical, error, warning, info and debug messages)
 
 The log level defines the maximum severity of log messages to output. For example, to output warning and error messages as well as critical messages, ``ROCDEC_LOG_LEVEL`` would need to be set to 2:
 
@@ -32,22 +32,22 @@ or
 
 
 .. |apifolder| replace:: ``api/rocdecode``
-.. _apifolder: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode
+.. _apifolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode
 
 .. |rocparser| replace:: ``api/rocdecode/rocparser.h``
-.. _rocparser: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocparser.h
+.. _rocparser: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocparser.h
 
 .. |rocdecode| replace:: ``api/rocDecode/rocdecode.h``
-.. _rocdecode: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocdecode.h
+.. _rocdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocdecode.h
 
 .. |rocdecodehost| replace:: ``api/rocDecode/rocdecode_host.h``
-.. _rocdecodehost: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocdecode_host.h
+.. _rocdecodehost: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocdecode_host.h
 
 .. |bitstreamreader| replace:: ``api/rocDecode/roc_bitstream_reader.h``
-.. _bitstreamreader: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/roc_bitstream_reader.h
+.. _bitstreamreader: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/roc_bitstream_reader.h
 
 .. |utilsfolder| replace:: ``utils`` folder
-.. _utilsfolder: https://github.com/ROCm/rocDecode/tree/develop/utils
+.. _utilsfolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils
 
 .. |commons| replace:: ``commons.h``
-.. _commons: https://github.com/ROCm/rocDecode/tree/develop/src/commons.h
+.. _commons: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/src/commons.h

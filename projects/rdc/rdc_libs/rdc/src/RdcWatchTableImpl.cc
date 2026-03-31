@@ -260,7 +260,7 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
           it++;
         }
       }  // end for
-    }    // end if
+    }  // end if
   }
   if (unsupported_fields > 0) {
     RDC_LOG(RDC_DEBUG, "Skip watch " << unsupported_fields << " fields as they are not supported.");

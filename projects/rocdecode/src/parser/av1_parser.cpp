@@ -38,8 +38,10 @@ Av1VideoParser::~Av1VideoParser() {
 }
 
 rocDecStatus Av1VideoParser::Initialize(RocdecParserParams *p_params) {
+    FunctionEntryLog(logger_);
     rocDecStatus ret;
     if ((ret = RocVideoParser::Initialize(p_params)) != ROCDEC_SUCCESS) {
+        FunctionExitLog(logger_);
         return ret;
     }
     // Set display delay to at least DECODE_BUF_POOL_EXTENSION (2) to prevent synchronous submission
@@ -47,33 +49,42 @@ rocDecStatus Av1VideoParser::Initialize(RocdecParserParams *p_params) {
         parser_params_.max_display_delay = DECODE_BUF_POOL_EXTENSION;
     }
     CheckAndAdjustDecBufPoolSize(BUFFER_POOL_MAX_SIZE);
+    FunctionExitLog(logger_);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus Av1VideoParser::UnInitialize() {
+    FunctionEntryLog(logger_);
+    FunctionExitLog(logger_);
     return ROCDEC_SUCCESS;
 }
 
-rocDecStatus Av1VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) { 
+rocDecStatus Av1VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
+    FunctionEntryLog(logger_);
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             logger_.ErrorLog(MakeMsg("Error occurred in picture data parsing."));
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
     } else if (!(p_data->flags & ROCDEC_PKT_ENDOFSTREAM)) {
         // If no payload and EOS is not set, treated as invalid.
+        FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     if (p_data->flags & ROCDEC_PKT_ENDOFSTREAM) {
         if (FlushDpb() != PARSER_OK) {
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
     }
+    FunctionExitLog(logger_);
     return ROCDEC_SUCCESS;
 }
 
 ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t pic_data_size) {
+    FunctionEntryLog(logger_);
     ParserResult ret = PARSER_OK;
     pic_data_buffer_ptr_ = (uint8_t*)p_stream;
     pic_data_size_ = pic_data_size;
@@ -92,10 +103,12 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
             case kObuFrameHeader: {
                 if (seen_frame_header_ != 0) {
                     logger_.ErrorLog(MakeMsg("If obu_type is equal to OBU_FRAME_HEADER, it is a requirement of bitstream conformance that SeenFrameHeader is equal to 0."));
+                    FunctionExitLog(logger_);
                     return PARSER_INVALID_ARG;
                 }
                 int bytes_parsed;
                 if ((ret = ParseFrameHeaderObu(pic_data_buffer_ptr_ + obu_byte_offset_, obu_size_, &bytes_parsed)) != PARSER_OK) {
+                    FunctionExitLog(logger_);
                     return ret;
                 }
                 break;
@@ -103,10 +116,12 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
             case kObuRedundantFrameHeader: {
                 if (seen_frame_header_ != 1) {
                     logger_.ErrorLog(MakeMsg("If obu_type is equal to OBU_REDUNDANT_FRAME_HEADER, it is a requirement of bitstream conformance that SeenFrameHeader is equal to 1."));
+                    FunctionExitLog(logger_);
                     return PARSER_INVALID_ARG;
                 }
                 int bytes_parsed;
                 if ((ret = ParseFrameHeaderObu(pic_data_buffer_ptr_ + obu_byte_offset_, obu_size_, &bytes_parsed)) != PARSER_OK) {
+                    FunctionExitLog(logger_);
                     return ret;
                 }
                 break;
@@ -125,6 +140,7 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     }
                 } else {
                     logger_.ErrorLog(MakeMsg("Frame OBU size error."));
+                    FunctionExitLog(logger_);
                     return PARSER_OUT_OF_RANGE;
                 }
                 break;
@@ -142,6 +158,7 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         // Init Roc decoder for the first time or reconfigure the existing decoder
         if (new_seq_activated_) {
             if ((ret = NotifyNewSequence(&seq_header_, &frame_header_)) != PARSER_OK) {
+                FunctionExitLog(logger_);
                 return ret;
             }
             new_seq_activated_ = false;
@@ -152,6 +169,7 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
             int disp_idx = dpb_buffer_.virtual_buffer_index[frame_header_.frame_to_show_map_idx];
             if (disp_idx == INVALID_INDEX) {
                 logger_.ErrorLog(MakeMsg("Invalid existing frame index to show."));
+                FunctionExitLog(logger_);
                 return PARSER_INVALID_ARG;
             }
             if (pfn_display_picture_cb_) {
@@ -165,6 +183,7 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                 // Insert into output/display picture list
                 if (num_output_pics_ >= dec_buf_pool_size_) {
                     logger_.ErrorLog(MakeMsg("Display list size larger than decode buffer pool size!"));
+                    FunctionExitLog(logger_);
                     return PARSER_OUT_OF_RANGE;
                 } else {
                     output_pic_list_[num_output_pics_] = disp_idx;
@@ -172,32 +191,39 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                 }
             }
             if ((ret = DecodeFrameWrapup()) != PARSER_OK) {
+                FunctionExitLog(logger_);
                 return ret;
             }
         } else if (tile_group_data_.num_tiles_parsed && tile_group_data_.num_tiles_parsed == tile_group_data_.num_tiles) {
             if ((ret = FindFreeInDecBufPool()) != PARSER_OK) {
+                FunctionExitLog(logger_);
                 return ret;
             }
             if ((ret = FindFreeInDpbAndMark()) != PARSER_OK) {
+                FunctionExitLog(logger_);
                 return ret;
             }
             if ((ret = SendPicForDecode()) != PARSER_OK) {
                 logger_.ErrorLog(MakeMsg(STR("Failed to decode!")));
+                FunctionExitLog(logger_);
                 return ret;
             }
             pic_count_++;
             dpb_buffer_.dec_ref_count[curr_pic_.pic_idx]--;
             memset(&tile_group_data_, 0, sizeof(Av1TileGroupDataInfo));
             if ((ret = DecodeFrameWrapup()) != PARSER_OK) {
+                FunctionExitLog(logger_);
                 return ret;
             }
             CheckAndUpdateDecStatus();
         }
     };
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 
 ParserResult Av1VideoParser::NotifyNewSequence(Av1SequenceHeader *p_seq_header, Av1FrameHeader *p_frame_header) {
+    FunctionEntryLog(logger_);
     video_format_params_.codec = rocDecVideoCodec_AV1;
     video_format_params_.frame_rate.numerator = frame_rate_.numerator;
     video_format_params_.frame_rate.denominator = frame_rate_.denominator;
@@ -244,15 +270,16 @@ ParserResult Av1VideoParser::NotifyNewSequence(Av1SequenceHeader *p_seq_header, 
     // callback function with RocdecVideoFormat params filled out
     if (pfn_sequence_cb_(parser_params_.user_data, &video_format_params_) == 0) {
         logger_.ErrorLog(MakeMsg("Sequence callback function failed."));
+        FunctionExitLog(logger_);
         return PARSER_FAIL;
     } else {
+        FunctionExitLog(logger_);
         return PARSER_OK;
     }
-    
-    return PARSER_OK;
 }
 
 ParserResult Av1VideoParser::SendPicForDecode() {
+    FunctionEntryLog(logger_);
     int i, j;
     Av1SequenceHeader *p_seq_header = &seq_header_;
     Av1FrameHeader *p_frame_header = &frame_header_;
@@ -480,8 +507,10 @@ ParserResult Av1VideoParser::SendPicForDecode() {
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         logger_.ErrorLog(MakeMsg("Decode error occurred."));
+        FunctionExitLog(logger_);
         return PARSER_FAIL;
     } else {
+        FunctionExitLog(logger_);
         return PARSER_OK;
     }
 }
@@ -749,6 +778,7 @@ ParserResult Av1VideoParser::ReadObuHeaderAndSize() {
 }
 
 ParserResult Av1VideoParser::ParseSequenceHeaderObu(uint8_t *p_stream, size_t size) {
+    FunctionEntryLog(logger_);
     Av1SequenceHeader *p_seq_header = &seq_header_;
     size_t offset = 0;  // current bit offset
 
@@ -926,10 +956,12 @@ ParserResult Av1VideoParser::ParseSequenceHeaderObu(uint8_t *p_stream, size_t si
         CheckAndAdjustDecBufPoolSize(BUFFER_POOL_MAX_SIZE * 2);
     }
     p_seq_header->is_received = 1;
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 
 ParserResult Av1VideoParser::ParseFrameHeaderObu(uint8_t *p_stream, size_t size, int *p_bytes_parsed) {
+    FunctionEntryLog(logger_);
     if (seen_frame_header_ == 1) {
         // frame_header_copy(). Use the existing frame_header_obu
     } else {
@@ -948,10 +980,12 @@ ParserResult Av1VideoParser::ParseFrameHeaderObu(uint8_t *p_stream, size_t size,
     curr_pic_.current_frame_id = frame_header_.current_frame_id;
     curr_pic_.order_hint = frame_header_.order_hint;
     curr_pic_.frame_type = frame_header_.frame_type;
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 
 ParserResult Av1VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t size, int *p_bytes_parsed) {
+    FunctionEntryLog(logger_);
     ParserResult ret = PARSER_OK;
     size_t offset = 0;  // current bit offset
     Av1SequenceHeader *p_seq_header = &seq_header_;
@@ -1290,10 +1324,12 @@ ParserResult Av1VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
 
     *p_bytes_parsed = (offset + 7) >> 3;
     p_frame_header->is_received = 1;
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 
 ParserResult Av1VideoParser::ParseTileGroupObu(uint8_t *p_stream, size_t size) {
+    FunctionEntryLog(logger_);
     size_t offset = 0;  // current bit offset
     Av1FrameHeader *p_frame_header = &frame_header_;
     Av1TileGroupDataInfo *p_tile_group = &tile_group_data_;
@@ -1375,6 +1411,7 @@ ParserResult Av1VideoParser::ParseTileGroupObu(uint8_t *p_stream, size_t size) {
         }
         seen_frame_header_ = 0;
     }
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 

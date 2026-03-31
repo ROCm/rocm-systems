@@ -63,6 +63,9 @@ output_config::parse_env()
     tmp_directory  = common::get_env("ROCPROF_TMPDIR", tmp_directory);
     kernel_rename  = common::get_env("ROCPROF_KERNEL_RENAME", false);
     group_by_queue = common::get_env("ROCPROF_GROUP_BY_QUEUE", false);
+    annotate_args  = common::get_env("ROCPROF_ANNOTATE_ARGS", false);
+    annotate_kfd   = common::get_env("ROCPROF_ANNOTATE_KFD", false);
+    annotate_pmc   = common::get_env("ROCPROF_ANNOTATE_PMC", false);
     auto to_upper  = [](std::string val) {
         for(auto& vitr : val)
             vitr = toupper(vitr);

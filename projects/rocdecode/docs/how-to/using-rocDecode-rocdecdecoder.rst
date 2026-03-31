@@ -236,10 +236,10 @@ From the ``rocdecdecode.cpp`` sample:
 Once decoding is complete, ``rocDecDestroyVideoParser()`` needs to be called to destroy the parser, and either ``rocDecDestroyDecoderHost()`` or ``rocDecDestroyDecoder()`` needs to be called to destroy the decoder.
 
 .. |rocdecdecode| replace:: ``rocdecdecode``
-.. _rocdecdecode: https://github.com/ROCm/rocDecode/tree/develop/samples/rocdecDecode/README.md
+.. _rocdecdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/rocdecDecode/README.md
 
 .. |apifolder| replace:: ``api/rocdecode/``
-.. _apifolder: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode
+.. _apifolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode
 
 .. |utilsfolder| replace:: ``utils`` folder
-.. _utilsfolder: https://github.com/ROCm/rocDecode/tree/develop/utils
+.. _utilsfolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils

@@ -30,10 +30,13 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 
-#include "api.hpp"
+#include "hw_counter_query.hpp"
+
+#include "core/amd_smi.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
-#include "library/rocm.hpp"
+#include "core/rocprofiler-sdk.hpp"
+#include "core/state.hpp"
 
 #include <timemory/components.hpp>
 #include <timemory/components/definition.hpp>
@@ -79,41 +82,45 @@ namespace
 {
 template <typename IntArrayT, typename BoolArrayT>
 IntArrayT
-compute_max_columns(IntArrayT _widths, BoolArrayT _using);
+compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_opts);
 
 template <typename Tp>
 void
-write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark);
+write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
+            const format_options& fmt_opts);
 
 template <typename Tp, typename IntArrayT, size_t N>
 void
 write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
-                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use);
+                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
+                 format_options& fmt_opts);
 
 template <typename IntArrayT, size_t N>
 string_t
-banner(IntArrayT _breaks, std::array<bool, N> _use, char filler = '-', char delim = '|');
+banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts,
+       char filler = '-', char delim = '|');
 
 template <typename IntArrayT, size_t N>
 string_t
-wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, char filler = ' ',
-     char delim = '|');
+wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts,
+     char filler = ' ', char delim = '|');
 }  // namespace
 
 template <size_t N = num_component_options>
 void
 write_component_info(std::ostream&, const array_t<bool, N>&, const array_t<bool, N>&,
-                     const array_t<string_t, N>&);
+                     const array_t<string_t, N>&, format_options& fmt_opts);
 
 template <size_t N = num_settings_options>
 void
-write_settings_info(std::ostream&, const array_t<bool, N>& = {},
+write_settings_info(std::ostream&, format_options& fmt_opts, const array_t<bool, N>& = {},
                     const array_t<bool, N>& = {}, const array_t<string_t, N>& = {});
 
 template <size_t N = num_hw_counter_options>
 void
-write_hw_counter_info(std::ostream&, const array_t<bool, N>& = {},
-                      const array_t<bool, N>& = {}, const array_t<string_t, N>& = {});
+write_hw_counter_info(std::ostream&, format_options& fmt_opts,
+                      const array_t<bool, N>& = {}, const array_t<bool, N>& = {},
+                      const array_t<string_t, N>& = {});
 
 namespace
 {
@@ -136,9 +143,8 @@ main(int argc, char** argv)
     (void) timemory_hash_aliases;  //
 
     tim::unwind::set_bfd_verbose(3);
-    tim::set_env("ROCPROFSYS_INIT_TOOLING", "OFF", 1);
-    rocprofsys_init_library();
-    gpu_count = rocprofsys::gpu::device_count();
+    rocprofsys::set_state(rocprofsys::State::Init);
+    rocprofsys::config::configure_settings(false);
 
     std::set<std::string> _category_options = component_categories{}();
     {
@@ -162,14 +168,16 @@ main(int argc, char** argv)
     _category_options.emplace("hw_counters::CPU");
     _category_options.emplace("hw_counters::GPU");
 
+    format_options fmt_opts{};
+
     array_t<bool, TOTAL> options    = { false, false, false, false, false, false, false };
     array_t<string_t, TOTAL> fields = {};
     array_t<bool, TOTAL>     use_mark = {};
 
     std::string cols_via{};
-    std::tie(num_cols, cols_via) = tim::utility::console::get_columns();
+    std::tie(fmt_opts.num_cols, cols_via) = tim::utility::console::get_columns();
     std::string col_msg =
-        ". default: " + std::to_string(num_cols) + " [via " + cols_via + "]";
+        ". default: " + std::to_string(fmt_opts.num_cols) + " [via " + cols_via + "]";
 
     fields[VAL]      = "VALUE_TYPE";
     fields[ENUM]     = "ENUMERATION";
@@ -241,8 +249,8 @@ main(int argc, char** argv)
     parser.add_argument({ "-a", "--all" }, "Print all available info")
         .max_count(1)
         .action([&](parser_t& p) {
-            all_info = p.get<bool>("all");
-            if(all_info)
+            fmt_opts.all_info = p.get<bool>("all");
+            if(fmt_opts.all_info)
             {
                 for(auto& itr : options)
                     itr = true;
@@ -258,7 +266,9 @@ main(int argc, char** argv)
         .add_argument({ "--advanced" },
                       "Print advanced settings not relevant to most use cases")
         .max_count(1)
-        .action([](parser_t& p) { print_advanced = p.get<bool>("advanced"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.print_advanced = p.get<bool>("advanced");
+        });
 
     parser
         .add_argument({ "--list-categories" },
@@ -271,7 +281,7 @@ main(int argc, char** argv)
         });
     parser.add_argument({ "--list-keys" }, "List the output keys")
         .max_count(1)
-        .action([](parser_t& p) {
+        .action([&fmt_opts](parser_t& p) {
             auto _list = p.get<bool>("list-keys");
             auto _show = p.get<bool>("expand-keys");
             if(_list)
@@ -290,7 +300,7 @@ main(int argc, char** argv)
                 std::stringstream _msg{};
                 _msg << std::left;
 
-                if(markdown)
+                if(fmt_opts.markdown)
                 {
                     _msg << "| " << std::setw(std::get<0>(_w) + 2) << "String";
                     if(_show) _msg << " | " << std::setw(std::get<1>(_w)) << "Value";
@@ -344,7 +354,9 @@ main(int argc, char** argv)
         .add_argument({ "--expand-keys" },
                       "Expand the output keys to their current values")
         .max_count(1)
-        .action([](parser_t& p) { expand_keys = p.get<bool>("expand-keys"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.expand_keys = p.get<bool>("expand-keys");
+        });
 
     parser.start_group("FILTER");
 
@@ -352,7 +364,9 @@ main(int argc, char** argv)
         .add_argument({ "-A", "--available" },
                       "Only display available components/settings/hw-counters")
         .max_count(1)
-        .action([](parser_t& p) { available_only = p.get<bool>("available"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.available_only = p.get<bool>("available");
+        });
     parser
         .add_argument({ "-r", "--filter" },
                       "Filter the output according to provided regex (egrep + "
@@ -382,13 +396,16 @@ main(int argc, char** argv)
         .action([](parser_t&) { regex_hl = true; });
     parser.add_argument({ "--alphabetical" }, "Sort the output alphabetically")
         .max_count(1)
-        .action([](parser_t& p) { alphabetical = p.get<bool>("alphabetical"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.alphabetical = p.get<bool>("alphabetical");
+        });
 
     parser.start_group("COLUMN");
 
     parser.add_argument({ "-b", "--brief" }, "Suppress availability/value info")
         .max_count(1)
-        .action([](parser_t& p) { force_brief = p.get<bool>("brief"); });
+        .action(
+            [&fmt_opts](parser_t& p) { fmt_opts.force_brief = p.get<bool>("brief"); });
     parser.add_argument({ "-d", "--description" }, "Display the component description")
         .max_count(1);
     parser.add_argument({ "-s", "--string" }, "Display all acceptable string identifiers")
@@ -417,17 +434,21 @@ main(int argc, char** argv)
                       "if w > 0, truncate any columns greater than this width")
         .count(1)
         .dtype("int")
-        .action([](parser_t& p) { max_width = p.get<int32_t>("column-width"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.max_width = p.get<int32_t>("column-width");
+        });
     parser
         .add_argument(
             { "-W", "--max-total-width" },
             std::string{ "if W > 0, truncate the total width of all the columns to this "
                          "value. Set '-w 0 -W 0' to remove all truncation" } +
                 col_msg)
-        .set_default(num_cols)
+        .set_default(fmt_opts.num_cols)
         .count(1)
         .dtype("int")
-        .action([](parser_t& p) { num_cols = p.get<int32_t>("max-total-width"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.num_cols = p.get<int32_t>("max-total-width");
+        });
 
     parser.start_group("OUTPUT");
 
@@ -470,23 +491,30 @@ main(int argc, char** argv)
         });
     parser.add_argument({ "-M", "--markdown" }, "Write data in markdown")
         .max_count(1)
-        .action([](parser_t& p) { markdown = p.get<bool>("markdown"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.markdown = p.get<bool>("markdown");
+            markdown          = fmt_opts.markdown;
+        });
     parser.add_argument({ "--csv" }, "Write data in csv")
         .max_count(1)
-        .action([](parser_t& p) {
-            csv = p.get<bool>("csv");
-            if(!p.exists("csv-separator")) global_delim = ",";
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.csv = p.get<bool>("csv");
+            csv          = fmt_opts.csv;
+            if(!p.exists("csv-separator")) fmt_opts.delim = ",";
         });
     parser
         .add_argument({ "--csv-separator" },
                       "Use the provided string instead of a ',' to separate values")
         .max_count(1)
-        .action([](parser_t& p) { global_delim = p.get<std::string>("csv-separator"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.delim = p.get<std::string>("csv-separator");
+        });
     parser
         .add_argument({ "--force" },
                       "Force the generation of an configuration file even if it exists")
         .max_count(1)
-        .action([](parser_t& p) { force_config = p.get<bool>("force"); });
+        .action(
+            [&fmt_opts](parser_t& p) { fmt_opts.force_config = p.get<bool>("force"); });
 
     parser.end_group();
 
@@ -507,31 +535,6 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-#if ROCPROFSYS_USE_ROCM > 0
-    if(gpu_count > 0)
-    {
-        size_t _num_metrics = 0;
-        try
-        {
-            // call to rocm_events() will add choices to ROCPROFSYS_ROCM_EVENTS setting
-            // so always perform this call even if list of HW counters is not requested
-            _num_metrics = rocprofsys::rocm::rocm_events().size();
-        } catch(std::runtime_error& _e)
-        {
-            verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
-        } catch(std::exception& _e)
-        {
-            verbprintf(0, "Exception retrieving GPU HW counters: %s", _e.what());
-        }
-        verbprintf(1, "Found %i HIP devices and %zu GPU HW counters\n", gpu_count,
-                   _num_metrics);
-    }
-    else
-    {
-        verbprintf(1, "No HIP devices found. GPU HW counters will not be available\n");
-    }
-#endif
-
     auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
         using Tp = decay_t<decltype(_var)>;
         if(parser.exists(_opt)) _var = parser.get<Tp>(_opt);
@@ -547,6 +550,45 @@ main(int argc, char** argv)
     _parser_set_if_exists(include_settings, "settings");
     _parser_set_if_exists(include_hw_counters, "hw-counters");
 
+    // Always register ROCm/SMI settings so they appear in settings queries
+    // (e.g., rocprof-sys-avail -bd -r ROCM). These functions query the
+    // rocprofiler-sdk and AMD SMI to discover available domains and metrics.
+    {
+        const auto& _config = tim::settings::shared_instance();
+        rocprofsys::rocprofiler_sdk::config_settings(_config);
+        rocprofsys::amd_smi::config_settings(_config);
+    }
+
+    // Only query GPU devices and hardware counters when they are actually
+    // requested. This avoids initializing the ROCm runtime for settings-only
+    // or component-only queries, reducing startup time and allowing
+    // rocprof-sys-avail to work in environments without GPU/ROCm.
+    if(include_hw_counters)
+    {
+        gpu_count = rocprofsys::gpu::device_count();
+        if(gpu_count > 0)
+        {
+            size_t _num_metrics = 0;
+            try
+            {
+                _num_metrics = rocprofsys::avail::query_gpu_hw_counters().size();
+            } catch(std::runtime_error& _e)
+            {
+                verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
+            } catch(std::exception& _e)
+            {
+                verbprintf(0, "Exception retrieving GPU HW counters: %s", _e.what());
+            }
+            verbprintf(1, "Found %i HIP devices and %zu GPU HW counters\n", gpu_count,
+                       _num_metrics);
+        }
+        else
+        {
+            verbprintf(1,
+                       "No HIP devices found. GPU HW counters will not be available\n");
+        }
+    }
+
     if(parser.exists("generate-config"))
     {
         if(_config_file.empty())
@@ -555,7 +597,7 @@ main(int argc, char** argv)
             throw std::runtime_error("Error! No config output formats specified!");
         try
         {
-            generate_config(_config_file, _config_fmts, options);
+            generate_config(_config_file, _config_fmts, options, fmt_opts);
         } catch(std::runtime_error& _e)
         {
             std::cerr << "[rocprof-sys-avail] " << _e.what() << std::endl;
@@ -593,14 +635,14 @@ main(int argc, char** argv)
 
     if(category_view.count("advanced") > 0 ||
        category_view.count("settings::advanced") > 0)
-        print_advanced = true;
+        fmt_opts.print_advanced = true;
 
     if(category_view.empty()) category_view = _category_options;
 
     if(!include_components && !include_settings && !include_hw_counters)
         include_settings = true;
 
-    if(markdown || include_hw_counters) padding = 6;
+    if(fmt_opts.markdown || include_hw_counters) fmt_opts.padding = 6;
 
     std::ostream* os = nullptr;
     std::ofstream ofs;
@@ -625,21 +667,24 @@ main(int argc, char** argv)
 
     if(include_components)
     {
-        write_component_info(*os, options, use_mark, fields);
+        write_component_info(*os, options, use_mark, fields, fmt_opts);
     }
     dump_log();
 
     if(include_settings)
     {
         write_settings_info(
-            *os, { options[VAL], options[LANG], options[DESC], options[CATEGORY] });
+            *os, fmt_opts,
+            { options[VAL], options[LANG], options[DESC], options[CATEGORY] });
     }
     dump_log();
 
     if(include_hw_counters)
     {
-        write_hw_counter_info(*os, { true, true, !force_brief && !available_only,
-                                     !force_brief && !options[DESC], options[DESC] });
+        write_hw_counter_info(*os, fmt_opts,
+                              { true, true,
+                                !fmt_opts.force_brief && !fmt_opts.available_only,
+                                !fmt_opts.force_brief && !options[DESC], options[DESC] });
     }
     dump_log();
 
@@ -657,14 +702,15 @@ main(int argc, char** argv)
 template <size_t N>
 void
 write_component_info(std::ostream& os, const array_t<bool, N>& options,
-                     const array_t<bool, N>& _mark, const array_t<string_t, N>& fields)
+                     const array_t<bool, N>& _mark, const array_t<string_t, N>& fields,
+                     format_options& fmt_opts)
 {
     static_assert(N >= num_component_options,
                   "Error! Too few component options + fields");
 
     std::vector<info_type> _info = get_component_info<TIMEMORY_COMPONENTS_END>();
 
-    if(available_only)
+    if(fmt_opts.available_only)
         _info.erase(std::remove_if(_info.begin(), _info.end(),
                                    [](const auto& itr) { return !itr.is_available(); }),
                     _info.end());
@@ -693,24 +739,24 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     using width_type = std::vector<int64_t>;
     using width_bool = std::array<bool, N + 2>;
 
-    auto       _available_column = !force_brief && !available_only;
+    auto       _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
     width_type _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
     width_bool _wusing           = width_bool{ true, _available_column };
-    int64_t    pad               = padding;
+    int64_t    pad               = fmt_opts.padding;
     for(size_t i = 0; i < options.size(); ++i)
         _wusing[i + 2] = options[i];
 
     {
         constexpr size_t idx = 0;
         stringstream_t   ss;
-        write_entry(ss, "COMPONENT", _widths.at(0), false, true);
+        write_entry(ss, "COMPONENT", _widths.at(0), false, true, fmt_opts);
         _widths.at(idx) = std::max<int64_t>(ss.str().length() + pad, _widths.at(idx));
     }
 
     {
         constexpr size_t idx = 1;
         stringstream_t   ss;
-        write_entry(ss, "AVAILABLE", _widths.at(1), true, false);
+        write_entry(ss, "AVAILABLE", _widths.at(1), true, false, fmt_opts);
         _widths.at(idx) = std::max<int64_t>(ss.str().length() + pad, _widths.at(idx));
     }
 
@@ -719,12 +765,12 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         constexpr size_t idx = 2;
         stringstream_t   ss;
         if(!options[i]) continue;
-        write_entry(ss, fields[i], _widths.at(i + 2), true, _mark.at(idx));
+        write_entry(ss, fields[i], _widths.at(i + 2), true, _mark.at(idx), fmt_opts);
         _widths.at(idx + i) =
             std::max<int64_t>(ss.str().length() + pad, _widths.at(idx + i));
     }
 
-    if(alphabetical)
+    if(fmt_opts.alphabetical)
     {
         std::sort(_info.begin(), _info.end(), [](const auto& lhs, const auto& rhs) {
             return std::get<0>(lhs) < std::get<0>(rhs);
@@ -738,21 +784,21 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             int               _selected = 0;
             std::stringstream ss;
             _selected += (is_selected(std::get<0>(itr))) ? 1 : 0;
-            write_entry(ss, std::get<0>(itr), _widths.at(0), false, true);
+            write_entry(ss, std::get<0>(itr), _widths.at(0), false, true, fmt_opts);
             if(_available_column)
             {
                 std::stringstream _avss{};
                 _avss << std::boolalpha << std::get<1>(itr);
                 _selected += (is_selected(_avss.str())) ? 1 : 0;
             }
-            write_entry(ss, std::get<1>(itr), _widths.at(1), true, false);
+            write_entry(ss, std::get<1>(itr), _widths.at(1), true, false, fmt_opts);
             for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
             {
                 if(!options[i]) continue;
                 bool center = (i > 0) ? false : true;
                 _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
-                            _mark.at(i));
+                            _mark.at(i), fmt_opts);
             }
 
             if(!category_regex_keys.empty())
@@ -765,14 +811,14 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         {
             constexpr size_t idx = 0;
             stringstream_t   ss;
-            write_entry(ss, std::get<idx>(itr), 0, true, true);
+            write_entry(ss, std::get<idx>(itr), 0, true, true, fmt_opts);
             _widths.at(idx) = std::max<int64_t>(ss.str().length() + pad, _widths.at(idx));
         }
 
         {
             constexpr size_t idx = 1;
             stringstream_t   ss;
-            write_entry(ss, std::get<idx>(itr), 0, true, false);
+            write_entry(ss, std::get<idx>(itr), 0, true, false, fmt_opts);
             _widths.at(idx) = std::max<int64_t>(ss.str().length() + pad, _widths.at(idx));
         }
 
@@ -780,7 +826,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
         {
             stringstream_t ss;
-            write_entry(ss, std::get<idx>(itr)[i], 0, true, _mark.at(idx));
+            write_entry(ss, std::get<idx>(itr)[i], 0, true, _mark.at(idx), fmt_opts);
             _widths.at(idx + i) =
                 std::max<int64_t>(ss.str().length() + pad, _widths.at(idx + i));
         }
@@ -788,33 +834,34 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
     dump_log();
 
-    _widths = compute_max_columns(_widths, _wusing);
+    _widths = compute_max_columns(_widths, _wusing, fmt_opts);
 
-    if(!markdown && !csv) os << banner(_widths, _wusing, '-');
+    if(!fmt_opts.markdown && !fmt_opts.csv) os << banner(_widths, _wusing, fmt_opts, '-');
 
-    if(!csv) os << global_delim;
-    write_entry(os, "COMPONENT", _widths.at(0), true, false);
-    if(_available_column) write_entry(os, "AVAILABLE", _widths.at(1), true, false);
+    if(!fmt_opts.csv) os << fmt_opts.delim;
+    write_entry(os, "COMPONENT", _widths.at(0), true, false, fmt_opts);
+    if(_available_column)
+        write_entry(os, "AVAILABLE", _widths.at(1), true, false, fmt_opts);
     for(size_t i = 0; i < fields.size(); ++i)
     {
         if(!options[i]) continue;
-        write_entry(os, fields[i], _widths.at(i + 2), true, false);
+        write_entry(os, fields[i], _widths.at(i + 2), true, false, fmt_opts);
     }
 
-    os << "\n" << banner(_widths, _wusing, '-');
+    os << "\n" << banner(_widths, _wusing, fmt_opts, '-');
 
     for(const auto& itr : _info)
     {
         int               _selected = 0;
         std::stringstream ss;
         _selected += (is_selected(std::get<0>(itr))) ? 1 : 0;
-        write_entry(ss, std::get<0>(itr), _widths.at(0), false, true);
+        write_entry(ss, std::get<0>(itr), _widths.at(0), false, true, fmt_opts);
         if(_available_column)
         {
             std::stringstream _avss{};
             _avss << std::boolalpha << std::get<1>(itr);
             _selected += (is_selected(_avss.str())) ? 1 : 0;
-            write_entry(ss, std::get<1>(itr), _widths.at(1), true, false);
+            write_entry(ss, std::get<1>(itr), _widths.at(1), true, false, fmt_opts);
         }
         for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
         {
@@ -823,10 +870,10 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
             if(fields.at(i) == "DESCRIPTION")
                 write_wrap_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
-                                 _mark.at(i), i + 2, _widths, _wusing);
+                                 _mark.at(i), i + 2, _widths, _wusing, fmt_opts);
             else
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
-                            _mark.at(i));
+                            _mark.at(i), fmt_opts);
         }
 
         if(!category_regex_keys.empty())
@@ -834,7 +881,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
         if(_selected > 0)
         {
-            os << global_delim;
+            os << fmt_opts.delim;
             os << hl_selected(ss.str());
             os << "\n";
         }
@@ -842,7 +889,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
     dump_log();
 
-    if(!markdown) os << banner(_widths, _wusing, '-');
+    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
 }
 
 //======================================================================================//
@@ -853,8 +900,9 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
 template <size_t N>
 void
-write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
-                    const array_t<bool, N>&, const array_t<string_t, N>&)
+write_settings_info(std::ostream& os, format_options& fmt_opts,
+                    const array_t<bool, N>& opts, const array_t<bool, N>&,
+                    const array_t<string_t, N>&)
 {
     static_assert(N >= num_settings_options, "Error! Too few settings options + fields");
 
@@ -866,7 +914,7 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
 
     width_type _widths = { 0, 0, 0, 0, 0, 0, 0, 0 };
     width_bool _wusing = {
-        true, !force_brief, opts[0], opts[1], opts[1], opts[1], opts[2], opts[3],
+        true, !fmt_opts.force_brief, opts[0], opts[1], opts[1], opts[1], opts[2], opts[3],
     };
     width_bool _mark = { false, false, false, true, true, true, false, false };
 
@@ -876,7 +924,7 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
     cereal::SettingsTextArchive settings_archive{ _setting_output, settings_exclude };
     settings::serialize_settings(settings_archive);
 
-    if(expand_keys)
+    if(fmt_opts.expand_keys)
     {
         for(auto& itr : _setting_output)
         {
@@ -904,7 +952,7 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
             {
                 if(category_view.count(citr) > 0) _found = true;
             }
-            if(!print_advanced && _categories.count("settings::advanced") > 0)
+            if(!fmt_opts.print_advanced && _categories.count("settings::advanced") > 0)
             {
                 if(!sitr->second->get_config_updated() &&
                    !sitr->second->get_environ_updated())
@@ -942,7 +990,7 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
                                          }),
                           _setting_output.end());
 
-    if(available_only)
+    if(fmt_opts.available_only)
     {
         _setting_output.erase(
             std::remove_if(_setting_output.begin(), _setting_output.end(),
@@ -955,7 +1003,7 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
             _setting_output.end());
     }
 
-    if(alphabetical)
+    if(fmt_opts.alphabetical)
     {
         std::sort(_setting_output.begin(), _setting_output.end(),
                   [](const auto& lhs, const auto& rhs) {
@@ -978,8 +1026,8 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
     for(size_t i = 0; i < _widths.size(); ++i)
     {
         if(_wusing.at(i))
-            _widths.at(i) =
-                std::max<uint64_t>(_widths.at(i), _labels.at(i).size() + padding);
+            _widths.at(i) = std::max<uint64_t>(_widths.at(i),
+                                               _labels.at(i).size() + fmt_opts.padding);
         else
             _widths.at(i) = 0;
     }
@@ -1006,9 +1054,10 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
         {
             if(!_wusing.at(i)) continue;
             _widths.at(i) =
-                std::max<uint64_t>(_widths.at(i), itr.at(i).length() + padding);
+                std::max<uint64_t>(_widths.at(i), itr.at(i).length() + fmt_opts.padding);
             _selected += (is_selected(itr.at(i))) ? 1 : 0;
-            write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i));
+            write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
+                        fmt_opts);
         }
 
         if(_selected == 0)
@@ -1020,17 +1069,17 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
 
     dump_log();
 
-    _widths = compute_max_columns(_widths, _wusing);
+    _widths = compute_max_columns(_widths, _wusing, fmt_opts);
 
-    if(!markdown) os << banner(_widths, _wusing, '-');
+    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
 
-    if(!csv) os << global_delim;
+    if(!fmt_opts.csv) os << fmt_opts.delim;
     for(size_t i = 0; i < _labels.size(); ++i)
     {
         if(!_wusing.at(i)) continue;
-        write_entry(os, _labels.at(i), _widths.at(i), true, false);
+        write_entry(os, _labels.at(i), _widths.at(i), true, false, fmt_opts);
     }
-    os << "\n" << banner(_widths, _wusing, '-');
+    os << "\n" << banner(_widths, _wusing, fmt_opts, '-');
 
     for(const auto& itr : _results)
     {
@@ -1042,14 +1091,15 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
             _selected += (is_selected(itr.at(i))) ? 1 : 0;
             if(_labels.at(i) == "DESCRIPTION")
                 write_wrap_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
-                                 i, _widths, _wusing);
+                                 i, _widths, _wusing, fmt_opts);
             else
-                write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i));
+                write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
+                            fmt_opts);
         }
 
         if(_selected > 0)
         {
-            if(!csv) os << global_delim;
+            if(!fmt_opts.csv) os << fmt_opts.delim;
             os << hl_selected(ss.str());
             os << "\n";
         }
@@ -1057,7 +1107,7 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
 
     dump_log();
 
-    if(!markdown) os << banner(_widths, _wusing, '-');
+    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
 }
 
 //======================================================================================//
@@ -1068,8 +1118,9 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
 
 template <size_t N>
 void
-write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
-                      const array_t<bool, N>&, const array_t<string_t, N>&)
+write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
+                      const array_t<bool, N>& options, const array_t<bool, N>&,
+                      const array_t<string_t, N>&)
 {
     static_assert(N >= num_hw_counter_options,
                   "Error! Too few hw counter options + fields");
@@ -1080,7 +1131,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
 
     auto _papi_events = tim::papi::available_events_info({ "perf_event_uncore" });
     auto _rocm_events =
-        (gpu_count > 0) ? rocprofsys::rocm::rocm_events() : hwcounter_info_t{};
+        (gpu_count > 0) ? rocprofsys::avail::query_gpu_hw_counters() : hwcounter_info_t{};
 
     // Tag overflow events by modifying both short and long descriptions upfront
     {
@@ -1135,7 +1186,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
 
         for(const auto& itr : fitr.second)
         {
-            if(available_only && !itr.available()) continue;
+            if(fmt_opts.available_only && !itr.available()) continue;
             std::stringstream ss;
             int               _selected = 0;
             if(options[0])
@@ -1183,7 +1234,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     for(size_t i = 0; i < _widths.size(); ++i)
     {
         // don't account for AVAILABLE or "DEVICE"
-        if(i != 1 && i != 2) _widths.at(i) = _labels.at(i).length() + padding;
+        if(i != 1 && i != 2) _widths.at(i) = _labels.at(i).length() + fmt_opts.padding;
         _wusing.at(i) = options[i];
     }
 
@@ -1195,7 +1246,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
                                 (int64_t) itr.short_description().length(),
                                 (int64_t) itr.long_description().length() } };
             for(auto& witr : _w)
-                witr += padding;
+                witr += fmt_opts.padding;
 
             for(size_t i = 0; i < N; ++i)
             {
@@ -1205,16 +1256,17 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
         }
     }
 
-    _widths = compute_max_columns(_widths, _wusing);
+    _widths = compute_max_columns(_widths, _wusing, fmt_opts);
 
-    if(!markdown) os << banner(_widths, _wusing, '-');
-    if(!csv) os << global_delim;
+    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
+    if(!fmt_opts.csv) os << fmt_opts.delim;
 
     for(size_t i = 0; i < _labels.size(); ++i)
     {
-        if(options[i]) write_entry(os, _labels.at(i), _widths.at(i), true, false);
+        if(options[i])
+            write_entry(os, _labels.at(i), _widths.at(i), true, false, fmt_opts);
     }
-    os << "\n" << banner(_widths, _wusing, '-');
+    os << "\n" << banner(_widths, _wusing, fmt_opts, '-');
 
     for(const auto& fitr : fields)
     {
@@ -1226,17 +1278,19 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
             std::stringstream ss;
             if(options[0])
             {
-                write_entry(ss, itr.symbol(), _widths.at(0), _center.at(0), _mark.at(0));
+                write_entry(ss, itr.symbol(), _widths.at(0), _center.at(0), _mark.at(0),
+                            fmt_opts);
             }
 
-            write_entry(ss, fitr.first, _widths.at(1), _center.at(1), _mark.at(1));
+            write_entry(ss, fitr.first, _widths.at(1), _center.at(1), _mark.at(1),
+                        fmt_opts);
 
             if(options[2])
             {
                 std::stringstream _avss{};
                 _avss << std::boolalpha << itr.available();
                 write_entry(ss, itr.available(), _widths.at(2), _center.at(2),
-                            _mark.at(1));
+                            _mark.at(1), fmt_opts);
             }
 
             array_t<string_t, N> _e = { { "", "", "", itr.short_description(),
@@ -1246,11 +1300,11 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
                 if(options[i])
                 {
                     write_wrap_entry(ss, _e.at(i), _widths.at(i), _center.at(i),
-                                     _mark.at(i), i, _widths, _wusing);
+                                     _mark.at(i), i, _widths, _wusing, fmt_opts);
                 }
             }
 
-            if(!csv) os << global_delim;
+            if(!fmt_opts.csv) os << fmt_opts.delim;
             os << hl_selected(ss.str());
             os << "\n";
         }
@@ -1258,7 +1312,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
 
     dump_log();
 
-    if(!markdown) os << banner(_widths, _wusing, '-');
+    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
 }
 
 //======================================================================================//
@@ -1271,11 +1325,11 @@ namespace
 {
 template <typename IntArrayT, typename BoolArrayT>
 IntArrayT
-compute_max_columns(IntArrayT _widths, BoolArrayT _using)
+compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_opts)
 {
     using value_type = typename IntArrayT::value_type;
 
-    if(num_cols == 0) return _widths;
+    if(fmt_opts.num_cols == 0) return _widths;
 
     auto _get_sum = [&]() {
         value_type _sumv = 0;
@@ -1295,10 +1349,10 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using)
             }
         }
 
-        if(_maxv <= min_width)
+        if(_maxv <= fmt_opts.min_width)
         {
             _midx = _widths.size();
-            _maxv = min_width;
+            _maxv = fmt_opts.min_width;
         }
         return std::make_pair(_midx, _maxv);
     };
@@ -1307,7 +1361,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using)
         if(_midx < _widths.size()) _widths.at(_midx) -= 1;
     };
 
-    int32_t _max_width = num_cols;
+    int32_t _max_width = fmt_opts.num_cols;
     size_t  _n         = 0;
     size_t  _nmax      = std::numeric_limits<uint16_t>::max();
     while(_n++ < _nmax)
@@ -1327,7 +1381,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using)
     }
 
     int32_t _maxw = _get_max().second;
-    if(max_width == 0 || _maxw < max_width) max_width = _maxw;
+    if(fmt_opts.max_width == 0 || _maxw < fmt_opts.max_width) fmt_opts.max_width = _maxw;
 
     if(debug_msg)
     {
@@ -1337,7 +1391,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using)
         std::cerr << "[final]> sum_width = " << _get_sum()
                   << ", max_width = " << _max_width
                   << ", widths = " << _msg.str().substr(2)
-                  << ", column max width = " << max_width << std::endl;
+                  << ", column max width = " << fmt_opts.max_width << std::endl;
     }
 
     return _widths;
@@ -1347,28 +1401,30 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using)
 
 template <typename Tp>
 void
-write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark)
+write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
+            const format_options& fmt_opts)
 {
-    if(max_width > 0 && _w > max_width) _w = max_width;
+    if(fmt_opts.max_width > 0 && _w > fmt_opts.max_width) _w = fmt_opts.max_width;
 
     stringstream_t ssentry;
     stringstream_t ss;
-    if(csv)
+    if(fmt_opts.csv)
         ssentry << std::boolalpha << _entry;
     else
-        ssentry << ' ' << std::boolalpha << ((mark && markdown) ? "`" : "") << _entry;
+        ssentry << ' ' << std::boolalpha << ((mark && fmt_opts.markdown) ? "`" : "")
+                << _entry;
     auto _sentry = remove(ssentry.str(), { "tim::", "component::" });
 
-    auto _decr = (mark && markdown) ? 6 : 5;
-    if(!csv && _w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
+    auto _decr = (mark && fmt_opts.markdown) ? 6 : 5;
+    if(!fmt_opts.csv && _w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
         _sentry = _sentry.substr(0, _w - _decr) + "...";
 
-    if(mark && markdown)
+    if(mark && fmt_opts.markdown)
     {
         _sentry += std::string{ "`" };
     }
 
-    if(center && !csv)
+    if(center && !fmt_opts.csv)
     {
         size_t _n = 0;
         while(_sentry.length() + 2 < static_cast<size_t>(_w))
@@ -1384,24 +1440,24 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
         }
         if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 1))
             _sentry = _sentry.substr(_w - 1);
-        ss << std::left << std::setw(_w - 1) << _sentry << global_delim;
+        ss << std::left << std::setw(_w - 1) << _sentry << fmt_opts.delim;
     }
     else
     {
-        if(csv)
+        if(fmt_opts.csv)
         {
-            if(_sentry.find(global_delim) == std::string::npos)
-                ss << _sentry << global_delim;
+            if(_sentry.find(fmt_opts.delim) == std::string::npos)
+                ss << _sentry << fmt_opts.delim;
             else
             {
                 if(_sentry.find('"') != std::string::npos)
-                    ss << "'" << _sentry << "'" << global_delim;
+                    ss << "'" << _sentry << "'" << fmt_opts.delim;
                 else
-                    ss << "\"" << _sentry << "\"" << global_delim;
+                    ss << "\"" << _sentry << "\"" << fmt_opts.delim;
             }
         }
         else
-            ss << std::left << std::setw(_w - 1) << _sentry << global_delim;
+            ss << std::left << std::setw(_w - 1) << _sentry << fmt_opts.delim;
     }
     os << ss.str();
 }
@@ -1411,26 +1467,28 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
 template <typename Tp, typename IntArrayT, size_t N>
 void
 write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
-                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use)
+                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use,
+                 format_options& fmt_opts)
 {
-    if(csv)
+    if(fmt_opts.csv)
     {
-        write_entry(os, _entry, _w, center, mark);
+        write_entry(os, _entry, _w, center, mark, fmt_opts);
         return;
     }
 
     auto _orig_w = _w;
-    if(max_width > 0 && _w > max_width) _w = max_width;
+    if(fmt_opts.max_width > 0 && _w > fmt_opts.max_width) _w = fmt_opts.max_width;
 
     auto           _remainder = std::string{};
     stringstream_t ssentry;
     stringstream_t ss;
-    ssentry << ' ' << std::boolalpha << ((mark && markdown) ? "`" : "") << _entry;
+    ssentry << ' ' << std::boolalpha << ((mark && fmt_opts.markdown) ? "`" : "")
+            << _entry;
     auto _sentry = remove(ssentry.str(), { "tim::", "component::" });
 
     if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
     {
-        auto _decr   = (mark && markdown) ? 4 : 3;
+        auto _decr   = (mark && fmt_opts.markdown) ? 4 : 3;
         auto _lspace = _sentry.substr(0, _w - _decr).find_last_of(" \t");
         if(_lspace == std::string::npos || _lspace < static_cast<uint64_t>(_w / 2))
             _lspace = _w - _decr;
@@ -1438,7 +1496,7 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bo
         _sentry    = _sentry.substr(0, _lspace);
     }
 
-    if(mark && markdown)
+    if(mark && fmt_opts.markdown)
     {
         _sentry += std::string{ "`" };
     }
@@ -1459,17 +1517,18 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bo
         }
         if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 1))
             _sentry = _sentry.substr(_w - 1);
-        ss << std::left << std::setw(_w - 1) << _sentry << global_delim;
+        ss << std::left << std::setw(_w - 1) << _sentry << fmt_opts.delim;
     }
     else
     {
-        ss << std::left << std::setw(_w - 1) << _sentry << global_delim;
+        ss << std::left << std::setw(_w - 1) << _sentry << fmt_opts.delim;
     }
 
     if(!_remainder.empty())
     {
-        ss << wrap(_idx, _breaks, _use);
-        write_wrap_entry(ss, _remainder, _orig_w, center, mark, _idx, _breaks, _use);
+        ss << wrap(_idx, _breaks, _use, fmt_opts);
+        write_wrap_entry(ss, _remainder, _orig_w, center, mark, _idx, _breaks, _use,
+                         fmt_opts);
     }
 
     os << ss.str();
@@ -1479,9 +1538,10 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bo
 
 template <typename IntArrayT, size_t N>
 string_t
-banner(IntArrayT _breaks, std::array<bool, N> _use, char filler, char delim)
+banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts, char filler,
+       char delim)
 {
-    if(csv) return string_t{};
+    if(fmt_opts.csv) return string_t{};
 
     if(debug_msg)
     {
@@ -1491,7 +1551,7 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, char filler, char delim)
         std::cerr << std::endl;
     }
 
-    _breaks = compute_max_columns(_breaks, _use);
+    _breaks = compute_max_columns(_breaks, _use, fmt_opts);
 
     if(debug_msg)
     {
@@ -1503,7 +1563,7 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, char filler, char delim)
 
     for(auto& itr : _breaks)
     {
-        if(max_width > 0 && itr > max_width) itr = max_width;
+        if(fmt_opts.max_width > 0 && itr > fmt_opts.max_width) itr = fmt_opts.max_width;
     }
 
     stringstream_t ss;
@@ -1534,15 +1594,16 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, char filler, char delim)
 
 template <typename IntArrayT, size_t N>
 string_t
-wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, char filler, char delim)
+wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts,
+     char filler, char delim)
 {
-    if(csv) return string_t{};
+    if(fmt_opts.csv) return string_t{};
 
-    _breaks = compute_max_columns(_breaks, _use);
+    _breaks = compute_max_columns(_breaks, _use, fmt_opts);
 
     for(auto& itr : _breaks)
     {
-        if(max_width > 0 && itr > max_width) itr = max_width;
+        if(fmt_opts.max_width > 0 && itr > fmt_opts.max_width) itr = fmt_opts.max_width;
     }
 
     stringstream_t ss;

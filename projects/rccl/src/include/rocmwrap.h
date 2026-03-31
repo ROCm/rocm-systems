@@ -78,6 +78,7 @@ DECLARE_ROCM_PFN_EXTERN(hsa_status_string);
 
 extern int ncclCuMemEnable();
 extern int ncclCuMemHostEnable();
+extern int64_t rcclParamForceEnableDMABUF();
 
 // Handle type used for cuMemCreate()
 extern CUmemAllocationHandleType ncclCuMemHandleType;

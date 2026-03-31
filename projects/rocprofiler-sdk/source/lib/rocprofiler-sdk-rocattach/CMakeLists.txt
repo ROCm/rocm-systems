@@ -23,8 +23,14 @@
 rocprofiler_activate_clang_tidy()
 
 add_library(rocprofiler-sdk-rocattach-shared-library SHARED)
-add_library(rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library ALIAS
-            rocprofiler-sdk-rocattach-shared-library)
+
+foreach(_NAMESPACE rocprofiler-sdk rocprofiler-sdk-rocattach)
+    foreach(_ALIAS library shared-library)
+        add_library(${_NAMESPACE}::rocprofiler-sdk-rocattach-${_ALIAS} ALIAS
+                    rocprofiler-sdk-rocattach-shared-library)
+    endforeach()
+endforeach()
+
 target_sources(rocprofiler-sdk-rocattach-shared-library
                PRIVATE rocattach.cpp auxv.cpp ptrace_session.cpp symbol_lookup.cpp)
 target_include_directories(

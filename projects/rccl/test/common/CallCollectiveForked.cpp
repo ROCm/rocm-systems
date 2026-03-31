@@ -38,7 +38,7 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
         break;
 
         default:
-            ERROR("This collective is not implemented for callCollective routine");
+            TEST_ERROR("This collective is not implemented for callCollective routine");
     }
     
     HIPCALL(hipSetDevice(rank));
@@ -114,7 +114,7 @@ void callCollectiveForked(int nranks,  int collID, const std::vector<int>& sendB
 
     for(int r = 0; r < nranks; ++r){
       if(pipe(childPipes[r].data()) == -1)
-        ERROR("child %i pipe Failed\n", r);
+        TEST_ERROR("child %i pipe Failed\n", r);
     } 
 
     auto createNCCLid = [&](int rank){

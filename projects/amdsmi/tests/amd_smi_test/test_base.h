@@ -24,10 +24,11 @@
 #define TESTS_AMD_SMI_TEST_TEST_BASE_H_
 
 #include <cstdint>
+#include <limits>
+#include <map>
 #include <string>
 #include <vector>
-#include <map>
-#include <limits>
+
 #include "amd_smi/amdsmi.h"
 
 // The max devices can be monitored
@@ -38,7 +39,7 @@ class TestBase {
 
   virtual ~TestBase(void);
 
-  enum VerboseLevel {VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS};
+  enum VerboseLevel { VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS };
 
   // @Brief: Before run the core measure codes, do something to set up
   // i.e. init runtime, prepare packet...
@@ -59,65 +60,38 @@ class TestBase {
   // @Brief: Display information about the test
   virtual void DisplayTestInfo(void);
 
-  const std::string & description(void) const {return description_;}
+  const std::string& description(void) const { return description_; }
 
   void set_description(std::string d);
 
-  void set_title(std::string name) {
-    title_ = name;
-  }
-  std::string title(void) const {
-    return title_;
-  }
-  void set_verbosity(uint32_t v) {
-    verbosity_ = v;
-  }
-  uint32_t verbosity(void) const {
-    return verbosity_;
-  }
-  void set_dont_fail(bool f) {
-    dont_fail_ = f;
-  }
-  bool dont_fail(void) const {
-    return dont_fail_;
-  }
-  void set_num_monitor_devs(uint32_t i) {
-    num_monitor_devs_ = i;
-  }
-  uint32_t num_monitor_devs(void) const {
-    return num_monitor_devs_;
-  }
-  void set_init_options(uint64_t x) {
-    init_options_ = x;
-  }
-  uint64_t init_options(void) const {
-    return init_options_;
-  }
-  void set_num_iterations(uint32_t x) {
-    num_iterations_ = x;
-  }
-  uint32_t num_iterations(void) const {
-    return num_iterations_;
-  }
+  void set_title(std::string name) { title_ = name; }
+  std::string title(void) const { return title_; }
+  void set_verbosity(uint32_t v) { verbosity_ = v; }
+  uint32_t verbosity(void) const { return verbosity_; }
+  void set_dont_fail(bool f) { dont_fail_ = f; }
+  bool dont_fail(void) const { return dont_fail_; }
+  void set_num_monitor_devs(uint32_t i) { num_monitor_devs_ = i; }
+  uint32_t num_monitor_devs(void) const { return num_monitor_devs_; }
+  void set_init_options(uint64_t x) { init_options_ = x; }
+  uint64_t init_options(void) const { return init_options_; }
+  void set_num_iterations(uint32_t x) { num_iterations_ = x; }
+  uint32_t num_iterations(void) const { return num_iterations_; }
 
   const std::map<amdsmi_accelerator_partition_type_t, std::string> partition_types_map = {
-    { AMDSMI_ACCELERATOR_PARTITION_INVALID, "N/A" },
-    { AMDSMI_ACCELERATOR_PARTITION_SPX, "SPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_DPX, "DPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_TPX, "TPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_QPX, "QPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_CPX, "CPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_MAX, "MAX" },
+      {AMDSMI_ACCELERATOR_PARTITION_INVALID, "N/A"}, {AMDSMI_ACCELERATOR_PARTITION_SPX, "SPX"},
+      {AMDSMI_ACCELERATOR_PARTITION_DPX, "DPX"},     {AMDSMI_ACCELERATOR_PARTITION_TPX, "TPX"},
+      {AMDSMI_ACCELERATOR_PARTITION_QPX, "QPX"},     {AMDSMI_ACCELERATOR_PARTITION_CPX, "CPX"},
+      {AMDSMI_ACCELERATOR_PARTITION_MAX, "MAX"},
   };
 
   const std::map<amdsmi_accelerator_partition_type_t, std::string> accelerator_types_map = {
-    { AMDSMI_ACCELERATOR_PARTITION_INVALID, "AMDSMI_ACCELERATOR_PARTITION_INVALID" },
-    { AMDSMI_ACCELERATOR_PARTITION_SPX, "AMDSMI_ACCELERATOR_PARTITION_SPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_DPX, "AMDSMI_ACCELERATOR_PARTITION_DPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_TPX, "AMDSMI_ACCELERATOR_PARTITION_TPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_QPX, "AMDSMI_ACCELERATOR_PARTITION_QPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_CPX, "AMDSMI_ACCELERATOR_PARTITION_CPX" },
-    { AMDSMI_ACCELERATOR_PARTITION_MAX, "AMDSMI_ACCELERATOR_PARTITION_MAX" },
+      {AMDSMI_ACCELERATOR_PARTITION_INVALID, "AMDSMI_ACCELERATOR_PARTITION_INVALID"},
+      {AMDSMI_ACCELERATOR_PARTITION_SPX, "AMDSMI_ACCELERATOR_PARTITION_SPX"},
+      {AMDSMI_ACCELERATOR_PARTITION_DPX, "AMDSMI_ACCELERATOR_PARTITION_DPX"},
+      {AMDSMI_ACCELERATOR_PARTITION_TPX, "AMDSMI_ACCELERATOR_PARTITION_TPX"},
+      {AMDSMI_ACCELERATOR_PARTITION_QPX, "AMDSMI_ACCELERATOR_PARTITION_QPX"},
+      {AMDSMI_ACCELERATOR_PARTITION_CPX, "AMDSMI_ACCELERATOR_PARTITION_CPX"},
+      {AMDSMI_ACCELERATOR_PARTITION_MAX, "AMDSMI_ACCELERATOR_PARTITION_MAX"},
   };
 
   struct AcceleratorProfileConfig {
@@ -130,10 +104,9 @@ class TestBase {
     std::vector<uint32_t> available_profile_indices;
   };
 
-  AcceleratorProfileConfig getAvailableProfileConfigs(uint32_t device_index,
-                              amdsmi_accelerator_partition_profile_t current_profile,
-                              amdsmi_accelerator_partition_profile_config_t config,
-                              bool isVerbose);
+  AcceleratorProfileConfig getAvailableProfileConfigs(
+      uint32_t device_index, amdsmi_accelerator_partition_profile_t current_profile,
+      amdsmi_accelerator_partition_profile_config_t config, bool isVerbose);
 
   uint32_t promptNumDevicesToTest(uint32_t current_num_devices);
 
@@ -150,20 +123,20 @@ class TestBase {
   }
 
  protected:
-  void MakeHeaderStr(const char *inStr, std::string *outStr) const;
+  void MakeHeaderStr(const char* inStr, std::string* outStr) const;
   void PrintDeviceHeader(amdsmi_processor_handle dv_ind);
-  bool setup_failed_;   ///< Record that setup failed to return ierr in Run
+  bool setup_failed_;          ///< Record that setup failed to return ierr in Run
   uint32_t num_monitor_devs_;  ///< Number of monitor devices found
   ///< device handles
   amdsmi_processor_handle processor_handles_[MAX_MONITOR_DEVICES];
-  uint32_t socket_count_;  ///< socket count
+  uint32_t socket_count_;                      ///< socket count
   std::vector<amdsmi_socket_handle> sockets_;  ///< sockets
 
  private:
   std::string description_;
-  std::string title_;   ///< Displayed title of test
-  uint32_t verbosity_;   ///< How much additional output to produce
-  bool dont_fail_;       ///< Don't quit test on individual failure if true
+  std::string title_;      ///< Displayed title of test
+  uint32_t verbosity_;     ///< How much additional output to produce
+  bool dont_fail_;         ///< Don't quit test on individual failure if true
   uint64_t init_options_;  ///< rsmi initialization options
   uint32_t num_iterations_;
 };
@@ -172,26 +145,25 @@ class TestBase {
 #define IF_NVERB(VB) if (verbosity() < (TestBase::VERBOSE_##VB))
 
 // Macros to be used within TestBase classes
-#define CHK_ERR_ASRT(RET) { \
-    if ((RET) != AMDSMI_STATUS_SUCCESS) { \
-        std::cout << std::endl << "\t===> TEST FAILURE." << std::endl; \
-        const char *err_str; \
-        std::cout << "\t===> ERROR: AMDSMI call returned " << (RET) << std::endl; \
-        amdsmi_status_code_to_string((RET), &err_str); \
-        std::cout << "\t===> (" << err_str << ")" << std::endl; \
-        std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-    } \
-    if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) { \
-        std::cout << \
-         "\t===> Abort is over-ridden due to dont_fail command line option." \
-                                                               << std::endl; \
-        return; \
-    } \
-    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, (RET)); \
-}
+#define CHK_ERR_ASRT(RET)                                                                \
+  {                                                                                      \
+    if ((RET) != AMDSMI_STATUS_SUCCESS) {                                                \
+      std::cout << std::endl << "\t===> TEST FAILURE." << std::endl;                     \
+      const char* err_str;                                                               \
+      std::cout << "\t===> ERROR: AMDSMI call returned " << (RET) << std::endl;          \
+      amdsmi_status_code_to_string((RET), &err_str);                                     \
+      std::cout << "\t===> (" << err_str << ")" << std::endl;                            \
+      std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << std::endl; \
+    }                                                                                    \
+    if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) {                               \
+      std::cout << "\t===> Abort is over-ridden due to dont_fail command line option."   \
+                << std::endl;                                                            \
+      return;                                                                            \
+    }                                                                                    \
+    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, (RET));                                             \
+  }
 
-void MakeHeaderStr(const char *inStr, std::string *outStr);
+void MakeHeaderStr(const char* inStr, std::string* outStr);
 extern const char kSetupLabel[];
 
 #endif  // TESTS_AMD_SMI_TEST_TEST_BASE_H_

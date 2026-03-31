@@ -24,10 +24,8 @@
 
 #include "core/timemory.hpp"
 
-#if defined(ROCPROFSYS_USE_ROCM)
-#    include <rocprofiler-sdk/fwd.h>
-#    include <rocprofiler-sdk/rocprofiler.h>
-#endif
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <cstdint>
 #include <memory>
@@ -53,8 +51,6 @@ config_settings(const std::shared_ptr<settings>&);
 version_info&
 get_version();
 
-#if defined(ROCPROFSYS_USE_ROCM)
-
 std::unordered_set<rocprofiler_callback_tracing_kind_t>
 get_callback_domains();
 
@@ -79,6 +75,5 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv);
 std::unordered_set<int32_t>
 get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv);
 
-#endif
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

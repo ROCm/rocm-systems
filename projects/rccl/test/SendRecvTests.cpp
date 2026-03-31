@@ -75,7 +75,7 @@ namespace RcclUnitTesting
           }
 
           if (testBed.ev.showNames) // Show test names
-            INFO("%s Datatype: %s SendReceive test Rank %d -> Rank %d for %d Elements\n",
+            TEST_INFO("%s Datatype: %s SendReceive test Rank %d -> Rank %d for %d Elements\n",
                  isMultiProcess ? "MP" : "SP",
                  ncclDataTypeNames[dataTypes[dataIdx]],
                  sendRank,
@@ -174,7 +174,7 @@ namespace RcclUnitTesting
           }
 
           if (testBed.ev.showNames) // Show test names
-            INFO("%s Datatype: %s SendReceive test Rank %d -> Rank %d for %d Elements\n",
+            TEST_INFO("%s Datatype: %s SendReceive test Rank %d -> Rank %d for %d Elements\n",
                  isMultiProcess ? "MP" : "SP",
                  ncclDataTypeNames[dataTypes[dataIdx]],
                  sendRank,

@@ -9,6 +9,7 @@
 #include "impl/core__types.h"
 #include "core_tmp.h"
 
+#undef __CUDACC__
 #define __CUDACC__ 0
 
 struct ncclLsaBarrierHandle;

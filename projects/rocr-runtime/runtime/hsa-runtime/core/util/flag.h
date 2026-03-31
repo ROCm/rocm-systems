@@ -297,7 +297,7 @@ class Flag {
 
     // This allows detecting if the dxg driver is loaded.
     var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
-    enable_dxg_detection_ = (var == "1") ? true : false;
+    enable_dxg_detection_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());

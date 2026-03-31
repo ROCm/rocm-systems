@@ -209,7 +209,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const std:
 
     *gpu_info = info;
 
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    return AMDCUID_STATUS_SUCCESS;
 }
 
 amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const {

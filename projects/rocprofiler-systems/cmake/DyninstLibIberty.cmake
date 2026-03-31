@@ -93,27 +93,23 @@ else()
             CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3 <SOURCE_DIR>/configure
             --prefix=${_li_root}
         BUILD_COMMAND make
-        BUILD_BYPRODUCTS ${_li_build_byproducts}
         INSTALL_COMMAND ""
     )
 
     add_custom_command(
-        TARGET ${_li_project_name}
-        POST_BUILD
+        OUTPUT ${_li_build_byproducts}
         COMMAND install
         ARGS -C ${_li_working_dir}/libiberty/libiberty.a ${_li_root}/lib
         COMMAND install
         ARGS -C ${_li_working_dir}/include/*.h ${_li_root}/include
+        DEPENDS ${_li_project_name}
         COMMENT "Installing LibIberty..."
     )
 
-    # target for re-executing the installation
     add_custom_target(
         rocprofiler-systems-libiberty-install
-        COMMAND install -C ${_li_working_dir}/libiberty/libiberty.a ${_li_root}/lib
-        COMMAND install ARGS -C ${_li_working_dir}/include/*.h ${_li_root}/include
-        WORKING_DIRECTORY ${_li_working_dir}
-        COMMENT "Installing LibIberty..."
+        ALL
+        DEPENDS ${_li_build_byproducts}
     )
 
     # For backward compatibility

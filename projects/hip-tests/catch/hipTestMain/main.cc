@@ -1,22 +1,7 @@
 /*
- * Copyright (C) Advanced Micro Devices, Inc.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE COPYRIGHT HOLDER(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
- * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  */
 
 #define CATCH_CONFIG_RUNNER
@@ -56,7 +41,10 @@ int main(int argc, char** argv) {
         ("Number of iterations used for cooperative groups sync tests (default: 5)")
     | Opt(cmd_options.cg_reduction_factor, "cg_reduction_factor")
         ["-C"]["--cg-reduction-factor"]
-        ("Percentage of warp sizes for shuffle tests to be actually tested (default: 10)") // TODO
+        ("Percentage of warp sizes for shuffle tests to be actually tested (default: 10)")
+    | Opt(cmd_options.warp_reduction_factor, "warp_reduction_factor")
+        ["-F"]["--warp-reduction-factor"]
+        ("Percentage of lane mask iterations for warp shuffle tests to be tested (default: 6.25)")
     | Opt(cmd_options.accuracy_iterations, "accuracy_iterations")
         ["-A"]["--accuracy-iterations"]
         ("Number of iterations used for math accuracy tests with randomly generated inputs (default: 2^32)")

@@ -288,7 +288,7 @@ void SvmMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_poo
   }
 
   if (kernArgs) {
-    hsa_memory_free(kernArgs);
+    hsa_amd_memory_pool_free(kernArgs);
   }
 
   if (signal.handle) {

@@ -358,6 +358,7 @@ CMake enforces that ``ROCPROFSYS_MAX_THREADS`` must be a power of 2:
 
    # Valid: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, ... any power of 2
    # Invalid: 100, 3000, 5000, 10000, ... (FATAL_ERROR)
+
 **Example: Building with custom thread limit**
 
 .. code-block:: shell

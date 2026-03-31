@@ -22,7 +22,7 @@ public:
   int nSteps = 10;
   void SetUp() override {
     proxyState = new ncclProxyState();
-    proxyState->proxyTrace = std::make_unique<facebook_rccl::ProxyTrace>(0);
+    proxyState->proxyTrace = new facebook_rccl::ProxyTrace(0);
     EXPECT_NE(proxyState->proxyTrace, nullptr);
     sub1 = new ncclProxySubArgs();
     sub2 = new ncclProxySubArgs();
@@ -34,6 +34,7 @@ public:
   void TearDown() override {
     delete sub1;
     delete sub2;
+    delete proxyState->proxyTrace;
     delete proxyState;
   }
   void AddTraceOp(ncclProxySubArgs *sub, facebook_rccl::ProxyOpType opType) {

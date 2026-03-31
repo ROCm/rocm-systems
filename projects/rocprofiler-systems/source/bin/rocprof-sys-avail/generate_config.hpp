@@ -29,4 +29,4 @@
 
 void
 generate_config(std::string _config_file, const std::set<std::string>& _config_fmts,
-                const std::array<bool, TOTAL>&);
+                const std::array<bool, TOTAL>&, const format_options&  fmt_opts);

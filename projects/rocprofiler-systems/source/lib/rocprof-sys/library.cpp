@@ -55,11 +55,11 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/shmem_gotcha.hpp"
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
 #include "library/process_sampler.hpp"
-#include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
@@ -83,10 +83,10 @@
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/agent.h>
-#    include <rocprofiler-sdk/registration.h>
-#endif
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/registration.h>
+
+#include <nlohmann/json.hpp>
 
 #include "logger/debug.hpp"
 
@@ -135,6 +135,26 @@ set_metadata_process_end_timestamp(int64_t _ts)
     auto process_info = trace_cache::get_metadata_registry().get_process_info();
     process_info.end  = _ts;
     trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+void
+set_metadata_environment_json(const std::string& _environment_json)
+{
+    auto process_info        = trace_cache::get_metadata_registry().get_process_info();
+    process_info.environment = _environment_json;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+std::string
+escape_quotes(std::string str)
+{
+    std::string::size_type pos = 0;
+    while((pos = str.find('"', pos)) != std::string::npos)
+    {
+        str.replace(pos, 1, "\"\"");
+        pos += 2;
+    }
+    return str;
 }
 
 bool
@@ -356,15 +376,16 @@ read_command_line(pid_t _pid)
 void
 rocprofsys_preinit_cache()
 {
-    auto _cmd_line = read_command_line(getpid());
+    const auto        _cmd_line = read_command_line(getpid());
+    const std::string _command  = _cmd_line.empty()
+                                      ? "rocprofiler-systems"
+                                      : fmt::format("{}", fmt::join(_cmd_line, " "));
 
-    if(_cmd_line.empty())
-    {
-        _cmd_line.emplace_back("rocprofiler-systems");
-    }
+    std::stringstream _extdata_stream;
+    config::print_settings_json(_extdata_stream);
 
     trace_cache::get_metadata_registry().set_process(
-        { getpid(), getppid(), _cmd_line.at(0) });
+        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()) });
 }
 
 void
@@ -515,12 +536,10 @@ rocprofsys_init_tooling_hidden(void)
         return false;
     }
 
-#if ROCPROFSYS_USE_ROCM > 0
     dynamic_library _amdhip64{ "ROCPROFSYS_ROCTRACER_LIBAMDHIP64",
                                find_library_path("libamdhip64.so",
                                                  { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
                                                  { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
-#endif
 
     static pid_t _once       = 0;
     static auto  _debug_init = get_debug_init();
@@ -565,11 +584,19 @@ rocprofsys_init_tooling_hidden(void)
         // if set to finalized, don't continue
         if(get_state() > State::Active) return;
 
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-        rocprofsys_preinit_cpu_agents();
-#endif
-
         rocprofsys_preinit_cache();
+
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
+    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
+
+        component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
+            nlohmann::json _environment_json;
+            _environment_json["MPI_COMM_WORLD_SIZE"] = size;
+            _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+
+            set_metadata_environment_json(escape_quotes(_environment_json.dump()));
+        });
+#endif
 
         if(get_use_process_sampling())
         {
@@ -619,6 +646,12 @@ rocprofsys_init_tooling_hidden(void)
         component::ucx_gotcha::start();
     }
 
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Setting up OpenSHMEM traces...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::start();
+    }
+
     if(get_use_vaapi_tracing())
     {
         LOG_DEBUG("Setting up VA-API traces...");
@@ -633,8 +666,6 @@ rocprofsys_init_tooling_hidden(void)
         LOG_DEBUG("Setting up Perfetto...");
         rocprofsys::perfetto::setup();
     }
-
-    tasking::setup();
 
     if(get_use_causal()) causal::start_experimenting();
 
@@ -818,14 +849,11 @@ rocprofsys_finalize_hidden(void)
     {
         set_state(State::Finalized);
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
         // Flush buffered traces in case of child process
-        if(get_use_rocm())
-        {
-            LOG_DEBUG("Shutting down ROCm...");
-            rocprofiler_sdk::shutdown();
-        }
-#endif
+
+        LOG_DEBUG("Shutting down ROCm...");
+        rocprofiler_sdk::shutdown();
+
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
@@ -916,19 +944,20 @@ rocprofsys_finalize_hidden(void)
         component::ucx_gotcha::shutdown();
     }
 
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Shutting down OpenSHMEM tracing...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::shutdown();
+    }
+
     if(get_use_vaapi_tracing())
     {
         LOG_DEBUG("Shutting down VA-API tracing...");
         component::vaapi_gotcha::shutdown();
     }
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-    if(get_use_rocm())
-    {
-        LOG_DEBUG("Shutting down ROCm...");
-        rocprofiler_sdk::shutdown();
-    }
-#endif
+    LOG_DEBUG("Shutting down ROCm...");
+    rocprofiler_sdk::shutdown();
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();
@@ -1042,10 +1071,6 @@ rocprofsys_finalize_hidden(void)
         LOG_DEBUG("Post-processing the system-level samples...");
         process_sampler::post_process();
     }
-
-    // shutdown tasking before timemory is finalized
-    LOG_DEBUG("Shutting down thread-pools...");
-    tasking::shutdown();
 
     if(get_use_code_coverage())
     {

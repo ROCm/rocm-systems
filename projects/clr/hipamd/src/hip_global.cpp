@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip_global.hpp"
 
@@ -59,7 +43,7 @@ namespace hip {
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 // Device Vars
-DeviceVar::DeviceVar(std::string name, hipModule_t hmod, int deviceId)
+DeviceVar::DeviceVar(const std::string &name, hipModule_t hmod, int deviceId)
     : shadowVptr(nullptr), name_(name), amd_mem_obj_(nullptr), device_ptr_(nullptr), size_(0) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   device::Program* dev_program = program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
@@ -101,8 +85,7 @@ DeviceVar::~DeviceVar() {
 }
 
 // Device Functions
-DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod)
-    : dflock_("function lock"), name_(name), kernel_(nullptr) {
+DeviceFunc::DeviceFunc(const std::string &name, hipModule_t hmod) : kernel_(nullptr) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
 
   const amd::Symbol* symbol = program->findSymbol(name.c_str());
@@ -153,7 +136,7 @@ hipError_t Function::getStatFunc(hipFunction_t* hfunc, int deviceId) {
     *hfunc = dFunc_[deviceId]->asHipFunction();
     return hipSuccess;
   }
-  amd::ScopedLock lock((*modules_)->FatBinaryLock());
+  std::scoped_lock lock((*modules_)->FatBinaryLock());
   // Check for the compiled kernel again, to make sure only one thread does compilation
   if (dFunc_[deviceId] != nullptr) {
     *hfunc = dFunc_[deviceId]->asHipFunction();

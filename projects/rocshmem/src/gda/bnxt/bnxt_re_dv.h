@@ -38,7 +38,6 @@
 #define __BNXT_RE_DV_H__
 
 #include <stdint.h>
-#include <infiniband/verbs.h>
 #ifdef __cplusplus
 extern "C" {
 #endif

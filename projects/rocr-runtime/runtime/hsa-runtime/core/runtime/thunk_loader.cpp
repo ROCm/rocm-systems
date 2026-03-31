@@ -390,8 +390,10 @@ namespace core {
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)dlsym(thunk_handle, "hsaKmtAisReadWriteFile");
       if (HSAKMT_PFN(hsaKmtAisReadWriteFile) == nullptr) goto ERROR;
 
+#if defined(_WIN32)
       HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)dlsym(thunk_handle, "hsaKmtGetMemoryHandle");
       if (HSAKMT_PFN(hsaKmtGetMemoryHandle) == nullptr) goto ERROR;
+#endif
 
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)dlsym(thunk_handle, "hsaKmtHandleImport");
       if (HSAKMT_PFN(hsaKmtHandleImport) == nullptr) goto ERROR;
@@ -545,7 +547,9 @@ ERROR:
 #endif
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&hsaKmtModelEnabled);
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)(&hsaKmtAisReadWriteFile);
+#if defined(_WIN32)
       HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)(&hsaKmtGetMemoryHandle);
+#endif
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)(&hsaKmtHandleImport);
       HSAKMT_PFN(hsaKmtMemoryVaMap) = (HSAKMT_DEF(hsaKmtMemoryVaMap)*)(&hsaKmtMemoryVaMap);
       HSAKMT_PFN(hsaKmtMemoryVaUnmap) = (HSAKMT_DEF(hsaKmtMemoryVaUnmap)*)(&hsaKmtMemoryVaUnmap);
@@ -603,6 +607,30 @@ ERROR:
       return true;
     }
     return false;
+  }
+
+  bool ThunkLoader::CheckThunkAbi() {
+    if (!IsDXG()) return true;
+
+    if (thunk_handle == nullptr) return false;
+
+    DxgAbiCheckFunc* pfnDxgAbiCheck =
+        (DxgAbiCheckFunc*)rocr::os::GetExportAddress(thunk_handle, "DxgAbiCheck");
+    if (pfnDxgAbiCheck == nullptr) {
+      // Old librocdxg without DxgAbiCheck — assume compatible.
+      debug_print("DxgAbiCheck not exported, skipping ABI check.\n");
+      return true;
+    }
+
+    HsaStructureSizes sizes = {};
+    sizes.StructureSizes = (HSAuint16)sizeof(HsaStructureSizes);
+    sizes.SizeOfHsaNodeProperties = (HSAuint16)sizeof(HsaNodeProperties);
+
+    if (pfnDxgAbiCheck(&sizes) != HSAKMT_STATUS_SUCCESS) {
+      debug_print("DxgAbiCheck failed!\n");
+      return false;
+    }
+    return true;
   }
 }   //  namespace core
 }   //  namespace rocr

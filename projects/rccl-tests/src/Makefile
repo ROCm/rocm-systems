@@ -42,7 +42,7 @@ HIP_MINOR = $(shell echo $(HIP_VERSION) | cut -d "." -f 2)
 
 # Better define GPU_TARGETS in your environment to the minimal set
 # of archs to reduce compile time.
-# Currently, supports gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1200,gfx1201
+# Currently, supports gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201
 ifndef GPU_TARGETS
 GPU_TARGETS = gfx906 gfx908 gfx90a
   ifeq ($(shell test "0$(HIP_MAJOR)" -ge 7; echo $$?),0)
@@ -55,7 +55,7 @@ GPU_TARGETS = gfx906 gfx908 gfx90a
     GPU_TARGETS += gfx950
     endif
   endif
-GPU_TARGETS += gfx1030 gfx1100 gfx1101 gfx1102 gfx1200 gfx1201
+GPU_TARGETS += gfx1030 gfx1100 gfx1101 gfx1102 gfx1151 gfx1200 gfx1201
 endif
 
 GPU_TARGETS_FLAGS = $(foreach target,$(GPU_TARGETS),"--offload-arch=$(target)")

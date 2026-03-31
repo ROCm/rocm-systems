@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <algorithm>
 #include <array>
@@ -82,7 +67,7 @@ static inline hipModule_t GetModule() {
   return mg.module();
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipModuleGetGlobal_Positive_Basic) {
   hipModule_t module = GetModule();
 
   SECTION("int") { HIP_MODULE_GET_GLOBAL_TEST(int, module); }
@@ -94,7 +79,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Positive_Basic") {
   SECTION("double") { HIP_MODULE_GET_GLOBAL_TEST(double, module); }
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Positive_Parameters") {
+HIP_TEST_CASE(Unit_hipModuleGetGlobal_Positive_Parameters) {
   hipModule_t module = GetModule();
   hipDeviceptr_t global = 0;
   size_t global_size = 0;
@@ -108,7 +93,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Positive_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Parameters) {
   hipModule_t module = GetModule();
   hipDeviceptr_t global = 0;
   size_t global_size = 0;
@@ -123,7 +108,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr") {
+HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr) {
   hipDeviceptr_t global = 0;
   size_t global_size = 0;
 
@@ -133,7 +118,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String") {
+HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String) {
   hipModule_t module = GetModule();
   hipDeviceptr_t global = 0;
   size_t global_size = 0;
@@ -141,14 +126,14 @@ TEST_CASE("Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String") {
   HIP_CHECK_ERROR(hipModuleGetGlobal(&global, &global_size, module, ""), hipErrorInvalidValue);
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Negative_Dptr_And_Bytes_Are_Nullptr") {
+HIP_TEST_CASE(Unit_hipModuleGetGlobal_Negative_Dptr_And_Bytes_Are_Nullptr) {
   hipModule_t module = GetModule();
   HIP_CHECK_ERROR(hipModuleGetGlobal(nullptr, nullptr, module, "int_var"), hipErrorInvalidValue);
 }
 
 // Test description: Loading device ptr from different device than the one on which the module
 // is loaded
-TEST_CASE("Unit_hipModuleGetGlobal_DiffDevice", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipModuleGetGlobal_DiffDevice) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {

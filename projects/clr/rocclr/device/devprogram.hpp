@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -67,7 +53,7 @@ class Program : public amd::HeapObject {
  public:
   typedef std::pair<const void* /* binary_image */, size_t /* binary size */> binary_t;
   typedef std::pair<amd::Os::FileDesc /* file_desc */, size_t /* file_offset */> finfo_t;
-  typedef std::unordered_map<std::string, Kernel*> kernels_t;
+  typedef std::unordered_map<std::string_view, Kernel*> kernels_t;
   // type of the program
   typedef enum {
     TYPE_NONE = 0,     // uncompiled
@@ -145,7 +131,7 @@ class Program : public amd::HeapObject {
   uint32_t codeObjectVer_;                                              //!< version of code object
   std::map<std::string, amd_comgr_metadata_node_t> kernelMetadataMap_;  //!< Map of kernel metadata
   //! Sanitizer lock - lock when launching init/fini kernels
-  static amd::Monitor initFiniLock_;
+  static std::recursive_mutex initFiniLock_;
 
  public:
   //! Construct a section.
@@ -244,7 +230,7 @@ class Program : public amd::HeapObject {
   amd_comgr_metadata_node_t metadata() const { return metadata_; }
 
   //! Get the kernel metadata
-  const bool getKernelMetadata(const std::string name, amd_comgr_metadata_node_t* meta) const {
+  const bool getKernelMetadata(const std::string& name, amd_comgr_metadata_node_t* meta) const {
     auto it = kernelMetadataMap_.find(name);
     if (it != kernelMetadataMap_.end()) {
       *meta = it->second;

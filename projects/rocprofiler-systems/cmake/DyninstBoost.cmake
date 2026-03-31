@@ -374,6 +374,8 @@ else()
         PREFIX ${Boost_ROOT_DIR}
         GIT_REPOSITORY https://github.com/boostorg/boost.git
         GIT_TAG boost-${ROCPROFSYS_BOOST_DOWNLOAD_VERSION}
+        GIT_SHALLOW TRUE
+        UPDATE_DISCONNECTED TRUE
         BUILD_IN_SOURCE 1
         CONFIGURE_COMMAND
             ${BOOST_BOOTSTRAP} --prefix=${Boost_ROOT_DIR}

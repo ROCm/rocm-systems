@@ -10,15 +10,13 @@ import re
 import sys
 import textwrap
 from enum import Enum
+from pathlib import Path
 
 # Check for required packages before importing them
 def check_required_packages():
     """Check if required Python packages are installed"""
     missing_packages = []
-    required_packages = {
-        'prettytable': 'prettytable',
-        'yaml': 'PyYAML'
-    }
+    required_packages = {"prettytable": "prettytable", "yaml": "PyYAML"}
 
     for import_name, package_name in required_packages.items():
         try:
@@ -27,9 +25,9 @@ def check_required_packages():
             missing_packages.append(package_name)
 
     if missing_packages:
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("WARNING: Missing Required Python Packages")
-        print("="*70)
+        print("=" * 70)
         print(f"\nThe following packages are required but not installed:")
         for pkg in missing_packages:
             print(f"  - {pkg}")
@@ -39,12 +37,13 @@ def check_required_packages():
         print("\nOr install all requirements:")
         print("  pip3 install -r <ROCM_INSTALL_PATH>/share/rdhc/requirements.txt")
         print("  Or\n  pip3 install -r requirements.txt")
-        print("\n" + "="*70 + "\n")
+        print("\n" + "=" * 70 + "\n")
 
         print("Exiting...")
         sys.exit(1)
     else:
         return True
+
 
 # Check packages before importing
 packages_available = check_required_packages()
@@ -66,6 +65,7 @@ class TestStatus(Enum):
     NOT_INSTALLED = "NOT INSTALLED"
     NOT_TESTED = "NOT TESTED"
 
+
 def run_command(command, shell=False):
     """Run a command and return stdout, stderr, and return code"""
     try:
@@ -77,13 +77,14 @@ def run_command(command, shell=False):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=shell,
-            universal_newlines=True
+            universal_newlines=True,
         )
         stdout, stderr = process.communicate()
         return stdout, stderr, process.returncode
     except Exception as e:
         logging.error(f"Error executing command: {command}, error: {str(e)}")
         return "", str(e), 1
+
 
 def generate_table_report(results):
     """Generate a pretty table report of test results"""
@@ -97,7 +98,7 @@ def generate_table_report(results):
         "amdgpu_driver": "Check if AMDGPU driver is working properly",
         "rocminfo": "Check if rocminfo is working properly",
         "amd_smi": "Check if amd-smi is working properly",
-        "lib_dependencies": "Check rocm libraries runtime dependencies"
+        "lib_dependencies": "Check rocm libraries runtime dependencies",
     }
 
     for test_name, result in results.items():
@@ -107,14 +108,19 @@ def generate_table_report(results):
         else:
             description = descriptions.get(test_name, f"Check {test_name} usability")
 
-        table.add_row([
-            test_name,
-            description,
-            result["status"],
-            result["reason"][:50] + "..." if len(result["reason"]) > 50 else result["reason"]
-        ])
+        table.add_row(
+            [
+                test_name,
+                description,
+                result["status"],
+                result["reason"][:50] + "..."
+                if len(result["reason"]) > 50
+                else result["reason"],
+            ]
+        )
 
     return table
+
 
 def generate_table_system_info(system_info):
     """Generate a pretty table report of amdgpu driver information"""
@@ -132,11 +138,12 @@ def generate_table_system_info(system_info):
             table.add_row([key, value])
     return table
 
+
 def generate_table_gpu_info(gpu_info_dict):
     """Generate a pretty table report of GPU information"""
 
     # Create a function to flatten the nested dictionary
-    def flatten_dict(d, parent_key='', sep=':'):
+    def flatten_dict(d, parent_key="", sep=":"):
         items = []
         for k, v in d.items():
             new_key = parent_key + sep + k if parent_key else k
@@ -169,7 +176,7 @@ def generate_table_gpu_info(gpu_info_dict):
 
     # Add rows to the table
     for idx, key in enumerate(all_keys):
-        row = [idx, key]    # Add row number as first column
+        row = [idx, key]  # Add row number as first column
         for gpu_key in flattened_gpus.keys():
             # row.append(flattened_gpus[gpu_key].get(key, "N/A"))
             value = flattened_gpus[gpu_key].get(key, "N/A")
@@ -188,6 +195,7 @@ def generate_table_gpu_info(gpu_info_dict):
 
     return table
 
+
 def generate_table_firmware_info(firmware_info):
     """Generate a pretty table report of amdgpu firmware version informations"""
 
@@ -197,34 +205,35 @@ def generate_table_firmware_info(firmware_info):
     table.align = "l"  # Left align all columns
     table.title = "AMDGPU Firmware Version Information"
     # table.field_names = ["##, "FW_ID", "GPU_O", "GPU_1", ...."]
-    table.field_names = ["##","FW_ID"] + list(gpu_dict.keys())
+    table.field_names = ["##", "FW_ID"] + list(gpu_dict.keys())
 
     # Get all firmware IDs while preserving order
     fw_ids = []
     for gpu_key, gpu_data in gpu_dict.items():
-        for fw_key, fw_data in gpu_data['FW_LIST'].items():
-            if fw_data['FW_ID'] not in fw_ids:
-                fw_ids.append(fw_data['FW_ID'])
+        for fw_key, fw_data in gpu_data["FW_LIST"].items():
+            if fw_data["FW_ID"] not in fw_ids:
+                fw_ids.append(fw_data["FW_ID"])
 
     # Add rows to the table
     for idx, fw_id in enumerate(fw_ids):
-        row = [idx, fw_id]    # Add row number and FW_ID as first two columns
+        row = [idx, fw_id]  # Add row number and FW_ID as first two columns
         for gpu_key in gpu_dict.keys():
             # Find the version for this firmware ID in this GPU
             version = "N/A"
-            for fw_key, fw_data in gpu_dict[gpu_key]['FW_LIST'].items():
-                if fw_data['FW_ID'] == fw_id:
-                    version = fw_data['FW_VERSION']
+            for fw_key, fw_data in gpu_dict[gpu_key]["FW_LIST"].items():
+                if fw_data["FW_ID"] == fw_id:
+                    version = fw_data["FW_VERSION"]
                     break
             row.append(version)
         table.add_row(row)
 
     return table
 
+
 def export_to_json(results, filename):
     """Export test results to a JSON file"""
     try:
-        with open(filename, 'w') as f:
+        with open(filename, "w") as f:
             json.dump(results, f, indent=4)
         logging.info(f"Results exported to {filename}")
         return True
@@ -232,23 +241,41 @@ def export_to_json(results, filename):
         logging.error(f"Error exporting results to JSON: {e}")
         return False
 
+
 class ROCMHealthCheck:
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, rocm_path=None):
         if logger is None:
             self.logger = logging.getLogger("RDHC")
             self.logger.setLevel(logging.INFO)
         else:
             self.logger = logger
 
+        # ROCm path: from constructor, or env, or default (used everywhere instead of os.environ.get)
+        self.rocm_path = (
+            rocm_path
+            if (rocm_path and str(rocm_path).strip())
+            else os.environ.get("ROCM_PATH", "/opt/rocm")
+        )
+        if isinstance(self.rocm_path, str):
+            self.rocm_path = self.rocm_path.strip()
+
         # List of all possible ROCm components to check
         self.all_components = [
             "hipcc",
             "hip-runtime-amd",
-            "hipblas", "hipfft", "hipcub-dev", "hipsolver",
-            "rocblas", "rocfft", "rocprim-dev" , "rocrand", "rocsolver",
-            "rocsparse", "rocthrust-dev",
+            "hipblas",
+            "hipfft",
+            "hipcub-dev",
+            "hipsolver",
+            "rocblas",
+            "rocfft",
+            "rocprim-dev",
+            "rocrand",
+            "rocsolver",
+            "rocsparse",
+            "rocthrust-dev",
             "miopen-hip",
-            "applications"
+            "applications",
         ]
 
         # Components to exclude from testing
@@ -280,9 +307,9 @@ class ROCMHealthCheck:
         self.logger.info(f"Installed components: {self.installed_components}")
 
     def get_rocm_version(self):
-        """Get the ROCm version string from /opt/rocm/.info/version"""
+        """Get the ROCm version string from <rocm_path>/.info/version"""
         try:
-            rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+            rocm_path = self.rocm_path
             with open(f"{rocm_path}/.info/version", "r") as f:
                 return f.read().strip()
         except Exception as e:
@@ -313,9 +340,13 @@ class ROCMHealthCheck:
                 os_info = f.read().lower()
                 if "ubuntu" in os_info:
                     return "ubuntu"
-                elif "rhel" in os_info or "centos" in os_info or\
-                     "fedora" in os_info or "almalinux" in os_info or\
-                     "azurelinux" in os_info:
+                elif (
+                    "rhel" in os_info
+                    or "centos" in os_info
+                    or "fedora" in os_info
+                    or "almalinux" in os_info
+                    or "azurelinux" in os_info
+                ):
                     return "rhel"
                 elif "sles" in os_info or "suse" in os_info:
                     return "sles"
@@ -335,18 +366,24 @@ class ROCMHealthCheck:
         # If no packages found, or if ROCM_PATH points to a non-standard location,
         # check for folder-based installation
         if not package_installed:
-            rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+            rocm_path = self.rocm_path
             folder_installed = self._get_components_from_folders(rocm_path)
 
         # Log the detection method used
         if package_installed:
             installed = package_installed
-            self.logger.info(f"Detected components for a quick test via package manager: {len(package_installed)}")
+            self.logger.info(
+                f"Detected components for a quick test via package manager: {len(package_installed)}"
+            )
         elif folder_installed:
             installed = folder_installed
-            self.logger.info(f"Detected components for a quick test via folder structure: {len(folder_installed)}")
+            self.logger.info(
+                f"Detected components for a quick test via folder structure: {len(folder_installed)}"
+            )
         else:
-            self.logger.warning("!!! No ROCm components detected via packages or folders.")
+            self.logger.warning(
+                "!!! No ROCm components detected via packages or folders."
+            )
 
         return installed
 
@@ -376,7 +413,9 @@ class ROCMHealthCheck:
                             break
 
             elif os_type == "sles":
-                stdout, _, ret_code = run_command(f"zypper se -i {component}", shell=True)
+                stdout, _, ret_code = run_command(
+                    f"zypper se -i {component}", shell=True
+                )
                 if ret_code == 0 and "i  | " in stdout:
                     # Extract package name from zypper output
                     for line in stdout.split("\n"):
@@ -398,50 +437,26 @@ class ROCMHealthCheck:
 
         # Define component detection strategies
         component_detection = {
-            "hipcc": [
-                f"{rocm_path}/bin/hipcc"
-            ],
-            "hip-runtime-amd": [
-                f"{rocm_path}/lib/libamdhip64.so*"
-            ],
-            "hipblas": [
-                f"{rocm_path}/lib/libhipblas.so*"
-            ],
-            "hipfft": [
-                f"{rocm_path}/lib/libhipfft.so*"
-            ],
-            "hipcub-dev": [
-                f"{rocm_path}/include/hipcub/hipcub.hpp"
-            ],
-            "hipsolver": [
-                f"{rocm_path}/lib/libhipsolver.so*"
-            ],
-            "rocblas": [
-                f"{rocm_path}/lib/librocblas.so*"
-            ],
-            "rocfft": [
-                f"{rocm_path}/lib/librocfft.so*"
-            ],
-            "rocprim-dev": [
-                f"{rocm_path}/include/rocprim/rocprim.hpp"
-            ],
-            "rocrand": [
-                f"{rocm_path}/lib/librocrand.so*"
-            ],
-            "rocsolver": [
-                f"{rocm_path}/lib/librocsolver.so*"
-            ],
-            "rocsparse": [
-                f"{rocm_path}/lib/librocsparse.so*"
-            ],
+            "hipcc": [f"{rocm_path}/bin/hipcc"],
+            "hip-runtime-amd": [f"{rocm_path}/lib/libamdhip64.so*"],
+            "hipblas": [f"{rocm_path}/lib/libhipblas.so*"],
+            "hipfft": [f"{rocm_path}/lib/libhipfft.so*"],
+            "hipcub-dev": [f"{rocm_path}/include/hipcub/hipcub.hpp"],
+            "hipsolver": [f"{rocm_path}/lib/libhipsolver.so*"],
+            "rocblas": [f"{rocm_path}/lib/librocblas.so*"],
+            "rocfft": [f"{rocm_path}/lib/librocfft.so*"],
+            "rocprim-dev": [f"{rocm_path}/include/rocprim/rocprim.hpp"],
+            "rocrand": [f"{rocm_path}/lib/librocrand.so*"],
+            "rocsolver": [f"{rocm_path}/lib/librocsolver.so*"],
+            "rocsparse": [f"{rocm_path}/lib/librocsparse.so*"],
             "rocthrust-dev": [
                 f"{rocm_path}/include/thrust",
-                f"{rocm_path}/lib/cmake/rocthrust"
+                f"{rocm_path}/lib/cmake/rocthrust",
             ],
             "miopen-hip": [
                 f"{rocm_path}/lib/libMIOpen.so*",
-                f"{rocm_path}/bin/MIOpenDriver"
-            ]
+                f"{rocm_path}/bin/MIOpenDriver",
+            ],
         }
 
         # Check each component
@@ -476,8 +491,10 @@ class ROCMHealthCheck:
 
         # AMD GPUs PCI class codes: 03xx (Display controllers ), 12xx (Processing accelerators)
         # use class codes also to identify AMD GPUs
-        stdout, _, ret_code = run_command( r"lspci -d 1002: -nn | grep -Ei 'Display controller|Processing accelerators|\[03[[:xdigit:]]{2}\]|\[12[[:xdigit:]]{2}\]' ",\
-                                            shell=True)
+        stdout, _, ret_code = run_command(
+            r"lspci -d 1002: -nn | grep -Ei 'Display controller|Processing accelerators|\[03[[:xdigit:]]{2}\]|\[12[[:xdigit:]]{2}\]' ",
+            shell=True,
+        )
         gpu_hw = stdout.strip()
         if ret_code == 0 and gpu_hw:
             self.logger.debug(f"--Found AMD GPU(s): \n{gpu_hw}")
@@ -511,7 +528,7 @@ class ROCMHealthCheck:
             if current_kernel:
                 # Highlight the dkms status with "*" for the current kernel installed
                 dkms_output = []
-                for line in stdout.split('\n'):
+                for line in stdout.split("\n"):
                     if "amdgpu" in line and current_kernel in line:
                         dkms_output.append(f"{line.strip()} *")
                     else:
@@ -539,7 +556,7 @@ class ROCMHealthCheck:
                     else:
                         all_checks_passed = False
                         issues.append("AMDGPU driver not initialized properly.")
-                        #self.logger.debug("--AMDGPU driver not initialized properly.")
+                        # self.logger.debug("--AMDGPU driver not initialized properly.")
             except Exception as e:
                 all_checks_passed = False
                 issues.append(f"Could not read AMDGPU init state: {e}")
@@ -560,7 +577,9 @@ class ROCMHealthCheck:
                     with open(sclk_file, "r") as f:
                         sclk_info = f.read().strip()
                         if sclk_info:
-                            self.logger.debug(f"--Power management is enabled. \n {sclk_file}: \n {sclk_info}")
+                            self.logger.debug(
+                                f"--Power management is enabled. \n {sclk_file}: \n {sclk_info}"
+                            )
                             sclk_checked = True
                             break
                 except Exception as e:
@@ -577,7 +596,9 @@ class ROCMHealthCheck:
             return TestStatus.PASS.value, "AMDGPU driver is fully functional."
         else:
             # Driver is loaded but with issues
-            self.logger.error(f"--AMDGPU driver loaded but with issues: {', --'.join(issues)}")
+            self.logger.error(
+                f"--AMDGPU driver loaded but with issues: {', --'.join(issues)}"
+            )
             return TestStatus.PASS.value, f"AMDGPU driver loaded but with issues."
 
     def test_rocminfo(self):
@@ -591,10 +612,18 @@ class ROCMHealthCheck:
         if "Device Type" in stdout:
             gpu_count = stdout.count("Device Type:             GPU")
             cpu_count = stdout.count("Device Type:             CPU")
-            self.logger.info(f"--rocminfo detected {gpu_count} GPU agent(s) and {cpu_count} CPU agent(s).")
-            return TestStatus.PASS.value, f"rocminfo detected {gpu_count} GPU agent(s) and {cpu_count} CPU agent(s)."
+            self.logger.info(
+                f"--rocminfo detected {gpu_count} GPU agent(s) and {cpu_count} CPU agent(s)."
+            )
+            return (
+                TestStatus.PASS.value,
+                f"rocminfo detected {gpu_count} GPU agent(s) and {cpu_count} CPU agent(s).",
+            )
         else:
-            return TestStatus.FAIL.value, "rocminfo executed but no GPU agents detected."
+            return (
+                TestStatus.FAIL.value,
+                "rocminfo executed but no GPU agents detected.",
+            )
 
     def test_rocm_agent_enumerator(self):
         """Test if rocm_agent_enumerator works properly"""
@@ -607,15 +636,22 @@ class ROCMHealthCheck:
         if "gfx" in stdout:
             agents = ", ".join(stdout.splitlines())
             self.logger.info(f"--Detected gpu agents: {agents}")
-            self.system_info["GPU Arch "] = stdout.splitlines()[0]  # Store first line as detected agents
+            self.system_info["GPU Arch "] = stdout.splitlines()[
+                0
+            ]  # Store first line as detected agents
             return TestStatus.PASS.value, f"Detected gpus: {agents}."
         else:
-            self.logger.error("--rocm_agent_enumerator executed but no GPU agents detected.")
-            return TestStatus.FAIL.value, "rocm_agent_enumerator executed but no GPU agents detected."
+            self.logger.error(
+                "--rocm_agent_enumerator executed but no GPU agents detected."
+            )
+            return (
+                TestStatus.FAIL.value,
+                "rocm_agent_enumerator executed but no GPU agents detected.",
+            )
 
     def test_amd_smi(self):
         """Test if amd-smi works properly.
-            Get all GPU related information using amd-smi command.
+        Get all GPU related information using amd-smi command.
         """
         results = {}
 
@@ -629,7 +665,7 @@ class ROCMHealthCheck:
         # Test list options and save the data for report
         stdout, stderr, ret_code = run_command("amd-smi list")
         stdout = stdout.strip()
-        if ret_code == 0  and stdout:
+        if ret_code == 0 and stdout:
             self.logger.debug(f"amd-smi list : \n {stdout}")
             results["list"] = "Passed"
             self.gpu_info_dict = self._convert_string_to_dict(stdout)
@@ -639,9 +675,11 @@ class ROCMHealthCheck:
 
         # Test static options and save the data for report
         smi_static_dict = {}
-        stdout, stderr, ret_code = run_command("amd-smi static --asic --bus --vbios --driver --vram")
+        stdout, stderr, ret_code = run_command(
+            "amd-smi static --asic --bus --vbios --driver --vram"
+        )
         stdout = stdout.strip()
-        if ret_code == 0  and stdout:
+        if ret_code == 0 and stdout:
             self.logger.debug(f"amd-smi static : \n {stdout}")
             results["static"] = "Passed"
             smi_static_dict = self._convert_string_to_dict(stdout)
@@ -659,7 +697,7 @@ class ROCMHealthCheck:
         # Check firmware option
         stdout, stderr, ret_code = run_command("amd-smi firmware")
         stdout = stdout.strip()
-        if ret_code == 0 and  stdout:
+        if ret_code == 0 and stdout:
             self.logger.debug(f"amd-smi firmware: \n {stdout}")
             results["firmware"] = "Passed"
             # Store firmware info in gpu_fw_info_dict
@@ -674,7 +712,10 @@ class ROCMHealthCheck:
             self.logger.error(f"Some amd-smi commands failed: {results}")
             return TestStatus.FAIL.value, f"Some amd-smi commands failed: {results}"
 
-        return TestStatus.PASS.value, f"amd-smi tests passed: {', '.join(k for k in results.keys())}"
+        return (
+            TestStatus.PASS.value,
+            f"amd-smi tests passed: {', '.join(k for k in results.keys())}",
+        )
 
     def _convert_string_to_dict(self, stdout_str):
         """Convert a string to a valid YAML format and return as a dictionary"""
@@ -682,7 +723,7 @@ class ROCMHealthCheck:
         # Need to add quotes around the GPU key to make it a string
         try:
             # Replace 'GPU: 0' with 'GPU_0:' to make it a valid YAML key
-            valid_yaml_str = re.sub(r'GPU: (\d+)', r'"GPU_\1":', stdout_str)
+            valid_yaml_str = re.sub(r"GPU: (\d+)", r'"GPU_\1":', stdout_str)
 
             # Use a custom loader to preserve all values as strings
             class StringPreservingLoader(yaml.SafeLoader):
@@ -694,8 +735,7 @@ class ROCMHealthCheck:
 
             # Register our custom string constructor for all scalar values
             StringPreservingLoader.add_constructor(
-                yaml.resolver.Resolver.DEFAULT_SCALAR_TAG,
-                string_constructor
+                yaml.resolver.Resolver.DEFAULT_SCALAR_TAG, string_constructor
             )
 
             # Disable YAML's type inference by overriding all the resolvers
@@ -713,7 +753,7 @@ class ROCMHealthCheck:
         """Check library dependencies of installed ROCm components"""
 
         # Determine ROCm installation path
-        rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+        rocm_path = self.rocm_path
         rocm_lib_path = os.path.join(rocm_path, "lib")
 
         max_depth = os.environ.get("LIBDIR_MAX_DEPTH", "")
@@ -725,34 +765,54 @@ class ROCMHealthCheck:
             return TestStatus.FAIL.value, "ROCm library path not found."
 
         # Get list of libraries in the ROCm path
-        stdout, stderr, ret_code = run_command(f"find {rocm_lib_path} {max_depth_arg} -name '*.so*'", shell=True)
+        stdout, stderr, ret_code = run_command(
+            f"find {rocm_lib_path} {max_depth_arg} -name '*.so*'", shell=True
+        )
         if ret_code != 0:
-            self.logger.error(f"--Error finding libraries in {rocm_lib_path}: \n{stderr}")
+            self.logger.error(
+                f"--Error finding libraries in {rocm_lib_path}: \n{stderr}"
+            )
             return TestStatus.FAIL.value, f"Error finding libraries: {stderr}"
 
-        libraries = stdout.strip().split('\n')
+        libraries = stdout.strip().split("\n")
         if not libraries:
             self.logger.warning("!!! No libraries found in ROCm library path.")
-            return TestStatus.NOT_TESTED.value, "No libraries found in ROCm library path."
+            return (
+                TestStatus.NOT_TESTED.value,
+                "No libraries found in ROCm library path.",
+            )
 
         # Check libraries in the ROCm library path
         # Check its dependencies as well.
-        self.logger.info(f"--Checking {len(libraries)} library files in ROCm library path: {rocm_lib_path}...")
-        self.logger.info(f"--Checking shared library dependencies and its linked path...")
-        missing_deps, wrong_path_warnings = self._check_rocm_libs_dependency(libraries, rocm_lib_path)
+        self.logger.info(
+            f"--Checking {len(libraries)} library files in ROCm library path: {rocm_lib_path}..."
+        )
+        self.logger.info(
+            f"--Checking shared library dependencies and its linked path..."
+        )
+        missing_deps, wrong_path_warnings = self._check_rocm_libs_dependency(
+            libraries, rocm_lib_path
+        )
 
         # Log any warnings about libraries linked outside of ROCm library path
         if wrong_path_warnings:
-            self.logger.warning(f"!!! Found {len(wrong_path_warnings)} warnings : rocm library path linked to outside of ROCm lib PATH. \n")
+            self.logger.warning(
+                f"!!! Found {len(wrong_path_warnings)} warnings : rocm library path linked to outside of ROCm lib PATH. \n"
+            )
             self.logger.debug(f"!!! : \n{json.dumps(wrong_path_warnings, indent=2)}")
 
         # If there are any missing dependencies, log them and return failure
         if missing_deps:
-            self.logger.error(f"!!! Found library dependency issues: \n{json.dumps(missing_deps, indent=2)}")
+            self.logger.error(
+                f"!!! Found library dependency issues: \n{json.dumps(missing_deps, indent=2)}"
+            )
             return TestStatus.FAIL.value, f"Found library dependency issues."
 
         if wrong_path_warnings:
-            return TestStatus.PASS.value, f"{len(wrong_path_warnings)} Path warnings are found. But all library dependencies are satisfied."
+            return (
+                TestStatus.PASS.value,
+                f"{len(wrong_path_warnings)} Path warnings are found. But all library dependencies are satisfied.",
+            )
         else:
             return TestStatus.PASS.value, "All library dependencies are satisfied."
 
@@ -779,13 +839,22 @@ class ROCMHealthCheck:
                 rplib = os.path.realpath(lib)
 
                 if not os.path.exists(rplib):
-                    self.logger.debug(f"!!! Library symlink {lib} points to a non-existent file <{rplib}>.")
+                    self.logger.debug(
+                        f"!!! Library symlink {lib} points to a non-existent file <{rplib}>."
+                    )
                     continue
 
                 # Check if the symlink is within the ROCm library path
-                if not (rplib.startswith(real_rocm_lib_path) or rplib.startswith(rocm_lib_path)):
-                    wrong_path_warnings[lib] = f"Library symlink pointing to ->{rplib} ; outside of ROCm library path {rocm_lib_path}."
-                    self.logger.debug(f"!!! Library symlink {lib}->{rplib} ; pointing outside of ROCm library path {rocm_lib_path}.")
+                if not (
+                    rplib.startswith(real_rocm_lib_path)
+                    or rplib.startswith(rocm_lib_path)
+                ):
+                    wrong_path_warnings[
+                        lib
+                    ] = f"Library symlink pointing to ->{rplib} ; outside of ROCm library path {rocm_lib_path}."
+                    self.logger.debug(
+                        f"!!! Library symlink {lib}->{rplib} ; pointing outside of ROCm library path {rocm_lib_path}."
+                    )
                 continue
 
             stdout, stderr, ret_code = run_command(f"ldd {lib}", shell=True)
@@ -815,15 +884,22 @@ class ROCMHealthCheck:
                         if not os.path.isabs(dep_lib_path):
                             # If it's relative, resolve it against the library path
                             # normalize the path to remove any redundant separators
-                            dep_lib_path = os.path.normpath(os.path.join(os.path.dirname(lib), dep_lib_path))
+                            dep_lib_path = os.path.normpath(
+                                os.path.join(os.path.dirname(lib), dep_lib_path)
+                            )
 
                         # check if the lib is a ROCm library, else # skip the check
                         if dep_lib in rocm_lib_basenames:
                             # If the dependency path is not within the ROCm library path, raise a warning
                             # Check if dep_lib_path starts with rocm_lib_path(/opt/rocm/lib/) or real_rocm_lib_path(/opt/rocm-7.0.0/lib/) without symlink.
-                            if not (dep_lib_path.startswith(rocm_lib_path) or dep_lib_path.startswith(real_rocm_lib_path)):
+                            if not (
+                                dep_lib_path.startswith(rocm_lib_path)
+                                or dep_lib_path.startswith(real_rocm_lib_path)
+                            ):
                                 # self.logger.debug(f"!!! Library {dep_lib} is linked to {dep_lib_path} which is outside of ROCm library path {rocm_lib_path}.")
-                                path_warnings.append(f"Library {dep_lib} is linked to {dep_lib_path} which is outside of ROCm library path {rocm_lib_path}.")
+                                path_warnings.append(
+                                    f"Library {dep_lib} is linked to {dep_lib_path} which is outside of ROCm library path {rocm_lib_path}."
+                                )
 
             if missing:
                 missing_deps[lib] = missing
@@ -852,7 +928,7 @@ class ROCMHealthCheck:
                 "check_type": "file_content",  # file_content or cmdline_param
                 "error_message": "numa_balancing is not disabled. For optimal performance, set numa_balancing=0",
                 "warning_message": None,
-                "is_error": True  # True for error, False for warning
+                "is_error": True,  # True for error, False for warning
             },
             {
                 "name": "amd_iommu",
@@ -862,7 +938,7 @@ class ROCMHealthCheck:
                 "check_type": "cmdline_param",
                 "error_message": "amd_iommu=on is not set in kernel parameters",
                 "warning_message": None,
-                "is_error": True
+                "is_error": True,
             },
             {
                 "name": "iommu",
@@ -872,7 +948,7 @@ class ROCMHealthCheck:
                 "check_type": "cmdline_param",
                 "error_message": "iommu=pt is not set in kernel parameters",
                 "warning_message": None,
-                "is_error": True
+                "is_error": True,
             },
             {
                 "name": "pci_realloc",
@@ -882,7 +958,7 @@ class ROCMHealthCheck:
                 "check_type": "cmdline_param",
                 "error_message": "pci=realloc=off is not set in kernel parameters",
                 "warning_message": None,
-                "is_error": True
+                "is_error": True,
             },
             {
                 "name": "cwsr_enable",
@@ -892,8 +968,8 @@ class ROCMHealthCheck:
                 "check_type": "file_content",
                 "error_message": None,
                 "warning_message": "amdgpu.cwsr_enable is set, should be 0 for optimal performance",
-                "is_error": False
-            }
+                "is_error": False,
+            },
         ]
 
         # Process each kernel parameter check
@@ -903,8 +979,8 @@ class ROCMHealthCheck:
                 actual_value = None
 
                 # Read the file if it exists
-                if os.path.exists(check['file_path']):
-                    with open(check['file_path'], 'r') as f:
+                if os.path.exists(check["file_path"]):
+                    with open(check["file_path"], "r") as f:
                         file_content = f.read().strip()
 
                     actual_value = file_content
@@ -912,17 +988,17 @@ class ROCMHealthCheck:
                 # Evaluate the check
                 check_passed = False
                 if actual_value is not None:
-                    if check['check_type'] == 'file_content':
-                        check_passed = (actual_value == check['expected_value'])
-                    elif check['check_type'] == 'cmdline_param':
-                        check_passed = (check['expected_value'] in actual_value)
+                    if check["check_type"] == "file_content":
+                        check_passed = actual_value == check["expected_value"]
+                    elif check["check_type"] == "cmdline_param":
+                        check_passed = check["expected_value"] in actual_value
 
                 # Handle failed checks
                 if not check_passed:
-                    if check['is_error'] and check['error_message']:
+                    if check["is_error"] and check["error_message"]:
                         self.logger.error(f"!!! {check['error_message']}")
                         errors += 1
-                    elif not check['is_error'] and check['warning_message']:
+                    elif not check["is_error"] and check["warning_message"]:
                         self.logger.warning(f"!!! {check['warning_message']}")
                         warnings += 1
 
@@ -939,16 +1015,27 @@ class ROCMHealthCheck:
             warnings += warning
 
         except Exception as e:
-            self.logger.warning(f"!!! Error checking BAR setting for GPU devices: {str(e)}")
+            self.logger.warning(
+                f"!!! Error checking BAR setting for GPU devices: {str(e)}"
+            )
             warnings += 1
 
         # Return results
         if errors > 0:
-            return TestStatus.FAIL.value, f"{errors}  Errors & {warnings} warnings detected in kernel parameters/environment settings."
+            return (
+                TestStatus.FAIL.value,
+                f"{errors}  Errors & {warnings} warnings detected in kernel parameters/environment settings.",
+            )
         elif warnings > 0:
-            return TestStatus.PASS.value, f"{warnings} warnings detected in kernel parameters/environment settings."
+            return (
+                TestStatus.PASS.value,
+                f"{warnings} warnings detected in kernel parameters/environment settings.",
+            )
         else:
-            return TestStatus.PASS.value, "All kernel parameters/environment settings for ROCm appear to be configured correctly"
+            return (
+                TestStatus.PASS.value,
+                "All kernel parameters/environment settings for ROCm appear to be configured correctly",
+            )
 
     def _check_large_bar(self):
         """Check if Large BAR is enabled for all GPUs in the system"""
@@ -973,34 +1060,43 @@ class ROCMHealthCheck:
             vis_vram_total_path = os.path.join(device_path, "mem_info_vis_vram_total")
             unique_id_path = os.path.join(device_path, "unique_id")
 
-            if not os.path.exists(vram_total_path) or not os.path.exists(vis_vram_total_path):
-                self.logger.debug(f"!!! VRAM info files not found for {card_num}. Skipping...")
+            if not os.path.exists(vram_total_path) or not os.path.exists(
+                vis_vram_total_path
+            ):
+                self.logger.debug(
+                    f"!!! VRAM info files not found for {card_num}. Skipping..."
+                )
                 continue
 
             try:
-                with open(vram_total_path, 'r') as f:
+                with open(vram_total_path, "r") as f:
                     vram_total = int(f.read().strip())
-                with open(vis_vram_total_path, 'r') as f:
+                with open(vis_vram_total_path, "r") as f:
                     vis_vram_total = int(f.read().strip())
-                with open(unique_id_path, 'r') as f:
+                with open(unique_id_path, "r") as f:
                     unique_id = f.read().strip()
 
                 # Format memory values for display
-                vram_total_mb = vram_total / (1024*1024)
-                vis_vram_total_mb = vis_vram_total / (1024*1024)
+                vram_total_mb = vram_total / (1024 * 1024)
+                vis_vram_total_mb = vis_vram_total / (1024 * 1024)
 
                 if vram_total != vis_vram_total:
-                    self.logger.warning(f"!!! Large BAR is not enabled for {card_num}[SerialNo:{unique_id}]. VRAM total: {vram_total_mb}MB, VRAM total Visible to CPU: {vis_vram_total_mb}MB")
+                    self.logger.warning(
+                        f"!!! Large BAR is not enabled for {card_num}[SerialNo:{unique_id}]. VRAM total: {vram_total_mb}MB, VRAM total Visible to CPU: {vis_vram_total_mb}MB"
+                    )
                     warnings += 1
                 else:
-                    self.logger.info(f"Large BAR is enabled for {card_num}[SerialNo:{unique_id}]. VRAM total: {vram_total_mb}MB, VRAM total Visible to CPU: {vis_vram_total_mb}MB")
+                    self.logger.info(
+                        f"Large BAR is enabled for {card_num}[SerialNo:{unique_id}]. VRAM total: {vram_total_mb}MB, VRAM total Visible to CPU: {vis_vram_total_mb}MB"
+                    )
 
             except Exception as e:
-                self.logger.error(f"!!! Error reading VRAM info for {device_path}: {str(e)}")
+                self.logger.error(
+                    f"!!! Error reading VRAM info for {device_path}: {str(e)}"
+                )
                 errors += 1
 
         return errors, warnings
-
 
     def test_check_env_variables(self):
         """Check ROCm-related environment variables settings"""
@@ -1025,18 +1121,36 @@ class ROCMHealthCheck:
                 missing_env_vars.append(f"{var} (recommended: {default_val})")
 
         if found_env_vars:
-            self.logger.info(f"------Found ROCm environment variables:\n {', '.join(found_env_vars)}")
+            self.logger.info(
+                f"------Found ROCm environment variables:\n {', '.join(found_env_vars)}"
+            )
 
         if missing_env_vars:
-            self.logger.warning(f"!!! Missing some recommended ROCm environment variables: {', '.join(missing_env_vars)}")
+            self.logger.warning(
+                f"!!! Missing some recommended ROCm environment variables: {', '.join(missing_env_vars)}"
+            )
             warnings += 1
 
         # Look for any ROCm-related environment variables not in our list
         additional_rocm_vars = []
 
         # TODO: Make this list more comprehensive based on actual ROCm environment variables
-        rocm_env_key_words = ['ROCM', 'HIP', 'HSA', 'ROCR', 'AMD', 'GPU',  'CL_', 'OPENCL',
-                              'MIOPEN', 'ROCBLAS', 'ROCSPARSE', 'ROCALUTION', 'ROCSOLVER', 'ROCRAND' ]
+        rocm_env_key_words = [
+            "ROCM",
+            "HIP",
+            "HSA",
+            "ROCR",
+            "AMD",
+            "GPU",
+            "CL_",
+            "OPENCL",
+            "MIOPEN",
+            "ROCBLAS",
+            "ROCSPARSE",
+            "ROCALUTION",
+            "ROCSOLVER",
+            "ROCRAND",
+        ]
 
         # TODO: Optimize this search to avoid multiple loop search.
         for var in os.environ:
@@ -1045,14 +1159,22 @@ class ROCMHealthCheck:
                     additional_rocm_vars.append(f"{var}={os.environ[var]}")
 
         if additional_rocm_vars:
-            self.logger.warning(f"!!! Additional ROCm-related environment variables set :\n {'; '.join(additional_rocm_vars)}")
+            self.logger.warning(
+                f"!!! Additional ROCm-related environment variables set :\n {'; '.join(additional_rocm_vars)}"
+            )
             warnings += 1
 
         # Return results
         if warnings > 0:
-            return TestStatus.PASS.value, f"{warnings} warnings detected in ENV settings."
+            return (
+                TestStatus.PASS.value,
+                f"{warnings} warnings detected in ENV settings.",
+            )
         else:
-            return TestStatus.PASS.value, "All ROCm environment settings appear to be set correctly"
+            return (
+                TestStatus.PASS.value,
+                "All ROCm environment settings appear to be set correctly",
+            )
 
     def _get_nic_brands(self, nic_cards):
         """Extract unique NIC brands from the list of NIC cards"""
@@ -1061,7 +1183,11 @@ class ROCMHealthCheck:
         for card in nic_cards:
             # Use regex to extract brand name after the controller type
             # Pattern: controller type [code]: Brand Name ...
-            match = re.search(r'(?:Ethernet controller|Network controller|Infiniband controller)\s*\[\w+\]:\s*(\w+)', card, re.IGNORECASE)
+            match = re.search(
+                r"(?:Ethernet controller|Network controller|Infiniband controller)\s*\[\w+\]:\s*(\w+)",
+                card,
+                re.IGNORECASE,
+            )
             if match:
                 brand = match.group(1)
                 nic_brands.add(brand)
@@ -1090,35 +1216,36 @@ class ROCMHealthCheck:
         driver_mapping = {
             "Mellanox": {
                 "modules": ["mlx5_core", "mlx5_ib", "mlx4_core", "mlx4_ib"],
-                "name": "Mellanox"
+                "name": "Mellanox",
             },
-            "Broadcom": {
-                "modules": ["bnxt_en", "bnxt_re"],
-                "name": "Broadcom"
-            },
+            "Broadcom": {"modules": ["bnxt_en", "bnxt_re"], "name": "Broadcom"},
             "HPE": {
                 "modules": ["cxi_core", "cxi_eth", "cxi_user"],
-                "name": "HPE-Cassini"
+                "name": "HPE-Cassini",
             },
             "Cray": {
                 "modules": ["cxi_core", "cxi_eth", "cxi_user"],
-                "name": "HPE-Cassini"
+                "name": "HPE-Cassini",
             },
             "Cassini": {
                 "modules": ["cxi_core", "cxi_eth", "cxi_user"],
-                "name": "HPE-Cassini"
+                "name": "HPE-Cassini",
             },
             "Intel": {
                 "modules": ["i40e", "ice", "ixgbe", "igb", "e1000e"],
-                "name": "Intel"
-            }
+                "name": "Intel",
+            },
         }
 
         # Get driver configuration for the detected brand
         driver_config = driver_mapping.get(nic_brand)
         if not driver_config:
-            driver_issues.append(f"No driver configuration found for NIC brand: {nic_brand}")
-            self.logger.warning(f"!!! No driver configuration found for NIC brand: {nic_brand}")
+            driver_issues.append(
+                f"No driver configuration found for NIC brand: {nic_brand}"
+            )
+            self.logger.warning(
+                f"!!! No driver configuration found for NIC brand: {nic_brand}"
+            )
             return nic_drivers_found, driver_issues
 
         # Check if the specified drivers are loaded
@@ -1132,7 +1259,9 @@ class ROCMHealthCheck:
         # Check if any drivers were found for this brand
         if not nic_drivers_found:
             driver_issues.append(f"{nic_brand} NIC present but drivers not loaded")
-            self.logger.warning(f"!!! {nic_brand} NIC detected but drivers ({', '.join(driver_config['modules'])}) not loaded")
+            self.logger.warning(
+                f"!!! {nic_brand} NIC detected but drivers ({', '.join(driver_config['modules'])}) not loaded"
+            )
 
         return nic_drivers_found, driver_issues
 
@@ -1145,14 +1274,18 @@ class ROCMHealthCheck:
         warnings = 0
         limits_conf_path = "/etc/security/limits.conf"
 
-        self.logger.info("----Checking system limits configuration in /etc/security/limits.conf...")
+        self.logger.info(
+            "----Checking system limits configuration in /etc/security/limits.conf..."
+        )
 
         if not os.path.exists(limits_conf_path):
-            self.logger.warning(f"!!! {limits_conf_path} not found. Cannot verify system-wide limit settings.")
+            self.logger.warning(
+                f"!!! {limits_conf_path} not found. Cannot verify system-wide limit settings."
+            )
             return 1
 
         try:
-            with open(limits_conf_path, 'r') as f:
+            with open(limits_conf_path, "r") as f:
                 lines = f.readlines()
         except Exception as e:
             self.logger.warning(f"!!! Error reading {limits_conf_path}: {e}")
@@ -1160,10 +1293,10 @@ class ROCMHealthCheck:
 
         # Initialize tracking variables
         found_limits = {
-            'soft_memlock': None,
-            'hard_memlock': None,
-            'soft_nofile': None,
-            'hard_nofile': None
+            "soft_memlock": None,
+            "hard_memlock": None,
+            "soft_nofile": None,
+            "hard_nofile": None,
         }
 
         # Parse non-commented lines
@@ -1171,7 +1304,7 @@ class ROCMHealthCheck:
             line = line.strip()
 
             # Skip empty lines and comments
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
 
             # Split line into parts (domain, type, item, value)
@@ -1182,52 +1315,76 @@ class ROCMHealthCheck:
             domain, limit_type, item, value = parts[0], parts[1], parts[2], parts[3]
 
             # Check for our target limits
-            if limit_type == 'soft' and item == 'memlock':
-                found_limits['soft_memlock'] = value
-                self.logger.info(f"--------Found soft memlock: {value} (line {line_num})")
-            elif limit_type == 'hard' and item == 'memlock':
-                found_limits['hard_memlock'] = value
-                self.logger.info(f"--------Found hard memlock: {value} (line {line_num})")
-            elif limit_type == 'soft' and item == 'nofile':
-                found_limits['soft_nofile'] = value
-                self.logger.info(f"--------Found soft nofile: {value} (line {line_num})")
-            elif limit_type == 'hard' and item == 'nofile':
-                found_limits['hard_nofile'] = value
-                self.logger.info(f"--------Found hard nofile: {value} (line {line_num})")
+            if limit_type == "soft" and item == "memlock":
+                found_limits["soft_memlock"] = value
+                self.logger.info(
+                    f"--------Found soft memlock: {value} (line {line_num})"
+                )
+            elif limit_type == "hard" and item == "memlock":
+                found_limits["hard_memlock"] = value
+                self.logger.info(
+                    f"--------Found hard memlock: {value} (line {line_num})"
+                )
+            elif limit_type == "soft" and item == "nofile":
+                found_limits["soft_nofile"] = value
+                self.logger.info(
+                    f"--------Found soft nofile: {value} (line {line_num})"
+                )
+            elif limit_type == "hard" and item == "nofile":
+                found_limits["hard_nofile"] = value
+                self.logger.info(
+                    f"--------Found hard nofile: {value} (line {line_num})"
+                )
 
         # Check memlock limits (should be 'unlimited')
-        for limit_key in ['soft_memlock', 'hard_memlock']:
+        for limit_key in ["soft_memlock", "hard_memlock"]:
             if found_limits[limit_key] is None:
                 warnings += 1
-                limit_type = limit_key.split('_')[0]
-                self.logger.warning(f"!!! Missing {limit_type} memlock setting in {limits_conf_path}")
+                limit_type = limit_key.split("_")[0]
+                self.logger.warning(
+                    f"!!! Missing {limit_type} memlock setting in {limits_conf_path}"
+                )
                 self.logger.warning(f"!!!   Add: * {limit_type} memlock unlimited")
-            elif found_limits[limit_key] != 'unlimited':
+            elif found_limits[limit_key] != "unlimited":
                 warnings += 1
-                limit_type = limit_key.split('_')[0]
-                self.logger.warning(f"!!! {limit_type} memlock is set to '{found_limits[limit_key]}', should be 'unlimited'")
-                self.logger.warning(f"!!!   Change to: * {limit_type} memlock unlimited")
+                limit_type = limit_key.split("_")[0]
+                self.logger.warning(
+                    f"!!! {limit_type} memlock is set to '{found_limits[limit_key]}', should be 'unlimited'"
+                )
+                self.logger.warning(
+                    f"!!!   Change to: * {limit_type} memlock unlimited"
+                )
 
         # Check nofile limits (should be >= 1048576)
-        for limit_key in ['soft_nofile', 'hard_nofile']:
+        for limit_key in ["soft_nofile", "hard_nofile"]:
             if found_limits[limit_key] is None:
                 warnings += 1
-                limit_type = limit_key.split('_')[0]
-                self.logger.warning(f"!!! Missing {limit_type} nofile setting in {limits_conf_path}")
+                limit_type = limit_key.split("_")[0]
+                self.logger.warning(
+                    f"!!! Missing {limit_type} nofile setting in {limits_conf_path}"
+                )
                 self.logger.warning(f"!!!   Add: * {limit_type} nofile 1048576")
             else:
                 try:
                     nofile_value = int(found_limits[limit_key])
                     if nofile_value < 1048576:
                         warnings += 1
-                        limit_type = limit_key.split('_')[0]
-                        self.logger.warning(f"!!! {limit_type} nofile is set to {nofile_value}, should be >= 1048576")
-                        self.logger.warning(f"!!!   Change to: * {limit_type} nofile 1048576")
+                        limit_type = limit_key.split("_")[0]
+                        self.logger.warning(
+                            f"!!! {limit_type} nofile is set to {nofile_value}, should be >= 1048576"
+                        )
+                        self.logger.warning(
+                            f"!!!   Change to: * {limit_type} nofile 1048576"
+                        )
                 except ValueError:
                     warnings += 1
-                    limit_type = limit_key.split('_')[0]
-                    self.logger.warning(f"!!! {limit_type} nofile has invalid value '{found_limits[limit_key]}', should be >= 1048576")
-                    self.logger.warning(f"!!!   Change to: * {limit_type} nofile 1048576")
+                    limit_type = limit_key.split("_")[0]
+                    self.logger.warning(
+                        f"!!! {limit_type} nofile has invalid value '{found_limits[limit_key]}', should be >= 1048576"
+                    )
+                    self.logger.warning(
+                        f"!!!   Change to: * {limit_type} nofile 1048576"
+                    )
 
         return warnings
 
@@ -1243,23 +1400,29 @@ class ROCMHealthCheck:
         stdout, stderr, ret_code = run_command("which mpirun")
         if ret_code != 0:
             warnings += 1
-            self.logger.warning("!!! mpirun is not found in PATH. Install OpenMPI or MPICH.")
+            self.logger.warning(
+                "!!! mpirun is not found in PATH. Install OpenMPI or MPICH."
+            )
         else:
             # Get MPI version for additional info
             stdout_ver, _, _ = run_command("mpirun --version")
-            mpi_version = stdout_ver.split('\n')[1] if stdout_ver else "Unknown version"
+            mpi_version = stdout_ver.split("\n")[1] if stdout_ver else "Unknown version"
             self.logger.info(f"------Found MPI: {mpi_version}")
 
         # 2. Check if network cards (NICs) are present in hardware list
         self.logger.info("----Checking for network interface cards...")
         nic_brand = None
-        nic_cards, stderr, ret_code = run_command("lspci -nn | grep -Ei 'ethernet|network|infiniband'", shell=True)
+        nic_cards, stderr, ret_code = run_command(
+            "lspci -nn | grep -Ei 'ethernet|network|infiniband'", shell=True
+        )
         if ret_code != 0 or not nic_cards.strip():
             errors += 1
             cluster_readiness_issues.append("No network cards found in hardware")
-            self.logger.error("!!! No Ethernet/Network cards found in the system. This node cannot work as part of a multinode cluster setup.")
+            self.logger.error(
+                "!!! No Ethernet/Network cards found in the system. This node cannot work as part of a multinode cluster setup."
+            )
         else:
-            nic_cards = nic_cards.strip().split('\n')
+            nic_cards = nic_cards.strip().split("\n")
             self.logger.info(f"------Found {len(nic_cards)} network card(s)")
             for idx, card in enumerate(nic_cards):
                 self.logger.debug(f"--------NIC {idx}: {card.strip()}")
@@ -1269,15 +1432,18 @@ class ROCMHealthCheck:
         if nic_brand:
             self.logger.info(f"------Detected NIC brand: {nic_brand}")
         else:
-            self.logger.warning("!!! Could not extract brand names from NIC information")
-
+            self.logger.warning(
+                "!!! Could not extract brand names from NIC information"
+            )
 
         # 3. Check for specific NIC drivers (Mellanox, Broadcom, HPE Cray/Cassini)
         self.logger.info("----Checking NIC drivers...")
         nic_drivers_found, driver_issues = self._check_nic_drivers(nic_brand)
 
         if nic_drivers_found:
-            self.logger.info(f"------Active NIC drivers: {', '.join(nic_drivers_found)}")
+            self.logger.info(
+                f"------Active NIC drivers: {', '.join(nic_drivers_found)}"
+            )
         else:
             errors += 1
             cluster_readiness_issues.append("No high-performance NIC drivers loaded")
@@ -1297,7 +1463,9 @@ class ROCMHealthCheck:
                 rdma_modules_loaded.append(module)
 
         if rdma_modules_loaded:
-            self.logger.info(f"------RDMA modules loaded: {', '.join(rdma_modules_loaded)}")
+            self.logger.info(
+                f"------RDMA modules loaded: {', '.join(rdma_modules_loaded)}"
+            )
         else:
             errors += 1
             cluster_readiness_issues.append("RDMA modules not loaded.")
@@ -1310,18 +1478,26 @@ class ROCMHealthCheck:
             self.logger.info(f"------: \n{stdout_rdma.strip()}")
         else:
             warnings += 1
-            self.logger.warning("!!! No RDMA links detected. This may affect performance in a multinode cluster setup.")
+            self.logger.warning(
+                "!!! No RDMA links detected. This may affect performance in a multinode cluster setup."
+            )
 
         # 6 Check ulimit settings
         self.logger.info("----Checking ulimit settings...")
 
         ulimit_warnings = self._check_system_limits_configuration()
         if ulimit_warnings == 0:
-            self.logger.info(f"------All required limits are properly configured for ulimit.")
+            self.logger.info(
+                f"------All required limits are properly configured for ulimit."
+            )
         else:
             warnings += ulimit_warnings
-            self.logger.warning(f"!!! Found {warnings} limit configuration issues for ulimit.")
-            self.logger.warning(f"!!! Note: Recommended to set the [ulimit -n 1048576 and ulimit -l unlimited] ")
+            self.logger.warning(
+                f"!!! Found {warnings} limit configuration issues for ulimit."
+            )
+            self.logger.warning(
+                f"!!! Note: Recommended to set the [ulimit -n 1048576 and ulimit -l unlimited] "
+            )
 
         # 7. Final assessment based on all checks
         self.logger.info("----Final multinode cluster readiness assessment...")
@@ -1343,7 +1519,9 @@ class ROCMHealthCheck:
             self.logger.warning(f"!!! {warning_msg}")
             return TestStatus.PASS.value, warning_msg
         else:
-            success_msg = f"Found {len(nic_cards)} NICs and required drivers are loaded."
+            success_msg = (
+                f"Found {len(nic_cards)} NICs and required drivers are loaded."
+            )
             self.logger.info(f" {success_msg}")
             return TestStatus.PASS.value, success_msg
 
@@ -1352,13 +1530,19 @@ class ROCMHealthCheck:
         self.logger.info("--Checking atomic operations support for GPU devices...")
 
         # Find AMD GPU devices using lspci
-        stdout, stderr, ret_code = run_command("lspci -d 1002: -nn | grep -Ei 'Display controller|Processing accelerators|VGA compatible controller'", shell=True)
+        stdout, stderr, ret_code = run_command(
+            "lspci -d 1002: -nn | grep -Ei 'Display controller|Processing accelerators|VGA compatible controller'",
+            shell=True,
+        )
 
         if ret_code != 0 or not stdout.strip():
             self.logger.error("!!! No AMD GPU devices found")
-            return TestStatus.FAIL.value, "No AMD GPU devices found to check atomic operations."
+            return (
+                TestStatus.FAIL.value,
+                "No AMD GPU devices found to check atomic operations.",
+            )
 
-        gpu_devices = stdout.strip().split('\n')
+        gpu_devices = stdout.strip().split("\n")
         self.logger.info(f"----Found {len(gpu_devices)} AMD GPU device(s)")
 
         def parse_atomic_details(stdout_detail, pci_address):
@@ -1366,7 +1550,7 @@ class ROCMHealthCheck:
             atomic_cap_found = False
             atomic_enabled = False
 
-            for line in stdout_detail.strip().split('\n'):
+            for line in stdout_detail.strip().split("\n"):
                 line = line.strip()
 
                 if "AtomicOpsCap:" in line:
@@ -1384,27 +1568,38 @@ class ROCMHealthCheck:
         def check_device_atomic_ops(gpu_line):
             """Check atomic operations for a single GPU device"""
             # Extract PCI address using regex (e.g., "01:00.0")
-            pci_match = re.match(r'^([0-9a-f]{2}:[0-9a-f]{2}\.[0-9a-f])', gpu_line.strip())
+            pci_match = re.match(
+                r"^([0-9a-f]{2}:[0-9a-f]{2}\.[0-9a-f])", gpu_line.strip()
+            )
 
             if not pci_match:
-                self.logger.warning(f"!!! Could not extract PCI address from line: {gpu_line}")
-                return None, "check_failed", f"Invalid format: Could not extract PCI address"
+                self.logger.warning(
+                    f"!!! Could not extract PCI address from line: {gpu_line}"
+                )
+                return (
+                    None,
+                    "check_failed",
+                    f"Invalid format: Could not extract PCI address",
+                )
 
             pci_address = pci_match.group(1)
 
             # Get atomic operations info using grep to filter relevant lines
             stdout_detail, stderr_detail, ret_detail = run_command(
-                f"lspci -vvv -s {pci_address} | grep -i atomic",
-                shell=True
+                f"lspci -vvv -s {pci_address} | grep -i atomic", shell=True
             )
 
             if ret_detail != 0 or not stdout_detail.strip():
-                self.logger.warning(f"!!! Failed to get atomic operations info for device {pci_address}")
+                self.logger.warning(
+                    f"!!! Failed to get atomic operations info for device {pci_address}"
+                )
                 self.logger.warning(f"!!! Try running the test with 'sudo -E' ")
                 return pci_address, "check_failed", f"{pci_address}: Check failed"
 
             # Parse AtomicOpsCap and AtomicOpsCtl
-            atomic_cap_found, atomic_enabled = parse_atomic_details(stdout_detail, pci_address)
+            atomic_cap_found, atomic_enabled = parse_atomic_details(
+                stdout_detail, pci_address
+            )
 
             # Determine device status
             if atomic_cap_found and atomic_enabled:
@@ -1424,24 +1619,28 @@ class ROCMHealthCheck:
             """Check PCIe generation and lane configuration for atomic routing"""
 
             stdout, stderr, ret_code = run_command(
-                f"lspci -vvv -s {pci_address} | grep -E 'LnkCap:|LnkSta:'",
-                shell=True
+                f"lspci -vvv -s {pci_address} | grep -E 'LnkCap:|LnkSta:'", shell=True
             )
 
             if ret_code == 0 and stdout.strip():
                 self.logger.debug(f"------PCIe Link Capabilities for {pci_address}:")
-                for line in stdout.strip().split('\n'):
+                for line in stdout.strip().split("\n"):
                     self.logger.info(f"--------{line.strip()}")
 
                     # Check for PCIe Gen4/Gen5 which have better atomic support
                     if "LnkSta" in line and "Speed" in line:
                         if "16GT/s" in line:  # PCIe Gen4
-                            self.logger.info(f"------Device {pci_address}: PCIe Gen4 (16GT/s) - Good atomic routing capability")
+                            self.logger.info(
+                                f"------Device {pci_address}: PCIe Gen4 (16GT/s) - Good atomic routing capability"
+                            )
                         elif "32GT/s" in line:  # PCIe Gen5
-                            self.logger.info(f"------Device {pci_address}: PCIe Gen5 (32GT/s) - Excellent atomic routing capability")
+                            self.logger.info(
+                                f"------Device {pci_address}: PCIe Gen5 (32GT/s) - Excellent atomic routing capability"
+                            )
                         elif "8GT/s" in line:  # PCIe Gen3
-                            self.logger.warning(f"!!! Device {pci_address}: PCIe Gen3 (8GT/s) - Limited atomic routing capability")
-
+                            self.logger.warning(
+                                f"!!! Device {pci_address}: PCIe Gen3 (8GT/s) - Limited atomic routing capability"
+                            )
 
         atomic_ops_status = []
         devices_with_atomics = 0
@@ -1464,19 +1663,33 @@ class ROCMHealthCheck:
 
         # Log summary
         self.logger.info(f"----Atomic operations summary:")
-        self.logger.info(f"------Devices with atomic ops enabled: {devices_with_atomics}")
-        self.logger.info(f"------Devices with atomic ops disabled: {devices_without_atomics}")
+        self.logger.info(
+            f"------Devices with atomic ops enabled: {devices_with_atomics}"
+        )
+        self.logger.info(
+            f"------Devices with atomic ops disabled: {devices_without_atomics}"
+        )
         if check_failed_devices > 0:
-            self.logger.info(f"------Devices with check failed/unclear: {check_failed_devices}")
+            self.logger.info(
+                f"------Devices with check failed/unclear: {check_failed_devices}"
+            )
 
         # Determine overall status
         if devices_without_atomics > 0:
-            return TestStatus.FAIL.value, f"Atomic operations not enabled for {devices_without_atomics} device(s). Details: {'; '.join(atomic_ops_status)}"
+            return (
+                TestStatus.FAIL.value,
+                f"Atomic operations not enabled for {devices_without_atomics} device(s). Details: {'; '.join(atomic_ops_status)}",
+            )
         elif check_failed_devices > 0:
-            return TestStatus.FAIL.value, f"Atomic operations check completed with {check_failed_devices} warning(s). Details: {'; '.join(atomic_ops_status)}"
+            return (
+                TestStatus.FAIL.value,
+                f"Atomic operations check completed with {check_failed_devices} warning(s). Details: {'; '.join(atomic_ops_status)}",
+            )
         else:
-            return TestStatus.PASS.value, f"Atomic operations supported and enabled on all {devices_with_atomics} GPU device(s)."
-
+            return (
+                TestStatus.PASS.value,
+                f"Atomic operations supported and enabled on all {devices_with_atomics} GPU device(s).",
+            )
 
     # Example component specific tests (these should be customized for each component)
     def test_check_hipcc(self):
@@ -1564,10 +1777,9 @@ class ROCMHealthCheck:
 
     def test_check_rocthrust_dev(self):
         """Test rocthrust package"""
-        #test_target_name = "rocthrust_norm"
+        # test_target_name = "rocthrust_norm"
         test_target_name = self._get_build_target("rocthrust-dev", 0)
         return self._build_target_and_run("rocthrust-dev", test_target_name)
-
 
     def _get_build_target(self, comp_name, item_index=0):
         """Get a build target for the specified component.
@@ -1593,7 +1805,10 @@ class ROCMHealthCheck:
         comp_key = component_mapping.get(comp_name, comp_name)
 
         # Check if the component exists and has targets
-        if comp_key in self.rocm_examples_targets and len(self.rocm_examples_targets[comp_key]) > item_index:
+        if (
+            comp_key in self.rocm_examples_targets
+            and len(self.rocm_examples_targets[comp_key]) > item_index
+        ):
             return self.rocm_examples_targets[comp_key][item_index]
 
         return None
@@ -1608,12 +1823,18 @@ class ROCMHealthCheck:
         Returns:
             tuple: (TestStatus, message)
         """
-        self.logger.info(f"--Checking {comp_name} with a simple program [{test_target_name}]...")
+        self.logger.info(
+            f"--Checking {comp_name} with a simple program [{test_target_name}]..."
+        )
         stdout, stderr, ret_code = run_command(
-            f"cmake --build build --target {test_target_name}; ctest --test-dir build -R \"^{test_target_name}$\"", shell=True)
+            f'cmake --build build --target {test_target_name}; ctest --test-dir build -R "^{test_target_name}$"',
+            shell=True,
+        )
         self.logger.debug(f"\n{stdout.strip()}")
         if ret_code != 0:
-            self.logger.error(f"--Failed to compile rocm-examples ({test_target_name}): \n{stderr}")
+            self.logger.error(
+                f"--Failed to compile rocm-examples ({test_target_name}): \n{stderr}"
+            )
             return TestStatus.FAIL.value, f"{comp_name} check failed: {stderr}"
         else:
             self.logger.debug(f"--Successfully executed {test_target_name}.")
@@ -1623,7 +1844,7 @@ class ROCMHealthCheck:
     def test_check_miopen_hip(self):
         """Test miopen-hip package"""
         # Find ROCM path
-        rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+        rocm_path = self.rocm_path
         miopen_driver = os.path.join(rocm_path, "bin", "MIOpenDriver")
 
         # Check if MIOpenDriver exists
@@ -1656,7 +1877,9 @@ class ROCMHealthCheck:
             test_results.append(("Pooling", True, ""))
 
         # Test 3: Activation test
-        self.logger.debug("----Checking MIOpen activation test with default parameters...")
+        self.logger.debug(
+            "----Checking MIOpen activation test with default parameters..."
+        )
         activ_cmd = f"{miopen_driver} activ -m relu"
         stdout, stderr, ret_code = run_command(activ_cmd, shell=True)
         if ret_code != 0:
@@ -1669,13 +1892,21 @@ class ROCMHealthCheck:
         # Evaluate overall results
         failed_tests = [test[0] for test in test_results if not test[1]]
         if failed_tests:
-            return TestStatus.FAIL.value, f"MIOpen tests failed for: {', '.join(failed_tests)}"
+            return (
+                TestStatus.FAIL.value,
+                f"MIOpen tests failed for: {', '.join(failed_tests)}",
+            )
         else:
-            return TestStatus.PASS.value, "MIOpen is working correctly for basic operations"
+            return (
+                TestStatus.PASS.value,
+                "MIOpen is working correctly for basic operations",
+            )
 
     def test_component(self, component):
         """Test a specific component by dynamically calling the appropriate test function"""
-        test_method_name = f"test_check_{component.replace('-', '_').replace('+', '_plus_')}"
+        test_method_name = (
+            f"test_check_{component.replace('-', '_').replace('+', '_plus_')}"
+        )
         test_method = getattr(self, test_method_name, None)
 
         if component in self.exclude_list:
@@ -1694,7 +1925,10 @@ class ROCMHealthCheck:
         """Basic test for components without specific test methods"""
         # Check if component packge files installed
         # TODO
-        return TestStatus.PASS.value, f"{component} is installed but no specific test available."
+        return (
+            TestStatus.PASS.value,
+            f"{component} is installed but no specific test available.",
+        )
 
     def _print_test_start(self, test_name):
         """Print a separator line and test start message
@@ -1780,7 +2014,12 @@ class ROCMHealthCheck:
 
         # Check if rocm-examples targets are available
         if not self.rocm_examples_targets:
-            return {"applications": {"status": TestStatus.NOT_TESTED.value, "reason": "No rocm-examples targets available for applications."}}
+            return {
+                "applications": {
+                    "status": TestStatus.NOT_TESTED.value,
+                    "reason": "No rocm-examples targets available for applications.",
+                }
+            }
 
         # Run tests for each application target
         for target in self.rocm_examples_targets.get("applications", []):
@@ -1816,13 +2055,19 @@ class ROCMHealthCheck:
                     # Clone repository
                     self.logger.info("Cloning rocm-examples repository...")
                     stdout, stderr, ret_code = run_command(
-                        "git clone https://github.com/ROCm/rocm-examples.git", shell=True)
+                        "git clone https://github.com/ROCm/rocm-examples.git",
+                        shell=True,
+                    )
                     if ret_code != 0:
                         self.logger.error(f"Failed to clone rocm-examples: \n{stderr}")
                     else:
-                        self.logger.info("Successfully cloned rocm-examples repository.")
+                        self.logger.info(
+                            "Successfully cloned rocm-examples repository."
+                        )
                 else:
-                    self.logger.info("rocm-examples repository already exists, skipping git clone.")
+                    self.logger.info(
+                        "rocm-examples repository already exists, skipping git clone."
+                    )
 
                 # Navigate to the repository directory
                 os.chdir(examples_dir)
@@ -1831,25 +2076,33 @@ class ROCMHealthCheck:
                 if not os.path.exists(os.path.join(examples_dir, "build")):
                     # Configure with cmake
                     self.logger.info("Configuring rocm-examples with cmake...")
-                    stdout, stderr, ret_code = run_command(
-                        "cmake -S . -B build")
+                    stdout, stderr, ret_code = run_command("cmake -S . -B build")
                     if ret_code != 0:
-                        self.logger.error(f"Failed to configure rocm-examples: \n{stderr}")
+                        self.logger.error(
+                            f"Failed to configure rocm-examples: \n{stderr}"
+                        )
                     else:
                         self.logger.info("Successfully configured rocm-examples.")
                 else:
-                    self.logger.info("rocm-examples build directory already exists, skipping cmake configuration.")
+                    self.logger.info(
+                        "rocm-examples build directory already exists, skipping cmake configuration."
+                    )
 
                 # Get the avilabale build targets dynamically.
                 self.logger.info("Retrieving available build targets...")
                 stdout, stderr, ret_code = run_command(
-                    "cmake --build build --target help", shell=True)
+                    "cmake --build build --target help", shell=True
+                )
                 if ret_code != 0:
                     self.logger.error(f"Failed to retrieve build targets: \n{stderr}")
                 else:
                     # Parse the output to find targets
-                    self.rocm_examples_targets = self._parse_rocm_example_targets(stdout)
-                    self.logger.debug(f"Available build targets from rocm-examples source:\n{json.dumps(self.rocm_examples_targets, indent=2)}")
+                    self.rocm_examples_targets = self._parse_rocm_example_targets(
+                        stdout
+                    )
+                    self.logger.debug(
+                        f"Available build targets from rocm-examples source:\n{json.dumps(self.rocm_examples_targets, indent=2)}"
+                    )
 
             except Exception as e:
                 self.logger.error(f"Error during rocm-examples setup: \n{str(e)}")
@@ -1864,7 +2117,6 @@ class ROCMHealthCheck:
 
                 # Return to original directory
                 os.chdir(original_dir)
-
 
         return self.results
 
@@ -1881,7 +2133,7 @@ class ROCMHealthCheck:
         component_targets = {}
 
         # Split the output into lines
-        lines = cmake_target_help_output.strip().split('\n')
+        lines = cmake_target_help_output.strip().split("\n")
 
         # Process each line
         for line in lines:
@@ -1911,11 +2163,15 @@ class ROCMHealthCheck:
 
         return component_targets
 
+
 # =======================================================================================
+
 
 def setup_logger(verbose=False, silent=False):
     """Setup the logger with appropriate log level"""
-    log_level = logging.ERROR if silent else (logging.DEBUG if verbose else logging.INFO)
+    log_level = (
+        logging.ERROR if silent else (logging.DEBUG if verbose else logging.INFO)
+    )
     logger = logging.getLogger("RDHC")
     logger.setLevel(log_level)
 
@@ -1928,7 +2184,9 @@ def setup_logger(verbose=False, silent=False):
     console_handler.setLevel(log_level)
 
     # Format
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     console_handler.setFormatter(formatter)
 
     # Add handler to logger
@@ -1936,53 +2194,86 @@ def setup_logger(verbose=False, silent=False):
 
     return logger
 
+
 def main():
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description="ROCm Deployment Health Check Tool",
-                                    formatter_class=argparse.RawDescriptionHelpFormatter,
-                                    usage="sudo -E ./rdhc.py [options]",
-                                    epilog="Refer the README @<ROCM_INSTALL_PATH>/share/rdhc/README.md \n"+
-                                        "Usage examples:\n"+
-                                        "# Run quick test (default tests only)\n" +
-                                        "sudo -E ./rdhc.py\n" +
-                                        "\n"+
-                                        "# Run all tests including compile and execute the rocm-example program for each component\n"+
-                                        "sudo -E ./rdhc.py --all\n" +
-                                        "\n"+
-                                        "# Run all tests with verbose output\n" +
-                                        "sudo -E ./rdhc.py --all -v\n" +
-                                        "\n"+
-                                        "# Enable verbose output\n" +
-                                        "sudo -E ./rdhc.py -v\n" +
-                                        "\n"+
-                                        "# Run in silent mode (only errors shown)\n" +
-                                        "sudo -E ./rdhc.py -s\n" +
-                                        "\n"+
-                                        "# Export results to a specific JSON file\n" +
-                                        "sudo -E ./rdhc.py --all --json rdhc-results.json\n" +
-                                        "\n"+
-                                        "# Specify a directory for temp files and logs (default: /tmp/rdhc/)\n" +
-                                        "sudo -E ./rdhc.py -d /home/user/rdhc-dir/\n" +
-                                        "\n"+
-                                        "NOTE for Ubuntu 24.04 (Python 3.12) users:\n" +
-                                        "Due to enhanced security policies, you must use a virtual environment:\n" +
-                                        "  # Create and activate virtual environment (one-time setup)\n" +
-                                        "  python3 -m venv ~/rdhc-venv\n" +
-                                        "  source ~/rdhc-venv/bin/activate\n" +
-                                        "  pip3 install -r requirements.txt\n" +
-                                        "\n" +
-                                        "  # Run the tool (use --preserve-env=PATH instead of -E)\n" +
-                                        "  sudo --preserve-env=PATH ./rdhc.py\n" +
-                                        "  sudo --preserve-env=PATH ./rdhc.py --all\n" +
-                                        " ",
-                                    )
+    parser = argparse.ArgumentParser(
+        description="ROCm Deployment Health Check Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        usage="sudo -E ./rdhc.py [options]",
+        epilog="Refer the README @<ROCM_INSTALL_PATH>/share/rdhc/README.md \n"
+        + "Usage examples:\n"
+        + "# Run quick test (default tests only)\n"
+        + "sudo -E ./rdhc.py\n"
+        + "\n"
+        + "# Run all tests including compile and execute the rocm-example program for each component\n"
+        + "sudo -E ./rdhc.py --all\n"
+        + "\n"
+        + "# Run all tests with verbose output\n"
+        + "sudo -E ./rdhc.py --all -v\n"
+        + "\n"
+        + "# Enable verbose output\n"
+        + "sudo -E ./rdhc.py -v\n"
+        + "\n"
+        + "# Run in silent mode (only errors shown)\n"
+        + "sudo -E ./rdhc.py -s\n"
+        + "\n"
+        + "# Export results to a specific JSON file\n"
+        + "sudo -E ./rdhc.py --all --json rdhc-results.json\n"
+        + "\n"
+        + "# Specify a directory for temp files and logs (default: /tmp/rdhc/)\n"
+        + "sudo -E ./rdhc.py -d /home/user/rdhc-dir/\n"
+        + "\n"
+        + "# Use a custom ROCm install prefix\n"
+        + "sudo -E ./rdhc.py --rocm-install-prefix /usr/local/rocm\n"
+        + "\n"
+        + "NOTE for Ubuntu 24.04 (Python 3.12) users:\n"
+        + "Due to enhanced security policies, you must use a virtual environment:\n"
+        + "  # Create and activate virtual environment (one-time setup)\n"
+        + "  python3 -m venv ~/rdhc-venv\n"
+        + "  source ~/rdhc-venv/bin/activate\n"
+        + "  pip3 install -r requirements.txt\n"
+        + "\n"
+        + "  # Run the tool (use --preserve-env=PATH instead of -E)\n"
+        + "  sudo --preserve-env=PATH ./rdhc.py\n"
+        + "  sudo --preserve-env=PATH ./rdhc.py --all\n"
+        + " ",
+    )
 
-    parser.add_argument("--quick", action="store_true", help="Run quick tests only (default)")
-    parser.add_argument("--all", action="store_true", help="Default tests + Compile and executes simple program for each component.")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
-    parser.add_argument("-s", "--silent", action="store_true", help="Silent mode (errors only)")
-    parser.add_argument("-j", "--json", metavar="FILE", help="Export results to JSON file", default="rdhc_results.json")
-    parser.add_argument("-d", "--dir", metavar="DIR", help="Directory path for temporary files (default: /tmp/rdhc/)", default="/tmp/rdhc/")
+    parser.add_argument(
+        "--quick", action="store_true", help="Run quick tests only (default)"
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Default tests + Compile and executes simple program for each component.",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose output"
+    )
+    parser.add_argument(
+        "-s", "--silent", action="store_true", help="Silent mode (errors only)"
+    )
+    parser.add_argument(
+        "-j",
+        "--json",
+        metavar="FILE",
+        help="Export results to JSON file",
+        default="rdhc_results.json",
+    )
+    parser.add_argument(
+        "-d",
+        "--dir",
+        metavar="DIR",
+        help="Directory path for temporary files (default: /tmp/rdhc/)",
+        default="/tmp/rdhc/",
+    )
+    parser.add_argument(
+        "--rocm-install-prefix",
+        metavar="DIR",
+        help="ROCm installation prefix. If set, overrides ROCM_PATH; otherwise ROCM_PATH or /opt/rocm is used.",
+        default=None,
+    )
     args = parser.parse_args()
 
     # Setup logger
@@ -1998,8 +2289,25 @@ def main():
         logger.info("Falling back to current directory")
         temp_dir = "./"
 
+    # If --rocm-install-prefix was passed and is non-empty; else keep current logic
+    rocm_path = None
+    if args.rocm_install_prefix is not None:
+        # Check if installation prefix exists
+        install_path = Path(args.rocm_install_prefix)
+        if not install_path.exists():
+            logger.error(f"ROCm Install prefix path not found: {install_path}")
+            logger.info("Falling back to Legacy ROCM_PATH or default")
+        else:
+            rocm_path = install_path
+            logger.debug(f"Using ROCm install prefix: {rocm_path}")
+
+    if rocm_path is None:
+        # If no valid install prefix path provided
+        # Support Legacy logic to use ROCM_PATH or default /opt/rocm
+        rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+
     # Create the health check instance
-    health_check = ROCMHealthCheck(logger)
+    health_check = ROCMHealthCheck(logger, rocm_path=rocm_path)
 
     # Run tests with the temp_dir
     health_check.run_tests(run_all=args.all, temp_dir=temp_dir)
@@ -2034,9 +2342,10 @@ def main():
             "system_info": health_check.system_info,
             "gpu_info": health_check.gpu_info_dict,
             "firmware_info": health_check.gpu_fw_info_dict,
-            "test_results": health_check.results
+            "test_results": health_check.results,
         }
         export_to_json(combined_data, json_path)
+
 
 if __name__ == "__main__":
     main()

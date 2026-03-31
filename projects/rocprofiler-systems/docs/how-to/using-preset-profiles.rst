@@ -3,27 +3,30 @@
    :keywords: ROCm, profiling, presets, HPC, AI, ML, GPU, tracing
 
 ******************************************************************************
-Using Preset Profiles
+Using preset profiles
 ******************************************************************************
 
-ROCprofiler-Systems provides preset profiles that configure the profiler for common workload scenarios. Instead of manually setting numerous environment variables and command-line options, presets offer optimized configurations for specific use cases.
+ROCm Systems Profiler provides preset profiles that configure the profiler for common workload scenarios. Instead of manually setting numerous environment variables and command-line options, presets offer optimized configurations for specific use cases.
 
-Overview
-========
+The presets are command-line options that automatically configure profiling settings for different workload types. They provide:
 
-Presets are command-line options that automatically configure profiling settings for different workload types. They provide:
-
-* **Simplified usage** - Single flag instead of multiple configuration options
-* **Optimized settings** - Pre-tuned configurations based on real-world usage
-* **Reduced overhead** - Settings tailored to minimize performance impact
-* **Consistent behavior** - Standardized profiling across different scenarios
+* **Simplified usage** - Single flag instead of multiple configuration options.
+* **Optimized settings** - Pre-tuned configurations based on real-world usage.
+* **Reduced overhead** - Settings tailored to minimize performance impact.
+* **Consistent behavior** - Standardized profiling across different scenarios.
 
 To see detailed information about active preset configuration, use the ``-v`` or ``--verbose`` flag.
 
-Available Presets
+Available presets
 ==================
 
-General Purpose Presets
+The available presets are broadly categorized into:
+
+* General purpose presets
+* Workload-specific presets
+* API tracing presets
+
+General purpose presets
 ------------------------
 
 --balanced
@@ -93,7 +96,7 @@ General Purpose Presets
 
 **When to use:** Detailed performance investigation, comprehensive analysis
 
-Workload-Specific Presets
+Workload-specific presets
 --------------------------
 
 --trace-hpc
@@ -249,7 +252,7 @@ Workload-Specific Presets
 
 **When to use:** GPU kernel optimization, understanding hardware utilization
 
-API Tracing Presets
+API tracing presets
 -------------------
 
 --sys-trace
@@ -304,7 +307,7 @@ API Tracing Presets
 
 **When to use:** Focusing on runtime API calls, excluding HIP compiler and HSA internals
 
-Usage Examples
+Usage examples
 ==============
 
 Quick Start

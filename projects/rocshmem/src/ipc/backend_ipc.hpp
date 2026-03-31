@@ -37,7 +37,6 @@
 namespace rocshmem {
 
 class IPCBackend : public Backend {
-  const unsigned MAX_NUM_BLOCKS{65536};
 
  public:
   /**
@@ -259,11 +258,6 @@ class IPCBackend : public Backend {
    * @brief Size of the bitmask
    */
   int team_bitmask_size_{-1};
-
-  /**
-   * Fine grained memory allocator for buffers used in collectives Routines
-   */
-  MemoryAllocator *fine_grained_allocator_{nullptr};
 
   /**
    * @brief Collective routines work/sync buffer size

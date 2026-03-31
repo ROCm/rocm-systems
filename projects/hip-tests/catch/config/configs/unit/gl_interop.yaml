@@ -1,0 +1,102 @@
+---
+gl_interop:
+  Unit_hipGLGetDevices_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGLGetDevices_Positive_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGLGetDevices_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterBuffer_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterBuffer_Positive_Register_Twice:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterBuffer_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterImage_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsGLRegisterImage_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsMapResources_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsMapResources_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsResourceGetMappedPointer_Positive_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsSubResourceGetMappedArray_Positive_Basic:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_wsl]
+  Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsUnmapResources_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsUnregisterResource_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-439004: Below tests failing randomly in CQE staging
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters: *level_2
+  Unit_hipGL_ContextSwitch_Basic: *level_2
+  Unit_hipGL_ContextSwitch_SeparateContextSetups: *level_2
+  Unit_hipGL_ContextSwitch_BackAndForth: *level_2
+  Unit_hipGL_ContextSwitch_RapidSwitching: *level_2
+  Unit_hipGL_ContextSwitch_Patterns: *level_2
+  Unit_hipGL_ContextSwitch_RegisterWithoutGetDevices: *level_2
+  Unit_hipGL_ContextSwitch_AllAPIsDetectSwitch: *level_2
+  Unit_hipGL_ContextSwitch_SequentialStableContext: *level_2
+  Unit_hipGL_ContextSwitch_InterleavedWithSwitch: *level_2
+  Unit_hipGL_ContextSwitch_RapidMultiContextSwitching: *level_2
+  Unit_hipGL_ContextSwitch_SameContextRepeated: *level_2
+  Unit_hipGL_ContextSwitch_ReturnToPreviousContext: *level_2
+  Unit_hipGL_ContextSwitch_ResourceContextAssociation: *level_2
+  Unit_hipGL_ContextSwitch_DataIntegrity: *level_2
+  Unit_hipGL_ContextSwitch_AlternatingDataOperations: *level_2
+  Unit_hipGL_ContextSwitch_TextureInterop: *level_2
+  Unit_hipGL_ContextSwitch_MixedResources: *level_2
+  Unit_hipGL_ContextSwitch_StreamOperations: *level_2
+  Unit_hipGL_ContextSwitch_MultipleStreams: *level_2
+  Unit_hipGL_ContextSwitch_HighFrequencyStress: *level_2
+  Unit_hipGL_ContextSwitch_ManyBuffersStress: *level_2
+  Unit_hipGL_ContextSwitch_LongRunningStress: *level_2
+  Unit_hipGL_ContextSwitch_RegistrationFlags: *level_2
+  Unit_hipGL_ContextSwitch_ContextDestruction: *level_2
+  Unit_hipGL_ContextSwitch_MultipleDestructionCycles: *level_2
+  Unit_hipGL_ContextSwitch_DeviceListTypes: *level_2
+  Unit_hipGL_ContextSwitch_FirstOperationInitialization: *level_2

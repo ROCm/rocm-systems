@@ -388,6 +388,10 @@ int main(int argc, char **argv) {
             }
             delete md5_generator;
         }
+        if (viddec) {
+            delete viddec;
+            viddec = nullptr;
+        }
     } catch (const std::exception &ex) {
         std::cout << ex.what() << std::endl;
         exit(1);

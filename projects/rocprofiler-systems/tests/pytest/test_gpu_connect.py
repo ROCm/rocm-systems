@@ -8,6 +8,9 @@ Tests for GPU connectivity
 from __future__ import annotations
 import pytest
 from pathlib import Path
+from conftest import RocprofsysTest
+
+pytestmark = [pytest.mark.gpu, pytest.mark.xgmi, pytest.mark.ci_enable]
 
 # =============================================================================
 # GPU connectivity fixtures
@@ -44,36 +47,29 @@ def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
-@pytest.mark.gpu
-@pytest.mark.xgmi
 @pytest.mark.run_if_gpu_category("not apu or instinct")
-class TestGPUConnect:
+class TestGPUConnect(RocprofsysTest):
     """Tests for GPU connectivity tests."""
 
-    @pytest.mark.rocpd("gpu_connect_env")
-    def test_sys_run(
-        self,
-        run_test,
-        gpu_connect_env: dict[str, str],
-        gpu_connect_rules: list[Path],
-        assert_regex,
-        assert_perfetto,
-        assert_rocpd,
-    ):
-        result = run_test(
-            "sys_run",
-            target="transferBench",
+    @pytest.mark.parametrize(
+        "mode", [pytest.param("sys_run", marks=pytest.mark.rocpd("gpu_connect_env"))]
+    )
+    def test_transferbench(self, mode, gpu_connect_env, gpu_connect_rules):
+        result = self.run_test(
+            mode,
+            "transferBench",
             env=gpu_connect_env,
+            check_target_arch=True,
             timeout=120,
         )
-
-        # Determine whether to skip or not
         if "Error: No valid transfers created" in result.test_output:
             pytest.skip("No valid transfers created")
-        else:
-            assert_regex(result)
-            assert_perfetto(
+
+        self.assert_regex(result)
+
+        if mode == "sys_run":
+            self.assert_rocpd(result, rules_files=gpu_connect_rules)
+            self.assert_perfetto(
                 result,
                 counter_names=["XGMI Read Data", "XGMI Write Data"],
             )
-            assert_rocpd(result, rules_files=gpu_connect_rules)

@@ -214,6 +214,18 @@ The supported options are:
   1_file____rocm-debug-agent_rocm-debug-agent-test_offset_14309_size_31336
   ````
 
+- __``-c``, ``--load-all-code-objects``__
+
+  Load all code objects as soon as they are loaded by the runtime.
+
+- __``-z``, ``--lazy``__
+
+  Delay inspecting the content of all loaded code obects until after an
+  exception is reported.  Note that the application must not free the code
+  objects' memory while they are loaded on the device.
+
+  This option is incompatible with -c.
+
 - __``-o <file-path>``, ``--output=<file-path>``__
 
   Saves the output produced by the ROCdebug-agent in the specified file.

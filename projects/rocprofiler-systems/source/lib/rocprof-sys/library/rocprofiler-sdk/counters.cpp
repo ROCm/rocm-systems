@@ -113,7 +113,7 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
             parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
             static_cast<uint32_t>(agent.device_type_index),
             static_cast<uint8_t>(agent.type), track_name.c_str(),
-            static_cast<double>(value) });
+            static_cast<double>(value), std::nullopt });
     }
 }
 

@@ -100,7 +100,7 @@ for more information and license details.
 
 _______________________________________________________________
 
-Dependencies on Latency Profiler (MIT License)
+Dependencies on Latency Profiler and ncclCommDump (MIT License)
 
     Copyright (c) Meta Platforms, Inc. and affiliates.
 
@@ -126,3 +126,4 @@ See:
 
     src/include/latency_profiler
     src/misc/latency_profiler
+    src/commDump.cc

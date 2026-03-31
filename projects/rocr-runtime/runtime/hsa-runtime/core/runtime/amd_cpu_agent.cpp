@@ -101,6 +101,10 @@ void CpuAgent::InitRegionList() {
   }
 }
 
+void CpuAgent::InitDerivedCuid() {
+  // No CUID support for CPU agents
+}
+
 void CpuAgent::InitCacheList() {
   // Get CPU cache information.
   cache_props_.resize(properties_.NumCaches);

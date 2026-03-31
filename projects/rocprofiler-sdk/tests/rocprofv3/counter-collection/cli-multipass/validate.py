@@ -72,8 +72,9 @@ def test_pass1_counters(pass1_counter_data):
 
     # All counters in pass 1 should be SQ_WAVES
     for row in pass1_counter_data:
-        assert row["Counter_Name"] == "SQ_WAVES", \
-            f"Expected SQ_WAVES in pass 1, got {row['Counter_Name']}"
+        assert (
+            row["Counter_Name"] == "SQ_WAVES"
+        ), f"Expected SQ_WAVES in pass 1, got {row['Counter_Name']}"
         assert int(row["Queue_Id"]) > 0
         assert int(row["Process_Id"]) > 0
         assert len(row["Kernel_Name"]) > 0
@@ -88,8 +89,9 @@ def test_pass2_counters(pass2_counter_data):
 
     # All counters in pass 2 should be GRBM_COUNT
     for row in pass2_counter_data:
-        assert row["Counter_Name"] == "GRBM_COUNT", \
-            f"Expected GRBM_COUNT in pass 2, got {row['Counter_Name']}"
+        assert (
+            row["Counter_Name"] == "GRBM_COUNT"
+        ), f"Expected GRBM_COUNT in pass 2, got {row['Counter_Name']}"
         assert int(row["Queue_Id"]) > 0
         assert int(row["Process_Id"]) > 0
         assert len(row["Kernel_Name"]) > 0
@@ -105,8 +107,9 @@ def test_same_kernel_count_both_passes(pass1_counter_data, pass2_counter_data):
     pass2_dispatch_ids = set([int(row["Dispatch_Id"]) for row in pass2_counter_data])
 
     # Both passes should have collected data for the same dispatches
-    assert pass1_dispatch_ids == pass2_dispatch_ids, \
-        f"Pass 1 and Pass 2 have different dispatch IDs. Pass1: {sorted(pass1_dispatch_ids)}, Pass2: {sorted(pass2_dispatch_ids)}"
+    assert (
+        pass1_dispatch_ids == pass2_dispatch_ids
+    ), f"Pass 1 and Pass 2 have different dispatch IDs. Pass1: {sorted(pass1_dispatch_ids)}, Pass2: {sorted(pass2_dispatch_ids)}"
 
 
 def test_counter_separation(pass1_counter_data, pass2_counter_data):
@@ -117,12 +120,17 @@ def test_counter_separation(pass1_counter_data, pass2_counter_data):
 
     # Verify no overlap (each counter should only be in one pass)
     overlap = pass1_counters & pass2_counters
-    assert len(overlap) == 0, \
-        f"Counters should not overlap between passes. Found {overlap} in both passes"
+    assert (
+        len(overlap) == 0
+    ), f"Counters should not overlap between passes. Found {overlap} in both passes"
 
     # Verify we have the expected counters
-    assert pass1_counters == {"SQ_WAVES"}, f"Expected only SQ_WAVES in pass 1, got {pass1_counters}"
-    assert pass2_counters == {"GRBM_COUNT"}, f"Expected only GRBM_COUNT in pass 2, got {pass2_counters}"
+    assert pass1_counters == {
+        "SQ_WAVES"
+    }, f"Expected only SQ_WAVES in pass 1, got {pass1_counters}"
+    assert pass2_counters == {
+        "GRBM_COUNT"
+    }, f"Expected only GRBM_COUNT in pass 2, got {pass2_counters}"
 
 
 if __name__ == "__main__":

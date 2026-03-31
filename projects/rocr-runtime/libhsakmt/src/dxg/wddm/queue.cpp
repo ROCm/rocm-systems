@@ -153,6 +153,17 @@ hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
   return HwsInit();
 }
 
+// ================================================================================================
+hsa_status_t WDDMQueue::SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask) {
+  if ((aql_doorbell_offset_ == 0) ||
+      device->SetCuMask(aql_doorbell_offset_, cu_mask_count, queue_cu_mask)) {
+    return HSA_STATUS_SUCCESS;
+  } else {
+    return HSA_STATUS_ERROR;
+  }
+}
+
+// ================================================================================================
 void ComputeQueue::HandleError(hsa_status_t status) {
   hsa_signal_t sig = amd_queue_rocr_->queue_inactive_signal;
   hsa_signal_value_t val = -1;
@@ -249,8 +260,8 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
                uint32_t engine,
                bool use_hws)
     : WDDMQueue(
-          device, device->IsAqlSupported() ? reinterpret_cast<uintptr_t>(ring) : 0,
-               device->IsAqlSupported() ? ring_size * 64 : cmdbuf_size, engine, use_hws),
+          device, (use_hws && device->IsAqlSupported()) ? reinterpret_cast<uintptr_t>(ring) : 0,
+               (use_hws && device->IsAqlSupported()) ? ring_size * 64 : cmdbuf_size, engine, use_hws),
                ring(ring),
                ring_size(ring_size),
                error_code_(reinterpret_cast<volatile std::atomic<int64_t>*>(error_addr)),
@@ -274,8 +285,9 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
   ring_rptr = _ring_rptr;
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_t, read_dispatch_id));
   amd_queue_memory_ = GetGpuMemoryFromAddress(amd_queue_rocr_);
-  aql_ = device->DeviceInfo().hwsInfo.hwsMask.aql_queue;
-  bool ret = device->CreateQueue(this);
+  native_aql_ = use_hws && device->IsAqlSupported();
+  bool ret = device->CreateQueue(
+      this, !native_aql_ ? reinterpret_cast<uint64_t>(_ring_rptr) : 0);
   assert(ret);
 
   GpuMemoryCreateInfo create_info{};
@@ -288,8 +300,8 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
   amd_queue_ = reinterpret_cast<amd_queue_v2_t*>(gpu_mem->GpuAddress());
 
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_v2_t, read_dispatch_id));
-  // Don't start the PM4 thread for AQL queue
-  if (!aql_) {
+  // Native AQL submission bypasses the PM4 translation thread.
+  if (!native_aql_) {
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
   }
 
@@ -300,7 +312,7 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
 }
 
 ComputeQueue::~ComputeQueue() {
-  if (!aql_) {
+  if (!native_aql_) {
     thread_cond_lock_.lock();
     thread_stop_ = true;
     thread_cond_lock_.unlock();
@@ -467,6 +479,15 @@ void ComputeQueue::InitScratchSRD() {
     amd_queue_->compute_tmpring_size = tmpring_size.u32All;
   }
 
+  // Update the amd_queue_rocr_
+  amd_queue_rocr_->compute_tmpring_size = amd_queue_->compute_tmpring_size;
+  amd_queue_rocr_->scratch_resource_descriptor[0] = amd_queue_->scratch_resource_descriptor[0];
+  amd_queue_rocr_->scratch_resource_descriptor[1] = amd_queue_->scratch_resource_descriptor[1];
+  amd_queue_rocr_->scratch_resource_descriptor[2] = amd_queue_->scratch_resource_descriptor[2];
+  amd_queue_rocr_->scratch_resource_descriptor[3] = amd_queue_->scratch_resource_descriptor[3];
+  amd_queue_rocr_->scratch_backing_memory_location = amd_queue_->scratch_backing_memory_location;
+  amd_queue_rocr_->scratch_wave64_lane_byte_size = amd_queue_->scratch_wave64_lane_byte_size;
+
   return;
 }
 
@@ -628,7 +649,7 @@ uint64_t ComputeQueue::GetKernelObjAddr(uint64_t addr) const {
 }
 
 void ComputeQueue::RingDoorbell(uint64_t value) {
-  if (!aql_) {
+  if (!native_aql_) {
     thread_cond_lock_.lock();
     thread_cond_lock_.unlock();
     pr_debug("notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, GetRingWptr()->load(),
@@ -787,6 +808,9 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
   info.scratchSizePerWave = ScratchSizePerWave();
   memset(info.scratchBaseOffset, 0, sizeof(info.scratchBaseOffset));
   info.offsetCnt = 0;
+  info.packetIndex = (reinterpret_cast<uint64_t>(packet) -
+                      reinterpret_cast<uint64_t>(amd_queue_rocr_->hsa_queue.base_address)) /
+      64;
 
   size_t size;
   size = cmd_util.BuildDispatch(&info, cpu + i);

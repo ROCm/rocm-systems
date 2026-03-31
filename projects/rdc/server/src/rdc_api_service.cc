@@ -278,6 +278,21 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   return ::grpc::Status::OK;
 }
 
+::grpc::Status RdcAPIServiceImpl::AddFieldToFieldGroup(
+    ::grpc::ServerContext* context, const ::rdc::AddFieldToFieldGroupRequest* request,
+    ::rdc::AddFieldToFieldGroupResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_status_t result = rdc_group_field_add_field(rdc_handle_, request->field_group_id(),
+                                                  static_cast<rdc_field_t>(request->field_id()));
+  reply->set_status(result);
+
+  return ::grpc::Status::OK;
+}
+
 ::grpc::Status RdcAPIServiceImpl::GetFieldGroupInfo(::grpc::ServerContext* context,
                                                     const ::rdc::GetFieldGroupInfoRequest* request,
                                                     ::rdc::GetFieldGroupInfoResponse* reply) {
@@ -796,7 +811,7 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   rdc_policy_t policy;
-  // constructure the policy
+  // construct the policy
   ::rdc::Policy p = request->policy();
 
   ::rdc::PolicyCondition cond = p.condition();

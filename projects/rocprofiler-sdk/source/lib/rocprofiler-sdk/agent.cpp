@@ -611,7 +611,28 @@ read_topology()
 {
     auto data = std::vector<unique_agent_t>{};
 
-    const auto sysfs_nodes_path = fs::path{"/sys/class/kfd/kfd/topology/nodes"};
+    auto _sysfs_nodes_path = std::optional<fs::path>{};
+    for(auto itr : std::initializer_list<std::string>{
+            common::get_env("ROCPROFILER_KFD_TOPOLOGY", ""),  // rocprofiler-sdk specific
+            common::get_env("AMD_KFD_TOPOLOGY", ""),          // universal AMD KFD topology env var
+            common::get_env("HSA_MODEL_TOPOLOGY", ""),        // HSA specific env var
+            "/sys/devices/virtual/kfd/kfd/topology/nodes",
+            "/sys/class/kfd/kfd/topology/nodes",
+        })
+    {
+        if(!itr.empty() && fs::exists(fs::path{itr}) && fs::is_directory(fs::path{itr}))
+        {
+            if(!_sysfs_nodes_path)
+            {
+                ROCP_INFO << fmt::format("Using KFD topology path '{}'", itr);
+                _sysfs_nodes_path = fs::path{itr};
+            }
+        }
+    }
+
+    auto sysfs_nodes_path =
+        _sysfs_nodes_path.value_or(fs::path{"/sys/class/kfd/kfd/topology/nodes"});
+
     if(!fs::exists(sysfs_nodes_path))
     {
         ROCP_CI_LOG(WARNING) << fmt::format("sysfs nodes path '{}' does not exist",
@@ -684,12 +705,30 @@ read_topology()
         read_property(properties, "cpu_cores_count", agent_info.cpu_cores_count);
         read_property(properties, "simd_count", agent_info.simd_count);
 
-        if(agent_info.cpu_cores_count > 0)
+        if(agent_info.cpu_cores_count > 0 && agent_info.simd_count == 0)
+        {
+            // CPU cores and no SIMDs indicates a CPU agent
             agent_info.type = ROCPROFILER_AGENT_TYPE_CPU;
-        else if(agent_info.simd_count > 0)
+        }
+        else if(agent_info.simd_count > 0 && agent_info.cpu_cores_count == 0)
+        {
+            // SIMDs and no CPU cores indicates a (discrete) GPU agent
             agent_info.type = ROCPROFILER_AGENT_TYPE_GPU;
+        }
+        else if(agent_info.cpu_cores_count > 0 && agent_info.simd_count > 0)
+        {
+            // SIMDs and CPU cores indicates an APU but we are marking this as an GPU for the
+            // purposes of rocprofiler-sdk.
+            agent_info.type = ROCPROFILER_AGENT_TYPE_GPU;
+        }
         else
-            ROCP_WARNING << "agent " << agent_info.node_id << " is neither a CPU nor a GPU";
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "agent-{} is neither a CPU nor a GPU. CPU cores: {}, SIMD count: {}",
+                agent_info.node_id,
+                agent_info.cpu_cores_count,
+                agent_info.simd_count);
+        }
 
         if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
             agent_info.logical_node_type_id = cpucount++;
@@ -757,15 +796,58 @@ read_topology()
             agent_info.grid_max_dim       = {grid_max_x, grid_max_y, grid_max_z};
             agent_info.cu_count           = agent_info.simd_count / agent_info.simd_per_cu;
 
+            // fallback in case drmOpenRender or amdgpu_device_initialize fails
+            auto _set_default_agent_names = [&agent_info]() {
+                if(agent_info.gfx_target_version >= 10000)
+                {
+                    ROCP_INFO << fmt::format(
+                        "Setting default agent names for agent-{} with gfx target version {}",
+                        agent_info.node_id,
+                        agent_info.gfx_target_version);
+
+                    auto major = (agent_info.gfx_target_version / 10000) % 100;
+                    auto minor = (agent_info.gfx_target_version / 100) % 100;
+                    auto step  = (agent_info.gfx_target_version % 100);
+                    agent_info.name =
+                        common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))
+                            ->c_str();
+                    agent_info.product_name = common::get_string_entry("unknown")->c_str();
+                    agent_info.vendor_name  = common::get_string_entry("AMD")->c_str();
+                }
+                else
+                {
+                    ROCP_INFO << fmt::format(
+                        "Failed to set default agent names for agent-{} with gfx target version "
+                        "{}. Requires gfx target version >= 10000.",
+                        agent_info.node_id,
+                        agent_info.gfx_target_version);
+                }
+            };
+
             agent_info.uuid = static_cast<rocprofiler_uuid_t>(_uuid);
             if(int drm_fd = 0; (drm_fd = drmOpenRender(agent_info.drm_render_minor)) >= 0)
             {
+                ROCP_TRACE << fmt::format(
+                    "Successful drmOpenRender for agent-{} using drm render minor {}... fd={}",
+                    agent_info.node_id,
+                    agent_info.drm_render_minor,
+                    drm_fd);
+
                 uint32_t major_version = 0;
                 uint32_t minor_version = 0;
                 auto*    device_handle = amdgpu_device_handle{};
                 if(amdgpu_device_initialize(
                        drm_fd, &major_version, &minor_version, &device_handle) == 0)
                 {
+                    ROCP_INFO << fmt::format(
+                        "Initialized amdgpu device handle for agent-{} using drm render minor {} "
+                        "(fd={}). amdgpu driver version {}.{}",
+                        agent_info.node_id,
+                        agent_info.drm_render_minor,
+                        drm_fd,
+                        major_version,
+                        minor_version);
+
                     auto major = (agent_info.gfx_target_version / 10000) % 100;
                     auto minor = (agent_info.gfx_target_version / 100) % 100;
                     auto step  = (agent_info.gfx_target_version % 100);
@@ -787,7 +869,15 @@ read_topology()
                     }
                     amdgpu_device_deinitialize(device_handle);
                 }
+                else
+                {
+                    _set_default_agent_names();
+                }
                 drmClose(drm_fd);
+            }
+            else
+            {
+                _set_default_agent_names();
             }
         }
         else if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)

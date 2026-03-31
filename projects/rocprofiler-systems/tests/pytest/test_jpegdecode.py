@@ -8,13 +8,15 @@ Tests for the jpegdecode example.
 from __future__ import annotations
 import pytest
 from pathlib import Path
+from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.decode, pytest.mark.jpegdecode]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.decode,
+    pytest.mark.jpegdecode,
+    pytest.mark.ci_enable,
+]
 
-from rocprofsys import (
-    GPUInfo,
-    RocprofsysConfig,
-)
 
 # =============================================================================
 # JPEG decode fixtures
@@ -32,14 +34,23 @@ def jpeg_decode_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def jpeg_decode_rules(validation_rules_dir: Path) -> list[Path]:
+def jpeg_decode_rules(validation_rules_dir, gpu_info) -> list[Path]:
     """Get validation rules for JPEG decode tests."""
     rules_dir = validation_rules_dir / "jpeg-decode"
-    return [
+    rules = [
         validation_rules_dir / "default-rules.json",
         rules_dir / "validation-rules.json",
         rules_dir / "sdk-metrics-rules.json",
     ]
+    if "instinct" in gpu_info.categories:
+        rules.append(rules_dir / "amd-smi-rules.json")
+    return rules
+
+
+@pytest.fixture
+def get_run_args(rocprof_config) -> list[str]:
+    """Get run arguments for JPEG decode tests."""
+    return ["-i", str(rocprof_config.rocprofsys_examples_dir / "images"), "-b", "32"]
 
 
 # =============================================================================
@@ -47,72 +58,33 @@ def jpeg_decode_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
-class TestJPEGDecode:
-    """Tests for the jpegdecode example."""
-
-    @pytest.mark.rocpd("jpeg_decode_env")
-    def test_sampling(
-        self,
-        run_test,
-        rocprof_config: RocprofsysConfig,
-        jpeg_decode_env: dict[str, str],
-        gpu_info: GPUInfo,
-        jpeg_decode_rules: list[Path],
-        assert_regex,
-        assert_perfetto,
-        assert_rocpd,
-    ):
-        env = jpeg_decode_env.copy()
-        if "instinct" in gpu_info.categories:
-            rules_dir = rocprof_config.rocpd_validation_rules / "jpeg-decode"
-            jpeg_decode_rules.append(rules_dir / "amd-smi-rules.json")
-
-        result = run_test(
-            "sampling",
-            target="jpegdecode",
-            env=env,
-            timeout=120,
-            run_args=[
-                "-i",
-                str(rocprof_config.rocprofsys_examples_dir / "images"),
-                "-b",
-                "32",
-            ],
-            no_check_target_arch=True,
-        )
-
-        assert_regex(result)
-        assert_perfetto(
-            result,
-            categories=["rocm_rocjpeg_api"],
-            labels=["rocJpegCreate"],
-            counts=[1],
-            depths=[1],
-            counter_names=(
-                ["JPEG Activity"] if "instinct" in gpu_info.categories else None
-            ),
-        )
-        assert_rocpd(result, rules_files=jpeg_decode_rules)
-
-    def test_sys_run(
-        self,
-        run_test,
-        rocprof_config: RocprofsysConfig,
-        jpeg_decode_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "sys_run",
-            target="jpegdecode",
+@pytest.mark.parametrize(
+    "mode",
+    [
+        pytest.param("sampling", marks=pytest.mark.rocpd("jpeg_decode_env")),
+        "sys_run",
+    ],
+)
+class TestJPEGDecode(RocprofsysTest):
+    def test(self, mode, jpeg_decode_env, jpeg_decode_rules, get_run_args, gpu_info):
+        result = self.run_test(
+            mode,
+            "jpegdecode",
             env=jpeg_decode_env,
+            run_args=get_run_args,
             timeout=120,
-            run_args=[
-                "-i",
-                str(rocprof_config.rocprofsys_examples_dir / "images"),
-                "-b",
-                "32",
-            ],
-            no_check_target_arch=True,
         )
+        self.assert_regex(result)
 
-        assert_regex(result)
+        if mode == "sampling":
+            self.assert_perfetto(
+                result,
+                categories=["rocm_rocjpeg_api"],
+                labels=["rocJpegCreate"],
+                counts=[1],
+                depths=[1],
+                counter_names=(
+                    ["JPEG Activity"] if "instinct" in gpu_info.categories else None
+                ),
+            )
+            self.assert_rocpd(result, rules_files=jpeg_decode_rules)
