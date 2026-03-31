@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.whl
+dist/
+build/
+.eggs/
+*.so
+.pytest_cache/
+/wheelhouse/
+# editable install metadata
+rocinsight.egg-info/

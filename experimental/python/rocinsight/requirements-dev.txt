@@ -1,0 +1,10 @@
+# rocinsight — development dependencies
+# Equivalent to: pip install -e ".[all,dev]"
+-r requirements.txt
+
+# Testing
+pytest
+
+# Linting / formatting
+flake8
+black

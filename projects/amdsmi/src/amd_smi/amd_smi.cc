@@ -4051,6 +4051,9 @@ amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
 
 amdsmi_status_t amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
                                              amdsmi_pcie_bandwidth_t* bandwidth) {
+  if (bandwidth == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   return rsmi_wrapper(rsmi_dev_pci_bandwidth_get, processor_handle, 0,
                       reinterpret_cast<rsmi_pcie_bandwidth_t*>(bandwidth));
 }

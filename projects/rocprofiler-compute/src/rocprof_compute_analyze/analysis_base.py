@@ -23,13 +23,12 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.roofline_calc import validate_roofline_csv
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
     merge_counters_spatial_multiplex,
 )
-from utils.utils_common import get_uuid
+from utils.utils_common import get_uuid, load_panel_configs, validate_roofline_csv
 
 # the build-in config to list kernel names purpose only
 TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
@@ -166,7 +165,7 @@ class OmniAnalyze_Base:
                         / arch
                     )
                 )
-            ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
+            ac.panel_configs = load_panel_configs(arch_panel_config)
 
         # TODO: filter_metrics should/might be one per arch
         parser.build_dfs(
