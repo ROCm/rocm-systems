@@ -32,27 +32,27 @@ VaapiVideoDecoder::~VaapiVideoDecoder() {
         rocDecStatus rocdec_status = ROCDEC_SUCCESS;
         rocdec_status = DestroyDataBuffers();
         if (rocdec_status != ROCDEC_SUCCESS) {
-            CriticalLog(logger_, MakeMsg("DestroyDataBuffers failed"));
+            CriticalLog(logger_, "DestroyDataBuffers failed");
         }
         VAStatus va_status = VA_STATUS_SUCCESS;
         va_status = vaDestroySurfaces(va_display_, va_surface_ids_.data(), va_surface_ids_.size());
         if (va_status != VA_STATUS_SUCCESS) {
-            CriticalLog(logger_, MakeMsg("vaDestroySurfaces failed"));
+            CriticalLog(logger_, "vaDestroySurfaces failed");
         }
         if (va_context_id_) {
             va_status = vaDestroyContext(va_display_, va_context_id_);
             if (va_status != VA_STATUS_SUCCESS) {
-                CriticalLog(logger_, MakeMsg("vaDestroyContext failed"));
+                CriticalLog(logger_, "vaDestroyContext failed");
             }
         }
         if (va_config_id_) {
             va_status = vaDestroyConfig(va_display_, va_config_id_);
             if (va_status != VA_STATUS_SUCCESS) {
-                CriticalLog(logger_, MakeMsg("vaDestroyConfig failed"));
+                CriticalLog(logger_, "vaDestroyConfig failed");
             }
         }
         if (vaTerminate(va_display_) != VA_STATUS_SUCCESS) {
-            CriticalLog(logger_, MakeMsg("Failed to termiate VA"));
+            CriticalLog(logger_, "Failed to termiate VA");
         }
     }
 }
@@ -64,7 +64,7 @@ rocDecStatus VaapiVideoDecoder::InitializeDecoder() {
     // Before initializing the VAAPI, first check to see if the requested codec config is supported
     if (!IsCodecConfigSupported(decoder_create_info_.device_id, decoder_create_info_.codec_type, decoder_create_info_.chroma_format,
         decoder_create_info_.bit_depth_minus_8, decoder_create_info_.output_format)) {
-        CriticalLog(logger_, MakeMsg("The codec config combination is not supported."));
+        CriticalLog(logger_, "The codec config combination is not supported.");
         FunctionExitLog(logger_);
         return ROCDEC_NOT_SUPPORTED;
     }
@@ -72,30 +72,30 @@ rocDecStatus VaapiVideoDecoder::InitializeDecoder() {
     VaContext& va_ctx = VaContext::GetInstance();
     uint32_t va_ctx_id;
     if ((rocdec_status = va_ctx.GetVaContext(decoder_create_info_.device_id, &va_ctx_id)) != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to get VA context."));
+        CriticalLog(logger_, "Failed to get VA context.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
     if ((rocdec_status = va_ctx.GetVaDisplay(va_ctx_id, &va_display_)) != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to get VA display."));
+        CriticalLog(logger_, "Failed to get VA display.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
     rocdec_status = CreateDecoderConfig();
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to create a VAAPI decoder configuration."));
+        CriticalLog(logger_, "Failed to create a VAAPI decoder configuration.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
     rocdec_status = CreateSurfaces();
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to create VAAPI surfaces."));
+        CriticalLog(logger_, "Failed to create VAAPI surfaces.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
     rocdec_status = CreateContext();
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to create a VAAPI context."));
+        CriticalLog(logger_, "Failed to create a VAAPI context.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
@@ -112,7 +112,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
 
     // Get the surface id for the current picture, assuming 1:1 mapping between DPB and VAAPI decoded surfaces.
     if (pPicParams->curr_pic_idx >= va_surface_ids_.size() || pPicParams->curr_pic_idx < 0) {
-        ErrorLog(logger_, MakeMsg("curr_pic_idx exceeded the VAAPI surface pool limit."));
+        ErrorLog(logger_, "curr_pic_idx exceeded the VAAPI surface pool limit.");
         FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
@@ -125,7 +125,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
             for (int i = 0; i < 15; i++) {
                 if (pPicParams->pic_params.hevc.ref_frames[i].pic_idx != 0xFF) {
                     if (pPicParams->pic_params.hevc.ref_frames[i].pic_idx >= va_surface_ids_.size() || pPicParams->pic_params.hevc.ref_frames[i].pic_idx < 0) {
-                        ErrorLog(logger_, MakeMsg("Reference frame index exceeded the VAAPI surface pool limit."));
+                        ErrorLog(logger_, "Reference frame index exceeded the VAAPI surface pool limit.");
                         FunctionExitLog(logger_);
                         return ROCDEC_INVALID_PARAMETER;
                     }
@@ -146,7 +146,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
 
             if ((pic_params_size != sizeof(VAPictureParameterBufferHEVC)) || (scaling_list_enabled && (iq_matrix_size != sizeof(VAIQMatrixBufferHEVC))) || 
                 (slice_params_size != sizeof(VASliceParameterBufferHEVC))) {
-                    ErrorLog(logger_, MakeMsg("HEVC data_buffer parameter_size not matching vaapi parameter buffer size."));
+                    ErrorLog(logger_, "HEVC data_buffer parameter_size not matching vaapi parameter buffer size.");
                     FunctionExitLog(logger_);
                     return ROCDEC_RUNTIME_ERROR;
             }
@@ -158,7 +158,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
             for (int i = 0; i < 16; i++) {
                 if (pPicParams->pic_params.avc.ref_frames[i].pic_idx != 0xFF) {
                     if (pPicParams->pic_params.avc.ref_frames[i].pic_idx >= va_surface_ids_.size() || pPicParams->pic_params.avc.ref_frames[i].pic_idx < 0) {
-                        ErrorLog(logger_, MakeMsg("Reference frame index exceeded the VAAPI surface pool limit."));
+                        ErrorLog(logger_, "Reference frame index exceeded the VAAPI surface pool limit.");
                         FunctionExitLog(logger_);
                         return ROCDEC_INVALID_PARAMETER;
                     }
@@ -176,7 +176,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
             slice_params_size = sizeof(RocdecAvcSliceParams);
 
             if ((pic_params_size != sizeof(VAPictureParameterBufferH264)) || (iq_matrix_size != sizeof(VAIQMatrixBufferH264)) || (slice_params_size != sizeof(VASliceParameterBufferH264))) {
-                    ErrorLog(logger_, MakeMsg("AVC data_buffer parameter_size not matching vaapi parameter buffer size."));
+                    ErrorLog(logger_, "AVC data_buffer parameter_size not matching vaapi parameter buffer size.");
                     FunctionExitLog(logger_);
                     return ROCDEC_RUNTIME_ERROR;
             }
@@ -187,7 +187,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
             for (int i = 0; i < 8; i++) {
                 if (pPicParams->pic_params.vp9.reference_frames[i] != 0xFF) {
                     if (pPicParams->pic_params.vp9.reference_frames[i] >= va_surface_ids_.size()) {
-                        ErrorLog(logger_, MakeMsg("Reference frame index exceeded the VAAPI surface pool limit."));
+                        ErrorLog(logger_, "Reference frame index exceeded the VAAPI surface pool limit.");
                         FunctionExitLog(logger_);
                         return ROCDEC_INVALID_PARAMETER;
                     }
@@ -199,7 +199,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
             slice_params_ptr = (void*)pPicParams->slice_params.vp9;
             slice_params_size = sizeof(RocdecVp9SliceParams);
             if ((pic_params_size != sizeof(VADecPictureParameterBufferVP9)) || (slice_params_size != sizeof(VASliceParameterBufferVP9))) {
-                    ErrorLog(logger_, MakeMsg("VP9 data_buffer parameter_size not matching vaapi parameter buffer size."));
+                    ErrorLog(logger_, "VP9 data_buffer parameter_size not matching vaapi parameter buffer size.");
                     FunctionExitLog(logger_);
                     return ROCDEC_RUNTIME_ERROR;
             }
@@ -211,7 +211,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
 
             if (pPicParams->pic_params.av1.current_display_picture != 0xFF) {
                 if (pPicParams->pic_params.av1.current_display_picture >= va_surface_ids_.size() || pPicParams->pic_params.av1.current_display_picture < 0) {
-                    ErrorLog(logger_, MakeMsg("Current display picture index exceeded the VAAPI surface pool limit."));
+                    ErrorLog(logger_, "Current display picture index exceeded the VAAPI surface pool limit.");
                     FunctionExitLog(logger_);
                     return ROCDEC_INVALID_PARAMETER;
                 }
@@ -220,7 +220,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
 
             for (int i = 0; i < pPicParams->pic_params.av1.anchor_frames_num; i++) {
                 if (pPicParams->pic_params.av1.anchor_frames_list[i] >= va_surface_ids_.size() || pPicParams->pic_params.av1.anchor_frames_list[i] < 0) {
-                    ErrorLog(logger_, MakeMsg("Anchor frame index exceeded the VAAPI surface pool limit."));
+                    ErrorLog(logger_, "Anchor frame index exceeded the VAAPI surface pool limit.");
                     FunctionExitLog(logger_);
                     return ROCDEC_INVALID_PARAMETER;
                 }
@@ -230,7 +230,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
             for (int i = 0; i < 8; i++) {
                 if (pPicParams->pic_params.av1.ref_frame_map[i] != 0xFF) {
                     if (pPicParams->pic_params.av1.ref_frame_map[i] >= va_surface_ids_.size() || pPicParams->pic_params.av1.ref_frame_map[i] < 0) {
-                        ErrorLog(logger_, MakeMsg("Reference frame index exceeded the VAAPI surface pool limit."));
+                        ErrorLog(logger_, "Reference frame index exceeded the VAAPI surface pool limit.");
                         FunctionExitLog(logger_);
                         return ROCDEC_INVALID_PARAMETER;
                     }
@@ -245,7 +245,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
             slice_params_size = sizeof(RocdecAv1SliceParams);
 
             if ((pic_params_size != sizeof(VADecPictureParameterBufferAV1)) || (slice_params_size != sizeof(VASliceParameterBufferAV1))) {
-                    CriticalLog(logger_, MakeMsg("AV1 data_buffer parameter_size not matching vaapi parameter buffer size."));
+                    CriticalLog(logger_, "AV1 data_buffer parameter_size not matching vaapi parameter buffer size.");
                     FunctionExitLog(logger_);
                     return ROCDEC_RUNTIME_ERROR;
             }
@@ -253,7 +253,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
         }
 
         default: {
-            CriticalLog(logger_, MakeMsg("The codec type is not supported."));
+            CriticalLog(logger_, "The codec type is not supported.");
             FunctionExitLog(logger_);
             return ROCDEC_NOT_SUPPORTED;
         }
@@ -262,7 +262,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
     // Destroy the data buffers of the previous frame
     rocDecStatus rocdec_status = DestroyDataBuffers();
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to destroy VAAPI buffer."));
+        CriticalLog(logger_, "Failed to destroy VAAPI buffer.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
@@ -352,7 +352,7 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
         return ROCDEC_INVALID_PARAMETER;
     }
     if (va_display_ == 0) {
-        CriticalLog(logger_, MakeMsg("VAAPI decoder has not been initialized but reconfiguration of the decoder has been requested."));
+        CriticalLog(logger_, "VAAPI decoder has not been initialized but reconfiguration of the decoder has been requested.");
         FunctionExitLog(logger_);
         return ROCDEC_NOT_SUPPORTED;
     }
@@ -380,20 +380,20 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
     if (create_va_config) {
         rocdec_status = CreateDecoderConfig();
         if (rocdec_status != ROCDEC_SUCCESS) {
-            CriticalLog(logger_, MakeMsg("Failed to create a VAAPI decoder configuration."));
+            CriticalLog(logger_, "Failed to create a VAAPI decoder configuration.");
             FunctionExitLog(logger_);
             return rocdec_status;
         }
     }
     rocdec_status = CreateSurfaces();
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to create VAAPI surfaces during the decoder reconfiguration."));
+        CriticalLog(logger_, "Failed to create VAAPI surfaces during the decoder reconfiguration.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
     rocdec_status = CreateContext();
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to create a VAAPI context during the decoder reconfiguration."));
+        CriticalLog(logger_, "Failed to create a VAAPI context during the decoder reconfiguration.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
@@ -444,7 +444,7 @@ rocDecStatus VaapiVideoDecoder::CreateDecoderConfig() {
             }
             break;
         default:
-            CriticalLog(logger_, MakeMsg("The codec type is not supported."));
+            CriticalLog(logger_, "The codec type is not supported.");
             FunctionExitLog(logger_);
             return ROCDEC_NOT_SUPPORTED;
     }
@@ -468,7 +468,7 @@ rocDecStatus VaapiVideoDecoder::CreateDecoderConfig() {
 rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
     FunctionEntryLog(logger_);
     if (decoder_create_info_.num_decode_surfaces < 1) {
-        CriticalLog(logger_, MakeMsg("Invalid number of decode surfaces."));
+        CriticalLog(logger_, "Invalid number of decode surfaces.");
         FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
@@ -503,7 +503,7 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
             surface_format = VA_RT_FORMAT_YUV444;
             break;
         default:
-            CriticalLog(logger_, MakeMsg("The surface type is not supported"));
+            CriticalLog(logger_, "The surface type is not supported");
             FunctionExitLog(logger_);
             return ROCDEC_NOT_SUPPORTED;
     }
@@ -568,7 +568,7 @@ VaContext::~VaContext() {
         }
         if (va_contexts_[i].va_display) {
             if (vaTerminate(va_contexts_[i].va_display) != VA_STATUS_SUCCESS) {
-                CriticalLog(logger_, MakeMsg("Failed to terminate VA"));
+                CriticalLog(logger_, "Failed to terminate VA");
             }
         }
     }
@@ -583,7 +583,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = InitHIP(device_id, hip_dev_prop);
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to initilize the HIP."));
+        CriticalLog(logger_, "Failed to initilize the HIP.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
@@ -626,7 +626,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         drm_node += std::to_string(render_node_id + offset);
         rocdec_status = InitVAAPI(va_ctx_idx, drm_node);
         if (rocdec_status != ROCDEC_SUCCESS) {
-            CriticalLog(logger_, MakeMsg("Failed to initilize the VAAPI."));
+            CriticalLog(logger_, "Failed to initilize the VAAPI.");
             FunctionExitLog(logger_);
             return rocdec_status;
         }
@@ -634,12 +634,12 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         amdgpu_device_handle dev_handle;
         uint32_t major_version = 0, minor_version = 0;
         if (amdgpu_device_initialize(va_contexts_[va_ctx_idx].drm_fd, &major_version, &minor_version, &dev_handle)) {
-            CriticalLog(logger_, MakeMsg("GPU device initialization failed: " + drm_node));
+            CriticalLog(logger_, "GPU device initialization failed: " + drm_node);
             FunctionExitLog(logger_);
             return ROCDEC_DEVICE_INVALID;
         }
         if (amdgpu_query_hw_ip_count(dev_handle, AMDGPU_HW_IP_VCN_DEC, &va_contexts_[va_ctx_idx].num_dec_engines)) {
-            CriticalLog(logger_, MakeMsg("Failed to get the number of video decode engines."));
+            CriticalLog(logger_, "Failed to get the number of video decode engines.");
         }
         amdgpu_device_deinitialize(dev_handle);
 
@@ -657,14 +657,14 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
 rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) {
     FunctionEntryLog(logger_);
     if (va_ctx_id >= va_contexts_.size()) {
-        CriticalLog(logger_, MakeMsg("Invalid VA context Id."));
+        CriticalLog(logger_, "Invalid VA context Id.");
         *va_display = 0;
         FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     } else {
         VADisplay new_va_display = vaGetDisplayDRM(va_contexts_[va_ctx_id].drm_fd);
         if (!new_va_display) {
-            CriticalLog(logger_, MakeMsg("Failed to create VA display."));
+            CriticalLog(logger_, "Failed to create VA display.");
             FunctionExitLog(logger_);
             return ROCDEC_NOT_INITIALIZED;
         }
@@ -680,7 +680,7 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
 rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
     FunctionEntryLog(logger_);
     if (dec_cap == nullptr) {
-        CriticalLog(logger_, MakeMsg("Null decode capability struct pointer."));
+        CriticalLog(logger_, "Null decode capability struct pointer.");
         FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
@@ -688,7 +688,7 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
     uint32_t va_ctx_id;
     rocdec_status = GetVaContext(dec_cap->device_id, &va_ctx_id);
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(logger_, MakeMsg("Failed to initilize."));
+        CriticalLog(logger_, "Failed to initilize.");
         FunctionExitLog(logger_);
         return rocdec_status;
     }
@@ -885,12 +885,12 @@ rocDecStatus VaContext::InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop) {
     FunctionEntryLog(logger_);
     CHECK_HIP(hipGetDeviceCount(&num_devices_));
     if (num_devices_ < 1) {
-        CriticalLog(logger_, MakeMsg("Didn't find any GPU."));
+        CriticalLog(logger_, "Didn't find any GPU.");
         FunctionExitLog(logger_);
         return ROCDEC_DEVICE_INVALID;
     }
     if (device_id >= num_devices_) {
-        CriticalLog(logger_, MakeMsg("ERROR: the requested device_id is not found!"));
+        CriticalLog(logger_, "ERROR: the requested device_id is not found!");
         FunctionExitLog(logger_);
         return ROCDEC_DEVICE_INVALID;
     }
@@ -904,13 +904,13 @@ rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
     FunctionEntryLog(logger_);
     va_contexts_[va_ctx_idx].drm_fd = open(drm_node.c_str(), O_RDWR);
     if (va_contexts_[va_ctx_idx].drm_fd < 0) {
-        CriticalLog(logger_, MakeMsg("Failed to open drm node." + drm_node));
+        CriticalLog(logger_, "Failed to open drm node." + drm_node);
         FunctionExitLog(logger_);
         return ROCDEC_NOT_INITIALIZED;
     }
     va_contexts_[va_ctx_idx].va_display = vaGetDisplayDRM(va_contexts_[va_ctx_idx].drm_fd);
     if (!va_contexts_[va_ctx_idx].va_display) {
-        CriticalLog(logger_, MakeMsg("Failed to create VA display."));
+        CriticalLog(logger_, "Failed to create VA display.");
         FunctionExitLog(logger_);
         return ROCDEC_NOT_INITIALIZED;
     }
