@@ -11,7 +11,7 @@
 [submodule "external/dyninst"]
 	path = external/dyninst
 	url = https://github.com/ROCm/dyninst.git
-	branch = dyninst_13
+	branch = users/kcossett-amd/dyninst_13-no-boost
 [submodule "external/PTL"]
 	path = external/PTL
 	url = https://github.com/jrmadsen/PTL.git

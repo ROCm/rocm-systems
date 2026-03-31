@@ -932,16 +932,12 @@ to_string(instruction_category_t _category)
         case c_CallInsn: return "function_call";
         case c_ReturnInsn: return "return";
         case c_BranchInsn: return "branch";
-        case c_ConditionalInsn: return "conditional";
         case c_CompareInsn: return "compare";
         case c_PrefetchInsn: return "prefetch";
         case c_SysEnterInsn: return "sys_enter";
         case c_SyscallInsn: return "sys_call";
-        case c_InterruptInsn: return "interrupt";
         case c_VectorInsn: return "vector";
         case c_GPUKernelExitInsn: return "gpu_kernel_exit";
-        case c_TransactionalInsn: return "transactional";
-        case c_SoftwareExceptionInsn: return "software_exception";
         case c_NoCategory: return "no_category";
     }
     return std::string{ "unknown_category_id_" } +

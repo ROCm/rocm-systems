@@ -517,10 +517,6 @@ module_function::is_module_constrained() const
     static std::regex core_lib_regex{ "lib(elf)(-|\\.)", regex_opts };
     // static std::regex prefix_regex{ "^(_|\\.[a-zA-Z0-9])", regex_opts };
 
-    // glibc math modules from libm
-    // These do not crash, but take long to instrument
-    static std::regex sys_math_regex{ "^\\./math/", regex_opts };
-
     // file extensions that should not be instrumented
     if(std::regex_search(module_name, ext_regex))
         return _report("Excluding", "file extension", 3);
@@ -529,14 +525,6 @@ module_function::is_module_constrained() const
     if(std::regex_search(module_name, sys_regex) ||
        std::regex_search(module_name, sys_build_regex))
         return _report("Excluding", "system module", 3);
-
-    // user can opt back in via -MI to instrument these modules
-    if(std::regex_search(module_name, sys_math_regex))
-    {
-        if(!file_include.empty() && check_regex_restrictions(module_name, file_include))
-            return false;
-        return _report("Excluding", "system math module", 3);
-    }
 
     // dyninst modules that must not be instrumented
     if(std::regex_search(module_name, dyninst_regex))
