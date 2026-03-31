@@ -2066,8 +2066,8 @@ def test_comprehensive_error_paths():
     from utils.parser import (
         build_comparable_columns,
         build_eval_string,
-        calc_builtin_var,
     )
+    from utils.utils_common import calc_builtin_var
 
     columns = build_comparable_columns("ms")
     expected = [
@@ -2080,10 +2080,7 @@ def test_comprehensive_error_paths():
     for expected_col in expected:
         assert expected_col in columns
 
-    class MockSysInfo:
-        total_l2_chan = 16
-
-    sys_info = MockSysInfo()
+    sys_info = {"total_l2_chan": 16}
     result = calc_builtin_var(42, sys_info)
     assert result == 42
 
