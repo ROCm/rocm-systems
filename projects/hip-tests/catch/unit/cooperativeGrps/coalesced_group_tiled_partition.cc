@@ -7,6 +7,7 @@
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 
+#include <algorithm>
 #include <random>
 #include <bitset>
 #include <optional>
@@ -668,8 +669,21 @@ template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncT
       }
 
       const auto active_count = std::bitset<sizeof(mask) * 8>(mask).count();
-      const auto start_offset = i * grid.threads_in_block_count_ + j * warp_size;
-      const auto end_offset = start_offset + active_count;
+      const size_t start_offset =
+          static_cast<size_t>(i) * grid.threads_in_block_count_ +
+          static_cast<size_t>(j) * warp_size;
+      // Popcount can exceed the number of launched threads in this warp if mask bookkeeping
+      // disagrees with the grid; cap to [start_offset, start_offset + segment_threads) and
+      // to the allocation so we never read past arr[0 .. thread_count_).
+      const int segment_threads =
+          std::min(static_cast<int>(warp_size),
+                   std::max(0, static_cast<int>(grid.threads_in_block_count_) -
+                                    j * static_cast<int>(warp_size)));
+      const size_t max_exclusive_for_warp =
+          std::min(start_offset + static_cast<size_t>(segment_threads),
+                   static_cast<size_t>(grid.thread_count_));
+      const size_t end_offset =
+          std::min(start_offset + active_count, max_exclusive_for_warp);
       const auto valid =
           std::all_of(arr.ptr() + start_offset, arr.ptr() + end_offset, [](T e) { return e; });
       if (!valid) {
