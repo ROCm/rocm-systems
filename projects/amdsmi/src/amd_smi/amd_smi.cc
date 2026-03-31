@@ -3052,7 +3052,7 @@ amdsmi_status_t amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processo
     current_partition_str = current_partition;
   }
 
-  ss << __PRETTY_FUNCTION__ << " | After attepting to set memory partition to "
+  ss << __PRETTY_FUNCTION__ << " | After attempting to set memory partition to "
      << req_user_partition << "\n"
      << " | Current memory partition is " << current_partition_str << "\n"
      << " | Returning: " << smi_amdgpu_get_status_string(ret, false)
@@ -3661,7 +3661,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
 
   status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, 0, &tmp_partition_id);
   const uint32_t partition_num = 0;  // Each partition should show the their respective
-                                     // partition_id at positon 0 of the array.
+                                     // partition_id at position 0 of the array.
                                      // We are no longer populating only the primary partition
                                      // for BM/Guest.
 

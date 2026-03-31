@@ -377,7 +377,7 @@ unsigned int RdciHealthSubSystem::handle_one_gpu(rdc_health_response_t& response
     // set gpu health
     if (incident->health > gpu_health) gpu_health = incident->health;
 
-    // handle smae component
+    // handle same component
     component_detail_t detail;
     detail.component_health = RDC_HEALTH_RESULT_PASS;
     detail.err_str.clear();
