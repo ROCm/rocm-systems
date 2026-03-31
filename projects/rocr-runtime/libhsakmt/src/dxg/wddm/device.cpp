@@ -52,6 +52,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include "impl/wddm/status.h"
+#include "impl/wddm/ntstatus_translate.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
