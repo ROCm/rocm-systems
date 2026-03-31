@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import csv
 import ctypes
 import glob
 import io
@@ -13,15 +14,15 @@ import selectors
 import shutil
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional, Union
-
-import yaml
 
 import config
 from utils.logger import (
@@ -30,9 +31,80 @@ from utils.logger import (
     console_log,
     console_warning,
 )
+from vendored import yaml
 
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+
+SUPPORTED_DENOM: dict[str, str] = {
+    "per_wave": "SQ_WAVES",
+    "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
+    "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
+    "per_kernel": "1",
+}
+
+# Build-in defined in mongodb variables:
+BUILD_IN_VARS: dict[str, str] = {
+    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
+    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
+    "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
+    "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
+        $GRBM_GUI_ACTIVE_PER_XCD)), 0) / $max_waves_per_cu) * 8) + \
+        MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
+        $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
+    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / \
+        1000) * $max_sclk)), 0)",
+    "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
+}
+
+# Supported expression field names for metric tables
+SUPPORTED_FIELD: list[str] = [
+    "Value",
+    "Minimum",
+    "Maximum",
+    "Average",
+    "Median",
+    "Min",
+    "Max",
+    "Avg",
+    "Pct of Peak",
+    "Peak",
+    "Peak (Empirical)",
+    "Count",
+    "Mean",
+    "Percent",
+    "Std Dev",
+    "Q1",
+    "Q3",
+    "Expression",
+    # Special keywords for L2 channel
+    "Channel",
+    "L2 Cache Hit Rate",
+    "Requests",
+    "L2 Read",
+    "L2 Write",
+    "L2 Atomic",
+    "L2-Fabric Requests",
+    "L2-Fabric Read",
+    "L2-Fabric Write and Atomic",
+    "L2-Fabric Atomic",
+    "L2 Read Req",
+    "L2 Write Req",
+    "L2 Atomic Req",
+    "L2-Fabric Read Req",
+    "L2-Fabric Write and Atomic Req",
+    "L2-Fabric Atomic Req",
+    "L2-Fabric Read Latency",
+    "L2-Fabric Write Latency",
+    "L2-Fabric Atomic Latency",
+    "L2-Fabric Read Stall (PCIe)",
+    "L2-Fabric Read Stall (Infinity Fabric™)",
+    "L2-Fabric Read Stall (HBM)",
+    "L2-Fabric Write Stall (PCIe)",
+    "L2-Fabric Write Stall (Infinity Fabric™)",
+    "L2-Fabric Write Stall (HBM)",
+    "L2-Fabric Write Starve",
+]
 
 # Global state: rocprof being used by profile mode
 _rocprof_cmd = ""
@@ -613,6 +685,142 @@ def parse_sets_yaml(arch: str) -> dict[str, Any]:
     return sets_info
 
 
+def load_panel_configs(
+    dirs: list[str],
+) -> OrderedDict[int, dict[str, Any]]:
+    """
+    Load all panel configs from yaml file.
+    """
+    configs: dict[int, dict[str, Any]] = {}
+    for dir_path in dirs:
+        for yaml_file in Path(dir_path).glob("*.yaml"):
+            with open(yaml_file) as file:
+                config_yml = yaml.safe_load(file)
+                # metric key can be None due to some metric-
+                # tables not having any metrics
+                # metric key should be empty dict instead of None
+                panel_config = config_yml["Panel Config"]
+                for data_source in panel_config["data source"]:
+                    metric_table = data_source.get("metric_table")
+                    if metric_table and metric_table["metric"] is None:
+                        metric_table["metric"] = {}
+                configs[panel_config["id"]] = panel_config
+
+    # TODO: sort metrics as the header order in case they-
+    # are not defined in the same order
+    return OrderedDict(sorted(configs.items()))
+
+
+def calc_builtin_var(var: Union[int, str], sys_info: dict[str, Any]) -> int:  # type: ignore[return]
+    """
+    Calculate build-in variable based on sys_info.
+    """
+    if isinstance(var, int):
+        return var
+    elif isinstance(var, str) and var.startswith("$total_l2_chan"):
+        return int(sys_info["total_l2_chan"])
+    else:
+        console_error(f'Built-in var "{var}" is not supported')
+
+
+def expand_placeholder_ranges(
+    panel_configs: OrderedDict[int, dict[str, Any]],
+    sys_info: Optional[dict[str, Any]],
+) -> OrderedDict[int, dict[str, Any]]:
+    """
+    Expand placeholder_range entries in metric_table data configs in-place.
+
+    Mutates panel_configs directly and returns the same object for convenience.
+
+    Some metric tables define a range of metrics via a placeholder key that is
+    expanded into individual entries at load time. sys_info is required to
+    resolve built-in range variables; if it is None the table is cleared.
+    """
+    for _panel_id, panel in panel_configs.items():
+        for data_source in panel["data source"]:
+            for type_key, data_config in data_source.items():
+                if (
+                    type_key == "metric_table"
+                    and "metric" in data_config
+                    and "placeholder_range" in data_config["metric"]
+                ):
+                    new_metrics: dict[str, Any] = {}
+                    if sys_info is not None:
+                        # NB: support single placeholder for now!!
+                        p_range = data_config["metric"].pop("placeholder_range")
+                        metric, metric_expr = data_config["metric"].popitem()
+                        for p, r in p_range.items():
+                            # NB: We have to resolve placeholder range first if it
+                            #   is a build-in var. It will be too late to do it in
+                            #   eval_metric(). This is the only reason we need
+                            #   sys_info at this stage.
+                            var = calc_builtin_var(r, sys_info)
+                            for i in range(var):
+                                new_key = metric.replace(p, str(i))
+                                new_val = {
+                                    k: v.replace(p, str(i))
+                                    for k, v in metric_expr.items()
+                                }
+                                new_metrics[new_key] = new_val
+                    data_config["metric"] = new_metrics
+
+    return panel_configs
+
+
+def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
+    """
+    Return True if a metric entry has at least one evaluatable expression field
+    that is not None and not the string "None".
+
+    Expression fields are identified by matching the header display name against
+    SUPPORTED_FIELD, excluding Peak-prefixed fields which are empirical values.
+    """
+    for header_key, header_display in data_config["header"].items():
+        if header_display in SUPPORTED_FIELD and not header_display.startswith("Peak"):
+            expr_value = entries.get(header_key)
+            if expr_value is not None and expr_value != "None":
+                return True
+    return False
+
+
+def build_metric_list(
+    panel_configs: OrderedDict[int, dict[str, Any]],
+    sys_info: Optional[dict[str, Any]],
+) -> dict[str, str]:
+    """
+    Build metric_list from the panel configs.
+
+    Returns a mapping of (panel/table/metric IDs -> display names)
+    without constructing DataFrames or metric_counters. Use this directly when
+    only the metric listing is needed (e.g. --list-metrics, --list-blocks).
+    """
+    metric_list: dict[str, str] = {}
+
+    expanded_configs = expand_placeholder_ranges(panel_configs, sys_info)
+
+    for panel_id, panel in expanded_configs.items():
+        for data_source in panel["data source"]:
+            for type_key, data_config in data_source.items():
+                if type_key == "metric_table":
+                    data_source_idx = str(data_config["id"] // 100)
+                    if data_source_idx != "0":
+                        metric_list[data_source_idx] = panel["title"]
+
+                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
+                    metric_list[table_idx] = data_config["title"]
+
+                    for i, (key, entries) in enumerate(data_config["metric"].items()):
+                        metric_idx = f"{table_idx}.{i}"
+                        if _metric_has_valid_expr(entries, data_config):
+                            metric_list[metric_idx] = key
+
+                elif type_key in ("raw_csv_table", "pc_sampling_table"):
+                    data_source_idx = str(data_config["id"] // 100)
+                    metric_list[data_source_idx] = panel["title"]
+
+    return metric_list
+
+
 def get_uuid(length: int = 8) -> str:
     return uuid.uuid4().hex[:length]
 
@@ -836,3 +1044,190 @@ def set_locale_encoding() -> None:
                 "Please ensure that a UTF-8-based locale is available on your system.",
                 exit=False,
             )
+
+
+def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
+    """
+    Validate roofline.csv exists and has consistent structure.
+
+    Returns:
+        tuple: (is_valid, error_message)
+               is_valid=True if CSV is valid, False otherwise
+               error_message contains description if invalid
+    """
+    if isinstance(workload_dir, list):
+        base_dir = (
+            workload_dir[0][0]
+            if isinstance(workload_dir[0], (list, tuple))
+            else workload_dir[0]
+        )
+    else:
+        base_dir = workload_dir
+
+    benchmark_results = Path(base_dir) / "roofline.csv"
+
+    # Check if file exists
+    if not benchmark_results.exists():
+        return False, f"Benchmark results file not found: {benchmark_results}"
+
+    # Validate CSV structure
+    try:
+        with open(benchmark_results) as csvfile:
+            csv_reader = csv.reader(csvfile, delimiter=",")
+            row_count = 0
+            num_headers = 0
+
+            for row in csv_reader:
+                if row_count == 0:
+                    num_headers = len(row) - 1
+                    if num_headers <= 0:
+                        return (
+                            False,
+                            "Empty or invalid header row in benchmark_results",
+                        )
+                else:
+                    if len(row) - 1 != num_headers:
+                        return (
+                            False,
+                            f"Inconsistent row length in benchmark_results at "
+                            f"row {row_count + 1}. "
+                            f"Expected {num_headers + 1} columns, "
+                            f"found {len(row)}. "
+                            "Roofline data appears corrupted or incomplete.",
+                        )
+                row_count += 1
+
+            if row_count < 2:
+                return (
+                    False,
+                    f"Insufficient data in benchmark_results. "
+                    f"Found {row_count} rows (need at least 2)."
+                    f" Roofline data appears corrupted or incomplete.",
+                )
+    except Exception as e:
+        return False, f"Failed to read benchmark_results: {e}"
+
+    return True, ""
+
+
+def format_table_ascii(
+    data: list[dict[str, Any]],
+    columns: list[str],
+    description_wrap_width: int = 40,
+    decimal: int = 2,
+) -> str:
+    """
+    Format a list of dicts as an ASCII table string using only stdlib.
+
+    Args:
+        data: List of dictionaries containing row data
+        columns: List of column names to display (in order)
+        description_wrap_width: Width to wrap Description column (default 40)
+        decimal: Number of decimal places for floats (default 2)
+
+    Returns:
+        Formatted ASCII table string
+    """
+    if not data:
+        return ""
+
+    # Calculate column widths
+    col_widths: dict[str, int] = {}
+    wrapped_data: list[dict[str, list[str]]] = []
+
+    for col in columns:
+        col_widths[col] = len(col)
+
+    # Process each row and wrap text as needed
+    for row in data:
+        wrapped_row: dict[str, list[str]] = {}
+        for col in columns:
+            value = row.get(col, "")
+            if value is None:
+                value = ""
+
+            # Format floats with specified decimal places (matches tabulate floatfmt)
+            if isinstance(value, float):
+                value = f"{value:.{decimal}f}"
+            elif isinstance(value, int):
+                value = str(value)
+            else:
+                value = str(value)
+
+            # Wrap Description column using textwrap.fill behavior
+            # (collapses whitespace, wraps at word boundaries)
+            if col == "Description":
+                # Use textwrap.fill to match original behavior exactly
+                wrapped_text = textwrap.fill(value, width=description_wrap_width)
+                lines = wrapped_text.split("\n") if wrapped_text else [""]
+            else:
+                lines = [value]
+
+            wrapped_row[col] = lines
+
+            # Update column width based on longest line
+            for line in lines:
+                col_widths[col] = max(col_widths[col], len(line))
+
+        wrapped_data.append(wrapped_row)
+
+    # Build the table
+    result: list[str] = []
+
+    # Index column width: max of "index" (5) and the widest row number
+    idx_width = max(5, len(str(len(data) - 1)))
+
+    # Create separator line
+    def make_separator() -> str:
+        parts = ["+"]
+        # Index column
+        parts.append("-" * (idx_width + 2) + "+")
+        for col in columns:
+            parts.append("-" * (col_widths[col] + 2) + "+")
+        return "".join(parts)
+
+    # Create header
+    def make_header() -> str:
+        parts = ["|"]
+        parts.append(f" {'index':^{idx_width}} |")
+        for col in columns:
+            parts.append(f" {col:<{col_widths[col]}} |")
+        return "".join(parts)
+
+    # Create data row (handles multi-line cells)
+    def make_row(row_idx: int, wrapped_row: dict[str, list[str]]) -> list[str]:
+        # Find max lines in this row
+        max_lines = max(len(lines) for lines in wrapped_row.values())
+
+        row_lines: list[str] = []
+        for line_idx in range(max_lines):
+            parts = ["|"]
+            # Index column - only show on first line
+            if line_idx == 0:
+                parts.append(f" {row_idx:>{idx_width}} |")
+            else:
+                parts.append(" " * (idx_width + 1) + " |")
+
+            for col in columns:
+                lines = wrapped_row[col]
+                if line_idx < len(lines):
+                    cell_value = lines[line_idx]
+                else:
+                    cell_value = ""
+                parts.append(f" {cell_value:<{col_widths[col]}} |")
+            row_lines.append("".join(parts))
+        return row_lines
+
+    # Build table
+    separator = make_separator()
+    result.append(separator)
+    result.append(make_header())
+    result.append(separator)
+
+    for idx, wrapped_row in enumerate(wrapped_data):
+        row_lines = make_row(idx, wrapped_row)
+        for line in row_lines:
+            result.append(line)
+        result.append(separator)
+
+    return "\n".join(result)

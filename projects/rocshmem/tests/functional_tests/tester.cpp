@@ -132,8 +132,6 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutNBITestType:
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
-      case PingPongTestType:
-      case PingAllTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case TeamBroadcastTestType:
@@ -792,7 +790,7 @@ void Tester::print(uint64_t size) {
   double time_us = gpuCyclesToMicroseconds(max_end_time - min_start_time);
   double time_s = time_us / 1e6;
 
-  double latency = time_us / num_loops;
+  double latency = time_us / num_loops / rtt_factor;
 
   double msg_rate = num_timed_msgs / time_s;
 
