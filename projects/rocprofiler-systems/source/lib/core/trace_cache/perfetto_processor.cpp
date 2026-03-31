@@ -1444,6 +1444,5 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
         LOG_WARNING("Unknown KFD category: {}", _category);
 }
 
-
 }  // namespace trace_cache
 }  // namespace rocprofsys

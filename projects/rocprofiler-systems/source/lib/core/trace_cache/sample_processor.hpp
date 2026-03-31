@@ -86,7 +86,6 @@ struct processor_t
 
     void handle(const kfd_sample& sample) { static_cast<T*>(this)->handle(sample); }
 
-
     void prepare_for_processing() { static_cast<T*>(this)->prepare_for_processing(); }
 
     void finalize_processing() { static_cast<T*>(this)->finalize_processing(); }
@@ -216,7 +215,6 @@ struct processor_view_t
     {
         m_vtable->handle_kfd_sample(m_object, sample);
     }
-
 
     ROCPROFSYS_INLINE void prepare_for_processing() const noexcept
     {

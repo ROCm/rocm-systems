@@ -679,7 +679,6 @@ rocpd_processor_t::handle(const kfd_sample& _kfd)
                                        _kfd.event_metadata.c_str());
 }
 
-
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
                                      int pid, int ppid)
