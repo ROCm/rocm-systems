@@ -27,7 +27,7 @@
 
 class TestXGMIReadWrite : public TestBase {
  public:
-    TestXGMIReadWrite();
+  TestXGMIReadWrite();
 
   // @Brief: Destructor for test case of TestXGMIReadWrite
   virtual ~TestXGMIReadWrite();
@@ -38,7 +38,7 @@ class TestXGMIReadWrite : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results

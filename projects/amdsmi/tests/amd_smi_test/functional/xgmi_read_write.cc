@@ -20,22 +20,23 @@
  * THE SOFTWARE.
  */
 
-#include <cstdint>
-
-#include <iostream>
+#include "xgmi_read_write.h"
 
 #include <gtest/gtest.h>
+
+#include <cstdint>
+#include <iostream>
+
 #include "amd_smi/amdsmi.h"
-#include "xgmi_read_write.h"
 
 TestXGMIReadWrite::TestXGMIReadWrite() : TestBase() {
   set_title("AMDSMI XGMI Read/Write Test");
-  set_description("This test verifies that XGMI error counts can be read"
-                               " properly, and that the count can be reset.");
+  set_description(
+      "This test verifies that XGMI error counts can be read"
+      " properly, and that the count can be reset.");
 }
 
-TestXGMIReadWrite::~TestXGMIReadWrite(void) {
-}
+TestXGMIReadWrite::~TestXGMIReadWrite(void) {}
 
 void TestXGMIReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -43,9 +44,7 @@ void TestXGMIReadWrite::SetUp(void) {
   return;
 }
 
-void TestXGMIReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestXGMIReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestXGMIReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -58,7 +57,6 @@ void TestXGMIReadWrite::Close() {
   TestBase::Close();
 }
 
-
 void TestXGMIReadWrite::Run(void) {
   GTEST_SKIP_("Temporarily disabled");
   amdsmi_status_t err;
@@ -66,9 +64,7 @@ void TestXGMIReadWrite::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -79,24 +75,22 @@ void TestXGMIReadWrite::Run(void) {
     amdsmi_xgmi_info_t info;
     err = amdsmi_get_xgmi_info(device, &info);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        std::cout <<
-            "\t**amdsmi_dev_xgmi_hive_id_get() is not supported"
-            " on this machine" << std::endl;
-        continue;
+      std::cout << "\t**amdsmi_dev_xgmi_hive_id_get() is not supported"
+                   " on this machine"
+                << std::endl;
+      continue;
     } else {
-        CHK_ERR_ASRT(err)
-        IF_VERB(STANDARD) {
-            std::cout << "\t**XGMI Hive ID : " << std::hex <<
-            info.xgmi_hive_id << std::endl;
-        }
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**XGMI Hive ID : " << std::hex << info.xgmi_hive_id << std::endl;
+      }
     }
 
     err = amdsmi_gpu_xgmi_error_status(device, &err_stat);
 
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout << "\t**XGMI Error Status: Not supported on this machine"
-                                                               << std::endl;
+        std::cout << "\t**XGMI Error Status: Not supported on this machine" << std::endl;
       }
       // Verify api support checking functionality is working
       err = amdsmi_gpu_xgmi_error_status(device, nullptr);
@@ -106,8 +100,7 @@ void TestXGMIReadWrite::Run(void) {
     }
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
-      std::cout << "\t**XGMI Error Status: " <<
-                               static_cast<uint32_t>(err_stat) << std::endl;
+      std::cout << "\t**XGMI Error Status: " << static_cast<uint32_t>(err_stat) << std::endl;
     }
     // Verify api support checking functionality is working
     err = amdsmi_gpu_xgmi_error_status(device, nullptr);
@@ -117,8 +110,6 @@ void TestXGMIReadWrite::Run(void) {
     // test won't be meaningless
     err = amdsmi_reset_gpu_xgmi_error(device);
     CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Successfully reset XGMI Error Status: " << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Successfully reset XGMI Error Status: " << std::endl; }
   }
 }

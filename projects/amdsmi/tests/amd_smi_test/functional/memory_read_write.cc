@@ -161,7 +161,9 @@ void TestMemoryReadWrite::Run(void) {
       // Test setting to current value (should succeed)
       err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], uma_info.current_index);
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) { std::cout << "\t  Set to current index succeeded (DRY_RUN)" << std::endl; }
+      IF_VERB(STANDARD) {
+        std::cout << "\t  Set to current index succeeded (DRY_RUN)" << std::endl;
+      }
 
       // Test setting to a different valid index if available
       if (valid_count > 1) {
@@ -257,7 +259,6 @@ void TestMemoryReadWrite::Run(void) {
       IF_VERB(STANDARD) { std::cout << "\t  Reset TTM succeeded (DRY_RUN)" << std::endl; }
     }
   }
-
 
   IF_VERB(STANDARD) { std::cout << "\n=== Memory Configuration Tests Completed ===" << std::endl; }
 }

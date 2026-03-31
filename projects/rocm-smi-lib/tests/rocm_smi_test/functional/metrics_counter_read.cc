@@ -43,27 +43,27 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/metrics_counter_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
-#include <string>
 #include <map>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/metrics_counter_read.h"
 #include "rocm_smi_test/test_common.h"
-
 
 TestMetricsCounterRead::TestMetricsCounterRead() : TestBase() {
   set_title("RSMI GPU Metrics Counter Read Test");
-  set_description("The GPU Metrics Counter tests verifies that "
-                  "the gpu metrics counter info can be read properly.");
+  set_description(
+      "The GPU Metrics Counter tests verifies that "
+      "the gpu metrics counter info can be read properly.");
 }
 
-TestMetricsCounterRead::~TestMetricsCounterRead(void) {
-}
+TestMetricsCounterRead::~TestMetricsCounterRead(void) {}
 
 void TestMetricsCounterRead::SetUp(void) {
   TestBase::SetUp();
@@ -71,9 +71,7 @@ void TestMetricsCounterRead::SetUp(void) {
   return;
 }
 
-void TestMetricsCounterRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestMetricsCounterRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestMetricsCounterRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -85,7 +83,6 @@ void TestMetricsCounterRead::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestMetricsCounterRead::Run(void) {
   rsmi_status_t err;
@@ -99,9 +96,7 @@ void TestMetricsCounterRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
-    IF_VERB(STANDARD) {
-        std::cout << "\t**GPU METRICS ENERGY COUNTER:\n";
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**GPU METRICS ENERGY COUNTER:\n"; }
 
     uint64_t power;
     uint64_t timestamp;
@@ -110,20 +105,17 @@ void TestMetricsCounterRead::Run(void) {
     if (err != RSMI_STATUS_SUCCESS) {
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
-          std::cout << "\t**" <<
-          "Not supported on this machine" << std::endl;
+          std::cout << "\t**" << "Not supported on this machine" << std::endl;
           return;
         }
       }
     } else {
       CHK_ERR_ASRT(err);
       IF_VERB(STANDARD) {
-          std::cout << std::dec << "power counter="
-          << power << '\n';
-          std::cout << "power in uJ="
-          << (double)(power * counter_resolution) << '\n';
-          std::cout << std::dec << "timestamp="
-          << timestamp << '\n';
+        std::cout << std::dec << "power counter=" << power << '\n';
+        std::cout << "power in uJ="
+                  << static_cast<double>(power) * static_cast<double>(counter_resolution) << '\n';
+        std::cout << std::dec << "timestamp=" << timestamp << '\n';
       }
     }
 
@@ -135,31 +127,25 @@ void TestMetricsCounterRead::Run(void) {
     rsmi_utilization_counter_t utilization_counters[2];
     utilization_counters[0].type = RSMI_COARSE_GRAIN_GFX_ACTIVITY;
     utilization_counters[1].type = RSMI_COARSE_GRAIN_MEM_ACTIVITY;
-    err = rsmi_utilization_count_get(i, utilization_counters,
-                    2, &timestamp);
+    err = rsmi_utilization_count_get(i, utilization_counters, 2, &timestamp);
     if (err != RSMI_STATUS_SUCCESS) {
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
-          std::cout << "\t**" <<
-          "Not supported on this machine" << std::endl;
+          std::cout << "\t**" << "Not supported on this machine" << std::endl;
           return;
         }
       }
     } else {
       CHK_ERR_ASRT(err);
       IF_VERB(STANDARD) {
-          std::cout << std::dec << "gfx_activity="
-          << utilization_counters[0].value << '\n';
-          std::cout << std::dec << "mem_activity="
-          << utilization_counters[1].value << '\n';
-          std::cout << std::dec << "timestamp="
-          << timestamp << '\n';
+        std::cout << std::dec << "gfx_activity=" << utilization_counters[0].value << '\n';
+        std::cout << std::dec << "mem_activity=" << utilization_counters[1].value << '\n';
+        std::cout << std::dec << "timestamp=" << timestamp << '\n';
       }
     }
 
     // Verify api support checking functionality is working
-    err = rsmi_utilization_count_get(i, nullptr,
-                    1 , nullptr);
+    err = rsmi_utilization_count_get(i, nullptr, 1, nullptr);
     ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
   }  // end for
 }

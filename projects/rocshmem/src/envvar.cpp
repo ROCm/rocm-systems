@@ -46,7 +46,6 @@ namespace envvar {
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS", "", 1024);
     const var<std::string> requested_nic("USE_IB_HCA", "");
     const var<std::string> hca_list("HCA_LIST", "");
-    const var<uint32_t> sq_size("SQ_SIZE", "", 1024);
     const var<std::string> backend("BACKEND", "");
     const var<bool> disable_mixed_ipc("DISABLE_MIXED_IPC", "", false);
     const var<bool> disable_ipc("DISABLE_IPC", "", false);
@@ -73,6 +72,7 @@ namespace envvar {
     const var<bool> enable_dmabuf("ENABLE_DMABUF", "", false);
     const var<bool> override_nic_firmware_check("OVERRIDE_NIC_FIRMWARE_CHECK", "", false);
     const var<std::string> alltoallv_wg_algo("ALLTOALLV_WG_ALGO", "");
+    const var<uint32_t> sq_size("SQ_SIZE", "", 4096);
   }  // namespace gda
 
   namespace _detail {

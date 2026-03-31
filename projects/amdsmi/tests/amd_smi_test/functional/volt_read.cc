@@ -20,25 +20,25 @@
  * THE SOFTWARE.
  */
 
-#include <cstdint>
+#include "volt_read.h"
 
+#include <gtest/gtest.h>
+
+#include <cstdint>
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
-#include "amd_smi/amdsmi.h"
-#include "volt_read.h"
 #include "../test_common.h"
-
+#include "amd_smi/amdsmi.h"
 
 TestVoltRead::TestVoltRead() : TestBase() {
   set_title("AMDSMI Volt Read Test");
-  set_description("The Voltage Read tests verifies that the voltage "
-                   "monitors can be read properly.");
+  set_description(
+      "The Voltage Read tests verifies that the voltage "
+      "monitors can be read properly.");
 }
 
-TestVoltRead::~TestVoltRead(void) {
-}
+TestVoltRead::~TestVoltRead(void) {}
 
 void TestVoltRead::SetUp(void) {
   TestBase::SetUp();
@@ -46,9 +46,7 @@ void TestVoltRead::SetUp(void) {
   return;
 }
 
-void TestVoltRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestVoltRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestVoltRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -60,7 +58,6 @@ void TestVoltRead::Close() {
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestVoltRead::Run(void) {
   amdsmi_status_t err;
@@ -77,18 +74,16 @@ void TestVoltRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(processor_handles_[i]);
 
-    auto print_volt_metric = [&](amdsmi_voltage_metric_t met,
-                                                        std::string label) {
-      err =  amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, &val_i64);
+    auto print_volt_metric = [&](amdsmi_voltage_metric_t met, std::string label) {
+      err = amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, &val_i64);
 
       if (err != AMDSMI_STATUS_SUCCESS) {
         if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
           IF_VERB(STANDARD) {
-            std::cout << "\t**" << label << ": " <<
-                               "Not supported on this machine" << std::endl;
+            std::cout << "\t**" << label << ": " << "Not supported on this machine" << std::endl;
 
             // Verify api support checking functionality is working
-            err =  amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, nullptr);
+            err = amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, nullptr);
             ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
             return;
           }
@@ -97,27 +92,22 @@ void TestVoltRead::Run(void) {
         }
       }
       // Verify api support checking functionality is working
-      err =  amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, nullptr);
+      err = amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, nullptr);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
-      IF_VERB(STANDARD) {
-        std::cout << "\t**" << label << ": " << val_i64 <<
-                                                           "mV" << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**" << label << ": " << val_i64 << "mV" << std::endl; }
     };
     for (uint32_t i = AMDSMI_VOLT_TYPE_FIRST; i <= AMDSMI_VOLT_TYPE_LAST; ++i) {
       IF_VERB(STANDARD) {
-        std::cout << "\t** **********" <<
-          GetVoltSensorNameStr(static_cast<amdsmi_voltage_type_t>(i)) <<
-                                         " Voltage **********" << std::endl;
+        std::cout << "\t** **********"
+                  << GetVoltSensorNameStr(static_cast<amdsmi_voltage_type_t>(i))
+                  << " Voltage **********" << std::endl;
       }
       print_volt_metric(AMDSMI_VOLT_CURRENT, "Current Voltage");
       print_volt_metric(AMDSMI_VOLT_MAX, "Voltage max value");
       print_volt_metric(AMDSMI_VOLT_MIN, "Voltage min value");
-      print_volt_metric(AMDSMI_VOLT_MAX_CRIT,
-                                "Voltage critical max value");
-      print_volt_metric(AMDSMI_VOLT_MIN_CRIT,
-                                "Voltage critical min value");
+      print_volt_metric(AMDSMI_VOLT_MAX_CRIT, "Voltage critical max value");
+      print_volt_metric(AMDSMI_VOLT_MIN_CRIT, "Voltage critical min value");
       print_volt_metric(AMDSMI_VOLT_AVERAGE, "Voltage critical max value");
       print_volt_metric(AMDSMI_VOLT_LOWEST, "Historical minimum temperature");
       print_volt_metric(AMDSMI_VOLT_HIGHEST, "Historical maximum temperature");

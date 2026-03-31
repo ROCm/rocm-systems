@@ -2,11 +2,15 @@ exclude: |
   (?x)
     third_party/
     # avoid checking build directories for any subproject
-    build/
-    build-.*/
-    _build/
+    | build/
+    | build-.*/
+    | _build/
     # external source of truth
-    shared/amdgpu-windows-interop
+    | shared/amdgpu-windows-interop
+    # these projects have their own pre-commit-config.yaml
+    | projects/amdsmi/
+    | projects/rdc/
+    | projects/rocm-smi-lib/
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

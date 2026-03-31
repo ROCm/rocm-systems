@@ -128,7 +128,7 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
   amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
 
   // Pre-allocate staging buffer with queue size
-  staging_buffer_.resize(256);
+  staging_buffer_.resize(wrapped->amd_queue_.hsa_queue.size);
 
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help trigger application errors.

@@ -479,11 +479,13 @@ TEST(ArgCheckTest, ArgsCheck_InvalidCommunicatorPointers)
             {
                 ASSERT_EQ(hipFree((void*)env.info->sendbuff), hipSuccess);
                 env.info->sendbuff = nullptr; // Invalid send buffer
+                env.sendDevicePtr = nullptr;  // Prevent double-free in cleanup
             }
             if(env.info->recvbuff)
             {
                 ASSERT_EQ(hipFree((void*)env.info->recvbuff), hipSuccess);
                 env.info->recvbuff = nullptr; // Invalid receive buffer
+                env.recvDevicePtr = nullptr;  // Prevent double-free in cleanup
             }
 
             ncclResult_t result = ArgsCheck(env.info);

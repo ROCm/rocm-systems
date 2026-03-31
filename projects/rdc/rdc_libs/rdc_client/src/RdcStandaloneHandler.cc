@@ -932,7 +932,7 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
         response.condition.value = cond.value();
         response.group_id = reply.group_id();
         response.value = reply.value();
-        response.gpu_index       = reply.gpu_index();
+        response.gpu_index = reply.gpu_index();
         response.reset_triggered = reply.reset_triggered();
 
         callback(&response);

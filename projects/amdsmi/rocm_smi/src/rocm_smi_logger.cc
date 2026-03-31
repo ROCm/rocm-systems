@@ -61,11 +61,9 @@
 #define LOGPATH "/var/log/amd_smi_lib/"
 #define LOGBASE_FNAME "AMD-SMI-lib"
 #define LOGEXTENSION ".log"
-const char *logFileName = LOGPATH LOGBASE_FNAME LOGEXTENSION;
+const char* logFileName = LOGPATH LOGBASE_FNAME LOGEXTENSION;
 
-ROCmLogging::Logger::Logger() {
-  initialize_resources();
-}
+ROCmLogging::Logger::Logger() { initialize_resources(); }
 
 ROCmLogging::Logger::~Logger() {
   if (m_loggingIsOn) {
@@ -79,13 +77,9 @@ ROCmLogging::Logger* ROCmLogging::Logger::getInstance() noexcept {
   return &instance;
 }
 
-void ROCmLogging::Logger::lock() {
-  m_Lock.lock();
-}
+void ROCmLogging::Logger::lock() { m_Lock.lock(); }
 
-void ROCmLogging::Logger::unlock() {
-  m_Lock.unlock();
-}
+void ROCmLogging::Logger::unlock() { m_Lock.unlock(); }
 
 void ROCmLogging::Logger::logIntoFile(std::string& data) {
   lock();
@@ -93,7 +87,7 @@ void ROCmLogging::Logger::logIntoFile(std::string& data) {
     initialize_resources();
     if (!m_File.is_open()) {
       std::cout << "WARNING: re-initializing resources was unsuccessful."
-                <<" Unable to print the following message." << std::endl;
+                << " Unable to print the following message." << std::endl;
       logOnConsole(data);
       unlock();
       return;
@@ -116,8 +110,7 @@ std::string ROCmLogging::Logger::getCurrentTime(void) {
 
   // get number of milliseconds for the current second
   // (remainder after division into seconds)
-  auto ms = std::chrono::duration_cast<std::chrono::microseconds>(
-    now.time_since_epoch()) % 1000000;
+  auto ms = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()) % 1000000;
 
   // convert to std::time_t in order to convert to std::tm (broken time)
   auto timer = std::chrono::system_clock::to_time_t(now);
@@ -158,9 +151,7 @@ void ROCmLogging::Logger::error(const char* text) noexcept {
   }
 }
 
-void ROCmLogging::Logger::error(std::string& text) noexcept {
-  error(text.data());
-}
+void ROCmLogging::Logger::error(std::string& text) noexcept { error(text.data()); }
 
 void ROCmLogging::Logger::error(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
@@ -192,9 +183,7 @@ void ROCmLogging::Logger::alarm(const char* text) noexcept {
   }
 }
 
-void ROCmLogging::Logger::alarm(std::string& text) noexcept {
-  alarm(text.data());
-}
+void ROCmLogging::Logger::alarm(std::string& text) noexcept { alarm(text.data()); }
 
 void ROCmLogging::Logger::alarm(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
@@ -226,9 +215,7 @@ void ROCmLogging::Logger::always(const char* text) noexcept {
   }
 }
 
-void ROCmLogging::Logger::always(std::string& text) noexcept {
-  always(text.data());
-}
+void ROCmLogging::Logger::always(std::string& text) noexcept { always(text.data()); }
 
 void ROCmLogging::Logger::always(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
@@ -246,7 +233,7 @@ void ROCmLogging::Logger::buffer(const char* text) noexcept {
       initialize_resources();
       if (!m_File.is_open()) {
         std::cout << "WARNING: re-initializing resources was unsuccessful."
-                  <<" Unable to print the following message." << std::endl;
+                  << " Unable to print the following message." << std::endl;
         std::string txtStr(text);
         std::cout << txtStr << std::endl;
         unlock();
@@ -260,9 +247,7 @@ void ROCmLogging::Logger::buffer(const char* text) noexcept {
   }
 }
 
-void ROCmLogging::Logger::buffer(std::string& text) noexcept {
-  buffer(text.data());
-}
+void ROCmLogging::Logger::buffer(std::string& text) noexcept { buffer(text.data()); }
 
 void ROCmLogging::Logger::buffer(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
@@ -287,16 +272,13 @@ void ROCmLogging::Logger::info(const char* text) noexcept {
     logIntoFile(data);
   } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_INFO)) {
     logOnConsole(data);
-  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE)
-             && (m_LogLevel >= LOG_LEVEL_INFO)) {
+  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE) && (m_LogLevel >= LOG_LEVEL_INFO)) {
     logOnConsole(data);
     logIntoFile(data);
   }
 }
 
-void ROCmLogging::Logger::info(std::string& text) noexcept {
-  info(text.data());
-}
+void ROCmLogging::Logger::info(std::string& text) noexcept { info(text.data()); }
 
 void ROCmLogging::Logger::info(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
@@ -321,16 +303,13 @@ void ROCmLogging::Logger::warn(const char* text) noexcept {
     logIntoFile(data);
   } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_WARN)) {
     logOnConsole(data);
-  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE)
-             && (m_LogLevel >= LOG_LEVEL_WARN)) {
+  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE) && (m_LogLevel >= LOG_LEVEL_WARN)) {
     logOnConsole(data);
     logIntoFile(data);
   }
 }
 
-void ROCmLogging::Logger::warn(std::string& text) noexcept {
-  warn(text.data());
-}
+void ROCmLogging::Logger::warn(std::string& text) noexcept { warn(text.data()); }
 
 void ROCmLogging::Logger::warn(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
@@ -355,16 +334,13 @@ void ROCmLogging::Logger::trace(const char* text) noexcept {
     logIntoFile(data);
   } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_TRACE)) {
     logOnConsole(data);
-  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE)
-             && (m_LogLevel >= LOG_LEVEL_TRACE)) {
+  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE) && (m_LogLevel >= LOG_LEVEL_TRACE)) {
     logOnConsole(data);
     logIntoFile(data);
   }
 }
 
-void ROCmLogging::Logger::trace(std::string& text) noexcept {
-  trace(text.data());
-}
+void ROCmLogging::Logger::trace(std::string& text) noexcept { trace(text.data()); }
 
 void ROCmLogging::Logger::trace(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
@@ -389,16 +365,13 @@ void ROCmLogging::Logger::debug(const char* text) noexcept {
     logIntoFile(data);
   } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_DEBUG)) {
     logOnConsole(data);
-  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE)
-             && (m_LogLevel >= LOG_LEVEL_DEBUG)) {
+  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE) && (m_LogLevel >= LOG_LEVEL_DEBUG)) {
     logOnConsole(data);
     logIntoFile(data);
   }
 }
 
-void ROCmLogging::Logger::debug(std::string& text) noexcept {
-  debug(text.data());
-}
+void ROCmLogging::Logger::debug(std::string& text) noexcept { debug(text.data()); }
 
 void ROCmLogging::Logger::debug(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
@@ -407,46 +380,30 @@ void ROCmLogging::Logger::debug(std::ostringstream& stream) noexcept {
 }
 
 // Interfaces to control log levels
-void ROCmLogging::Logger::updateLogLevel(LogLevel logLevel) {
-  m_LogLevel = logLevel;
-}
+void ROCmLogging::Logger::updateLogLevel(LogLevel logLevel) { m_LogLevel = logLevel; }
 
-void ROCmLogging::Logger::enableAllLogLevels() {
-  m_LogLevel = ENABLE_LOG;
-}
+void ROCmLogging::Logger::enableAllLogLevels() { m_LogLevel = ENABLE_LOG; }
 
 // Disable all log levels, except error and alarm
-void ROCmLogging::Logger::disableLog() {
-  m_LogLevel = DISABLE_LOG;
-}
+void ROCmLogging::Logger::disableLog() { m_LogLevel = DISABLE_LOG; }
 
 // Interfaces to control log Types
-void ROCmLogging::Logger::updateLogType(LogType logType) {
-  m_LogType = logType;
-}
+void ROCmLogging::Logger::updateLogType(LogType logType) { m_LogType = logType; }
 
-void ROCmLogging::Logger::enableConsoleLogging() {
-  m_LogType = CONSOLE;
-}
+void ROCmLogging::Logger::enableConsoleLogging() { m_LogType = CONSOLE; }
 
-void ROCmLogging::Logger::enableFileLogging() {
-  m_LogType = FILE_LOG;
-}
+void ROCmLogging::Logger::enableFileLogging() { m_LogType = FILE_LOG; }
 
 // Returns a string of details on current log settings
 std::string ROCmLogging::Logger::getLogSettings() {
   std::string logSettings;
 
-  logSettings += ("Logging is "
-                  + std::string((m_loggingIsOn ? "ENABLED" : "DISABLED"))
-                  + ", ");
+  logSettings += ("Logging is " + std::string((m_loggingIsOn ? "ENABLED" : "DISABLED")) + ", ");
 
   if (m_File.is_open()) {
-    logSettings += "OpenStatus = File (" + std::string(logFileName)
-                   + ") is open";
+    logSettings += "OpenStatus = File (" + std::string(logFileName) + ") is open";
   } else {
-    logSettings += "OpenStatus = File (" + std::string(logFileName)
-                   + ") is not open";
+    logSettings += "OpenStatus = File (" + std::string(logFileName) + ") is not open";
   }
   logSettings += ", ";
 
@@ -499,9 +456,7 @@ std::string ROCmLogging::Logger::getLogSettings() {
 
 // Returns current reported enabled logging state. State is controlled by
 // user's environment variable RSMI_LOGGING.
-bool ROCmLogging::Logger::isLoggerEnabled() {
-  return m_loggingIsOn;
-}
+bool ROCmLogging::Logger::isLoggerEnabled() { return m_loggingIsOn; }
 
 void ROCmLogging::Logger::initialize_resources() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
@@ -539,15 +494,12 @@ void ROCmLogging::Logger::initialize_resources() {
       break;
   }
   if (!m_File.is_open()) {
-    std::cout << "WARNING: Issue opening log file (" << logFileName
-              << ") to write." << std::endl;
+    std::cout << "WARNING: Issue opening log file (" << logFileName << ") to write." << std::endl;
   }
   if (m_File.fail()) {
     std::cout << "WARNING: Failed opening log file." << std::endl;
   }
-  chmod(logFileName, S_IRUSR|S_IRGRP|S_IROTH|S_IWUSR|S_IWGRP|S_IWOTH);
+  chmod(logFileName, S_IRUSR | S_IRGRP | S_IROTH | S_IWUSR | S_IWGRP | S_IWOTH);
 }
 
-void ROCmLogging::Logger::destroy_resources() {
-  m_File.close();
-}
+void ROCmLogging::Logger::destroy_resources() { m_File.close(); }

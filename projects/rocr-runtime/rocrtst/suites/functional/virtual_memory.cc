@@ -132,7 +132,7 @@ VirtMemoryTestBasic::VirtMemoryTestBasic(void) : TestBase() {
 VirtMemoryTestBasic::~VirtMemoryTestBasic(void) {}
 
 void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
-  hsa_agent_t* agents_accessible;
+  hsa_agent_t* agents_accessible = nullptr;
   hsa_amd_pointer_info_t ptrInfo = {};
   uint32_t num_agents_accessible = 0;
   std::vector<hsa_agent_t> gpus;
@@ -166,9 +166,13 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   /* For unmapped VA, then size is equal to size of address reservation */
   ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_addrRangeUnmapped);
   ASSERT_EQ(num_agents_accessible, 0);
+  free(agents_accessible);
+  agents_accessible = nullptr;
 
   /* Verify that pointer info for unmapped VA offset return expected values */
   ptrInfo.size = sizeof(ptrInfo);
+  num_agents_accessible = 0;
+  agents_accessible = nullptr;
   ASSERT_SUCCESS(hsa_amd_pointer_info(reinterpret_cast<uint8_t*>(addrRangeUnmapped) + 10, &ptrInfo, &malloc,
                                       &num_agents_accessible, &agents_accessible));
   ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
@@ -177,6 +181,8 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   /* For unmapped VA, then size is equal to size of address reservation */
   ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_addrRangeUnmapped);
   ASSERT_EQ(num_agents_accessible, 0);
+  free(agents_accessible);
+  agents_accessible = nullptr;
 
   hsa_amd_vmem_alloc_handle_t mem_handle;
   const size_t sizeof_mem_handle = 10 * granule_size;
@@ -210,6 +216,8 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
   ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_mem_handle);  // size matches memory handle
   ASSERT_EQ(num_agents_accessible, 0);
+  free(agents_accessible);
+  agents_accessible = nullptr;
 
   // Access to each GPU should be None
   for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
@@ -594,9 +602,10 @@ void VirtMemoryTestBasic::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
   }
   std::cout << "    CPU have read & write to GPU memory successfully" << std::endl;
 
-  ASSERT_SUCCESS(hsa_amd_vmem_unmap(dev_data, max_alloc_size));
-  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle_dev));
-  ASSERT_SUCCESS(hsa_amd_vmem_address_free(reinterpret_cast<void*>(dev_data), max_alloc_size));
+  // Cleanup
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(dev_data, max_alloc_size));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle_dev));
+  EXPECT_SUCCESS(hsa_amd_vmem_address_free(reinterpret_cast<void*>(dev_data), max_alloc_size));
   free(host_data);
 }
 
@@ -821,11 +830,12 @@ void VirtMemoryTestBasic::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
     std::cout << "    GPU has written to system memory successfully" << std::endl;
   }
 
-  ASSERT_SUCCESS(hsa_amd_vmem_unmap(dev_data, sizeof(*dev_data)));
-  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+  // Cleanup
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(dev_data, sizeof(*dev_data)));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
 
   if (dev_data) {
-    ASSERT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
+    EXPECT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
   }
 
   if (host_data) hsa_memory_free(host_data);
@@ -1075,11 +1085,12 @@ void VirtMemoryTestBasic::GPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
     std::cout << "    GPU has written to system memory successfully" << std::endl;
   }
 
-  ASSERT_SUCCESS(hsa_amd_vmem_unmap(dev_data, sizeof(*dev_data)));
-  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+  // Cleanup
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(dev_data, sizeof(*dev_data)));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
 
   if (dev_data) {
-    ASSERT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
+    EXPECT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
   }
 
   if (host_data) hsa_memory_free(host_data);
@@ -1474,12 +1485,13 @@ void VirtMemoryTestInterProcess::Run(void) {
 
   TestBase::Run();
 
-  // Note: Close() (and hsa_shut_down()) will be called from main()
-  // processOne is true for parent process, false for child process
+  // Note: Close() (and hsa_shut_down()) will be called from main() for parent.
+  // Child process must shut down HSA runtime before exiting.
   if (parentProcess_) {
     ParentProcessImpl();
   } else {
     ChildProcessImpl();
+    hsa_shut_down();
     exit(0);
   }
 }

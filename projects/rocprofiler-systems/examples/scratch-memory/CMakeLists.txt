@@ -5,15 +5,9 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(rocprofiler-systems-scratch-memory-example LANGUAGES CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        PROJECT_NAME IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR _DIR IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 find_program(
@@ -47,12 +41,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(scratch-memory scratch-memory.cpp)
-target_compile_options(
-    scratch-memory
-    PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
-)
-
 find_library(
     HSA_RUNTIME_LIBRARY
     NAMES hsa-runtime64
@@ -74,14 +62,20 @@ if(NOT HSA_RUNTIME_LIBRARY)
 endif()
 
 find_package(Threads REQUIRED)
+
+add_executable(scratch-memory scratch-memory.cpp)
+target_compile_options(
+    scratch-memory
+    PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
+)
 target_link_libraries(scratch-memory PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
 
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     target_compile_options(scratch-memory PRIVATE --offload-arch=${arch})
-    target_link_options(scratch-memory PUBLIC --offload-arch=${arch})
+    target_link_options(scratch-memory PRIVATE --offload-arch=${arch})
 endforeach()
 
-if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET scratch-memory)
 endif()
 

@@ -3862,7 +3862,7 @@ pub fn amdsmi_gpu_counter_group_supported(
         processor_handle,
         group
     ));
-    // Here amdsmi_wrapper::amdsmi_gpu_counter_group_supported return successfull means supported.
+    // Here amdsmi_wrapper::amdsmi_gpu_counter_group_supported return successful means supported.
     Ok(true)
 }
 
