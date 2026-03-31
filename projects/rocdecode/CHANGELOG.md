@@ -7,12 +7,9 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 ### Added
 
 * Logging improvement: Added function entry and exit logs (at Info log level).
+* Logging improvement: Merged all logger instances into one single global instance.
 
 ## rocDecode 1.7.0 for ROCm 7.2.1
-
-### Added
-
-* Logging improvements. Added function entry and exit logs (at Info log level).
 
 ### Changed
 
