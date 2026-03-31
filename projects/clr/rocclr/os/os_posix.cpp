@@ -789,6 +789,9 @@ address Os::currentStackPtr() {
 #elif defined(ATI_ARCH_ARM)
       "mov %0,sp"
       : "=r"(value)
+#elif defined(ATI_ARCH_LOONGARCH)
+      "move %0,$sp"
+      : "=r"(value)
 #else
       ""
 #endif
