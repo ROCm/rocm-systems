@@ -147,7 +147,7 @@ foreach(
             NAME validate-${_PARENT_TEST}-rocprof-device-${_COUNTER}-exists
             COMMAND
                 sh -c
-                "for i in 0 1 2 3 4 5 6 7 8 9; do test -e ${_rocprof_output_dir}/${_PARENT_TEST}/rocprof-device-\${i}-${_COUNTER}.txt && exit 0; done; exit 1"
+                "for i in {0..9}; do test -e ${_rocprof_output_dir}/${_PARENT_TEST}/rocprof-device-\${i}-${_COUNTER}.txt && exit 0; done; exit 1"
         )
 
         set_tests_properties(
