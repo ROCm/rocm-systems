@@ -482,14 +482,17 @@ write_perfetto(
     auto sample_counter_tracks =
         std::map<std::string, std::map<std::pair<uint64_t, uint64_t>, counter_track_data>>{};
 
-    auto get_category_string = [](std::string_view _category) {
-        static auto buffer_names  = sdk::get_buffer_tracing_names();
-        auto        _category_idx = ROCPROFILER_BUFFER_TRACING_NONE;
+    auto get_trace_category = [](std::string_view category_str) {
+        static auto buffer_names = sdk::get_buffer_tracing_names();
+        auto        category_idx = ROCPROFILER_BUFFER_TRACING_NONE;
         for(const auto& citr : buffer_names)
         {
-            if(_category == citr.name) _category_idx = citr.value;
+            if(category_str == citr.name) category_idx = citr.value;
         }
-        return sdk::get_perfetto_category(_category_idx);
+        const char* category_name = sdk::get_perfetto_category(category_idx);
+        return std::strcmp(category_name, sdk::perfetto_category<sdk::category::none>::name) == 0
+                   ? ::perfetto::DynamicCategory{std::string{category_str}}
+                   : ::perfetto::DynamicCategory{category_name};
     };
 
     // trace events
@@ -520,13 +523,7 @@ write_perfetto(
                 auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
                 auto _args       = read_region_args(itr.id);
 
-                const char* category_name = get_category_string(itr.category);
-
-                auto _category = std::strcmp(category_name,
-                                             sdk::perfetto_category<sdk::category::none>::name) == 0
-                                     ? ::perfetto::DynamicCategory{itr.category}
-                                     : ::perfetto::DynamicCategory{category_name};
-
+                auto _category  = get_trace_category(itr.category);
                 auto flow_index = get_flow_index(itr.stack_id);
 
                 TRACE_EVENT_BEGIN(
@@ -644,13 +641,7 @@ write_perfetto(
                         _operation = _extdata.operation.value();
                 }
 
-                const char* category_name = get_category_string(itr.category);
-
-                auto _category = std::strcmp(category_name,
-                                             sdk::perfetto_category<sdk::category::none>::name) == 0
-                                     ? ::perfetto::DynamicCategory{itr.category}
-                                     : ::perfetto::DynamicCategory{category_name};
-
+                auto _category  = get_trace_category(itr.category);
                 auto flow_index = get_flow_index(itr.stack_id);
 
                 TRACE_EVENT_INSTANT(_category,
