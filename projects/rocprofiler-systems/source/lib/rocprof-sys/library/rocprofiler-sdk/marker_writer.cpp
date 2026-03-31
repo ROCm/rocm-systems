@@ -71,7 +71,7 @@ default_marker_policy::pop_perfetto_ts(const char* name, uint64_t ts,
 }
 
 void
-default_marker_policy::add_string(const std::string_view string_value)
+default_marker_policy::add_string(std::string_view string_value)
 {
     trace_cache::get_metadata_registry().add_string(string_value);
 }

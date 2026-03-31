@@ -48,7 +48,7 @@ struct default_marker_policy
     static void pop_perfetto_ts(const char* name, uint64_t ts,
                                 const std::vector<annotation_entry>& annotations);
 
-    static void add_string(const std::string_view string_value);
+    static void add_string(std::string_view string_value);
     static void store_region(const trace_cache::region_sample& sample);
     static void add_thread_info(const rocprofsys::trace_cache::info::thread& thread_info);
 };

@@ -30,8 +30,8 @@ public:
 
     void shutdown();
 
-    void register_region_start_stop_callbacks(callback_t start_callback,
-                                              callback_t stop_callback);
+    void register_region_pauser_resume_callbacks(callback_t resume_callback,
+                                                 callback_t pause_callback);
 
     bool region_filter_active() const
     {
@@ -53,8 +53,8 @@ private:
     std::atomic<uint32_t>              m_active_region_count{ 0 };
     std::atomic<bool>                  m_user_paused{ false };
 
-    std::vector<callback_t> m_start_callbacks;
-    std::vector<callback_t> m_stop_callbacks;
+    std::vector<callback_t> m_resume_callbacks;
+    std::vector<callback_t> m_pause_callbacks;
 
     std::mutex m_region_mutex;
     std::mutex m_callback_mutex;

@@ -167,7 +167,7 @@ counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
 {
     if(!track || timestamp == 0) return;
 
-    // Write zero to Perfetto trace
+    // Write zero to Perfetto trace (for legacy Perfetto)
     TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
                   timestamp, 0);
 

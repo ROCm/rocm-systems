@@ -45,7 +45,7 @@ trace_control::force_initial_pause()
     {
         return;
     }
-    trigger_callbacks(m_stop_callbacks);
+    trigger_callbacks(m_pause_callbacks);
 }
 
 void
@@ -67,7 +67,7 @@ trace_control::handle_range_start(uint64_t range_id, const char* message)
 
     if(was_empty && !m_user_paused.load(std::memory_order_relaxed))
     {
-        trigger_callbacks(m_start_callbacks);
+        trigger_callbacks(m_resume_callbacks);
     }
 }
 
@@ -97,7 +97,7 @@ trace_control::handle_range_stop(uint64_t range_id)
         }
         else
         {
-            trigger_callbacks(m_stop_callbacks);
+            trigger_callbacks(m_pause_callbacks);
         }
     }
 }
@@ -123,7 +123,7 @@ trace_control::handle_pause()
 
     m_user_paused.store(true, std::memory_order_relaxed);
     LOG_INFO("Pausing tracing session...");
-    trigger_callbacks(m_stop_callbacks);
+    trigger_callbacks(m_pause_callbacks);
 }
 
 void
@@ -147,7 +147,7 @@ trace_control::handle_resume()
 
     m_user_paused.store(false, std::memory_order_relaxed);
     LOG_INFO("Resuming tracing session...");
-    trigger_callbacks(m_start_callbacks);
+    trigger_callbacks(m_resume_callbacks);
 }
 
 void
@@ -155,8 +155,8 @@ trace_control::shutdown()
 {
     {
         std::scoped_lock const lk{ m_callback_mutex };
-        m_start_callbacks.clear();
-        m_stop_callbacks.clear();
+        m_resume_callbacks.clear();
+        m_pause_callbacks.clear();
     }
 
     {
@@ -169,12 +169,12 @@ trace_control::shutdown()
 }
 
 void
-trace_control::register_region_start_stop_callbacks(callback_t start_callback,
-                                                    callback_t stop_callback)
+trace_control::register_region_pauser_resume_callbacks(callback_t start_callback,
+                                                       callback_t stop_callback)
 {
     std::scoped_lock const lk{ m_callback_mutex };
-    m_start_callbacks.push_back(std::move(start_callback));
-    m_stop_callbacks.push_back(std::move(stop_callback));
+    m_resume_callbacks.push_back(std::move(start_callback));
+    m_pause_callbacks.push_back(std::move(stop_callback));
 }
 
 bool

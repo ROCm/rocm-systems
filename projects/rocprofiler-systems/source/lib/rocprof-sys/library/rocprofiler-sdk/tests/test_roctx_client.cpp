@@ -105,8 +105,8 @@ protected:
         auto                 client = std::make_unique<roctx_client_t>(config);
 
         auto ctrl = client->get_controller();
-        ctrl->register_region_start_stop_callbacks([this]() { start_count++; },
-                                                   [this]() { stop_count++; });
+        ctrl->register_region_pauser_resume_callbacks([this]() { start_count++; },
+                                                      [this]() { stop_count++; });
 
         return client;
     }
@@ -513,7 +513,7 @@ public:
     MOCK_METHOD(void, pop_perfetto_ts,
                 (const char* name, uint64_t ts,
                  const std::vector<annotation_entry>& annotations));
-    MOCK_METHOD(void, add_string, (const std::string_view string_value));
+    MOCK_METHOD(void, add_string, (std::string_view string_value));
     MOCK_METHOD(void, store_region, (const region_sample& sample));
     MOCK_METHOD(void, add_thread_info,
                 (const rocprofsys::trace_cache::info::thread& thread_info));
@@ -540,7 +540,7 @@ struct mock_marker_policy
         api->pop_perfetto_ts(name, ts, annotations);
     }
 
-    static void add_string(const std::string_view string_value)
+    static void add_string(std::string_view string_value)
     {
         api->add_string(string_value);
     }

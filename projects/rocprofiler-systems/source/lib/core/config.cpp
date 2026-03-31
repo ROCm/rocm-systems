@@ -432,7 +432,7 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_TRACE_REGION",
-        "Comma-separated list of roctx region names. When set, only traces "
+        "Comma-separated list of roctx region names. When set, only "
         "activity inside roctx regions matching one of these names "
         "(matched against roctxRangeStartA message). Uses process-wide "
         "roctxRangeStart/roctxRangeStop markers.",
