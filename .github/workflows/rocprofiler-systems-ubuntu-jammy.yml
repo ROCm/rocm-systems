@@ -129,7 +129,7 @@ jobs:
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
-      shell: bash
+      shell: 'script -q -e -c "export TERM=xterm-256color; bash --noprofile --norc -eo pipefail {0}"'
       working-directory: projects/rocprofiler-systems/
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
