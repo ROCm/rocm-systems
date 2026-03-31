@@ -259,15 +259,11 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 __device__ void QueuePair::mlx5_quiet(ActiveWFInfo &wf_info) {
-  // uint64_t qp_lane_mask = get_same_qp_lane_mask();
-  // if (is_first_active_lane(qp_lane_mask)) {
-  // is this redundant, since the quiet is already called from only the PE group leader with the wavefront
-  if (wf_info.is_pe_group_leader) {
-    mlx5_poll_cq_until(mlx5_sq.depth);
-  }
+  mlx5_poll_cq_until(mlx5_sq.depth);
 }
 
 // called with all active lanes using different QPs
+// is this call redundant..? mlx5_quiet
 __device__ void QueuePair::mlx5_quiet_single() {
   mlx5_poll_cq_until(mlx5_sq.depth);
 }
