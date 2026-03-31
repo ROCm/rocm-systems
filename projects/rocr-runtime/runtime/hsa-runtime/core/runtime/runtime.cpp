@@ -3556,7 +3556,6 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
 
   DiscardOp* op = new DiscardOp();
   MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
-
   
   // Prepare memory regions with page alignment and store target cpu agent for each region
   op->regions.reserve(count);
@@ -3644,8 +3643,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
   The last one to decrement remaining_deps to 0 will triggers the discard. */
   static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
     DiscardOp* op = reinterpret_cast<DiscardOp*>(arg);
-    
-    // the last call to signal_handler should trigger discard operation
+
     if (op->remaining_deps.fetch_sub(1, std::memory_order_acq_rel) == 1) {
       discard_all(op);
     }
