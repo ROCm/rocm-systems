@@ -120,14 +120,17 @@ void record_module_load(hipModule_t module, const void* image,
                         size_t image_size);
 void record_module_unload(hipModule_t module);
 
-// Kernel launch: captures kernel function, grid/block dims, args
-// kernel_name may be null for the hipLaunchKernel path (resolved later)
+// Kernel launch: captures kernel function, grid/block dims, args.
+// hipFunction_t is passed opaquely to avoid pulling in HIP headers.
+// Internally cast to DeviceFunc* to access KernelParameterDescriptor
+// for pointer/scalar arg identification and buffer snapshots.
 void record_kernel_launch(const char* kernel_name,
+                          void* func_handle,  // hipFunction_t
                           uint32_t grid_x, uint32_t grid_y, uint32_t grid_z,
                           uint32_t block_x, uint32_t block_y, uint32_t block_z,
                           uint32_t shared_mem,
                           const void* stream,
-                          void** kernel_args, size_t num_args);
+                          void** kernel_args);
 
 // Synchronization
 void record_device_sync();

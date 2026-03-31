@@ -25,6 +25,9 @@
 // All writes are mutex-protected for thread safety.
 
 #include "hip_hrr.h"
+#include "hip_global.hpp"
+#include "platform/kernel.hpp"
+#include "device/devkernel.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -509,49 +512,191 @@ void record_module_unload(hipModule_t module) {
 // --- Kernel launch recording ---
 
 void record_kernel_launch(const char* kernel_name,
+                          void* func_handle,
                           uint32_t grid_x, uint32_t grid_y, uint32_t grid_z,
                           uint32_t block_x, uint32_t block_y, uint32_t block_z,
                           uint32_t shared_mem,
                           const void* stream,
-                          void** kernel_args, size_t num_args) {
+                          void** kernel_args) {
   if (!g_state.active) return;
   if (!matches_kernel_filter(kernel_name)) return;
 
-  // Build a variable-length payload:
-  //   kernel_name_len(2) + kernel_name(N) + grid(12) + block(12) +
-  //   shared_mem(4) + num_args(2)
-  // Kernel arg capture (buffer snapshots) will be added in Milestone 2.
+  // --- Introspect kernel args via KernelParameterDescriptor ---
+  // Each arg is classified as:
+  //   value_kind=0 (scalar): record raw bytes inline
+  //   value_kind=1 (pointer/MemoryObject): record ptr handle, snapshot buffer
+  //   value_kind=2+ (hidden): skip (runtime-injected)
 
+  struct ArgRecord {
+    uint8_t value_kind;  // 0=scalar, 1=pointer, 2=hidden
+    uint16_t size;
+    std::vector<uint8_t> data;       // inline bytes (scalar or ptr handle)
+    Hash128 snapshot_hash;           // blob hash for pointer buffer snapshot
+    uint64_t snapshot_size;          // size of snapshotted buffer
+  };
+
+  std::vector<ArgRecord> args;
+  std::vector<std::pair<Hash128, uint64_t>> snapshots;  // {hash, size} for buffer snapshots
+
+  // Try to get kernel signature for arg metadata
+  hip::DeviceFunc* devFunc = func_handle ?
+      hip::DeviceFunc::asFunction(reinterpret_cast<hipFunction_t>(func_handle)) : nullptr;
+  amd::Kernel* kernel = devFunc ? devFunc->kernel() : nullptr;
+
+  if (kernel && kernel_args) {
+    const amd::KernelSignature& sig = kernel->signature();
+    uint32_t num_params = sig.numParameters();
+
+    for (uint32_t i = 0; i < num_params; i++) {
+      const amd::KernelParameterDescriptor& desc = sig.at(i);
+      ArgRecord arg;
+
+      if (desc.info_.hidden_) {
+        arg.value_kind = 2;  // hidden - skip
+        arg.size = static_cast<uint16_t>(desc.size_);
+        args.push_back(std::move(arg));
+        continue;
+      }
+
+      bool is_pointer = (desc.info_.oclObject_ ==
+                         amd::KernelParameterDescriptor::MemoryObject) ||
+                        desc.info_.rawPointer_;
+
+      if (is_pointer) {
+        arg.value_kind = 1;
+        arg.size = static_cast<uint16_t>(desc.size_);
+
+        // Read the pointer value from kernel_args
+        void* ptr_val = nullptr;
+        if (kernel_args[i]) {
+          memcpy(&ptr_val, kernel_args[i], sizeof(void*));
+        }
+
+        // Store the pointer handle (8 bytes)
+        uint64_t handle = reinterpret_cast<uint64_t>(ptr_val);
+        arg.data.resize(8);
+        memcpy(arg.data.data(), &handle, 8);
+
+        // Snapshot buffer contents if in inputs/full mode
+        if (g_state.record_mode != RecordMode::Timeline && ptr_val) {
+          std::lock_guard<std::mutex> lock(g_state.mu);
+          auto it = g_state.allocs.find(reinterpret_cast<uintptr_t>(ptr_val));
+          if (it != g_state.allocs.end()) {
+            size_t buf_size = it->second.size;
+            if (g_state.max_blob_mb == 0 ||
+                buf_size <= g_state.max_blob_mb * 1024 * 1024) {
+              // Copy buffer from device to host for snapshotting
+              // NOTE: This requires a sync and DtoH copy — expensive!
+              // The copy is done outside the lock below.
+              arg.snapshot_size = buf_size;
+            }
+          }
+        }
+      } else {
+        arg.value_kind = 0;  // scalar
+        arg.size = static_cast<uint16_t>(desc.size_);
+        arg.data.resize(desc.size_);
+        if (kernel_args[i]) {
+          memcpy(arg.data.data(), kernel_args[i], desc.size_);
+        }
+      }
+
+      args.push_back(std::move(arg));
+    }
+
+    // Snapshot pointer buffers (outside any lock, as hipMemcpy may be slow)
+    // Only in inputs or full mode
+    if (g_state.record_mode != RecordMode::Timeline) {
+      for (auto& arg : args) {
+        if (arg.value_kind == 1 && arg.snapshot_size > 0) {
+          uint64_t ptr_val;
+          memcpy(&ptr_val, arg.data.data(), 8);
+          void* dev_ptr = reinterpret_cast<void*>(ptr_val);
+
+          std::vector<uint8_t> host_buf(arg.snapshot_size);
+          // Use the real hipMemcpy (not the instrumented one) to avoid recursion
+          // For now we call the internal ihipMemcpy path would be ideal,
+          // but we use a direct device-to-host copy via hipMemcpy
+          // TODO: use ihipMemcpy to avoid re-entrancy
+          extern hipError_t hipMemcpy_common(void*, const void*, size_t, unsigned int);
+          hipError_t err = hipMemcpy_common(host_buf.data(), dev_ptr,
+                                            arg.snapshot_size, 2 /*D2H*/);
+          if (err == hipSuccess) {
+            arg.snapshot_hash = write_blob(host_buf.data(), arg.snapshot_size);
+          }
+        }
+      }
+    }
+  }
+
+  // --- Build payload ---
   std::string name_str = kernel_name ? kernel_name : "<unknown>";
   uint16_t name_len = static_cast<uint16_t>(
       name_str.size() > 65535 ? 65535 : name_str.size());
+  uint16_t num_args_u16 = static_cast<uint16_t>(args.size());
+  uint16_t num_snapshots = 0;
+  for (const auto& a : args) {
+    if (a.value_kind == 1 && a.snapshot_size > 0) num_snapshots++;
+  }
 
-  size_t payload_size = 2 + name_len + 12 + 12 + 4 + 2;
+  // Calculate payload size
+  // name_len(2) + name(N) + grid(12) + block(12) + shared_mem(4) +
+  // num_args(2) + num_snapshots(2) +
+  // for each arg: value_kind(1) + size(2) + data(size) +
+  // for each snapshot: ptr_handle(8) + offset(8) + length(8) + hash(16) + direction(1)
+  size_t payload_size = 2 + name_len + 12 + 12 + 4 + 2 + 2;
+  for (const auto& a : args) {
+    payload_size += 1 + 2 + a.data.size();
+  }
+  payload_size += num_snapshots * (8 + 8 + 8 + 16 + 1);
+
   std::vector<uint8_t> payload(payload_size);
   uint8_t* p = payload.data();
 
-  // kernel_name_len
+  // Header fields
   memcpy(p, &name_len, 2); p += 2;
-  // kernel_name
   memcpy(p, name_str.c_str(), name_len); p += name_len;
-  // grid_dim
   memcpy(p, &grid_x, 4); p += 4;
   memcpy(p, &grid_y, 4); p += 4;
   memcpy(p, &grid_z, 4); p += 4;
-  // block_dim
   memcpy(p, &block_x, 4); p += 4;
   memcpy(p, &block_y, 4); p += 4;
   memcpy(p, &block_z, 4); p += 4;
-  // shared_mem
   memcpy(p, &shared_mem, 4); p += 4;
-  // num_args (placeholder - full arg capture in Milestone 2)
-  uint16_t n = static_cast<uint16_t>(num_args);
-  memcpy(p, &n, 2); p += 2;
+  memcpy(p, &num_args_u16, 2); p += 2;
+  memcpy(p, &num_snapshots, 2); p += 2;
 
+  // Args
+  for (const auto& a : args) {
+    *p++ = a.value_kind;
+    uint16_t sz = static_cast<uint16_t>(a.data.size());
+    memcpy(p, &sz, 2); p += 2;
+    if (!a.data.empty()) {
+      memcpy(p, a.data.data(), a.data.size());
+      p += a.data.size();
+    }
+  }
+
+  // Buffer snapshots
+  for (const auto& a : args) {
+    if (a.value_kind == 1 && a.snapshot_size > 0) {
+      memcpy(p, a.data.data(), 8); p += 8;  // ptr_handle
+      uint64_t offset = 0;
+      memcpy(p, &offset, 8); p += 8;        // offset (0 = full buffer)
+      memcpy(p, &a.snapshot_size, 8); p += 8; // length
+      memcpy(p, &a.snapshot_hash.lo, 8); p += 8;
+      memcpy(p, &a.snapshot_hash.hi, 8); p += 8;
+      uint8_t dir = 0;  // 0 = input
+      *p++ = dir;
+    }
+  }
+
+  // Write event (payload may exceed u16 max for very large arg lists)
+  uint16_t payload_len = static_cast<uint16_t>(
+      payload_size > 65535 ? 65535 : payload_size);
   write_event(EVENT_KERNEL_LAUNCH,
               static_cast<uint32_t>(reinterpret_cast<uintptr_t>(stream)),
-              0, payload.data(),
-              static_cast<uint16_t>(payload_size > 65535 ? 65535 : payload_size));
+              0, payload.data(), payload_len);
 }
 
 // --- Synchronization recording ---

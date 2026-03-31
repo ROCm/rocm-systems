@@ -607,7 +607,6 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   }
 
   if (hrr::enabled()) {
-    // Extract kernel name from hipFunction_t if available
     const char* kname = nullptr;
     if (f) {
       hip::DeviceFunc* devFunc = hip::DeviceFunc::asFunction(f);
@@ -615,11 +614,11 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
         kname = devFunc->name().c_str();
       }
     }
-    hrr::record_kernel_launch(kname,
+    hrr::record_kernel_launch(kname, reinterpret_cast<void*>(f),
                               gridDimX, gridDimY, gridDimZ,
                               blockDimX, blockDimY, blockDimZ,
                               sharedMemBytes, hStream,
-                              kernelParams, 0);
+                              kernelParams);
   }
 
   HIP_RETURN(
