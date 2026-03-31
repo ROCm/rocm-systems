@@ -59,7 +59,7 @@ __device__ uint32_t QueuePair::reserve_sq_single(uint32_t num_wqes) {
   return my_sq_prod;
 }
 
-__device__ uint32_t QueuePair::commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes) {
+__device__ uint32_t QueuePair::commit_sq_single(uint32_t my_sq_prod, [[maybe_unused]] uint32_t my_sq_pos, uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
   spin_lock_acquire_unique(&sq_lock);
@@ -76,7 +76,8 @@ __device__ uint32_t QueuePair::commit_sq_single(uint32_t my_sq_prod, uint32_t my
 }
 
 __device__ uint32_t QueuePair::commit_sq(ActiveWFInfo &wf_info,
-    uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes) {
+    uint32_t my_sq_prod, [[maybe_unused]] uint32_t my_sq_pos,
+    uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
   spin_lock_acquire_shared(&sq_lock, wf_info.pe_group_mask);
@@ -263,7 +264,7 @@ __device__ void QueuePair::ionic_ring_doorbell(uint32_t pos) {
   uint32_t lane_id    = get_active_lane_num(activemask);
   uint32_t lane_count = get_active_lane_count(activemask);
 
-  for (int i = 0; i < lane_count; ++i) {
+  for (uint32_t i = 0; i < lane_count; ++i) {
     if (lane_id == i) {
       __threadfence();
       __atomic_store_n(sq_dbreg, sq_dbval | (sq_mask & pos), __ATOMIC_SEQ_CST);
@@ -326,7 +327,7 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
   wqe->common.length = byteswap<uint32_t>(size);
 
   if (size) {
-    if (opcode == IONIC_V2_OP_RDMA_WRITE && size <= inline_threshold) {
+    if (opcode == IONIC_V2_OP_RDMA_WRITE && static_cast<int32_t>(size) <= static_cast<int32_t>(inline_threshold)) {
       wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
       wqe->base.num_sge_key = 0;
       if (!laddr) {
@@ -378,7 +379,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
   wqe->common.length = byteswap<uint32_t>(size);
 
   if (size) {
-    if (opcode == IONIC_V2_OP_RDMA_WRITE && size <= inline_threshold) {
+    if (opcode == IONIC_V2_OP_RDMA_WRITE && static_cast<int32_t>(size) <= static_cast<int32_t>(inline_threshold)) {
       wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
       wqe->base.num_sge_key = 0;
       if (!laddr) {
@@ -399,7 +400,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
   commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
 }
 
-__device__ uint64_t QueuePair::ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
+__device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
@@ -473,7 +474,7 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
   return ret;
 }
 
-__device__ uint64_t QueuePair::ionic_post_wqe_amo_single(int32_t size,
+__device__ uint64_t QueuePair::ionic_post_wqe_amo_single([[maybe_unused]] int32_t size,
     uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching) {
   uint32_t num_wqes = 1;

@@ -66,7 +66,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
   int wf_size = get_wf_size(deviceId);
-  for(int i{0}; i < FETCHING_ATOMIC_CNT; i+=wf_size) {
+  for(uint32_t i{0}; i < FETCHING_ATOMIC_CNT; i+=wf_size) {
     fetching_atomic_freelist->push_back(fetching_atomic + i);
   }
 
@@ -129,7 +129,7 @@ __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
 /******************************************************************************
  ************************ PROVIDER-SPECIFIC HELPERS ***************************
  *****************************************************************************/
-__device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr,
+__device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, uintptr_t laddr,
     uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
@@ -152,7 +152,7 @@ __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr,
   }
 }
 
-__device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr,
+__device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, uintptr_t laddr,
     uintptr_t raddr, uint8_t opcode, bool ring_db) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)

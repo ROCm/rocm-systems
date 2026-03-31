@@ -347,7 +347,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length,
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo(int32_t length,
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length,
     uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
   /**
@@ -406,7 +406,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(int32_t length,
 }
 
 // called with all active lanes using different QPs
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(int32_t length,
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t length,
     uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching) {
   // get SQ lock

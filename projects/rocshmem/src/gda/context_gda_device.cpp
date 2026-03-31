@@ -153,7 +153,7 @@ __device__ void GDAContext::fence() { //TODO: optimize
   __threadfence_system();
 }
 
-__device__ void GDAContext::fence(int pe) {
+__device__ void GDAContext::fence([[maybe_unused]] int pe) {
   //TODO: optimize
   ActiveWFInfo wf_info(ctx_id_);
   for(int i = 0; i < num_qps_per_pe; i++) {
@@ -432,7 +432,7 @@ __device__ uint64_t GDAContext::signal_fetch_wg(const uint64_t *sig_addr) {
 }
 
 __device__ uint64_t GDAContext::signal_fetch_wave(const uint64_t *sig_addr) {
-  uint64_t value;
+  uint64_t value = 0;
   if (is_thread_zero_in_wave()) {
     ActiveWFInfo wf_info(my_pe, ThreadScope::wave);
     int qp_index = get_qp_index(my_pe, wf_info);

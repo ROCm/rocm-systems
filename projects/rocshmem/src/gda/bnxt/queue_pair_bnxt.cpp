@@ -217,7 +217,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   uint32_t hdr_flags;
   uint32_t inline_msg;
 
-  inline_msg = length <= inline_threshold &&
+  inline_msg = static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold) &&
                opcode == gda_op_rdma_write;
 
   bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
