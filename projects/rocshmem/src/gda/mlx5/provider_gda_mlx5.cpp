@@ -142,7 +142,7 @@ struct mlx5_qp_umem_alloc_info {
   static constexpr size_t cq_depth = 1;
 
   // align CQ and doorbell records to cache line size
-  static constexpr size_t cq_size       = mlx5_align_amdgpu_cache_line(sizeof(mlx5_cqe64[cq_depth]));
+  static constexpr size_t cq_size       = mlx5_align_amdgpu_cache_line(sizeof(mlx5_cqe64) * cq_depth);
   static constexpr size_t qp_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
   static constexpr size_t cq_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
 
@@ -309,6 +309,7 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
   qp.cq       = umem_alloc_info.cq_addr(umem_buffer);
   qp.cq_dbrec = umem_alloc_info.cq_dbrec_addr(umem_buffer);
   qp.qp_dbrec = umem_alloc_info.qp_dbrec_addr(umem_buffer);
+  qp.cq_depth = umem_alloc_info.cq_depth;
   qp.sq_depth = umem_alloc_info.sq_depth;
 
   /* allocate UAR
@@ -392,6 +393,7 @@ int mlx5dv_funcs_t::destroy_qp(mlx5_devx_qp& qp) {
   qp.qp_dbrec    = nullptr;
   qp.cqn         = 0;
   qp.qpn         = 0;
+  qp.cq_depth    = 0;
   qp.sq_depth    = 0;
 
   return err;
@@ -410,7 +412,7 @@ static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
   // CQEs must be initialized with opcode set to Invalid = 0xF and in hardware ownership
   constexpr uint8_t op_own_init = (MLX5_CQE_INVALID << 4) | MLX5_CQE_OWNER_MASK;
   // simplest way is to set all bytes in the CQ to op_own_init = 0xF1
-  QPAllocator::memset(qp.cq, op_own_init, sizeof(mlx5_cqe64[mlx5_qp_umem_alloc_info::cq_depth]));
+  QPAllocator::memset(qp.cq, op_own_init, sizeof(mlx5_cqe64) * qp.cq_depth);
 
   // get EQN, we don't use it but it needs to be set when creating the CQ
   uint32_t eqn = 0;
@@ -422,7 +424,7 @@ static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
   DEVX_SET(cqc, cqc, cc,                   true);
   // set overrun ignore so that we don't need to ring the CQ doorbell
   DEVX_SET(cqc, cqc, oi,                   true);
-  DEVX_SET(cqc, cqc, log_cq_size,          bit_log2(mlx5_qp_umem_alloc_info::cq_depth));
+  DEVX_SET(cqc, cqc, log_cq_size,          bit_log2(qp.cq_depth));
   // we don't ring the CQ doorbell anyway
   DEVX_SET(cqc, cqc, uar_page,             qp.uar->page_id);
   DEVX_SET(cqc, cqc, c_eqn_or_ext_element, eqn);
@@ -639,7 +641,7 @@ void mlx5_devx_qp::dump([[maybe_unused]] int conn_num) {
   DPRINTF("  (uint32_t*) qp_dbrec         = %p\n",    this->qp_dbrec);
   DPRINTF("  (uint32_t)  cqn              = 0x%x\n",  this->cqn);
   DPRINTF("  (void*)     cq               = %p\n",    this->cq);
-  DPRINTF("  (uint32_t)  cq_depth         = %u\n",    mlx5_qp_umem_alloc_info::cq_depth);
+  DPRINTF("  (uint32_t)  cq_depth         = %u\n",    this->cq_depth);
   DPRINTF("  (uint32_t*) cq_dbrec         = %p\n",    this->cq_dbrec);
   DPRINTF("  (void*)     uar->reg_addr    = %p\n",    this->uar->reg_addr);
   DPRINTF("  (void*)     uar->base_addr   = %p\n",    this->uar->base_addr);

@@ -312,6 +312,7 @@ struct mlx5_devx_qp {
   uint32_t*         qp_dbrec;
   uint32_t          cqn;
   uint32_t          qpn;
+  uint32_t          cq_depth;
   uint16_t          sq_depth;
 
   void dump(int conn_num);
