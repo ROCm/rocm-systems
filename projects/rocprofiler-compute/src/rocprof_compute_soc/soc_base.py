@@ -445,13 +445,11 @@ class OmniSoC_Base:
             for counter in counters[list(counters.keys())[0]]
             if hasattr(counter, "block") or hasattr(counter, "expression")
         }
+        # Delete counter definition temporary directory
+        if os.environ.get("ROCPROFILER_METRICS_PATH"):
+            shutil.rmtree(os.environ["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
         # Reset env. var.
         if old_rocprofiler_metrics_path is None:
-            # Delete counter definition temporary directory
-            if os.environ.get("ROCPROFILER_METRICS_PATH"):
-                shutil.rmtree(
-                    os.environ["ROCPROFILER_METRICS_PATH"], ignore_errors=True
-                )
             del os.environ["ROCPROFILER_METRICS_PATH"]
         else:
             os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
