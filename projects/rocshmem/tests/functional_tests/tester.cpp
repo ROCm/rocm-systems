@@ -36,8 +36,8 @@
 #include "amo_extended_tester.hpp"
 #endif //!defined(TEST_WITH_MORI)
 #include "amo_standard_tester.hpp"
-#if !defined(TEST_WITH_MORI)
 #include "default_ctx_primitive_tester.hpp"
+#if !defined(TEST_WITH_MORI)
 #include "barrier_all_tester.hpp"
 #include "barrier_all_on_stream_tester.hpp"
 #endif //!defined(TEST_WITH_MORI)
@@ -206,7 +206,6 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Non-Blocking Puts ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
       return testers;
-#if 0
     case DefaultCTXGetTestType:
       if (rank == 0)
         std::cout << "Default context Blocking Gets ###" << std::endl;
@@ -227,6 +226,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         std::cout << "Default context Non-Blocking Puts ###" << std::endl;
       testers.push_back(new DefaultCTXPrimitiveTester(args));
       return testers;
+#if 0
     case TeamCtxInfraTestType:
       if (rank == 0) std::cout << "Team Ctx Infra test ###" << std::endl;
       testers.push_back(new TeamCtxInfraTester(args));
