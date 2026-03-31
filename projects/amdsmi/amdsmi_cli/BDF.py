@@ -40,6 +40,18 @@ class BDF:
             if bdf.startswith("BDF("):
                 bdf = bdf.replace("BDF(", "").replace(")", "")
 
+            # Validate BDF format before parsing
+            # PCI BDF format: [SSSS:]BB:DD.F where:
+            #   - SSSS: 4 hex digits (segment/domain) - optional
+            #   - BB: 2 hex digits (bus)
+            #   - DD: 2 hex digits (device)
+            #   - F: 1 hex digit 0-7 (function) - MUST be single digit
+            bdf_format_regex = r"^(?:[0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$"
+            if not re.match(bdf_format_regex, bdf):
+                raise self.BDFError(
+                    f"Invalid BDF format: '{bdf}'. Expected format: [SSSS:]BB:DD.F (where F is 0-7)"
+                )
+
             try:
                 bdf_components = [int(x, 16) for x in re.split("[:.]", bdf)]
             except self.BDFError as e:

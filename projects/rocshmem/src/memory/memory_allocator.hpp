@@ -102,6 +102,7 @@ class MemoryAllocator {
    */
   void deallocate(void* ptr);
 
+ public:
  protected:
   /**
    * @brief is this memory allocated using managed memory

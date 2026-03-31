@@ -47,7 +47,7 @@
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
+HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
 #if HT_AMD
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-119");
   return;
@@ -107,7 +107,7 @@ TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE(Unit_hipDeviceGetP2PAttribute_Negative) {
+HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Negative) {
 #if HT_AMD
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-122");
   return;

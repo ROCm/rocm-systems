@@ -27,7 +27,7 @@ This testcase verifies hipMemcpyDtoDAsync API
 7.DtoH copy and validating the result
 */
 
-TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
                    double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;
@@ -97,7 +97,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count <= 1) {

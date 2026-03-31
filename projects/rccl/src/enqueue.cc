@@ -2361,7 +2361,7 @@ static ncclResult_t topoGetAlgoInfo(
   rcclOverrideAlgorithm(ncclAlgoStr, table, info);
   rcclOverrideProtocol(ncclProtoStr, table, info);
 #ifdef ENABLE_WARP_SPEED
-  rcclSetWarpSpeedAuto(comm, info, nBytes);
+  NCCLCHECK(rcclSetWarpSpeedAuto(comm, info, nBytes));
   if(info->useWarpSpeed) {
     rcclSetWarpSpeedCUs(comm, info->algorithm, info->nWarps * comm->WarpSize, nc);
   }
@@ -3092,7 +3092,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     NCCLCHECK(hostToDevRedOp(&opDev, info->op, info->datatype, comm));
 
     if (comm->nRanks == 1) {
-      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream));
+      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream, info->acc));
       return ncclSuccess;
     } else {
       struct ncclDevrWindow* sendWin;

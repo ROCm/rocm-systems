@@ -242,7 +242,7 @@ template <typename T> static void runTest() {
   HIP_CHECK(hipFree(dOData));
 }
 
-TEST_CASE(Unit_SimpleAtomicsTest) {
+HIP_TEST_CASE(Unit_SimpleAtomicsTest) {
   SECTION("test for int") { runTest<int>(); }
   SECTION("test for unsigned int") { runTest<unsigned int>(); }
   SECTION("test for float") { runTest<float>(); }

@@ -161,7 +161,7 @@ template <unsigned int tile_size> static void test_group_partition(TiledGroupShf
   delete[] expected_result;
 }
 
-TEST_CASE(Unit_hipCGThreadBlockTileType_Shfl) {
+HIP_TEST_CASE(Unit_hipCGThreadBlockTileType_Shfl) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;

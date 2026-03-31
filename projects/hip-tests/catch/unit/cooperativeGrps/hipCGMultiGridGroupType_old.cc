@@ -363,7 +363,7 @@ template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, i
   }
 }
 
-TEST_CASE(Unit_hipCGMultiGridGroupType_Basic) {
+HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Basic) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   num_devices = min(num_devices, MaxGPUs);
@@ -410,7 +410,7 @@ TEST_CASE(Unit_hipCGMultiGridGroupType_Basic) {
   }
 }
 
-TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
+HIP_TEST_CASE(Unit_hipCGMultiGridGroupType_Barrier) {
   int num_devices = 0;
   uint32_t loops = GENERATE(1, 2, 3, 4);
   uint32_t warps = GENERATE(4, 8, 16, 32);

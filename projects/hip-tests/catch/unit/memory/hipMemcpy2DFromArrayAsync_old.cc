@@ -19,7 +19,7 @@ static constexpr auto NUM_H{10};
            then A_d-->E_h  in GPU1
  * OUTPUT: validating the result by comparing A_h and E_h
  */
-TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -78,7 +78,7 @@ TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem) {
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -134,7 +134,7 @@ TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange) {
 * ------------------------
 *  - HIP_VERSION >= 6.0
 */
-TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Capture) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int kTestSizes[] = {3, 4, 100};
@@ -177,4 +177,3 @@ TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Capture) {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFreeArray(device_array));
 }
-

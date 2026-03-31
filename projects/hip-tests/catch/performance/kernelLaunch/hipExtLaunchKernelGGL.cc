@@ -157,7 +157,7 @@ static bool query_gpu_frequency(void (*kernel)(uint64_t* out, size_t maxIter, ui
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipExtLaunchKernelGGL_QueryGPUFrequency) {
+HIP_TEST_CASE(Performance_hipExtLaunchKernelGGL_QueryGPUFrequency) {
   HIP_CHECK(hipSetDevice(0));
   int clock_rate = 0;       // in kHz
   int wall_clock_rate = 0;  // in kHz

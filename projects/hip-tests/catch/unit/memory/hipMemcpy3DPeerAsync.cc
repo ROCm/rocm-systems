@@ -28,7 +28,7 @@
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
+HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
   CHECK_IMAGE_SUPPORT
   constexpr int numW = 16;
   constexpr int numH = 16;
@@ -135,7 +135,7 @@ TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipMemcpy3DPeerAsync_NegativeTsts) {
+HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_NegativeTsts) {
   CHECK_IMAGE_SUPPORT
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));

@@ -32,18 +32,19 @@ __global__ void test_kernel_star() {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_Printf_PrintfStar) {
+HIP_TEST_CASE(Unit_Printf_PrintfStar) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
     HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
   }
-  std::string reference(R"here(              42
+  std::string reference =
+      std::string(R"here(              42
 00000042
-00000042        
-    123.45600000 hello * world
-)here");
+)here") +
+      std::string("00000042") + std::string(8, ' ') + "\n" +
+      std::string("    123.45600000 hello * world\n");
   CaptureStream captured(stdout);
   hipLaunchKernelGGL(test_kernel_star, dim3(1), dim3(1), 0, 0);
   HIP_CHECK(hipStreamSynchronize(0));

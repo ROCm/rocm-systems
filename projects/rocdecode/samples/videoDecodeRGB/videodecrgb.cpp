@@ -54,7 +54,8 @@ void ShowHelpAndExit(const char *option = NULL) {
     << "-of Output Format name - (native, bgr, bgr48, rgb, rgb48, bgra, bgra64, rgba, rgba64; converts native YUV frame to RGB image format; optional; default: 0" << std::endl
     << "-resize WxH - (where W is resize width and H is resize height) optional; default: no resize " << std::endl
     << "-crop crop rectangle for output (not used when using interopped decoded frame); optional; default: 0" << std::endl
-    << "-disp_delay -specify the number of frames to be delayed for display; optional; default: 1" << std::endl;
+    << "-disp_delay -specify the number of frames to be delayed for display; optional; default: 1" << std::endl
+    << "-f number of frames to decode - optional; default: 0, meaning decode the entire stream" << std::endl;
 
     exit(0);
 }
@@ -182,6 +183,7 @@ int main(int argc, char **argv) {
     int current_frame_index = 0;
     hipStream_t hip_stream_dec = 0;
     hipStream_t hip_stream_csc = 0;
+    uint32_t num_decoded_frames = 0;  // default value is 0, meaning decode the entire stream
 
     // Parse command-line arguments
     if(argc <= 1) {
@@ -268,6 +270,13 @@ int main(int argc, char **argv) {
             disp_delay = atoi(argv[i]);
             continue;
         }
+        if (!strcmp(argv[i], "-f")) {
+            if (++i == argc) {
+                ShowHelpAndExit("-f");
+            }
+            num_decoded_frames = atoi(argv[i]);
+            continue;
+        }
         ShowHelpAndExit(argv[i]);
     }
 
@@ -325,7 +334,7 @@ int main(int argc, char **argv) {
             }
 
             int last_index = 0;
-            for (int i = 0; i < n_frames_returned; i++) {
+            for (int i = 0; i < n_frames_returned && (!num_decoded_frames || n_frame < num_decoded_frames); i++) {
                 p_frame = viddec.GetFrame(&pts);
                 // allocate extra device memories to use double-buffering for keeping two decoded frames
                 if (frame_buffers[0] == nullptr) {
@@ -346,9 +355,12 @@ int main(int argc, char **argv) {
                 viddec.ReleaseFrame(pts);
                 current_frame_index = (current_frame_index + 1) % frame_buffers_size; // update the current_frame_index to the next index in the frame_buffers
                 cv.notify_one(); // Notify the ColorSpaceConversionThread that a frame is available for post-processing
+                n_frame++;
             }
 
-            n_frame += n_frames_returned;
+            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+                break;
+            }
         } while (n_video_bytes);
 
         {

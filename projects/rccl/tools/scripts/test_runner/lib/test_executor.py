@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 import datetime
+import copy
 from enum import IntEnum, Enum
 from pathlib import Path
 
@@ -66,6 +67,12 @@ class TestExecutor:
         self.test_names = []
         self.test_durations = []
         self.test_suites = []
+
+        # Rerun tracking
+        self.failed_test_info = []  # Store info needed to rerun failed tests
+        self.rerun_results = []
+        self.rerun_names = []
+        self.rerun_durations = []
 
     def setup_directories(self):
         """Setup build and log directories"""
@@ -168,13 +175,16 @@ class TestExecutor:
         if not os.path.isdir(rocm_path):
             errors.append(f"ROCm not found at {rocm_path}")
 
-        # Check MPI
-        mpi_path = self.paths.get("mpi_path")
-        if mpi_path:
-            if not os.path.isdir(mpi_path):
-                print(f"WARNING: MPI path not found: {mpi_path}")
-            elif not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
-                print(f"WARNING: mpirun not found in {mpi_path}/bin/")
+        # Check MPI (unless skip flag is set)
+        if not self.args.skip_mpi_check:
+            mpi_path = self.paths.get("mpi_path")
+            if mpi_path:
+                if not os.path.isdir(mpi_path):
+                    print(f"WARNING: MPI path not found: {mpi_path}")
+                elif not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
+                    print(f"WARNING: mpirun not found in {mpi_path}/bin/")
+        elif self.args.verbose:
+            print("SKIP: MPI installation check skipped (--skip-mpi-check)")
 
         # Check RCCL library (if not building or using custom lib)
         if self.args.no_build or self.using_custom_lib:
@@ -612,7 +622,15 @@ class TestExecutor:
 
         results = []
         skipped_count = 0
+        should_stop = False  # Track if we should stop due to rerun failure
+
         for test in tests:
+            # Check if we should stop due to previous rerun failure
+            if should_stop:
+                if self.args.verbose:
+                    print(f"\nStopping test suite execution due to rerun failure (--stop-on-rerun-failure)")
+                break
+
             # Filter by test name if specified
             test_name = test.get("name")
             if self.args.test_name and test_name != self.args.test_name:
@@ -627,10 +645,86 @@ class TestExecutor:
             self.test_durations.append(result["duration"])
             self.test_suites.append(suite_name)
 
+            # If test failed and rerun flag is set, rerun immediately
+            if self.args.rerun_failed and result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
+                # Get rerun_env_variables from suite config or test config
+                rerun_env = suite_config.get("rerun_env_variables", {})
+                test_rerun_env = test.get("rerun_env_variables", {})
+
+                # Merge rerun environments (test-level overrides suite-level)
+                merged_rerun_env = {**rerun_env, **test_rerun_env}
+
+                if merged_rerun_env:
+                    print(f"\n{'='*80}")
+                    print(f"RERUNNING FAILED TEST IMMEDIATELY")
+                    print(f"{'='*80}")
+
+                    # Create a modified test config with merged environment variables
+                    rerun_test_config = copy.deepcopy(test)
+
+                    # Merge original env_variables with rerun_env_variables
+                    original_env = test.get("env_variables", {})
+                    rerun_test_config["env_variables"] = {**original_env, **merged_rerun_env}
+
+                    print(f"\nRerunning test: {test_name}")
+                    print(f"  Original result: {result['result']}")
+                    print(f"  Additional env variables:")
+                    for key, value in merged_rerun_env.items():
+                        print(f"    {key}={value}")
+                    if self.args.verbose:
+                        print(f"  Final merged env_variables for rerun:")
+                        for key, value in rerun_test_config["env_variables"].items():
+                            print(f"    {key}={value}")
+
+                    # Run the test with merged environment
+                    rerun_result = self.run_test(rerun_test_config, suite_config)
+
+                    # Track rerun results
+                    self.rerun_names.append(test_name)
+                    self.rerun_results.append(rerun_result["result"])
+                    self.rerun_durations.append(rerun_result["duration"])
+
+                    print(f"  Rerun result: {rerun_result['result']}")
+                    if "exit_code" in rerun_result:
+                        print(f"  Rerun exit code: {rerun_result['exit_code']}")
+                    print(f"{'='*80}\n")
+
+                    # Check if rerun also failed and we should stop
+                    if self.args.stop_on_rerun_failure and rerun_result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
+                        print(f"\nERROR: Rerun failed for test '{test_name}'")
+                        print(f"Stopping test execution (--stop-on-rerun-failure)")
+                        should_stop = True
+                    # Otherwise continue to next test regardless of rerun result
+                else:
+                    if self.args.verbose:
+                        print(f"SKIP: No rerun_env_variables defined for failed test '{test_name}'")
+
         if self.args.verbose and skipped_count > 0:
             print(f"  Skipped {skipped_count} test(s) due to --test-name filter")
 
         return results
+
+    def _format_duration(self, seconds):
+        """
+        Format duration in a human-readable format
+
+        Args:
+            seconds: Duration in seconds
+
+        Returns:
+            str: Formatted duration string
+        """
+        if seconds < 60:
+            return f"{seconds:.2f} seconds"
+        elif seconds < 3600:
+            minutes = int(seconds // 60)
+            secs = seconds % 60
+            return f"{minutes} min {secs:.2f} sec"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            secs = seconds % 60
+            return f"{hours} hr {minutes} min {secs:.2f} sec"
 
     def print_summary(self):
         """Print test execution summary"""
@@ -638,6 +732,9 @@ class TestExecutor:
         passed = self.test_results.count(TestResult.RESULT_PASSED.value)
         failed = self.test_results.count(TestResult.RESULT_FAILED.value)
         timeout = self.test_results.count(TestResult.RESULT_TIMEOUT.value)
+
+        # Calculate total test time
+        total_time_seconds = sum(self.test_durations) if self.test_durations else 0
 
         # Get unique test suites that were run
         unique_suites = sorted(set(self.test_suites)) if self.test_suites else []
@@ -659,6 +756,33 @@ class TestExecutor:
             print(f"Passed:        {passed}")
             print(f"Failed:        {failed}")
             print(f"Timeout:       {timeout}")
+            print(f"Total Time:    {self._format_duration(total_time_seconds)}")
+            print("="*120)
+
+        # Print rerun results if any
+        if self.rerun_results:
+            total_reruns = len(self.rerun_results)
+            rerun_passed = self.rerun_results.count(TestResult.RESULT_PASSED.value)
+            rerun_failed = self.rerun_results.count(TestResult.RESULT_FAILED.value)
+            rerun_timeout = self.rerun_results.count(TestResult.RESULT_TIMEOUT.value)
+            rerun_time_seconds = sum(self.rerun_durations) if self.rerun_durations else 0
+
+            print("\nRerun Results (with additional environment variables):")
+            print("-"*120)
+            print(f"{'Test Name':<60} {'Result':<10} {'Duration'}")
+            print("-"*120)
+            for i in range(total_reruns):
+                print(
+                    f"{self.rerun_names[i]:<60} "
+                    f"{self.rerun_results[i]:<10} "
+                    f"{self.rerun_durations[i]:.3f} seconds"
+                )
+            print("-"*120)
+            print(f"Total Reruns:  {total_reruns}")
+            print(f"Passed:        {rerun_passed}")
+            print(f"Failed:        {rerun_failed}")
+            print(f"Timeout:       {rerun_timeout}")
+            print(f"Total Time:    {self._format_duration(rerun_time_seconds)}")
             print("="*120)
 
     def generate_coverage_report(self):

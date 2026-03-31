@@ -5,6 +5,7 @@
 #include "core.h"
 #include "utils.h"
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include <cstring>
 #include <mutex>
@@ -502,9 +503,22 @@ ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersio
     }
     *fwVersion = info.fw_info_list[0].fw_version;
   } else {
-    // Use ARSMI fallback - avoid direct rsmi calls that can conflict with libamd_smi.so
-    // ARSMI doesn't have a firmware query API, so return 0
+    // Read MEC firmware version from sysfs; path may not exist on card0, so search all cards until found
+    constexpr uint32_t maxCards = 128;
     *fwVersion = 0;
+    for (uint32_t card = 0; card < maxCards; card++) {
+      char path[256];
+      snprintf(path, sizeof(path), "/sys/class/drm/card%u/device/fw_version/mec_fw_version", card);
+      FILE* fp = fopen(path, "r");
+      if (fp != nullptr) {
+        char line[64];
+        if (fgets(line, sizeof(line), fp) != nullptr) {
+          *fwVersion = strtoull(line, nullptr, 16);
+        }
+        fclose(fp);
+        break;
+      }
+    }
   }
   return ncclSuccess;
 }

@@ -1,91 +1,224 @@
 ---
 rtc:
-  Unit_hiprtc_saxpy: *level_2
-  Unit_hiprtc_warpsize: *level_2
-  Unit_hiprtc_functional: *level_2
-  Unit_hipStreamCaptureRtc: *level_2
-  Unit_hiprtc_includepath: *level_2
-  Unit_hiprtc_devicemalloc: *level_2
-  Unit_hiprtcGetLoweredName_templateKrnls: *level_2
-  Unit_hiprtc_cpp17: *level_2
-  Unit_hiprtc_namehandling: *level_2
-  Unit_hiprtc_getloweredname: *level_2
-  Unit_hiprtc_test_hip_bfloat16: *level_2
-  Unit_RTC_LinkerAPI_Negative: *level_2
-  Unit_RTC_LinkDestroy_Negative: *level_2
-  Unit_hiprtc_fp8_simple: *level_2
+  Unit_hiprtc_saxpy:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_warpsize:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_functional:
+    <<: *level_2
+    tags: [compile]
+  Unit_hipStreamCaptureRtc:
+    <<: *level_2
+    tags: [integration]
+  Unit_hiprtc_includepath:
+    <<: *level_2
+    tags: [link]
+  Unit_hiprtc_devicemalloc:
+    <<: *level_2
+    tags: [integration]
+  Unit_hiprtcGetLoweredName_templateKrnls:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_cpp17:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_namehandling:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_getloweredname:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_test_hip_bfloat16:
+    <<: *level_2
+    tags: [header]
+  Unit_RTC_LinkerAPI_Negative:
+    <<: *level_2
+    tags: [link]
+  Unit_RTC_LinkDestroy_Negative:
+    <<: *level_2
+    tags: [link]
+  Unit_hiprtc_fp8_simple:
+    <<: *level_2
+    tags: [compile]
   Unit_RTC_LinkDestroy_Default:
     <<: *level_2
     # SWDEV-450909: Test failed in stress testing
     disabled: [amd_windows]
-  Unit_RTC_LinkerAPI: *level_2
-  Unit_RTC_LinkAddFile_Negative: *level_2
-  Unit_RTC_LinkAddFile_Default: *level_2
-  Unit_hiprtc_half_shuffle: *level_2
-  Unit_hiprtc_half_shuffle_sync: *level_2
+    tags: [link]
+  Unit_RTC_LinkerAPI:
+    <<: *level_2
+    tags: [link]
+  Unit_RTC_LinkAddFile_Negative:
+    <<: *level_2
+    tags: [link]
+  Unit_RTC_LinkAddFile_Default:
+    <<: *level_2
+    tags: [link]
+  Unit_hiprtc_half_shuffle:
+    <<: *level_2
+    tags: [integration]
+  Unit_hiprtc_half_shuffle_sync:
+    <<: *level_2
+    tags: [integration]
   Unit_Rtc_ReduceRandom:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
+    tags: [compile]
   Unit_hiprtc_stdheaders:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
-  Unit_Rtc_MathConstants_header: *level_2
-  Unit_Rtc_VectorTypes_header: *level_2
-  Unit_Rtc_MathFunctions_header: *level_2
-  Unit_Rtc_fp16_header: *level_2
-  Unit_Rtc_TextureTypes_header: *level_2
-  Unit_Rtc_HipComplex_header: *level_2
-  Unit_hipRTC_Ptrdiff_t_Check: *level_2
-  Unit_hipRTC_Check_Ptrdiff_t_FrmChildProcess: *level_2
-  Unit_hiprtc_bitcode_undefined_function: *level_2
-  Unit_Rtc_bfloat16_header: *level_2
-  Unit_hiprtcGpuArchComplrOptnTst: *level_2
+    tags: [header]
+  Unit_Rtc_MathConstants_header:
+    <<: *level_2
+    tags: [header]
+  Unit_Rtc_VectorTypes_header:
+    <<: *level_2
+    tags: [header]
+  Unit_Rtc_MathFunctions_header:
+    <<: *level_2
+    tags: [header]
+  Unit_Rtc_fp16_header:
+    <<: *level_2
+    tags: [header]
+  Unit_Rtc_TextureTypes_header:
+    <<: *level_2
+    tags: [header]
+  Unit_Rtc_HipComplex_header:
+    <<: *level_2
+    tags: [header]
+  Unit_hipRTC_Ptrdiff_t_Check:
+    <<: *level_2
+    tags: [compile]
+  Unit_hipRTC_Check_Ptrdiff_t_FrmChildProcess:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtc_bitcode_undefined_function:
+    <<: *level_2
+    tags: [link]
+  Unit_Rtc_bfloat16_header:
+    <<: *level_2
+    tags: [header]
+  Unit_hiprtcGpuArchComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
   Unit_hiprtcGpuRdcComplrOptnTst:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327
     disabled: [amd_wsl]
-  Unit_hiprtcEnabledDenormalsComplrOptnTst: *level_2
-  Unit_hiprtcDisabledDenormalsComplrOptnTst: *level_2
-  Unit_hiprtcOff_ffpContractComplrOptnTst: *level_2
-  Unit_hiprtcOnffpContractComplrOptnTst: *level_2
-  Unit_hiprtcFastffpContractComplrOptnTst: *level_2
-  Unit_hiprtcEnabledFastMathComplrOptnTst: *level_2
-  Unit_hiprtcDisabledFastMathComplrOptnTst: *level_2
-  Unit_hiprtcEnabledSlpVectorizeComplrOptnTst: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledDenormalsComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledDenormalsComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcOff_ffpContractComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcOnffpContractComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcFastffpContractComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledFastMathComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledFastMathComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledSlpVectorizeComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
   Unit_hiprtcDisabledSlpVectorizeComplrOptnTst:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327
     disabled: [amd_wsl]
-  Unit_hiprtcDefineMacroComplrOptnTst: *level_2
-  Unit_hiprtcUndefMacroComplrOptnTst: *level_2
-  Unit_hiprtcHeaderDirectoryComplrOptnTst: *level_2
-  Unit_hiprtcWarningComplrOptnTst: *level_2
+    tags: [compile]
+  Unit_hiprtcDefineMacroComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcUndefMacroComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcHeaderDirectoryComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcWarningComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
   Unit_hiprtcRpassInlineComplrOptnTst:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327
     disabled: [amd_wsl]
-  Unit_hiprtcEnabledConversionErrComplrOptnTst: *level_2
-  Unit_hiprtcDisabledConversionErrComplrOptnTst: *level_2
-  Unit_hiprtcEnabledConversionWarningComplrOptnTst: *level_2
-  Unit_hiprtcDisabledConversionWarningComplrOptnTst: *level_2
-  Unit_hiprtcGpuMaxThreadPerBlockComplrOptnTst: *level_2
-  Unit_hiprtcEnabledUnsafeAtomicComplrOptnTst: *level_2
-  Unit_hiprtcDisabledUnsafeAtomicComplrOptnTst: *level_2
-  Unit_hiprtcEnabledInfiniteNumComplrOptnTst: *level_2
-  Unit_hiprtcDisabledInfiniteNumComplrOptnTst: *level_2
-  Unit_hiprtcEnabledNANComplrOptnTst: *level_2
-  Unit_hiprtcDisabledNANComplrOptnTst: *level_2
-  Unit_hiprtcEnabledFiniteMathComplrOptnTst: *level_2
-  Unit_hiprtcDisabledFiniteMathComplrOptnTst: *level_2
-  Unit_hiprtcEnabledAssociativeMathComplrOptnTst: *level_2
-  Unit_hiprtcDisabledAssociativeMathComplrOptnTst: *level_2
-  Unit_hiprtcEnabledSignedZerosComplrOptnTst: *level_2
-  Unit_hiprtcDisabledSignedZerosComplrOptnTst: *level_2
-  Unit_hiprtcEnabledTrappingMathComplrOptnTst: *level_2
-  Unit_hiprtcDisabledTrappingMathComplrOptnTst: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledConversionErrComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledConversionErrComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledConversionWarningComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledConversionWarningComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcGpuMaxThreadPerBlockComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledUnsafeAtomicComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledUnsafeAtomicComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledInfiniteNumComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledInfiniteNumComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledNANComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledNANComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledFiniteMathComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledFiniteMathComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledAssociativeMathComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledAssociativeMathComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledSignedZerosComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledSignedZerosComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcEnabledTrappingMathComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
+  Unit_hiprtcDisabledTrappingMathComplrOptnTst:
+    <<: *level_2
+    tags: [compile]
   Unit_hiprtcCombiComplrOptnTst:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327
     disabled: [amd_wsl]
+    tags: [compile]
+  Unit_Rtc_CoopReduce:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]

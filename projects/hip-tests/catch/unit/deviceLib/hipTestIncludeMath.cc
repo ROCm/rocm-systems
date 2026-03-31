@@ -113,7 +113,7 @@ __global__ void FloatMathPreciseKernel() {
   ynf(1, 1.0f);
 }
 
-TEST_CASE(Unit_TestIncludeMathPreciseFloat) {
+HIP_TEST_CASE(Unit_TestIncludeMathPreciseFloat) {
   hipError_t err;
   err = hipLaunchKernel(reinterpret_cast<void*>(FloatMathPreciseKernel), dim3(1, 1, 1),
                         dim3(1, 1, 1), 0, 0, 0);

@@ -32,7 +32,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE(Unit_texCubemapLayeredGrad_Positive_ReadModeElementType, char,
+HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLayeredGrad_Positive_ReadModeElementType, char,
                    unsigned char, short, unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
   INFO("texCubemap isn't supported. Skipped.");
@@ -118,7 +118,7 @@ TEMPLATE_TEST_CASE(Unit_texCubemapLayeredGrad_Positive_ReadModeElementType, char
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE(Unit_texCubemapLayeredGrad_Positive_ReadModeNormalizedFloat, char,
+HIP_TEMPLATE_TEST_CASE(Unit_texCubemapLayeredGrad_Positive_ReadModeNormalizedFloat, char,
                    unsigned char, short, unsigned short) {
   CHECK_IMAGE_SUPPORT;
   INFO("texCubemap isn't supported. Skipped.");

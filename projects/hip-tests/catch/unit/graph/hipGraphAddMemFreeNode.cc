@@ -36,7 +36,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemFreeNode_Negative_Params) {
+HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Negative_Params) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipGraphNode_t alloc_node, free_node;
@@ -114,7 +114,7 @@ TEST_CASE(Unit_hipGraphAddMemFreeNode_Negative_Params) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemFreeNode_Negative_NotSupported) {
+HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Negative_NotSupported) {
   constexpr size_t N = 1024;
   hipGraph_t graph1, graph2;
   hipGraphNode_t alloc_node, free_node;
@@ -187,7 +187,7 @@ TEST_CASE(Unit_hipGraphAddMemFreeNode_Negative_NotSupported) {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
+HIP_TEST_CASE(Unit_hipGraphAddMemFreeNode_Functional) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {

@@ -137,7 +137,15 @@ hsa_status_t MemoryTest::TestAllocate(hsa_amd_memory_pool_t pool, size_t sz) {
   err = hsa_amd_memory_pool_allocate(pool, sz, 0, &ptr);
 
   if (err == HSA_STATUS_SUCCESS) {
+#ifdef ROCRTST_ASAN
+    // Under ASAN, hsa_amd_memory_pool_allocate returns base+PAGE_SIZE (ASAN header offset).
+    // hsa_memory_free is not intercepted by the ASAN runtime, so it receives the offset pointer
+    // and fails to find it in allocation_map_. Use hsa_amd_memory_pool_free which IS intercepted
+    // and correctly strips the PAGE_SIZE offset before calling into ROCr.
+    err = hsa_amd_memory_pool_free(ptr);
+#else
     err = hsa_memory_free(ptr);
+#endif
   }
 
   return err;
@@ -228,6 +236,12 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   // Do everything in "granule" units
   auto gran_sz = pool_i.alloc_granule;
   auto pool_sz = pool_i.aggregate_alloc_max / gran_sz;
+
+  // AIE agent's dev heap is advertised as HSA_HEAPTYPE_DEVICE_SVM, but
+  // is limited to the actual pool size.
+  if (ag_type == HSA_DEVICE_TYPE_AIE && pool_i.alloc_rec_granule == 0) {
+    pool_sz = pool_i.size / gran_sz;
+  }
 
   // Neg. test: Try to allocate more than the pool size
 #ifdef ROCRTST_ASAN

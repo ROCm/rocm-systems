@@ -4,6 +4,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.13.0
+
+### Resolved Issues
+
+- **Fixed `amdsmi_topo_get_p2p_status()` returning a raw `ctypes.c_uint32` object instead of an integer for the `type` field**.  
+  - The `'type'` key in the returned dictionary now correctly returns `type_32.value` (an `int`) rather than the unwrapped ctypes object, consistent with the pattern used in `amdsmi_topo_get_link_type()`.
+
 ## amd_smi_lib for ROCm 7.12.0
 
 ### Added
@@ -91,7 +98,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Optimized
 
-- N/A
+- **Adjusted the KFD Process cache to be more responsive and have and adjustable cache duration**.  
+  - Users may adjust the cache duration by setting the environment variable 'AMDSMI_PROCESS_INFO_CACHE_MS'.
 
 ### Resolved Issues
 

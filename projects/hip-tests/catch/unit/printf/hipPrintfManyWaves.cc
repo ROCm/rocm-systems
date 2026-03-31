@@ -222,7 +222,7 @@ static void test_numbers(uint num_blocks, uint threads_per_block) {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_Printf_PrintfManyWaves) {
+HIP_TEST_CASE(Unit_Printf_PrintfManyWaves) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {

@@ -109,11 +109,11 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     /* Allocate SCQ UMEM */
     bnxt_scqs[i].length = cq_attr.ncqe * cq_attr.cqe_size;
     bnxt_scqs[i].depth  = cq_attr.ncqe;
-    CHECK_HIP(hipExtMallocWithFlags(&bnxt_scqs[i].buf, bnxt_scqs[i].length, hipDeviceMallocUncached));
+    qp_allocator_->allocate(reinterpret_cast<void**>(&bnxt_scqs[i].buf), bnxt_scqs[i].length);
     CHECK_HIP(hipMemset(bnxt_scqs[i].buf, 0, bnxt_scqs[i].length));
 
     if (dmabuf_enabled) {
-      CHECK_HSA(hsa_amd_portable_export_dmabuf(bnxt_scqs[i].buf,
+      CHECK_HIP(qp_allocator_->GetDmabufHandle(bnxt_scqs[i].buf,
                                                bnxt_scqs[i].length,
                                                &bnxt_scqs[i].dmabuf_fd,
                                                &bnxt_scqs[i].dmabuf_offset));
@@ -149,11 +149,11 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     /* Allocate RCQ UMEM */
     bnxt_rcqs[i].length = cq_attr.ncqe * cq_attr.cqe_size;
     bnxt_rcqs[i].depth  = cq_attr.ncqe;
-    CHECK_HIP(hipExtMallocWithFlags(&bnxt_rcqs[i].buf, bnxt_rcqs[i].length, hipDeviceMallocUncached));
+    qp_allocator_->allocate(reinterpret_cast<void**>(&bnxt_rcqs[i].buf), bnxt_rcqs[i].length);
     CHECK_HIP(hipMemset(bnxt_rcqs[i].buf, 0, bnxt_rcqs[i].length));
 
     if (dmabuf_enabled) {
-      CHECK_HSA(hsa_amd_portable_export_dmabuf(bnxt_rcqs[i].buf,
+      CHECK_HIP(qp_allocator_->GetDmabufHandle(bnxt_rcqs[i].buf,
                                                bnxt_rcqs[i].length,
                                                &bnxt_rcqs[i].dmabuf_fd,
                                                &bnxt_rcqs[i].dmabuf_offset));
@@ -212,13 +212,13 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     CHECK_ZERO(err, "bnxt_re_dv_qp_mem_alloc");
 
     /* Alloc SQ */
-    CHECK_HIP(hipExtMallocWithFlags(&sq_ptr, bnxt_qps[i].mem_info.sq_len, hipDeviceMallocUncached));
+    qp_allocator_->allocate(reinterpret_cast<void**>(&sq_ptr), bnxt_qps[i].mem_info.sq_len);
     CHECK_HIP(hipMemset(sq_ptr, 0,  bnxt_qps[i].mem_info.sq_len));
     bnxt_qps[i].mem_info.sq_va = (uint64_t) sq_ptr;
     bnxt_qps[i].sq_buf = sq_ptr;
 
     if (dmabuf_enabled) {
-      CHECK_HSA(hsa_amd_portable_export_dmabuf(sq_ptr,
+      CHECK_HIP(qp_allocator_->GetDmabufHandle(sq_ptr,
                                                bnxt_qps[i].mem_info.sq_len,
                                                &bnxt_qps[i].sq_dmabuf_fd,
                                                &bnxt_qps[i].sq_dmabuf_offset));
@@ -241,13 +241,13 @@ void GDABackend::bnxt_create_qps(int sq_length) {
     CHECK_NNULL(sq_umem_handle, "bnxt_re_dv_umem_reg(sq)");
 
     /* Alloc RQ */
-    CHECK_HIP(hipExtMallocWithFlags(&rq_ptr, bnxt_qps[i].mem_info.rq_len, hipDeviceMallocUncached));
+    qp_allocator_->allocate(reinterpret_cast<void**>(&rq_ptr), bnxt_qps[i].mem_info.rq_len);
     CHECK_HIP(hipMemset(rq_ptr, 0,  bnxt_qps[i].mem_info.rq_len));
     bnxt_qps[i].mem_info.rq_va = (uint64_t) rq_ptr;
     bnxt_qps[i].rq_buf = rq_ptr;
 
     if (dmabuf_enabled) {
-      CHECK_HSA(hsa_amd_portable_export_dmabuf(rq_ptr,
+      CHECK_HIP(qp_allocator_->GetDmabufHandle(rq_ptr,
                                                bnxt_qps[i].mem_info.rq_len,
                                                &bnxt_qps[i].rq_dmabuf_fd,
                                                &bnxt_qps[i].rq_dmabuf_offset));

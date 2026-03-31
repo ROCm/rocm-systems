@@ -108,7 +108,7 @@ static int HmmAttrPrint() {
 // The following function tests if peers can set hipMemAdviseSetAccessedBy flag
 // on HMM memory prefetched on each of the other gpus
 #if HT_AMD
-TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
+HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -165,7 +165,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
 /* Set AccessedBy flag to device 0 on Hmm memory and prefetch the memory to
    device 1, then probe for AccessedBy flag using hipMemRangeGetAttribute()
    we should still see the said flag is set for device 0*/
-TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
+HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
@@ -201,7 +201,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
    PreferredLocation to device 1, check for AccessedBy flag using
    hipMemRangeGetAttribute() it should return 1*/
 
-TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
+HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
@@ -238,10 +238,10 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
 /* Set AccessedBy flag to HMM memory launch a kernel and then unset
    AccessedBy, launch kernel. We should not have any access issues*/
 
-TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
+HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
-    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 1024;
+    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
     hipStream_t strm;
     HIP_CHECK(hipStreamCreate(&strm));
     HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));
@@ -285,7 +285,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
    the allocated memory and launch a kernel. Kernel should get executed
    successfully without hang or segfault*/
 #if __linux__ && HT_AMD
-TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
+HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
   // The following code block checks for xnack+
   // so as to skip if the device is not xnack+
   hipDeviceProp_t prop;
@@ -331,7 +331,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
   }
 }
 
-TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
+HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   if (setenv("HSA_XNACK", "1", 1) != 0) {
     HipTest::HIP_SKIP_TEST("Unable to set xnack on environment variable.");
     return;
@@ -358,7 +358,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   access denial case arising due to setting ReadMostly only to a particular
   gpu*/
 
-TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
+HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0;

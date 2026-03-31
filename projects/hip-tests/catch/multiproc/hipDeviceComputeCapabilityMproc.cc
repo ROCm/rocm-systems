@@ -127,7 +127,7 @@ bool runMaskedDeviceTest(int actualNumGPUs) {
 /**
  * Validate behavior of hipDeviceComputeCapability for masked devices.
  */
-TEST_CASE(Unit_hipDeviceGet_MaskedDevices) {
+HIP_TEST_CASE(Unit_hipDeviceGet_MaskedDevices) {
   int count = -1;
   constexpr int ReqGPUs = 2;
   bool ret;

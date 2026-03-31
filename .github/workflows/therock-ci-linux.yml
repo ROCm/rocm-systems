@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 526c77297de1418cbd11edccea09dc37055fd71c # 2026-03-12 commit
+          ref: 9a38f01d34a90ecabd87d6cdf197466eab4e84ab # 2026-03-20
 
       - name: Install python deps
         run: |
@@ -122,6 +122,5 @@ jobs:
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      # Due to migrating MI325s, we have lost capacity as of 3/13/2026 11:41am PST
-      test_runs_on: ""
+      test_runs_on: "linux-gfx942-1gpu-ossci-rocm"
       platform: "linux"

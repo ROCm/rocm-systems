@@ -40,6 +40,9 @@
 #include "KFDTestUtil.hpp"
 #include "Assemble.hpp"
 #include "ShaderStore.hpp"
+#ifdef HSAKMT_CTX
+#include "hsakmt/hsakmtctx.h"
+#endif
 
 #define MAX_GPU 64
 
@@ -60,7 +63,12 @@ typedef struct _KFDTESTGPU_PARAMETERS
 //  @class KFDBaseComponentTest
 class KFDBaseComponentTest : public testing::Test {
  public:
-    KFDBaseComponentTest(void) { m_MemoryFlags.Value = 0; }
+    KFDBaseComponentTest(void) {
+        m_MemoryFlags.Value = 0;
+        #ifdef HSAKMT_CTX
+        m_hsakmt_current_ctx = NULL;
+        #endif
+    }
     ~KFDBaseComponentTest(void) {}
 
     HSAuint64 GetSysMemSize();
@@ -115,8 +123,15 @@ class KFDBaseComponentTest : public testing::Test {
                                             unsigned int gpu_num);
 
     HSAKMT_STATUS KFDTestLaunch(std::function<void(int)> test_func);
+#ifdef HSAKMT_CTX
+    HsaKFDContext *m_hsakmt_current_ctx;
 
  protected:
+    HsaKFDContext *m_hsakmt_primary_ctx;
+    HsaKFDContext *m_hsakmt_secondary_ctx;
+#else
+ protected:
+#endif
     HsaVersionInfo  m_VersionInfo;
     HsaSystemProperties m_SystemProperties;
     unsigned int m_FamilyId;
@@ -160,7 +175,7 @@ class KFDBaseComponentTest : public testing::Test {
             return;
         }
         m_xnack = -1;
-        HSAKMT_STATUS ret = hsaKmtGetXNACKMode(&m_xnack);
+        HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtGetXNACKMode, m_hsakmt_current_ctx, &m_xnack);
         if (ret != HSAKMT_STATUS_SUCCESS) {
             LOG() << "Failed " << ret << " to get XNACK mode" << std::endl;
             return;
@@ -181,7 +196,7 @@ class KFDBaseComponentTest : public testing::Test {
         if (xnack_on == m_xnack)
             return;
 
-        ret = hsaKmtSetXNACKMode(xnack_on);
+        ret = HSAKMT_CALL(hsaKmtSetXNACKMode, m_hsakmt_current_ctx, xnack_on);
         if (ret != HSAKMT_STATUS_SUCCESS)
             LOG() << "Failed " << ret << " to set XNACK mode " << xnack_on << std::endl;
         else
@@ -195,7 +210,7 @@ class KFDBaseComponentTest : public testing::Test {
         if (m_xnack == -1)
             return;
 
-        hsaKmtSetXNACKMode(m_xnack);
+        HSAKMT_CALL(hsaKmtSetXNACKMode, m_hsakmt_current_ctx, m_xnack);
     }
 };
 

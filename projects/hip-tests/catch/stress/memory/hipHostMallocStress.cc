@@ -13,7 +13,7 @@
 // Try to allocate as much memory as possible
 // But since max allocation can fail, we need to try the next value
 
-TEST_CASE(Stress_hipHostMalloc_MaxAllocation) {
+HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation) {
   size_t devMemAvail{0}, devMemFree{0};
   HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemAvail));
   auto hostMemFree = HipTest::getAvailableSystemMemoryInMB() * 1024 * 1024;  // In bytes
@@ -43,7 +43,7 @@ TEST_CASE(Stress_hipHostMalloc_MaxAllocation) {
 // Allocate more memory than total GPU memory in each available GPU.
 // hipHostMalloc should return hipSuccess.
 
-TEST_CASE(Stress_hipHostMalloc_MaxAllocation_AllGpu) {
+HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation_AllGpu) {
   char* A = nullptr;
   size_t maxGpuMem = 0, availableMem = 0;
   int count = 0;

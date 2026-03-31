@@ -485,7 +485,7 @@ NCCL_PARAM(IbDisable, "IB_DISABLE", 0);
 NCCL_PARAM(IbMergeVfs, "IB_MERGE_VFS", 1);
 NCCL_PARAM(IbMergeNics, "IB_MERGE_NICS", 1);
 
-// Returns 0 if this is the path of two VFs of the same physical device
+// Returns 1 if this is the path of two VFs of the same physical device
 static int ncclIbMatchVfPath(char* path1, char* path2) {
   // Merge multi-port NICs into the same PCI device
   if (ncclParamIbMergeVfs()) {
@@ -495,24 +495,46 @@ static int ncclIbMatchVfPath(char* path1, char* path2) {
   }
 }
 
+/**
+ * Assumes PCIe path ends with xxxx:xx:xx.x 
+ */
+static void ncclIbNormalizePciPath(const char* in, char* out, size_t out_size) {
+  if (!in || !out || out_size == 0) return;
+  // Safe copy with truncation
+  size_t len = strnlen(in, out_size - 1);
+  memmove(out, in, len);
+  out[len] = '\0';
+  if (len < 4) return;
+  // Merge multi-port NICs (.1/.2/.3 -> .0)
+  out[len - 1] = '0';
+  // Merge VFs if enabled
+  if (ncclParamIbMergeVfs()) {
+    out[len - 3] = '0';
+    out[len - 4] = '0';
+  }
+}
+
 static ncclResult_t ncclIbGetPciPath(char* devName, char** path, int* realPort) {
   char devicePath[PATH_MAX];
   snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
   char* p = realpath(devicePath, NULL);
+  // Keep real path unchanged
+  *path = p;
   if (p == NULL) {
     WARN("Could not find real path of %s (%s)", devName, devicePath);
   } else {
-    // Merge multi-port NICs into the same PCI device
-    p[strlen(p)-1] = '0';
-    // Also merge virtual functions (VF) into the same device
-    if (ncclParamIbMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
+    char normalized[PATH_MAX];
+    ncclIbNormalizePciPath(p, normalized, PATH_MAX);
     // Keep the real port aside (the ibv port is always 1 on recent cards)
     *realPort = 0;
-    for (int d=0; d<ncclNIbDevs; d++) {
-      if (ncclIbMatchVfPath(p, ncclIbDevs[d].pciPath)) (*realPort)++;
+    for (int d = 0; d < ncclNIbDevs; d++) {
+      char otherNorm[PATH_MAX];
+      ncclIbNormalizePciPath(ncclIbDevs[d].pciPath, otherNorm, PATH_MAX);
+      if (ncclIbMatchVfPath(normalized, otherNorm)) {
+        (*realPort)++;
+      }
     }
   }
-  *path = p;
   return ncclSuccess;
 }
 
@@ -693,35 +715,38 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   }
 
   // Always count up number of merged devices
-  ncclIbMergedDev* mDev = ncclIbMergedDevs + ncclNMergedIbDevs;
-  mDev->vProps.ndevs = 0;
-  mDev->speed = 0;
-
+  ncclIbMergedDev tmp;
+  memset(&tmp,0,sizeof(tmp));
+  bool used[MAX_IB_DEVS] = {0};
   for (int i = 0; i < props->ndevs; i++) {
-    ncclIbDev* dev = ncclIbDevs + props->devs[i];
-    if (mDev->vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
-    mDev->vProps.devs[mDev->vProps.ndevs++] = props->devs[i];
-    mDev->speed += dev->speed;
-    // Each successive time, copy the name '+' new name
-    if (mDev->vProps.ndevs > 1) {
-      snprintf(mDev->devName + strlen(mDev->devName), sizeof(mDev->devName) - strlen(mDev->devName), "+%s", dev->devName);
-    // First time, copy the plain name
-    } else {
-      strncpy(mDev->devName, dev->devName, MAXNAMESIZE);
-    }
-  }
-
-  // Check link layers
-  ncclIbDev* dev0 = ncclIbDevs + props->devs[0];
-  for (int i = 1; i < props->ndevs; i++) {
-    if (props->devs[i] >= ncclNIbDevs) {
+    if( props->devs[i]  < 0 || props->devs[i] >= ncclNIbDevs ) {
       WARN("NET/IB : Cannot use physical device %d, max %d", props->devs[i], ncclNIbDevs);
       return ncclInvalidUsage;
     }
-    ncclIbDev* dev = ncclIbDevs + props->devs[i];
+    if(used[props->devs[i]]) continue;
+    const ncclIbDev* dev = ncclIbDevs + props->devs[i];
+    if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
+    tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
+    tmp.speed += dev->speed;
+    // Each successive time, copy the name '+' new name
+    if (tmp.vProps.ndevs > 1) {
+      size_t off = strlen(tmp.devName);
+      snprintf(tmp.devName + off, sizeof(tmp.devName) - off, "+%s", dev->devName);
+    // First time, copy the plain name
+    } else {
+      strncpy(tmp.devName, dev->devName, MAXNAMESIZE-1);
+      tmp.devName[MAXNAMESIZE-1] = '\0';
+    }
+    used[props->devs[i]] = true;
+  }
+
+  // Check link layers
+  const ncclIbDev* dev0 = ncclIbDevs + tmp.vProps.devs[0];
+  for (int i = 1; i < tmp.vProps.ndevs; i++) {
+    const ncclIbDev* dev = ncclIbDevs + tmp.vProps.devs[i];
     if (dev->link != dev0->link) {
       WARN("NET/IB : Attempted to merge incompatible devices: [%d]%s:%d/%s and [%d]%s:%d/%s. Try selecting NICs of only one link type using NCCL_IB_HCA",
-        props->devs[0], dev0->devName, dev0->portNum, NCCL_IB_LLSTR(dev0->link), props->devs[i], dev->devName, dev->portNum, NCCL_IB_LLSTR(dev->link));
+        tmp.vProps.devs[0], dev0->devName, dev0->portNum, NCCL_IB_LLSTR(dev0->link),tmp.vProps.devs[i], dev->devName, dev->portNum, NCCL_IB_LLSTR(dev->link));
       return ncclInvalidUsage;
     }
   }
@@ -730,8 +755,8 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   //format -> 0000:00 
   char root0[8]; 
   ncclIbGetPciRootFromPath(dev0->pciPath, root0, sizeof(root0));
-  for (int i = 1; i < props->ndevs; i++) {
-    ncclIbDev* dev = ncclIbDevs + props->devs[i];
+  for (int i = 1; i < tmp.vProps.ndevs; i++) {
+    const ncclIbDev* dev = ncclIbDevs + tmp.vProps.devs[i];
     int numa_i = ncclIbGetNumaNodeFromPath(dev->pciPath);
     if (numa0 >= 0 && numa_i >= 0 && numa_i != numa0) {
       WARN("NET/IB : Merging NICs across NUMA nodes (%s numa=%d, %s numa=%d). "
@@ -739,7 +764,6 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
            dev0->devName, numa0, dev->devName, numa_i);
       break;
     }
-
     char root_i[8];
     ncclIbGetPciRootFromPath(dev->pciPath, root_i, sizeof(root_i));
     if (strcmp(root_i, root0) != 0) {
@@ -750,9 +774,9 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
       break;
     }
   }
-
+  ncclIbMergedDevs[ncclNMergedIbDevs] = tmp;
   *d = ncclNMergedIbDevs++;
-  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, mDev->devName, mDev->speed, mDev->vProps.ndevs);
+  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, tmp.devName, tmp.speed, tmp.vProps.ndevs);
   return ncclSuccess;
 }
 
@@ -910,14 +934,6 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
               PTHREADCHECKGOTO(pthread_create(&ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs), "pthread_create", ret, fail);
               ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
               PTHREADCHECKGOTO(pthread_detach(ncclIbAsyncThread), "pthread_detach", ret, fail); // will not be pthread_join()'d
-
-              // Add this plain physical device to the list of virtual devices
-              int vDev;
-              ncclNetVDeviceProps_t vProps = {0};
-              vProps.ndevs = 1;
-              vProps.devs[0] = ncclNIbDevs;
-              NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps));
-
               ncclNIbDevs++;
               nPorts++;
             }
@@ -937,8 +953,14 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
     // Determine whether RELAXED_ORDERING is enabled and possible
     ncclIbRelaxedOrderingEnabled = ncclIbRelaxedOrderingCapable();
     for (int d = 0; d < ncclNIbDevs; d++) {
-        snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
-          ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
+      snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
+        ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
+      // Add this plain physical device to the list of virtual devices
+      int vDev;
+      ncclNetVDeviceProps_t vProps = {0};
+      vProps.ndevs = 1;
+      vProps.devs[0] = d;
+      NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps)); 
     }
     char addrline[SOCKET_NAME_MAXLEN+1];
     INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",

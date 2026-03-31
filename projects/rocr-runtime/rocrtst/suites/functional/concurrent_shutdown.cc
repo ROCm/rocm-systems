@@ -152,5 +152,11 @@ void ConcurrentShutdownTest::TestConcurrentShutdown(void) {
       std::cout << Id << "Thread creation failed " << std::endl;
     }
   }
+
+  for (int Id = 0; Id < NumOfThreads; ++Id) {
+    pthread_join(ThreadId[Id], nullptr);
+  }
+
+  pthread_attr_destroy(&attr);
 }
 #undef RET_IF_HSA_ERR

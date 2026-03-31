@@ -404,7 +404,7 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
     if (s->GetParentStream() != nullptr) {
       reinterpret_cast<hip::Stream*>(s->GetParentStream())->EraseParallelCaptureStream(stream);
     }
-    s->EndCapture();
+    [[maybe_unused]] auto error = s->EndCapture();
   }
   s->GetDevice()->RemoveStreamFromPools(s);
 

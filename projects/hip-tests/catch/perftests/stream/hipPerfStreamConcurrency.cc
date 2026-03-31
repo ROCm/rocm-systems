@@ -344,7 +344,7 @@ void hipPerfStreamConcurrency::checkData(uint* ptr) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfStreamConcurrency) {
+HIP_TEST_CASE(Perf_hipPerfStreamConcurrency) {
   hipPerfStreamConcurrency streamConcurrency;
   int deviceId = 0;
   REQUIRE(true == streamConcurrency.open(deviceId));

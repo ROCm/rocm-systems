@@ -1023,7 +1023,7 @@ static ncclResult_t ncclNetGetDeviceHandle(ncclNetDeviceType type, int version, 
 static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   ncclNet_ctxt_t ncclNetCtxt = {};
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
-  bool rcclAinicRoce = ((rcclParamAinicRoce() == 1) ? true : false);
+  bool rcclAinicRoce = rcclUseAinic();
   if (reqSize != sizeof(netSendConnectArgs)) return ncclInternalError;
   ncclResult_t ret = ncclSuccess;
   netSendConnectArgs* req = (netSendConnectArgs*) reqBuff;
@@ -1245,7 +1245,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   resources->tpRemoteProxyRank = req->proxyRank;
   ncclResult_t ret = ncclSuccess;
   ncclNet_ctxt_t ncclNetCtxt = {};
-  bool rcclAinicRoce = ((rcclParamAinicRoce() == 1) ? true : false);
+  bool rcclAinicRoce = rcclUseAinic();
 
   setNetAttrs(proxyState, &req->netAttr);
 

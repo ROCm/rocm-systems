@@ -94,6 +94,7 @@ endif()
 # ------------------------------------------------------------------------------#
 
 set(ROCPROFSYS_PYTHON_VALIDATION_FILES
+    ${CMAKE_CURRENT_LIST_DIR}/check_amd_smi_metrics.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
