@@ -218,9 +218,22 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
 
 soc = test_utils.gpu_soc()
 
+_profile_skip_reason = None
+if soc is None:
+    _profile_skip_reason = "GPU not supported by profile baseline tests"
+
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
-Baseline_dir = str(Path("tests/workloads/vcopy/" + soc).resolve())
+if soc is None:
+    Baseline_dir = ""
+else:
+    Baseline_dir = Path("tests/workloads/vcopy") / soc
+    if _profile_skip_reason is None and not Baseline_dir.exists():
+        _profile_skip_reason = f"No profile baseline workload available for {soc}"
+    Baseline_dir = str(Baseline_dir.resolve())
+
+if _profile_skip_reason is not None:
+    pytestmark = pytest.mark.skip(reason=_profile_skip_reason)
 
 
 def baseline_compare_metric(test_name, workload_dir, args=[]):
