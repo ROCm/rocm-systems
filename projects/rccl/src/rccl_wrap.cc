@@ -40,6 +40,7 @@ RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
+RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -411,13 +412,9 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Check if user explicitly disabled direct AllGather
-  static int userDirectAllGatherInput = -2;
-  if (userDirectAllGatherInput == -2) {
-    const char *inputStr = getenv("RCCL_DIRECT_ALLGATHER_DISABLE");
-    userDirectAllGatherInput = !inputStr ? 0 : 1;
-  }
-  if (userDirectAllGatherInput == 1) {
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled.");
+  static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
+  if (userDirectAllGatherInput != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled by environment variable.");
     return false;
   }
 
