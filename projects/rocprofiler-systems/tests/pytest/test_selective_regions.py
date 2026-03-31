@@ -222,9 +222,9 @@ class TestSelectiveRegion(RocprofsysTest):
 @pytest.mark.parametrize(
     "target",
     [
-        pytest.param("selective_region_pause_1", id="1"),
-        pytest.param("selective_region_pause_2", id="2"),
-        pytest.param("selective_region_pause_3", id="3"),
+        pytest.param("selective_region_pause_1", id="inside"),
+        pytest.param("selective_region_pause_2", id="before"),
+        pytest.param("selective_region_pause_3", id="outside"),
     ],
 )
 class TestSelectiveRegionPause(RocprofsysTest):
@@ -283,7 +283,7 @@ class TestSelectiveRegionPause(RocprofsysTest):
             pass_regex=["Region1"],
         )
 
-    def test_region_1_filter(self, mode, target, selective_region_env):
+    def test_filtered(self, mode, target, selective_region_env):
         """With Region1 filter: region filtering combined with pause/resume."""
         env = selective_region_env.copy()
         env["ROCPROFSYS_TRACE_REGION"] = "Region1"
