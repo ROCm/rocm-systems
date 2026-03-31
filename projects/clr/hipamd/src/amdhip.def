@@ -533,6 +533,7 @@ hipKernelGetAttribute
 hipKernelSetAttribute
 hipKernelGetFunction
 
+#ifdef WITH_HSA_DEVICE
 ; HSA Runtime exports (will be deprecated)
 hsa_agent_get_info
 hsa_code_object_reader_create_from_file
@@ -564,3 +565,4 @@ hsa_amd_memory_pool_get_info
 hsa_amd_spm_acquire
 hsa_amd_spm_release
 hsa_amd_spm_set_dest_buffer
+#endif
