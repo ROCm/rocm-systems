@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+x
+
 #include "core/amd_smi.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"

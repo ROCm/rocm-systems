@@ -203,6 +203,7 @@ endif()
 # debug-safe optimizations
 #
 add_cxx_flag_if_avail("-faligned-new")
+add_cxx_flag_if_avail("-fdiagnostics-color=always")
 
 rocprofiler_systems_add_interface_library(rocprofiler-systems-lto
                                           "Adds link-time-optimization flags"
