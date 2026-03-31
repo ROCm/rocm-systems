@@ -22,6 +22,7 @@
 
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
+#include "hip_hrr.h"
 
 #undef hipChooseDevice
 #undef hipDeviceProp_t
@@ -680,6 +681,9 @@ hipError_t hipDeviceSynchronize() {
   CHECK_SUPPORTED_DURING_CAPTURE();
   constexpr bool kDoWaitForCpu = false;
   hip::getCurrentDevice()->SyncAllStreams(kDoWaitForCpu);
+  if (hrr::enabled()) {
+    hrr::record_device_sync();
+  }
   HIP_RETURN_DURATION(hipSuccess);
 }
 

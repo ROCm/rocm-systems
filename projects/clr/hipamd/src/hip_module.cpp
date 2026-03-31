@@ -28,6 +28,8 @@
 #include "hip_event.hpp"
 #include "hip_platform.hpp"
 #include "hip_comgr_helper.hpp"
+#include "hip_global.hpp"
+#include "hip_hrr.h"
 
 namespace hip {
 
@@ -63,7 +65,25 @@ hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
 
 hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
   HIP_INIT_API(hipModuleLoadData, module, image);
-  HIP_RETURN(PlatformState::Instance().LoadModule(module, 0, image));
+  hipError_t status = PlatformState::Instance().LoadModule(module, 0, image);
+  if (status == hipSuccess && hrr::enabled() && module && *module && image) {
+    // Estimate code object size from ELF header if available
+    size_t image_size = 0;
+    const uint8_t* p = static_cast<const uint8_t*>(image);
+    if (p[0] == 0x7f && p[1] == 'E' && p[2] == 'L' && p[3] == 'F') {
+      // Read ELF64 e_shoff + e_shnum * e_shentsize for total size estimate
+      // For now use a conservative fixed scan (proper ELF parsing in M2)
+      const uint64_t* e_shoff = reinterpret_cast<const uint64_t*>(p + 40);
+      const uint16_t* e_shentsize = reinterpret_cast<const uint16_t*>(p + 58);
+      const uint16_t* e_shnum = reinterpret_cast<const uint16_t*>(p + 60);
+      image_size = static_cast<size_t>(*e_shoff +
+                   static_cast<size_t>(*e_shentsize) * (*e_shnum));
+    }
+    if (image_size > 0) {
+      hrr::record_module_load(*module, image, image_size);
+    }
+  }
+  HIP_RETURN(status);
 }
 
 hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned int numOptions,
@@ -584,6 +604,22 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
       launch_params.local_[2] == 0) {
     HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (hrr::enabled()) {
+    // Extract kernel name from hipFunction_t if available
+    const char* kname = nullptr;
+    if (f) {
+      hip::DeviceFunc* devFunc = hip::DeviceFunc::asFunction(f);
+      if (devFunc) {
+        kname = devFunc->name().c_str();
+      }
+    }
+    hrr::record_kernel_launch(kname,
+                              gridDimX, gridDimY, gridDimZ,
+                              blockDimX, blockDimY, blockDimZ,
+                              sharedMemBytes, hStream,
+                              kernelParams, 0);
   }
 
   HIP_RETURN(

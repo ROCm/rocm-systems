@@ -149,6 +149,18 @@ release(bool, GPU_ENABLE_WGP_MODE, true,                                      \
         "Enables WGP Mode in HW if available")                                \
 release(bool, GPU_DUMP_CODE_OBJECT, false,                                    \
         "Enable dump code object")                                            \
+release(bool, HIP_RECORD, false,                                              \
+        "Enable HIP Record & Replay trace capture")                          \
+release(cstring, HIP_RECORD_OUTPUT, "",                                       \
+        "Output directory for HRR trace (default: capture_TIMESTAMP.hrr)")   \
+release(cstring, HIP_RECORD_MODE, "inputs",                                   \
+        "Recording mode: timeline, inputs (default), or full")               \
+release(cstring, HIP_RECORD_KERNEL_FILTER, "",                                \
+        "Record only kernels matching this pattern (supports trailing *)")   \
+release(uint, HIP_RECORD_MAX_BLOB_MB, 0,                                     \
+        "Skip buffer capture above this size in MB (0 = no limit)")          \
+release(bool, HIP_RECORD_COMPRESS, false,                                     \
+        "Zstd-compress captured buffer blobs")                               \
 release(uint, GPU_MAX_USWC_ALLOC_SIZE, 2048,                                  \
         "Set a limit in Mb on the maximum USWC allocation size"               \
         "-1 = No limit")                                                      \

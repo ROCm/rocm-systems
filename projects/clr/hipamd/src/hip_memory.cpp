@@ -28,6 +28,7 @@
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
 #include "platform/external_memory.hpp"
+#include "hip_hrr.h"
 namespace hip {
 
 // Guards global hipArray set
@@ -758,7 +759,11 @@ hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flag
 hipError_t hipMalloc(void** ptr, size_t sizeBytes) {
   HIP_INIT_API(hipMalloc, ptr, sizeBytes);
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  HIP_RETURN_DURATION(ihipMalloc(ptr, sizeBytes, 0), ReturnPtrValue(ptr));
+  hipError_t status = ihipMalloc(ptr, sizeBytes, 0);
+  if (status == hipSuccess && hrr::enabled()) {
+    hrr::record_malloc(*ptr, sizeBytes, 0);
+  }
+  HIP_RETURN_DURATION(status, ReturnPtrValue(ptr));
 }
 
 hipError_t hipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
@@ -774,6 +779,9 @@ hipError_t hipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
 hipError_t hipFree(void* ptr) {
   HIP_INIT_API(hipFree, ptr);
   CHECK_STREAM_CAPTURE_SUPPORTED();
+  if (hrr::enabled()) {
+    hrr::record_free(ptr);
+  }
   HIP_RETURN(ihipFree(ptr));
 }
 
@@ -796,6 +804,10 @@ hipError_t hipMemcpy_common(void* dst, const void* src, size_t sizeBytes, hipMem
 
 hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind) {
   HIP_INIT_API(hipMemcpy, dst, src, sizeBytes, kind);
+  if (hrr::enabled()) {
+    hrr::record_memcpy(dst, src, sizeBytes, static_cast<unsigned int>(kind),
+                       nullptr);
+  }
   HIP_RETURN_DURATION(hipMemcpy_common(dst, src, sizeBytes, kind));
 }
 

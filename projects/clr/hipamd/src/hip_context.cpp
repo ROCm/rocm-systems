@@ -27,6 +27,7 @@
 #include "rocclr/os/os.hpp"
 
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include "hip_hrr.h"
 namespace hip {
 const HipToolsDispatchTable* GetHipToolsDispatchTable();
 }  // namespace hip
@@ -105,6 +106,13 @@ void init(bool* status) {
 
   // Complete platform initialization
   PlatformState::Instance().Init();
+
+  // Initialize HIP Record & Replay if HIP_RECORD=1
+  hrr::init();
+  if (hrr::enabled()) {
+    atexit(hrr::shutdown);
+  }
+
   *status = true;
 }
 
