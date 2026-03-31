@@ -200,6 +200,7 @@ Catch2 allows multiple ways in which you can debug the test case.
 
 ## External Libs being used
 - [Catch2](https://github.com/catchorg/Catch2) - Testing framework
+- [picojson](https://github.com/kazuho/picojson) - For config file parsing
 - [PyYAML](https://pyyaml.org/) - For config file parsing (Python script)
 
 # Testing Guidelines
