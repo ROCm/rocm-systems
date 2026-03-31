@@ -1,0 +1,293 @@
+
+/*
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+/**
+ * @addtogroup hipGreenCtxResourceSplit hipGreenCtxResourceSplit
+ * @{
+ * @ingroup GreenContextTest
+ * `hipDevSmResourceSplit` and `hipDevSmResourceSplitByCount` APIs
+ */
+
+#include <hip_test_common.hh>
+#include <hip_test_kernels.hh>
+#include "hip_greenctx_common.hh"
+
+#include <vector>
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Splits device SM resources into 2 explicit groups via hipDevSmResourceSplit
+ *    and verifies the output resource counts match the request.
+ */
+HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Sanity) {
+  HIP_CHECK(hipSetDevice(0));
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+
+  hipDevResource input{};
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+
+  unsigned int totalSMs = input.sm.smCount;
+  unsigned int alignment = input.sm.smCoscheduledAlignment;
+  unsigned int halfSMs = (totalSMs / 2 / alignment) * alignment;
+  REQUIRE(halfSMs >= 2);
+
+  hipDevSmResourceGroupParams params[2] = {};
+  params[0].smCount = halfSMs;
+  params[1].smCount = halfSMs;
+
+  hipDevResource result[2] = {};
+  hipDevResource remainder{};
+  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params));
+
+  REQUIRE(result[0].type == hipDevResourceTypeSm);
+  REQUIRE(result[0].sm.smCount == halfSMs);
+  REQUIRE(result[1].type == hipDevResourceTypeSm);
+  REQUIRE(result[1].sm.smCount == halfSMs);
+
+  unsigned int remainderSMs = 0;
+  if (remainder.type == hipDevResourceTypeSm) {
+    remainderSMs = remainder.sm.smCount;
+  }
+  REQUIRE(result[0].sm.smCount + result[1].sm.smCount + remainderSMs == totalSMs);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Splits device SM resources via hipDevSmResourceSplitByCount using discovery
+ *    mode (result=NULL) to query possible groups, then performs the actual split
+ *    and verifies group counts and SM totals.
+ */
+HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Sanity) {
+  HIP_CHECK(hipSetDevice(0));
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+
+  hipDevResource input{};
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+
+  unsigned int nbGroups = 0;
+  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, 2));
+  REQUIRE(nbGroups > 0);
+
+  std::vector<hipDevResource> result(nbGroups);
+  hipDevResource remainder{};
+  unsigned int actualGroups = nbGroups;
+  HIP_CHECK(hipDevSmResourceSplitByCount(result.data(), &actualGroups, &input, &remainder, 0, 2));
+  REQUIRE(actualGroups == nbGroups);
+
+  unsigned int totalAssigned = 0;
+  for (unsigned int i = 0; i < actualGroups; i++) {
+    REQUIRE(result[i].type == hipDevResourceTypeSm);
+    REQUIRE(result[i].sm.smCount >= 2);
+    totalAssigned += result[i].sm.smCount;
+  }
+  unsigned int remainderSMs = 0;
+  if (remainder.type == hipDevResourceTypeSm) {
+    remainderSMs = remainder.sm.smCount;
+  }
+  REQUIRE(totalAssigned + remainderSMs == input.sm.smCount);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Validates error codes from hipDevSmResourceSplit for invalid parameters:
+ *    NULL input, NULL groupParams, non-zero flags, wrong resource type,
+ *    smCount < 2, and smCount exceeding total SMs.
+ */
+HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Negative) {
+  HIP_CHECK(hipSetDevice(0));
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+
+  hipDevResource input{};
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+
+  hipDevResource result[2] = {};
+  hipDevSmResourceGroupParams params[2] = {};
+  params[0].smCount = 2;
+  params[1].smCount = 2;
+
+  // NULL input
+  REQUIRE(hipDevSmResourceSplit(result, 2, nullptr, nullptr, 0, params)
+          == hipErrorInvalidValue);
+
+  // NULL groupParams
+  REQUIRE(hipDevSmResourceSplit(result, 2, &input, nullptr, 0, nullptr)
+          == hipErrorInvalidValue);
+
+  // Non-zero flags (currently unsupported)
+  hipDevSmResourceGroupParams validParams[1] = {};
+  validParams[0].smCount = 2;
+  REQUIRE(hipDevSmResourceSplit(result, 1, &input, nullptr, 1, validParams)
+          == hipErrorInvalidValue);
+
+  // Wrong resource type
+  hipDevResource badInput = input;
+  badInput.type = hipDevResourceTypeInvalid;
+  REQUIRE(hipDevSmResourceSplit(result, 1, &badInput, nullptr, 0, validParams)
+          == hipErrorInvalidResourceType);
+
+  // smCount < minSmPartitionSize (must be >= minSmPartitionSize)
+  hipDevSmResourceGroupParams tooSmall[1] = {};
+  tooSmall[0].smCount = input.sm.minSmPartitionSize - 1;
+  REQUIRE(hipDevSmResourceSplit(result, 1, &input, nullptr, 0, tooSmall)
+          == hipErrorInvalidResourceConfiguration);
+
+  // smCount exceeds total SMs
+  hipDevSmResourceGroupParams tooLarge[1] = {};
+  tooLarge[0].smCount = input.sm.smCount + 2;
+  REQUIRE(hipDevSmResourceSplit(result, 1, &input, nullptr, 0, tooLarge)
+          == hipErrorInvalidResourceConfiguration);
+
+  // Total smCount across groups exceeds available SMs
+  hipDevSmResourceGroupParams overcommit[2] = {};
+  overcommit[0].smCount = input.sm.smCount;
+  overcommit[1].smCount = 2;
+  REQUIRE(hipDevSmResourceSplit(result, 2, &input, nullptr, 0, overcommit)
+          == hipErrorInvalidResourceConfiguration);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Splits SM resources into 2 explicit groups via hipDevSmResourceSplit using
+ *    a 60/40 split.  Any SMs left over due to alignment are captured in the
+ *    remainder.  Creates a green context and stream from each partition, runs a
+ *    vectorADD kernel, and verifies correctness.
+ */
+HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Functional) {
+  HIP_CHECK(hipSetDevice(0));
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+
+  hipDevResource input{};
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+
+  unsigned int totalSMs = input.sm.smCount;
+  unsigned int alignment = input.sm.smCoscheduledAlignment;
+  unsigned int groupA = (static_cast<unsigned int>(totalSMs * 0.6) / alignment) * alignment;
+  unsigned int groupB = (static_cast<unsigned int>(totalSMs * 0.4) / alignment) * alignment;
+  REQUIRE(groupA >= alignment);
+  REQUIRE(groupB >= alignment);
+
+  hipDevSmResourceGroupParams params[2] = {};
+  params[0].smCount = groupA;
+  params[1].smCount = groupB;
+
+  hipDevResource result[2] = {};
+  hipDevResource remainder{};
+  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params));
+
+  REQUIRE(result[0].sm.smCount == groupA);
+  REQUIRE(result[1].sm.smCount == groupB);
+
+  unsigned int remainderSMs = 0;
+  if (remainder.type == hipDevResourceTypeSm) {
+    remainderSMs = remainder.sm.smCount;
+  }
+  REQUIRE(result[0].sm.smCount + result[1].sm.smCount + remainderSMs == totalSMs);
+
+  RunVectorAddOnResource(&result[0], 0);
+  RunVectorAddOnResource(&result[1], 0);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Validates error codes from hipDevSmResourceSplitByCount for invalid
+ *    parameters: NULL nbGroups, NULL input, and wrong resource type.
+ */
+HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Negative) {
+  HIP_CHECK(hipSetDevice(0));
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+
+  hipDevResource input{};
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+
+  unsigned int nbGroups = 2;
+
+  // NULL nbGroups
+  REQUIRE(hipDevSmResourceSplitByCount(nullptr, nullptr, &input, nullptr, 0, 2)
+          == hipErrorInvalidValue);
+
+  // NULL input
+  REQUIRE(hipDevSmResourceSplitByCount(nullptr, &nbGroups, nullptr, nullptr, 0, 2)
+          == hipErrorInvalidValue);
+
+  // Wrong resource type
+  hipDevResource badInput = input;
+  badInput.type = hipDevResourceTypeInvalid;
+  REQUIRE(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &badInput, nullptr, 0, 2)
+          == hipErrorInvalidResourceType);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Splits SM resources via hipDevSmResourceSplitByCount into 2 partitions
+ *    using a minCount of ~40% of total SMs.  Any SMs left over due to
+ *    alignment are captured in the remainder.  Creates a green context and
+ *    stream from each partition, runs a vectorADD kernel, and verifies
+ *    correctness.
+ */
+HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Functional) {
+  HIP_CHECK(hipSetDevice(0));
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+
+  hipDevResource input{};
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+
+  unsigned int totalSMs = input.sm.smCount;
+  unsigned int alignment = input.sm.smCoscheduledAlignment;
+  unsigned int minCount = (static_cast<unsigned int>(totalSMs * 0.4) / alignment) * alignment;
+  REQUIRE(minCount >= alignment);
+
+  unsigned int nbGroups = 0;
+  HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, minCount));
+  REQUIRE(nbGroups >= 2);
+
+  unsigned int requestedGroups = 2;
+  hipDevResource result[2] = {};
+  hipDevResource remainder{};
+  HIP_CHECK(hipDevSmResourceSplitByCount(result, &requestedGroups, &input, &remainder, 0,
+                                         minCount));
+  REQUIRE(requestedGroups == 2);
+
+  unsigned int assignedSMs = result[0].sm.smCount + result[1].sm.smCount;
+  unsigned int remainderSMs = 0;
+  if (remainder.type == hipDevResourceTypeSm) {
+    remainderSMs = remainder.sm.smCount;
+  }
+  REQUIRE(assignedSMs + remainderSMs == totalSMs);
+
+  RunVectorAddOnResource(&result[0], 0);
+  RunVectorAddOnResource(&result[1], 0);
+}
+
+/**
+ * End doxygen group hipGreenCtxResourceSplit.
+ * @}
+ */

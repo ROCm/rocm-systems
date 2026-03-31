@@ -16,3 +16,15 @@ greenctx:
     <<: *level_2
   Unit_hipExecutionCtxRecordWait_Blocking:
     <<: *level_2
+  Unit_hipGreenCtxResourceSplit_Sanity:
+    <<: *level_2
+  Unit_hipGreenCtxResourceSplit_By_Count_Sanity:
+    <<: *level_2
+  Unit_hipGreenCtxResourceSplit_Negative:
+    <<: *level_2
+  Unit_hipGreenCtxResourceSplit_Functional:
+    <<: *level_2
+  Unit_hipGreenCtxResourceSplit_By_Count_Negative:
+    <<: *level_2
+  Unit_hipGreenCtxResourceSplit_By_Count_Functional:
+    <<: *level_2
