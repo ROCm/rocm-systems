@@ -107,9 +107,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
       HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "This test needs atleast 2 gpus, but the system has less than"
-        " 2 gpus hence skipping the test");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
@@ -200,9 +198,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
       HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(
-        "This test needs atleast 2 gpus, but the system has less than"
-        " 2 gpus hence skipping the test");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
