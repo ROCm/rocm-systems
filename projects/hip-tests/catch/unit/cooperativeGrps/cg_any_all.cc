@@ -29,7 +29,7 @@ __global__ void coop_any_coal_odd_even(unsigned int* data, unsigned int even_val
   }
 }
 
-TEST_CASE(Unit_coopgroups_any) {
+HIP_TEST_CASE(Unit_coopgroups_any) {
   const size_t warp_size = getWarpSize();
 
   unsigned int *data, *res;
@@ -270,7 +270,7 @@ __global__ void coop_all_coal_odd_even(unsigned int* data, unsigned int even_val
   }
 }
 
-TEST_CASE(Unit_coopgroups_coal_all) {
+HIP_TEST_CASE(Unit_coopgroups_coal_all) {
   const size_t warp_size = getWarpSize();
 
   unsigned int *data, *res;
@@ -475,7 +475,7 @@ __global__ void coop_match_any_coal_odd_even(unsigned int* data, unsigned long l
   }
 }
 
-TEST_CASE(Unit_coopgroups_match_any_coal) {
+HIP_TEST_CASE(Unit_coopgroups_match_any_coal) {
   const size_t warp_size = getWarpSize();
 
   unsigned int* data;
@@ -545,7 +545,7 @@ __global__ void coop_match_all_coal_odd_even(unsigned int* data, unsigned long l
   }
 }
 
-TEST_CASE(Unit_coopgroups_match_all_coal) {
+HIP_TEST_CASE(Unit_coopgroups_match_all_coal) {
   const size_t warp_size = getWarpSize();
 
   unsigned int* data;

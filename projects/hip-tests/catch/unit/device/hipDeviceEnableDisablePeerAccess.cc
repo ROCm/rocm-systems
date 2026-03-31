@@ -30,7 +30,7 @@
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceEnableDisablePeerAccess_positive) {
+HIP_TEST_CASE(Unit_hipDeviceEnableDisablePeerAccess_positive) {
   int canAccessPeer = 0;
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
@@ -79,7 +79,7 @@ TEST_CASE(Unit_hipDeviceEnableDisablePeerAccess_positive) {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceEnablePeerAccess_negative) {
+HIP_TEST_CASE(Unit_hipDeviceEnablePeerAccess_negative) {
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -143,7 +143,7 @@ TEST_CASE(Unit_hipDeviceEnablePeerAccess_negative) {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceDisablePeerAccess_negative) {
+HIP_TEST_CASE(Unit_hipDeviceDisablePeerAccess_negative) {
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");

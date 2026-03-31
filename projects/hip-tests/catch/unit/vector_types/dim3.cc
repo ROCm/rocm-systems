@@ -35,7 +35,7 @@ __global__ void Dim3VectorKernel(dim3* vector, const uint32_t x, const uint32_t 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_dim3_Empty_Positive_Device) {
+HIP_TEST_CASE(Unit_dim3_Empty_Positive_Device) {
   dim3 vector_h{0, 0, 0};
   dim3* vector_d;
   HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)));
@@ -62,7 +62,7 @@ TEST_CASE(Unit_dim3_Empty_Positive_Device) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_dim3_X_Positive_Device) {
+HIP_TEST_CASE(Unit_dim3_X_Positive_Device) {
   dim3 vector_h{0, 0, 0};
   dim3* vector_d;
   HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)));
@@ -92,7 +92,7 @@ TEST_CASE(Unit_dim3_X_Positive_Device) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_dim3_XY_Positive_Device) {
+HIP_TEST_CASE(Unit_dim3_XY_Positive_Device) {
   dim3 vector_h{0, 0, 0};
   dim3* vector_d;
   HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)));
@@ -125,7 +125,7 @@ TEST_CASE(Unit_dim3_XY_Positive_Device) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_dim3_XYZ_Positive_Device) {
+HIP_TEST_CASE(Unit_dim3_XYZ_Positive_Device) {
   dim3 vector_h{0, 0, 0};
   dim3* vector_d;
   HIP_CHECK(hipMalloc(&vector_d, sizeof(dim3)));
@@ -162,7 +162,7 @@ TEST_CASE(Unit_dim3_XYZ_Positive_Device) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_dim3_Empty_Positive_Host) {
+HIP_TEST_CASE(Unit_dim3_Empty_Positive_Host) {
   dim3 vector = dim3();
   REQUIRE(vector.x == 1);
   REQUIRE(vector.y == 1);
@@ -182,7 +182,7 @@ TEST_CASE(Unit_dim3_Empty_Positive_Host) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_dim3_X_Positive_Host) {
+HIP_TEST_CASE(Unit_dim3_X_Positive_Host) {
   uint32_t value_x =
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
@@ -205,7 +205,7 @@ TEST_CASE(Unit_dim3_X_Positive_Host) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_dim3_XY_Positive_Host) {
+HIP_TEST_CASE(Unit_dim3_XY_Positive_Host) {
   uint32_t value_x =
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());
@@ -231,7 +231,7 @@ TEST_CASE(Unit_dim3_XY_Positive_Host) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_dim3_XYZ_Positive_Host) {
+HIP_TEST_CASE(Unit_dim3_XYZ_Positive_Host) {
   uint32_t value_x =
       GENERATE(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max() / 2,
                std::numeric_limits<uint32_t>::max());

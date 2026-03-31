@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ----------------------------------------------------------------------------- #
 #
 # rocprofiler-systems: contains all instrumentation functionality
@@ -49,7 +52,6 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ucx>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-libva>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ptl>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>

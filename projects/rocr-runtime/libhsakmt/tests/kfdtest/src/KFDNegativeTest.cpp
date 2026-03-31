@@ -91,7 +91,7 @@ TEST_F(KFDNegativeTest, BasicPipeReset) {
             queue.Destroy();
 
             // child expects hw exception event
-            EXPECT_SUCCESS(hsaKmtWaitOnEvent(resetEvent, g_TestTimeOut));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent, g_TestTimeOut));
             EXPECT_EQ(resetEvent->EventData.EventType, HSA_EVENTTYPE_HW_EXCEPTION);
 
             LOG() << "Child ==> Complete" << std::endl;
@@ -110,7 +110,7 @@ TEST_F(KFDNegativeTest, BasicPipeReset) {
             waitpid(childPid, &childStatus, 0);
 
             // parent process should not intercept reset event on child queue reset
-            EXPECT_NE(HSAKMT_STATUS_SUCCESS, hsaKmtWaitOnEvent(resetEvent, 100));
+            EXPECT_NE(HSAKMT_STATUS_SUCCESS, HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent, 100));
 
             HsaMemoryBuffer destBuf(PAGE_SIZE, defaultGPUNode, false);
             destBuf.Fill(0xFF);
@@ -125,8 +125,8 @@ TEST_F(KFDNegativeTest, BasicPipeReset) {
             queue.Wait4PacketConsumption(event);
             EXPECT_TRUE(WaitOnValue(destBuf.As<unsigned int*>(), 0));
 
-            hsaKmtDestroyEvent(event);
-            hsaKmtDestroyEvent(resetEvent);
+            HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
+            HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent);
             EXPECT_SUCCESS(queue.Destroy());
 
             LOG() << "Parent ==> Complete" << std::endl;
@@ -208,9 +208,9 @@ TEST_F(KFDNegativeTest, BasicSDMAReset) {
                 queue.Destroy();
 
                 // child expects hw exception event
-                EXPECT_SUCCESS(hsaKmtWaitOnEvent(resetEvent, g_TestTimeOut));
+                EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent, g_TestTimeOut));
                 EXPECT_EQ(resetEvent->EventData.EventType, HSA_EVENTTYPE_HW_EXCEPTION);
-                hsaKmtDestroyEvent(resetEvent);
+                HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent);
 
                 // ack reset to parent and wait for parent to check healthy queue
                 write(pipe2[1], &buf2, 1);
@@ -257,12 +257,12 @@ TEST_F(KFDNegativeTest, BasicSDMAReset) {
                ASSERT_EQ(buf1, buf2);
 
                // expect no reset event, then update poll to trigger write completion check
-               EXPECT_NE(HSAKMT_STATUS_SUCCESS, hsaKmtWaitOnEvent(resetEvent, 100));
+               EXPECT_NE(HSAKMT_STATUS_SUCCESS, HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent, 100));
                poll[0] = 1;
                queue.Wait4PacketConsumption();
                EXPECT_TRUE(WaitOnValue(&dest[0], targetDestValue));
-               hsaKmtDestroyEvent(event);
-               hsaKmtDestroyEvent(resetEvent);
+               HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
+               HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, resetEvent);
                EXPECT_SUCCESS(queue.Destroy());
                write(pipe1[1], &buf1, 1);
             }

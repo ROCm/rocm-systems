@@ -35,7 +35,7 @@ class HipEventDestroyBenchmark : public Benchmark<HipEventDestroyBenchmark> {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipEventDestroy) {
+HIP_TEST_CASE(Performance_hipEventDestroy) {
   HipEventDestroyBenchmark benchmark;
   benchmark.Run();
 }

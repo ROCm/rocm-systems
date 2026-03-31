@@ -69,7 +69,7 @@ inline void checkFlags(unsigned int expected, unsigned int obtained) {
   REQUIRE(expected == obtained);
 }
 
-TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
+HIP_TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
   constexpr auto SIZE{LEN * sizeof(int)};
   int* A_h{nullptr};
 
@@ -102,7 +102,7 @@ TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
 }
 
 // Test Allocation with flags and getting flags in another thread
-TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
+HIP_TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
   constexpr auto SIZE{LEN * sizeof(int)};
   int* A_h{nullptr};
 
@@ -135,7 +135,7 @@ TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
 }
 
 // Test behaviour of hipHostGetFlags with invalid args
-TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
+HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
   constexpr auto SIZE{LEN * sizeof(int)};
   int* A_h{nullptr};
 
@@ -205,7 +205,7 @@ TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
   }
 }
 
-TEST_CASE(Unit_hipHostGetFlags_Capture) {
+HIP_TEST_CASE(Unit_hipHostGetFlags_Capture) {
   unsigned int host_flags = 0;
   void* host_ptr = nullptr;
   constexpr size_t kAllocSize = 1024;

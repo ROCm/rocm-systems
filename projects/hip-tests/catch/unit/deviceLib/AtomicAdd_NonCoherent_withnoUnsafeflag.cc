@@ -30,7 +30,7 @@ Output: atomicAdd API would work and the 0/P is INITIAL_VAL + INC_VAL
         global_atomic_cmpswap instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE(Unit_AtomicAdd_NonCoherentwithnounsafeflag, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_AtomicAdd_NonCoherentwithnounsafeflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

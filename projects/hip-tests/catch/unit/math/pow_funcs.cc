@@ -46,7 +46,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(exp, 2, 1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_exp_expf_Negative_RTC) { NegativeTestRTCWrapper<4>(kExp); }
+HIP_TEST_CASE(Unit_Device_exp_expf_Negative_RTC) { NegativeTestRTCWrapper<4>(kExp); }
 
 /**
  * Test Description
@@ -77,7 +77,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(exp2, 2, 1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_exp2_exp2f_Negative_RTC) { NegativeTestRTCWrapper<4>(kExp2); }
+HIP_TEST_CASE(Unit_Device_exp2_exp2f_Negative_RTC) { NegativeTestRTCWrapper<4>(kExp2); }
 
 /**
  * Test Description
@@ -107,7 +107,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(expm1, 1, 1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_expm1_expm1f_Negative_RTC) { NegativeTestRTCWrapper<4>(kExpm1); }
+HIP_TEST_CASE(Unit_Device_expm1_expm1f_Negative_RTC) { NegativeTestRTCWrapper<4>(kExpm1); }
 
 MATH_UNARY_KERNEL_DEF(exp10)
 
@@ -124,7 +124,7 @@ MATH_UNARY_KERNEL_DEF(exp10)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_exp10f_Accuracy_Positive) {
+HIP_TEST_CASE(Unit_Device_exp10f_Accuracy_Positive) {
   auto exp10_ref = [](double arg) -> double { return std::pow(10, arg); };
   double (*ref)(double) = exp10_ref;
   UnarySinglePrecisionTest(exp10_kernel<float>, ref, ULPValidatorBuilderFactory<float>(2));
@@ -143,7 +143,7 @@ TEST_CASE(Unit_Device_exp10f_Accuracy_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_exp10_Accuracy_Positive) {
+HIP_TEST_CASE(Unit_Device_exp10_Accuracy_Positive) {
   auto exp10_ref = [](long double arg) -> long double { return std::pow(10, arg); };
   long double (*ref)(long double) = exp10_ref;
   UnaryDoublePrecisionTest(exp10_kernel<double>, ref, ULPValidatorBuilderFactory<double>(1));
@@ -161,7 +161,7 @@ TEST_CASE(Unit_Device_exp10_Accuracy_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_exp10_exp10f_Negative_RTC) { NegativeTestRTCWrapper<4>(kExp10); }
+HIP_TEST_CASE(Unit_Device_exp10_exp10f_Negative_RTC) { NegativeTestRTCWrapper<4>(kExp10); }
 
 template <typename T>
 __global__ void frexp_kernel(std::pair<T, int>* const ys, const size_t num_xs, T* const xs) {
@@ -197,7 +197,7 @@ template <typename T> std::pair<T, int> frexp_ref(T arg) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_frexpf_Accuracy_Positive) {
+HIP_TEST_CASE(Unit_Device_frexpf_Accuracy_Positive) {
   UnarySinglePrecisionTest(
       frexp_kernel<float>, frexp_ref<double>,
       PairValidatorBuilderFactory<float, int>(ULPValidatorBuilderFactory<float>(0),
@@ -219,7 +219,7 @@ TEST_CASE(Unit_Device_frexpf_Accuracy_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_frexp_Accuracy_Positive) {
+HIP_TEST_CASE(Unit_Device_frexp_Accuracy_Positive) {
   UnaryDoublePrecisionTest(
       frexp_kernel<double>, frexp_ref<long double>,
       PairValidatorBuilderFactory<double, int>(ULPValidatorBuilderFactory<double>(0),
@@ -238,7 +238,7 @@ TEST_CASE(Unit_Device_frexp_Accuracy_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_frexp_frexpf_Negative_RTC) { NegativeTestRTCWrapper<20>(kFrexp); }
+HIP_TEST_CASE(Unit_Device_frexp_frexpf_Negative_RTC) { NegativeTestRTCWrapper<20>(kFrexp); }
 
 
 /********** Binary Functions **********/
@@ -260,7 +260,7 @@ MATH_BINARY_KERNEL_DEF(pow)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Device_pow_Accuracy_Positive, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_Device_pow_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   auto pow_ref = [](RT arg1, RT arg2) -> RT {
     if (std::isinf(arg1) && arg2 < 0) return 0;
@@ -283,7 +283,7 @@ TEMPLATE_TEST_CASE(Unit_Device_pow_Accuracy_Positive, float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_pow_powf_Negative_RTC) { NegativeTestRTCWrapper<8>(kPow); }
+HIP_TEST_CASE(Unit_Device_pow_powf_Negative_RTC) { NegativeTestRTCWrapper<8>(kPow); }
 
 MATH_POW_INT_KERNEL_DEF(ldexp)
 
@@ -301,7 +301,7 @@ MATH_POW_INT_KERNEL_DEF(ldexp)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Device_ldexp_Accuracy_Positive, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_Device_ldexp_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   RT (*ref)(RT, int) = std::ldexp;
   PowIntFloatingPointTest(ldexp_kernel<TestType, int>, ref,
@@ -320,7 +320,7 @@ TEMPLATE_TEST_CASE(Unit_Device_ldexp_Accuracy_Positive, float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_ldexp_ldexpf_Negative_RTC) { NegativeTestRTCWrapper<8>(kLdexp); }
+HIP_TEST_CASE(Unit_Device_ldexp_ldexpf_Negative_RTC) { NegativeTestRTCWrapper<8>(kLdexp); }
 
 MATH_POW_INT_KERNEL_DEF(powi)
 
@@ -339,7 +339,7 @@ MATH_POW_INT_KERNEL_DEF(powi)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Device_powi_Accuracy_Positive, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_Device_powi_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   auto pow_ref = [](RT arg1, int arg2) -> RT {
     if (std::isinf(arg1) && arg2 < 0) return 0;
@@ -363,7 +363,7 @@ TEMPLATE_TEST_CASE(Unit_Device_powi_Accuracy_Positive, float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_powi_powif_Negative_RTC) { NegativeTestRTCWrapper<8>(kPowi); }
+HIP_TEST_CASE(Unit_Device_powi_powif_Negative_RTC) { NegativeTestRTCWrapper<8>(kPowi); }
 
 MATH_POW_INT_KERNEL_DEF(scalbn)
 
@@ -381,7 +381,7 @@ MATH_POW_INT_KERNEL_DEF(scalbn)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Device_scalbn_Accuracy_Positive, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_Device_scalbn_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   RT (*ref)(RT, int) = std::scalbn;
   PowIntFloatingPointTest(scalbn_kernel<TestType, int>, ref,
@@ -400,7 +400,7 @@ TEMPLATE_TEST_CASE(Unit_Device_scalbn_Accuracy_Positive, float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_scalbn_scalbnf_Negative_RTC) { NegativeTestRTCWrapper<8>(kScalbn); }
+HIP_TEST_CASE(Unit_Device_scalbn_scalbnf_Negative_RTC) { NegativeTestRTCWrapper<8>(kScalbn); }
 
 MATH_POW_INT_KERNEL_DEF(scalbln)
 
@@ -418,7 +418,7 @@ MATH_POW_INT_KERNEL_DEF(scalbln)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Device_scalbln_Accuracy_Positive, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_Device_scalbln_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   RT (*ref)(RT, long int) = std::scalbln;
   PowIntFloatingPointTest(scalbln_kernel<TestType, long int>, ref,
@@ -437,7 +437,7 @@ TEMPLATE_TEST_CASE(Unit_Device_scalbln_Accuracy_Positive, float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Device_scalbln_scalblnf_Negative_RTC) { NegativeTestRTCWrapper<8>(kScalbln); }
+HIP_TEST_CASE(Unit_Device_scalbln_scalblnf_Negative_RTC) { NegativeTestRTCWrapper<8>(kScalbln); }
 
 /**
  * End doxygen group MathTest.

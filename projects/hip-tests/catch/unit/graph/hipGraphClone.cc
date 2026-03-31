@@ -30,7 +30,7 @@ Functional:
 /* This test covers the negative scenarios of
    hipGraphClone API */
 
-TEST_CASE(Unit_hipGraphClone_Negative) {
+HIP_TEST_CASE(Unit_hipGraphClone_Negative) {
   SECTION("Passing nullptr to Cloned graph") {
     hipGraph_t graph;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -216,7 +216,7 @@ This testcase verifies following scenarios
    validate the result of the cloned graph
 3. Device context change for cloned graph
 */
-TEST_CASE(Unit_hipGraphClone_Functional) {
+HIP_TEST_CASE(Unit_hipGraphClone_Functional) {
   SECTION("hipGraphClone Basic Functionality") { hipGraphClone_Func(); }
   SECTION("hipGraphClone Modify Original graph") { hipGraphClone_Func(true); }
 
@@ -245,7 +245,7 @@ hipGraphClone is failing in CUDA in multi threaded
 scenario so excluded for nvidia
 */
 #if HT_AMD
-TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
+HIP_TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;

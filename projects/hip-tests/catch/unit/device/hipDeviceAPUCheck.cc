@@ -25,7 +25,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipDeviceAPUCheck) {
+HIP_TEST_CASE(Unit_hipDeviceAPUCheck) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   if (!prop.integrated) {

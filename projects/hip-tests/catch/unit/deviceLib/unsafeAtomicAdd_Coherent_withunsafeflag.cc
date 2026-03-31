@@ -32,7 +32,7 @@ Output: atomicAdd API would return 0 and the 0/P is 5
         atomic add instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentwithUnsafeflag, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentwithUnsafeflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

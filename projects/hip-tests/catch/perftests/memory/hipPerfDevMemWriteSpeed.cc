@@ -120,7 +120,7 @@ static bool hipPerfDevMemWriteSpeed_test() {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfDevMemWriteSpeed_test) {
+HIP_TEST_CASE(Perf_hipPerfDevMemWriteSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

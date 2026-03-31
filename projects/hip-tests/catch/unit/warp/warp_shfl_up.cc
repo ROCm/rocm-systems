@@ -40,7 +40,7 @@ template <typename T> class WarpShflUp : public WarpShflTest<WarpShflUp<T>, T> {
     LinearAllocGuard<unsigned int> deltas_dev(LinearAllocs::hipMalloc, alloc_size);
     deltas_.resize(width_);
     std::generate(deltas_.begin(), deltas_.end(),
-                  [this] { return GenerateRandomInteger(0u, static_cast<unsigned int>(width_)); });
+                  [this] { return GenRandomInteger(0u, static_cast<unsigned int>(width_)); });
     HIP_CHECK(hipMemcpy(deltas_dev.ptr(), deltas_.data(), alloc_size, hipMemcpyHostToDevice));
     shfl_up<<<this->grid_.grid_dim_, this->grid_.block_dim_>>>(arr_dev, input_dev, active_masks,
                                                                deltas_dev.ptr(), width_);
@@ -85,7 +85,7 @@ template <typename T> class WarpShflUp : public WarpShflTest<WarpShflUp<T>, T> {
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp shuffle
  */
-TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Up_Positive_Basic, int, unsigned int, long, unsigned long,
+HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Up_Positive_Basic, int, unsigned int, long, unsigned long,
                    long long, unsigned long long, float, double, __half, __half2) {
   int device;
   hipDeviceProp_t device_properties;

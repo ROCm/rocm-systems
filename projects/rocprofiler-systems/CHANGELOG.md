@@ -26,6 +26,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Added `libhsa-runtime64.so` and `libomp.so` to the internal library exclusion list for runtime instrumentation to prevent instrumenting of runtime library internals.
 - RCCL implementation refactored with `production_pmc_registrar` for improved testability and separation of concerns.
 - Unsupported RCCL datatypes now gracefully return 0 with `LOG_WARNING` instead of aborting profiler, allowing continued profiling with newer RCCL versions.
+- Added AI NIC support.
 
 ### Resolved issues
 

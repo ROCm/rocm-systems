@@ -27,10 +27,30 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <fstream>
-#include <set>
 #include <string>
+#include <thread>
+#include <vector>
+
+namespace
+{
+
+// Read all available data from a file descriptor into a string.
+// Used to collect child stdout redirected through a pipe.
+std::string
+read_fd(int fd)
+{
+    std::string result;
+    char        buf[4096];
+    ssize_t     n;
+    while((n = read(fd, buf, sizeof(buf))) > 0)
+        result.append(buf, static_cast<size_t>(n));
+    return result;
+}
+
+}  // namespace
 
 class logger_test : public ::testing::Test
 {
@@ -171,6 +191,20 @@ TEST_F(logger_test, logger_instance_returns_valid_logger)
     auto& logger = rocprofsys::logger_t::instance();
     EXPECT_NE(logger.name(), "");
     EXPECT_EQ(logger.name(), "rocprofiler-systems");
+
+    testing::internal::CaptureStdout();
+    logger.info("stdout_capture_test_marker");
+    logger.flush();
+    auto captured = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(captured.find("stdout_capture_test_marker"), std::string::npos)
+        << "Log message not found in stdout. Captured: " << captured;
+    EXPECT_NE(captured.find("[info]"), std::string::npos)
+        << "Log level not found in stdout. Captured: " << captured;
+
+    auto pid_marker = "P:" + std::to_string(getpid());
+    EXPECT_NE(captured.find(pid_marker), std::string::npos)
+        << "PID not found in stdout. Captured: " << captured;
 }
 
 TEST_F(logger_test, logger_instance_is_singleton)
@@ -213,29 +247,48 @@ TEST_F(logger_test, fork_resets_logger_in_child)
     auto& parent_logger     = rocprofsys::logger_t::instance();
     auto* parent_logger_ptr = &parent_logger;
 
+    int pipefd[2];
+    ASSERT_EQ(pipe(pipefd), 0) << "pipe() failed";
+
     pid_t child_pid = fork();
     if(child_pid == 0)
     {
-        auto& child_logger     = rocprofsys::logger_t::instance();
-        auto* child_logger_ptr = &child_logger;
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
 
-        bool logger_is_valid = (child_logger_ptr != nullptr);
+        auto& child_logger = rocprofsys::logger_t::instance();
+
         bool logger_has_name = (child_logger.name() == "rocprofiler-systems");
 
-        exit((logger_is_valid && logger_has_name) ? 0 : 1);
-    }
-    else
-    {
-        int status;
-        waitpid(child_pid, &status, 0);
-        int child_exit_code = WEXITSTATUS(status);
+        child_logger.info("fork_reset_child_marker");
+        child_logger.flush();
 
-        EXPECT_EQ(child_exit_code, 0) << "Child logger should be valid after fork reset";
-
-        auto& post_fork_parent_logger = rocprofsys::logger_t::instance();
-        EXPECT_EQ(&post_fork_parent_logger, parent_logger_ptr)
-            << "Parent logger should remain the same after fork";
+        _exit(logger_has_name ? 0 : 1);
     }
+
+    close(pipefd[1]);
+    auto child_output = read_fd(pipefd[0]);
+    close(pipefd[0]);
+
+    int status;
+    waitpid(child_pid, &status, 0);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0) << "Child logger should be valid after fork reset";
+
+    EXPECT_NE(child_output.find("fork_reset_child_marker"), std::string::npos)
+        << "Child log message not found in piped stdout. Got: " << child_output;
+    EXPECT_NE(child_output.find("[info]"), std::string::npos)
+        << "Log level not found in child output. Got: " << child_output;
+
+    auto child_pid_marker = "P:" + std::to_string(child_pid);
+    EXPECT_NE(child_output.find(child_pid_marker), std::string::npos)
+        << "Child PID not found in log output. Expected P:" << child_pid
+        << " in: " << child_output;
+
+    auto& post_fork_parent_logger = rocprofsys::logger_t::instance();
+    EXPECT_EQ(&post_fork_parent_logger, parent_logger_ptr)
+        << "Parent logger should remain the same after fork";
 }
 
 TEST_F(logger_test, logger_settings_default_values)
@@ -321,4 +374,294 @@ TEST_F(logger_test, fork_child_creates_log_file_with_child_pid)
         EXPECT_EQ(child_exit_code, 0)
             << "Child process failed to create its own log file with child PID";
     }
+}
+
+TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
+{
+    auto& logger = rocprofsys::logger_t::instance();
+
+    constexpr int     num_threads    = 4;
+    constexpr int     log_iterations = 200;
+    std::atomic<bool> keep_logging{ true };
+
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+    for(int i = 0; i < num_threads; ++i)
+    {
+        threads.emplace_back([&logger, &keep_logging, i] {
+            int iter = 0;
+            while(keep_logging.load(std::memory_order_relaxed))
+            {
+                logger.info("Thread {} iteration {}", i, iter++);
+                if(iter >= log_iterations) break;
+            }
+        });
+    }
+
+    int pipefd[2];
+    ASSERT_EQ(pipe(pipefd), 0) << "pipe() failed";
+
+    pid_t child_pid = fork();
+    if(child_pid == 0)
+    {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        // In child: threads don't exist, logger was reset by atfork handler.
+        // Verify we can acquire a fresh logger without deadlocking.
+        auto& child_logger = rocprofsys::logger_t::instance();
+        child_logger.info("concurrent_fork_child_marker");
+        child_logger.flush();
+        _exit(0);
+    }
+
+    close(pipefd[1]);
+    auto child_output = read_fd(pipefd[0]);
+    close(pipefd[0]);
+
+    keep_logging.store(false, std::memory_order_relaxed);
+    for(auto& t : threads)
+        t.join();
+
+    int   status;
+    pid_t waited = waitpid(child_pid, &status, 0);
+    ASSERT_NE(waited, -1) << "waitpid failed";
+    ASSERT_TRUE(WIFEXITED(status)) << "Child did not exit normally (possible deadlock)";
+    EXPECT_EQ(WEXITSTATUS(status), 0);
+
+    EXPECT_NE(child_output.find("concurrent_fork_child_marker"), std::string::npos)
+        << "Child log message not found after concurrent fork. Got: " << child_output;
+
+    auto child_pid_marker = "P:" + std::to_string(child_pid);
+    EXPECT_NE(child_output.find(child_pid_marker), std::string::npos)
+        << "Child PID not in log output. Expected P:" << child_pid
+        << " in: " << child_output;
+}
+
+TEST_F(logger_test, multiple_sequential_forks)
+{
+    constexpr int num_forks = 3;
+
+    for(int i = 0; i < num_forks; ++i)
+    {
+        int pipefd[2];
+        ASSERT_EQ(pipe(pipefd), 0) << "pipe() failed on fork " << i;
+
+        pid_t child_pid = fork();
+        if(child_pid == 0)
+        {
+            close(pipefd[0]);
+            dup2(pipefd[1], STDOUT_FILENO);
+            close(pipefd[1]);
+
+            auto& child_logger = rocprofsys::logger_t::instance();
+            child_logger.info("sequential_fork_child_{}", i);
+            child_logger.flush();
+
+            bool valid = (child_logger.name() == "rocprofiler-systems");
+            _exit(valid ? 0 : 1);
+        }
+
+        close(pipefd[1]);
+        auto child_output = read_fd(pipefd[0]);
+        close(pipefd[0]);
+
+        int status;
+        waitpid(child_pid, &status, 0);
+        ASSERT_TRUE(WIFEXITED(status)) << "Fork " << i << " child did not exit normally";
+        EXPECT_EQ(WEXITSTATUS(status), 0)
+            << "Fork " << i << " child failed to reinitialize logger";
+
+        auto expected_marker = "sequential_fork_child_" + std::to_string(i);
+        EXPECT_NE(child_output.find(expected_marker), std::string::npos)
+            << "Fork " << i << " child output missing marker. Got: " << child_output;
+
+        auto child_pid_marker = "P:" + std::to_string(child_pid);
+        EXPECT_NE(child_output.find(child_pid_marker), std::string::npos)
+            << "Fork " << i << " child PID not in output. Got: " << child_output;
+    }
+
+    // Parent logger should still work after multiple forks
+    testing::internal::CaptureStdout();
+    auto& logger = rocprofsys::logger_t::instance();
+    EXPECT_EQ(logger.name(), "rocprofiler-systems");
+    logger.info("parent_after_{}_forks", num_forks);
+    logger.flush();
+    auto parent_output = testing::internal::GetCapturedStdout();
+
+    EXPECT_NE(parent_output.find("parent_after_3_forks"), std::string::npos)
+        << "Parent log not captured after sequential forks. Got: " << parent_output;
+}
+
+TEST_F(logger_test, parent_continues_logging_after_fork)
+{
+    std::string log_base = "/tmp/test_parent_post_fork";
+    std::string log_file = log_base + ".log";
+
+    setenv("ROCPROFSYS_LOG_FILE", log_file.c_str(), 1);
+
+    // Force a fresh logger with the file sink
+    // (the singleton was already created without a file sink,
+    //  so we test via a child that gets a fresh logger)
+    pid_t child_pid = fork();
+    if(child_pid == 0)
+    {
+        auto& child_logger = rocprofsys::logger_t::instance();
+        child_logger.info("parent_post_fork_marker");
+        child_logger.flush();
+
+        pid_t       current_pid = getpid();
+        std::string expected_log_file =
+            log_base + "_" + std::to_string(current_pid) + ".log";
+
+        std::ifstream log(expected_log_file);
+        bool          found = false;
+        std::string   line;
+        while(std::getline(log, line))
+        {
+            if(line.find("parent_post_fork_marker") != std::string::npos)
+            {
+                found = true;
+                break;
+            }
+        }
+
+        std::remove(expected_log_file.c_str());
+        _exit(found ? 0 : 1);
+    }
+
+    int status;
+    waitpid(child_pid, &status, 0);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0) << "Child failed to log after fork";
+
+    // Parent logger should remain functional
+    auto& parent_logger = rocprofsys::logger_t::instance();
+    EXPECT_NO_THROW(parent_logger.info("Parent logging after child completed"));
+
+    unsetenv("ROCPROFSYS_LOG_FILE");
+}
+
+TEST_F(logger_test, fork_child_gets_new_logger_instance)
+{
+    auto& parent_logger = rocprofsys::logger_t::instance();
+    EXPECT_EQ(parent_logger.name(), "rocprofiler-systems");
+    EXPECT_FALSE(parent_logger.sinks().empty());
+
+    pid_t child_pid = fork();
+    if(child_pid == 0)
+    {
+        auto& child_logger = rocprofsys::logger_t::instance();
+
+        // The child logger should be freshly created with default sinks
+        // (stdout only, since ROCPROFSYS_LOG_FILE is not set)
+        bool has_sinks = !child_logger.sinks().empty();
+        bool has_name  = (child_logger.name() == "rocprofiler-systems");
+        bool can_log   = true;
+
+        try
+        {
+            child_logger.info("Verifying child logger works");
+            child_logger.flush();
+        } catch(...)
+        {
+            can_log = false;
+        }
+
+        _exit((has_sinks && has_name && can_log) ? 0 : 1);
+    }
+
+    int status;
+    waitpid(child_pid, &status, 0);
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(WEXITSTATUS(status), 0) << "Child should get a fresh, functional logger";
+
+    // Parent logger should remain valid after fork
+    EXPECT_EQ(parent_logger.name(), "rocprofiler-systems");
+    EXPECT_FALSE(parent_logger.sinks().empty());
+    EXPECT_NO_THROW(parent_logger.info("Parent still works after child fork"));
+}
+
+TEST_F(logger_test, concurrent_logging_stress_with_fork)
+{
+    auto& logger = rocprofsys::logger_t::instance();
+
+    constexpr int     num_threads      = 8;
+    constexpr int     iterations       = 500;
+    constexpr int     child_iterations = 10;
+    std::atomic<bool> start{ false };
+    std::atomic<int>  ready_count{ 0 };
+
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+    for(int i = 0; i < num_threads; ++i)
+    {
+        threads.emplace_back([&logger, &start, &ready_count, i] {
+            ready_count.fetch_add(1, std::memory_order_release);
+            while(!start.load(std::memory_order_acquire))
+            {
+            }
+            for(int j = 0; j < iterations; ++j)
+            {
+                logger.info("Stress thread {} iter {}", i, j);
+            }
+        });
+    }
+
+    // Wait for all threads to be ready
+    while(ready_count.load(std::memory_order_acquire) < num_threads)
+    {
+    }
+    start.store(true, std::memory_order_release);
+
+    int pipefd[2];
+    ASSERT_EQ(pipe(pipefd), 0) << "pipe() failed";
+
+    // Fork while threads are actively logging
+    pid_t child_pid = fork();
+    if(child_pid == 0)
+    {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        // Child: threads don't exist. Logger must be usable.
+        auto& child_logger = rocprofsys::logger_t::instance();
+        for(int j = 0; j < child_iterations; ++j)
+        {
+            child_logger.info("stress_child_iter_{}", j);
+        }
+        child_logger.flush();
+        _exit(0);
+    }
+
+    close(pipefd[1]);
+    auto child_output = read_fd(pipefd[0]);
+    close(pipefd[0]);
+
+    for(auto& t : threads)
+        t.join();
+
+    int   status;
+    pid_t waited = waitpid(child_pid, &status, 0);
+    ASSERT_NE(waited, -1) << "waitpid failed";
+    ASSERT_TRUE(WIFEXITED(status))
+        << "Child did not exit normally under stress (possible deadlock)";
+    EXPECT_EQ(WEXITSTATUS(status), 0);
+
+    // Validate child produced all expected log lines
+    for(int j = 0; j < child_iterations; ++j)
+    {
+        auto marker = "stress_child_iter_" + std::to_string(j);
+        EXPECT_NE(child_output.find(marker), std::string::npos)
+            << "Missing child stress iteration " << j << " in output";
+    }
+
+    auto child_pid_marker = "P:" + std::to_string(child_pid);
+    EXPECT_NE(child_output.find(child_pid_marker), std::string::npos)
+        << "Child PID not in stress test output. Got: " << child_output;
+
+    // Parent logger should still work
+    EXPECT_NO_THROW(logger.info("Parent done after stress fork"));
 }

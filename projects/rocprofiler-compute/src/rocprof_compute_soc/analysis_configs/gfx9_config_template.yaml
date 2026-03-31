@@ -268,7 +268,34 @@ panels:
     title: L1 Cache
   - type: metric_table
     id: 2
-    title: L1 traffic
+    title: L1 Traffic
   - type: metric_table
     id: 3
+    title: TD Return Path
+  - type: metric_table
+    id: 4
+    title: Normalized Stall Metrics (%)
+  - type: metric_table
+    id: 5
+    title: Normalized Throughput Metrics (per Second)
+  - type: metric_table
+    id: 6
     title: Raw Counter Value
+  - type: metric_table
+    id: 7
+    title: L2 Cache
+  - type: metric_table
+    id: 8
+    title: L2 Traffic
+  - type: metric_table
+    id: 9
+    title: L2 Raw Counter Values
+  - type: metric_table
+    id: 10
+    title: Normalized L2 Stall Metrics (%)
+  - type: metric_table
+    id: 11
+    title: Normalized L2 Throughput Metrics (per Second)
+  - type: metric_table
+    id: 12
+    title: L2 Bottleneck Detection Indicators

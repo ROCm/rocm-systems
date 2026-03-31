@@ -132,7 +132,7 @@ void UnarySinglePrecisionRangeTest(kernel_sig<T, float> kernel, ref_sig<RT, RTAr
   const auto reduction_factor = GetTestReductionFactor();
   const auto max_batch_size = GetMaxAllowedDeviceMemoryUsage() / (sizeof(float) + sizeof(T));
   LinearAllocGuard<float> values{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(float)};
-  
+
   MathTest math_test(kernel, max_batch_size);
 
   const auto run = [&, gs = grid_size, bs = block_size](size_t inserted) {
@@ -220,13 +220,13 @@ void UnaryDoublePrecisionTest(kernel_sig<T, double> kernel, ref_sig<RT, RTArg> r
 #define MATH_UNARY_WITHIN_ULP_TEST_DEF(kern_name, ref_func, sp_ulp, dp_ulp)                        \
   MATH_UNARY_KERNEL_DEF(kern_name)                                                                 \
                                                                                                    \
-  TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_float) {                                   \
+  HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_float) {                               \
     double (*ref)(double) = ref_func;                                                              \
     UnarySinglePrecisionTest(kern_name##_kernel<float>, ref,                                       \
                              ULPValidatorBuilderFactory<float>(sp_ulp));                           \
   }                                                                                                \
                                                                                                    \
-  TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_double) {                                  \
+  HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_double) {                              \
     long double (*ref)(long double) = ref_func;                                                    \
     UnaryDoublePrecisionTest(kern_name##_kernel<double>, ref,                                      \
                              ULPValidatorBuilderFactory<double>(dp_ulp));                          \

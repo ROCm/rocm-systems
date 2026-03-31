@@ -19,7 +19,7 @@ bool compare_arrays(int* arr1, int* arr2, int width, int height) {
   return true;
 }
 
-TEST_CASE(Unit_hipMemcpy2DArrayToArray_Negative) {
+HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_Negative) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width = 256;
@@ -99,7 +99,7 @@ TEST_CASE(Unit_hipMemcpy2DArrayToArray_Negative) {
   HIP_CHECK(hipFreeArray(d_dst_arr));
 }
 
-TEST_CASE(Unit_hipMemcpy2DArrayToArray_Positive) {
+HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_Positive) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width = 4;
@@ -154,7 +154,7 @@ TEST_CASE(Unit_hipMemcpy2DArrayToArray_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemcpy2DArrayToArray_BasicPositive) {
+HIP_TEST_CASE(Unit_hipMemcpy2DArrayToArray_BasicPositive) {
   CHECK_IMAGE_SUPPORT
 
   const size_t width = 1024;

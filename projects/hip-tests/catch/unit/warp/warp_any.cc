@@ -92,7 +92,7 @@ class WarpAny : public WarpVoteTest<WarpAny, uint64_t> {
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp vote
  */
-TEST_CASE(Unit_Warp_Vote_Any_Positive_Basic) {
+HIP_TEST_CASE(Unit_Warp_Vote_Any_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));

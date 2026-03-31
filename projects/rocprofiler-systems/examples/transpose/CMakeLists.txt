@@ -5,15 +5,9 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-transpose-example LANGUAGES CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
@@ -69,7 +63,7 @@ target_link_libraries(transpose PRIVATE Threads::Threads)
 # Specify GPU architectures to compile for
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     target_compile_options(transpose PRIVATE --offload-arch=${arch})
-    target_link_options(transpose PUBLIC --offload-arch=${arch})
+    target_link_options(transpose PRIVATE --offload-arch=${arch})
 endforeach()
 
 if(

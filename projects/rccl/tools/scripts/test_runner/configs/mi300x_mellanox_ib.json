@@ -14,11 +14,8 @@
     "NCCL_DEBUG": "INFO"
   },
   "build_configuration": {
-    "install_flags": ["--debug", "-c", "-t", "-l", "--log-trace", "--enable-mpi-tests", "--no_clean"],
+    "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-code-coverage", "--enable-mpi-tests", "--no_clean"],
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-    "env_variables": {
-      "HIPCC_COMPILE_FLAGS_APPEND": "-g -Wno-format-nonliteral -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping -parallel-jobs=16"
-    },
     "parallel_jobs": 64
   },
   "test_configurations": {

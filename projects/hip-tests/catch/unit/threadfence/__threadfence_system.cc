@@ -44,7 +44,7 @@ __global__ void ReadKernel(int* out, int* in) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
+HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("At least 2 devices are required");
@@ -98,7 +98,7 @@ TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___threadfence_system_Positive_Basic_Host) {
+HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Host) {
   LinearAllocGuard<int> in_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 

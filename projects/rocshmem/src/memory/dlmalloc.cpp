@@ -27,9 +27,14 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* BEGIN AMD ROCSHMEM CHANGES */
 // To improve code coverage score, code for the following cases has been
 // stripped from imported dlmalloc.c:
-//   !ONLY_MSPACES; MALLOC_INSPECT_ALL; USE_LOCKS; DEBUG; 
+//   !ONLY_MSPACES; MALLOC_INSPECT_ALL; USE_LOCKS; DEBUG;
 #include "dlmalloc.hpp"
 #include <cstdio>
+
+// Suppress GNU null pointer arithmetic warnings for dlmalloc's intentional
+// use of chunk2mem(0) for compile-time offset calculations
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-null-pointer-arithmetic"
 
 namespace rocshmem {
 
@@ -1859,7 +1864,7 @@ static msegmentptr segment_holding(mstate m, char* addr) {
 }
 
 /* Return true if segment contains a segment link */
-static int has_segment_link(mstate m, msegmentptr ss) {
+[[maybe_unused]] static int has_segment_link(mstate m, msegmentptr ss) {
   msegmentptr sp = &m->seg;
   for (;;) {
     if ((char*)sp >= ss->base && (char*)sp < ss->base + ss->size)
@@ -2713,7 +2718,7 @@ static void add_segment(mstate m, char* tbase, size_t tsize, flag_t mmapped) {
   msegmentptr ss = (msegmentptr)(chunk2mem(sp));
   mchunkptr tnext = chunk_plus_offset(sp, ssize);
   mchunkptr p = tnext;
-  int nfences = 0;
+  [[maybe_unused]] int nfences = 0;
 
   /* reset top to new space */
   init_top(m, (mchunkptr)tbase, tsize - TOP_FOOT_SIZE);
@@ -2982,7 +2987,7 @@ static int sys_trim(mstate m, size_t pad) {
     if (m->topsize > pad) {
       /* Shrink top space in granularity-size units, keeping at least one */
       size_t unit = mparams.granularity;
-      size_t extra = ((m->topsize - pad + (unit - SIZE_T_ONE)) / unit -
+      [[maybe_unused]] size_t extra = ((m->topsize - pad + (unit - SIZE_T_ONE)) / unit -
                       SIZE_T_ONE) * unit;
       msegmentptr sp = segment_holding(m, (char*)m->top);
 
@@ -3589,7 +3594,7 @@ struct mallinfo mspace_mallinfo(mspace msp) {
 }
 #endif /* NO_MALLINFO */
 
-size_t mspace_usable_size(const void* mem) {
+[[maybe_unused]] size_t mspace_usable_size(const void* mem) {
   if (mem != 0) {
     mchunkptr p = mem2chunk(mem);
     if (is_inuse(p))
@@ -3598,7 +3603,7 @@ size_t mspace_usable_size(const void* mem) {
   return 0;
 }
 
-int mspace_mallopt(int param_number, int value) {
+[[maybe_unused]] int mspace_mallopt(int param_number, int value) {
   return change_mparam(param_number, value);
 }
 
@@ -3942,16 +3947,19 @@ size_t DLMalloc::mspace_max_footprint(mspace msp) {
   return ::rocshmem::mspace_max_footprint(msp);
 }
 size_t DLMalloc::mspace_used(mspace msp) {
-  struct mallinfo mi{0};
+  struct mallinfo mi{};
   mi = mspace_mallinfo(msp);
   return mi.uordblks;
 }
 size_t DLMalloc::mspace_avail(mspace msp) {
-  struct mallinfo mi{0};
+  struct mallinfo mi{};
   mi = mspace_mallinfo(msp);
   return mi.fordblks;
 }
 #endif // MSPACES
 #endif // ROCSHMEM_ENCAPSULATE
 } // namespace rocshmem
+
+#pragma clang diagnostic pop
+
 /* END AMD ROCSHMEM CHANGES */

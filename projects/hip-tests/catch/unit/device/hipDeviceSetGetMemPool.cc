@@ -56,7 +56,7 @@ static inline hipMemPool_t CreateMemPool(const int device) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceSetMemPool_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Positive_Basic) {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   if (!CheckMemPoolSupport(device)) {
@@ -87,7 +87,7 @@ TEST_CASE(Unit_hipDeviceSetMemPool_Positive_Basic) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceSetMemPool_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Negative_Parameters) {
   hipMemPool_t mem_pool;
   HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
 
@@ -129,7 +129,7 @@ TEST_CASE(Unit_hipDeviceSetMemPool_Negative_Parameters) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Default) {
+HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Default) {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   if (!CheckMemPoolSupport(device)) {
@@ -157,7 +157,7 @@ TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Default) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Basic) {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   if (!CheckMemPoolSupport(device)) {
@@ -187,7 +187,7 @@ TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Basic) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Threaded) {
+HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Threaded) {
   class HipDeviceGetMemPoolTest : public ThreadedZigZagTest<HipDeviceGetMemPoolTest> {
    public:
     void TestPart2() {
@@ -232,7 +232,7 @@ TEST_CASE(Unit_hipDeviceGetMemPool_Positive_Threaded) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetMemPool_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipDeviceGetMemPool_Negative_Parameters) {
   hipMemPool_t mem_pool;
 
   SECTION("mem_pool == nullptr") {

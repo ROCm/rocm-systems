@@ -131,7 +131,7 @@ void execute_clock_kernels(void (*kernel)(long long*, long long*, float*, float*
   REQUIRE(clock_start < clock_end);
 }
 
-TEST_CASE(Unit_hipClock64_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipClock64_Positive_Basic) {
   if (IsGfx11()) {
     HipTest::HIP_SKIP_TEST("Issue with clock64() function on gfx11 devices!");
     return;
@@ -153,7 +153,7 @@ TEST_CASE(Unit_hipClock64_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipClock_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipClock_Positive_Basic) {
   if (IsGfx11()) {
     HipTest::HIP_SKIP_TEST("Issue with clock() function on gfx11 devices!");
     return;
@@ -162,7 +162,7 @@ TEST_CASE(Unit_hipClock_Positive_Basic) {
   execute_clock_kernels(reduce_c);
 }
 
-TEST_CASE(Unit_hipWallClock64_Positive_Basic) { execute_clock_kernels(reduce_wc64); }
+HIP_TEST_CASE(Unit_hipWallClock64_Positive_Basic) { execute_clock_kernels(reduce_wc64); }
 
 /**
  * End doxygen group DeviceLanguageTest.

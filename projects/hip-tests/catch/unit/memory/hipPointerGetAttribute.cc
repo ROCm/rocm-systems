@@ -57,9 +57,8 @@ static __global__ void var_update(int* data) {
 
 /* Allocate memory using different Allocation APIs and check whether
    correct memory type and device oridinal are returned */
-TEST_CASE(Unit_hipPointerGetAttribute_MemoryTypes) {
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_MemoryTypes) {
   CHECK_IMAGE_SUPPORT
-
   HIP_CHECK(hipSetDevice(0));
   size_t pitch_A;
   size_t width{NUM_W * sizeof(char)};
@@ -109,7 +108,7 @@ TEST_CASE(Unit_hipPointerGetAttribute_MemoryTypes) {
  * Validates the device variable to check whether the
  * data is updated or not.
  */
-TEST_CASE(Unit_hipPointerGetAttribute_KernelUpdation) {
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_KernelUpdation) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -138,7 +137,7 @@ TEST_CASE(Unit_hipPointerGetAttribute_KernelUpdation) {
  * from peer GPU device.It validates the memory type and
  * device ordinal in peer GPU
  */
-TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -173,7 +172,7 @@ TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
    hipPointerGetAttribute API with HIP_POINTER_ATTRIBUTE_BUFFER_ID,
    DeAllocate and Allocate the memory again and
    ensure that the buffer ID is unique */
-TEST_CASE(Unit_hipPointerGetAttribute_BufferID) {
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_BufferID) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -195,7 +194,7 @@ TEST_CASE(Unit_hipPointerGetAttribute_BufferID) {
    and ensure that it matches with CUDA result
 */
 #if HT_AMD
-TEST_CASE(Unit_hipPointerGetAttribute_HostDeviceOrdinal) {
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_HostDeviceOrdinal) {
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
   int* A_h;
@@ -215,7 +214,7 @@ TEST_CASE(Unit_hipPointerGetAttribute_HostDeviceOrdinal) {
 /* Allocate managed memory with different flags and trigger
    hipPointerGetAttribute with the following flags HIP_POINTER_ATTRIBUTE_MAPPED
    and verify the behaviour */
-TEST_CASE(Unit_hipPointerGetAttribute_MappedMem) {
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_MappedMem) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -244,7 +243,7 @@ TEST_CASE(Unit_hipPointerGetAttribute_MappedMem) {
 }
 
 /* This testcase verifies negative scenarios of hipPointerGetAttribute API */
-TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   constexpr size_t N{100};
@@ -322,8 +321,7 @@ TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
 
 /* Allocate memory using different Allocation APIs and check whether
    IPC CAPABLE attribute returns correctly */
-TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
-
+HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = N * sizeof(int);
   unsigned int datatype;
@@ -340,7 +338,6 @@ TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
   size_t pitch_A;
   size_t width{NUM_W * sizeof(char)};
   SECTION("Malloc Pitch Allocation") {
-    CHECK_IMAGE_SUPPORT
     char* A_d;
     HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
     HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
