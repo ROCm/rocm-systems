@@ -15,8 +15,6 @@ import traceback
 from pathlib import Path
 from typing import Any, Union, cast
 
-import yaml
-
 import config
 import utils.utils_profile_csv as csv_ops
 from utils import rocpd_data
@@ -33,13 +31,13 @@ from utils.utils_common import (
     parse_text,
     perform_attach_detach,
 )
+from vendored import yaml
 
 
 def run_prof(
     fnames: Union[list[str], str],
     profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
     workload_dir: str,
-    mspec: Any,  # noqa: ANN401
     loglevel: int,
     format_rocprof_output: str,
     torch_trace_enabled: bool = False,
@@ -420,18 +418,18 @@ def gen_sysinfo(
     mspec: Any,  # noqa: ANN401
     soc: Any,  # noqa: ANN401
 ) -> None:
-    df = mspec.get_class_members()
+    data = mspec.get_class_members()
 
     # Append workload information to machine specs
-    df["command"] = app_cmd
-    df["workload_path"] = workload_dir
+    data["command"] = app_cmd
+    data["workload_path"] = workload_dir
 
     blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
     if not skip_roof:
         blocks.append("roofline")
-    df["ip_blocks"] = "|".join(blocks)
+    data["ip_blocks"] = "|".join(blocks)
 
-    df.to_csv(workload_dir + "/" + "sysinfo.csv", index=False)
+    csv_ops.write_csv_from_dicts(workload_dir + "/" + "sysinfo.csv", [data])
 
 
 def get_submodules(package_name: str) -> list[str]:

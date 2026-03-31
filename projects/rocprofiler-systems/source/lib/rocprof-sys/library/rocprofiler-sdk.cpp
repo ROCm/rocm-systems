@@ -3,6 +3,7 @@
 
 #include "core/rocprofiler-sdk.hpp"
 #include "api.hpp"
+#include "binary/analysis.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"
 #include "core/common_types.hpp"
@@ -12,12 +13,10 @@
 #include "core/gpu.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
-#include "core/trace_cache/buffer_storage.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include "library/amd_smi.hpp"
-#include "library/components/category_region.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
@@ -64,7 +63,6 @@
 #include <atomic>
 #include <cctype>
 #include <cstdint>
-#include <deque>
 #include <iostream>
 #include <mutex>
 #include <regex>
@@ -2649,8 +2647,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
     {
-        LOG_DEBUG("Setting amd_smi state to active...");
-        amd_smi::set_state(State::Active);
+        LOG_DEBUG("Setting PMC sampler state to active...");
+        pmc::set_state(State::Active);
     }
 
     start();
@@ -2672,8 +2670,7 @@ tool_fini(void* callback_data)
     flush();
     stop();
 
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::shutdown();
+    if(config::get_use_process_sampling() && config::get_use_amd_smi()) pmc::shutdown();
 
     if(get_counter_storage())
     {

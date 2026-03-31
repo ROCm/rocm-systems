@@ -7,13 +7,11 @@
 Installing and deploying ROCm Compute Profiler
 **********************************************
 
-* :ref:`ROCm Compute Profiler core installation <core-install>`
-
-  * Provides the core application profiling capability.
-  * Allows the collection of performance counters, filtering by hardware
-    block, dispatch, kernel, and more.
-  * Provides a CLI-based analysis mode.
-  * Provides a standalone web interface for importing analysis metrics.
+* Provides the core application profiling capability.
+* Allows the collection of performance counters, filtering by hardware
+  block, dispatch, kernel, and more.
+* Provides a CLI-based analysis mode.
+* Provides a standalone web interface for importing analysis metrics.
 
 .. _core-install:
 
@@ -56,21 +54,12 @@ following steps illustrate how to install the necessary Python dependencies
 using `pip <https://packaging.python.org/en/latest/>`_ and ROCm Compute Profiler into a
 shared location controlled by the ``INSTALL_DIR`` environment variable.
 
-.. tip::
-
-   To always run ROCm Compute Profiler with a particular version of Python, you can create a
-   bash alias. For example, to run ROCm Compute Profiler with Python 3.10, you can run the
-   following command:
-
-   .. code-block:: shell
-
-      alias rocprof-compute-mypython="/usr/bin/python3.10 /opt/rocm/bin/rocprof-compute"
-
 .. _core-install-cmake-vars:
 
 Configuration variables
 -----------------------
-The following installation example leverages several
+
+The following installation steps leverage several
 `CMake <https://cmake.org/cmake/help/latest>`_ project variables defined as
 follows.
 
@@ -90,7 +79,7 @@ follows.
       - Specifies an optional path for separate ROCm Compute Profiler modulefile installation.
 
     * - ``rocprofiler-sdk_DIR``
-      - Specifies the path to the rocprofiler-sdk CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
+      - Specifies the path to the ROCprofiler-SDK CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
         This directory should contain ``rocprofiler-sdkConfig.cmake`` (for example, ``<rocprofiler-sdk-install-path>/lib/cmake/rocprofiler-sdk``).
 
     * - ``STANDALONEBINARY_EXTRACT_DIR``
@@ -103,7 +92,7 @@ follows.
       - Should be ON to enable testing from the installation location without dependency on the source directory.
 
     * - ``SKIP_NATIVE_TOOL_BUILD``
-      - Should be ON to skip building the native profiling tool. When enabled, the native tool will be compiled at runtime instead of build time. This is useful when rocprofiler-sdk is not available during build time.
+      - Should be ON to skip building the native profiling tool. When enabled, the native tool will be compiled at runtime instead of build time. This is useful when ROCprofiler-SDK is not available during build time.
 
 .. _core-install-steps:
 
@@ -111,7 +100,6 @@ Install from the TheRock nightly releases
 -----------------------------------------
 
 #. For detailed instructions on installing TheRock nightly release artifacts, refer to `TheRock/Release <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`_.
-
 
 .. _source-install:
 
@@ -173,6 +161,8 @@ Install from the source
          $ ls $INSTALL_DIR
          modulefiles  {{ config.version }}  python-libs
 
+.. _tarball-install:
+
 Install from the tarball
 ------------------------
 
@@ -180,10 +170,10 @@ Install from the tarball
 #. Untar the downloaded tarball and navigate to the `rocprofiler-compute` directory.
 #. Follow the installation steps under :ref:`source-install`.
 
-.. _core-install-modulefiles:
-
 Execution using modulefiles
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------
+
+.. _core-install-modulefiles:
 
 The installation process includes the creation of an environment modulefile for
 use with `Lmod <https://lmod.readthedocs.io>`_. On systems that support Lmod,
@@ -200,9 +190,10 @@ for execution of ROCm Compute Profiler as follows.
       /opt/apps/rocprofiler-compute/{{ config.version }}/bin/rocprof-compute
 
       $ rocprof-compute --version
-      ROC Profiler:   /opt/rocm-5.1.0/bin/rocprof
-
-      rocprofiler-compute (v{{ config.version }})
+      ----------------------------------------
+      rocprofiler-compute version: {{ config.version }} (release)
+      Git revision:     abc1234
+      ----------------------------------------
 
 .. tip::
 
@@ -211,7 +202,7 @@ for execution of ROCm Compute Profiler as follows.
    module dependencies.
 
 Execution without modulefiles
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+------------------------------
 
 To use ROCm Compute Profiler without the companion modulefile, update your ``PATH``
 settings to enable access to the command line binary. If you installed Python
@@ -225,10 +216,49 @@ configuration.
       export PATH=$INSTALL_DIR/{{ config.version }}/bin:$PATH
       export PYTHONPATH=$INSTALL_DIR/python-libs
 
+.. tip::
+
+   To always run ROCm Compute Profiler with a particular version of Python, you can create a
+   bash alias. For example, to run ROCm Compute Profiler with Python 3.8, you can run the
+   following command:
+
+   .. code-block:: shell
+
+      alias rocprof-compute-mypython="/usr/bin/python3.8 /opt/rocm/bin/rocprof-compute"
+
 .. _core-install-rocprof-var:
 
-Configuring the environment for ROCprofiler-SDK
------------------------------------------------
+Configuring the environment for profiling
+-----------------------------------------
 
-ROCm Compute Profiler profiling process relies on :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`'s ``rocprofiler-sdk`` library.
-Optionally, a ``rocprofv3`` binary can be used in substitution of rocprofiler-sdk library when ``ROCPROF`` environment variable is set to ``rocprofv3`` or to the path of ``rocprofv3`` binary.
+ROCm Compute Profiler supports two profiling backends, selectable via the ``ROCPROF`` environment variable.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Backend
+     - How it is selected
+     - How it works
+   * - ``rocprofiler-sdk`` (**default**)
+     - ``ROCPROF`` unset, or ``ROCPROF=rocprofiler-sdk``
+     - Injects ``librocprofiler-sdk-tool.so`` into the target application process via ``LD_PRELOAD``. The application runs directly; profiling is configured through environment variables.
+   * - ``rocprofv3``
+     - ``ROCPROF=rocprofv3`` or ``ROCPROF=<path-to-rocprofv3>``
+     - Launches the ``rocprofv3`` binary as a wrapper process around the target application. Profiling is configured via ``rocprofv3`` command-line arguments.
+
+Both backends build on the same underlying ROCprofiler-SDK infrastructure. The ``rocprofiler-sdk`` backend is recommended because it supports the full feature set, including :ref:`iteration multiplexing <iteration-multiplexing>`.
+
+.. _core-install-native-tool:
+
+Native counter collection tool
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When using the ``rocprofiler-sdk`` backend on ROCm 7.0 or later, ROCm Compute Profiler also injects a native counter collection tool (``librocprofiler-compute-tool.so``) alongside the SDK tool via ``LD_PRELOAD``. This tool is a shared library built as part of ROCm Compute Profiler that directly uses the ROCprofiler-SDK public C API to collect hardware performance counter data per kernel dispatch.
+
+The division of responsibility between the two injected libraries is:
+
+* **Native tool** (``librocprofiler-compute-tool.so``): collects hardware performance counters per dispatch.
+* **SDK tool** (``librocprofiler-sdk-tool.so``): handles kernel tracing and output database generation.
+
+The native tool is required for :ref:`iteration multiplexing <iteration-multiplexing>`. Use ``--no-native-tool`` to disable it, but note that doing so also disables iteration multiplexing. The native tool is not used in :doc:`dynamic process attachment mode <../how-to/live_attach_detach>` or with the ``rocprofv3`` backend.
