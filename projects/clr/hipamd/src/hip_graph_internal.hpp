@@ -584,6 +584,11 @@ class GraphEventWaitNode : public GraphNode {
   }
 };
 
+struct ScheduledNode {
+  Node node;
+  int stream;
+};
+
 class Graph {
  public:
   //!< Contains mem alloc dptrs whose corresponding free node is not added to the graph.
@@ -728,9 +733,9 @@ class Graph {
   //! Runs one node on the assigned stream
   bool RunOneNode(Node node);
 
-  bool RunOneNodeRec(Node top_node, bool top_wait);
-
   bool PathDecomposition();
+
+  std::vector<ScheduledNode> scheduled_nodes_;
 
   std::vector<std::vector<Node>> MinPathCoverBiased();
 

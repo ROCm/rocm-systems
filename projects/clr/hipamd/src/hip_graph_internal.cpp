@@ -21,8 +21,6 @@
 #include "hip_graph_internal.hpp"
 #include <queue>
 
-#define USE_RECURSIVE_LAUNCH 0
-
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
     case_string = #C;                                                                              \
@@ -512,99 +510,6 @@ void Graph::UpdateStreams(hip::Stream* launch_stream,
   }
 }
 
-#if USE_RECURSIVE_LAUNCH
-// ================================================================================================
-bool Graph::RunOneNodeRec(Node node, bool wait) {
-  if (node->launch_id_ != -1) return true;
-
-    // Clear the storage of the wait nodes
-    memset(&wait_order_[0], 0, sizeof(Node) * wait_order_.size());
-    amd::Command::EventWaitList waitList;
-    // Walk through dependencies and find the last launches on each parallel stream
-    for (auto depNode : node->GetDependencies()) {
-      // Process only the nodes that have been submitted
-      if (depNode->launch_id_ != -1) {
-        // If it's the same stream then skip the signal, since it's in order
-        if (depNode->stream_id_ != node->stream_id_) {
-          // If there is no wait node on the stream, then assign one
-          if ((wait_order_[depNode->stream_id_] == nullptr) ||
-          // If another node executed on the same stream, then use the latest launch only,
-          // since the same stream has in-order run
-              (wait_order_[depNode->stream_id_]->launch_id_ < depNode->launch_id_)) {
-            wait_order_[depNode->stream_id_] = depNode;
-            waits_count_++;
-          }
-        }
-      } else {
-        // It should be a safe return,
-        // since the last edge to this dependency has to submit the command
-        return true;
-      }
-    }
-    // Create a wait list from the last launches of all dependencies
-    for (auto dep : wait_order_) {
-      if (dep == nullptr) continue;
-            // Add all commands in the wait list
-      if (dep->GetType() != hipGraphNodeTypeGraph) {
-        for (auto command : dep->GetCommands()) {
-          // XPUT("dep command: %s", command->Xstring().c_str());
-          waitList.push_back(command);
-        }
-        continue;
-      }
-    } // for
-    if (node->GetType() == hipGraphNodeTypeGraph) {
-      // Process child graph separately, since, there is no connection
-      auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
-      if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
-        child->RunNodes(node->stream_id_, &streams_, &waitList);
-      }
-    } else {
-      // Assing a stream to the current node
-      node->SetStream(streams_);
-      // Create the execution commands on the assigned stream
-      auto status = node->CreateCommand(node->GetQueue());
-      if (status != hipSuccess) {
-        LogPrintfError("Command creation for node id(%d) failed!", current_id_ + 1);
-        return false;
-      }
-      // Retain all commands, since potentially the command can finish before a wait signal
-      for (auto command : node->GetCommands()) {
-        command->retain();
-      }
-
-      // If a wait was requested, then process the list
-      if (wait && !waitList.empty()) {
-        node->UpdateEventWaitLists(waitList);
-      }
-      // Start the execution
-      node->EnqueueCommands(node->GetQueue());
-    }
-    // Assign the launch ID of the submmitted node
-    // This is also applied to childGraphs to prevent them from being reprocessed
-    node->launch_id_ = current_id_++;
-    uint32_t i = 0;
-    // Execute the nodes in the edges list
-    for (auto edge: node->GetEdges()) {
-      // Don't wait in the nodes, executed on the same streams and if it has just one dependency
-      bool wait = ((i < DEBUG_HIP_FORCE_GRAPH_QUEUES) ||
-                   (edge->GetDependencies().size() > 1)) ? true : false;
-      // XPUT("%d: edge: %p wait: %d", i, edge, wait);
-      // Execute the edge node
-      if (!RunOneNodeRec(edge, wait)) {
-        return false;
-      }
-      i++;
-    }
-    if (i == 0) {
-      // Add a leaf node into the list for a wait.
-      // Always use the last node, since it's the latest for the particular queue
-      leafs_[node->stream_id_] = node;
-    }
-
-  return true;
-}
-#else // USE_RECURSIVE_LAUNCH
 // ================================================================================================
 bool Graph::RunOneNode(Node node) {
   // Clear the storage of the wait nodes
@@ -718,258 +623,154 @@ bool Graph::RunOneNode(Node node) {
   node->SetWait(false);
   return true;
 }
-#endif // USE_RECURSIVE_LAUNCH
-
-std::vector<int> ComputeCP(Graph& g) {
-  const auto& topo = g.GetTopoOrder();
-  std::unordered_map<Node, int> cp;
-
-  for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
-      Node u = *it;
-      int best = 0;
-      for (Node v : u->GetEdges()) {
-          best = std::max(best, cp[v]);
-      }
-      cp[u] = 1 + best;
-  }
-
-  std::vector<int> result;
-  const auto& nodes = g.GetNodes();
-  for (Node n : nodes) {
-    // XPUT("CP[%s]: %d", n->Xstring().c_str(), cp[n]);
-    result.push_back(cp[n]);
-  }
-  return result;
-}
-
-struct BipartiteMatcher {
-  int n;
-  std::vector<std::vector<int>> adj;
-  std::vector<int> dist, matchL, matchR;
-
-  BipartiteMatcher(int n) : n(n), adj(n), dist(n), matchL(n, -1), matchR(n, -1) {}
-
-  void addEdge(int u, int v) {
-      adj[u].push_back(v);
-  }
-
-  bool bfs() {
-      std::queue<int> q;
-      for (int i = 0; i < n; i++) {
-          if (matchL[i] == -1) {
-              dist[i] = 0;
-              q.push(i);
-          } else {
-              dist[i] = -1;
-          }
-      }
-
-      bool found = false;
-      while (!q.empty()) {
-          int u = q.front(); q.pop();
-          for (int v : adj[u]) {
-              int nxt = matchR[v];
-              if (nxt >= 0 && dist[nxt] < 0) {
-                  dist[nxt] = dist[u] + 1;
-                  q.push(nxt);
-              }
-              if (nxt == -1) found = true;
-          }
-      }
-      return found;
-  }
-
-  bool dfs(int u) {
-      for (int v : adj[u]) {
-          int nxt = matchR[v];
-          if (nxt < 0 || (dist[nxt] == dist[u] + 1 && dfs(nxt))) {
-              matchL[u] = v;
-              matchR[v] = u;
-              return true;
-          }
-      }
-      dist[u] = -1;
-      return false;
-  }
-
-  int maxMatching() {
-      int result = 0;
-      while (bfs()) {
-          for (int i = 0; i < n; i++) {
-              if (matchL[i] == -1 && dfs(i)) {
-                  result++;
-              }
-          }
-      }
-      return result;
-  }
-};
-
-std::vector<std::vector<Node>> Graph::MinPathCoverBiased() {
-  const auto& nodes = GetNodes();
-  int n = nodes.size();
-
-  std::unordered_map<Node, int> id;
-  for (int i = 0; i < n; i++) id[nodes[i]] = i;
-
-  auto cp = ComputeCP(*this);
-
-  BipartiteMatcher matcher(n);
-
-  // Build edges with sorting
-  for (int u = 0; u < n; u++) {
-      auto edges = nodes[u]->GetEdges();
-
-      
-      std::sort(edges.begin(), edges.end(), [&](Node a, Node b) {
-        int ia = id[a];
-        int ib = id[b];
-        float alpha = 0.8f, beta = 0.4f, gamma = 0.2f;
-        float scoreA = alpha * cp[ia] + 
-              beta * a->GetOutDegree() - gamma * a->GetInDegree();
-        float scoreB = alpha * cp[ib] + 
-              beta * b->GetOutDegree() - gamma * b->GetInDegree();
-    
-        return scoreA > scoreB;
-      });
-
-      for (Node vNode : edges) {
-          matcher.addEdge(u, id[vNode]);
-      }
-  }
-
-  matcher.maxMatching();
-
-  // Same reconstruction as before
-  std::vector<bool> hasIncoming(n, false);
-  for (int v = 0; v < n; v++) {
-      if (matcher.matchR[v] != -1) {
-          hasIncoming[v] = true;
-      }
-  }
-
-  std::vector<std::vector<Node>> paths;
-
-  for (int i = 0; i < n; i++) {
-      if (!hasIncoming[i]) {
-          std::vector<Node> path;
-          int u = i;
-
-          while (u != -1) {
-              path.push_back(nodes[u]);
-              int next = matcher.matchL[u];
-              u = next;
-          }
-
-          paths.push_back(path);
-      }
-  }
-
-  int total_nodes = 0, I = 0;
-  for (auto path : paths) {
-    total_nodes += path.size();
-    XPUT("%d: Path: sz %zu", I, path.size());
-    for (auto node : path) {
-      node->Zid = I % 8;
-    }
-    I++;
-  }
-  XPUT("Total nodes: %d vs %zu", total_nodes, nodes.size());
-
-  return paths;
-}
 
 // Path Decomposition: assign each node to a unique path starting from roots, printing all such paths, sorted by length
 bool Graph::PathDecomposition() {
   const auto& topo_order = GetTopoOrder();
-  std::unordered_map<Node, std::pair<int, int>> depth_map;
-  int idx = 0;
-  for (auto node : topo_order) {
-    depth_map[node] = {0, idx++};
-  }
-  for (auto it = topo_order.crbegin(); it != topo_order.crend(); ++it) {
-    auto deps = (*it)->GetEdges();
-    int max_depth = -1;
-    for (auto dep : deps) {
-      max_depth = std::max(max_depth, depth_map[dep].first);
-      // XPUT("%d -> %d, max_depth: %d", (*it)->GetID(), dep->GetID(), max_depth);
-    }
-    // this will stay 0 if the node has no dependencies
-    depth_map[*it].first = max_depth + 1;
-    // XPUT("%d: final depth: %d", (*it)->GetID(), depth_map[*it]);
-  }
-  auto xnodes = topo_order;
-  std::sort(xnodes.begin(), xnodes.end(), [&](const Node& a, const Node& b) {
-    auto da = depth_map[a], db = depth_map[b];
-    return da.first > db.first || (da.first == db.first && da.second < db.second);
-  });
-  // for (auto node : xnodes) {
-  //   XPUT("%s: final sorted depth: %d", node->Xstring().c_str(), depth_map[node].first);
-  // }
 
-  std::unordered_set<Node> unused;
-  for (auto node : xnodes) {
-    unused.insert(node);
+  std::vector< int > stream0, stream1, stream2;
+  stream0.reserve(200);
+  stream1.reserve(200);
+  stream2.reserve(200);
+  stream0 = {1,4,6,8,13};
+  stream1 = {0,3};
+
+  // 7,9,16,18,25,27,34,36,43,45
+
+  for (int i = 0, j = 15, k = 10, l = 7; i < 40; i++) {
+    stream0.push_back(j);
+    stream0.push_back(j + 2);
+    stream0.push_back(j + 6);
+    stream0.push_back(j + 7);
+    stream1.push_back(k);
+    stream1.push_back(k + 1);
+
+    stream2.push_back(l);
+    stream2.push_back(l + 2);
+    j += 9; k += 9; l += 9;
   }
-  std::vector<std::vector<Node>> paths;
-  for (auto node : xnodes) {
-    if (unused.find(node) == unused.end()) {
-      continue;
-    }
-    std::vector<Node> path;
-    auto cur = node;
-    while (unused.find(cur) != unused.end()) {
-      path.push_back(cur);
-      unused.erase(cur);
-      for (auto e : cur->GetEdges()) {
-        if (unused.find(e) != unused.end() && depth_map[e].first == depth_map[cur].first - 1) {
-          cur = e;
-          break;
-        }
-      }
-    }
-    paths.push_back(path);
-  }
-  int total_nodes = 0, I = 0;
-  for (auto path : paths) {
-    total_nodes += path.size();
-    // XPUT("Path: sz %zu", path.size());
-    for (auto node : path) {
-      node->Zid = I;
+
+  int I = 0;
+  for (auto node : topo_order) {
+    node->Zid = I;
+    if (std::find(stream0.begin(), stream0.end(), node->Zid) != stream0.end()) {
+      node->stream_id_ = 0;
+    } else if (std::find(stream1.begin(), stream1.end(), node->Zid) != stream1.end()) {
+      node->stream_id_ = 1;
+    } else if (std::find(stream2.begin(), stream2.end(), node->Zid) != stream2.end()) {
+      node->stream_id_ = 2;
+    } else {
+      node->stream_id_ = 3;
     }
     I++;
   }
-  XPUT("Total nodes: %d vs %zu", total_nodes, xnodes.size());
   return true;
+}
 
-#if 0
-for u in nodes:
-        if u not in unused:
-            continue
+std::unordered_map<Node, int> ComputeCriticalPath(Graph& g) {
+    std::unordered_map<Node, int> cp;
+    const auto& topo = g.GetTopoOrder();
+    for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
+        Node u = *it;
+        int best = 0;
+        for (Node v : u->GetEdges()) {
+            best = std::max(best, cp[v]);
+        }
+        cp[u] = 1 + best;
+    }
+    return cp;
+}
 
-        path = []
-        current = u
+std::vector<ScheduledNode> ScheduleGraph(Graph& g,
+                                       double alpha = 1.0,   // weight for CP
+                                       double beta  = 0.3,   // weight for fanout
+                                       double new_stream_penalty = 1.0,
+                                       int max_streams = -1) {
 
-        while current in unused:
-            path.append(current)
-            unused.remove(current)
+  std::vector<ScheduledNode> result;
 
-            # Find next node in longest path chain
-            next_nodes = [
-                v for v in graph[current]
-                if v in unused and dp[v] == dp[current] - 1
-            ]
+  auto cp = ComputeCriticalPath(g);
 
-            if not next_nodes:
-                break
+  std::unordered_map<Node, int> indegree;
+  for (Node n : g.GetNodes()) {
+      indegree[n] = n->GetInDegree();
+  }
 
-            # choose any (they are equal-length options)
-            current = next_nodes[0]
+  // Ready queue with priority
+  auto cmp = [&](Node a, Node b) {
+      double pa = alpha * cp[a] + beta * a->GetOutDegree();
+      double pb = alpha * cp[b] + beta * b->GetOutDegree();
+      return pa < pb; // max-heap
+  };
 
-        paths.append(path)
+  std::priority_queue<Node, std::vector<Node>, decltype(cmp)> ready(cmp);
 
-    return paths
-#endif
+  for (Node n : g.GetNodes()) {
+      if (indegree[n] == 0) {
+          ready.push(n);
+      }
+  }
+
+  std::unordered_map<Node, int> stream;
+  int next_stream = 0;
+
+  while (!ready.empty()) {
+    Node u = ready.top();
+    ready.pop();
+
+    // ---- PICK MAIN PARENT ----
+    Node main_parent = nullptr;
+    int best_cp = -1;
+
+    for (Node dep : u->GetDependencies()) {
+        if (cp[dep] > best_cp) {
+            best_cp = cp[dep];
+            main_parent = dep;
+        }
+    }
+
+    // ---- ASSIGN STREAM ----
+    if (!main_parent) {
+        // root
+        stream[u] = next_stream % max_streams;
+        next_stream++;
+    } else {
+        // stream[u] = stream[main_parent];
+    }
+
+    result.push_back({u, stream[u]});
+
+    // ---- PROCESS CHILDREN ----
+    auto children = u->GetEdges();
+
+    // sort children by cp descending
+    std::sort(children.begin(), children.end(), [&](Node a, Node b) {
+        return cp[a] > cp[b];
+    });
+
+    int alt_stream = (stream[u] + 1) % max_streams;
+
+    for (size_t i = 0; i < children.size(); i++) {
+        Node v = children[i];
+
+        indegree[v]--;
+
+        if (indegree[v] == 0) {
+            // enforce stream for children:
+            if (i == 0) {
+                // main continuation
+                stream[v] = stream[u];
+            } else {
+                stream[v] = alt_stream;
+                alt_stream = (alt_stream + 1) % max_streams;
+            }
+
+            ready.push(v);
+        }
+    }
+  }
+
+  return result;
 }
 
 // ================================================================================================
@@ -1015,25 +816,29 @@ bool Graph::RunNodes(
     last_command->release();
   }
 
-  // PathDecomposition();
-  // MinPathCoverBiased();
+  auto start_time = std::chrono::high_resolution_clock::now();
+
+  if (scheduled_nodes_.empty()) {
+    scheduled_nodes_ = ScheduleGraph(*this,
+      /*alpha*/ 1.0,
+      /*beta*/ 0.3,
+      /*new_stream_penalty*/ 1000,
+      /*max_streams*/ DEBUG_HIP_FORCE_GRAPH_QUEUES);
+    // PathDecomposition();
+  }
 
   // Run all commands in the graph
   waits_count_ = 0;
-  #if USE_RECURSIVE_LAUNCH
-  for (auto node : GetNodes()) node->launch_id_ = -1;
-  for (auto node : GetNodes()) {
-    if (node->launch_id_ == -1) {
-      // XPUT("RunOneNodeDFS node %s", node->Xstring().c_str());
-      if (!RunOneNodeRec(node, true)) return false;
-    }
-  }
+#if 1
+  for (auto scheduled_node : scheduled_nodes_) {
+    Node node = scheduled_node.node;
+    // node->stream_id_ = scheduled_node.stream % DEBUG_HIP_FORCE_GRAPH_QUEUES;
 #else
   for (auto node : GetTopoOrder()) {
+#endif
     node->launch_id_ = -1;
     if (!RunOneNode(node)) return false;
   }
-#endif
   XPUT("%p: waits_count_: %d", this, waits_count_);
   
   wait_list.clear();
