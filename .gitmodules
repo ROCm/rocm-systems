@@ -102,10 +102,6 @@
 [submodule "projects/rocprofiler-systems/external/json"]
 	path = projects/rocprofiler-systems/external/json
 	url = https://github.com/nlohmann/json.git
-[submodule "projects/rccl/ext-src/rocSHMEM"]
-	path = projects/rccl/ext-src/rocSHMEM
-	url = https://github.com/ROCm/rocSHMEM.git
-	branch = develop
 [submodule "projects/rocprofiler-compute/src/vendored/pyyaml"]
 	path = projects/rocprofiler-compute/src/vendored/pyyaml
 	url = https://github.com/yaml/pyyaml.git
