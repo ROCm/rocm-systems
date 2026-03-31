@@ -28,3 +28,8 @@ greenctx:
     <<: *level_2
   Unit_hipGreenCtxResourceSplit_By_Count_Functional:
     <<: *level_2
+  Unit_hipGreenCtxResourceSplit_Backfill_Functional:
+    <<: *level_2
+  Unit_hipGreenCtxResourceSplit_Disjoint_Sets:
+    <<: *level_2
+    disabled: [nvidia_linux]

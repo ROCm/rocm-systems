@@ -288,6 +288,111 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Functional) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Splits SM resources into 2 groups via hipDevSmResourceSplit where the first
+ *    group gets 65% of CUs and the second group uses the backfill flag to absorb
+ *    all remaining CUs.  Verifies that the remainder has 0 CUs and runs a
+ *    vectorADD kernel on each partition.
+ */
+HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Backfill_Functional) {
+  HIP_CHECK(hipSetDevice(0));
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+
+  hipDevResource input{};
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+
+  unsigned int totalSMs = input.sm.smCount;
+  unsigned int alignment = input.sm.smCoscheduledAlignment;
+  unsigned int group0 = (static_cast<unsigned int>(totalSMs * 0.65) / alignment) * alignment;
+  REQUIRE(group0 >= alignment);
+
+  hipDevSmResourceGroupParams params[2] = {};
+  params[0].smCount = group0;
+  params[1].smCount = 0;
+  params[1].flags = hipDevSmResourceGroupBackfill;
+
+  hipDevResource result[2] = {};
+  hipDevResource remainder{};
+  HIP_CHECK(hipDevSmResourceSplit(result, 2, &input, &remainder, 0, params));
+
+  REQUIRE(result[0].sm.smCount == group0);
+  REQUIRE(result[1].sm.smCount == totalSMs - group0);
+  REQUIRE(remainder.type == hipDevResourceTypeInvalid);
+
+  RunVectorAddOnResource(&result[0], 0);
+  RunVectorAddOnResource(&result[1], 0);
+}
+
+#if HT_AMD
+/**
+ * Test Description
+ * ------------------------
+ *  - Splits SM resources into 3 equal groups via hipDevSmResourceSplit, creates
+ *    a green context and stream from each partition, retrieves CU masks via
+ *    hipExtStreamGetCUMask, and verifies that every pair of masks is disjoint
+ *    (bitwise AND is zero).
+ */
+HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Disjoint_Sets) {
+  HIP_CHECK(hipSetDevice(0));
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+
+  hipDevResource input{};
+  HIP_CHECK(hipDeviceGetDevResource(device, &input, hipDevResourceTypeSm));
+
+  unsigned int totalSMs = input.sm.smCount;
+  unsigned int alignment = input.sm.smCoscheduledAlignment;
+  unsigned int groupSize = (totalSMs / 3 / alignment) * alignment;
+  REQUIRE(groupSize >= alignment);
+
+  hipDevSmResourceGroupParams params[3] = {};
+  params[0].smCount = groupSize;
+  params[1].smCount = groupSize;
+  params[2].smCount = groupSize;
+
+  hipDevResource result[3] = {};
+  hipDevResource remainder{};
+  HIP_CHECK(hipDevSmResourceSplit(result, 3, &input, &remainder, 0, params));
+
+  for (int i = 0; i < 3; i++) {
+    REQUIRE(result[i].type == hipDevResourceTypeSm);
+    REQUIRE(result[i].sm.smCount == groupSize);
+  }
+
+  unsigned int maskWords = (totalSMs + 31) / 32;
+  std::vector<std::vector<uint32_t>> masks(3);
+  hipGreenCtx_t ctx[3] = {};
+  hipStream_t stream[3] = {};
+
+  for (int i = 0; i < 3; i++) {
+    hipDevResourceDesc_t desc{};
+    HIP_CHECK(hipDevResourceGenerateDesc(&desc, &result[i], 1));
+    HIP_CHECK(hipGreenCtxCreate(&ctx[i], desc, 0, 0));
+    REQUIRE(ctx[i] != nullptr);
+    HIP_CHECK(hipExecutionCtxStreamCreate(&stream[i], ctx[i], hipStreamNonBlocking, 0));
+    REQUIRE(stream[i] != nullptr);
+
+    masks[i].resize(maskWords, 0);
+    HIP_CHECK(hipExtStreamGetCUMask(stream[i], maskWords, masks[i].data()));
+  }
+
+  for (int i = 0; i < 3; i++) {
+    for (int j = i + 1; j < 3; j++) {
+      for (unsigned int w = 0; w < maskWords; w++) {
+        REQUIRE((masks[i][w] & masks[j][w]) == 0);
+      }
+    }
+  }
+
+  for (int i = 0; i < 3; i++) {
+    HIP_CHECK(hipStreamDestroy(stream[i]));
+    HIP_CHECK(hipGreenCtxDestroy(ctx[i]));
+  }
+}
+#endif
+/**
  * End doxygen group hipGreenCtxResourceSplit.
  * @}
  */
