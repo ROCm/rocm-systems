@@ -79,12 +79,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentwithUnsafeflag, float, doubl
       HIP_CHECK(hipHostFree(result));
     }
   } else {
-    {
-      std::string const skip_gfx_msg = std::string(
-          "Memory model feature is only supported for gfx90a, gfx942, Hence"
-          "skipping the testcase for this GPU ") +
-          std::to_string(device);
-      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
-    }
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }

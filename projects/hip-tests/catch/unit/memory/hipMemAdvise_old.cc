@@ -118,9 +118,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
 
     HIP_CHECK(hipGetDeviceCount(&NumDevs));
     if (NumDevs < 2) {
-      HipTest::HIP_SKIP_TEST(
-          "Test TestSetAccessedByPeer() need atleast two Gpus to test"
-          " the scenario. This system has GPUs less than 2");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
       return;
     }
     HIP_CHECK(hipMallocManaged(&Hmm, MEM_SIZE, hipMemAttachGlobal));
@@ -357,9 +355,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
     int Ngpus = 0;
     HIP_CHECK(hipGetDeviceCount(&Ngpus));
     if (Ngpus < 2) {
-      HipTest::HIP_SKIP_TEST(
-          "This test needs atleast two gpus to run."
-          "Hence skipping the test.\n");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
       return;
     }
     int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;

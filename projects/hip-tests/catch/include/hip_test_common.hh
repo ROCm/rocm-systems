@@ -476,6 +476,8 @@ inline constexpr char const kManagedMemoryUnsupported[] =
     "Skipped: GPU does not support managed memory.";
 inline constexpr char const kManagedMemoryDeviceRequired[] =
     "Skipped: at least one device with managed memory support is required.";
+inline constexpr char const kPageableMemoryAccessUnsupported[] =
+    "Skipped: pageable access unsupported; hipMallocManaged may host-allocate (OOM risk).";
 inline constexpr char const kNoGpuDevice[] = "Skipped: no GPU device available.";
 inline constexpr char const kCoherentHostAllocFailed[] =
     "Skipped: coherent host allocation failed (SVM may be unsupported).";
@@ -498,6 +500,10 @@ inline constexpr char const kWarpBallotUnsupported[] =
     "Skipped: warp ballot is not supported on this device.";
 inline constexpr char const kVmmUnsupported[] =
     "Skipped: virtual memory management (VMM) is not supported.";
+inline constexpr char const kLargeBarUnsupported[] =
+    "Skipped: large BAR (resizable BAR) is not supported on this device.";
+inline constexpr char const kFineGrainHwUnsupported[] =
+    "Skipped: fine-grained memory / atomic hardware support is not available on this device.";
 }  // namespace SkipReason
 
 /**
