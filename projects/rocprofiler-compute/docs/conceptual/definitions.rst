@@ -67,7 +67,7 @@ backend of LLVM:
 
    * - Local
      - Memory that is only visible to a particular workgroup. On AMD's Instinct
-       accelerator hardware, this is stored in :doc:`LDS <conceptual/cdna/local-data-share>`
+       accelerator hardware, this is stored in :doc:`LDS </conceptual/cdna/local-data-share>`
        memory.
 
    * - Private

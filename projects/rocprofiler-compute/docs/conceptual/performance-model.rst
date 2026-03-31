@@ -22,12 +22,12 @@ the profiler presents metrics for each hardware family.
 Architecture-specific chapters
 ==============================
 
-* :doc:`CDNA / Instinct performance model <conceptual/cdna/cdna-performance-model>` — comparison tables for
+* :doc:`CDNA / Instinct performance model </conceptual/cdna/cdna-performance-model>` — comparison tables for
   CDNA through CDNA4, **tabbed die diagrams** (CDNA, CDNA2, CDNA3, CDNA4), and nested pages for
   compute unit, L2, shader engine, command processor, System Speed-of-Light, and references,
   all under ``conceptual/cdna/``.
 
-* :doc:`RDNA client GPU performance model <conceptual/rdna/rdna-performance-model>` — Radeon / RDNA profiler
+* :doc:`RDNA client GPU performance model </conceptual/rdna/rdna-performance-model>` — Radeon / RDNA profiler
   context with **tabs by generation** (**RDNA3.5 (gfx1151)** today; **RDNA4** placeholder).
   Full metric text: :ref:`RDNA3.5 (gfx1151) metrics <gfx1151-metrics-ref>`. **System Speed-of-Light** is split by
-  family: :doc:`CDNA / Instinct <conceptual/cdna/system-speed-of-light>` and :doc:`RDNA (gfx1151) <conceptual/rdna/system-speed-of-light>`.
+  family: :doc:`CDNA / Instinct </conceptual/cdna/system-speed-of-light>` and :doc:`RDNA (gfx1151) </conceptual/rdna/system-speed-of-light>`.

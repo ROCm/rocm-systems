@@ -14,7 +14,7 @@ This page lists **metric descriptions** for the RDNA3.5 analysis configuration
 ``metrics_description`` fields used by the analysis panels.
 
 For hardware context, narrative, and the same metric tables organized by block (WGP,
-GL1, GL2, shader engine, command processor), see :doc:`conceptual/rdna/rdna-performance-model`
+GL1, GL2, shader engine, command processor), see :doc:`/conceptual/rdna/rdna-performance-model`
 and its sub-pages. This reference page keeps a **single flat outline** of every table.
 
 .. note::
