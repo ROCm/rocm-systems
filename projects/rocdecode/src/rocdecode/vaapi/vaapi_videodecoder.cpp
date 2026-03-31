@@ -52,7 +52,7 @@ VaapiVideoDecoder::~VaapiVideoDecoder() {
             }
         }
         if (vaTerminate(va_display_) != VA_STATUS_SUCCESS) {
-            CriticalLog(logger_, "Failed to termiate VA");
+            CriticalLog(logger_, "Failed to terminate VA");
         }
     }
 }
