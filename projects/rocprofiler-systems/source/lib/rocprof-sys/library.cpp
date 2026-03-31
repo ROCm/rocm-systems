@@ -684,6 +684,7 @@ rocprofsys_init_tooling_hidden(void)
                 ::rocprofsys::pthread_gotcha::pause();
                 component::numa_gotcha::pause();
                 rocprofsys::kokkosp::pause();
+                process_sampler::pause();
                 invoke_external_pause_callbacks();
             };
             auto resume_callback = [](void) {
@@ -697,6 +698,7 @@ rocprofsys_init_tooling_hidden(void)
                 ::rocprofsys::pthread_gotcha::resume();
                 component::numa_gotcha::resume();
                 rocprofsys::kokkosp::resume();
+                process_sampler::resume();
                 invoke_external_resume_callbacks();
             };
             trace_controller->register_region_pauser_resume_callbacks(resume_callback,

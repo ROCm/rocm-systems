@@ -25,6 +25,11 @@ public:
     }
     void post_process() { post_process_called = true; }
     void shutdown() { shutdown_called = true; }
+    void pause(int64_t ts)
+    {
+        pause_called    = true;
+        pause_timestamp = ts;
+    }
 
     bool    setup_called        = false;
     bool    config_called       = false;
@@ -32,6 +37,8 @@ public:
     int64_t last_timestamp      = 0;
     bool    post_process_called = false;
     bool    shutdown_called     = false;
+    bool    pause_called        = false;
+    int64_t pause_timestamp     = 0;
 };
 
 class mock_nic_collector
@@ -46,6 +53,7 @@ public:
     }
     void post_process() { post_process_called = true; }
     void shutdown() { shutdown_called = true; }
+    void pause(int64_t /*ts*/) { pause_called = true; }
 
     bool    setup_called        = false;
     bool    config_called       = false;
@@ -53,6 +61,7 @@ public:
     int64_t last_timestamp      = 0;
     bool    post_process_called = false;
     bool    shutdown_called     = false;
+    bool    pause_called        = false;
 };
 
 class collector_slice_test : public ::testing::Test

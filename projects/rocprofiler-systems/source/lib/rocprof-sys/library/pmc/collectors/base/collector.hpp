@@ -198,6 +198,37 @@ struct collector
     }
 
     /**
+     * @brief Write a zero-valued sample for all tracked devices.
+     *
+     * This method is used when profiling is paused. It records a sample
+     * with all metrics set to zero for every enabled device. The main
+     * purpose of this is to make Perfetto counter tracks drop to zero
+     * during the pause, ensuring that the profiler does not appear to be
+     * continuing to sample the previous value.
+     *
+     * @param timestamp The current time in nanoseconds, typically when the pause occurs.
+     */
+    void pause(int64_t timestamp)
+    {
+        const auto current_timestamp = static_cast<uint64_t>(timestamp);
+        for(const auto& entry : m_device_entries)
+        {
+            auto      device_id   = entry.device->get_index();
+            auto      device_name = entry.device->get_name();
+            metrics_t zero_metrics{};
+
+            CacheApi::store_sample(device_id, device_name, m_enabled_metrics,
+                                   entry.supported_metrics, zero_metrics,
+                                   current_timestamp);
+
+            if(SettingsApi::get_use_perfetto_legacy_metrics())
+            {
+                PerfettoApi::store_sample(device_id, zero_metrics, current_timestamp);
+            }
+        }
+    }
+
+    /**
      * @brief Shutdown the device provider and release resources.
      *
      * @note This method does NOT clear m_device_entries because post_process()
