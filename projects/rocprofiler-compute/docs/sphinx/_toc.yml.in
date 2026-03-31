@@ -57,10 +57,12 @@ subtrees:
       - file: conceptual/rdna/rdna-performance-model.rst
         title: RDNA client GPU performance model
         entries:
-        - file: conceptual/rdna/compute-unit.rst
-          title: Compute unit
-        - file: conceptual/rdna/l2-cache.rst
-          title: L2 cache
+        - file: conceptual/rdna/wgp.rst
+          title: Workgroup processor (WGP)
+        - file: conceptual/rdna/gl1-cache.rst
+          title: GL1 — TCP and GL1C
+        - file: conceptual/rdna/gl2-cache.rst
+          title: GL2 — GL2C and memory path
         - file: conceptual/rdna/shader-engine.rst
           title: Shader engine
         - file: conceptual/rdna/command-processor.rst
