@@ -3199,12 +3199,12 @@ class AMDSMICommands:
             if args.power:
                 power_dict = {
                     "socket_power": "N/A",
-                              'npu_power': "N/A",
-                              'apu_power': 'N/A',
-                              'gfx_power': 'N/A',
-                              'dGPU_power': 'N/A',
-                              'all_core_power': 'N/A',
-                              'system_power': 'N/A',
+                    "npu_power": "N/A",
+                    "apu_power": "N/A",
+                    "gfx_power": "N/A",
+                    "dGPU_power": "N/A",
+                    "all_core_power": "N/A",
+                    "system_power": "N/A",
                     "gfx_voltage": "N/A",
                     "soc_voltage": "N/A",
                     "mem_voltage": "N/A",
@@ -3228,12 +3228,12 @@ class AMDSMICommands:
                             )
 
                     power_dict["socket_power"] = power_info["socket_power"]
-                    power_dict['npu_power'] = power_info['npu_power']
-                    power_dict['apu_power'] = power_info['apu_power']
-                    power_dict['gfx_power'] = power_info['gfx_power']
-                    power_dict['dGPU_power'] = power_info['dGPU_power']
-                    power_dict['all_core_power'] = power_info['all_core_power']
-                    power_dict['system_power'] = power_info['system_power']
+                    power_dict["npu_power"] = power_info["npu_power"]
+                    power_dict["apu_power"] = power_info["apu_power"]
+                    power_dict["gfx_power"] = power_info["gfx_power"]
+                    power_dict["dGPU_power"] = power_info["dGPU_power"]
+                    power_dict["all_core_power"] = power_info["all_core_power"]
+                    power_dict["system_power"] = power_info["system_power"]
                     power_dict["gfx_voltage"] = power_info["gfx_voltage"]
                     power_dict["soc_voltage"] = power_info["soc_voltage"]
                     power_dict["mem_voltage"] = power_info["mem_voltage"]
@@ -4284,29 +4284,37 @@ class AMDSMICommands:
                 values_dict["throttle"] = throttle_status
 
         # Handle GPU Metrics specific options
-        if hasattr(args, 'gpu_metrics_ver') and args.gpu_metrics_ver:
+        if hasattr(args, "gpu_metrics_ver") and args.gpu_metrics_ver:
             try:
                 gpu_metrics_version = amdsmi_interface.amdsmi_get_gpu_metrics_header_info(args.gpu)
-                values_dict['gpu_metrics_version'] = gpu_metrics_version
+                values_dict["gpu_metrics_version"] = gpu_metrics_version
             except amdsmi_exception.AmdSmiLibraryException as e:
-                values_dict['gpu_metrics_version'] = "N/A"
-                logging.debug("Failed to get GPU metrics version for gpu %s | %s", gpu_id, e.get_error_info())
+                values_dict["gpu_metrics_version"] = "N/A"
+                logging.debug(
+                    "Failed to get GPU metrics version for gpu %s | %s", gpu_id, e.get_error_info()
+                )
 
-        if hasattr(args, 'gpu_metrics_table') and args.gpu_metrics_table:
+        if hasattr(args, "gpu_metrics_table") and args.gpu_metrics_table:
             try:
                 gpu_metrics_raw = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
-                values_dict['gpu_metrics_raw'] = gpu_metrics_raw
+                values_dict["gpu_metrics_raw"] = gpu_metrics_raw
             except amdsmi_exception.AmdSmiLibraryException as e:
-                values_dict['gpu_metrics_raw'] = "N/A"
-                logging.debug("Failed to get GPU metrics table for gpu %s | %s", gpu_id, e.get_error_info())
+                values_dict["gpu_metrics_raw"] = "N/A"
+                logging.debug(
+                    "Failed to get GPU metrics table for gpu %s | %s", gpu_id, e.get_error_info()
+                )
 
-        if hasattr(args, 'gpu_partition_metrics') and args.gpu_partition_metrics:
+        if hasattr(args, "gpu_partition_metrics") and args.gpu_partition_metrics:
             try:
                 partition_metrics = amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(args.gpu)
-                values_dict['partition_metrics'] = partition_metrics
+                values_dict["partition_metrics"] = partition_metrics
             except amdsmi_exception.AmdSmiLibraryException as e:
-                values_dict['partition_metrics'] = "N/A"
-                logging.debug("Failed to get GPU partition metrics for gpu %s | %s", gpu_id, e.get_error_info())
+                values_dict["partition_metrics"] = "N/A"
+                logging.debug(
+                    "Failed to get GPU partition metrics for gpu %s | %s",
+                    gpu_id,
+                    e.get_error_info(),
+                )
 
         # Store timestamp first if watching_output is enabled
         if watching_output:
@@ -11529,7 +11537,15 @@ class AMDSMICommands:
                     output_file.write(legend_output + "\n")
 
     def partition(
-        self, args, multiple_devices=False, gpu=None, current=None, memory=None, accelerator=None, metrics=None):
+        self,
+        args,
+        multiple_devices=False,
+        gpu=None,
+        current=None,
+        memory=None,
+        accelerator=None,
+        metrics=None,
+    ):
         """Display partition information for the target GPU
         param:
             args - argparser args to pass to subcommand
@@ -11565,7 +11581,12 @@ class AMDSMICommands:
         # amd-smi partition (no args)             #
         ###########################################
         # if no args are present, then everything should be displayed
-        if not args.current and not args.memory and not args.accelerator and not getattr(args, 'metrics', False):
+        if (
+            not args.current
+            and not args.memory
+            and not args.accelerator
+            and not getattr(args, "metrics", False)
+        ):
             args.current = True
             args.memory = True
             args.accelerator = True
@@ -11981,14 +12002,16 @@ class AMDSMICommands:
         ###########################################
         # amd-smi partition --metrics             #
         ###########################################
-        if hasattr(args, 'metrics') and args.metrics:
-            self.logger.table_header = ''.rjust(7)
-            metrics_header = "GPU_ID".ljust(8) + \
-                           "PARTITION_ID".ljust(14) + \
-                           "GFX_ACTIVITY".ljust(15) + \
-                           "UMC_ACTIVITY".ljust(15) + \
-                           "MM_ACTIVITY".ljust(15) + \
-                           "THROTTLE_STATUS".ljust(17)
+        if hasattr(args, "metrics") and args.metrics:
+            self.logger.table_header = "".rjust(7)
+            metrics_header = (
+                "GPU_ID".ljust(8)
+                + "PARTITION_ID".ljust(14)
+                + "GFX_ACTIVITY".ljust(15)
+                + "UMC_ACTIVITY".ljust(15)
+                + "MM_ACTIVITY".ljust(15)
+                + "THROTTLE_STATUS".ljust(17)
+            )
             self.logger.table_header = metrics_header + self.logger.table_header.strip()
 
             tabular_output = []
@@ -11998,22 +12021,22 @@ class AMDSMICommands:
                     partition_metrics = amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(gpu)
 
                     # Extract partition utilization metrics
-                    gfx_activity = partition_metrics.get('current_gfxclk_utilization', 'N/A')
-                    umc_activity = partition_metrics.get('current_uclk_utilization', 'N/A')
-                    mm_activity = partition_metrics.get('average_mm_activity', 'N/A')
+                    gfx_activity = partition_metrics.get("current_gfxclk_utilization", "N/A")
+                    umc_activity = partition_metrics.get("current_uclk_utilization", "N/A")
+                    mm_activity = partition_metrics.get("average_mm_activity", "N/A")
 
                     # Check if throttled
                     throttle_status = "None"
-                    if partition_metrics.get('throttle_status_bitmask', 0) != 0:
+                    if partition_metrics.get("throttle_status_bitmask", 0) != 0:
                         throttle_status = "Throttled"
 
                     tabular_output_dict = {
                         "gpu_id": gpu_id,
                         "partition_id": 0,  # Default partition
-                        "gfx_activity": f"{gfx_activity}%" if gfx_activity != 'N/A' else 'N/A',
-                        "umc_activity": f"{umc_activity}%" if umc_activity != 'N/A' else 'N/A',
-                        "mm_activity": f"{mm_activity}%" if mm_activity != 'N/A' else 'N/A',
-                        "throttle_status": throttle_status
+                        "gfx_activity": f"{gfx_activity}%" if gfx_activity != "N/A" else "N/A",
+                        "umc_activity": f"{umc_activity}%" if umc_activity != "N/A" else "N/A",
+                        "mm_activity": f"{mm_activity}%" if mm_activity != "N/A" else "N/A",
+                        "throttle_status": throttle_status,
                     }
 
                 except amdsmi_exception.AmdSmiLibraryException as e:
@@ -12023,9 +12046,13 @@ class AMDSMICommands:
                         "gfx_activity": "N/A",
                         "umc_activity": "N/A",
                         "mm_activity": "N/A",
-                        "throttle_status": "N/A"
+                        "throttle_status": "N/A",
                     }
-                    logging.debug("Failed to get partition metrics for gpu %s | %s", gpu_id, e.get_error_info())
+                    logging.debug(
+                        "Failed to get partition metrics for gpu %s | %s",
+                        gpu_id,
+                        e.get_error_info(),
+                    )
 
                 tabular_output.append(tabular_output_dict)
 
@@ -12466,7 +12493,7 @@ class AMDSMICommands:
             if current_power == "N/A":
                 try:
                     power_info = amdsmi_interface.amdsmi_get_power_info(processor)
-                    current_power = power_info['socket_power']
+                    current_power = power_info["socket_power"]
                 except amdsmi_exception.AmdSmiLibraryException:
                     current_power = "N/A"
             gpu_info_dict.update({"mem_util": mem_util})

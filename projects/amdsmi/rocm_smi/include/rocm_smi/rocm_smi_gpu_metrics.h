@@ -59,11 +59,10 @@ constexpr uint32_t kRSMI_GPU_METRICS_API_CONTENT_MINOR_VER_2 = 2;
 constexpr uint32_t kRSMI_GPU_METRICS_API_CONTENT_MINOR_VER_3 = 3;
 constexpr uint32_t kRSMI_GPU_METRICS_API_CONTENT_MINOR_VER_4 = 4;
 constexpr uint32_t kRSMI_GPU_METRICS_API_CONTENT_MINOR_VER_8 = 8;
-constexpr uint32_t kRSMI_LATEST_GPU_METRICS_API_CONTENT_MAJOR_VER
-                    = kRSMI_GPU_METRICS_API_CONTENT_MAJOR_VER_3;
-constexpr uint32_t kRSMI_LATEST_GPU_METRICS_API_CONTENT_MINOR_VER
-                    = kRSMI_GPU_METRICS_API_CONTENT_MINOR_VER_0;
-
+constexpr uint32_t kRSMI_LATEST_GPU_METRICS_API_CONTENT_MAJOR_VER =
+    kRSMI_GPU_METRICS_API_CONTENT_MAJOR_VER_3;
+constexpr uint32_t kRSMI_LATEST_GPU_METRICS_API_CONTENT_MINOR_VER =
+    kRSMI_GPU_METRICS_API_CONTENT_MINOR_VER_0;
 
 //  Note: This *must* match NUM_HBM_INSTANCES
 constexpr uint32_t kRSMI_MAX_NUM_HBM_INSTANCES = 4;
@@ -892,21 +891,21 @@ struct AMDGpuMetrics_v20_t {
   uint64_t m_system_clock_counter;
 
   /* Temperature */
-  uint16_t m_temperature_gfx; // gfx temperature on APUs
-  uint16_t m_temperature_soc; // soc temperature on APUs
-  uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES]; // CPU core temperature on APUs
+  uint16_t m_temperature_gfx;                             // gfx temperature on APUs
+  uint16_t m_temperature_soc;                             // soc temperature on APUs
+  uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES];  // CPU core temperature on APUs
   uint16_t m_temperature_l3[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Utilization */
   uint16_t m_average_gfx_activity;
-  uint16_t m_average_mm_activity; // UVD or VCN
+  uint16_t m_average_mm_activity;  // UVD or VCN
 
   /* Power/Energy */
-  uint16_t m_average_socket_power; // dGPU + APU power on A + A platform
+  uint16_t m_average_socket_power;  // dGPU + APU power on A + A platform
   uint16_t m_average_cpu_power;
   uint16_t m_average_soc_power;
   uint16_t m_average_gfx_power;
-  uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES]; // CPU core power on APUs
+  uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES];  // CPU core power on APUs
 
   /* Average clocks */
   uint16_t m_average_gfxclk_frequency;
@@ -923,7 +922,7 @@ struct AMDGpuMetrics_v20_t {
   uint16_t m_current_fclk;
   uint16_t m_current_vclk;
   uint16_t m_current_dclk;
-  uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES]; // CPU core clocks
+  uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES];  // CPU core clocks
   uint16_t m_current_l3clk[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Throttle status */
@@ -933,31 +932,31 @@ struct AMDGpuMetrics_v20_t {
   uint16_t m_current_fan_speed;
 
   uint16_t m_padding;
-  };
+};
 
 struct AMDGpuMetrics_v21_t {
   ~AMDGpuMetrics_v21_t() = default;
   struct AMDGpuMetricsHeader_v1_t m_common_header;
 
   /* Temperature */
-  uint16_t m_temperature_gfx; // gfx temperature on APUs
-  uint16_t m_temperature_soc; // soc temperature on APUs
-  uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES]; // CPU core temperature on APUs
+  uint16_t m_temperature_gfx;                             // gfx temperature on APUs
+  uint16_t m_temperature_soc;                             // soc temperature on APUs
+  uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES];  // CPU core temperature on APUs
   uint16_t m_temperature_l3[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Utilization */
   uint16_t m_average_gfx_activity;
-  uint16_t m_vcn_activity; // UVD or VCN
+  uint16_t m_vcn_activity;  // UVD or VCN
 
   /* Driver attached timestamp (in ns) */
   uint64_t m_system_clock_counter;
 
   /* Power/Energy */
-  uint16_t m_average_socket_power; // dGPU + APU power on A + A platform
+  uint16_t m_average_socket_power;  // dGPU + APU power on A + A platform
   uint16_t m_average_cpu_power;
   uint16_t m_average_soc_power;
   uint16_t m_average_gfx_power;
-  uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES]; // CPU core power on APUs
+  uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES];  // CPU core power on APUs
 
   /* Average clocks */
   uint16_t m_average_gfxclk_frequency;
@@ -974,7 +973,7 @@ struct AMDGpuMetrics_v21_t {
   uint16_t m_current_fclk;
   uint16_t m_current_vclk;
   uint16_t m_current_dclk;
-  uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES]; // CPU core clocks
+  uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES];  // CPU core clocks
   uint16_t m_current_l3clk[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Throttle status */
@@ -991,24 +990,24 @@ struct AMDGpuMetrics_v22_t {
   struct AMDGpuMetricsHeader_v1_t m_common_header;
 
   /* Temperature */
-  uint16_t m_temperature_gfx; // gfx temperature on APUs
-  uint16_t m_temperature_soc; // soc temperature on APUs
-  uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES]; // CPU core temperature on APUs
+  uint16_t m_temperature_gfx;                             // gfx temperature on APUs
+  uint16_t m_temperature_soc;                             // soc temperature on APUs
+  uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES];  // CPU core temperature on APUs
   uint16_t m_temperature_l3[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Utilization */
   uint16_t m_average_gfx_activity;
-  uint16_t m_vcn_activity; // UVD or VCN
+  uint16_t m_vcn_activity;  // UVD or VCN
 
   /* Driver attached timestamp (in ns) */
   uint64_t m_system_clock_counter;
 
   /* Power/Energy */
-  uint16_t m_average_socket_power; // dGPU + APU power on A + A platform
+  uint16_t m_average_socket_power;  // dGPU + APU power on A + A platform
   uint16_t m_average_cpu_power;
   uint16_t m_average_soc_power;
   uint16_t m_average_gfx_power;
-  uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES]; // CPU core power on APUs
+  uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES];  // CPU core power on APUs
 
   /* Average clocks */
   uint16_t m_average_gfxclk_frequency;
@@ -1025,7 +1024,7 @@ struct AMDGpuMetrics_v22_t {
   uint16_t m_current_fclk;
   uint16_t m_current_vclk;
   uint16_t m_current_dclk;
-  uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES]; // CPU core clocks
+  uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES];  // CPU core clocks
   uint16_t m_current_l3clk[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Throttle status (ASIC dependent) */
@@ -1045,24 +1044,24 @@ struct AMDGpuMetrics_v23_t {
   struct AMDGpuMetricsHeader_v1_t m_common_header;
 
   /* Temperature */
-  uint16_t m_temperature_gfx; // gfx temperature on APUs
-  uint16_t m_temperature_soc; // soc temperature on APUs
-  uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES]; // CPU core temperature on APUs
+  uint16_t m_temperature_gfx;                             // gfx temperature on APUs
+  uint16_t m_temperature_soc;                             // soc temperature on APUs
+  uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES];  // CPU core temperature on APUs
   uint16_t m_temperature_l3[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Utilization */
   uint16_t m_average_gfx_activity;
-  uint16_t m_vcn_activity; // UVD or VCN
+  uint16_t m_vcn_activity;  // UVD or VCN
 
   /* Driver attached timestamp (in ns) */
   uint64_t m_system_clock_counter;
 
   /* Power/Energy */
-  uint16_t m_average_socket_power; // dGPU + APU power on A + A platform
+  uint16_t m_average_socket_power;  // dGPU + APU power on A + A platform
   uint16_t m_average_cpu_power;
   uint16_t m_average_soc_power;
   uint16_t m_average_gfx_power;
-  uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES]; // CPU core power on APUs
+  uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES];  // CPU core power on APUs
 
   /* Average clocks */
   uint16_t m_average_gfxclk_frequency;
@@ -1079,7 +1078,7 @@ struct AMDGpuMetrics_v23_t {
   uint16_t m_current_fclk;
   uint16_t m_current_vclk;
   uint16_t m_current_dclk;
-  uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES]; // CPU core clocks
+  uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES];  // CPU core clocks
   uint16_t m_current_l3clk[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Throttle status (ASIC dependent) */
@@ -1094,10 +1093,11 @@ struct AMDGpuMetrics_v23_t {
   uint64_t m_indep_throttle_status;
 
   /* Average Temperature */
-  uint16_t m_average_temperature_gfx; // average gfx temperature on APUs
-  uint16_t m_average_temperature_soc; // average soc temperature on APUs
-  uint16_t m_average_temperature_core[kRSMI_GC20_MAX_NUM_CORES]; // average CPU core temperature on APUs
-uint16_t m_average_temperature_l3[kRSMI_MAX_NUM_L3_CACHES];
+  uint16_t m_average_temperature_gfx;  // average gfx temperature on APUs
+  uint16_t m_average_temperature_soc;  // average soc temperature on APUs
+  uint16_t
+      m_average_temperature_core[kRSMI_GC20_MAX_NUM_CORES];  // average CPU core temperature on APUs
+  uint16_t m_average_temperature_l3[kRSMI_MAX_NUM_L3_CACHES];
 };
 
 struct AMDGpuMetrics_v24_t {
@@ -1105,53 +1105,53 @@ struct AMDGpuMetrics_v24_t {
   struct AMDGpuMetricsHeader_v1_t m_common_header;
 
   /* Temperature (unit: centi-Celsius) */
- uint16_t m_temperature_gfx;
- uint16_t m_temperature_soc;
- uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES];
- uint16_t m_temperature_l3[kRSMI_MAX_NUM_L3_CACHES];
+  uint16_t m_temperature_gfx;
+  uint16_t m_temperature_soc;
+  uint16_t m_temperature_core[kRSMI_GC20_MAX_NUM_CORES];
+  uint16_t m_temperature_l3[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Utilization (unit: centi) */
- uint16_t m_average_gfx_activity;
- uint16_t m_vcn_activity;
+  uint16_t m_average_gfx_activity;
+  uint16_t m_vcn_activity;
 
   /* Driver attached timestamp (in ns) */
-	uint64_t m_system_clock_counter;
+  uint64_t m_system_clock_counter;
 
   /* Power/Energy (unit: mW) */
- uint16_t m_average_socket_power;
- uint16_t m_average_cpu_power;
- uint16_t m_average_soc_power;
- uint16_t m_average_gfx_power;
- uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES];
+  uint16_t m_average_socket_power;
+  uint16_t m_average_cpu_power;
+  uint16_t m_average_soc_power;
+  uint16_t m_average_gfx_power;
+  uint16_t m_average_core_power[kRSMI_GC20_MAX_NUM_CORES];
 
   /* Average clocks (unit: MHz) */
- uint16_t m_average_gfxclk_frequency;
- uint16_t m_average_socclk_frequency;
- uint16_t m_average_uclk_frequency;
- uint16_t m_average_fclk_frequency;
- uint16_t m_average_vclk_frequency;
- uint16_t m_average_dclk_frequency;
+  uint16_t m_average_gfxclk_frequency;
+  uint16_t m_average_socclk_frequency;
+  uint16_t m_average_uclk_frequency;
+  uint16_t m_average_fclk_frequency;
+  uint16_t m_average_vclk_frequency;
+  uint16_t m_average_dclk_frequency;
 
   /* Current clocks (unit: MHz) */
- uint16_t m_current_gfxclk;
- uint16_t m_current_socclk;
- uint16_t m_current_uclk;
- uint16_t m_current_fclk;
- uint16_t m_current_vclk;
- uint16_t m_current_dclk;
- uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES];
- uint16_t m_current_l3clk[kRSMI_MAX_NUM_L3_CACHES];
+  uint16_t m_current_gfxclk;
+  uint16_t m_current_socclk;
+  uint16_t m_current_uclk;
+  uint16_t m_current_fclk;
+  uint16_t m_current_vclk;
+  uint16_t m_current_dclk;
+  uint16_t m_current_coreclk[kRSMI_GC20_MAX_NUM_CORES];
+  uint16_t m_current_l3clk[kRSMI_MAX_NUM_L3_CACHES];
 
   /* Throttle status (ASIC dependent) */
   uint32_t m_throttle_status;
 
   /* Fans */
- uint16_t m_current_fan_speed;
+  uint16_t m_current_fan_speed;
 
- uint16_t m_padding[3];
+  uint16_t m_padding[3];
 
   /* Throttle status (ASIC independent) */
-	uint64_t m_indep_throttle_status;
+  uint64_t m_indep_throttle_status;
 
   /* Average Temperature (unit: centi-Celsius) */
   uint16_t m_average_temperature_gfx;
@@ -1203,7 +1203,7 @@ struct AMDGpuMetrics_v30_t {
   uint16_t m_average_npu_writes;
 
   /* Driver attached timestamp (in ns) */
-	uint64_t m_system_clock_counter;
+  uint64_t m_system_clock_counter;
 
   /* Power/Energy */
   /* time filtered power used for PPT/STAPM [APU+dGPU] [mW] */
@@ -1401,14 +1401,14 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricAvgMmActivity,
   kMetricGfxActivityAccumulator,
   kMetricMemActivityAccumulator,
-  kMetricVcnActivity,                     // v1.4
-  kMetricJpegActivity,                    // v1.5
-  kMetricNpuActivity,                     // v3.0
-  kMetricAvgCoreC0Activity,               // v3.0
-  kMetricAvgDramReads,                    // v3.0
-  kMetricAvgDramWrites,                   // v3.0
-  kMetricAvgNpuReads,                     // v3.0
-  kMetricAvgNpuWrites,                    // v3.0
+  kMetricVcnActivity,        // v1.4
+  kMetricJpegActivity,       // v1.5
+  kMetricNpuActivity,        // v3.0
+  kMetricAvgCoreC0Activity,  // v3.0
+  kMetricAvgDramReads,       // v3.0
+  kMetricAvgDramWrites,      // v3.0
+  kMetricAvgNpuReads,        // v3.0
+  kMetricAvgNpuWrites,       // v3.0
 
   // kGpuMetricAverageClock counters
   kMetricAvgGfxClockFrequency,
@@ -1418,8 +1418,8 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricAvgDClock0Frequency,
   kMetricAvgVClock1Frequency,
   kMetricAvgDClock1Frequency,
-  kMetricAvgFClockFrequency,              // v2.0
-  kMetricAvgNpuClockFrequency,            // v3.0
+  kMetricAvgFClockFrequency,    // v2.0
+  kMetricAvgNpuClockFrequency,  // v3.0
 
   // kGpuMetricCurrentClock counters
   kMetricCurrGfxClock,  // v1.4: Changed to multi-valued
@@ -1429,11 +1429,11 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricCurrDClock0,  // v1.4: Changed to multi-valued
   kMetricCurrVClock1,
   kMetricCurrDClock1,
-  kMetricCurrFClock,                      // v2.0
-  kMetricCurrCoreClock,                   // v2.1
-  kMetricCurrL3Clock,                     // v2.1
-  kMetricCurrCoreMaxFreq,                 // v3.0
-  kMetricCurrGfxMaxFreq,                  // v3.0
+  kMetricCurrFClock,       // v2.0
+  kMetricCurrCoreClock,    // v2.1
+  kMetricCurrL3Clock,      // v2.1
+  kMetricCurrCoreMaxFreq,  // v3.0
+  kMetricCurrGfxMaxFreq,   // v3.0
 
   // kGpuMetricThrottleStatus counters
   kMetricThrottleStatus,
@@ -1469,21 +1469,21 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
 
   // kGpuMetricPowerEnergy counters
   kMetricAvgSocketPower,
-  kMetricCurrSocketPower,                 // v1.4
-  kMetricEnergyAccumulator,               // v1.4
-  kMetricAvgCpuPower,                     // v2.0
-  kMetricAvgSocPower,                     // v2.0
-  kMetricAvgGfxPower,                     // v2.0
-  kMetricAvgCorePower,                    // v2.0
-  kMetricAvgCpuCurrent,                   // v2.4
-  kMetricAvgSocCurrent,                   // v2.4
-  kMetricAvgGfxCurrent,                   // v2.4
-  kMetricAvgNpuPower,                     // v3.0
-  kMetricAvgdGpuPower,                    // v3.0
-  kMetricAvgdAllCorePower,                // v3.0
-  kMetricAvgdSysPower,                    // v3.0
-  kMetricMaxStapmPowerLimit,              // v3.0
-  kMetricAvgStapmPowerLimit,              // v3.0
+  kMetricCurrSocketPower,     // v1.4
+  kMetricEnergyAccumulator,   // v1.4
+  kMetricAvgCpuPower,         // v2.0
+  kMetricAvgSocPower,         // v2.0
+  kMetricAvgGfxPower,         // v2.0
+  kMetricAvgCorePower,        // v2.0
+  kMetricAvgCpuCurrent,       // v2.4
+  kMetricAvgSocCurrent,       // v2.4
+  kMetricAvgGfxCurrent,       // v2.4
+  kMetricAvgNpuPower,         // v3.0
+  kMetricAvgdGpuPower,        // v3.0
+  kMetricAvgdAllCorePower,    // v3.0
+  kMetricAvgdSysPower,        // v3.0
+  kMetricMaxStapmPowerLimit,  // v3.0
+  kMetricAvgStapmPowerLimit,  // v3.0
 
   // kGpuMetricVoltage counters
   kMetricVoltageSoc,  // v1.3
@@ -1559,8 +1559,8 @@ enum class AMDGpuMetricVersionFlags_t : AMDGpuMetricVersionFlagId_t {
   kGpuMetricV16 = (0x1 << 6),
   kGpuMetricV17 = (0x1 << 7),
   kGpuMetricV18 = (0x1 << 8),
-  kGpuXcpMetricV10 = (0x1 << 0),         // Added in v1.8 for partition metrics v1.0
-  kGpuMetricDynV19Plus = (0x1 << 9),     // Dyn. GPU Metrics v1.9+
+  kGpuXcpMetricV10 = (0x1 << 0),      // Added in v1.8 for partition metrics v1.0
+  kGpuMetricDynV19Plus = (0x1 << 9),  // Dyn. GPU Metrics v1.9+
   kGpuMetricV20 = (0x1 << 10),
   kGpuMetricV21 = (0x1 << 11),
   kGpuMetricV22 = (0x1 << 12),
@@ -1892,13 +1892,11 @@ class GpuMetricsBase_v20_t final : public GpuMetricsBase_t {
  public:
   ~GpuMetricsBase_v20_t() = default;
 
-  size_t sizeof_metric_table() override {
-    return sizeof(AMDGpuMetrics_v20_t);
-  }
+  size_t sizeof_metric_table() override { return sizeof(AMDGpuMetrics_v20_t); }
 
   GpuMetricTypePtr_t get_metrics_table() override {
     if (!m_gpu_metric_ptr) {
-      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v20_t*){});
+      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v20_t*) {});
     }
     assert(m_gpu_metric_ptr != nullptr);
     return m_gpu_metric_ptr;
@@ -1920,13 +1918,11 @@ class GpuMetricsBase_v21_t final : public GpuMetricsBase_t {
  public:
   ~GpuMetricsBase_v21_t() = default;
 
-  size_t sizeof_metric_table() override {
-    return sizeof(AMDGpuMetrics_v21_t);
-  }
+  size_t sizeof_metric_table() override { return sizeof(AMDGpuMetrics_v21_t); }
 
   GpuMetricTypePtr_t get_metrics_table() override {
     if (!m_gpu_metric_ptr) {
-      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v21_t*){});
+      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v21_t*) {});
     }
     assert(m_gpu_metric_ptr != nullptr);
     return m_gpu_metric_ptr;
@@ -1948,13 +1944,11 @@ class GpuMetricsBase_v22_t final : public GpuMetricsBase_t {
  public:
   ~GpuMetricsBase_v22_t() = default;
 
-  size_t sizeof_metric_table() override {
-    return sizeof(AMDGpuMetrics_v22_t);
-  }
+  size_t sizeof_metric_table() override { return sizeof(AMDGpuMetrics_v22_t); }
 
   GpuMetricTypePtr_t get_metrics_table() override {
     if (!m_gpu_metric_ptr) {
-      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v22_t*){});
+      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v22_t*) {});
     }
     assert(m_gpu_metric_ptr != nullptr);
     return m_gpu_metric_ptr;
@@ -1976,13 +1970,11 @@ class GpuMetricsBase_v23_t final : public GpuMetricsBase_t {
  public:
   ~GpuMetricsBase_v23_t() = default;
 
-  size_t sizeof_metric_table() override {
-    return sizeof(AMDGpuMetrics_v23_t);
-  }
+  size_t sizeof_metric_table() override { return sizeof(AMDGpuMetrics_v23_t); }
 
   GpuMetricTypePtr_t get_metrics_table() override {
     if (!m_gpu_metric_ptr) {
-      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v23_t*){});
+      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v23_t*) {});
     }
     assert(m_gpu_metric_ptr != nullptr);
     return m_gpu_metric_ptr;
@@ -2004,13 +1996,11 @@ class GpuMetricsBase_v24_t final : public GpuMetricsBase_t {
  public:
   ~GpuMetricsBase_v24_t() = default;
 
-  size_t sizeof_metric_table() override {
-    return sizeof(AMDGpuMetrics_v24_t);
-  }
+  size_t sizeof_metric_table() override { return sizeof(AMDGpuMetrics_v24_t); }
 
   GpuMetricTypePtr_t get_metrics_table() override {
     if (!m_gpu_metric_ptr) {
-      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v24_t*){});
+      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v24_t*) {});
     }
     assert(m_gpu_metric_ptr != nullptr);
     return m_gpu_metric_ptr;
@@ -2032,13 +2022,11 @@ class GpuMetricsBase_v30_t final : public GpuMetricsBase_t {
  public:
   ~GpuMetricsBase_v30_t() = default;
 
-  size_t sizeof_metric_table() override {
-    return sizeof(AMDGpuMetrics_v30_t);
-  }
+  size_t sizeof_metric_table() override { return sizeof(AMDGpuMetrics_v30_t); }
 
   GpuMetricTypePtr_t get_metrics_table() override {
     if (!m_gpu_metric_ptr) {
-      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v30_t*){});
+      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v30_t*) {});
     }
     assert(m_gpu_metric_ptr != nullptr);
     return m_gpu_metric_ptr;

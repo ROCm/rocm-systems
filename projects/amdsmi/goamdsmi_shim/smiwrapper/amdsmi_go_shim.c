@@ -983,153 +983,149 @@ int32_t goamdsmi_ttm_pages_limit_reset(void) {
   return 0;
 }
 
-bool goamdsmi_gpu_metrics_info_supported(uint32_t dv_ind)
-{
-    if (dv_ind >= num_gpu_devices_inAllSocket) {
-        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-            printf("AMDSMI, Invalid device index %d for gpu metrics support check\n", dv_ind);
-        }
-        return false;
-    }
-
-    amdsmi_gpu_metrics_t test_metrics = {0};
-    amdsmi_status_t status = amdsmi_get_gpu_metrics_info(
-        amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-        &test_metrics
-    );
-
-    bool supported = (status == AMDSMI_STATUS_SUCCESS);
+bool goamdsmi_gpu_metrics_info_supported(uint32_t dv_ind) {
+  if (dv_ind >= num_gpu_devices_inAllSocket) {
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-        printf("AMDSMI, GPU metrics support check for Gpu:%d, Status:%d, Supported:%s\n",
-               dv_ind, status, supported ? "Yes" : "No");
-    }
-
-    return supported;
-}
-
-bool goamdsmi_gpu_metrics_header_info_get(uint32_t dv_ind, uint16_t* header_size, uint8_t* format_rev, uint8_t* content_rev)
-{
-    if (dv_ind >= num_gpu_devices_inAllSocket || !header_size || !format_rev || !content_rev) {
-        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-            printf("AMDSMI, Invalid parameters for gpu metrics header info get\n");
-        }
-        return false;
-    }
-
-    amdsmi_gpu_metrics_t metrics = {0};
-    amdsmi_status_t status = amdsmi_get_gpu_metrics_info(
-        amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-        &metrics
-    );
-
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        *header_size = metrics.common_header.structure_size;
-        *format_rev = metrics.common_header.format_revision;
-        *content_rev = metrics.common_header.content_revision;
-
-        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-            printf("AMDSMI, GPU metrics header for Gpu:%d, Size:%d, Format:%d, Content:%d\n",
-                   dv_ind, *header_size, *format_rev, *content_rev);
-        }
-        return true;
-    }
-
-    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-        printf("AMDSMI, Failed to get GPU metrics header for Gpu:%d, Status:%d\n", dv_ind, status);
+      printf("AMDSMI, Invalid device index %d for gpu metrics support check\n", dv_ind);
     }
     return false;
+  }
+
+  amdsmi_gpu_metrics_t test_metrics = {0};
+  amdsmi_status_t status = amdsmi_get_gpu_metrics_info(
+      amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], &test_metrics);
+
+  bool supported = (status == AMDSMI_STATUS_SUCCESS);
+  if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+    printf("AMDSMI, GPU metrics support check for Gpu:%d, Status:%d, Supported:%s\n", dv_ind,
+           status, supported ? "Yes" : "No");
+  }
+
+  return supported;
 }
 
-bool goamdsmi_gpu_partition_metrics_info_supported(uint32_t dv_ind)
-{
-    if (dv_ind >= num_gpu_devices_inAllSocket) {
-        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-            printf("AMDSMI, Invalid device index %d for partition metrics support check\n", dv_ind);
-        }
-        return false;
-    }
-
-    amdsmi_gpu_metrics_t test_metrics = {0};
-    amdsmi_status_t status = amdsmi_get_gpu_partition_metrics_info(
-        amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-        &test_metrics
-    );
-
-    bool supported = (status == AMDSMI_STATUS_SUCCESS);
+bool goamdsmi_gpu_metrics_header_info_get(uint32_t dv_ind, uint16_t* header_size,
+                                          uint8_t* format_rev, uint8_t* content_rev) {
+  if (dv_ind >= num_gpu_devices_inAllSocket || !header_size || !format_rev || !content_rev) {
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-        printf("AMDSMI, GPU partition metrics support check for Gpu:%d, Status:%d, Supported:%s\n",
-               dv_ind, status, supported ? "Yes" : "No");
-    }
-
-    return supported;
-}
-
-bool goamdsmi_gpu_partition_metrics_header_info_get(uint32_t dv_ind, uint32_t* num_partitions, uint16_t* header_size, uint8_t* format_rev, uint8_t* content_rev)
-{
-    if (dv_ind >= num_gpu_devices_inAllSocket || !num_partitions || !header_size || !format_rev || !content_rev) {
-        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-            printf("AMDSMI, Invalid parameters for partition metrics header info get\n");
-        }
-        return false;
-    }
-
-    amdsmi_gpu_metrics_t metrics = {0};
-    amdsmi_status_t status = amdsmi_get_gpu_partition_metrics_info(
-        amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-        &metrics
-    );
-
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        *num_partitions = metrics.num_partition;
-        *header_size = metrics.common_header.structure_size;
-        *format_rev = metrics.common_header.format_revision;
-        *content_rev = metrics.common_header.content_revision;
-
-        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-            printf("AMDSMI, Partition metrics header for Gpu:%d, Partitions:%d, Size:%d, Format:%d, Content:%d\n",
-                   dv_ind, *num_partitions, *header_size, *format_rev, *content_rev);
-        }
-        return true;
-    }
-
-    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-        printf("AMDSMI, Failed to get partition metrics header for Gpu:%d, Status:%d\n", dv_ind, status);
+      printf("AMDSMI, Invalid parameters for gpu metrics header info get\n");
     }
     return false;
+  }
+
+  amdsmi_gpu_metrics_t metrics = {0};
+  amdsmi_status_t status = amdsmi_get_gpu_metrics_info(
+      amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], &metrics);
+
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    *header_size = metrics.common_header.structure_size;
+    *format_rev = metrics.common_header.format_revision;
+    *content_rev = metrics.common_header.content_revision;
+
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+      printf("AMDSMI, GPU metrics header for Gpu:%d, Size:%d, Format:%d, Content:%d\n", dv_ind,
+             *header_size, *format_rev, *content_rev);
+    }
+    return true;
+  }
+
+  if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+    printf("AMDSMI, Failed to get GPU metrics header for Gpu:%d, Status:%d\n", dv_ind, status);
+  }
+  return false;
 }
 
-bool goamdsmi_gpu_partition_xcp_utilization_get(uint32_t dv_ind, uint32_t xcp_index, uint32_t* gfx_busy_inst, uint64_t* gfx_busy_acc)
-{
-    if (dv_ind >= num_gpu_devices_inAllSocket || !gfx_busy_inst || !gfx_busy_acc) {
-        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-            printf("AMDSMI, Invalid parameters for XCP utilization get\n");
-        }
-        return false;
+bool goamdsmi_gpu_partition_metrics_info_supported(uint32_t dv_ind) {
+  if (dv_ind >= num_gpu_devices_inAllSocket) {
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+      printf("AMDSMI, Invalid device index %d for partition metrics support check\n", dv_ind);
     }
+    return false;
+  }
 
-    amdsmi_gpu_metrics_t metrics = {0};
-    amdsmi_status_t status = amdsmi_get_gpu_partition_metrics_info(
-        amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-        &metrics
-    );
+  amdsmi_gpu_metrics_t test_metrics = {0};
+  amdsmi_status_t status = amdsmi_get_gpu_partition_metrics_info(
+      amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], &test_metrics);
 
-    if (status == AMDSMI_STATUS_SUCCESS && xcp_index < metrics.num_partition && xcp_index < AMDSMI_MAX_NUM_XCP) {
-        const amdsmi_gpu_xcp_metrics_t* xcp_stat = &metrics.xcp_stats[xcp_index];
+  bool supported = (status == AMDSMI_STATUS_SUCCESS);
+  if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+    printf("AMDSMI, GPU partition metrics support check for Gpu:%d, Status:%d, Supported:%s\n",
+           dv_ind, status, supported ? "Yes" : "No");
+  }
 
-        // Copy the XCC utilization arrays
-        for (uint32_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
-            gfx_busy_inst[i] = xcp_stat->gfx_busy_inst[i];
-            gfx_busy_acc[i] = xcp_stat->gfx_busy_acc[i];
-        }
+  return supported;
+}
 
-        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-            printf("AMDSMI, XCP utilization for Gpu:%d, XCP:%d retrieved successfully\n", dv_ind, xcp_index);
-        }
-        return true;
+bool goamdsmi_gpu_partition_metrics_header_info_get(uint32_t dv_ind, uint32_t* num_partitions,
+                                                    uint16_t* header_size, uint8_t* format_rev,
+                                                    uint8_t* content_rev) {
+  if (dv_ind >= num_gpu_devices_inAllSocket || !num_partitions || !header_size || !format_rev ||
+      !content_rev) {
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+      printf("AMDSMI, Invalid parameters for partition metrics header info get\n");
+    }
+    return false;
+  }
+
+  amdsmi_gpu_metrics_t metrics = {0};
+  amdsmi_status_t status = amdsmi_get_gpu_partition_metrics_info(
+      amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], &metrics);
+
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    *num_partitions = metrics.num_partition;
+    *header_size = metrics.common_header.structure_size;
+    *format_rev = metrics.common_header.format_revision;
+    *content_rev = metrics.common_header.content_revision;
+
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+      printf(
+          "AMDSMI, Partition metrics header for Gpu:%d, Partitions:%d, Size:%d, Format:%d, "
+          "Content:%d\n",
+          dv_ind, *num_partitions, *header_size, *format_rev, *content_rev);
+    }
+    return true;
+  }
+
+  if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+    printf("AMDSMI, Failed to get partition metrics header for Gpu:%d, Status:%d\n", dv_ind,
+           status);
+  }
+  return false;
+}
+
+bool goamdsmi_gpu_partition_xcp_utilization_get(uint32_t dv_ind, uint32_t xcp_index,
+                                                uint32_t* gfx_busy_inst, uint64_t* gfx_busy_acc) {
+  if (dv_ind >= num_gpu_devices_inAllSocket || !gfx_busy_inst || !gfx_busy_acc) {
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+      printf("AMDSMI, Invalid parameters for XCP utilization get\n");
+    }
+    return false;
+  }
+
+  amdsmi_gpu_metrics_t metrics = {0};
+  amdsmi_status_t status = amdsmi_get_gpu_partition_metrics_info(
+      amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], &metrics);
+
+  if (status == AMDSMI_STATUS_SUCCESS && xcp_index < metrics.num_partition &&
+      xcp_index < AMDSMI_MAX_NUM_XCP) {
+    const amdsmi_gpu_xcp_metrics_t* xcp_stat = &metrics.xcp_stats[xcp_index];
+
+    // Copy the XCC utilization arrays
+    for (uint32_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
+      gfx_busy_inst[i] = xcp_stat->gfx_busy_inst[i];
+      gfx_busy_acc[i] = xcp_stat->gfx_busy_acc[i];
     }
 
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-        printf("AMDSMI, Failed to get XCP utilization for Gpu:%d, XCP:%d, Status:%d\n", dv_ind, xcp_index, status);
+      printf("AMDSMI, XCP utilization for Gpu:%d, XCP:%d retrieved successfully\n", dv_ind,
+             xcp_index);
     }
-    return false;
+    return true;
+  }
+
+  if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+    printf("AMDSMI, Failed to get XCP utilization for Gpu:%d, XCP:%d, Status:%d\n", dv_ind,
+           xcp_index, status);
+  }
+  return false;
 }

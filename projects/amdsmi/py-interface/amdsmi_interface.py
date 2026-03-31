@@ -6889,6 +6889,7 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     )
     return gpu_busy_percent.value
 
+
 # Memory Size Management Functions
 # Note: UMA carveout and TTM are kernel UAPI features (sysfs/modprobe.d), not libdrm.
 

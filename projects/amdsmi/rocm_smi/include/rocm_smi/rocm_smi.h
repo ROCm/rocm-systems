@@ -1294,7 +1294,7 @@ typedef struct {
 
   // Power (W) /Energy (15.259uJ per 1ns)
   uint32_t average_socket_power;  // v3 expands to 32 bit
-  uint64_t energy_accumulator;  // v1 mod. (32->64)
+  uint64_t energy_accumulator;    // v1 mod. (32->64)
 
   // Driver attached timestamp (in ns)
   uint64_t system_clock_counter;  // v1 mod. (moved from top of struct)
@@ -1471,16 +1471,16 @@ typedef struct {
    * v2.0
    */
   /* Temperature */
-  //Removed from 2.0 - 2.4 because there are 16 in 3.0
-  //uint16_t			temperature_core[8]; // CPU core temperature on APUs
+  // Removed from 2.0 - 2.4 because there are 16 in 3.0
+  // uint16_t			temperature_core[8]; // CPU core temperature on APUs
   uint16_t temperature_l3[RSMI_MAX_NUM_L3_CACHES];
 
   /* Power/Energy */
   uint16_t average_cpu_power;
   uint16_t average_soc_power;
   uint32_t average_gfx_power;  // expanded to 32 bit in v3
-  //Removed from 2.0 - 2.4 because there are 16 in 3.0
-  //uint16_t average_core_power[8]; // CPU core power on APUs
+  // Removed from 2.0 - 2.4 because there are 16 in 3.0
+  // uint16_t average_core_power[8]; // CPU core power on APUs
 
   /* Average clocks */
   uint16_t average_fclk_frequency;
@@ -1491,17 +1491,17 @@ typedef struct {
   uint16_t current_fclk;
   uint16_t current_vclk;
   uint16_t current_dclk;
-  //Removed from 2.0 - 2.4 because there are 16 in 3.0
-  //uint16_t current_coreclk[8]; // CPU core clocks
+  // Removed from 2.0 - 2.4 because there are 16 in 3.0
+  // uint16_t current_coreclk[8]; // CPU core clocks
   uint16_t current_l3clk[RSMI_MAX_NUM_L3_CACHES];
 
   /*
    * v2.3
    */
   /* Average Temperature */
-  uint16_t average_temperature_gfx; // average gfx temperature on APUs
-  uint16_t average_temperature_soc; // average soc temperature on APUs
-  uint16_t average_temperature_core[RSMI_MAX_NUM_CORES]; // average CPU core temperature on APUs
+  uint16_t average_temperature_gfx;                       // average gfx temperature on APUs
+  uint16_t average_temperature_soc;                       // average soc temperature on APUs
+  uint16_t average_temperature_core[RSMI_MAX_NUM_CORES];  // average CPU core temperature on APUs
   uint16_t average_temperature_l3[RSMI_MAX_NUM_L3_CACHES];
 
   /*

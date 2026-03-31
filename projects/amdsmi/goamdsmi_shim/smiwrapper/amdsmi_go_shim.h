@@ -710,5 +710,4 @@ bool goamdsmi_gpu_partition_metrics_header_info_get(uint32_t dv_ind, uint32_t* n
  *
  */
 bool goamdsmi_gpu_partition_xcp_utilization_get(uint32_t dv_ind, uint32_t xcp_index,
-                                                uint32_t* gfx_busy_inst,
-                                                uint64_t* gfx_busy_acc);
+                                                uint32_t* gfx_busy_inst, uint64_t* gfx_busy_acc);

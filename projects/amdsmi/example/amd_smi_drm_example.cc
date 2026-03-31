@@ -1887,10 +1887,10 @@ int main() {
       } else {  // START PARTITION METRICS OUTPUTS
         CHK_AMDSMI_RET(ret)
         printf("    Output of amdsmi_get_gpu_partition_metrics_info:\n");
-        printf(
-            "\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n", i,
-            static_cast<uint64_t>(bdf.domain_number), static_cast<uint32_t>(bdf.bus_number),
-            static_cast<uint32_t>(bdf.device_number), static_cast<uint32_t>(bdf.function_number));
+        printf("\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n", i,
+               static_cast<uint64_t>(bdf.domain_number), static_cast<uint32_t>(bdf.bus_number),
+               static_cast<uint32_t>(bdf.device_number),
+               static_cast<uint32_t>(bdf.function_number));
 
         std::cout << "PARTITION METRIC TABLE HEADER:\n";
         std::cout << "structure_size=" << std::dec
@@ -1980,10 +1980,10 @@ int main() {
         amdsmi_gpu_metrics_t partition_metrics_check = {};
         for (auto idx = uint16_t(1); idx <= kPARTITION_TEST_ITER; ++idx) {
           amdsmi_get_gpu_partition_metrics_info(processor_handles[device_index],
-                                               &partition_metrics_check);
+                                                &partition_metrics_check);
           std::cout << "\t\t -> partition firmware_timestamp [" << idx << "/"
-                    << kPARTITION_TEST_ITER
-                    << "]: " << partition_metrics_check.firmware_timestamp << "\n";
+                    << kPARTITION_TEST_ITER << "]: " << partition_metrics_check.firmware_timestamp
+                    << "\n";
         }
 
         std::cout << "\n";

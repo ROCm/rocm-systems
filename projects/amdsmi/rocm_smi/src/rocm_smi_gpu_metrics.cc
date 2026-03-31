@@ -20,6 +20,8 @@
  * THE SOFTWARE.
  */
 
+#include "rocm_smi/rocm_smi_gpu_metrics.h"
+
 #include <dirent.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -46,7 +48,6 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_dyn_gpu_metrics.h"  // Dynamic metrics
 #include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_utils.h"

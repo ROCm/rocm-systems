@@ -895,9 +895,9 @@ func GO_gpu_metrics_header_info_get(i int) (uint16, uint8, uint8, bool) {
 	var header_size C.uint16_t
 	var format_rev C.uint8_t
 	var content_rev C.uint8_t
-	
+
 	success := bool(C.goamdsmi_gpu_metrics_header_info_get(C.uint32_t(i), &header_size, &format_rev, &content_rev))
-	
+
 	return uint16(header_size), uint8(format_rev), uint8(content_rev), success
 }
 

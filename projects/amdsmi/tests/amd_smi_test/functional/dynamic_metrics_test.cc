@@ -82,12 +82,18 @@ auto GetExpectedMetricVersionFlag(uint16_t major, uint16_t minor, bool is_partit
       }
     } else if (major == 2) {
       switch (minor) {
-        case 0: return Flag::kGpuMetricV20;
-        case 1: return Flag::kGpuMetricV21;
-        case 2: return Flag::kGpuMetricV22;
-        case 3: return Flag::kGpuMetricV23;
-        case 4: return Flag::kGpuMetricV24;
-        default: return Flag::kGpuMetricNone;
+        case 0:
+          return Flag::kGpuMetricV20;
+        case 1:
+          return Flag::kGpuMetricV21;
+        case 2:
+          return Flag::kGpuMetricV22;
+        case 3:
+          return Flag::kGpuMetricV23;
+        case 4:
+          return Flag::kGpuMetricV24;
+        default:
+          return Flag::kGpuMetricNone;
       }
     } else if (major == 3) {
       if (minor == 0) {

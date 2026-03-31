@@ -181,7 +181,6 @@ typedef enum {
  */
 #define AMDSMI_MAX_NUM_XCP 8
 
-
 /**
  * @brief This should match kRSMI_MAX_NUM_L3_CACHES
  */
@@ -2291,8 +2290,8 @@ typedef struct {
    * v2.3
    */
   /* Average Temperature */
-  uint16_t average_temperature_gfx;   //!< average gfx temperature on APUs
-  uint16_t average_temperature_soc;   //!< average soc temperature on APUs
+  uint16_t average_temperature_gfx;                         //!< average gfx temperature on APUs
+  uint16_t average_temperature_soc;                         //!< average soc temperature on APUs
   uint16_t average_temperature_core[AMDSMI_MAX_NUM_CORES];  //!< average CPU core temperature
   uint16_t average_temperature_l3[AMDSMI_MAX_NUM_L3_CACHES];
 
@@ -2314,25 +2313,25 @@ typedef struct {
    */
   /* Temperature */
   uint16_t temperature_core[AMDSMI_MAX_NUM_CORES];  //!< CPU core temperature on APUs
-  uint16_t temperature_skin;                         //!< skin temperature on APUs
+  uint16_t temperature_skin;                        //!< skin temperature on APUs
 
   /* Utilization */
-  uint16_t average_npu_activity[AMDSMI_MAX_NUM_NPU_COLUMNS];    //!< NPU per-column busy % [0-100]
-  uint16_t average_core_c0_activity[AMDSMI_MAX_NUM_CORES];      //!< per-core C0 residency % [0-100]
+  uint16_t average_npu_activity[AMDSMI_MAX_NUM_NPU_COLUMNS];  //!< NPU per-column busy % [0-100]
+  uint16_t average_core_c0_activity[AMDSMI_MAX_NUM_CORES];    //!< per-core C0 residency % [0-100]
   uint16_t average_dram_reads;   //!< time filtered DRAM read bandwidth [MB/sec]
   uint16_t average_dram_writes;  //!< time filtered DRAM write bandwidth [MB/sec]
   uint16_t average_npu_reads;    //!< time filtered NPU read bandwidth [MB/sec]
   uint16_t average_npu_writes;   //!< time filtered NPU write bandwidth [MB/sec]
 
   /* Power/Energy */
-  uint16_t average_npu_power;                        //!< time filtered NPU power [mW]
-  uint32_t average_apu_power;                        //!< time filtered APU power [mW]
-  uint32_t average_dgpu_power;                       //!< time filtered dGPU power [mW]
-  uint32_t average_all_core_power;                   //!< time filtered all core power [mW]
-  uint16_t average_core_power[AMDSMI_MAX_NUM_CORES]; //!< calculated core power [mW]
-  uint16_t average_sys_power;                        //!< time filtered total system power [mW]
-  uint16_t stapm_power_limit;                        //!< max IRM defined STAPM power limit [mW]
-  uint16_t current_stapm_power_limit;                //!< time filtered STAPM power limit [mW]
+  uint16_t average_npu_power;                         //!< time filtered NPU power [mW]
+  uint32_t average_apu_power;                         //!< time filtered APU power [mW]
+  uint32_t average_dgpu_power;                        //!< time filtered dGPU power [mW]
+  uint32_t average_all_core_power;                    //!< time filtered all core power [mW]
+  uint16_t average_core_power[AMDSMI_MAX_NUM_CORES];  //!< calculated core power [mW]
+  uint16_t average_sys_power;                         //!< time filtered total system power [mW]
+  uint16_t stapm_power_limit;                         //!< max IRM defined STAPM power limit [mW]
+  uint16_t current_stapm_power_limit;                 //!< time filtered STAPM power limit [mW]
 
   /* time filtered clocks [MHz] */
   uint16_t average_vpeclk_frequency;

@@ -20,7 +20,9 @@ import os
 import time
 
 # Add the built Python package to the path
-build_path = os.path.join(os.path.dirname(__file__), '..', '..', 'build', 'py-interface', 'python_package')
+build_path = os.path.join(
+    os.path.dirname(__file__), "..", "..", "build", "py-interface", "python_package"
+)
 if os.path.exists(build_path):
     sys.path.insert(0, build_path)
 
@@ -29,11 +31,12 @@ try:
     import amdsmi
 except ImportError:
     # Fall back to development imports
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     try:
         from amdsmi_interface import amdsmi_init, amdsmi_shut_down, amdsmi_get_processor_handles
         from amdsmi_interface import amdsmi_get_gpu_partition_metrics_info
         from amdsmi_exception import AmdSmiException
+
         # Create a fake amdsmi module-like object for compatibility
         class AmdsmiCompat:
             amdsmi_init = amdsmi_init
@@ -41,9 +44,12 @@ except ImportError:
             amdsmi_get_processor_handles = amdsmi_get_processor_handles
             amdsmi_get_gpu_partition_metrics_info = amdsmi_get_gpu_partition_metrics_info
             AmdSmiException = AmdSmiException
+
         amdsmi = AmdsmiCompat()
     except ImportError as e:
-        print(f"Error: AMD SMI library not found. Please ensure amdsmi is installed or built. Details: {e}")
+        print(
+            f"Error: AMD SMI library not found. Please ensure amdsmi is installed or built. Details: {e}"
+        )
         sys.exit(1)
 
 
@@ -60,34 +66,34 @@ def print_partition_metrics_info(gpu_handle, gpu_id):
 
         # Core utilization metrics
         print(f"\nUtilization Metrics:")
-        gfx_util = partition_metrics.get('current_gfxclk_utilization', 'N/A')
-        umc_util = partition_metrics.get('current_uclk_utilization', 'N/A')
-        mm_activity = partition_metrics.get('average_mm_activity', 'N/A')
+        gfx_util = partition_metrics.get("current_gfxclk_utilization", "N/A")
+        umc_util = partition_metrics.get("current_uclk_utilization", "N/A")
+        mm_activity = partition_metrics.get("average_mm_activity", "N/A")
 
-        if gfx_util != 'N/A':
+        if gfx_util != "N/A":
             print(f"  Current GFXCLK Utilization: {gfx_util}%")
-        if umc_util != 'N/A':
+        if umc_util != "N/A":
             print(f"  Current UCLK Utilization: {umc_util}%")
-        if mm_activity != 'N/A':
+        if mm_activity != "N/A":
             print(f"  Average MM Activity: {mm_activity}%")
 
         # Clock frequencies
         print(f"\nClock Frequencies:")
-        current_gfxclk = partition_metrics.get('current_gfxclk', 'N/A')
-        current_uclk = partition_metrics.get('current_uclk', 'N/A')
-        current_socclk = partition_metrics.get('current_socclk', 'N/A')
+        current_gfxclk = partition_metrics.get("current_gfxclk", "N/A")
+        current_uclk = partition_metrics.get("current_uclk", "N/A")
+        current_socclk = partition_metrics.get("current_socclk", "N/A")
 
-        if current_gfxclk != 'N/A' and isinstance(current_gfxclk, (int, float)):
+        if current_gfxclk != "N/A" and isinstance(current_gfxclk, (int, float)):
             gfxclk_mhz = current_gfxclk / 1000000  # Convert Hz to MHz
             print(f"  Current GFXCLK: {gfxclk_mhz:.0f} MHz")
         else:
             print(f"  Current GFXCLK: {current_gfxclk}")
-        if current_uclk != 'N/A' and isinstance(current_uclk, (int, float)):
+        if current_uclk != "N/A" and isinstance(current_uclk, (int, float)):
             uclk_mhz = current_uclk / 1000000
             print(f"  Current UCLK: {uclk_mhz:.0f} MHz")
         else:
             print(f"  Current UCLK: {current_uclk}")
-        if current_socclk != 'N/A' and isinstance(current_socclk, (int, float)):
+        if current_socclk != "N/A" and isinstance(current_socclk, (int, float)):
             socclk_mhz = current_socclk / 1000000
             print(f"  Current SOCCLK: {socclk_mhz:.0f} MHz")
         else:
@@ -95,7 +101,7 @@ def print_partition_metrics_info(gpu_handle, gpu_id):
 
         # Throttling information
         print(f"\nThrottling Status:")
-        throttle_mask = partition_metrics.get('throttle_status_bitmask', 0)
+        throttle_mask = partition_metrics.get("throttle_status_bitmask", 0)
 
         if throttle_mask == 0:
             print(f"  Status: No throttling active")
@@ -118,12 +124,14 @@ def print_partition_metrics_info(gpu_handle, gpu_id):
 
         # Partition-specific information
         print(f"\nPartition Information:")
-        num_partitions = partition_metrics.get('num_partition', 'N/A')
-        if num_partitions != 'N/A':
+        num_partitions = partition_metrics.get("num_partition", "N/A")
+        if num_partitions != "N/A":
             print(f"  Number of Partitions: {num_partitions}")
 
         # Per-partition utilization (if available)
-        partition_keys = [key for key in partition_metrics.keys() if 'per_' in key and 'utilization' in key]
+        partition_keys = [
+            key for key in partition_metrics.keys() if "per_" in key and "utilization" in key
+        ]
         if partition_keys:
             print(f"  Per-Partition Utilization:")
             for key in partition_keys[:5]:  # Show first 5 to avoid clutter
@@ -136,10 +144,16 @@ def print_partition_metrics_info(gpu_handle, gpu_id):
         # Additional metrics of interest
         print(f"\nAdditional Metrics:")
         for key, value in partition_metrics.items():
-            if key not in ['current_gfxclk_utilization', 'current_uclk_utilization',
-                          'average_mm_activity', 'current_gfxclk', 'current_uclk',
-                          'current_socclk', 'throttle_status_bitmask', 'num_partition'] and \
-               not key.startswith('per_'):
+            if key not in [
+                "current_gfxclk_utilization",
+                "current_uclk_utilization",
+                "average_mm_activity",
+                "current_gfxclk",
+                "current_uclk",
+                "current_socclk",
+                "throttle_status_bitmask",
+                "num_partition",
+            ] and not key.startswith("per_"):
                 print(f"  {key}: {value}")
 
     except amdsmi.AmdSmiException as e:
@@ -174,8 +188,8 @@ def monitor_partition_metrics(gpu_handles, duration_seconds=30, interval_seconds
                 try:
                     partition_metrics = amdsmi.amdsmi_get_gpu_partition_metrics_info(gpu_handle)
 
-                    gfx_util = partition_metrics.get('current_gfxclk_utilization', 'N/A')
-                    throttle_mask = partition_metrics.get('throttle_status_bitmask', 0)
+                    gfx_util = partition_metrics.get("current_gfxclk_utilization", "N/A")
+                    throttle_mask = partition_metrics.get("throttle_status_bitmask", 0)
 
                     throttle_status = "None" if throttle_mask == 0 else f"0x{throttle_mask:x}"
 
@@ -220,7 +234,7 @@ def main():
 
         try:
             response = input("Monitor partition metrics over time? (y/N): ").strip().lower()
-            if response in ['y', 'yes']:
+            if response in ["y", "yes"]:
                 monitor_partition_metrics(gpu_handles)
         except (KeyboardInterrupt, EOFError):
             print("\nSkipping monitoring...")
