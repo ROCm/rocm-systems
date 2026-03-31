@@ -30,7 +30,7 @@ foreach(_XNACK on off)
             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace -o out --output-format
             json --log-level env -- $<TARGET_FILE:transpose> 1 100 10
         DEPENDS transpose
-        TIMEOUT 240
+        TIMEOUT 120
         LABELS "integration-tests;multi-gpu"
         ENVIRONMENT "${kfd-xnack-${_XNACK}-env}"
         FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
