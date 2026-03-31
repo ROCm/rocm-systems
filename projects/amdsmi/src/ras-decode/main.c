@@ -68,7 +68,7 @@ void demonstrate_json_decoding(void) {
   printf("Decoded AFID: %d\n",
          decode_afid(register_array_32, RAS_DECODE_REGISTER_ARRAY_SIZE_32_BYTES, 0, 1, 1));
 
-  JsonValue *json_result_32 =
+  JsonValue* json_result_32 =
       decode_error_info(register_array_32, RAS_DECODE_REGISTER_ARRAY_SIZE_32_BYTES, 0, 1, 1);
   if (json_result_32) {
     print_json_value(json_result_32);
@@ -82,7 +82,7 @@ void demonstrate_json_decoding(void) {
   printf("Decoded AFID: %d\n",
          decode_afid(register_array_test, RAS_DECODE_REGISTER_ARRAY_SIZE_32_BYTES, 0, 1, 1));
 
-  JsonValue *json_result_test =
+  JsonValue* json_result_test =
       decode_error_info(register_array_test, RAS_DECODE_REGISTER_ARRAY_SIZE_32_BYTES, 0, 1, 1);
   if (json_result_test) {
     print_json_value(json_result_test);
@@ -111,7 +111,7 @@ void demonstrate_json_decoding(void) {
   printf("Decoded AFID: %d\n",
          decode_afid(register_array_128, RAS_DECODE_REGISTER_ARRAY_SIZE_128_BYTES, 0, 1, 1));
 
-  JsonValue *json_result_128 =
+  JsonValue* json_result_128 =
       decode_error_info(register_array_128, RAS_DECODE_REGISTER_ARRAY_SIZE_128_BYTES, 0, 1, 1);
   if (json_result_128) {
     print_json_value(json_result_128);
@@ -140,7 +140,7 @@ void demonstrate_json_decoding(void) {
   printf("Decoded AFID: %d\n",
          decode_afid(register_array_pcs_xgmi, RAS_DECODE_REGISTER_ARRAY_SIZE_128_BYTES, 0, 1, 1));
 
-  JsonValue *json_result_pcs =
+  JsonValue* json_result_pcs =
       decode_error_info(register_array_pcs_xgmi, RAS_DECODE_REGISTER_ARRAY_SIZE_128_BYTES, 0, 1, 1);
   if (json_result_pcs) {
     print_json_value(json_result_pcs);
@@ -163,7 +163,7 @@ void demonstrate_json_decoding(void) {
          decode_afid(register_array_bad_page, RAS_DECODE_REGISTER_ARRAY_SIZE_128_BYTES,
                      RAS_DECODE_FLAG_THRESHOLD_EXCEEDED, 1, 1));
 
-  JsonValue *json_result_bad_page =
+  JsonValue* json_result_bad_page =
       decode_error_info(register_array_bad_page, RAS_DECODE_REGISTER_ARRAY_SIZE_128_BYTES,
                         RAS_DECODE_FLAG_THRESHOLD_EXCEEDED, 1, 1);
   if (json_result_bad_page) {
@@ -187,7 +187,7 @@ void demonstrate_json_decoding(void) {
   printf("Decoded AFID: %d\n",
          decode_afid(boot_messages, sizeof(boot_messages) / sizeof(boot_messages[0]), 0, 1, 9));
 
-  JsonValue *json_result_boot =
+  JsonValue* json_result_boot =
       decode_error_info(boot_messages, sizeof(boot_messages) / sizeof(boot_messages[0]), 0, 1, 9);
   if (json_result_boot) {
     print_json_value(json_result_boot);

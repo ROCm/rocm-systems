@@ -58,7 +58,7 @@
 #include <bitset>
 
 #include "impl/wddm/types.h"
-#include "wkmi/wkmi.h"
+#include "wkmi.h"
 #include "impl/wddm/va_mgr.h"
 #include "impl/wddm/status.h"
 #include "impl/wddm/types.h"

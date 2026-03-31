@@ -31,40 +31,42 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/nic/amd_smi_no_drm_switch.h"
-#include "shared_mutex.h"  // NOLINT
 #include "rocm_smi/rocm_smi_logger.h"
+#include "shared_mutex.h"  // NOLINT
 
 namespace amd::smi {
 
-class AMDSmiSWITCHDevice: public AMDSmiProcessor {
+class AMDSmiSWITCHDevice : public AMDSmiProcessor {
  public:
+  AMDSmiSWITCHDevice(uint32_t switch_id, amdsmi_bdf_t bdf, AMDSmiNoDrmSwitch& no_drm_switch)
+      : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH),
+        switch_id_(switch_id),
+        bdf_(bdf),
+        nodrm_(no_drm_switch) {
+    if (check_if_no_drm_is_supported()) this->get_no_drm_data();
+  }
 
-    AMDSmiSWITCHDevice(uint32_t switch_id, amdsmi_bdf_t bdf, AMDSmiNoDrmSwitch& no_drm_switch)
-                : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH), switch_id_(switch_id), bdf_(bdf), nodrm_(no_drm_switch) {
-              if (check_if_no_drm_is_supported()) this->get_no_drm_data();
-            }
+  ~AMDSmiSWITCHDevice() = default;
 
-    ~AMDSmiSWITCHDevice() = default;
+  amdsmi_status_t get_no_drm_data();
+  pthread_mutex_t* get_mutex();
+  uint32_t get_switch_id() const;
+  std::string& get_switch_path();
+  amdsmi_bdf_t get_bdf();
+  bool check_if_no_drm_is_supported() { return nodrm_.check_if_no_drm_is_supported(); }
 
-    amdsmi_status_t get_no_drm_data();
-    pthread_mutex_t* get_mutex();
-    uint32_t get_switch_id() const;
-    std::string& get_switch_path();
-    amdsmi_bdf_t get_bdf();
-    bool check_if_no_drm_is_supported() { return nodrm_.check_if_no_drm_is_supported(); }
-
-    amdsmi_status_t amd_query_switch_link_info(amdsmi_brcm_switch_link_metric_t& info) const;
-    amdsmi_status_t amd_query_switch_uuid(std::string& serial) const;
-    amdsmi_status_t amd_query_switch_numa_affinity(int32_t *numa_node) const;
-    amdsmi_status_t amd_query_switch_cpu_affinity(std::string& cpu_affinity) const;
-    amdsmi_status_t amd_query_switch_device_info(amdsmi_brcm_switch_device_metric_t& info) const;
-    amdsmi_status_t amd_query_switch_power_info(amdsmi_brcm_switch_power_metric_t& info) const;
+  amdsmi_status_t amd_query_switch_link_info(amdsmi_brcm_switch_link_metric_t& info) const;
+  amdsmi_status_t amd_query_switch_uuid(std::string& serial) const;
+  amdsmi_status_t amd_query_switch_numa_affinity(int32_t* numa_node) const;
+  amdsmi_status_t amd_query_switch_cpu_affinity(std::string& cpu_affinity) const;
+  amdsmi_status_t amd_query_switch_device_info(amdsmi_brcm_switch_device_metric_t& info) const;
+  amdsmi_status_t amd_query_switch_power_info(amdsmi_brcm_switch_power_metric_t& info) const;
 
  private:
-    uint32_t switch_id_;
-    std::string path_;
-    amdsmi_bdf_t bdf_;
-    AMDSmiNoDrmSwitch& nodrm_;
+  uint32_t switch_id_;
+  std::string path_;
+  amdsmi_bdf_t bdf_;
+  AMDSmiNoDrmSwitch& nodrm_;
 };
 
 }  // namespace amd::smi

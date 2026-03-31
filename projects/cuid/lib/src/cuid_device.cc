@@ -90,10 +90,24 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac 
             }
             break;
             case AMDCUID_DEVICE_TYPE_CPU:
-                // search by package_core_id
+                // search by device_node first (unique per logical CPU),
+                // then fall back to package_core_id for backward compatibility
                 {
                     auto cpu = reinterpret_cast<CuidCpu*>(const_cast<CuidDevice*>(this));
                     if (cpu) {
+                        // Try device_node first - unique per logical CPU on SMT systems
+                        std::string device_path;
+                        if (cpu->get_device_path(device_path) == AMDCUID_STATUS_SUCCESS
+                            && !device_path.empty()) {
+                            CuidFileEntry entry;
+                            status = derived_file.find_by_device_node(device_path, entry);
+                            if (status == AMDCUID_STATUS_SUCCESS) {
+                                build_derived_id_from_file_entry(entry, id);
+                                return AMDCUID_STATUS_SUCCESS;
+                            }
+                        }
+                        // Fallback: package_core_id (not unique on SMT, but needed
+                        // for backward compatibility with old CUID files)
                         const auto& info = cpu->get_info();
                         std::string core_id = std::to_string(info.header.fields.cpu.physical_id) + 
                                         ":" + std::to_string(info.header.fields.cpu.core);

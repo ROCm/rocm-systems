@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/device.hpp"
 #include "thread/monitor.hpp"
@@ -807,8 +793,8 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-  // Check if Lightning compiler was requested
-  constexpr bool kComgrVersioned = false;
+  // use versioned comgr for HIP, unversioned for Opencl
+  const bool kComgrVersioned = amd::IS_HIP;
   std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
   return amd::Comgr::IsReady();
 }
@@ -1061,6 +1047,13 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
   if (amd_mem_obj == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
              "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
+    return false;
+  }
+
+  // VMM allocations must use hipMemExportToShareableHandle for IPC.
+  if (amd_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "IPC is not supported for VMM allocations (dev_ptr: %p)", dev_ptr);
     return false;
   }
 

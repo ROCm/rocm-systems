@@ -102,7 +102,10 @@ class BaseQueue {
     unsigned int m_Node;
     unsigned int m_FamilyId;
     int m_SdmaEngineId;
-
+#ifdef HSAKMT_CTX
+    // KFD Context this queue belongs to
+    HsaKFDContext *m_KFDContext;
+#endif
     // @return Write pointer modulo queue size in dwords
     virtual unsigned int Wptr() = 0;
     // @return Read pointer modulo queue size in dwords

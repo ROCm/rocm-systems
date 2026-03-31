@@ -13,15 +13,15 @@ Panel Config:
       metric:
         Utilization:
           value: AVG(((TCC_BUSY_sum * 100) / (TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)))
-          unit: pct
+          unit: Percent
         Peak Bandwidth:
           value: ((100 * AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))))
             / ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan)))
-          unit: pct
+          unit: Percent
         Hit Rate:
           value: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else 0))
-          unit: pct
+          unit: Percent
         L2-Fabric Read BW:
           value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
             * 64)) / (End_Timestamp - Start_Timestamp)))
@@ -58,7 +58,7 @@ Panel Config:
             != 0) else None))
           max: MAX((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
             != 0) else None))
-          unit: pct
+          unit: Percent
         Remote Read Traffic:
           avg: AVG((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
             if (TCC_EA_RDREQ_sum != 0) else None))
@@ -66,7 +66,7 @@ Panel Config:
             if (TCC_EA_RDREQ_sum != 0) else None))
           max: MAX((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
             if (TCC_EA_RDREQ_sum != 0) else None))
-          unit: pct
+          unit: Percent
         Uncached Read Traffic:
           avg: AVG((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
             != 0) else None))
@@ -74,7 +74,7 @@ Panel Config:
             != 0) else None))
           max: MAX((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
             != 0) else None))
-          unit: pct
+          unit: Percent
         Write and Atomic BW:
           avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
             * 32)) / $denom))
@@ -90,7 +90,7 @@ Panel Config:
             != 0) else None))
           max: MAX((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
             != 0) else None))
-          unit: pct
+          unit: Percent
         Remote Write and Atomic Traffic:
           avg: AVG((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
             if (TCC_EA_WRREQ_sum != 0) else None))
@@ -98,7 +98,7 @@ Panel Config:
             if (TCC_EA_WRREQ_sum != 0) else None))
           max: MAX((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
             if (TCC_EA_WRREQ_sum != 0) else None))
-          unit: pct
+          unit: Percent
         Atomic Traffic:
           avg: AVG((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
             != 0) else None))
@@ -106,7 +106,7 @@ Panel Config:
             != 0) else None))
           max: MAX((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
             != 0) else None))
-          unit: pct
+          unit: Percent
         Uncached Write and Atomic Traffic:
           avg: AVG((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
             != 0) else None))
@@ -114,7 +114,7 @@ Panel Config:
             != 0) else None))
           max: MAX((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
             != 0) else None))
-          unit: pct
+          unit: Percent
         Read Latency:
           avg: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
             != 0) else None))
@@ -191,7 +191,7 @@ Panel Config:
             + TCC_MISS_sum) != 0) else None))
           max: MAX((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else None))
-          unit: pct
+          unit: Percent
         Hits:
           avg: AVG((TCC_HIT_sum / $denom))
           min: MIN((TCC_HIT_sum / $denom))
@@ -280,7 +280,7 @@ Panel Config:
             != 0) else None))
           max: MAX(((100 * (TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum
             != 0) else None))
-          unit: pct
+          unit: Percent
   - metric_table:
       id: 1706
       title: L2 - Fabric interface detailed metrics

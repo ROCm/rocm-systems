@@ -43,26 +43,27 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/api_support_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/api_support_read.h"
 #include "rocm_smi_test/test_common.h"
 #include "rocm_smi_test/test_utils.h"
 
 TestAPISupportRead::TestAPISupportRead() : TestBase() {
   set_title("RSMI API Support Read Test");
-  set_description("This test verifies that the supported APIs are corretly "
-                                                               "identified.");
+  set_description(
+      "This test verifies that the supported APIs are corretly "
+      "identified.");
 }
 
-TestAPISupportRead::~TestAPISupportRead(void) {
-}
+TestAPISupportRead::~TestAPISupportRead(void) {}
 
 void TestAPISupportRead::SetUp(void) {
   TestBase::SetUp();
@@ -70,9 +71,7 @@ void TestAPISupportRead::SetUp(void) {
   return;
 }
 
-void TestAPISupportRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestAPISupportRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestAPISupportRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -90,9 +89,7 @@ void TestAPISupportRead::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -112,15 +109,11 @@ void TestAPISupportRead::Run(void) {
       while (1) {
         err = rsmi_func_iter_value_get(iter_handle, &value);
         CHK_ERR_ASRT(err)
-        IF_VERB(STANDARD) {
-          std::cout << "Function Name: " << value.name << std::endl;
-        }
+        IF_VERB(STANDARD) { std::cout << "Function Name: " << value.name << std::endl; }
         err = rsmi_dev_supported_variant_iterator_open(iter_handle, &var_iter);
         if (err != RSMI_STATUS_NO_DATA) {
           CHK_ERR_ASRT(err)
-          IF_VERB(STANDARD) {
-            std::cout << "\tVariants/Monitors: ";
-          }
+          IF_VERB(STANDARD) { std::cout << "\tVariants/Monitors: "; }
           while (1) {
             err = rsmi_func_iter_value_get(var_iter, &value);
             CHK_ERR_ASRT(err)
@@ -132,17 +125,14 @@ void TestAPISupportRead::Run(void) {
               }
               std::cout << " (";
             }
-            err =
-              rsmi_dev_supported_variant_iterator_open(var_iter, &sub_var_iter);
+            err = rsmi_dev_supported_variant_iterator_open(var_iter, &sub_var_iter);
             if (err != RSMI_STATUS_NO_DATA) {
               CHK_ERR_ASRT(err)
 
               while (1) {
                 err = rsmi_func_iter_value_get(sub_var_iter, &value);
                 CHK_ERR_ASRT(err)
-                IF_VERB(STANDARD) {
-                  std::cout << value.id << ", ";
-                }
+                IF_VERB(STANDARD) { std::cout << value.id << ", "; }
                 err = rsmi_func_iter_next(sub_var_iter);
 
                 if (err == RSMI_STATUS_NO_DATA) {
@@ -154,9 +144,7 @@ void TestAPISupportRead::Run(void) {
               CHK_ERR_ASRT(err)
             }
 
-            IF_VERB(STANDARD) {
-              std::cout << "), ";
-            }
+            IF_VERB(STANDARD) { std::cout << "), "; }
             err = rsmi_func_iter_next(var_iter);
 
             if (err == RSMI_STATUS_NO_DATA) {
@@ -164,9 +152,7 @@ void TestAPISupportRead::Run(void) {
             }
             CHK_ERR_ASRT(err)
           }
-          IF_VERB(STANDARD) {
-            std::cout << std::endl;
-          }
+          IF_VERB(STANDARD) { std::cout << std::endl; }
           err = rsmi_dev_supported_func_iterator_close(&var_iter);
           CHK_ERR_ASRT(err)
         }
@@ -178,8 +164,8 @@ void TestAPISupportRead::Run(void) {
         }
         CHK_ERR_ASRT(err)
 
-    //  err = rsmi_dev_supported_variant_iterator_open(iter_handle, &var_iter);
-    //
+        //  err = rsmi_dev_supported_variant_iterator_open(iter_handle, &var_iter);
+        //
       }
       err = rsmi_dev_supported_func_iterator_close(&iter_handle);
       CHK_ERR_ASRT(err)

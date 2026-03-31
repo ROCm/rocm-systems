@@ -25,15 +25,14 @@ THE SOFTWARE.
 #ifndef SRC_SHARED_MUTEX_SHARED_MUTEX_H_
 #define SRC_SHARED_MUTEX_SHARED_MUTEX_H_
 
-#include <sys/stat.h>
-
 #include <pthread.h>  // pthread_mutex_t, pthread_mutexattr_t,
-                      // pthread_mutexattr_init, pthread_mutexattr_setpshared,
-                      // pthread_mutex_init, pthread_mutex_destroy
+#include <sys/stat.h>
+// pthread_mutexattr_init, pthread_mutexattr_setpshared,
+// pthread_mutex_init, pthread_mutex_destroy
 
 // Structure of a shared mutex.
 typedef struct shared_mutex_t {
-  pthread_mutex_t *ptr;  // Pointer to the pthread mutex and
+  pthread_mutex_t* ptr;  // Pointer to the pthread mutex and
                          // shared memory segment.
   int shm_fd;            // Descriptor of shared memory object.
   char* name;            // Name of the mutex and associated
@@ -61,7 +60,7 @@ typedef struct shared_mutex_t {
 // There is no workaround currently, except to run first
 // initialization only before multi-threaded or multi-process
 // functionality.
-shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried=false);
+shared_mutex_t shared_mutex_init(const char* name, mode_t mode, bool retried = false);
 
 // Close access to the shared mutex and free all the resources,
 // used by the structure.

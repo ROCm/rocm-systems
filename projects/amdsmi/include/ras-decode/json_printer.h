@@ -33,7 +33,7 @@ extern "C" {
  * @brief Print a JSON value to stdout in formatted form
  * @param value JSON value to print
  */
-void print_json_value(JsonValue *value);
+void print_json_value(JsonValue* value);
 
 #ifdef __cplusplus
 }

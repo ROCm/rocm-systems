@@ -49,7 +49,7 @@
 
 class TestVoltCurvRead : public TestBase {
  public:
-    TestVoltCurvRead();
+  TestVoltCurvRead();
 
   // @Brief: Destructor for test case of TestVoltCurvRead
   virtual ~TestVoltCurvRead();

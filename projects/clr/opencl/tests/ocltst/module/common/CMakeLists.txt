@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 set(COMMON_SOURCES
     ${OCLTST_DIR}/module/common/BaseTestImp.cpp
     ${OCLTST_DIR}/module/common/OCLTestImp.cpp

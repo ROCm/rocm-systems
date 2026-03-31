@@ -7,24 +7,44 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
+    - Library Management
+    Support for the following APIs for parity with the corresponding CUDA APIs.
+      * `hipKernelSetAttribute` sets an attribute for a kernel
+      * `hipKernelGetAttribute` returns information about a kernel
+      * `hipKernelGetFunction` returns a function handle
+    - Memory Management
+      * Added support for `hipMipmappedArrayGetMemoryRequirements`, which returns memory requirements for HIP mipmapped arrays and ensures parity with CUDA APIs.
     - Cooperative Groups
-      * Support for `barrier` APIs `barrier_arrive` and `barrier_wait` has been added for both `grid_group` and `thread_block` to enable finer‑grained synchronization within cooperative groups
+      * Support for `barrier` APIs `barrier_arrive` and `barrier_wait` has been added for both `grid_group` and `thread_block` to enable finer‑grained synchronization within cooperative groups.
       * Support for `block_rank` in the class `grid_group`, returns the rank of the block in the calling thread
     - Dynamic logging, no matching CUDA APIs exist
       * `hipExtEnableLogging` enables HIP runtime logging
       * `hipExtDisableLogging` disables HIP runtime logging
       * `hipExtSetLoggingParams` sets HIP runtime logging parameters
 
-* New HIP enumeration
-    - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs
+* New HIP device attributes
+    - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs.
+    - `hipDeviceAttributeDmaBufSupported` is now supported, enabling buffer sharing.
 
 ### Resolved issues
 
 * An error that occurred during HIP graph stream capture in thread‑local capture mode has been fixed. The HIP runtime now updates its validation logic to ensure that captures running in other threads on different streams no longer invalidate or block the thread‑local capture in the current thread.
+* A segmentation fault that occurred during HIP graph capture. The HIP runtime has updated its large‑graph handling mechanism to prevent stack overflow.
+* Incorrect return codes from `hipEventQuery` and `hipEventSynchronize` when invoked under mixed stream‑capture modes. The HIP runtime now correctly handles capture‑mode restrictions for event operations.
+* A segmentation fault that occurred when retrieving an allocation handle with `hipMemRetainAllocationHandle`. The HIP runtime now correctly retains the generic allocation object to prevent memory‑management issues.
+* Resolved a graph node scheduling issue in multistream execution that, in some cases, led to unnecessary kernel‑execution stalls.
 
 ### Optimized
 
 * HIP log-level control capabilities HIP runtime adds dynamic logging functionalities, enabling applications to programmatically enable, disable, and configure logging at runtime without modifying environment variables or restarting the application. The result is more precise control over diagnostic output, making it easier to debug targeted code paths or minimize log noise during performance‑critical execution.
+* HIP Graph Segmented Execution: Graph nodes are grouped into segments and dispatched across multiple GPU streams to enable parallel execution.
+  - Batching: Each stream receives a single `AccumulateCommand` that aggregates all kernel dispatches and submits them efficiently as one batch.
+  - Synchronization: When a segment depends on work running on another stream, a hardware wait is inserted. At completion, all parallel streams synchronize back to the launch stream.
+  - Signaling: Segments emit hardware signals only when downstream segments require them—typically at fork points or when executing in parallel with other segments.
+
+This approach reduces dispatch overhead and improves GPU utilization by overlapping independent graph work across streams while preserving correct execution order.
+* Optimized graph stream synchronization by eliminating duplicate marker creation when syncing streams back to the launch stream. The runtime now tracks synchronized dependency segments to avoid redundant synchronization markers.
+* Optimized `hipMemcpyBatchAsync` with refactored code, new data structures, and an improved core implementation for better performance.
 
 ## HIP 7.11 for ROCm 7.11
 

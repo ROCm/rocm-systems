@@ -316,8 +316,7 @@ void RdciDmonSubSystem::resolve_device_indexes() {
     throw RdcException(res, "Failed to get all devices");
   }
 
-  const bool has_group =
-      (options_.find(OPTIONS_GROUP_ID) != options_.end());
+  const bool has_group = (options_.find(OPTIONS_GROUP_ID) != options_.end());
 
   // Case 1: no group and no explicit GPU indexes -> default to all devices
   if (!has_group && raw_device_indexes_.empty()) {

@@ -27,7 +27,7 @@
 
 class TestMutualExclusion : public TestBase {
  public:
-    TestMutualExclusion();
+  TestMutualExclusion();
 
   // @Brief: Destructor for test case of TestMutualExclusion
   virtual ~TestMutualExclusion();

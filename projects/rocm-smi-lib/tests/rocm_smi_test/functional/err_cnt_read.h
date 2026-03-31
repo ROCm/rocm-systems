@@ -47,7 +47,7 @@
 
 class TestErrCntRead : public TestBase {
  public:
-    TestErrCntRead();
+  TestErrCntRead();
 
   // @Brief: Destructor for test case of TestErrCntRead
   virtual ~TestErrCntRead();

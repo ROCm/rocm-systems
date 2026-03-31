@@ -4,6 +4,10 @@ device_memory:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
-  Unit_Device_memcpy_Negative_Parameters_RTC: *level_2
+  Unit_Device_memcpy_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [device_lang]
   Unit_Device_memset_Positive: *level_2
-  Unit_Device_memset_Negative_Parameters_RTC: *level_2
+  Unit_Device_memset_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [device_lang]

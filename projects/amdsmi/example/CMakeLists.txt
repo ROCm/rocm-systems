@@ -51,7 +51,6 @@ else()
     set(_AMDSMI_LINK_TARGET amd_smi)
 endif()
 
-
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Example                         ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
@@ -75,10 +74,8 @@ if(ENABLE_ESMI_LIB)
     target_compile_definitions(${ESMI_SAMPLE_EXE} PUBLIC ENABLE_ESMI_LIB)
 endif()
 
-
 add_executable(ainic amd_smi_nic.cc)
 target_compile_definitions(ainic PRIVATE ENABLE_ESMI_LIB)
 target_include_directories(ainic PRIVATE /opt/rocm/include /opt/rocm/include/amd_smi/impl/nic)
 target_link_directories(ainic PRIVATE /opt/rocm/lib)
 target_link_libraries(ainic PRIVATE ${_AMDSMI_LINK_TARGET})
-

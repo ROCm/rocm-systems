@@ -4,15 +4,17 @@
  */
 
 #include "rocm_smi/rocm_smi_npm.h"
-#include "rocm_smi/rocm_smi_utils.h"
+
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <map>
+#include <sstream>
+
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_logger.h"
-#include <fstream>
-#include <cstring>
-#include <cerrno>
-#include <iomanip>
-#include <sstream>
-#include <map>
+#include "rocm_smi/rocm_smi_utils.h"
 
 using amd::smi::getRSMIStatusString;
 
@@ -20,7 +22,7 @@ namespace amd::smi {
 
 namespace fs = std::filesystem;
 
-rsmi_status_t read_npm_file(const fs::path &path, std::string &out) {
+rsmi_status_t read_npm_file(const fs::path& path, std::string& out) {
   std::ifstream ifs(path);
   if (!ifs.is_open()) {
     return RSMI_STATUS_FILE_ERROR;
@@ -33,7 +35,7 @@ rsmi_status_t read_npm_file(const fs::path &path, std::string &out) {
   return RSMI_STATUS_SUCCESS;
 }
 
-rsmi_status_t get_npm_board_status(const std::string &board_path, bool *enabled) {
+rsmi_status_t get_npm_board_status(const std::string& board_path, bool* enabled) {
   if (enabled == nullptr) return RSMI_STATUS_INVALID_ARGS;
   if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
 
@@ -55,8 +57,8 @@ rsmi_status_t get_npm_board_status(const std::string &board_path, bool *enabled)
   return RSMI_STATUS_UNEXPECTED_DATA;
 }
 
-static rsmi_status_t read_board_uint64(const std::string &board_path,
-                                       const char *filename, uint64_t *value) {
+static rsmi_status_t read_board_uint64(const std::string& board_path, const char* filename,
+                                       uint64_t* value) {
   if (value == nullptr) return RSMI_STATUS_INVALID_ARGS;
   if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
 
@@ -83,13 +85,12 @@ static rsmi_status_t read_board_uint64(const std::string &board_path,
   }
 }
 
-rsmi_status_t get_npm_board_limit(const std::string &board_path, uint64_t *limit) {
+rsmi_status_t get_npm_board_limit(const std::string& board_path, uint64_t* limit) {
   return read_board_uint64(board_path, "cur_node_power_limit", limit);
 }
 
-
-rsmi_status_t get_ubb_power_limit(const std::string &board_path, uint64_t *limit) {
+rsmi_status_t get_ubb_power_limit(const std::string& board_path, uint64_t* limit) {
   return read_board_uint64(board_path, "baseboard_power_limit", limit);
 }
 
-}  // end namespace
+}  // namespace amd::smi

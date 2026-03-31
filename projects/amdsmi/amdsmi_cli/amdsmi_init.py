@@ -43,20 +43,21 @@ except ImportError as e:
     sys.exit(1)
 
 # Using basic python logging for user errors and development
-logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR) # User level logging
+logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR)  # User level logging
 # This traceback limit only affects this file, once the code hit's the cli portion it get's reset to the user's preference
-sys.tracebacklimit = -1 # Disable traceback when raising errors
+sys.tracebacklimit = -1  # Disable traceback when raising errors
 
 # On initial import set initialized variable
 AMDSMI_INITIALIZED = False
 AMDSMI_INIT_FLAG = amdsmi_interface.AmdSmiInitFlags.INIT_ALL_PROCESSORS
 AMD_VENDOR_ID = 4098
 
+
 def check_amdgpu_driver():
-    """ Returns true if amdgpu is found in the list of initialized modules """
+    """Returns true if amdgpu is found in the list of initialized modules"""
     amd_gpu_status_file = Path("/sys/module/amdgpu/initstate")
     if amd_gpu_status_file.exists():
-        try: 
+        try:
             return amd_gpu_status_file.read_text(encoding="ascii").strip() == "live"
         except OSError:
             pass
@@ -75,22 +76,24 @@ def check_amdgpu_driver():
 
 
 def check_amd_hsmp_driver():
-    """ Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules """
+    """Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules"""
     amd_cpu_status_file = Path("/dev/hsmp")
     if amd_cpu_status_file.exists():
-            return True
+        return True
     return False
 
+
 def check_amd_ionic_driver():
-    """ Returns true if ionic is found in the list of initialized modules """
+    """Returns true if ionic is found in the list of initialized modules"""
     status_file = Path("/sys/module/ionic/initstate")
     if status_file.exists():
         if status_file.read_text(encoding="ascii").strip() == "live":
             return True
     return False
 
+
 def amdsmi_cli_init():
-    """ Initializes AMDSMI Library for the CLI
+    """Initializes AMDSMI Library for the CLI
 
     Checks for the presence of the amdgpu, amd_hsmp or hsmp_acpi drivers and initializes the
     AMD SMI library based on the live drivers found.
@@ -114,18 +117,32 @@ def amdsmi_cli_init():
 
     try:
         amdsmi_interface.amdsmi_init(init_flag)
-    except (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException) as e:
+    except (
+        amdsmi_interface.AmdSmiLibraryException,
+        amdsmi_interface.AmdSmiParameterException,
+    ) as e:
         # parameter exception thrown if init_flag is 0, but err_code will be set to 0 in that case, so must check if init_flag is 0 too
-        if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED) or init_flag == 0:
-            logging.error("Drivers not loaded (amdgpu, amd_hsmp, ionic, rdma drivers not found in modules)")
+        if (
+            e.err_code
+            in (
+                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
+            )
+            or init_flag == 0
+        ):
+            logging.error(
+                "Drivers not loaded (amdgpu, amd_hsmp, ionic, rdma drivers not found in modules)"
+            )
             sys.exit(-1)
         else:
             raise e
 
-    logging.debug(f"AMDSMI initialized with atleast one driver successfully | init flag: {init_flag}")
+    logging.debug(
+        f"AMDSMI initialized with atleast one driver successfully | init flag: {init_flag}"
+    )
 
     return init_flag
+
 
 def amdsmi_cli_shutdown():
     """Shutdown AMDSMI instance
@@ -143,10 +160,13 @@ def amdsmi_cli_shutdown():
 def signal_handler(sig, frame):
     logging.debug(f"Handling signal: {sig}")
     try:
-       sys.exit(0)
+        sys.exit(0)
     except Exception as e:
-        logging.error("Unable to cleanly shut down amd-smi-lib, exception: %s", str(type(e).__name__))
+        logging.error(
+            "Unable to cleanly shut down amd-smi-lib, exception: %s", str(type(e).__name__)
+        )
         os._exit(0)
+
 
 if not AMDSMI_INITIALIZED:
     AMDSMI_INIT_FLAG = amdsmi_cli_init()

@@ -280,12 +280,8 @@ class HostQueue : public CommandQueue {
     lastEnqueueCommand_ = command;
   }
 
-  //! Flushes submitted commands if the batch size significantly grew
-  void FlushSubmissionBatch(Command* command) {
-    if (size_ > DEBUG_CLR_MAX_BATCH_SIZE) {
-      command->notifyCmdQueue();
-    }
-  }
+  //! Returns true if the batch size exceeds the flush threshold
+  bool ShouldFlushBatch() const { return size_ > DEBUG_CLR_MAX_BATCH_SIZE; }
   //! Reset the command batch list
   void ResetSubmissionBatch() {
     head_ = nullptr;
@@ -296,7 +292,7 @@ class HostQueue : public CommandQueue {
   void SetQueueStatus() { isActive_ = true; }
 
   //! Get queue status
-  bool GetQueueStatus() { return isActive_; }
+  bool GetQueueStatus() const { return isActive_; }
 
   //! Set the force destory to terminate queue without checking last command
   void SetForceDestroy(bool forceDestroy) { forceDestroy_ = forceDestroy; }

@@ -27,7 +27,7 @@
 
 class TestXGMIReadWrite : public TestBase {
  public:
-    TestXGMIReadWrite();
+  TestXGMIReadWrite();
 
   // @Brief: Destructor for test case of TestXGMIReadWrite
   virtual ~TestXGMIReadWrite();
