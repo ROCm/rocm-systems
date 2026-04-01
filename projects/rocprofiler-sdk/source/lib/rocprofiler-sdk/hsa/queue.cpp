@@ -130,15 +130,9 @@ get_signal_pool()
 {
     constexpr size_t default_signal_pool_size = (1 << 12);  // 4096 signals per pool batch
 
-    // static auto pool = common::container::pool<Queue::signal_impl>{
-    //     std::piecewise_construct, default_signal_pool_size, [](Queue::signal_impl& signal) {
-    //         construct_hsa_signal(signal, 0, 0, nullptr, 0);
-    //     }};
-    // return &pool;
-
     static auto*& pool = common::static_object<common::container::pool<signal_t>>::construct(
         std::piecewise_construct, default_signal_pool_size, [](signal_t& signal) {
-            construct_hsa_signal(signal, 0, 0, nullptr, 0);
+            if(registration::get_fini_status() == 0) construct_hsa_signal(signal, 0, 0, nullptr, 0);
         });
 
     return pool;
@@ -162,7 +156,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     {
         _session_ptr->reset();
         delete _session_ptr;
-        return true;
+        return false;
     }
 
     // cleanup the pooled signal data and release the signal back to the pool for reuse
@@ -378,11 +372,6 @@ WriteInterceptor(const void* packets,
 
     auto transformed_packets = packet_vector_t{};
 
-    // mark the queue as having at least one packet which will be assigned a callback to
-    // AsyncSignalHandler. This is used to determine whether we need to wait for the signal handler
-    // to complete during finalization.
-    queue.async_started();
-
     // all packets should have the same correlation id so we can just look at the first one to get
     // the correlation id for the entire batch of packets
     auto*                    corr_id      = context::get_latest_correlation_id();
@@ -427,6 +416,11 @@ WriteInterceptor(const void* packets,
                                               .enqueue_ts     = common::timestamp_ns(),
                                               .correlation_id = corr_id,
                                               .packet_data    = packet_data_array_t{}};
+
+    // mark the queue as having at least one packet which will be assigned a callback to
+    // AsyncSignalHandler. This is used to determine whether we need to wait for the signal handler
+    // to complete during finalization.
+    queue.async_started();
 
     // Searching accross all the packets given during this write
     for(size_t i = 0; i < pkt_count; ++i)
@@ -739,6 +733,8 @@ Queue::Queue(const AgentCache&  agent,
     _core_api.hsa_signal_store_screlease_fn(ready_signal, 0);
     _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
     *queue = _intercept_queue;
+
+    (void) get_signal_pool();  // ensure the signal pool is constructed for this queue
 }
 
 Queue::Queue(
@@ -788,6 +784,8 @@ Queue::Queue(
     create_signal(0, &_active_kernels, false);
     _core_api.hsa_signal_store_screlease_fn(ready_signal, 0);
     _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
+
+    (void) get_signal_pool();  // ensure the signal pool is constructed for this queue
 }
 
 Queue::~Queue()
@@ -807,7 +805,7 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
 
     if(signal)
     {
-        ROCP_FATAL_IF(signal->get().value.handle != raw_signal.handle)
+        ROCP_INFO_IF(signal->get().value.handle != raw_signal.handle)
             << fmt::format("signal handle does not match raw signal handle: {} vs {}",
                            signal->get().value.handle,
                            raw_signal.handle);
@@ -817,7 +815,7 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
                            signal->get().value.handle);
 
         hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-            signal->get().value, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
+            raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
         ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
             << "Error: hsa_amd_signal_async_handler failed with error code " << status
             << " :: " << hsa::get_hsa_status_string(status);
@@ -928,13 +926,28 @@ Queue::set_state(queue_state state)
     _state = state;
 }
 
+namespace
+{
+auto did_queue_init = false;
+}
+
+void
+queue_init()
+{
+    // record that queue initialization happened
+    did_queue_init = true;
+}
+
 void
 queue_fini()
 {
-    if(auto* pool = get_signal_pool(); pool != nullptr)
+    if(did_queue_init)
     {
-        ROCP_INFO << pool->get_usage_report();
-        pool->clear([](auto& signal) { Queue::destroy_signal(&signal); });
+        if(auto* pool = get_signal_pool(); pool != nullptr)
+        {
+            ROCP_INFO << pool->get_usage_report();
+            pool->clear([](auto& signal) { Queue::destroy_signal(&signal); });
+        }
     }
 }
 }  // namespace hsa

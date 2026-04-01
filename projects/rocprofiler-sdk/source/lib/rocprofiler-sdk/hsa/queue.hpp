@@ -204,6 +204,9 @@ Queue::lock_queue(FuncT&& func)
 }
 
 void
+queue_init();
+
+void
 queue_fini();
 }  // namespace hsa
 }  // namespace rocprofiler

@@ -530,6 +530,8 @@ void
 queue_controller_init(HsaApiTable* table)
 {
     CHECK_NOTNULL(get_queue_controller())->init(*table->core_, *table->amd_ext_);
+
+    if(enable_queue_intercept()) queue_init();
 }
 
 void
@@ -546,7 +548,7 @@ queue_controller_fini()
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 
     // finalize queue data (e.g. clean up signal pool)
-    queue_fini();
+    if(enable_queue_intercept()) queue_fini();
 }
 
 void
@@ -562,6 +564,8 @@ queue_controller_init(RocAttachDispatchTable* attach_table)
                "may not be instrumented correctly.";
     }
     *(get_attach_table()) = attach_table;
+
+    if(enable_queue_intercept()) queue_init();
 }
 
 }  // namespace hsa

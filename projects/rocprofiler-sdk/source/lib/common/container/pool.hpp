@@ -60,9 +60,9 @@ struct pool
     pool()                = default;
     ~pool()               = default;
     pool(const pool&)     = delete;
-    pool(pool&&) noexcept = default;
+    pool(pool&&) noexcept = delete;
     pool& operator=(const pool&) = delete;
-    pool& operator=(pool&&) noexcept = default;
+    pool& operator=(pool&&) noexcept = delete;
 
     // get an object from the pool. if all objects are in use, a new one will be created and added
     // to the pool
@@ -202,7 +202,7 @@ pool<Tp>::clear(FuncT&& func)
             "Pool object at index {} is still in use during pool clear", itr.index());
         itr.release();
         // run cleanup lambda
-        std::forward<FuncT>(func)(itr);
+        func(itr);
     }
 
     auto _write_avail_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
