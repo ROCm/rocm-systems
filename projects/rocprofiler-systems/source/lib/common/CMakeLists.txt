@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # ------------------------------------------------------------------------------#
 #
 # rocprofiler-systems common headers
@@ -43,6 +46,11 @@ target_include_directories(
         $<BUILD_INTERFACE:${COMMON_BINARY_INCLUDE_DIR}>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/timemory/source>
         $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/timemory/source>
+)
+
+target_link_libraries(
+    rocprofiler-systems-common-library
+    INTERFACE $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
 )
 
 target_compile_definitions(
