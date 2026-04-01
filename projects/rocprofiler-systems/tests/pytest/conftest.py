@@ -174,14 +174,14 @@ def pytest_configure(config: pytest.Config) -> None:
 
     if config.getoption("--ctest-mode", default="off") == "cleanup":
         _run_cleanup(config)
-        pytest.exit(reason="Cleanup complete", returncode=0)
+        pytest.exit("Cleanup complete", returncode=0)
 
     if config.getoption("--show-config-only", default=False):
         pytest._config_ref = config
         header = _generate_rocprofsys_config_header(config)
         for line in header:
             print(line)
-        pytest.exit(reason="Header generated", returncode=0)
+        pytest.exit("Header generated", returncode=0)
 
     is_monochrome = config.getoption("--monochrome", default=False)
     if is_monochrome:
@@ -330,7 +330,7 @@ def pytest_configure(config: pytest.Config) -> None:
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
-
+    #
     _show_test_output = config.getoption("--show-test-output", default="subtest")
     config.stash[_show_output_key] = _show_test_output == "all"
     config.stash[_show_on_subfail_key] = _show_test_output == "subtest"
@@ -1028,7 +1028,7 @@ def _ctest_generate_tests(
         print(f"Generated {len(items)} CTest definitions -> {output_path}")
     else:
         print(content)
-    pytest.exit(reason="", returncode=0)
+    pytest.exit("CTest generation complete", returncode=0)
 
 
 def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
