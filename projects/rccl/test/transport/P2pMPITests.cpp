@@ -1702,5 +1702,113 @@ TEST_F(P2pMPITest, IpcGraphRegisterBufferTest)
     }
 }
 
+// Requires NCCL_LOCAL_REGISTER=1 NCCL_SHM_DISABLE=1 to trigger the IPC registration path.
+TEST_F(P2pMPITest, P2pIpcRegistration_NoStickyHipError)
+{
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI,
+                                          kNoProcessLimit,
+                                          kNoPowerOfTwoRequired,
+                                          1,
+                                          kRequireSingleNode))
+        << "Test requirements not met - all ranks must meet requirements";
+
+    setupP2PBuffers();
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    if(config.world_rank == 0)
+    {
+        TEST_INFO("Testing that RCCL clears sticky HIP errors after "
+                   "IPC buffer registration (%d processes)",
+                   config.world_size);
+    }
+
+    // Drain any pre-existing HIP errors so we start clean
+    (void)hipGetLastError();
+
+    // Allocate buffers large enough to trigger the SIMPLE protocol path which
+    // exercises ipcRegisterBuffer -> hipPointerGetAttribute internally.
+    void* send_buffer = nullptr;
+    void* recv_buffer = nullptr;
+
+    allocateAndInitBuffers(&send_buffer, &recv_buffer, kLargeBufferSize, kLargeBufferSize);
+
+    void* send_reg_handle = nullptr;
+    void* recv_reg_handle = nullptr;
+
+    preRegisterBuffers(send_buffer,
+                       recv_buffer,
+                       kLargeBufferSize,
+                       kLargeBufferSize,
+                       &send_reg_handle,
+                       &recv_reg_handle);
+
+    NcclRegHandleGuard sendRegGuard(send_reg_handle,
+                                    NcclRegHandleDeleter(getActiveCommunicator()));
+    NcclRegHandleGuard recvRegGuard(recv_reg_handle,
+                                    NcclRegHandleDeleter(getActiveCommunicator()));
+
+    const size_t num_floats = kLargeBufferSize / sizeof(float);
+    hipError_t   hip_result = initializeBufferWithPattern<float>(
+        send_buffer, num_floats, [rank = config.world_rank](size_t i) {
+            return static_cast<float>(rank * 1000 + i);
+        });
+    ASSERT_EQ(hipSuccess, hip_result)
+        << "Rank " << config.world_rank << ": Failed to initialize send buffer";
+
+    const int nranks    = config.world_size;
+    const int rank      = config.world_rank;
+    const int recv_peer = (rank - 1 + nranks) % nranks;
+    const int send_peer = (rank + 1) % nranks;
+
+    auto nccl_result = ncclGroupStart();
+    ASSERT_EQ(ncclSuccess, nccl_result);
+
+    nccl_result = ncclSend(send_buffer,
+                           num_floats,
+                           ncclFloat,
+                           send_peer,
+                           getActiveCommunicator(),
+                           getActiveStream());
+    ASSERT_EQ(ncclSuccess, nccl_result);
+
+    nccl_result = ncclRecv(recv_buffer,
+                           num_floats,
+                           ncclFloat,
+                           recv_peer,
+                           getActiveCommunicator(),
+                           getActiveStream());
+    ASSERT_EQ(ncclSuccess, nccl_result);
+
+    nccl_result = ncclGroupEnd();
+    ASSERT_EQ(ncclSuccess, nccl_result);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    hip_result = hipStreamSynchronize(getActiveStream());
+    ASSERT_EQ(hipSuccess, hip_result)
+        << "Rank " << config.world_rank << ": hipStreamSynchronize failed";
+
+    // After RCCL operations complete there must no leftover sticky HIP error visible to the application.
+    hipError_t stickyErr = hipGetLastError();
+    EXPECT_EQ(hipSuccess, stickyErr)
+        << "Rank " << config.world_rank
+        << ": RCCL left a sticky HIP error after IPC buffer registration: "
+        << hipGetErrorString(stickyErr)
+        << " (RCCL must flush non-fatal HIP errors)";
+
+    if(config.world_rank == 0)
+    {
+        if(stickyErr == hipSuccess)
+        {
+            TEST_INFO("No sticky HIP error detected");
+        }
+        else
+        {
+            TEST_INFO("Sticky HIP error detected: %s",
+                       hipGetErrorString(stickyErr));
+        }
+    }
+}
+
 #endif // MPI_TESTS_ENABLED
 
