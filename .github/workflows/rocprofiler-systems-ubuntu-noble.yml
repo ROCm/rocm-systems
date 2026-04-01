@@ -88,7 +88,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        python3 -m pip install --break-system-packages -r requirements.txt
         for env_dir in /opt/conda/envs/py3.{8,9,10,11,12,13}/; do
           if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
             echo "Installing requirements into ${env_dir}"

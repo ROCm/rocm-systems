@@ -94,7 +94,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        python3 -m pip install -r requirements.txt
         for env_dir in /opt/conda/envs/py3.{8,9,10,11}/; do
           if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
             echo "Installing requirements into ${env_dir}"
@@ -304,7 +303,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        python3 -m pip install -r requirements.txt
         for env_dir in /opt/conda/envs/py3.{8,9,10,11}/; do
           if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
             echo "Installing requirements into ${env_dir}"

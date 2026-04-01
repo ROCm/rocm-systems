@@ -24,20 +24,13 @@ from typing import Optional
 from .config import RocprofsysConfig
 
 
-def _safe_remove_file(filepath: Path) -> None:
-    """Safely remove a file, ignoring errors."""
+def safe_remove(path: Path) -> None:
+    """Safely remove a file or directory, ignoring errors."""
     try:
-        if filepath.is_file():
-            filepath.unlink()
-    except OSError:
-        pass
-
-
-def _safe_remove_directory(dirpath: Path) -> None:
-    """Safely remove a directory recursively, ignoring errors."""
-    try:
-        if dirpath.is_dir():
-            shutil.rmtree(dirpath)
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.is_file():
+            path.unlink()
     except OSError:
         pass
 
@@ -135,11 +128,11 @@ class TestResult:
 
         # Clean up instrumented binaries
         for inst_file in self._instrumented_files:
-            _safe_remove_file(inst_file)
+            safe_remove(inst_file)
 
         # Clean up output directory
         if self.output_dir.exists():
-            _safe_remove_directory(self.output_dir)
+            safe_remove(self.output_dir)
 
     def cleanup_instrumented_binaries(self) -> None:
         """Clean up only the instrumented binary files."""
@@ -147,12 +140,12 @@ class TestResult:
             return
 
         for inst_file in self._instrumented_files:
-            _safe_remove_file(inst_file)
+            safe_remove(inst_file)
 
         # Also clean any .inst files in output directory
         if self.output_dir.exists():
             for inst_file in self.output_dir.glob("*.inst"):
-                _safe_remove_file(inst_file)
+                safe_remove(inst_file)
 
 
 class BaseRunner(ABC):
@@ -555,12 +548,12 @@ class BinaryRewriteRunner(BaseRunner):
             return
 
         for inst_file in self._instrumented_files:
-            _safe_remove_file(inst_file)
+            safe_remove(inst_file)
 
         # Also clean any .inst files in output directory
         if self.output_dir.exists():
             for inst_file in self.output_dir.glob("*.inst"):
-                _safe_remove_file(inst_file)
+                safe_remove(inst_file)
 
 
 class RuntimeInstrumentRunner(BaseRunner):
