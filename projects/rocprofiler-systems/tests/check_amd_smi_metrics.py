@@ -23,6 +23,7 @@ Usage:
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -65,6 +66,9 @@ class GpuMetricAvailability:
     # sdma_usage is not reported by amd-smi CLI; it is a compile-time
     # feature (AMD_SMI_SDMA_SUPPORTED) and cannot be detected here.
 
+    # GPU type classification (derived from rocminfo ASIC detection)
+    is_apu: bool = False  # True if GPU is an APU
+
     def to_metrics_string(self) -> str:
         """Return comma-separated string for ROCPROFSYS_AMD_SMI_METRICS."""
         categories = []
@@ -83,17 +87,28 @@ class GpuMetricAvailability:
         return ", ".join(categories)
 
 
+_SENTINEL_VALUES = {
+    0xFFFF,  # UINT16_MAX
+    0xFFFFFFFF,  # UINT32_MAX
+    0xFFFFFFFFFFFFFFFF,  # UINT64_MAX
+}
+
+
 def _is_available(value) -> bool:
     """Return True if a JSON value represents an available metric.
-    Handles: None, "N/A", {"value": N, "unit": "..."}, and plain numerics."""
+    Handles: None, "N/A", {"value": N, "unit": "..."}, plain numerics,
+    and AMD SMI sentinel values (UINT16/32/64_MAX) indicating unsupported."""
     if value is None:
         return False
     if isinstance(value, str):
         return value.strip() != "N/A"
     if isinstance(value, dict):
-        # e.g. {"value": 25, "unit": "W"} - present means available
-        return True
-    # numeric (int, float)
+        inner = value.get("value")
+        if inner is None:
+            return False
+        return _is_available(inner)
+    if isinstance(value, (int, float)):
+        return value not in _SENTINEL_VALUES
     return True
 
 
@@ -321,6 +336,33 @@ def detect_pcie_metrics(gpus: list[GpuMetricAvailability]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# GPU type classification (APU vs discrete) — reuses pytest/rocprofsys/gpu.py
+# ---------------------------------------------------------------------------
+
+
+def detect_gpu_type(gpus: list[GpuMetricAvailability]) -> None:
+    """Classify GPUs as APU or discrete using detect_gpu()"""
+    try:
+        _tests_dir = os.path.dirname(os.path.abspath(__file__))
+        _pytest_dir = os.path.join(_tests_dir, "pytest")
+        if _pytest_dir not in sys.path:
+            sys.path.insert(0, _pytest_dir)
+
+        from rocprofsys.gpu import detect_gpu
+
+        gpu_info = detect_gpu()
+        is_apu_system = "apu" in gpu_info.categories
+
+        for gpu in gpus:
+            gpu.is_apu = is_apu_system
+    except Exception as e:
+        print(
+            f"Warning: GPU type detection failed ({e}), assuming discrete GPU",
+            file=sys.stderr,
+        )
+
+
+# ---------------------------------------------------------------------------
 # XGMI detection (kept from original - text parsing of amd-smi metric -x)
 # ---------------------------------------------------------------------------
 
@@ -435,12 +477,15 @@ def get_available_metrics() -> list[GpuMetricAvailability]:
     detect_power_metrics(gpus)
     detect_pcie_metrics(gpus)
 
-    # 3. XGMI from existing text parser
+    # 3. GPU type classification (APU vs discrete)
+    detect_gpu_type(gpus)
+
+    # 4. XGMI from existing text parser
     xgmi_map = run_amd_smi_xgmi()
     for gpu in gpus:
         gpu.xgmi = xgmi_map.get(gpu.gpu_id, False)
 
-    # 4. Derive coarse fields from fine-grained
+    # 5. Derive coarse fields from fine-grained
     for gpu in gpus:
         gpu.busy = gpu.gfx_activity or gpu.umc_activity or gpu.mm_activity
         gpu.temp = gpu.hotspot_temperature or gpu.edge_temperature
@@ -450,7 +495,7 @@ def get_available_metrics() -> list[GpuMetricAvailability]:
 
 
 def collect_metric_names(gpu: GpuMetricAvailability) -> set[str]:
-    """Collect all available metric names (fine-grained + coarse) for a GPU."""
+    """Collect all available metric names (fine-grained + coarse + GPU type) for a GPU."""
     metrics: set[str] = set()
 
     for name in _FINE_GRAINED_NAMES:
@@ -468,6 +513,10 @@ def collect_metric_names(gpu: GpuMetricAvailability) -> set[str]:
         metrics.add("vcn_activity")
     if gpu.jpeg_activity:
         metrics.add("jpeg_activity")
+
+    # GPU type classification for conditional validation rules
+    if gpu.is_apu:
+        metrics.add("is_apu")
 
     return metrics
 
@@ -523,6 +572,7 @@ def main():
             print(f"  busy (derived):       {gpu.busy}")
             print(f"  temp (derived):       {gpu.temp}")
             print(f"  power (derived):      {gpu.power}")
+            print(f"  is_apu:               {gpu.is_apu}")
             print(f'  -> ROCPROFSYS_AMD_SMI_METRICS="{gpu.to_metrics_string()}"')
             print()
 

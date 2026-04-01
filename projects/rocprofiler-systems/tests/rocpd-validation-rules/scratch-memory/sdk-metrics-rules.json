@@ -3,6 +3,9 @@
         {
             "commit": "Validation rules for scratch memory allocations",
             "min_rows": 12,
+            "min_rows_overrides": [
+                { "requires": "is_apu", "min_rows": 1 }
+            ],
             "name": "scratch_memory",
             "required_columns": [
                 "id",

@@ -58,7 +58,13 @@ class required_table:
     """Class to represent a required table as defined in JSON rules file"""
 
     def __init__(
-        self, name, name_prefix, required_columns, min_rows=1, validation_queries=None
+        self,
+        name,
+        name_prefix,
+        required_columns,
+        min_rows=1,
+        min_rows_overrides=None,
+        validation_queries=None,
     ):
         if name is None and name_prefix is None:
             raise ValueError("Either 'name' or 'name_prefix' must be specified")
@@ -69,7 +75,29 @@ class required_table:
         self.name_prefix = name_prefix
         self.required_columns = required_columns
         self.min_rows = min_rows
+        self.min_rows_overrides = min_rows_overrides or []
         self.validation_queries = validation_queries or []
+
+    def resolve_min_rows(self, available_metrics=None):
+        """Resolve effective min_rows based on available GPU capabilities.
+
+        Checks min_rows_overrides in order; the first override whose 'requires'
+        key is present in available_metrics wins. Falls back to self.min_rows.
+
+        Example JSON:
+            "min_rows": 1,
+            "min_rows_overrides": [
+                {"requires": "discrete_gpu", "min_rows": 12}
+            ]
+
+        On a discrete GPU, min_rows=12 is used. On an APU (where discrete_gpu
+        is absent), min_rows=1 applies.
+        """
+        if available_metrics and self.min_rows_overrides:
+            for override in self.min_rows_overrides:
+                if override.get("requires") in available_metrics:
+                    return override["min_rows"]
+        return self.min_rows
 
     def __repr__(self):
         identifier = (
@@ -191,15 +219,16 @@ def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
             cursor.execute(f"SELECT COUNT(*) as count FROM {table_name}")
             row_count = cursor.fetchone()["count"]
 
-            if row_count < rule.min_rows:
+            effective_min_rows = rule.resolve_min_rows(available_metrics)
+            if row_count < effective_min_rows:
                 print(
-                    f"❌ ERROR: Table '{table_name}' has {row_count} rows, minimum required: {rule.min_rows}"
+                    f"❌ ERROR: Table '{table_name}' has {row_count} rows, minimum required: {effective_min_rows}"
                 )
                 all_tables_passed = False
                 continue
             else:
                 print(
-                    f"✅ Row count check passed for '{table_name}': {row_count} rows (minimum: {rule.min_rows})"
+                    f"✅ Row count check passed for '{table_name}': {row_count} rows (minimum: {effective_min_rows})"
                 )
 
             all_queries_passed = True
@@ -333,6 +362,7 @@ def load_validation_rules(validation_rules) -> list:
                         name_prefix=table_data.get("name_prefix", None),
                         required_columns=table_data["required_columns"],
                         min_rows=table_data.get("min_rows", 1),
+                        min_rows_overrides=table_data.get("min_rows_overrides", []),
                         validation_queries=validation_queries,
                     )
                     rules.append(required_table_obj)
