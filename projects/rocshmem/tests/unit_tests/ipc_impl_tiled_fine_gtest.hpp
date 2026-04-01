@@ -207,7 +207,7 @@ class IPCImplTiledFine : public ::testing::TestWithParam<std::tuple<int, int, in
         CHECK_HIP(hipStreamSynchronize(nullptr));
     }
 
-    virtual void copy(TestType test, dim3 grid, dim3 block) {
+    virtual void copy([[maybe_unused]] TestType test, [[maybe_unused]] dim3 grid, [[maybe_unused]] dim3 block) {
         FAIL();
     }
 

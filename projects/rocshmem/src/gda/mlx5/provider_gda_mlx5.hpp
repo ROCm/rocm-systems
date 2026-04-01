@@ -201,7 +201,8 @@ public:
         raddr, rkey,
         laddr, lkey, byte_count,
         send_inline)} { }
-} __attribute__((__packed__)) __attribute__((__aligned__(64)));
+} __attribute__((__aligned__(64)));
+
 static_assert(sizeof(gda_mlx5_wqe) == sizeof(gda_mlx5_wqe_segment[4]),
               "mlx5 WQEs have up to 4 segments");
 

@@ -18,8 +18,16 @@ exclude: |
     | build/
     | build-.*/
     | _build/
+    | esmi_ib_library/
+    | third_party/
 fail_fast: false
 repos:
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.2
+    hooks:
+      - id: codespell
+        args: ["-w", "--config", "projects/amdsmi/.codespellrc"]
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

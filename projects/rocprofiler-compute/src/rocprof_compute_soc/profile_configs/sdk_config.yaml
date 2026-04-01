@@ -10911,3 +10911,13 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: accumulate(SQC_ICACHE_INFLIGHT_LEVEL, HIGH_RES)
+  fw-restriction-schema-version: 1
+  firmware_restrictions:
+  - affected_architectures:
+    - gfx940
+    - gfx941
+    - gfx942
+    firmware_type: CP
+    min_version: 186
+    reason: CP firmware below version 186 can cause device resets and VM Page Faults
+      on MI3XX devices.

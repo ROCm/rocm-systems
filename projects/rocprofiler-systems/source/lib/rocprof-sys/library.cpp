@@ -59,8 +59,11 @@
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
+#include "library/kokkosp.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk/roctx_client.hpp"
+#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -401,7 +404,45 @@ rocprofsys_preinit_hidden()
     _preinit_callback();
     _preinit_callback = []() {};
 }
+
+using callback_t = void (*)();
+std::mutex              external_pause_resume_callbacks_mutex;
+std::vector<callback_t> external_pause_callbacks;
+std::vector<callback_t> external_resume_callbacks;
+
+void
+invoke_external_pause_callbacks()
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    for(auto* _fn : external_pause_callbacks)
+        _fn();
+}
+
+void
+invoke_external_resume_callbacks()
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    for(auto* _fn : external_resume_callbacks)
+        _fn();
+}
+
 }  // namespace
+
+extern "C" void
+rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_fn)())
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+
+    if(pause_fn)
+    {
+        external_pause_callbacks.emplace_back(pause_fn);
+    }
+
+    if(resume_fn)
+    {
+        external_resume_callbacks.emplace_back(resume_fn);
+    }
+}
 
 extern "C" void
 rocprofsys_set_mpi_hidden(bool use, bool attached)
@@ -627,6 +668,43 @@ rocprofsys_init_tooling_hidden(void)
         {
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             trace_cache::get_buffer_storage().start(getpid());
+        }
+
+        auto trace_controller = rocprofiler_sdk::get_trace_controller();
+        if(trace_controller)
+        {
+            auto pause_callback = [](void) {
+                LOG_DEBUG("Pause callback...");
+                rocprofiler_sdk::pause();
+                sampling::pause();
+                component::mpi_gotcha::pause();
+                component::ucx_gotcha::pause();
+                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
+                component::vaapi_gotcha::pause();
+                ::rocprofsys::pthread_gotcha::pause();
+                component::numa_gotcha::pause();
+                rocprofsys::kokkosp::pause();
+                process_sampler::pause();
+                invoke_external_pause_callbacks();
+            };
+            auto resume_callback = [](void) {
+                LOG_DEBUG("Resume callback...");
+                rocprofiler_sdk::resume();
+                sampling::resume();
+                component::mpi_gotcha::resume();
+                component::ucx_gotcha::resume();
+                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
+                component::vaapi_gotcha::resume();
+                ::rocprofsys::pthread_gotcha::resume();
+                component::numa_gotcha::resume();
+                rocprofsys::kokkosp::resume();
+                process_sampler::resume();
+                invoke_external_resume_callbacks();
+            };
+            trace_controller->register_region_pauser_resume_callbacks(resume_callback,
+                                                                      pause_callback);
+
+            trace_controller->force_initial_pause();
         }
 
         set_state(State::Active);  // set to active as very last operation
