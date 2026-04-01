@@ -606,10 +606,11 @@ def pytest_collection_modifyitems(config, items) -> None:
                 pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
         if "multi_gpu" in item.keywords:
             num_gpu = item.get_closest_marker("multi_gpu").args[0]
-            if gpu_info.device_count < num_gpu:
+            info = get_gpu_info()
+            if info.device_count < num_gpu:
                 item.add_marker(
                     pytest.mark.skip(
-                        reason=f"Test requires {num_gpu} GPUs but system has {gpu_info.device_count}"
+                        reason=f"Test requires atleast {num_gpu} GPUs but system has {info.device_count}"
                     )
                 )
         # ----------------------------------------------------------------------------
