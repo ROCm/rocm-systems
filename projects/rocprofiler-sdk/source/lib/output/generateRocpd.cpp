@@ -340,7 +340,7 @@ insert_value(std::string_view _name, const Tp& _value, TraitT = {})
         {
             auto _uval = static_cast<uint64_t>(_value);
             if(_uval > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
-                return sql_insert_value{_name, static_cast<double>(_uval)};
+                return sql_insert_value{_name, fmt::format("{}", _uval)};
             return sql_insert_value{_name, _uval};
         }
         else
@@ -414,7 +414,13 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
             }
             else if constexpr(std::is_same_v<value_type, uint64_t>)
             {
-                return sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
+                if(val <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+                    return sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
+                // Values > INT64_MAX cannot be stored as SQLite INTEGER without wrapping;
+                // bind as TEXT to preserve the exact value.
+                auto text = fmt::format("{}", val);
+                return sqlite3_bind_text(
+                    stmt, idx, text.c_str(), static_cast<int>(text.size()), SQLITE_TRANSIENT);
             }
             else if constexpr(std::is_same_v<value_type, double>)
             {
@@ -516,6 +522,23 @@ get_or_prepare_batch_statement(rocpd_db&                   db,
     return stmt;
 }
 
+size_t
+get_bucketed_rows_per_exec(size_t remaining_rows, size_t max_rows)
+{
+    auto capped_rows = std::min(remaining_rows, max_rows);
+    if(capped_rows <= 1) return capped_rows;
+
+    // Keep statement cache bounded by using powers-of-two for remainder chunks.
+    // Full-size batches still use max_rows directly.
+    if(capped_rows == max_rows) return max_rows;
+
+    size_t bucket = 1;
+    while((bucket << 1) <= capped_rows)
+        bucket <<= 1;
+
+    return bucket;
+}
+
 void
 flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending)
 {
@@ -546,7 +569,7 @@ flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending)
     for(size_t begin_idx = 0; begin_idx < batch_size;)
     {
         const size_t remaining     = batch_size - begin_idx;
-        const size_t rows_per_exec = std::min(remaining, pending.max_rows);
+        const size_t rows_per_exec = get_bucketed_rows_per_exec(remaining, pending.max_rows);
         auto&        stmt          = get_or_prepare_batch_statement(db, pending, rows_per_exec);
         auto         end_idx       = begin_idx + rows_per_exec;
         reset_and_clear_statement(stmt);
@@ -1937,9 +1960,18 @@ write_rocpd(
     }
 
     {
-        auto _sqlgenperf_rocpd = get_simple_timer("SQL indexing");
-        auto indexes_schema    = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
-        execute_raw_sql_statements(conn, indexes_schema);
+        auto _deferred = sql::deferred_transaction{db.conn};
+
+        {
+            auto _sqlgenperf_rocpd = get_simple_timer("rocpd_flush_pending");
+            finish_pending_insert_batch(db);
+        }
+
+        {
+            auto _sqlgenperf_rocpd = get_simple_timer("SQL indexing");
+            auto indexes_schema    = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_INDEXES);
+            execute_raw_sql_statements(conn, indexes_schema);
+        }
     }
 }
 }  // namespace tool
