@@ -81,7 +81,10 @@ def detect_missing_counters(
     if join_type == "grid":
         group_labels.append("Grid_Size")
 
-    num_files = len(list(workload_dir.glob("perfmon/*.txt")))
+    # Old workloads have *.txt, new workloads have pmc_perf_*.yaml
+    num_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
+        list(workload_dir.glob("perfmon/pmc_perf_*.yaml"))
+    )
     kernels_with_missing_counters = []
     for _, groups in df.groupby(group_labels):
         if groups["Dispatch_ID"].nunique() < num_files:

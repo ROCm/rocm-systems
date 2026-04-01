@@ -505,9 +505,7 @@ class OmniSoC_Base:
                 and not is_tcc_channel_counter(counter)
             ):
                 counters.remove(counter)
-                output_files.append(
-                    CounterFile(counter + ".txt", self.__perfmon_config)
-                )
+                output_files.append(CounterFile(counter, self.__perfmon_config))
                 output_files[-1].add(counter)
                 output_files[-1].add(f"{counter}_ACCUM")
                 accu_file_count += 1
@@ -536,9 +534,7 @@ class OmniSoC_Base:
 
             # All files are full, create a new file
             if not added:
-                output_files.append(
-                    CounterFile(f"pmc_perf_{file_count}.txt", self.__perfmon_config)
-                )
+                output_files.append(CounterFile(file_count, self.__perfmon_config))
                 file_count += 1
                 output_files[-1].add(ctr)
 
@@ -579,7 +575,8 @@ class OmniSoC_Base:
 
             for f_idx in range(groups_per_bucket):
                 file_name = (
-                    Path(workload_perfmon_dir) / f"pmc_perf_node_{node_idx}_{f_idx}.txt"
+                    Path(workload_perfmon_dir)
+                    / f"pmc_perf_node_{node_idx}_{f_idx}.yaml"
                 )
 
                 pmc = []
@@ -594,12 +591,12 @@ class OmniSoC_Base:
 
                 # Write counters to file
                 with open(file_name, "w") as fd:
-                    fd.write(f"pmc: {' '.join(pmc)}\n\n")
+                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
         else:
             # Output to files
             for f in output_files:
-                file_name_txt = workload_perfmon_dir / f.file_name_txt
-                file_name_yaml = workload_perfmon_dir / f.file_name_yaml
+                pmc_filename = workload_perfmon_dir / f.pmc_filename
+                counter_def_filename = workload_perfmon_dir / f.counter_def_filename
 
                 pmc = []
                 counter_def: dict[str, Any] = {}
@@ -634,15 +631,12 @@ class OmniSoC_Base:
                         )
 
                 # Write counters to file
-                with open(file_name_txt, "w") as fd:
-                    fd.write(f"pmc: {' '.join(pmc)}\n\n")
-                    fd.write("gpu:\n")
-                    fd.write("range:\n")
-                    fd.write("kernel:\n")
+                with open(pmc_filename, "w") as fd:
+                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
 
                 # Write counter definitions to file
                 if counter_def:
-                    with open(file_name_yaml, "w") as fp:
+                    with open(counter_def_filename, "w") as fp:
                         fp.write(yaml.dump(counter_def, sort_keys=False))
 
     # ----------------------------------------------------
@@ -730,9 +724,8 @@ class LimitedSet:
 # block limited according to perfmon config.
 class CounterFile:
     def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
-        name_no_extension = name.split(".")[0]
-        self.file_name_txt: str = name_no_extension + ".txt"
-        self.file_name_yaml: str = name_no_extension + ".yaml"
+        self.pmc_filename: str = f"pmc_perf_{name}.yaml"
+        self.counter_def_filename: str = f"counter_def_{name}.yaml"
         self.blocks: dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }
