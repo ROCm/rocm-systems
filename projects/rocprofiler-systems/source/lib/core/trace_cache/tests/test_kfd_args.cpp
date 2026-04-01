@@ -9,10 +9,7 @@
 
 using namespace rocprofsys;
 
-class kfd_args_test : public ::testing::Test
-{};
-
-TEST_F(kfd_args_test, page_fault_args_roundtrip)
+TEST(kfd_args_test, page_fault_args_roundtrip)
 {
     auto args_str = std::string("0;;uint64_t;;address;;0x7f4a00001000;;"
                                 "1;;string;;agent;;5;;");
@@ -37,7 +34,7 @@ TEST_F(kfd_args_test, page_fault_args_roundtrip)
     EXPECT_EQ(reparsed[1].arg_name, "agent");
 }
 
-TEST_F(kfd_args_test, page_migrate_args_parse)
+TEST(kfd_args_test, page_migrate_args_parse)
 {
     auto args_str = std::string("0;;uint64_t;;start_address;;0x7fb100000000;;"
                                 "1;;uint64_t;;end_address;;0x7fb100200000;;"
@@ -73,7 +70,7 @@ TEST_F(kfd_args_test, page_migrate_args_parse)
     EXPECT_EQ(args[6].arg_value, "0");
 }
 
-TEST_F(kfd_args_test, queue_args_parse)
+TEST(kfd_args_test, queue_args_parse)
 {
     auto args_str = std::string("0;;string;;agent;;3;;");
 
@@ -86,7 +83,7 @@ TEST_F(kfd_args_test, queue_args_parse)
     EXPECT_EQ(args[0].arg_value, "3");
 }
 
-TEST_F(kfd_args_test, unmap_from_gpu_args_parse)
+TEST(kfd_args_test, unmap_from_gpu_args_parse)
 {
     auto args_str = std::string("0;;string;;agent;;5;;"
                                 "1;;uint64_t;;start_address;;0x7f0000000000;;"
@@ -100,7 +97,7 @@ TEST_F(kfd_args_test, unmap_from_gpu_args_parse)
     EXPECT_EQ(args[2].arg_name, "end_address");
 }
 
-TEST_F(kfd_args_test, dropped_events_args_parse)
+TEST(kfd_args_test, dropped_events_args_parse)
 {
     auto args_str = std::string("0;;uint64_t;;count;;42;;");
 
@@ -113,19 +110,19 @@ TEST_F(kfd_args_test, dropped_events_args_parse)
     EXPECT_EQ(args[0].arg_value, "42");
 }
 
-TEST_F(kfd_args_test, empty_args_string)
+TEST(kfd_args_test, empty_args_string)
 {
     auto args = process_arguments_string("");
     EXPECT_EQ(args.size(), 0u);
 }
 
-TEST_F(kfd_args_test, malformed_args_string_throws)
+TEST(kfd_args_test, malformed_args_string_throws)
 {
     EXPECT_THROW(process_arguments_string("0;;uint64_t;;address;;"),
                  std::invalid_argument);
 }
 
-TEST_F(kfd_args_test, null_agent_value_preserved)
+TEST(kfd_args_test, null_agent_value_preserved)
 {
     auto args_str = std::string("0;;string;;agent;;null;;");
 
