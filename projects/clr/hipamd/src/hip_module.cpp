@@ -119,7 +119,7 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
 
   amd::Kernel* kernel = hip::asKernel(hfunc);
   if (kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+    HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
   const device::Kernel::WorkGroupInfo* wrkGrpInfo =
