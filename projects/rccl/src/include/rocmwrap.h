@@ -45,6 +45,7 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
     hipError_t err = cmd;				      \
     if( err != hipSuccess ) {				      \
       WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__);		      \
+      (void)hipGetLastError(); /* clear sticky HIP error state */   \
       res = ncclUnhandledCudaError;			      \
       goto label;					      \
     }							      \
