@@ -14,6 +14,9 @@ matrix:
   - os-distro: "ubuntu"
     os-version: "22.04"
     rocm-version: "7.0"
+  - os-distro: "ubuntu"
+    os-version: "22.04"
+    rocm-version: "7.2"
   # ubuntu 24.04
   - os-distro: "ubuntu"
     os-version: "24.04"
@@ -27,6 +30,9 @@ matrix:
   - os-distro: "ubuntu"
     os-version: "24.04"
     rocm-version: "7.0"
+  - os-distro: "ubuntu"
+    os-version: "24.04"
+    rocm-version: "7.2"
   # opensuse 15.5
   - os-distro: "opensuse"
     os-version: "15.5"

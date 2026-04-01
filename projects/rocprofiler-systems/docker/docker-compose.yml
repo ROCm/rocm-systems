@@ -1,0 +1,15 @@
+services:
+  rocm-systems-profiler:
+    image: <Use Your Image Name Here>
+    pull_policy: never
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - ../../../../:/app
+    tty: true
+    stdin_open: true
+    working_dir: /app
+    container_name: rocm-systems-profiler
