@@ -180,7 +180,7 @@ static void checkPartitionIdChanges(amdsmi_processor_handle* const processor_han
   // re-initialize to ensure new device ordering is followed
   if (reinitialize) {
     if (isVerbose) {
-      std::cout << "\t**REINITIALIZING device list due to parition changes.\n";
+      std::cout << "\t**REINITIALIZING device list due to partition changes.\n";
     }
     amdsmi_shut_down();
     amdsmi_init(AMDSMI_INIT_AMD_GPUS);
