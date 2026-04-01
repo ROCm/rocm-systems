@@ -24,7 +24,7 @@ import importlib
 
 def load_bench(device_ids: list[str]) -> object:
     try:
-        from roofline.hip.hip import hipGetDeviceProperties
+        from utils.hip_interface import hipGetDeviceProperties
 
         # Get exact LLVM target name of the device
         gfx_device = (hipGetDeviceProperties(int(device_ids[0])).gcnArchName).split(
@@ -43,6 +43,7 @@ def load_bench(device_ids: list[str]) -> object:
         bench_module = importlib.import_module(
             f"roofline.benchmark.{gfx_arch}.benchmark_{gfx_device}"
         )
+
         # Get the bench class from the module
         bench_class = getattr(bench_module, f"Bench_{gfx_device}")
         # Instantiate and return the bench class
@@ -65,12 +66,12 @@ if __name__ == "__main__":
         if sys.argv[1] == "-d":
             device_ids = int(sys.argv[2])
 
-    sys.path.append(str(Path("..").absolute().resolve()))
+    sys.path.append(str(Path(__file__).parent.parent.resolve()))
     # TODO: verify multi-device scenario- only one device works at this time
     try:
         bench = load_bench(device_ids)
-    except RuntimeError:
-        print("GPU benchmarking could not be executed")
+    except RuntimeError as e:
+        print(f"GPU benchmarking could not be executed: {e}")
         sys.exit(1)
     metrics = bench.run_on_devices(device_ids)
     bench.dump_csv(metrics, "roofline.csv")

@@ -13,10 +13,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Standalone roofline (`--roof-only` option) in profile mode now creates `roofline.csv` only. HTML roofline charts are generated via `rocprof-compute analyze`. The `calc_ai_profile()` function has been removed; `calc_ai_analyze()` is the single source of truth for arithmetic intensity calculation.
   * Roofline visualization options (`--sort`, `--mem-level`, `--roofline-data-type`) have moved from profile mode to analyze mode.
 
-* GPU Benchmarking entry point has changed from benchmark.py to `run_benchmark.py` to run standalone benchmarking on a device
-  * To benchmark, run the following command: `python ./run_benchmark.py` located in `/rocprof-compute/src/roofline/`.
-  * Note: the working directory must be the same directory run_benchmark.py is located in due to imports.
-
 * Standardized unit naming in analysis configs and Python utilities: `pct`/`Pct` → `Percent`, `instr` → `Instructions`.
 
 * Profile mode output format:
