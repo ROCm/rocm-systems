@@ -19,6 +19,8 @@
     #define _HIP_BFLOAT16_H_
     #include <hip/hip_bf16.h>
     typedef __hip_bfloat16 hip_bfloat16;
+  #elif ROCM_VERSION >= 70000
+    #include <hip/hip_bf16.h>
   #else
     #error "RCCL is not using the correct hip_bf16.h file. Please make sure that the correct header is included!"
   #endif

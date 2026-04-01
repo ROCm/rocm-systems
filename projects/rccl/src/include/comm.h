@@ -485,6 +485,7 @@ typedef enum ncclGroupTaskType {
 } ncclGroupTaskType_t;
 
 struct ncclCommSymTeams;
+class ncclIpcMemHandler;
 
 struct ncclComm {
   uint64_t startMagic;
@@ -512,6 +513,14 @@ struct ncclComm {
   ncclCollNet_t* ncclCollNet;
   void* collNetContext;
   void* bootstrap;
+
+  // DDA IPC all-reduce: per-rank device scratch + IPC handles (see ncclDdaIpcCommInit)
+  ncclIpcMemHandler* ddaIpcMemHandler;
+  void* ddaIpcScratch;
+  size_t ddaIpcScratchBytes;
+  void* ddaIpcPeerPtrsDev;
+  void* ddaIpcBarrierState; /* opaque DDA IpcGpuBarrier (see ncclDdaIpcCommInit) */
+
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
   struct channelMasks* connectRecv;

@@ -20,6 +20,10 @@ set(SRC_FILES
   src/group.cc
   src/init.cc
   src/init_nvtx.cc
+  src/ipc_mem_handler.cc
+  src/ipc_gpu_barrier.cu
+  src/device_buffer.cc
+  src/dda_all_reduce_ipc.cu
   src/mnnvl.cc
   src/msccl.cc
   src/proxy.cc
@@ -88,6 +92,11 @@ set(SRC_FILES
 # src/include/cudawrap.h
   src/include/debug.h
   src/include/dev_runtime.h
+  src/include/dda_all_reduce_ipc.h
+  src/include/ipc_gpu_barrier.cuh
+  src/include/algorithms/CollCommon.cuh
+  src/include/algorithms/all_reduce/all_reduce_dda.cuh
+  src/include/device_buffer.h
   src/include/device.h
   src/include/enqueue.h
   src/include/gdrwrap.h
@@ -107,6 +116,7 @@ set(SRC_FILES
   src/include/net.h
   src/include/nvmlwrap.h
   src/include/nvtx.h
+  src/include/ipc_mem_handler.h
   src/include/nvtx_payload_schemas.h
   src/include/nvtx_stub.h
   src/include/p2p.h
