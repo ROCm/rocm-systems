@@ -17,7 +17,12 @@ bool ComgrHotswapAvailable() {
 
 int ComgrHotswapRewriteB0A0(const void *elf_data, size_t elf_size,
                             void **out_elf, size_t *out_elf_size) {
-  // Stub: COMGR not bound yet.
+  (void)elf_data;
+  (void)elf_size;
+  if (out_elf)
+    *out_elf = nullptr;
+  if (out_elf_size)
+    *out_elf_size = 0;
   return -1;
 }
 
