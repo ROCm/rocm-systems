@@ -50,7 +50,7 @@ namespace rocshmem
     std::vector<int> status(numPages);
 
     pages[0] = array;
-    for (int i = 1; i < numPages; i++) {
+    for (size_t i = 1; i < numPages; i++) {
       pages[i] = (char*)pages[i-1] + pageSize;
     }
 
@@ -170,7 +170,6 @@ namespace rocshmem
       hsa_amd_pointer_info_t info;
       info.size = sizeof(info);
 
-      int err;
       int32_t* tempBuffer;
 
       // Index CPU agents
@@ -217,7 +216,7 @@ namespace rocshmem
   }
 
   // Get the hsa_agent_t associated with a MemDevice
-  static int GetHsaAgent(MemDevice const& memDevice, hsa_agent_t& agent)
+  [[maybe_unused]] static int GetHsaAgent(MemDevice const& memDevice, hsa_agent_t& agent)
   {
     if (IsCpuMemType(memDevice.memType)) return GetHsaAgent({EXE_CPU, memDevice.memIndex}, agent);
     if (IsGpuMemType(memDevice.memType)) return GetHsaAgent({EXE_GPU, memDevice.memIndex}, agent);
@@ -446,7 +445,7 @@ namespace rocshmem
   //========================================================================================
 
   // Prints off PCIe tree
-  static void PrintPCIeTree(PCIeNode    const& node,
+  [[maybe_unused]] static void PrintPCIeTree(PCIeNode    const& node,
                             std::string const& prefix = "",
                             bool               isLast = true)
   {
@@ -603,7 +602,6 @@ namespace rocshmem
     // Build PCIe tree on first use
     if (!isInitialized) {
       // Add NICs to the tree
-      int numNics = rocshmem::GetNumDevices(rocshmem::EXE_NIC);
       auto const& ibvDeviceList = rocshmem::GetIbvDeviceList();
       for (IbvDevice const& ibvDevice : ibvDeviceList) {
         if (!ibvDevice.hasActivePort || ibvDevice.busId == "") continue;
@@ -898,7 +896,7 @@ namespace rocshmem
 #endif
 
           int minDistance = std::numeric_limits<int>::max();
-          for (int j = 0; j < ibvAddressList.size(); j++) {
+          for (size_t j = 0; j < ibvAddressList.size(); j++) {
             if (ibvAddressList[j] != "") {
               int distance = GetBusIdDistance(hipPciBusId, ibvAddressList[j]);
               if (distance < minDistance && distance >= 0) {
@@ -946,18 +944,18 @@ namespace rocshmem
 
     int numGpus = rocshmem::GetNumDevices(rocshmem::EXE_GPU);
     auto const& ibvDeviceList = rocshmem::GetIbvDeviceList();
-    for (int i = 0; i < ibvDeviceList.size(); i++) {
+    for (size_t i = 0; i < ibvDeviceList.size(); i++) {
 
       std::string closestGpusStr = "";
       for (int j = 0; j < numGpus; j++) {
-        if (rocshmem::GetClosestNicToGpu(j, nullptr, nullptr) == i) {
+        if (rocshmem::GetClosestNicToGpu(j, nullptr, nullptr) == static_cast<int>(i)) {
           if (closestGpusStr != "") closestGpusStr += ",";
           closestGpusStr += std::to_string(j);
         }
       }
 
       printf(" %-3d | %-11s | %-6s | %-12s | %-4d | %-14s | %-9s | %-20s\n",
-             i, ibvDeviceList[i].name.c_str(),
+             static_cast<int>(i), ibvDeviceList[i].name.c_str(),
              ibvDeviceList[i].hasActivePort ? "Yes" : "No",
              ibvDeviceList[i].busId.c_str(),
              ibvDeviceList[i].numaNode,

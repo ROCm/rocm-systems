@@ -183,7 +183,7 @@ static inline mlx5dv_devx_umem* mlx5_umem_reg(const mlx5dv_funcs_t& mlx5dv,
   int dmabuf_fd = -1;
   uint64_t dmabuf_offset = std::numeric_limits<uint64_t>::max();
 
-  mlx5dv_devx_umem_in umem_in = {0};
+  mlx5dv_devx_umem_in umem_in = {};
 
   umem_in.addr = addr;
   umem_in.size = size;
@@ -217,7 +217,9 @@ static inline void mlx5_initialize_cq_buffer(mlx5_cqe64* cq, uint32_t cq_depth) 
 
 static inline uint32_t mlx5_pdn(const mlx5dv_funcs_t& mlx5dv, struct ibv_pd *pd) {
   mlx5dv_pd mlx5_pd;
-  mlx5dv_obj obj{ .pd = { .in = pd, .out = &mlx5_pd } };
+  mlx5dv_obj obj = {};
+  obj.pd.in = pd;
+  obj.pd.out = &mlx5_pd;
   int err = mlx5dv.init_obj(&obj, MLX5DV_OBJ_PD);
   CHECK_ZERO(err, "mlx5dv_init_obj (PD)");
   return mlx5_pd.pdn;
@@ -489,11 +491,11 @@ static int mlx5_create_qp(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp, struct
 }
 
 static int mlx5_modify_qp_reset2init(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
-                                     struct ibv_qp_attr* attr, int attr_mask) {
+                                     struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask) {
   // man 3 ibv_modify_qp
-  constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
+  [[maybe_unused]] constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
                                      IBV_QP_ACCESS_FLAGS;
-  constexpr unsigned int access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+  [[maybe_unused]] constexpr unsigned int access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
                                         IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
   assert((attr_mask & required_attr_mask) == required_attr_mask && "missing required attr");
   assert((attr->qp_access_flags & access_flags) == access_flags && "missing access flags");
@@ -520,9 +522,9 @@ static int mlx5_modify_qp_reset2init(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp&
 }
 
 static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
-                                   struct ibv_qp_attr* attr, int attr_mask, uint32_t gid_type) {
+                                   struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask, uint32_t gid_type) {
   // man 3 ibv_modify_qp
-  constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
+  [[maybe_unused]] constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
                                      IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC |
                                      IBV_QP_MIN_RNR_TIMER;
   assert((attr_mask & required_attr_mask) == required_attr_mask && "missing required attr");
@@ -599,9 +601,9 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
 }
 
 static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp,
-                                  struct ibv_qp_attr* attr, int attr_mask) {
+                                  struct ibv_qp_attr* attr, [[maybe_unused]] int attr_mask) {
   // man 3 ibv_modify_qp
-  constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC |
+  [[maybe_unused]] constexpr int required_attr_mask = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC |
                                      IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_TIMEOUT;
   assert((attr_mask & required_attr_mask) == required_attr_mask && "missing required attr");
   assert(attr->max_rd_atomic > 0 && "ibv_qp_attr::max_rd_atomic is 0");
@@ -626,7 +628,7 @@ static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp
   return mlx5dv.devx_obj_modify(qp.devx_qp_obj, in, sizeof(in), out, sizeof(out));
 }
 
-void mlx5_devx_qp::dump(int conn_num) {
+void mlx5_devx_qp::dump([[maybe_unused]] int conn_num) {
   DPRINTF("\n");
   DPRINTF("===============================================\n");
   DPRINTF("     INITIALIZED MLX5_DEVX_QP FOR CONNECTION#%d\n", conn_num);

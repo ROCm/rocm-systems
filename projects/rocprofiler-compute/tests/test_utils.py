@@ -1845,10 +1845,6 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     mock_fname_path_obj.name = "counters.txt"
     mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
 
-    mock_div_result = mock.Mock(spec=Path)
-    mock_div_result.parent = "dummy_path"
-    mock_fname_path_obj.__truediv__.return_value = mock_div_result
-
     mock_out_path_obj = mock.Mock(spec=Path)
     mock_out_path_obj.exists.return_value = False
 
@@ -1880,7 +1876,10 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
     monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
     monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
-    monkeypatch.setattr("tempfile.mkdtemp", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "utils.utils_profile.create_temp_rocprofiler_metrics_path",
+        lambda *a, **k: "dummy_path",
+    )
     monkeypatch.setattr("yaml.dump", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
     monkeypatch.setattr("builtins.open", lambda *a, **k: io.StringIO(""))

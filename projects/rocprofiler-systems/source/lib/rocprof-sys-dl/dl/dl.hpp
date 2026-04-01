@@ -88,6 +88,8 @@ extern "C"
     void rocprofsys_progress(const char*) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_annotated_progress(const char*, rocprofsys_annotation_t*,
                                        size_t) ROCPROFSYS_PUBLIC_API;
+    void rocprofsys_external_register_pause_callbacks(void (*)(),
+                                                      void (*)()) ROCPROFSYS_PUBLIC_API;
 
 #if defined(ROCPROFSYS_DL_SOURCE) && (ROCPROFSYS_DL_SOURCE > 0)
     void rocprofsys_preinit_library(void) ROCPROFSYS_HIDDEN_API;

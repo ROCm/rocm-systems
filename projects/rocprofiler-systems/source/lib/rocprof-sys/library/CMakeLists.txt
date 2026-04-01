@@ -40,8 +40,8 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
         ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
 )
-add_subdirectory(rocprofiler-sdk)
 
+add_subdirectory(rocprofiler-sdk)
 add_subdirectory(pmc)
 add_subdirectory(causal)
 add_subdirectory(components)

@@ -119,4 +119,8 @@ extern "C"
     void rocprofsys_progress_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_annotated_progress_hidden(const char*, rocprofsys_annotation_t*,
                                               size_t) ROCPROFSYS_HIDDEN_API;
+
+    /// registers external pause/resume callbacks (e.g. from the Python profiler).
+    void rocprofsys_external_register_pause_callbacks(void (*)(),
+                                                      void (*)()) ROCPROFSYS_PUBLIC_API;
 }

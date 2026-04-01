@@ -29,11 +29,9 @@
 #include "OSWrapper.hpp"
 #include "GoogleTestExtension.hpp"
 #include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmtctx.h"
 #include "Assemble.hpp"
 #include "ShaderStore.hpp"
-#ifdef HSAKMT_CTX
-#include "hsakmt/hsakmtctx.h"
-#endif
 
 class BaseQueue;
 #define ARRAY_SIZE(_x) (sizeof(_x)/sizeof(_x[0]))

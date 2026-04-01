@@ -320,7 +320,7 @@ typedef struct {
   0x7F  //[9:3]=Utilization point for balanced core modes (%).
 #define AMDSMI_MAX_POWER_EFFICIENCY_PPTLIMIT \
   0x1FFFFF                                 //[30:10]=PPT limit for balanced core modes(mW).
-#define AMDSMI_RAIL_INDEX_NONE 0xFFFFFFFF  // Rail Index value defined as maximun when not passed
+#define AMDSMI_RAIL_INDEX_NONE 0xFFFFFFFF  // Rail Index value defined as maximum when not passed
 #endif
 
 /**
@@ -613,15 +613,15 @@ typedef enum {
   AMDSMI_FW_ID_CP_CE,       //!< Compute Processor - Command_Engine (fetch, decode, dispatch)
   AMDSMI_FW_ID_CP_PFP,      //!< Compute Processor - Pixel Front End Processor (pixelating process)
   AMDSMI_FW_ID_CP_ME,       //!< Compute Processor - Micro Engine (specialize processing)
-  AMDSMI_FW_ID_CP_MEC_JT1,  //!< Compute Processor - Micro Engine Controler Job Table 1 (queues,
+  AMDSMI_FW_ID_CP_MEC_JT1,  //!< Compute Processor - Micro Engine Controller Job Table 1 (queues,
                             //!< scheduling)
-  AMDSMI_FW_ID_CP_MEC_JT2,  //!< Compute Processor - Micro Engine Controler Job Table 2 (queues,
+  AMDSMI_FW_ID_CP_MEC_JT2,  //!< Compute Processor - Micro Engine Controller Job Table 2 (queues,
                             //!< scheduling)
-  AMDSMI_FW_ID_CP_MEC1,     //!< Compute Processor - Micro Engine Controler 1 (scheduling, managing
+  AMDSMI_FW_ID_CP_MEC1,     //!< Compute Processor - Micro Engine Controller 1 (scheduling, managing
                             //!< resources)
-  AMDSMI_FW_ID_CP_MEC2,     //!< Compute Processor - Micro Engine Controler 2 (scheduling, managing
+  AMDSMI_FW_ID_CP_MEC2,     //!< Compute Processor - Micro Engine Controller 2 (scheduling, managing
                             //!< resources)
-  AMDSMI_FW_ID_RLC,         //!< Rasterizer and L2 Cache (rasterization processs)
+  AMDSMI_FW_ID_RLC,         //!< Rasterizer and L2 Cache (rasterization process)
   AMDSMI_FW_ID_SDMA0,       //!< System Direct Memory Access 0 (high speed data transfers)
   AMDSMI_FW_ID_SDMA1,       //!< System Direct Memory Access 1 (high speed data transfers)
   AMDSMI_FW_ID_SDMA2,       //!< System Direct Memory Access 2 (high speed data transfers)
@@ -648,10 +648,10 @@ typedef enum {
   AMDSMI_FW_ID_PSP_SOSDRV,  //!< Platform Security Processor Secure Operating System Driver
   AMDSMI_FW_ID_PSP_TOC,     //!< Platform Security Processor Table of Contents
   AMDSMI_FW_ID_PSP_KEYDB,   //!< Platform Security Processor Table of Contents
-  AMDSMI_FW_ID_DFC,         //!< Data Fabric Controler (bandwidth and coherency)
+  AMDSMI_FW_ID_DFC,         //!< Data Fabric Controller (bandwidth and coherency)
   AMDSMI_FW_ID_PSP_SPL,     //!< Platform Security Processor Secure Program Loader
   AMDSMI_FW_ID_DRV_CAP,     //!< Driver Capabilities (capabilities, features)
-  AMDSMI_FW_ID_MC,          //!< Memory Contoller (RAM and VRAM)
+  AMDSMI_FW_ID_MC,          //!< Memory Controller (RAM and VRAM)
   AMDSMI_FW_ID_PSP_BL,      //!< Platform Security Processor Bootloader (initial firmware)
   AMDSMI_FW_ID_CP_PM4,      //!< Compute Processor Packet Processor 4 (processing command packets)
   AMDSMI_FW_ID_RLC_P,       //!< Rasterizier and L2 Cache Partition
@@ -694,8 +694,8 @@ typedef enum {
   AMDSMI_FW_ID_RLCV_LX7,               //!< Hardware Block RLCV - Subsystem LX7
   AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST,  //!< Rasterizier and L2 Cache - Save Restore List
   AMDSMI_FW_ID_ASD,                    //!< Asynchronous Shader Dispatcher
-  AMDSMI_FW_ID_TA_RAS,       //!< Trusted Applications - Reliablity Availability and Serviceability
-  AMDSMI_FW_ID_TA_XGMI,      //!< Trusted Applications - Reliablity XGMI
+  AMDSMI_FW_ID_TA_RAS,       //!< Trusted Applications - Reliability Availability and Serviceability
+  AMDSMI_FW_ID_TA_XGMI,      //!< Trusted Applications - Reliability XGMI
   AMDSMI_FW_ID_RLC_SRLG,     //!< Rasterizier and L2 Cache - Shared Resource Local Group
   AMDSMI_FW_ID_RLC_SRLS,     //!< Rasterizier and L2 Cache - Shared Resource Local Segment
   AMDSMI_FW_ID_PM,           //!< Power Management Firmware
@@ -928,7 +928,7 @@ typedef struct {
   uint32_t drm_card;                        //!< the graphic card device under /sys/class/drm/card*
   uint32_t hsa_id;                          //!< the HSA enumeration ID
   uint32_t hip_id;                          //!< the HIP enumeration ID
-  char hip_uuid[AMDSMI_MAX_STRING_LENGTH];  //!< the HIP unique identifer
+  char hip_uuid[AMDSMI_MAX_STRING_LENGTH];  //!< the HIP unique identifier
 } amdsmi_enumeration_info_t;
 
 /**
@@ -1223,7 +1223,7 @@ typedef struct {
     uint32_t max_bandwidth;            //!< max bandwidth of the link in Gb/s
     amdsmi_link_type_t link_type;      //!< type of the link
     uint64_t read;                     //!< total data received for each link in KB
-    uint64_t write;                    //!< total data transfered for each link in KB
+    uint64_t write;                    //!< total data transferred for each link in KB
     amdsmi_link_status_t link_status;  //!< HW status of the link
     uint64_t reserved[1];
   } links[AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK];
@@ -1541,7 +1541,7 @@ typedef struct {
 
 /**
  * @brief Temperature Metrics. This enum is used to identify various
- * temperature metrics. Corresponding values will be in Celcius
+ * temperature metrics. Corresponding values will be in Celsius
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
@@ -1578,7 +1578,7 @@ typedef enum {
 
 /**
  * @brief Voltage Metrics.  This enum is used to identify various
- * Volatge metrics. Corresponding values will be in millivolt.
+ * Voltage metrics. Corresponding values will be in millivolt.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -2190,7 +2190,7 @@ typedef struct {
    * aka PVIOL
    *
    * Ex. PVIOL/TVIOL calculations
-   * Where A and B are measurments recorded at prior points in time.
+   * Where A and B are measurements recorded at prior points in time.
    * Typically A is the earlier measured value and B is the latest measured value.
    *
    * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) -
@@ -2207,7 +2207,7 @@ typedef struct {
    * aka TVIOL
    *
    * Ex. PVIOL/TVIOL calculations
-   * Where A and B are measurments recorded at prior points in time.
+   * Where A and B are measurements recorded at prior points in time.
    * Typically A is the earlier measured value and B is the latest measured value.
    *
    * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) -
@@ -2419,9 +2419,9 @@ typedef struct {
  * @cond @tag{cpu_bm} @endcond
  */
 typedef struct {
-  uint32_t max_bw;        //!< DDR Maximum theoritical bandwidth in GB/s
+  uint32_t max_bw;        //!< DDR Maximum theoretical bandwidth in GB/s
   uint32_t utilized_bw;   //!< DDR bandwidth utilization in GB/s
-  uint32_t utilized_pct;  //!< DDR bandwidth utilization in % of theoritical max
+  uint32_t utilized_pct;  //!< DDR bandwidth utilization in % of theoretical max
 } amdsmi_ddr_bw_metrics_t;
 
 /**
@@ -2454,7 +2454,7 @@ typedef struct {
   uint16_t sensor : 11;      //!< Dimm thermal sensor[31:21](11 bit data)
   uint16_t update_rate : 9;  //!< Time since last update[16:8](9 bit data)
   uint8_t dimm_addr;         //!< Dimm address[7:0](8 bit data)
-  float temp;                //!< temperature in degree celcius
+  float temp;                //!< temperature in degree celsius
 } amdsmi_dimm_thermal_t;
 
 /**
@@ -2465,7 +2465,7 @@ typedef struct {
 typedef enum {
   AGG_BW0 = 1,  //!< Aggregate Bandwidth
   RD_BW0 = 2,   //!< Read Bandwidth
-  WR_BW0 = 4    //!< Write Bandwdith
+  WR_BW0 = 4    //!< Write Bandwidth
 } amdsmi_io_bw_encoding_t;
 
 /**
@@ -2607,7 +2607,7 @@ typedef struct {
   char model_name[AMDSMI_MAX_STRING_LENGTH];   //!< cpu model name
   uint32_t cpu_family_id;                      //!< cpu family id
   uint32_t model_id;                           //!< cpu model id
-  uint32_t threads_per_core;                   //!< vitual processing units per cpu core
+  uint32_t threads_per_core;                   //!< virtual processing units per cpu core
   uint32_t cores_per_socket;                   //!< cpu cores per socket
   bool frequency_boost;                        //!< boost frequency
   uint32_t vendor_id;                          //!< Use 32 bit to be compatible with other platform.
@@ -2855,7 +2855,7 @@ typedef struct {
  *  sockets with either AMD GPUS or CPUS.
  *  Both AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_CPUS flags are supported.
  *
- *  @param[in] init_flags Bit flags that tell SMI how to initialze. Values of
+ *  @param[in] init_flags Bit flags that tell SMI how to initialize. Values of
  *  ::amdsmi_init_flags_t may be OR'd together and passed through @p init_flags
  *  to modify how AMDSMI initializes.
  *
@@ -3071,7 +3071,7 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
  *  @platform{guest_mvf} @platform{guest_windows}
  *
  *  @details This function retrieves the processor handles of a socket. The
- *  @p socket_handle must be provided for the processor. A socket may have mulitple different
+ *  @p socket_handle must be provided for the processor. A socket may have multiple different
  *  type processors: An APU on a socket have both CPUs and GPUs.
  *  Currently, only AMD GPUs are supported.
  *
@@ -3463,7 +3463,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_han
 amdsmi_status_t amdsmi_get_gpu_subsystem_id(amdsmi_processor_handle processor_handle, uint16_t* id);
 
 /**
- *  @brief Get the name string for the device subsytem
+ *  @brief Get the name string for the device subsystem
  *
  *  @ingroup tagIdentQuery
  *
@@ -4418,12 +4418,12 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[in,out] utilization_counters Multiple utilization counters can be retreived with a single
+ *  @param[in,out] utilization_counters Multiple utilization counters can be retrieved with a single
  *  call. The caller must allocate enough space to the utilization_counters array. The caller also
  *  needs to set valid AMDSMI_UTILIZATION_COUNTER_TYPE type for each element of the array.
  *  ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the provided arguments.
  *
- *  If the function reutrns AMDSMI_STATUS_SUCCESS, the counter will be set in the value field of
+ *  If the function returns AMDSMI_STATUS_SUCCESS, the counter will be set in the value field of
  *  the amdsmi_utilization_counter_t.
  *
  *  @param[in] count The size of @p utilization_counters array.
@@ -4693,18 +4693,18 @@ amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle pr
  *  @details Given a device handle @p processor_handle, @p pm_metrics pointer,
  *  and @p num_of_metrics pointer,
  *  this function will write the pm metrics name value pair
- *  to the array at @p pm_metrics and the number of metrics retreived to @p num_of_metrics
+ *  to the array at @p pm_metrics and the number of metrics retrieved to @p num_of_metrics
  *  Note: the library allocated memory for pm_metrics, and user must call
  *  free(pm_metrics) to free it after use.
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[inout] pm_metrics A pointerto an array to hold multiple PM metrics. On successs,
+ *  @param[inout] pm_metrics A pointerto an array to hold multiple PM metrics. On success,
  *  the library will allocate memory of pm_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
  *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of
- *  metrics is allocated for pm_metrics array as input, and the number of metrics retreived
+ *  metrics is allocated for pm_metrics array as input, and the number of metrics retrieved
  *  as output. If this parameter is NULL, this function will return
  *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
@@ -4731,7 +4731,7 @@ amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(amdsmi_processor_handle processor
  *  @details Given a device handle @p processor_handle, @p reg_type, @p reg_metrics pointer,
  *  and @p num_of_metrics pointer,
  *  this function will write the register metrics name value pair
- *  to the array at @p reg_metrics and the number of metrics retreived to @p num_of_metrics
+ *  to the array at @p reg_metrics and the number of metrics retrieved to @p num_of_metrics
  *  Note: the library allocated memory for reg_metrics, and user must call
  *  free(reg_metrics) to free it after use.
  *
@@ -4739,12 +4739,12 @@ amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(amdsmi_processor_handle processor
  *
  *  @param[in] reg_type The register type
  *
- *  @param[inout] reg_metrics A pointerto an array to hold multiple register metrics. On successs,
+ *  @param[inout] reg_metrics A pointerto an array to hold multiple register metrics. On success,
  *  the library will allocate memory of reg_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
  *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of
- *  metrics is allocated for reg_metrics array as input, and the number of metrics retreived
+ *  metrics is allocated for reg_metrics array as input, and the number of metrics retrieved
  *  as output. If this parameter is NULL, this function will return
  *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
@@ -5466,7 +5466,7 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processo
  * AMDSMI_STATUS_OUT_OF_RESOURCES.
  *
  * Even if the API returns AMDSMI_STATUS_MORE_DATA, the 2nd call may still get the entry_count == 0
- * as the driver cache may not contain the serverity user is interested in. The API should return
+ * as the driver cache may not contain the severity user is interested in. The API should return
  * AMDSMI_STATUS_SUCCESS in this case so that user can ignore that call.
  *
  * @ingroup tagRasInfo
@@ -6069,7 +6069,7 @@ amdsmi_status_t amdsmi_topo_get_link_weight(amdsmi_processor_handle processor_ha
                                             uint64_t* weight);
 
 /**
- *  @brief Retreive minimal and maximal io link bandwidth between 2 GPUs
+ *  @brief Retrieve minimal and maximal io link bandwidth between 2 GPUs
  *
  *  @ingroup tagHWTopology
  *
@@ -6174,7 +6174,7 @@ amdsmi_status_t amdsmi_get_link_topology_nearest(amdsmi_processor_handle process
  *  @param[in] processor_handle_dst the destination processor handle
  *
  *  @param[in,out] accessible A pointer to a bool to which the status for
- *  the P2P connection availablity should be written.
+ *  the P2P connection availability should be written.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -6217,7 +6217,7 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
 /*****************************************************************************/
 /** @defgroup tagComputePartition Compute Partition Functions
  *  These functions are used to configure and query the device's
- *  compute parition setting.
+ *  compute partition setting.
  *  @{
  */
 
@@ -6231,7 +6231,7 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
  *  @details
  *  Given a processor handle @p processor_handle and a string @p compute_partition ,
  *  and uint32 @p len , this function will attempt to obtain the device's
- *  current compute partition setting string. Upon successful retreival,
+ *  current compute partition setting string. Upon successful retrieval,
  *  the obtained device's compute partition settings string shall be stored in
  *  the passed @p compute_partition char string variable.
  *
@@ -6303,7 +6303,7 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle process
  *  @details
  *  Given a processor handle @p processor_handle and a string @p memory_partition ,
  *  and uint32 @p len , this function will attempt to obtain the device's
- *  memory partition string. Upon successful retreival, the obtained device's
+ *  memory partition string. Upon successful retrieval, the obtained device's
  *  memory partition string shall be stored in the passed @p memory_partition
  *  char string variable.
  *
@@ -6411,7 +6411,7 @@ amdsmi_status_t amdsmi_set_gpu_memory_partition_mode(amdsmi_processor_handle pro
 /*****************************************************************************/
 /** @defgroup tagAcceleratorPartition Accelerator Partition Profile Functions
  *  These functions are used to configure and query the device's
- *  accelerator parition profile setting.
+ *  accelerator partition profile setting.
  *  @{
  */
 
@@ -6561,7 +6561,7 @@ amdsmi_status_t amdsmi_set_gpu_event_notification_mask(amdsmi_processor_handle p
  *
  *  This function requires prior calls to ::amdsmi_init_gpu_event_notification() and
  *  :: amdsmi_set_gpu_event_notification_mask(). This function polls for the
- *  occurrance of the events on the respective devices that were previously
+ *  occurrence of the events on the respective devices that were previously
  *  specified by :: amdsmi_set_gpu_event_notification_mask().
  *
  *  @param[in] timeout_ms number of milliseconds to wait for an event
@@ -7094,7 +7094,7 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
  *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
  *  did not reload properly and the user should check dmesg logs.
  *
- *  This function has been created in order to conviently reload the
+ *  This function has been created in order to conveniently reload the
  *  AMD GPU driver once `amdsmi_set_gpu_memory_partition()` or
  *  `amdsmi_set_gpu_memory_partition_mode()` successfully has been changed
  *  on Baremetal systems. Now users can control the reload once all GPU
@@ -8385,7 +8385,7 @@ amdsmi_status_t amdsmi_get_hsmp_metrics_table(amdsmi_processor_handle processor_
 /** @} End tagHSMPMetricsTable */
 
 /*****************************************************************************/
-/** @defgroup tagCPUAuxillary Auxillary functions
+/** @defgroup tagCPUAuxillary Auxiliary functions
  *  @{
  */
 
