@@ -15,7 +15,7 @@ import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [
-    pytest.mark.gpu, 
+    pytest.mark.gpu,
     pytest.mark.selective_regions,
     pytest.mark.timeout(120),
     pytest.mark.rocm,
