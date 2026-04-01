@@ -362,4 +362,101 @@ SQ_SEL_W                                 = 0x00000007,
 	signed int	i32All;
 	float	f32All;
         };
+
+        // GFX13 Buffer Resource Descriptor (160 bits - 5 DWORDs)
+        // Bit 0-31
+        union SQ_BUF_RSRC_WORD0_GFX13 {
+          struct {
+#if defined(LITTLEENDIAN_CPU)
+            unsigned int BASE_ADDRESS : 32;
+#elif defined(BIGENDIAN_CPU)
+            unsigned int BASE_ADDRESS : 32;
+#endif
+          } bitfields, bits;
+          unsigned int u32All;
+          signed int i32All;
+          float f32All;
+        };
+
+        // Bit 32-63
+        union SQ_BUF_RSRC_WORD1_GFX13 {
+          struct {
+#if defined(LITTLEENDIAN_CPU)
+            unsigned int BASE_ADDRESS_HI : 16;
+            unsigned int                 :  9;
+            unsigned int NUM_RECORDS_1   :  7;
+#elif defined(BIGENDIAN_CPU)
+            unsigned int NUM_RECORDS_1   :  7;
+            unsigned int                 :  9;
+            unsigned int BASE_ADDRESS_HI : 16;
+#endif
+          } bitfields, bits;
+          unsigned int u32All;
+          signed int i32All;
+          float f32All;
+        };
+
+        // Bit 64-95
+        union SQ_BUF_RSRC_WORD2_GFX13 {
+          struct {
+#if defined(LITTLEENDIAN_CPU)
+            unsigned int NUM_RECORDS_2 : 32;
+#elif defined(BIGENDIAN_CPU)
+            unsigned int NUM_RECORDS_2 : 32;
+#endif
+          } bitfields, bits;
+          unsigned int u32All;
+          signed int i32All;
+          float f32All;
+        };
+
+        // Bit 96-127
+        union SQ_BUF_RSRC_WORD3_GFX13 {
+          struct {
+#if defined(LITTLEENDIAN_CPU)
+            unsigned int NUM_RECORDS_3  :  6;
+            unsigned int                :  6;
+            unsigned int STRIDE         : 14;
+            unsigned int STRIDE_SCALE   :  2;
+            unsigned int SWIZZLE_ENABLE :  1;
+            unsigned int                :  1;
+            unsigned int TYPE           :  2;
+#elif defined(BIGENDIAN_CPU)
+            unsigned int TYPE           :  2;
+            unsigned int                :  1;
+            unsigned int SWIZZLE_ENABLE :  1;
+            unsigned int STRIDE_SCALE   :  2;
+            unsigned int STRIDE         : 14;
+            unsigned int                :  6;
+            unsigned int NUM_RECORDS_3  :  6;
+#endif
+          } bitfields, bits;
+          unsigned int u32All;
+          signed int i32All;
+          float f32All;
+        };
+
+        // Bit 128-159
+        union SQ_BUF_RSRC_WORD4_GFX13 {
+          struct {
+#if defined(LITTLEENDIAN_CPU)
+            unsigned int DST_SEL_X :  3;
+            unsigned int DST_SEL_Y :  3;
+            unsigned int DST_SEL_Z :  3;
+            unsigned int DST_SEL_W :  3;
+            unsigned int FORMAT    :  7;
+            unsigned int           : 13;
+#elif defined(BIGENDIAN_CPU)
+            unsigned int           : 13;
+            unsigned int FORMAT    :  7;
+            unsigned int DST_SEL_W :  3;
+            unsigned int DST_SEL_Z :  3;
+            unsigned int DST_SEL_Y :  3;
+            unsigned int DST_SEL_X :  3;
+#endif
+          } bitfields, bits;
+          unsigned int u32All;
+          signed int i32All;
+          float f32All;
+        };
 #endif  // header guard

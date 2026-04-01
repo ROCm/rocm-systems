@@ -1940,6 +1940,51 @@ void AqlQueue::FillBufRsrcWord3_Gfx12() {
   amd_queue_.scratch_resource_descriptor[3] = srd3.u32All;
 }
 
+void AqlQueue::FillBufRsrcWords_Gfx13() {
+  /*
+   * For GFX13, buffer descriptor is either 4 or 5 dwords
+   * depending on the instruction using it.
+   *
+   * For scratch buffer, we are passing only the first 4 dwords.
+   * The last dword is not necessary for scratch buffer and passing
+   * all 5 dwords would require ROCr/firmware interface change.
+   */
+  const auto& agent_props = agent_->properties();
+  const uint32_t num_xcc = agent_props.NumXcc;
+  uintptr_t scratch_base = uintptr_t(queue_scratch_.main_queue_base);
+
+  SQ_BUF_RSRC_WORD0_GFX13 srd0;
+  srd0.bits.BASE_ADDRESS = uint32_t(scratch_base);
+
+  SQ_BUF_RSRC_WORD1_GFX13 srd1;
+  srd1.u32All = 0;
+#ifdef HSA_LARGE_MODEL
+  srd1.bits.BASE_ADDRESS_HI = uint32_t(scratch_base >> 32);
+#endif
+
+  // NUM_RECORDS is 45 bits total, split across dwords 1, 2, and 3:
+  // - NUM_RECORDS_1: Bit[6:0]   ( 7 bits)
+  // - NUM_RECORDS_2: Bit[38:7]  (32 bits)
+  // - NUM_RECORDS_3: Bit[44:39] ( 6 bits)
+  uint64_t num_records = queue_scratch_.main_size / num_xcc;
+  srd1.bits.NUM_RECORDS_1 = uint32_t(num_records & 0x7F);  // bits [6:0]
+
+  SQ_BUF_RSRC_WORD2_GFX13 srd2;
+  srd2.bits.NUM_RECORDS_2 = uint32_t((num_records >> 7) & 0xFFFFFFFF);  // bits [38:7]
+
+  SQ_BUF_RSRC_WORD3_GFX13 srd3;
+  srd3.bits.NUM_RECORDS_3 = uint32_t((num_records >> 39) & 0x3F);  // bits [44:39]
+  srd3.bits.STRIDE = 0;
+  srd3.bits.STRIDE_SCALE = 0;
+  srd3.bits.SWIZZLE_ENABLE = 1;
+  srd3.bits.TYPE = SQ_RSRC_BUF;
+
+  amd_queue_.scratch_resource_descriptor[0] = srd0.u32All;
+  amd_queue_.scratch_resource_descriptor[1] = srd1.u32All;
+  amd_queue_.scratch_resource_descriptor[2] = srd2.u32All;
+  amd_queue_.scratch_resource_descriptor[3] = srd3.u32All;
+}
+
 // Set concurrent wavefront limits only when scratch is being used.
 void AqlQueue::FillComputeTmpRingSize() {
   COMPUTE_TMPRING_SIZE tmpring_size = {};
@@ -2078,7 +2123,7 @@ void AqlQueue::FillComputeTmpRingSize_Gfx12_Gfx13() {
 void AqlQueue::InitScratchSRD() {
   switch (agent_->supported_isas()[0]->GetMajorVersion()) {
     case 13:
-      // We shouldn't be using the buffer resource descriptor anymore.
+      FillBufRsrcWords_Gfx13();
       FillComputeTmpRingSize_Gfx12_Gfx13();
       break;
     case 12:
