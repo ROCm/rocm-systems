@@ -478,6 +478,10 @@ class TestExecutor:
             mpi_path = self.paths.get("mpi_path", "")
             mpi_cmd = f"{mpi_path}/bin/mpirun" if mpi_path else "mpirun"
 
+            # Allow running as root (common in Docker containers)
+            if os.getuid() == 0:
+                mpi_cmd += " --allow-run-as-root"
+
             # Use cached hostfile detected during initialization
             hostfile = self.mpi_hostfile
 
@@ -512,6 +516,12 @@ class TestExecutor:
 
             # Pass the LD_LIBRARY_PATH
             mpi_args += f" -x LD_LIBRARY_PATH={env['LD_LIBRARY_PATH']}"
+
+            # Forward LD_PRELOAD so UCX core libraries are preloaded with
+            # global visibility on remote ranks (required for UCX PML)
+            ld_preload = os.environ.get("LD_PRELOAD", "")
+            if ld_preload:
+                mpi_args += f" -x LD_PRELOAD={ld_preload}"
 
             # Pass LLVM_PROFILE_FILE to MPI ranks for code coverage (prevents default.profraw collision)
             mpi_args += f" -x LLVM_PROFILE_FILE=rccl_tests_%p_%m.profraw"

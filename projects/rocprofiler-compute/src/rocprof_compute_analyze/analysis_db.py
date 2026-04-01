@@ -18,7 +18,6 @@ from utils import utils_analysis
 from utils.analysis_orm import Database, get_views
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.parser import (
-    BUILD_IN_VARS,
     PC_SAMPLING_NOT_ISSUE_PREFIX,
     CodeTransformer,
     to_avg,
@@ -40,7 +39,7 @@ from utils.roofline_calc import (
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
-from utils.utils_common import get_uuid, get_version
+from utils.utils_common import BUILD_IN_VARS, get_uuid, get_version
 
 
 class db_analysis(OmniAnalyze_Base):

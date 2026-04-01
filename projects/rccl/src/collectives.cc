@@ -12,6 +12,7 @@
 #include "api_trace.h"
 #include "nvtx_payload_schemas.h"
 #include "msccl/msccl_lifecycle.h"
+#include "device/hierarchical_ag_shuffle.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -88,6 +89,98 @@ const char* ncclProtoToString(int proto) {
 
 NCCL_API(ncclResult_t, ncclAllGather, const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
+
+static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
+    ncclDataType_t datatype, int in_place, ncclComm_t comm, cudaStream_t stream) {
+  int nRanks = comm->nRanks;
+  int rank = comm->rank;
+  size_t rankOffset = sendcount * ncclTypeSize(datatype);
+
+  NCCLCHECK(ncclGroupStart());
+  for (int r = 0; r < nRanks; r++) {
+    int peer = (rank + r) % nRanks;
+    if (peer == rank && in_place) continue;
+    NCCLCHECK(ncclSend(((char*)sendbuff), sendcount, datatype, peer, comm, stream));
+    NCCLCHECK(ncclRecv(((char*)recvbuff) + peer * rankOffset, sendcount, datatype, peer, comm, stream));
+  }
+  NCCLCHECK(ncclGroupEnd());
+
+  return ncclSuccess;
+}
+
+RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 0);
+
+static bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
+  if (comm->nNodes < 8) return false;
+  if (rcclParamHierarchicalAllGather() != 1) return false;
+  if (!comm->hierarchicalCommsInitialized) return false;
+
+  size_t threshold = 0;
+  if (comm->nNodes >= 16) {
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
+  } else if (comm->nNodes >= 8) {
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+  }
+
+  return threshold > 0 && msgSize <= threshold;
+}
+
+static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* recvbuff, size_t sendcount,
+    ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
+  if (sendcount == 0) return ncclSuccess;
+  ncclComm* intraComm = comm->hierarchicalIntraComm;
+  ncclComm* interComm = comm->hierarchicalInterComm;
+  int localRanks = intraComm->nRanks; // Ranks per node
+  int nNodes = interComm->nRanks; // Number of nodes
+  size_t typeSize = ncclTypeSize(datatype);
+
+  void* tempBuffer = comm->hierarchicalAGTempBuffer;
+  const void* interSendBuff = sendbuff;
+  size_t rankOffset = sendcount * typeSize;
+  if (sendbuff == ((char*)recvbuff) + comm->rank * rankOffset) {
+    CUDACHECK(hipMemcpyAsync(tempBuffer, sendbuff, rankOffset, hipMemcpyDeviceToDevice, stream));
+    interSendBuff = tempBuffer;
+  }
+
+  // Step 1: Inter-node AllGather
+  size_t interMsgSize = sendcount * nNodes * typeSize;
+  if (rcclUseAllGatherDirect(interComm, interMsgSize)) {
+    // Use direct allgather
+    NCCLCHECK(rcclDirectAllGather(interSendBuff, recvbuff, sendcount, datatype, 0, interComm, stream));
+  } else {
+    struct ncclInfo infoInterAG = { ncclFuncAllGather, "HierarchicalAllGather-Inter",
+      interSendBuff, recvbuff, sendcount, datatype, ncclSum, 0, interComm, stream,
+      ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS, nullptr };
+    NCCLCHECK(ncclEnqueueCheck(&infoInterAG));
+  }
+
+  // Step 2: Intra-node AllGather
+  size_t intraSendCount = sendcount * nNodes;
+  size_t intraMsgSize = intraSendCount * typeSize * localRanks;
+  if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
+    // Use direct allgather
+    NCCLCHECK(rcclDirectAllGather(recvbuff, tempBuffer, intraSendCount, datatype, 0, intraComm, stream));
+  } else {
+    struct ncclInfo infoIntraAG = { ncclFuncAllGather, "HierarchicalAllGather-Intra",
+      recvbuff, tempBuffer, intraSendCount, datatype, ncclSum, 0, intraComm, stream,
+      ALLGATHER_CHUNKSTEPS,
+      intraComm->rcclUseOneSlice ? ALLGATHER_SLICESTEPS_SINGLE_NODE : ALLGATHER_SLICESTEPS, nullptr
+    };
+    NCCLCHECK(ncclEnqueueCheck(&infoIntraAG));
+  }
+
+  // Step 3: Shuffle tempBuffer to recvbuff
+  // TODO: numBlocks is set to 16 based on testing up to 16 Nodes.
+  // may need to adjust for larger configurations
+  int numBlocks = 16;
+  int threadsPerBlock = 1024;
+  hierarchicalAGShuffle<<<numBlocks, threadsPerBlock, 0, stream>>>(
+    (const char*)tempBuffer, (char*)recvbuff, rankOffset, nNodes, localRanks);
+  CUDACHECK(hipGetLastError());
+
+  return ncclSuccess;
+}
+
 ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AllGather, NcclNvtxParamsAllGather,
@@ -120,6 +213,10 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
       sendcount, datatype, 0, 0, ncclSum, mscclFuncAllGather, comm, stream);
   }
 
+  if (rcclUseHierarchicalAllGather(comm, msgSize)) {
+    return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+  }
+
   if (rcclUseAllGatherDirect(comm, msgSize) && ncclGroupDepth == 0) {
      INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
 		     sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
@@ -135,17 +232,8 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
         dstBuf = recvbuff;
      }
 
-     NCCLCHECK(ncclGroupStart());
-
-     for (int r = 0; r < nRanks; r++) {
-         if (r == rank && in_place)
-             continue;
-         
-         NCCLCHECK(ncclSend(((char*)srcBuf), sendcount, datatype, r, comm, stream));
-         NCCLCHECK(ncclRecv(((char*)dstBuf) + r * rankOffset, sendcount, datatype, r, comm, stream));
-     }
-     NCCLCHECK(ncclGroupEnd());
-     return ncclSuccess;
+    NCCLCHECK(rcclDirectAllGather(srcBuf, dstBuf, sendcount, datatype, in_place, comm, stream));
+    return ncclSuccess;
   } else {
      // use ring allgather
      return ncclEnqueueCheck(&info);

@@ -21,7 +21,6 @@ subtree_to_project_map = {
     "projects/rocprofiler-register": "profiler",
     "projects/rocprofiler-sdk": "profiler",
     "projects/rocprofiler-systems": "profiler",
-    "projects/rocprofiler": "profiler",
     "projects/rocr-debug-agent": "debug_tools",
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
@@ -39,7 +38,10 @@ project_map = {
         "projects_to_test": "",  # rdc-tests is not built by TheRock build system - TBD
     },
     "debug_tools": {
-        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON"],
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
+        ],
         "projects_to_test": "rocr-debug-agent, rocgdb",
     },
     # media libs to be enabled in following PR
@@ -49,7 +51,7 @@ project_map = {
     # },
     "profiler": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-systems",
+        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",
     },
     "rocshmem": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_ROCSHMEM=ON"],
@@ -61,7 +63,7 @@ project_map = {
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-systems, rocr-debug-agent, rocgdb",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb",
     },
 }
 
