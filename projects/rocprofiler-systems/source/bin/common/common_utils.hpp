@@ -256,33 +256,6 @@ check_rocm_available()
 }
 
 inline void
-warn_if_rocm_unavailable()
-{
-    if(!check_rocm_available())
-    {
-        std::cerr << "\n[rocprof-sys][WARNING] GPU tracing requested but ROCm is not "
-                     "available.\n";
-        std::cerr << "  GPU features will be disabled.\n\n";
-    }
-}
-
-inline void
-warn_if_gpu_preset_without_rocm(const std::vector<std::string>& active_presets)
-{
-    for(const auto& preset : active_presets)
-    {
-        if(preset == "--workload-trace" || preset == "--trace-hpc" ||
-           preset == "--sys-trace" || preset == "--runtime-trace" ||
-           preset == "--trace-gpu" || preset == "--trace-openmp" ||
-           preset == "--trace-hw-counters")
-        {
-            warn_if_rocm_unavailable();
-            return;
-        }
-    }
-}
-
-inline void
 warn_if_output_not_writable(std::string_view tool_name)
 {
     auto output_dir = get_output_directory();

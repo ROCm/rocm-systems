@@ -2725,8 +2725,7 @@ tmp_file::remove()
     return true;
 }
 
-tmp_file::
-operator bool() const
+tmp_file::operator bool() const
 {
     return (m_pid == getpid()) &&
            ((stream.is_open() && stream.good()) || (file != nullptr && fd > 0) ||

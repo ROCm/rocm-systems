@@ -38,7 +38,7 @@ auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
 #else
     return code_object.rocp_agent.handle;
@@ -193,7 +193,7 @@ rocpd_processor_t::handle(const memory_copy_sample& _mcs)
 void
 rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 {
-#if (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =

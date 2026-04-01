@@ -22,8 +22,8 @@
 
 #include "perfetto.hpp"
 #include "config.hpp"
-#include "output_file_registry.hpp"
 #include "library/runtime.hpp"
+#include "output_file_registry.hpp"
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
 

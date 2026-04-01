@@ -1155,7 +1155,7 @@ PROFILING WORKFLOW:
                                                "mutex-locks", "spin-locks", "rw-locks",
                                                "rocm" };
 
-#if (!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                         \
+#if(!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                          \
     (!defined(ROCPROFSYS_USE_MPI_HEADERS) || ROCPROFSYS_USE_MPI_HEADERS == 0)
     _backend_choices.erase("mpip");
 #endif
@@ -1307,13 +1307,6 @@ PROFILING WORKFLOW:
     {
         exit(EXIT_FAILURE);
     }
-
-    if(parser.exists("hip-trace") && parser.get<bool>("hip-trace"))
-    {
-        rocprofsys::common_utils::warn_if_rocm_unavailable();
-    }
-
-    rocprofsys::common_utils::warn_if_gpu_preset_without_rocm(active_presets);
 
     if(!active_presets.empty() && verbose >= 1)
     {

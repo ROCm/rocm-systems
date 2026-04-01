@@ -661,8 +661,6 @@ INSTRUMENTATION WORKFLOW:
         exit(EXIT_FAILURE);
     }
 
-    rocprofsys::common_utils::warn_if_gpu_preset_without_rocm(active_presets);
-
     if(!active_presets.empty() && _parser_data.verbose >= 1)
     {
         rocprofsys::common_utils::print_pre_execution_info("run", active_presets[0]);
