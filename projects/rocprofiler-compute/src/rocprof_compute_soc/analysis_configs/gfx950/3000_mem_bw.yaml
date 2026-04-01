@@ -922,60 +922,74 @@ Panel Config:
     # These metrics use (GRBM_GUI_ACTIVE_PER_XCD * cu_per_gpu) as denominator, enabling direct comparison across components.
     # The cu_per_gpu factor normalizes the per-CU counter sums to give average percentage per instance.
     Normalized L1 Cache - VMEM stalled by L1 Cache: >-
-      Average percentage of time each CU is stalled on VMEM instructions waiting for L1 Cache.
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that SQ could not dispatch VMEM instructions because
+      the L1 Cache (TCP) command FIFO was full. Averaged across all CUs. High values mean
+      L1 cache cannot keep up with memory instruction demand.
       Equation: ((SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA addr stalled by TCP: >-
-      Average percentage of time each TA address path is stalled by TCP.
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TA could not send addresses to TCP (L1 Cache)
+      because TCP was not ready. Averaged across all CUs. High values indicate L1 cache
+      congestion backing up into the address path.
       Equation: ((SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA addr stalled by TD: >-
-      Average percentage of time each TA address path is stalled by TD.
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TA could not process new addresses because the
+      TD (texture data) return path was backed up. Averaged across all CUs. High values
+      indicate congestion in the data return path.
       Equation: ((SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA data stalled by TCP: >-
-      Average percentage of time each TA data path is stalled by TCP.
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TA could not send write or store data to TCP
+      (L1 Cache) because TCP's data path was full. Averaged across all CUs. High values
+      indicate L1 cache write-side congestion.
       Equation: ((SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA addresser stalled: >-
-      Average percentage of time each TA addresser is stalled.
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TA's address generation logic was stalled for
+      any reason. Averaged across all CUs. High values indicate address computation
+      bottlenecks in the L1 front-end.
       Equation: ((SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TA stalled by TCP (aggregated): >-
-      Average percentage of time each TA is stalled by TCP (from TCP perspective).
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TCP reported stalling TA's address path.
+      Averaged across all CUs. This is TCP's own view of the stall, complementing the
+      TA-side metrics. High values confirm L1 cache is the source of TA backpressure.
       Equation: ((SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TCP stalled by UTCL1: >-
-      Average percentage of time each TCP is stalled by UTCL1 (TLB inflight saturation).
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TCP was stalled because UTCL1 (L1 TLB) had too
+      many in-flight translation requests. Averaged across all CUs. High values indicate
+      TLB capacity is a bottleneck.
       Equation: ((SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TCP stalled by UTCL2: >-
-      Average percentage of time each TCP is stalled by UTCL2 (TLB miss latency).
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TCP was stalled because UTCL2 (L2 TLB) could
+      not accept more miss requests from UTCL1. Averaged across all CUs. High values
+      indicate slow TLB miss handling, often due to page table walk latency.
       Equation: ((SUM(TCP_UTCL1_STALL_LFIFO_NO_RES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TCP stalled by TD: >-
-      Average percentage of time each TCP is stalled by TD (return path backpressure).
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TCP was stalled because TD (texture data return
+      unit) could not consume returned data fast enough. Averaged across all CUs. High
+      values indicate the return path from L1 to CU is a bottleneck.
       Equation: ((SUM(TCP_TD_TCP_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized L1 Cache - TCP stalled by L2: >-
-      Average percentage of time each TCP is stalled by L2 (TCC backpressure via TCR).
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TCP was stalled because L2 (TCC), via the TCR
+      interface, could not accept more requests. Averaged across all CUs. High values
+      indicate L2 cache is a downstream bottleneck.
       Equation: ((SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized TD - stalled by TCP: >-
-      Average percentage of time each TD is stalled waiting for TCP data.
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TD was waiting for TCP (L1 Cache) to provide
+      data. Averaged across all CUs. High values indicate L1 cache read latency is
+      slowing the data return path to the CU.
       Equation: ((SUM(TD_TC_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized TD - input FIFO full: >-
-      Average percentage of time each TD input FIFO is full.
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TD's input FIFO (receiving data from TCP) was
+      full. Averaged across all CUs. This prevents TCP from sending more data and may
+      indicate TD processing is too slow or a downstream block is backed up.
       Equation: ((SUM(TD_TC_TD_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized TD - output FIFO full: >-
-      Average percentage of time each TD output FIFO is full.
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TD's output FIFO was full, meaning TD could not
+      deliver completed data to the CU (VGPR/LDS). Averaged across all CUs. High values
+      indicate backpressure from the CU's register file or LDS.
       Equation: ((SUM(TD_OUTPUT_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     Normalized TD - stalled by SPI: >-
-      Average percentage of time each TD is stalled by SPI.
-      Normalized by CU count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that TD was stalled because SPI (Shader Processor
+      Input) was not ready to accept write-back data to VGPRs. Averaged across all CUs.
+      High values indicate VGPR write port contention.
       Equation: ((SUM(TD_SPI_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
     # Table 3005: Normalized Throughput Metrics (per Second)
     Normalized TA processing rate: >-
@@ -1134,63 +1148,63 @@ Panel Config:
     # These metrics use (GRBM_GUI_ACTIVE_PER_XCD * total_l2_chan) as denominator.
     # The total_l2_chan factor normalizes the per-channel counter sums to give average percentage per channel.
     Normalized L2 - Tag stall: >-
-      Average percentage of time each L2 channel's tag pipeline was stalled for any reason.
-      This is the primary L2 bottleneck indicator (lump sum of all internal TCC stalls).
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that the L2 tag pipeline was stalled for any reason.
+      Averaged across all L2 channels. This is the primary L2 bottleneck indicator,
+      covering all internal TCC stall causes.
       Equation: (SUM(TCC_TAG_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 - Input buffer stall: >-
-      Average percentage of time each L2 channel's input buffer was stalled, meaning L2
-      cannot accept new requests from L1. Indicates L1-to-L2 interface bottleneck.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that the L2 input buffer was stalled, preventing L2
+      from accepting new requests from L1. Averaged across all L2 channels. High values
+      indicate the L1-to-L2 interface is a bottleneck.
       Equation: (SUM(TCC_IB_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 - Latency FIFO full: >-
-      Average percentage of time each L2 channel's latency FIFO was full, indicating
-      too many requests are pending in the L2 cache. Suggests L2 internal congestion.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that the L2 latency FIFO was full because too many
+      requests were in flight inside L2. Averaged across all L2 channels. High values
+      indicate L2 internal congestion.
       Equation: (SUM(TCC_LATENCY_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 - Source FIFO full: >-
-      Average percentage of time each L2 channel's source data FIFO was full, indicating
-      the write data path is saturated.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that the L2 write data (source) FIFO was full,
+      meaning the write data path into L2 was saturated. Averaged across all L2 channels.
       Equation: (SUM(TCC_SRC_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Write stall: >-
-      Average percentage of time each L2 channel's write requests to memory through EA were stalled.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that L2 write requests to memory (via the EA
+      interface) were stalled. Averaged across all L2 channels. High values indicate the
+      memory write path is saturated.
       Equation: (SUM(TCC_EA0_WRREQ_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Too many writes stall: >-
-      Average percentage of time each L2 channel could not send write requests to memory
-      because maximum pending EA write requests was reached. Indicates write credit starvation.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that L2 could not issue write requests to memory
+      because the maximum number of pending EA writes was reached. Averaged across all
+      L2 channels. High values indicate write credit starvation at the memory interface.
       Equation: (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Read credit stall (HBM): >-
-      Average percentage of time each L2 channel's read requests were stalled due to HBM
-      credit exhaustion. High values indicate HBM read bandwidth is saturated.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that L2 read requests to HBM were stalled because
+      all HBM read credits were in use. Averaged across all L2 channels. High values
+      indicate HBM read bandwidth saturation.
       Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Write credit stall (HBM): >-
-      Average percentage of time each L2 channel's write requests were stalled due to HBM
-      credit exhaustion. High values indicate HBM write bandwidth is saturated.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that L2 write requests to HBM were stalled because
+      all HBM write credits were in use. Averaged across all L2 channels. High values
+      indicate HBM write bandwidth saturation.
       Equation: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Read credit stall (GMI): >-
-      Average percentage of time each L2 channel's read requests were stalled due to GMI
-      credit exhaustion. High values indicate remote read bandwidth is saturated.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that L2 read requests to remote memory (via GMI)
+      were stalled because all GMI read credits were in use. Averaged across all L2
+      channels. High values indicate remote read bandwidth saturation.
       Equation: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Write credit stall (GMI): >-
-      Average percentage of time each L2 channel's write requests were stalled due to GMI
-      credit exhaustion. High values indicate remote write bandwidth is saturated.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that L2 write requests to remote memory (via GMI)
+      were stalled because all GMI write credits were in use. Averaged across all L2
+      channels. High values indicate remote write bandwidth saturation.
       Equation: (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Read credit stall (IO): >-
-      Average percentage of time each L2 channel's read requests were stalled due to IO
-      interface credit exhaustion. High values indicate PCIe/IO read bandwidth is saturated.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that L2 read requests to IO (PCIe) were stalled
+      because all IO read credits were in use. Averaged across all L2 channels. High
+      values indicate PCIe read bandwidth saturation.
       Equation: (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     Normalized L2 to EA - Write credit stall (IO): >-
-      Average percentage of time each L2 channel's write requests were stalled due to IO
-      interface credit exhaustion. High values indicate PCIe/IO write bandwidth is saturated.
-      Normalized by L2 channel count for cross-component comparison (0-100% range).
+      Percentage of GPU active time that L2 write requests to IO (PCIe) were stalled
+      because all IO write credits were in use. Averaged across all L2 channels. High
+      values indicate PCIe write bandwidth saturation.
       Equation: (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan)) * 100
     # Table 3011: Normalized L2 Throughput Metrics (per Second)
     Normalized L2 read requests: >-
