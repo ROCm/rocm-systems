@@ -6,19 +6,24 @@
 
 #include "hotswap.hpp"
 #include "hotswap_comgr_client.hpp"
+#include <cstdio>
 #include <cstdlib>
-#include <iostream>
 
 namespace rocr {
 namespace hotswap {
 
 int RetargetCodeObjectB0A0Grow(const void *elf_data, size_t elf_size,
                                void **out_data, size_t *out_size) {
+  if (!out_data || !out_size) {
+    fprintf(stderr, "hotswap: invalid null output pointer(s) in B0->A0 grow\n");
+    return -1;
+  }
+
   *out_data = const_cast<void *>(elf_data);
   *out_size = elf_size;
 
   if (!ComgrHotswapAvailable()) {
-    std::cerr << "hotswap: COMGR not available for B0->A0\n";
+    fprintf(stderr, "hotswap: COMGR not available for B0->A0\n");
     return -1;
   }
 
@@ -27,7 +32,7 @@ int RetargetCodeObjectB0A0Grow(const void *elf_data, size_t elf_size,
   int rc = ComgrHotswapRewriteB0A0(elf_data, elf_size,
                                    &out_elf, &out_elf_size);
   if (rc != 0) {
-    std::cerr << "hotswap: COMGR B0->A0 rewrite failed (rc=" << rc << ")\n";
+    fprintf(stderr, "hotswap: COMGR B0->A0 rewrite failed (rc=%d)\n", rc);
     if (out_elf)
       std::free(out_elf);
     return rc;
