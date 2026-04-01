@@ -118,14 +118,11 @@ static bool cpu_to_gpu_coherency() {
   }
 
   SECTION("With device fine grained buffer") {
-    hipDeviceProp_t props{};
-    HIP_CHECK(hipGetDeviceProperties(&props, 0));
-    std::string gfxName(props.gcnArchName);
-    if (!CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
+    HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 0));
+    if (deviceFineGrain == 0) {
       HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
       return true;
     }
-    deviceFineGrain = 1;
     fprintf(stderr, "info: allocate device mem (%zu bytes) on device 0\n", Nbytes);
     HIP_CHECK(
         hipExtMallocWithFlags(reinterpret_cast<void**>(&A_d), Nbytes, hipDeviceMallocFinegrained));

@@ -474,8 +474,6 @@ inline constexpr char const kHostPinnedMemoryUnsupported[] =
     "Skipped: host pinned memory mapping is not supported.";
 inline constexpr char const kManagedMemoryUnsupported[] =
     "Skipped: GPU does not support managed memory.";
-inline constexpr char const kManagedMemoryDeviceRequired[] =
-    "Skipped: at least one device with managed memory support is required.";
 inline constexpr char const kPageableMemoryAccessUnsupported[] =
     "Skipped: pageable access unsupported; hipMallocManaged may host-allocate (OOM risk).";
 inline constexpr char const kNoGpuDevice[] = "Skipped: no GPU device available.";
