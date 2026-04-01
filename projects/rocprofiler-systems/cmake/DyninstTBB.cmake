@@ -1,5 +1,8 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # =====================================================================================
-# ThreadingBuildingBlocks.cmake
+# DyninstTBB.cmake
 #
 # Configure Intel's Threading Building Blocks for Dyninst
 #
@@ -7,19 +10,22 @@
 #
 # Accepts the following CMake variables
 #
-# TBB_ROOT_DIR        - Hint directory that contains the TBB installation TBB_INCLUDEDIR -
-# Hint directory that contains the TBB headers files TBB_LIBRARYDIR      - Hint directory
-# that contains the TBB library files TBB_LIBRARY         - Alias for TBB_LIBRARYDIR
-# TBB_USE_DEBUG_BUILD - Use debug version of tbb libraries, if present TBB_MIN_VERSION -
-# Minimum acceptable version of TBB
+# ROCPROFSYS_BUILD_TBB - Build TBB from source instead of finding system package
+# TBB_ROOT_DIR         - Hint directory that contains the TBB installation
+# TBB_INCLUDEDIR       - Hint directory that contains the TBB headers files
+# TBB_LIBRARYDIR       - Hint directory that contains the TBB library files
+# TBB_LIBRARY          - Alias for TBB_LIBRARYDIR
+# TBB_USE_DEBUG_BUILD  - Use debug version of tbb libraries, if present
+# TBB_MIN_VERSION      - Minimum acceptable version of TBB (default: 2018.6)
 #
 # Directly exports the following CMake variables
 #
-# TBB_ROOT_DIR        - Computed base directory of TBB installation TBB_INCLUDE_DIRS    -
-# TBB include directory TBB_INCLUDE_DIR     - Alias for TBB_INCLUDE_DIRS TBB_LIBRARY_DIRS
-# - TBB library directory TBB_LIBRARY_DIR - Alias for TBB_LIBRARY_DIRS TBB_DEFINITIONS -
-# TBB compiler definitions TBB_LIBRARIES       - TBB library files
-#
+# TBB_ROOT_DIR         - Computed base directory of TBB installation
+# TBB_INCLUDE_DIRS     - TBB include directory
+# TBB_INCLUDE_DIR      - Alias for TBB_INCLUDE_DIRS
+# TBB_LIBRARY_DIRS     - TBB library directory
+# TBB_DEFINITIONS      - TBB compiler definitions
+# TBB_LIBRARIES        - TBB library files
 # TBB_<c>_LIBRARY_RELEASE - Path to the release version of component <c>
 # TBB_<c>_LIBRARY_DEBUG   - Path to the debug version of component <c>
 #
@@ -52,7 +58,7 @@ set(TBB_MIN_VERSION
 )
 
 if(${TBB_MIN_VERSION} VERSION_LESS ${_tbb_min_version})
-    dyninst_message(
+    rocprofiler_systems_message(
         FATAL_ERROR
         "Requested TBB version ${TBB_MIN_VERSION} is less than minimum supported version ${_tbb_min_version}"
     )
@@ -88,6 +94,26 @@ if(TBB_FOUND)
     set(TBB_LIBRARY_DIRS ${TBB_LIBRARY_DIRS} CACHE PATH "TBB library directory" FORCE)
     set(TBB_DEFINITIONS ${TBB_DEFINITIONS} CACHE STRING "TBB compiler definitions" FORCE)
     set(TBB_LIBRARIES ${TBB_LIBRARIES} CACHE FILEPATH "TBB library files" FORCE)
+
+    # Update TBB_ROOT_DIR to the found location for Dyninst.
+    # Prefer include dirs: multiarch TBB_DIR under lib/<triplet>/cmake/... breaks fixed depth.
+    set(_tbb_root "")
+    if(TBB_INCLUDE_DIRS)
+        list(GET TBB_INCLUDE_DIRS 0 _tbb_inc)
+        get_filename_component(_tbb_root "${_tbb_inc}" DIRECTORY)
+    endif()
+    if(NOT _tbb_root AND TBB_DIR)
+        string(REGEX REPLACE "/lib(/[^/]+)*/cmake/TBB[^/]*$" "" _tbb_root "${TBB_DIR}")
+        if(_tbb_root STREQUAL TBB_DIR)
+            set(_tbb_root "")
+        else()
+            get_filename_component(_tbb_root "${_tbb_root}" ABSOLUTE)
+        endif()
+    endif()
+    if(_tbb_root)
+        set(TBB_ROOT_DIR "${_tbb_root}" CACHE PATH "TBB root directory" FORCE)
+    endif()
+    set(TBB_ROOT ${TBB_ROOT_DIR})
 elseif(STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR "TBB not found and cannot be downloaded because build is sterile."
@@ -173,7 +199,7 @@ else()
     find_program(MAKE_EXECUTABLE NAMES make gmake PATH_SUFFIXES bin)
 
     if(NOT MAKE_EXECUTABLE AND CMAKE_GENERATOR MATCHES "Ninja")
-        dyninst_message(
+        rocprofiler_systems_message(
             FATAL_ERROR
             "make/gmake executable not found. Please re-run with -DMAKE_EXECUTABLE=/path/to/make"
         )
@@ -229,8 +255,15 @@ foreach(_DIR_TYPE INCLUDE LIBRARY)
     endif()
 endforeach()
 
+if(NOT DEFINED _tbb_cmake_interface_definitions)
+    set(_tbb_cmake_interface_definitions "")
+endif()
+
 target_include_directories(rocprofiler-systems-tbb SYSTEM INTERFACE ${TBB_INCLUDE_DIRS})
-target_compile_definitions(rocprofiler-systems-tbb INTERFACE ${TBB_DEFINITIONS})
+target_compile_definitions(
+    rocprofiler-systems-tbb
+    INTERFACE ${_tbb_cmake_interface_definitions}
+)
 target_link_directories(rocprofiler-systems-tbb INTERFACE ${TBB_LIBRARY_DIRS})
 target_link_libraries(rocprofiler-systems-tbb INTERFACE ${TBB_LIBRARIES})
 
@@ -238,3 +271,89 @@ rocprofiler_systems_message(STATUS "TBB include directory: ${TBB_INCLUDE_DIRS}."
 rocprofiler_systems_message(STATUS "TBB library directory: ${TBB_LIBRARY_DIRS}.")
 rocprofiler_systems_message(STATUS "TBB libraries: ${TBB_LIBRARIES}.")
 rocprofiler_systems_message(STATUS "TBB definitions: ${TBB_DEFINITIONS}.")
+
+# --------------------------------------------------------------------------------------#
+# Create standard TBB::* targets for system packages only
+# --------------------------------------------------------------------------------------#
+# When using system packages, create standard targets that Dyninst's find_package(TBB)
+# can discover.
+if(NOT TARGET TBB::tbb AND NOT ROCPROFSYS_BUILD_TBB)
+    # System package - create imported targets from found libraries
+    rocprofiler_systems_message(
+        STATUS
+            "Creating TBB::* targets from system TBB (targets not provided by package)"
+    )
+
+    # Set TBB_ROOT for Dyninst's find_package(TBB) to use as a hint
+    set(TBB_ROOT "${TBB_ROOT_DIR}" CACHE PATH "TBB root directory for Dyninst" FORCE)
+
+    # Extract individual libraries from TBB_LIBRARIES list
+    set(_tbb_lib "")
+    set(_tbbmalloc_lib "")
+    set(_tbbmalloc_proxy_lib "")
+
+    foreach(_lib ${TBB_LIBRARIES})
+        if(_lib MATCHES "libtbb\\.(so|a)")
+            set(_tbb_lib "${_lib}")
+        elseif(_lib MATCHES "libtbbmalloc_proxy\\.(so|a)")
+            set(_tbbmalloc_proxy_lib "${_lib}")
+        elseif(_lib MATCHES "libtbbmalloc\\.(so|a)")
+            set(_tbbmalloc_lib "${_lib}")
+        endif()
+    endforeach()
+
+    # Create TBB::tbb target
+    if(_tbb_lib)
+        add_library(TBB::tbb UNKNOWN IMPORTED)
+        set_target_properties(
+            TBB::tbb
+            PROPERTIES
+                IMPORTED_LOCATION "${_tbb_lib}"
+                INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
+        )
+        if(_tbb_cmake_interface_definitions)
+            set_target_properties(
+                TBB::tbb
+                PROPERTIES
+                    INTERFACE_COMPILE_DEFINITIONS "${_tbb_cmake_interface_definitions}"
+            )
+        endif()
+    endif()
+
+    # Create TBB::tbbmalloc target
+    if(_tbbmalloc_lib)
+        add_library(TBB::tbbmalloc UNKNOWN IMPORTED)
+        set_target_properties(
+            TBB::tbbmalloc
+            PROPERTIES
+                IMPORTED_LOCATION "${_tbbmalloc_lib}"
+                INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
+        )
+    endif()
+
+    # Create TBB::tbbmalloc_proxy target
+    if(_tbbmalloc_proxy_lib)
+        add_library(TBB::tbbmalloc_proxy UNKNOWN IMPORTED)
+        set_target_properties(
+            TBB::tbbmalloc_proxy
+            PROPERTIES
+                IMPORTED_LOCATION "${_tbbmalloc_proxy_lib}"
+                INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
+        )
+    endif()
+endif()
+
+# Create Dyninst::TBB target if building from source
+# --------------------------------------------------------------------------------------#
+# When TBB is built from source, Dyninst's find_package(TBB) would fail because the
+# bundled TBB isn't installed in standard locations. Creating this target causes
+# Dyninst to skip find_package(TBB) and use the bundled dependency instead.
+
+if(ROCPROFSYS_BUILD_TBB AND NOT TARGET Dyninst::TBB)
+    add_library(Dyninst::TBB INTERFACE IMPORTED)
+    target_link_libraries(Dyninst::TBB INTERFACE ${TBB_LIBRARIES})
+    target_include_directories(Dyninst::TBB SYSTEM INTERFACE ${TBB_INCLUDE_DIRS})
+    if(TBB_LIBRARY_DIRS)
+        target_link_directories(Dyninst::TBB INTERFACE ${TBB_LIBRARY_DIRS})
+    endif()
+endif()

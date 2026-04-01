@@ -748,16 +748,28 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
-  // Multi-linear copy: LINEAR op with num_dsts > 0, independent copies
+  // Multi-linear copy: LINEAR op with num_entries > 0, independent copies
   // (different src/dst/size per entry) sharing a single completion signal.
   // Uses prologue/body/epilogue fan-out across available SDMA engines.
   hsa_status_t DmaCopyMulti(
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
-  // Common fan-out implementation shared by DmaCopyBroadcast and DmaCopyMulti.
-  // Submits prologue, per-entry copy bodies, and epilogue with one signal.
-  hsa_status_t DmaCopyFanOut(
+  // Linear swap: exchanges the contents of src and dst buffers.
+  // Only supported on gfx94X / gfx95X.  Uses DmaCopyFanOutOp with
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP.
+  hsa_status_t DmaCopySwap(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
+  // and swap operations.  Submits prologue, per-entry bodies (selected by
+  // @p op), and epilogue with one signal.
+  // @p op is the hsa_amd_memory_copy_op_type_t from the public API; only
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR and HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP are
+  // currently supported.
+  hsa_status_t DmaCopyFanOutOp(
+      hsa_amd_memory_copy_op_type_t op,
       core::Signal& out_signal,
       std::vector<core::Signal*>& dep_signals,
       uint16_t num_entries,
