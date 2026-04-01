@@ -226,6 +226,20 @@ unified_memory_processor_t::handle(const kfd_sample& sample)
                 LOG_TRACE("Unknown migration direction for device {}", device_id);
                 break;
         }
+
+        auto trigger = classify_trigger(sample.name);
+        switch(trigger)
+        {
+            case migration_trigger::GPU_PAGE_FAULT:
+                m_data.triggers.gpu_page_fault++;
+                break;
+            case migration_trigger::CPU_PAGE_FAULT:
+                m_data.triggers.cpu_page_fault++;
+                break;
+            case migration_trigger::PREFETCH: m_data.triggers.prefetch++; break;
+            case migration_trigger::TTM_EVICTION: m_data.triggers.ttm_eviction++; break;
+            case migration_trigger::UNKNOWN: m_data.triggers.unknown++; break;
+        }
     }
     else if(sample.category == "kfd_page_fault")
     {
@@ -233,15 +247,7 @@ unified_memory_processor_t::handle(const kfd_sample& sample)
         bool     is_read  = is_read_fault(sample.name);
 
         m_data.faults_by_agent[agent_id].add_fault(is_read);
-
-        if(sample.device_type == static_cast<uint8_t>(agent_type::CPU))
-        {
-            m_data.total_cpu_page_faults++;
-        }
-        else if(sample.device_type == static_cast<uint8_t>(agent_type::GPU))
-        {
-            m_data.total_gpu_page_faults++;
-        }
+        m_data.total_page_faults++;
     }
 }
 
@@ -284,6 +290,16 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
         return migration_direction::DEVICE_TO_DEVICE;
     else
         return migration_direction::UNKNOWN;
+}
+
+unified_memory_processor_t::migration_trigger
+unified_memory_processor_t::classify_trigger(const std::string& name) const
+{
+    if(name == "PAGE_MIGRATE_PAGEFAULT_GPU") return migration_trigger::GPU_PAGE_FAULT;
+    if(name == "PAGE_MIGRATE_PAGEFAULT_CPU") return migration_trigger::CPU_PAGE_FAULT;
+    if(name == "PAGE_MIGRATE_PREFETCH") return migration_trigger::PREFETCH;
+    if(name == "PAGE_MIGRATE_TTM_EVICTION") return migration_trigger::TTM_EVICTION;
+    return migration_trigger::UNKNOWN;
 }
 
 bool
@@ -393,10 +409,26 @@ unified_memory_processor_t::write_text_output(std::ostream& out)
         out << "\n";
     }
 
-    if(m_data.total_cpu_page_faults > 0 || m_data.total_gpu_page_faults > 0)
+    out << " Total Page Faults: " << m_data.total_page_faults << "\n";
+
+    if(m_data.triggers.total() > 0)
     {
-        out << " Total CPU Page faults: " << m_data.total_cpu_page_faults << "\n";
-        out << " Total GPU Page faults: " << m_data.total_gpu_page_faults << "\n";
+        out << "\n Migration Triggers:\n";
+        if(m_data.triggers.gpu_page_fault > 0)
+            out << "   GPU page fault: " << std::setw(10)
+                << m_data.triggers.gpu_page_fault << "\n";
+        if(m_data.triggers.cpu_page_fault > 0)
+            out << "   CPU page fault: " << std::setw(10)
+                << m_data.triggers.cpu_page_fault << "\n";
+        if(m_data.triggers.prefetch > 0)
+            out << "   Prefetch:       " << std::setw(10) << m_data.triggers.prefetch
+                << "\n";
+        if(m_data.triggers.ttm_eviction > 0)
+            out << "   TTM eviction:   " << std::setw(10) << m_data.triggers.ttm_eviction
+                << "\n";
+        if(m_data.triggers.unknown > 0)
+            out << "   Unknown:        " << std::setw(10) << m_data.triggers.unknown
+                << "\n";
     }
 }
 
@@ -442,9 +474,16 @@ unified_memory_processor_t::write_json_output(std::ostream& out)
     root["devices"] = devices_array;
 
     nlohmann::json summary;
-    summary["total_cpu_page_faults"] = m_data.total_cpu_page_faults;
-    summary["total_gpu_page_faults"] = m_data.total_gpu_page_faults;
-    summary["xnack_enabled"]         = m_data.xnack_enabled;
+    summary["total_page_faults"] = m_data.total_page_faults;
+    summary["xnack_enabled"]     = m_data.xnack_enabled;
+
+    nlohmann::json triggers;
+    triggers["gpu_page_fault"]    = m_data.triggers.gpu_page_fault;
+    triggers["cpu_page_fault"]    = m_data.triggers.cpu_page_fault;
+    triggers["prefetch"]          = m_data.triggers.prefetch;
+    triggers["ttm_eviction"]      = m_data.triggers.ttm_eviction;
+    triggers["unknown"]           = m_data.triggers.unknown;
+    summary["migration_triggers"] = triggers;
 
     root["summary"] = summary;
 

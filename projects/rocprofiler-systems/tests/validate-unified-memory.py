@@ -12,7 +12,8 @@ from pathlib import Path
 
 def print_help():
     """Print the help message"""
-    print(f"""
+    print(
+        f"""
     Unified Memory Output Validation Tool
 
     DESCRIPTION:
@@ -50,7 +51,8 @@ def print_help():
         0  - All validations passed successfully
         1  - File not found or general error
         65 - Validation failures detected (EX_DATAERR)
-    """)
+    """
+    )
 
 
 def validate_text_output(filepath):
@@ -79,6 +81,7 @@ def validate_text_output(filepath):
         "Avg Size",
         "Total Size",
         "Bandwidth",
+        "Total Page Faults",
     ]
 
     missing = []
@@ -137,8 +140,8 @@ def validate_json_output(filepath):
     summary = data["summary"]
     required_summary_fields = [
         "xnack_enabled",
-        "total_cpu_page_faults",
-        "total_gpu_page_faults",
+        "total_page_faults",
+        "migration_triggers",
     ]
     missing_fields = [field for field in required_summary_fields if field not in summary]
 
@@ -186,11 +189,26 @@ def validate_json_output(filepath):
                 print(f"Error: Device {i}, {direction} missing stats: {missing_stats}")
                 return False
 
+    triggers = summary["migration_triggers"]
+    required_trigger_fields = [
+        "gpu_page_fault",
+        "cpu_page_fault",
+        "prefetch",
+        "ttm_eviction",
+        "unknown",
+    ]
+    missing_trigger_fields = [
+        field for field in required_trigger_fields if field not in triggers
+    ]
+    if missing_trigger_fields:
+        print(f"Error: Missing migration_triggers fields: {missing_trigger_fields}")
+        return False
+
     print("JSON output validation passed")
     print(f"  Devices: {len(devices)}")
     print(f"  XNACK enabled: {summary['xnack_enabled']}")
-    print(f"  Total CPU page faults: {summary['total_cpu_page_faults']}")
-    print(f"  Total GPU page faults: {summary['total_gpu_page_faults']}")
+    print(f"  Total page faults: {summary['total_page_faults']}")
+    print(f"  Migration triggers: {triggers}")
 
     return True
 

@@ -94,14 +94,28 @@ struct page_fault_stats
     }
 };
 
+struct migration_trigger_stats
+{
+    uint64_t gpu_page_fault = 0;
+    uint64_t cpu_page_fault = 0;
+    uint64_t prefetch       = 0;
+    uint64_t ttm_eviction   = 0;
+    uint64_t unknown        = 0;
+
+    uint64_t total() const noexcept
+    {
+        return gpu_page_fault + cpu_page_fault + prefetch + ttm_eviction + unknown;
+    }
+};
+
 struct unified_memory_data
 {
     std::map<uint32_t, device_migration_summary> devices;
     std::map<uint32_t, page_fault_stats>         faults_by_agent;
 
-    uint64_t total_cpu_page_faults = 0;
-    uint64_t total_gpu_page_faults = 0;
-    bool     xnack_enabled         = false;
+    uint64_t                total_page_faults = 0;
+    migration_trigger_stats triggers;
+    bool                    xnack_enabled = false;
 };
 
 class unified_memory_processor_t : public processor_t<unified_memory_processor_t>
@@ -137,18 +151,27 @@ private:
         UNKNOWN
     };
 
+    enum class migration_trigger
+    {
+        GPU_PAGE_FAULT,
+        CPU_PAGE_FAULT,
+        PREFETCH,
+        TTM_EVICTION,
+        UNKNOWN
+    };
+
     migration_direction classify_direction(const std::string& src_label,
                                            const std::string& dst_label) const;
+    migration_trigger   classify_trigger(const std::string& name) const;
     bool                is_read_fault(const std::string& name) const;
     [[nodiscard]] std::optional<std::pair<std::string, std::string>>
     parse_agent_ids_from_args(const std::string& args_str) const;
 
     /**
      * Extracts GPU name from migration event labels.
-     * @param src_label Source agent label from KFD event (e.g., "NODE_1", "CPU")
-     * @param dst_label Destination agent label from KFD event
-     * @return GPU agent name if found (e.g., "AMD Instinct MI300X"), fallback to "GPU" or
-     * "GPU {id}"
+     * @param src_label Source agent numeric node ID from KFD event (e.g., "0", "2")
+     * @param dst_label Destination agent numeric node ID from KFD event
+     * @return GPU agent name if found (e.g., "gfx950"), fallback to "GPU" or "GPU {id}"
      */
     [[nodiscard]] std::string extract_gpu_name(const std::string& src_label,
                                                const std::string& dst_label) const;
