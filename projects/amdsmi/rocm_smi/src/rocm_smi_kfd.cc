@@ -797,7 +797,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
     }
     ret = node->get_property_value(kKFDNodePropDOMAINStr, &kfd_gpu_node_domain);
     if (ret != 0) {
-      std::cerr << "Failed to get \"domain\" properity from properties "
+      std::cerr << "Failed to get \"domain\" property from properties "
                    "files for kfd node "
                 << node->node_index() << "." << std::endl;
       closedir(kfd_node_dir);

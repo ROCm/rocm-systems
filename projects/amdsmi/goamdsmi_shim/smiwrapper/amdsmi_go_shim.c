@@ -626,7 +626,7 @@ uint64_t goamdsmi_gpu_dev_power_get(uint32_t dv_ind) {
       }
     }
     gpu_power = gpu_power_temp;
-    gpu_power = (gpu_power) * 1000000;  // to maintain backward compatibity with old ROCM SMI
+    gpu_power = (gpu_power) * 1000000;  // to maintain backward compatibility with old ROCM SMI
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
       printf("AMDSMI, Success for Gpu:%d, GpuPower:%llu, GpuPowerinWatt:%.6f\n", dv_ind,
              (unsigned long long)(gpu_power), ((double)(gpu_power)) / 1000000);
@@ -657,7 +657,7 @@ uint64_t goamdsmi_gpu_dev_power_get(uint32_t dv_ind) {
       }
     }
     gpu_power = gpu_power_temp;
-    gpu_power = (gpu_power) * 1000000;  // to maintain backward compatibity with old ROCM SMI
+    gpu_power = (gpu_power) * 1000000;  // to maintain backward compatibility with old ROCM SMI
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
       printf(
           "AMDSMI, Success for Gpu:%d, GpuPowerFromMetrics:%llu, GpuPowerFromMetricsinWatt:%.6f\n",
@@ -685,7 +685,7 @@ uint64_t goamdsmi_gpu_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor, uint
     readSuccess = true;
     gpu_temperature = gpu_temperature_temp;
     gpu_temperature =
-        (gpu_temperature) * 1000;  // to maintain backward compatibity with old ROCM SMI
+        (gpu_temperature) * 1000;  // to maintain backward compatibility with old ROCM SMI
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
       printf(
           "AMDSMI, %s for Gpu:%d Sensor:%d Metric:%d, GpuTemperature:%llu, "

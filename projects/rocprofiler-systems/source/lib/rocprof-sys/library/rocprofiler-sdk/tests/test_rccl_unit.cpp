@@ -112,8 +112,8 @@ INSTANTIATE_TEST_SUITE_P(
                       rccl_type_size_param{ ncclUint64, 8, "uint64" },
                       rccl_type_size_param{ ncclFloat64, 8, "float64" },
                       rccl_type_size_param{ ncclBfloat16, 2, "bfloat16" }),
-    [](const ::testing::TestParamInfo<rccl_type_size_param>& info) {
-        return info.param.name;
+    [](const ::testing::TestParamInfo<rccl_type_size_param>& _info) {
+        return _info.param.name;
     });
 
 TEST_F(rccl_test, rccl_type_size_returns_zero_for_invalid_datatype)

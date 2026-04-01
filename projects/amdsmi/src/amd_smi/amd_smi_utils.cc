@@ -795,7 +795,7 @@ std::vector<std::string> split_string(const std::string& line, char delim) {
 // rsmi_status_t ret - return value of RSMI API function
 // bool fullStatus - defaults to true, set to false to chop off description
 // Returns:
-// string - if fullStatus == true, returns full decription of return value
+// string - if fullStatus == true, returns full description of return value
 //      ex. 'RSMI_STATUS_SUCCESS: The function has been executed successfully.'
 // string - if fullStatus == false, returns a minimalized return value
 //      ex. 'RSMI_STATUS_SUCCESS'

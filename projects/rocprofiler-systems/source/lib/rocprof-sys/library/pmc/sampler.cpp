@@ -206,6 +206,24 @@ post_process()
 }
 
 void
+pause()
+{
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    if(pmc::get_state() != State::Active || !is_initialized())
+    {
+        return;
+    }
+
+    auto timestamp = static_cast<int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+
+    for(auto& slice : g_collector_slices)
+    {
+        slice.pause(timestamp);
+    }
+}
+
+void
 postfork_child_cleanup()
 {
     LOG_DEBUG("Disabling PMC sampling in child process after fork.");

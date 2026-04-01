@@ -515,7 +515,7 @@ class AMDSMIHelpers:
         Args:
             uuid_question (str): the given string to be evaluated.
         Returns:
-            True or False: wether the UUID given matches the UUID format.
+            True or False: whether the UUID given matches the UUID format.
         """
         UUID_pattern = re.compile(
             "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", flags=re.IGNORECASE
@@ -1184,7 +1184,7 @@ class AMDSMIHelpers:
         )
 
     def get_amd_gpu_bdfs(self):
-        """Return a list of GPU BDFs visibile to amdsmi
+        """Return a list of GPU BDFs visible to amdsmi
 
         Returns:
             list[BDF]: List of GPU BDFs

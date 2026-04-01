@@ -303,6 +303,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "presets",
         "hpc",
         "hip",
+        "selective_regions",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
