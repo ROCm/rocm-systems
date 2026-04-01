@@ -102,10 +102,6 @@
 [submodule "projects/rocprofiler-systems/external/json"]
 	path = projects/rocprofiler-systems/external/json
 	url = https://github.com/nlohmann/json.git
-[submodule "projects/rccl/ext-src/rocSHMEM"]
-	path = projects/rccl/ext-src/rocSHMEM
-	url = https://github.com/ROCm/rocSHMEM.git
-	branch = develop
 [submodule "projects/rocprofiler-systems/external/onetbb"]
 	path = projects/rocprofiler-systems/external/onetbb
 	url = https://github.com/uxlfoundation/oneTBB.git
