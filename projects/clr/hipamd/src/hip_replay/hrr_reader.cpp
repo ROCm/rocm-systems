@@ -10,10 +10,14 @@ namespace fs = std::filesystem;
 
 namespace hrr {
 
+// Union copy helper: sizeof(memcpy_ev) is the largest union member (44 bytes
+// packed) so this covers all fields of all three union variants.
+static constexpr size_t kEventUnionBytes = sizeof(MemcpyEvent);
+
 Event::Event(Event&& o) noexcept
     : header(o.header), kernel_launch(o.kernel_launch),
       raw_payload(std::move(o.raw_payload)) {
-  memcpy(&malloc_ev, &o.malloc_ev, sizeof(malloc_ev));
+  memcpy(&malloc_ev, &o.malloc_ev, kEventUnionBytes);
   o.kernel_launch = nullptr;
 }
 
@@ -21,7 +25,7 @@ Event& Event::operator=(Event&& o) noexcept {
   if (this != &o) {
     delete kernel_launch;
     header = o.header;
-    memcpy(&malloc_ev, &o.malloc_ev, sizeof(malloc_ev));
+    memcpy(&malloc_ev, &o.malloc_ev, kEventUnionBytes);
     kernel_launch = o.kernel_launch;
     raw_payload = std::move(o.raw_payload);
     o.kernel_launch = nullptr;
@@ -65,6 +69,15 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
   if (p + name_len > end) return false;
   kl.kernel_name.assign(reinterpret_cast<const char*>(p), name_len);
   p += name_len;
+
+  // co_hash (16 bytes): identifies the specific code object this kernel belongs to.
+  // Present in traces recorded after the co_hash fix; older traces have payload too
+  // short here, so we default to 0,0 (search all modules) and skip gracefully.
+  kl.co_hash_lo = 0; kl.co_hash_hi = 0;
+  if (p + 16 <= end) {
+    memcpy(&kl.co_hash_lo, p, 8); p += 8;
+    memcpy(&kl.co_hash_hi, p, 8); p += 8;
+  }
 
   if (p + 12 + 12 + 4 + 2 + 2 > end) return false;
   memcpy(kl.grid, p, 12); p += 12;

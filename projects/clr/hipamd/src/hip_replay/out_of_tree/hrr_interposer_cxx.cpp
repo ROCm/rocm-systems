@@ -30,14 +30,14 @@ typedef ihipEvent_t*        hipEvent_t;
 extern "C" {
   int  hrr_writer_enabled(void);
   void hrr_record_kernel_launch(const char* kernel_name,
-                                 const void* code_object_image,
-                                 size_t code_object_size,
+                                 uint64_t co_hash_lo, uint64_t co_hash_hi,
                                  uint32_t gx, uint32_t gy, uint32_t gz,
                                  uint32_t bx, uint32_t by, uint32_t bz,
                                  uint32_t shared_mem,
                                  const void* stream,
                                  void** kernel_args);
   void hrr_record_kernel_launch_packed(const char* kernel_name,
+                                        uint64_t co_hash_lo, uint64_t co_hash_hi,
                                         uint32_t gx, uint32_t gy, uint32_t gz,
                                         uint32_t bx, uint32_t by, uint32_t bz,
                                         uint32_t shared_mem,
@@ -45,6 +45,8 @@ extern "C" {
                                         const void* packed_buf,
                                         size_t packed_size);
   const char* hrr_lookup_function_name(const void* func_handle);
+  int hrr_lookup_function_co_hash(const void* func_handle,
+                                   uint64_t* hash_lo, uint64_t* hash_hi);
 }
 
 /* Real function pointer — looked up via dlsym by mangled name to avoid
@@ -94,11 +96,22 @@ hipError_t hipExtModuleLaunchKernel(
   }
 
   if (hrr_writer_enabled()) {
-    const char* kname = hrr_lookup_function_name(static_cast<const void*>(f));
+    const void* fv = static_cast<const void*>(f);
+    const char* kname = hrr_lookup_function_name(fv);
+    uint64_t co_lo = 0, co_hi = 0;
+    hrr_lookup_function_co_hash(fv, &co_lo, &co_hi);
+
+    /* hipExtModuleLaunchKernel uses (globalWorkSize, localWorkSize) semantics,
+     * while hipModuleLaunchKernel uses (numBlocks, blockDim). Normalize to
+     * numBlocks here so the trace format is consistent with the C interposer. */
+    uint32_t nbx = localWorkSizeX ? (globalWorkSizeX + localWorkSizeX - 1) / localWorkSizeX : 1;
+    uint32_t nby = localWorkSizeY ? (globalWorkSizeY + localWorkSizeY - 1) / localWorkSizeY : 1;
+    uint32_t nbz = localWorkSizeZ ? (globalWorkSizeZ + localWorkSizeZ - 1) / localWorkSizeZ : 1;
+
     if (kernelParams) {
       /* Standard kernelParams path: array of pointers to arg values */
-      hrr_record_kernel_launch(kname, nullptr, 0,
-                                globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+      hrr_record_kernel_launch(kname, co_lo, co_hi,
+                                nbx, nby, nbz,
                                 localWorkSizeX, localWorkSizeY, localWorkSizeZ,
                                 static_cast<uint32_t>(sharedMemBytes),
                                 static_cast<const void*>(hStream), kernelParams);
@@ -119,8 +132,8 @@ hipError_t hipExtModuleLaunchKernel(
         }
       }
       if (packed_buf) {
-        hrr_record_kernel_launch_packed(kname,
-                                        globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
+        hrr_record_kernel_launch_packed(kname, co_lo, co_hi,
+                                        nbx, nby, nbz,
                                         localWorkSizeX, localWorkSizeY, localWorkSizeZ,
                                         static_cast<uint32_t>(sharedMemBytes),
                                         static_cast<const void*>(hStream),

@@ -51,7 +51,10 @@ struct MallocEvent {
 };
 
 // Parsed memcpy event
-struct MemcpyEvent {
+// NOTE: must be packed to match the trace writer's #pragma pack(1) layout.
+// Writer places hash_lo at byte offset 28 (no gap after kind); natural
+// alignment would insert 4 bytes of padding there.
+struct __attribute__((packed)) MemcpyEvent {
   uint64_t dst_addr;
   uint64_t src_addr;
   uint64_t size;
@@ -87,6 +90,8 @@ struct BufferSnapshot {
 // Parsed kernel launch event
 struct KernelLaunchEvent {
   std::string kernel_name;
+  uint64_t co_hash_lo = 0;  // code object hash (0,0 = unknown, search all modules)
+  uint64_t co_hash_hi = 0;
   uint32_t grid[3];
   uint32_t block[3];
   uint32_t shared_mem;
@@ -109,7 +114,7 @@ struct Event {
   std::vector<uint8_t> raw_payload;
 
   ~Event() { delete kernel_launch; }
-  Event() { memset(&malloc_ev, 0, sizeof(malloc_ev)); }
+  Event() { memset(&malloc_ev, 0, sizeof(memcpy_ev)); }  // sizeof(memcpy_ev) = largest union member
   Event(Event&& o) noexcept;
   Event& operator=(Event&& o) noexcept;
   Event(const Event&) = delete;
