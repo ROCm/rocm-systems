@@ -534,7 +534,7 @@ class OmniSoC_Base:
 
             # All files are full, create a new file
             if not added:
-                output_files.append(CounterFile(file_count, self.__perfmon_config))
+                output_files.append(CounterFile(str(file_count), self.__perfmon_config))
                 file_count += 1
                 output_files[-1].add(ctr)
 
