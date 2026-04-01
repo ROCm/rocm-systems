@@ -262,7 +262,7 @@ You can instrument your code with multiple ``roctxProfilerResume()``/``roctxProf
 
 **Nested pause/resume pairs:**
 
-By default, each ``roctxProfilerResume()`` and ``roctxProfilerPause()`` call directly toggles profiling on or off. If you have nested pairs (e.g., a function with profiling control called from within another profiled region), the innermost call will affect the profiling state. To handle nested pairs with reference counting, use the ``--selected-regions-ref-count`` option, which will ignore nested pause/resume pairs and only toggle profiling when the outermost pair is called.
+By default, each ``roctxProfilerResume()`` and ``roctxProfilerPause()`` call directly toggles profiling on or off. If you have nested pairs (e.g., a function with profiling control called from within another profiled region), the innermost call will affect the profiling state. To handle nested pairs with reference counting, use the ``--selected-regions-ref-count`` option, which uses reference counting for pause/resume calls and only toggles profiling when the outermost pair boundaries are crossed..
 
 **Thread-specific control:**
 
