@@ -59,7 +59,11 @@ execute_process(
   COMMAND ${CMAKE_COMMAND} -E echo "Applying RCCL ROCM NetIB patch to staging area: ${ROCM_NETIB_FILE}"
   COMMAND bash -c "patch -p1 -i ${ROCM_NETIB_PATCH_FILE} -o ${ROCM_NETIB_FILE}"
   WORKING_DIRECTORY ${RCCL_SRC_DIR}
+  RESULT_VARIABLE _rocm_netib_patch_rc
 )
+if(NOT _rocm_netib_patch_rc EQUAL 0)
+  message(FATAL_ERROR "Failed to apply RCCL ROCM NetIB patch.")
+endif()
 execute_process(
   COMMAND bash -c "sed -i 's/NCCL_PARAM(Ib/NCCL_PARAM(RocmIb/g' ${ROCM_NETIB_FILE}"
   WORKING_DIRECTORY ${ROCM_NETIB_STAGING_DIR}
