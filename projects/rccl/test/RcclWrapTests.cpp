@@ -15,6 +15,7 @@
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
 #include "graph/topo.h"
+#include "rocmwrap.h"
 
 namespace RcclUnitTesting
 {
@@ -1298,6 +1299,30 @@ TEST(Rcclwrap, AllPxnTests)
     bool allTestsPassed = ProcessIsolatedTestRunner::executeAllTests(options);
 
     EXPECT_TRUE(allTestsPassed) << "One or more PXN process-isolated tests failed";
+}
+
+TEST(Rcclwrap, CucheckgotoMacro_CheckStickyHipErrorOnFailure)
+{
+    hipError_t hipErr = hipSetDevice(0);
+    if(hipErr != hipSuccess)
+    {
+        GTEST_SKIP() << "No GPU available";
+    }
+
+    // Clear any pre-existing sticky error so we start clean
+    (void)hipGetLastError();
+
+    // Force a HIP failure through CUCHECKGOTO using an invalid device pointer (0x1)
+    ncclResult_t ret = ncclSuccess;
+    CUCHECKGOTO(hipPointerGetAttribute(nullptr, HIP_POINTER_ATTRIBUTE_CONTEXT,
+                                       (hipDeviceptr_t)0x1),
+                ret, check_sticky);
+
+check_sticky:
+    EXPECT_EQ(ncclUnhandledCudaError, ret)
+        << "CUCHECKGOTO should set result to ncclUnhandledCudaError on failure";
+    EXPECT_EQ(hipSuccess, hipGetLastError())
+        << "CUCHECKGOTO must clear sticky HIP error after failure";
 }
 
 } // namespace RcclUnitTesting
