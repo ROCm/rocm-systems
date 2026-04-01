@@ -88,7 +88,6 @@ BackendType get_backend_type() { return backend->get_backend_type(); }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
-  BackendType type;
 
   /* Check whether the user explicitely requests a particular backend type */
   std::string envstr = envvar::backend;
@@ -225,7 +224,7 @@ static void setFilesLimit() {
   init_constant_memory();
 }
 
-[[maybe_unused]] __host__ static void inline library_init_subcomm(TcpBootstrap *bootstrap, int nranks, int rank) {
+[[maybe_unused]] __host__ static void inline library_init_subcomm([[maybe_unused]] TcpBootstrap *bootstrap, int nranks, int rank) {
   int initialized;
   int world_size = -1;
 

@@ -50,6 +50,7 @@ set(BITCODE_COMPILE_FLAGS_BASE
     -std=c++17
     -emit-llvm
     -fvisibility=default
+    -Xclang -mcode-object-version=none
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
     -I${CMAKE_CURRENT_SOURCE_DIR}/src

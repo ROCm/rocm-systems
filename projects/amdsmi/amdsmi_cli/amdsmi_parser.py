@@ -739,7 +739,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if args.watch is None:
-                    raise argparse.ArgumentError(self, f"invalid argument: '{self.dest}' needs to be paired with -w/--watch. Error code: -2")
+                    raise argparse.ArgumentError(
+                        self,
+                        f"invalid argument: '{self.dest}' needs to be paired with -w/--watch. Error code: -2",
+                    )
                 else:
                     setattr(args, self.dest, values)
 
@@ -822,7 +825,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         return _NICSelectAction
 
     def _switch_select(self, switch_choices):
-        """Custom argparse action to return the device handle(s) for the switchs(s) selected
+        """Custom argparse action to return the device handle(s) for the switches(s) selected
         This will set the destination (args.switch) to a list of 1 or more device handles
         If 1 or more device handles are not found then raise an ArgumentError for the first invalid switch seen
         """
@@ -2279,7 +2282,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         hops_help = "Displays the number of hops between GPUs"
         link_type_help = "Displays the link type between GPUs"
         numa_bw_help = "Display max and min bandwidth between nodes"
-        coherent_help = "Display cache coherant (or non-coherant) link capability between nodes"
+        coherent_help = "Display cache coherent (or non-coherent) link capability between nodes"
         atomics_help = "Display 32 and 64-bit atomic io link capability between nodes"
         dma_help = "Display P2P direct memory access (DMA) link capability between nodes"
         bi_dir_help = "Display P2P bi-directional link capability between nodes"

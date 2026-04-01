@@ -225,7 +225,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   uint32_t hdr_flags;
   uint32_t inline_msg;
 
-  inline_msg = length <= inline_threshold &&
+  inline_msg = static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold) &&
                opcode == gda_op_rdma_write;
 
   bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
@@ -278,7 +278,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
 }
 
-__device__ void QueuePair::bnxt_post_wqe_rma(int pe, int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
+__device__ void QueuePair::bnxt_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
   uint64_t active_lane_mask;
   uint8_t active_lane_count;
   uint8_t active_lane_id;

@@ -163,6 +163,23 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
 }
 
 void
+counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
+{
+    if(!track || timestamp == 0) return;
+
+    // Write zero to Perfetto trace (for legacy Perfetto)
+    TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
+                  timestamp, 0);
+
+    // Write zero to cache (for rocpd database)
+    trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
+        track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}",
+        static_cast<uint32_t>(device_id), static_cast<uint8_t>(agent_type::GPU),
+        track_name.c_str(), 0.0, std::nullopt });
+}
+
+void
 counter_storage::write(counter_storage_type* storage, const std::string& metric_name,
                        const std::string& metric_description)
 {

@@ -45,6 +45,7 @@ set(SRC_FILES
   src/device/rccl_metadata.h
   src/device/rccl_ptr.h
   src/device/sendrecv.h
+  src/device/hierarchical_ag_shuffle.h
   src/device/common.cu
   src/device/onerank.cu
   src/device/network/unpack/unpack_defs.h

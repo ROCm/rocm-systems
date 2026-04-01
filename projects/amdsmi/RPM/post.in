@@ -25,7 +25,7 @@ do_configureLogrotate() {
     # Hourly logrotation check
     # Only rotates if size grew larger than 1MB
     # Max of 4 rotation files, oldest will be removed
-    # Rotated files use date extention of ex. AMD-SMI-lib.log.2023-05-09_16:51:42
+    # Rotated files use date extension of ex. AMD-SMI-lib.log.2023-05-09_16:51:42
     cat << EOF > "${logrotateConfFile}"
 ${logFile} {
     su root root
