@@ -256,6 +256,12 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "serialize: mark test as serializable (used for CTest)",
     )
+    config.addinivalue_line(
+        "markers",
+        "multi_gpu(num): mark test as using requiring atleast num amount of GPUs",
+    )
+
+    # See pytest_collection_modifyitems
     generic_functional_markers = [
         "ucx",
         "overflow",
@@ -460,7 +466,9 @@ def pytest_collection_modifyitems(config, items) -> None:
         add_marker_if(item, "papi", cond=annotate_available, req_mark="annotate")
         add_marker_if(item, "mpi", req_mark="mpi_implementation")
         add_marker_if(item, "python", req_mark="python_versions")
+        add_marker_if(item, "gpu", req_mark="multi_gpu")
 
+        # ----------------------------------------------------------------------------
         # Add corresponding runner type markers based on parametrized values ("mode")
         detected_runners: set[str] = set()
         if hasattr(item, "callspec") and item.callspec:
@@ -596,6 +604,27 @@ def pytest_collection_modifyitems(config, items) -> None:
                     )
             except Exception as e:
                 pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
+        if "multi_gpu" in item.keywords:
+            num_gpu = item.get_closest_marker("multi_gpu").args[0]
+            if gpu_info.device_count < num_gpu:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"Test requires {num_gpu} GPUs but system has {gpu_info.device_count}"
+                    )
+                )
+        # ----------------------------------------------------------------------------
+        # Deselect tests for CI mode (TheRock)
+        # Only tests explicitly marked with @pytest.mark.ci_enable are selected.
+        # Note that ci_disable("all") overrides ci_enable.
+        if config.getoption("--ci-mode", default=False) and not config.getoption(
+            "--allow-disabled", default=False
+        ):
+            disable_marker = item.get_closest_marker("ci_disable")
+            ci_disabled = disable_marker and "all" in disable_marker.args
+            if item.get_closest_marker("ci_enable") and not ci_disabled:
+                selected_tests.append(item)
+            else:
+                deselected_tests.append(item)
 
 
 def pytest_collection_finish(session):
