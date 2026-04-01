@@ -2011,6 +2011,7 @@ class ROCMHealthCheck:
         results["env_variables"] = {"status": status, "reason": reason}
 
         # Test 9: Multinode cluster readiness
+        self._print_test_start("Multinode cluster readiness")
         if self.skip_multinode_readiness:
             self.logger.info(
                 "Skipping multinode cluster readiness (--skip-multinode-readiness)."
@@ -2020,11 +2021,11 @@ class ROCMHealthCheck:
                 "reason": "Skipped (--skip-multinode-readiness).",
             }
         else:
-            self._print_test_start("Multinode cluster readiness")
             status, reason = self.test_check_multinode_cluster_readiness()
             results["Multinode_Readiness"] = {"status": status, "reason": reason}
 
         # Test 10: Atomic Operations
+        self._print_test_start("Is Atomic Operations Enabled")
         if self.skip_atomic_operations:
             self.logger.info(
                 "Skipping atomic operations check (--skip-atomic-operations)."
@@ -2034,7 +2035,6 @@ class ROCMHealthCheck:
                 "reason": "Skipped (--skip-atomic-operations).",
             }
         else:
-            self._print_test_start("Is Atomic Operations Enabled")
             status, reason = self.test_check_atomic_operations()
             results["atomic_operations"] = {"status": status, "reason": reason}
 
