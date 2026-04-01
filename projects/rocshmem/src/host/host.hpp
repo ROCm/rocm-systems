@@ -298,7 +298,7 @@ class HostInterface {
 #endif // USE_HDP_FLUSH
   }
 
-  __host__ void flush_remote_hdp(int pe) {
+  __host__ void flush_remote_hdp([[maybe_unused]] int pe) {
 #if defined USE_HDP_FLUSH
     unsigned flush_val{HdpPolicy::HDP_FLUSH_VAL};
     mpilib_ftable_.Put(&flush_val, 1, MPI_UNSIGNED, pe, 0, 1, MPI_UNSIGNED, hdp_win);

@@ -78,6 +78,7 @@ hipify:
 	# PATCH 1: Fix device includes - remove "device/" prefix since files are in same directory
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/src/device/include/*.h
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/include/*.h
+	sed -i 's|#include "device/|#include "|g' hipify_rccl/*.cc
 	# PATCH 2: Use NVTX stubs - topo_expl doesn't need full NVTX implementation
 	cp hipify_rccl/include/nvtx_stub.h hipify_rccl/include/nvtx.h
 	bash ../../cmake/scripts/add_unroll.sh "hipify_rccl/src/device/include/common.h"

@@ -235,6 +235,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "python_versions: Test will be parametrized by Python version",
     )
+    config.addinivalue_line(
+        "markers",
+        "multi_gpu(num): mark test as using requiring atleast num amount of GPUs",
+    )
 
     # See pytest_collection_modifyitems
     generic_functional_markers = [
@@ -272,6 +276,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "rocprof_binary",
         "rocprof_config",
         "xgmi",
+        "sdma",
         "group_by_queue",
         "group_by_stream",
         "openmp",
@@ -302,6 +307,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "presets",
         "hpc",
         "hip",
+        "selective_regions",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -479,6 +485,8 @@ def pytest_collection_modifyitems(config, items) -> None:
         add_marker_if(item, "papi", cond=annotate_available, req_mark="annotate")
         add_marker_if(item, "mpi", req_mark="mpi_implementation")
         add_marker_if(item, "python", req_mark="python_versions")
+        add_marker_if(item, "gpu", req_mark="multi_gpu")
+
         # ----------------------------------------------------------------------------
         # Add corresponding runner type markers based on parametrized values ("mode")
         # Ex: If "sampling" runner is used, then sampling marker is added
@@ -552,6 +560,14 @@ def pytest_collection_modifyitems(config, items) -> None:
             except Exception as e:
                 pytest.exit(
                     f"Invalid run_if_gpu_category marker expression: {e}", returncode=1
+                )
+        if "multi_gpu" in item.keywords:
+            num_gpu = item.get_closest_marker("multi_gpu").args[0]
+            if gpu_info.device_count < num_gpu:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"Test requires {num_gpu} GPUs but system has {gpu_info.device_count}"
+                    )
                 )
         # ----------------------------------------------------------------------------
         # Deselect tests for CI mode (TheRock)
