@@ -101,6 +101,8 @@ typedef struct {
   uint64_t handle;
   const void* image;
   size_t image_size;
+  uint64_t image_hash_lo;  /* stored at load time so we don't need live image ptr later */
+  uint64_t image_hash_hi;
   /* Parsed kernel metadata for this module */
   hrr_kernel_meta_t kernels[32];
   int num_kernels;
@@ -108,6 +110,7 @@ typedef struct {
 
 typedef struct {
   uintptr_t handle;
+  uint64_t module_handle;  /* handle of the owning hipModule_t (from g.next_mod_handle) */
   char name[MAX_FUNC_NAME];
 } func_entry_t;
 
@@ -187,6 +190,36 @@ static alloc_entry_t* find_alloc(uintptr_t ptr) {
     if (g.allocs[i].ptr == ptr) return &g.allocs[i];
   }
   return NULL;
+}
+
+/* Range-aware lookup for kernel arg recording.
+ * Returns the actual GPU pointer value as the handle (matching the MALLOC
+ * event format).  The replay's translate_ptr does a range search keyed by
+ * GPU base address, so emitting the sub-alloc GPU address directly lets it
+ * compute the correct byte offset into the base allocation.
+ *
+ * Returns 1 and sets *out_handle on success, 0 if the pointer is not tracked. */
+static int find_alloc_handle(uintptr_t ptr, uint64_t* out_handle) {
+  /* Exact match */
+  for (int i = 0; i < g.num_allocs; i++) {
+    if (g.allocs[i].ptr == ptr) {
+      *out_handle = (uint64_t)ptr;
+      return 1;
+    }
+  }
+  /* Range match: ptr points into the interior of a known allocation */
+  for (int i = 0; i < g.num_allocs; i++) {
+    uintptr_t base = g.allocs[i].ptr;
+    size_t    sz   = g.allocs[i].size;
+    if (ptr > base && ptr < base + sz) {
+      /* Emit the actual sub-alloc GPU address.  The replay's translate_ptr
+       * range-searches by GPU base address, so it computes:
+       *   live_ptr + (sub_alloc_addr - base_addr)  which is the correct offset. */
+      *out_handle = (uint64_t)ptr;
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static module_entry_t* find_module(uintptr_t mod) {
@@ -287,9 +320,11 @@ int hrr_writer_enabled(void) { return g.active; }
 
 void hrr_record_malloc(const void* ptr, size_t size, unsigned int flags) {
   if (!g.active) return;
-  uint64_t handle;
+  /* Use the actual GPU pointer value as the allocation handle.
+   * This allows the replay's range-based translate_ptr to find sub-allocations
+   * within a pool without needing a separate handle namespace. */
+  uint64_t handle = (uint64_t)(uintptr_t)ptr;
   HRR_MUTEX_LOCK(&g.mu);
-  handle = g.next_handle++;
   if (g.num_allocs < MAX_ALLOCS) {
     g.allocs[g.num_allocs++] = (alloc_entry_t){(uintptr_t)ptr, handle, size};
   }
@@ -303,11 +338,12 @@ void hrr_record_malloc(const void* ptr, size_t size, unsigned int flags) {
 
 void hrr_record_free(const void* ptr) {
   if (!g.active) return;
-  uint64_t handle = 0;
   HRR_MUTEX_LOCK(&g.mu);
   alloc_entry_t* e = find_alloc((uintptr_t)ptr);
-  if (e) { handle = e->handle; *e = g.allocs[--g.num_allocs]; }
+  if (e) *e = g.allocs[--g.num_allocs];
   HRR_MUTEX_UNLOCK(&g.mu);
+  /* Emit the GPU address as the handle — matches the MALLOC format. */
+  uint64_t handle = (uint64_t)(uintptr_t)ptr;
   write_event(EVT_FREE, 0, &handle, sizeof(handle));
 }
 
@@ -339,6 +375,10 @@ void hrr_record_memset(void* dst, int value, size_t size, const void* stream) {
 void hrr_record_module_load(void* module, const void* image, size_t image_size) {
   if (!g.active) return;
   uint64_t mod_handle;
+  hash128_t h = {0, 0};
+  if (image && image_size > 0)
+    h = hash_buffer(image, image_size);
+
   HRR_MUTEX_LOCK(&g.mu);
   mod_handle = g.next_mod_handle++;
   if (g.num_modules < MAX_MODULES) {
@@ -347,6 +387,8 @@ void hrr_record_module_load(void* module, const void* image, size_t image_size) 
     me->handle = mod_handle;
     me->image = image;
     me->image_size = image_size;
+    me->image_hash_lo = h.lo;
+    me->image_hash_hi = h.hi;
     me->num_kernels = hrr_parse_code_object(image, image_size,
                                             me->kernels, 32);
   }
@@ -354,7 +396,6 @@ void hrr_record_module_load(void* module, const void* image, size_t image_size) 
 
   /* Save code object */
   if (image && image_size > 0) {
-    hash128_t h = hash_buffer(image, image_size);
     char hex[33]; hash_hex(h, hex);
     char path[640];
     snprintf(path, sizeof(path), "%s" HRR_SEP "code_objects" HRR_SEP "%s.hsaco",
@@ -383,8 +424,7 @@ void hrr_record_module_unload(void* module) {
 }
 
 void hrr_record_kernel_launch(const char* kernel_name,
-                              const void* code_object_image,
-                              size_t code_object_size,
+                              uint64_t co_hash_lo, uint64_t co_hash_hi,
                               uint32_t gx, uint32_t gy, uint32_t gz,
                               uint32_t bx, uint32_t by, uint32_t bz,
                               uint32_t shared_mem,
@@ -417,7 +457,8 @@ void hrr_record_kernel_launch(const char* kernel_name,
   uint16_t num_args = meta ? (uint16_t)meta->num_args : 0;
   uint16_t num_snaps = 0;  /* TODO: buffer snapshots in out-of-tree */
 
-  size_t pl_size = 2 + name_len + 12 + 12 + 4 + 2 + 2;
+  /* co_hash (16 bytes) added to payload after name */
+  size_t pl_size = 2 + name_len + 16 + 12 + 12 + 4 + 2 + 2;
   /* Add args */
   for (uint32_t i = 0; i < num_args; i++) {
     pl_size += 1 + 2 + (meta->args[i].kind == HRR_ARG_GLOBAL_BUFFER ? 8 :
@@ -430,6 +471,8 @@ void hrr_record_kernel_launch(const char* kernel_name,
 
   memcpy(p, &name_len, 2); p += 2;
   memcpy(p, name, name_len); p += name_len;
+  memcpy(p, &co_hash_lo, 8); p += 8;
+  memcpy(p, &co_hash_hi, 8); p += 8;
   memcpy(p, &gx, 4); p += 4;
   memcpy(p, &gy, 4); p += 4;
   memcpy(p, &gz, 4); p += 4;
@@ -450,14 +493,26 @@ void hrr_record_kernel_launch(const char* kernel_name,
       memcpy(p, &sz, 2); p += 2;
       if (kernel_args && kernel_args[i]) {
         /* Translate raw device pointer to allocation handle so the replay
-         * can remap it to a live GPU address on the target machine. */
+         * can remap it to a live GPU address on the target machine.
+         * Range-aware: sub-allocations from a pool are encoded as
+         * base_handle + byte_offset, which replay's translate_ptr handles. */
         uint64_t dev_ptr = 0;
         memcpy(&dev_ptr, kernel_args[i], 8);
         uint64_t handle = 0;
         HRR_MUTEX_LOCK(&g.mu);
-        alloc_entry_t* ae = find_alloc((uintptr_t)dev_ptr);
-        if (ae) handle = ae->handle;
+        find_alloc_handle((uintptr_t)dev_ptr, &handle);
         HRR_MUTEX_UNLOCK(&g.mu);
+        if (!handle && dev_ptr != 0) {
+          if (g.verbose) {
+            fprintf(stderr, "[HRR] kernel '%s' arg[%u]: ptr=0x%llx untracked, "
+                    "registering synthetic alloc (1MB)\n",
+                    name, i, (unsigned long long)dev_ptr);
+          }
+          hrr_record_malloc((const void*)(uintptr_t)dev_ptr, 1024*1024, 0);
+          HRR_MUTEX_LOCK(&g.mu);
+          find_alloc_handle((uintptr_t)dev_ptr, &handle);
+          HRR_MUTEX_UNLOCK(&g.mu);
+        }
         memcpy(p, &handle, 8);
       } else {
         memset(p, 0, 8);
@@ -481,6 +536,7 @@ void hrr_record_kernel_launch(const char* kernel_name,
 }
 
 void hrr_record_kernel_launch_packed(const char* kernel_name,
+                                      uint64_t co_hash_lo, uint64_t co_hash_hi,
                                       uint32_t gx, uint32_t gy, uint32_t gz,
                                       uint32_t bx, uint32_t by, uint32_t bz,
                                       uint32_t shared_mem,
@@ -513,7 +569,8 @@ void hrr_record_kernel_launch_packed(const char* kernel_name,
   uint16_t num_args = meta ? (uint16_t)meta->num_args : 0;
   uint16_t num_snaps = 0;
 
-  size_t pl_size = 2 + name_len + 12 + 12 + 4 + 2 + 2;
+  /* co_hash (16 bytes) added to payload after name */
+  size_t pl_size = 2 + name_len + 16 + 12 + 12 + 4 + 2 + 2;
   for (uint32_t i = 0; i < num_args; i++) {
     pl_size += 1 + 2 + (meta->args[i].kind == HRR_ARG_GLOBAL_BUFFER ? 8 :
                          meta->args[i].size);
@@ -525,6 +582,8 @@ void hrr_record_kernel_launch_packed(const char* kernel_name,
 
   memcpy(p, &name_len, 2); p += 2;
   memcpy(p, name, name_len); p += name_len;
+  memcpy(p, &co_hash_lo, 8); p += 8;
+  memcpy(p, &co_hash_hi, 8); p += 8;
   memcpy(p, &gx, 4); p += 4;
   memcpy(p, &gy, 4); p += 4;
   memcpy(p, &gz, 4); p += 4;
@@ -554,14 +613,13 @@ void hrr_record_kernel_launch_packed(const char* kernel_name,
         memcpy(&dev_ptr, arg_data, 8);
         uint64_t handle = 0;
         HRR_MUTEX_LOCK(&g.mu);
-        alloc_entry_t* ae = find_alloc((uintptr_t)dev_ptr);
-        if (ae) handle = ae->handle;
+        int found = find_alloc_handle((uintptr_t)dev_ptr, &handle);
         HRR_MUTEX_UNLOCK(&g.mu);
-        if (!ae && dev_ptr != 0) {
-          /* Pointer not tracked — likely allocated via an API we don't intercept
-           * (e.g. HSA-level, hipGraph, or internal runtime pool). Emit a synthetic
-           * MALLOC event so the replayer can create a backing buffer for it.
-           * We don't know the true size; use 1MB as a safe upper bound. */
+        if (!found && dev_ptr != 0) {
+          /* Pointer not tracked — sub-allocation from an unintercepted pool,
+           * HSA-level alloc, or hipGraph buffer. Emit a synthetic MALLOC so
+           * the replayer can create a backing buffer.  1MB is a best-guess
+           * upper bound; we use it only when range lookup also fails. */
           if (g.verbose) {
             fprintf(stderr, "[HRR] kernel '%s' arg[%u]: ptr=0x%llx untracked, "
                     "registering synthetic alloc (1MB)\n",
@@ -569,8 +627,7 @@ void hrr_record_kernel_launch_packed(const char* kernel_name,
           }
           hrr_record_malloc((const void*)(uintptr_t)dev_ptr, 1024*1024, 0);
           HRR_MUTEX_LOCK(&g.mu);
-          ae = find_alloc((uintptr_t)dev_ptr);
-          if (ae) handle = ae->handle;
+          find_alloc_handle((uintptr_t)dev_ptr, &handle);
           HRR_MUTEX_UNLOCK(&g.mu);
         }
         memcpy(p, &handle, 8);
@@ -605,21 +662,30 @@ void hrr_record_stream_sync(const void* stream) {
   write_event(EVT_STREAM_SYNC, (uint32_t)(uintptr_t)stream, NULL, 0);
 }
 
-void hrr_register_function(const void* func_handle, const char* kernel_name) {
+void hrr_register_function(const void* func_handle, const void* module_handle,
+                            const char* kernel_name) {
   if (!func_handle || !kernel_name) return;
   HRR_MUTEX_LOCK(&g.mu);
+  /* Find the sequential module handle from our module table */
+  uint64_t mod_h = 0;
+  uintptr_t raw_mod = (uintptr_t)module_handle;
+  for (int i = 0; i < g.num_modules; i++) {
+    if (g.modules[i].module == raw_mod) { mod_h = g.modules[i].handle; break; }
+  }
   /* Check if already registered (update in place) */
   uintptr_t h = (uintptr_t)func_handle;
   for (int i = 0; i < g.num_funcs; i++) {
     if (g.funcs[i].handle == h) {
       strncpy(g.funcs[i].name, kernel_name, MAX_FUNC_NAME - 1);
       g.funcs[i].name[MAX_FUNC_NAME - 1] = '\0';
+      g.funcs[i].module_handle = mod_h;
       HRR_MUTEX_UNLOCK(&g.mu);
       return;
     }
   }
   if (g.num_funcs < MAX_FUNC_ENTRIES) {
     g.funcs[g.num_funcs].handle = h;
+    g.funcs[g.num_funcs].module_handle = mod_h;
     strncpy(g.funcs[g.num_funcs].name, kernel_name, MAX_FUNC_NAME - 1);
     g.funcs[g.num_funcs].name[MAX_FUNC_NAME - 1] = '\0';
     g.num_funcs++;
@@ -640,4 +706,31 @@ const char* hrr_lookup_function_name(const void* func_handle) {
   }
   HRR_MUTEX_UNLOCK(&g.mu);
   return NULL;
+}
+
+int hrr_lookup_function_co_hash(const void* func_handle,
+                                 uint64_t* hash_lo, uint64_t* hash_hi) {
+  *hash_lo = 0; *hash_hi = 0;
+  if (!func_handle) return 0;
+  uintptr_t h = (uintptr_t)func_handle;
+  HRR_MUTEX_LOCK(&g.mu);
+  /* Find the function entry */
+  uint64_t mod_h = 0;
+  int found = 0;
+  for (int i = 0; i < g.num_funcs; i++) {
+    if (g.funcs[i].handle == h) { mod_h = g.funcs[i].module_handle; found = 1; break; }
+  }
+  if (found && mod_h != 0) {
+    /* Find the module by its sequential handle and return its stored hash */
+    for (int i = 0; i < g.num_modules; i++) {
+      if (g.modules[i].handle == mod_h) {
+        *hash_lo = g.modules[i].image_hash_lo;
+        *hash_hi = g.modules[i].image_hash_hi;
+        HRR_MUTEX_UNLOCK(&g.mu);
+        return (*hash_lo != 0 || *hash_hi != 0) ? 1 : 0;
+      }
+    }
+  }
+  HRR_MUTEX_UNLOCK(&g.mu);
+  return 0;
 }

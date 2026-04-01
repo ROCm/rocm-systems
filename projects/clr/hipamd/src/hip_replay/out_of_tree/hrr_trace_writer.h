@@ -41,11 +41,11 @@ void hrr_record_module_load(void* module, const void* image, size_t image_size);
 void hrr_record_module_unload(void* module);
 
 /* Record a kernel launch event.
- * kernel_name: mangled kernel function name
- * code_object_image/size: for arg introspection (can be NULL if unknown) */
+ * co_hash_lo/hi: XXH3-128 hash of the code object the function belongs to
+ *   (0,0 if unknown — replay will fall back to searching all modules).
+ * kernel_name: mangled kernel function name */
 void hrr_record_kernel_launch(const char* kernel_name,
-                              const void* code_object_image,
-                              size_t code_object_size,
+                              uint64_t co_hash_lo, uint64_t co_hash_hi,
                               uint32_t gx, uint32_t gy, uint32_t gz,
                               uint32_t bx, uint32_t by, uint32_t bz,
                               uint32_t shared_mem,
@@ -53,9 +53,9 @@ void hrr_record_kernel_launch(const char* kernel_name,
                               void** kernel_args);
 
 /* Record a kernel launch using the packed kernarg buffer (hipExtModuleLaunchKernel
- * 'extra' path). Uses arg offsets from parsed code object metadata to extract
- * each argument from the flat kernarg buffer. */
+ * 'extra' path). co_hash_lo/hi identifies the owning code object. */
 void hrr_record_kernel_launch_packed(const char* kernel_name,
+                                      uint64_t co_hash_lo, uint64_t co_hash_hi,
                                       uint32_t gx, uint32_t gy, uint32_t gz,
                                       uint32_t bx, uint32_t by, uint32_t bz,
                                       uint32_t shared_mem,
@@ -69,14 +69,21 @@ void hrr_record_device_sync(void);
 /* Record a stream synchronize event */
 void hrr_record_stream_sync(const void* stream);
 
-/* Function handle → kernel name registry.
- * Called from hipModuleGetFunction hook to associate the returned handle with
- * the kernel name. Used by hipExtModuleLaunchKernel to recover the name. */
-void hrr_register_function(const void* func_handle, const char* kernel_name);
+/* Function handle → (module, kernel name) registry.
+ * Called from hipModuleGetFunction hook.  module_handle is the hipModule_t
+ * that owns the function; it is used to recover the code object hash for the
+ * KERNEL_LAUNCH event so replay can select the exact code object. */
+void hrr_register_function(const void* func_handle, const void* module_handle,
+                            const char* kernel_name);
 
 /* Look up a kernel name by its hipFunction_t handle.
  * Returns the registered name, or NULL if unknown. */
 const char* hrr_lookup_function_name(const void* func_handle);
+
+/* Look up the code-object hash for a function.
+ * Fills hash_lo/hash_hi; returns 1 on success, 0 if not found (both set to 0). */
+int hrr_lookup_function_co_hash(const void* func_handle,
+                                 uint64_t* hash_lo, uint64_t* hash_hi);
 
 #ifdef __cplusplus
 }

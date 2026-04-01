@@ -31,9 +31,12 @@ static hipError_t (*real_hipMalloc)(void**, size_t) = NULL;
 static hipError_t (*real_hipExtMallocWithFlags)(void**, size_t, unsigned int) = NULL;
 static hipError_t (*real_hipMallocManaged)(void**, size_t, unsigned int) = NULL;
 static hipError_t (*real_hipMallocAsync)(void**, size_t, hipStream_t) = NULL;
+static hipError_t (*real_hipMallocFromPoolAsync)(void**, size_t, void*, hipStream_t) = NULL;
 static hipError_t (*real_hipFreeAsync)(void*, hipStream_t) = NULL;
 static hipError_t (*real_hipFree)(void*) = NULL;
 static hipError_t (*real_hipMemcpy)(void*, const void*, size_t, hipMemcpyKind) = NULL;
+static hipError_t (*real_hipMemcpyHtoD)(void*, const void*, size_t) = NULL;
+static hipError_t (*real_hipMemcpyDtoH)(void*, const void*, size_t) = NULL;
 static hipError_t (*real_hipMemset)(void*, int, size_t) = NULL;
 static hipError_t (*real_hipModuleLoadData)(hipModule_t*, const void*) = NULL;
 static hipError_t (*real_hipModuleUnload)(hipModule_t) = NULL;
@@ -49,19 +52,27 @@ static hipError_t (*real_hipInit)(unsigned int) = NULL;
 /* Explicit handle to the real HIP library.
  * RTLD_NEXT fails during early init if libamdhip64 isn't in the chain yet
  * (e.g. called from another library's constructor). We fall back to
- * dlopen("libamdhip64.so.6") to get the real functions. */
+ * dlopen("libamdhip64.so.N", RTLD_NOLOAD) to get the real functions without
+ * pulling in a second copy.  Try versioned names first (ROCm 7 = .so.7,
+ * ROCm 6 = .so.6) then the bare soname. */
 static void* s_hip_lib = NULL;
 
 static void* hrr_load_hip_sym(const char* name) {
   void* sym = dlsym(RTLD_NEXT, name);
   if (sym) return sym;
 
-  /* RTLD_NEXT returned NULL — libamdhip64 not yet in chain. Try explicit load. */
+  /* RTLD_NEXT returned NULL — libamdhip64 not yet in chain. Try explicit
+   * handle to whichever version is already mapped in this process.
+   * RTLD_NOLOAD: only find it if already mapped; don't pull in a new copy. */
   if (!s_hip_lib) {
-    s_hip_lib = dlopen("libamdhip64.so.6", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
-    if (!s_hip_lib)
-      s_hip_lib = dlopen("libamdhip64.so", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
-    /* RTLD_NOLOAD: only find it if already mapped; don't pull in a new copy. */
+    static const char* const candidates[] = {
+      "libamdhip64.so.7",
+      "libamdhip64.so.6",
+      "libamdhip64.so",
+      NULL
+    };
+    for (int i = 0; candidates[i] && !s_hip_lib; ++i)
+      s_hip_lib = dlopen(candidates[i], RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
   }
   if (s_hip_lib) return dlsym(s_hip_lib, name);
   return NULL;
@@ -138,6 +149,18 @@ hipError_t hipMallocAsync(void** ptr, size_t size, hipStream_t stream) {
   return ret;
 }
 
+hipError_t hipMallocFromPoolAsync(void** ptr, size_t size, void* mem_pool,
+                                   hipStream_t stream) {
+  LOAD_SYM(hipMallocFromPoolAsync);
+  ensure_init();
+  if (!real_hipMallocFromPoolAsync) return -1;
+  hipError_t ret = real_hipMallocFromPoolAsync(ptr, size, mem_pool, stream);
+  if (ret == 0 && hrr_writer_enabled()) {
+    hrr_record_malloc(*ptr, size, 0);
+  }
+  return ret;
+}
+
 hipError_t hipFreeAsync(void* ptr, hipStream_t stream) {
   LOAD_SYM(hipFreeAsync);
   if (hrr_writer_enabled()) {
@@ -161,6 +184,21 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
     hrr_record_memcpy(dst, src, sizeBytes, (unsigned int)kind, NULL);
   }
   FORWARD_OR_ERROR(hipMemcpy, (dst, src, sizeBytes, kind));
+}
+
+/* hipMemcpyHtoD / hipMemcpyDtoH — explicit-direction variants used by MIGraphX */
+hipError_t hipMemcpyHtoD(void* dst, const void* src, size_t sizeBytes) {
+  LOAD_SYM(hipMemcpyHtoD);
+  if (hrr_writer_enabled()) {
+    hrr_record_memcpy(dst, src, sizeBytes, 1 /* hipMemcpyHostToDevice */, NULL);
+  }
+  FORWARD_OR_ERROR(hipMemcpyHtoD, (dst, src, sizeBytes));
+}
+
+hipError_t hipMemcpyDtoH(void* dst, const void* src, size_t sizeBytes) {
+  LOAD_SYM(hipMemcpyDtoH);
+  /* DtoH copies don't need blob capture (no GPU→CPU data needed for replay) */
+  FORWARD_OR_ERROR(hipMemcpyDtoH, (dst, src, sizeBytes));
 }
 
 hipError_t hipMemset(void* dst, int value, size_t count) {
@@ -207,10 +245,10 @@ hipError_t hipModuleGetFunction(hipFunction_t* hfunc, hipModule_t hmod,
   LOAD_SYM(hipModuleGetFunction);
   if (!real_hipModuleGetFunction) return -1;
   hipError_t ret = real_hipModuleGetFunction(hfunc, hmod, name);
-  /* Always register the handle→name mapping regardless of recording state.
-   * Used by hipExtModuleLaunchKernel to recover the kernel name. */
+  /* Always register the handle→(module,name) mapping regardless of recording state.
+   * module handle is used to identify the code object for precise replay. */
   if (ret == 0 && hfunc && *hfunc && name) {
-    hrr_register_function(*hfunc, name);
+    hrr_register_function(*hfunc, hmod, name);
   }
   return ret;
 }
@@ -223,8 +261,10 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
   LOAD_SYM(hipModuleLaunchKernel);
 
   if (hrr_writer_enabled()) {
-    /* Kernel name not available without CLR internals; recorded as anonymous. */
-    hrr_record_kernel_launch(NULL, NULL, 0,
+    const char* kname = hrr_lookup_function_name(f);
+    uint64_t co_lo = 0, co_hi = 0;
+    hrr_lookup_function_co_hash(f, &co_lo, &co_hi);
+    hrr_record_kernel_launch(kname, co_lo, co_hi,
                              gridDimX, gridDimY, gridDimZ,
                              blockDimX, blockDimY, blockDimZ,
                              sharedMemBytes, hStream, kernelParams);
