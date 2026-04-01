@@ -186,7 +186,7 @@ TEST_F(flush_worker_test, different_pid_start_stop)
         bool still_running = worker_sync->is_running;
         bool exit_finished = worker_sync->exit_finished;
 
-        exit(still_running ? 1 : (exit_finished ? 2 : 0));
+        _exit(still_running ? 1 : (exit_finished ? 2 : 0));
     }
     else
     {

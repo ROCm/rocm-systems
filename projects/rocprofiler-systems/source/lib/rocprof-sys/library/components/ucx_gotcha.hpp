@@ -57,6 +57,9 @@ struct ucx_gotcha : tim::component::base<ucx_gotcha, void>
     static void start();
     static void stop();
 
+    static void pause();
+    static void resume();
+
     // Generic template audit function for UCX operations with void* parameters
     template <typename... Args>
     static void audit(const gotcha_data& _data, audit::incoming, Args...)
@@ -104,6 +107,9 @@ public:
     // Outgoing audit for return values
     static void audit(const gotcha_data&, audit::outgoing, void*);
     static void audit(const gotcha_data&, audit::outgoing, int);
+
+private:
+    static std::mutex s_mutex;
 };
 }  // namespace component
 

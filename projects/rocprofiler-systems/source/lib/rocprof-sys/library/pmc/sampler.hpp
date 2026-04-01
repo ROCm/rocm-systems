@@ -34,6 +34,9 @@ post_process();
 void set_state(State);
 
 void
+pause();
+
+void
 postfork_child_cleanup();
 
 void
