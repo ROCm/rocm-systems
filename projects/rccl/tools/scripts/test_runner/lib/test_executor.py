@@ -596,13 +596,7 @@ class TestExecutor:
             # global visibility on remote ranks (required for UCX PML)
             ld_preload = os.environ.get("LD_PRELOAD", "")
             if ld_preload:
-                mpi_args += f" -x LD_PRELOAD={ld_preload}"
-
-            # Pass LLVM_PROFILE_FILE to MPI ranks for code coverage (prevents default.profraw collision)
-            if self.mpi_impl == "mpich":
-                mpi_args += f" -env LLVM_PROFILE_FILE rccl_tests_%p_%m.profraw"
-            else:
-                mpi_args += f" -x LLVM_PROFILE_FILE=rccl_tests_%p_%m.profraw"
+                mpi_args += " " + env_fmt.format(key="LD_PRELOAD", value=ld_preload)
 
             # Build test command based on type
             if is_gtest:
