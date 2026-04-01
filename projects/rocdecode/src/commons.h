@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <iostream>
 #include <algorithm>
 #include <unistd.h>
+#include <stdint.h>
 #include <sys/syscall.h>
 
 #define TOSTR(X) std::to_string(X)
