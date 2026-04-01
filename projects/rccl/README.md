@@ -81,7 +81,7 @@ $ cd build
 $ cmake ..
 $ make -j 16      # Or some other suitable number of parallel jobs
 ```
-If you have already cloned, you can checkout the external submodules manually.
+If you have already cloned, you can check out the remaining git submodules manually (for example MSCCL++ and nlohmann/json under `ext-src/`). rocSHMEM is **not** a submodule; to build RCCL with rocSHMEM from CMake, set `ROCSHMEM_INSTALL_DIR` or `ROCSHMEM_SOURCE_DIR` as described under [rocSHMEM support](#rocshmem-support) below.
 ```shell
 $ git submodule update --init --recursive --depth=1
 ```
@@ -139,13 +139,20 @@ Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/r
   ```shell
   ./install.sh --rocshmem
   ```
-  If the rocSHMEM submodule is present (`ext-src/rocSHMEM`), it will be built and linked automatically. To use a pre-built rocSHMEM installation instead, set `ROCSHMEM_INSTALL_DIR` to the install prefix before running the script.
-- Using CMake:
+  By default (without `ROCSHMEM_INSTALL_DIR`), the script creates a sparse git worktree of the mono-repo at a pinned commit and passes that rocSHMEM tree to CMake as `ROCSHMEM_SOURCE_DIR`, so RCCL builds rocSHMEM via CMake `ExternalProject`. To use an already-built rocSHMEM instead, set `ROCSHMEM_INSTALL_DIR` to its install prefix before running the script.
+
+- **Manual CMake (without `install.sh`)**  
+  You need InfiniBand Verbs development libraries on the system (`libibverbs`; e.g. `rdma-core` / `libibverbs-dev` on Debian/Ubuntu). Then enable rocSHMEM and supply **either** a pre-built install prefix **or** a path to the rocSHMEM CMake source tree (the directory that contains rocSHMEM’s top-level `CMakeLists.txt`, e.g. `projects/rocshmem` in the rocm-systems mono-repo):
+
   ```shell
-  cmake -DENABLE_ROCSHMEM=ON ..
-  # Optional: use an existing rocSHMEM install
-  cmake -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=/path/to/rocshmem ..
+  # Option A — link against an existing rocSHMEM installation
+  cmake -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=/path/to/rocshmem/prefix ..
+
+  # Option B — build rocSHMEM from source as part of the RCCL build
+  cmake -DENABLE_ROCSHMEM=ON -DROCSHMEM_SOURCE_DIR=/path/to/rocshmem/source ..
   ```
+
+  If neither `ROCSHMEM_INSTALL_DIR` (with a successful `find_package(rocshmem_static)`) nor `ROCSHMEM_SOURCE_DIR` is set, configuration fails with an error directing you to set `ROCSHMEM_SOURCE_DIR` (or use `install.sh --rocshmem`).
 
 **Runtime behavior**
 

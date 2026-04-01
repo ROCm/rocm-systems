@@ -58,6 +58,9 @@ public:
     } }
     , m_post_process_impl{ [](void* ptr) { static_cast<T*>(ptr)->post_process(); } }
     , m_shutdown_impl{ [](void* ptr) { static_cast<T*>(ptr)->shutdown(); } }
+    , m_pause_impl{ [](void* ptr, int64_t timestamp) {
+        static_cast<T*>(ptr)->pause(timestamp);
+    } }
     {}
 
     /**
@@ -96,12 +99,21 @@ public:
      */
     void shutdown() { m_shutdown_impl(m_object); }
 
+    /**
+     * @brief Write a zero-valued sample for all devices.
+     *
+     * @param timestamp Current timestamp in nanoseconds.
+     * Calls the underlying collector's write_zero() method.
+     */
+    void pause(int64_t timestamp) { m_pause_impl(m_object, timestamp); }
+
 private:
     using setup_fn_t        = void (*)(void*);
     using config_fn_t       = void (*)(void*);
     using sample_fn_t       = void (*)(void*, int64_t);
     using post_process_fn_t = void (*)(void*);
     using shutdown_fn_t     = void (*)(void*);
+    using pause_fn_t        = void (*)(void*, int64_t);
 
     void*             m_object;            /**< Non-owning pointer to collector */
     setup_fn_t        m_setup_impl;        /**< Type-erased setup function */
@@ -109,6 +121,7 @@ private:
     sample_fn_t       m_sample_impl;       /**< Type-erased sample function */
     post_process_fn_t m_post_process_impl; /**< Type-erased post_process function */
     shutdown_fn_t     m_shutdown_impl;     /**< Type-erased shutdown function */
+    pause_fn_t        m_pause_impl;        /**< Type-erased pause function */
 };
 
 }  // namespace rocprofsys::pmc::collectors

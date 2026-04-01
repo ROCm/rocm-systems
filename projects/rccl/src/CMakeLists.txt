@@ -45,6 +45,7 @@ set(SRC_FILES
   src/device/rccl_metadata.h
   src/device/rccl_ptr.h
   src/device/sendrecv.h
+  src/device/hierarchical_ag_shuffle.h
   src/device/common.cu
   src/device/onerank.cu
   src/device/network/unpack/unpack_defs.h
@@ -889,7 +890,6 @@ target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
 target_link_libraries(rccl PRIVATE   dl)
-target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 target_link_libraries(rccl PRIVATE fmt::fmt-header-only)
 if(ENABLE_MSCCLPP)
   add_mscclpp_targets()
