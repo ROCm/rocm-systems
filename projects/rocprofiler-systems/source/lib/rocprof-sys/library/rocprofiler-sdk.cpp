@@ -85,7 +85,7 @@ client_data* tool_data = new client_data{};
 
 namespace
 {
-using tool_agent_vec_t = std::vector<tool_agent>;
+using tool_agent_vec_t                         = std::vector<tool_agent>;
 std::shared_ptr<roctx_client<>> g_roctx_client = {};
 
 std::shared_ptr<roctx_client<>>
