@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 set(OCLTST_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(OCLTST_INSTALL_DIR "bin")
+set(OCLTST_INSTALL_DIR ${CMAKE_INSTALL_BINDIR})
 
 find_package(OpenGL)
 find_package(GLEW)
