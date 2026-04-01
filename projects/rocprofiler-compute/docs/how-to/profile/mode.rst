@@ -315,7 +315,7 @@ Examples:
     ├── results_pmc_perf_0.csv
     ├── results_pmc_perf_1.csv
     ├── results_pmc_perf_2.csv
-    ├── results_SQ_LEVEL_WAVES.csv
+    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
     ├── roofline.csv
     └── sysinfo.csv
 
@@ -363,7 +363,7 @@ on available output formats and when the final ``pmc_perf.csv`` is created.
     ├── results_pmc_perf_0.csv
     ├── results_pmc_perf_1.csv
     ├── results_pmc_perf_2.csv
-    ├── results_SQ_LEVEL_WAVES.csv
+    ├── results_pmc_perf_SQ_LEVEL_WAVES.csv
     ├── roofline.csv
     └── sysinfo.csv
 
@@ -383,7 +383,7 @@ of raw performance counter data produced by the underlying
 
 * ``rocpd`` format (default):
    * Instructs ROCprofiler-SDK to write raw performance counter data in rocpd (SQLite) format.
-   * The rocpd database files are converted to CSV files (``results_pmc_perf_0.csv``, ``results_SQ_*.csv``, etc.) for each profiling run, after which the database files are removed.
+   * The rocpd database files are converted to CSV files (``results_pmc_perf_0.csv``, ``results_pmc_perf_SQ_*.csv``, etc.) for each profiling run, after which the database files are removed.
    * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
    * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
