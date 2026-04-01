@@ -47,16 +47,9 @@ def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
+@pytest.mark.multi_gpu(2)
 @pytest.mark.run_if_gpu_category("not apu or instinct")
 class TestGPUConnect(RocprofsysTest):
-    @pytest.fixture(autouse=True)
-    def _require_multi_gpu(self, gpu_info):
-        """transferBench requires GPU-to-GPU transfers, skip with fewer than 2 GPUs."""
-        if gpu_info.device_count < 2:
-            pytest.skip(
-                f"transferBench requires multiple GPUs (found {gpu_info.device_count})"
-            )
-
     """Tests for GPU connectivity tests."""
 
     @pytest.mark.parametrize(

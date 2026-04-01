@@ -142,21 +142,32 @@ foreach(
         continue()
     endif()
 
+    # The output directory strips "-run" from the test name
+    # (e.g., "binary-rewrite-run" outputs to "binary-rewrite/")
+    string(REGEX REPLACE "-run$" "" _OUTPUT_SUBDIR "${_PARENT_TEST}")
+
+    # Binary-rewrite tests have a cleanup fixture that deletes the output directory,
+    # so validation must run before cleanup by requiring the same fixture.
+    set(_FIXTURES "rocprofsys-global-tmp-files")
+    if("${_OUTPUT_SUBDIR}" MATCHES "-binary-rewrite$")
+        list(APPEND _FIXTURES "${_OUTPUT_SUBDIR}-fixture")
+    endif()
+
     foreach(_COUNTER ${ROCPROFSYS_COUNTER_NAMES_ARG})
         add_test(
             NAME validate-${_PARENT_TEST}-rocprof-device-${_COUNTER}-exists
             COMMAND
-                sh -c
-                "for i in {0..9}; do test -e ${_rocprof_output_dir}/${_PARENT_TEST}/rocprof-device-\${i}-${_COUNTER}.txt && exit 0; done; exit 1"
+                bash -c
+                "for i in {0..9}; do test -e ${_rocprof_output_dir}/${_OUTPUT_SUBDIR}/rocprof-device-\${i}-${_COUNTER}.txt && exit 0; done; exit 1"
         )
 
         set_tests_properties(
             validate-${_PARENT_TEST}-rocprof-device-${_COUNTER}-exists
             PROPERTIES
                 DEPENDS "${_PARENT_TEST}"
-                LABELS "rocprofiler;validate"
+                LABELS "rocprofiler;validate;rocm"
                 TIMEOUT 30
-                FIXTURES_REQUIRED rocprofsys-global-tmp-files
+                FIXTURES_REQUIRED "${_FIXTURES}"
         )
     endforeach()
 endforeach()

@@ -219,10 +219,10 @@ class TestTransposeROCProfiler(RocprofsysTest):
         self.assert_regex(result)
         # Counter file device ID depends on GPU topology, search across IDs 0-9
         for pattern in gpu_info.expected_counter_files:
-            matches = list(result.output_dir.glob(pattern))
-            assert (
-                len(matches) > 0,
-            ), f"No counter file matching '{pattern}' found in {result.output_dir}"
+            if not any(result.output_dir.glob(pattern)):
+                pytest.fail(
+                    f"No counter file matching '{pattern}' found in {result.output_dir}"
+                )
         if mode == "sampling":
             self.assert_perfetto(
                 result,
