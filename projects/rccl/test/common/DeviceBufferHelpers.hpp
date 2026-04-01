@@ -6,8 +6,6 @@
 
 #ifndef DEVICE_BUFFER_HELPERS_HPP
 #define DEVICE_BUFFER_HELPERS_HPP
-#ifndef DEVICE_BUFFER_HELPERS_HPP
-#define DEVICE_BUFFER_HELPERS_HPP
 
 #include "nccl.h"
 #include <cmath>
