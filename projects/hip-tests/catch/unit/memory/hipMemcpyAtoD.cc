@@ -29,7 +29,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemcpyAtoD_Basic) {
+HIP_TEST_CASE(Unit_hipMemcpyAtoD_Basic) {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;

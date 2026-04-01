@@ -43,7 +43,7 @@ static void hostNodeCallback(void* data) {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE(Unit_hipLaunchHostFunc_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipLaunchHostFunc_Negative_Parameters) {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
   hipGraph_t graph{nullptr};
@@ -73,7 +73,7 @@ TEST_CASE(Unit_hipLaunchHostFunc_Negative_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE(Unit_hipLaunchHostFunc_Positive_Functional) {
+HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Functional) {
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, sizeof(float));
   LinearAllocGuard<float> B_h(LinearAllocs::malloc, sizeof(float));
   LinearAllocGuard<float> A_d(LinearAllocs::hipMalloc, sizeof(float));
@@ -126,7 +126,7 @@ static void thread_func_pos(hipStream_t* stream, hipHostFn_t fn, float** data){
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE(Unit_hipLaunchHostFunc_Positive_Thread) {
+HIP_TEST_CASE(Unit_hipLaunchHostFunc_Positive_Thread) {
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, sizeof(float));
   LinearAllocGuard<float> B_h(LinearAllocs::malloc, sizeof(float));
   LinearAllocGuard<float> A_d(LinearAllocs::hipMalloc, sizeof(float));
@@ -183,7 +183,7 @@ static void set_vector(void* args) {
 }
 }  // namespace
 
-TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
+HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
   constexpr int numOfBlocks = 1024;
   constexpr int threadsPerBlock = 1024;
   constexpr size_t arraySize = 1U << 20;  // 1,048,576

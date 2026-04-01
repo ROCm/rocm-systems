@@ -33,7 +33,7 @@ constexpr std::array<hipSharedMemConfig, 3> kSharedMemConfigs{
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipFuncSetSharedMemConfig_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipFuncSetSharedMemConfig_Positive_Basic) {
   const auto shared_mem_config =
       GENERATE(from_range(begin(kSharedMemConfigs), end(kSharedMemConfigs)));
 
@@ -58,7 +58,7 @@ TEST_CASE(Unit_hipFuncSetSharedMemConfig_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipFuncSetSharedMemConfig_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipFuncSetSharedMemConfig_Negative_Parameters) {
   SECTION("func == nullptr") {
     HIP_CHECK_ERROR(hipFuncSetSharedMemConfig(nullptr, hipSharedMemBankSizeDefault),
                     hipErrorInvalidDeviceFunction);
@@ -83,7 +83,7 @@ TEST_CASE(Unit_hipFuncSetSharedMemConfig_Negative_Parameters) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported) {
+HIP_TEST_CASE(Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported) {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("This is an AMD specific test");
   return;

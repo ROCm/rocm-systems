@@ -60,6 +60,6 @@ __device__ void double_precision_intrinsics() {
 
 __global__ void compileDoublePrecisionIntrinsics(int) { double_precision_intrinsics(); }
 
-TEST_CASE(Unit_DoublePrecisionIntrinsics) {
+HIP_TEST_CASE(Unit_DoublePrecisionIntrinsics) {
   hipLaunchKernelGGL(compileDoublePrecisionIntrinsics, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, 1);
 }

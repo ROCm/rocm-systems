@@ -26,7 +26,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipInit_Positive) {
+HIP_TEST_CASE(Unit_hipInit_Positive) {
   HIP_CHECK(hipInit(0));
 
   // Verify that HIP runtime is successfully initialized by calling a HIP API
@@ -48,7 +48,7 @@ TEST_CASE(Unit_hipInit_Positive) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipInit_Negative) {
+HIP_TEST_CASE(Unit_hipInit_Negative) {
   // If initialization is attempted with invalid flag, error shall be reported
   unsigned int invalid_flag = 1;
   HIP_CHECK_ERROR(hipInit(invalid_flag), hipErrorInvalidValue);

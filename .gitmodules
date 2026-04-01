@@ -74,9 +74,6 @@
 	path = projects/rocprofiler-systems/external/dyninst
 	url = https://github.com/ROCm/dyninst.git
 	branch = dyninst_13
-[submodule "projects/rocprofiler-systems/external/PTL"]
-	path = projects/rocprofiler-systems/external/PTL
-	url = https://github.com/jrmadsen/PTL.git
 [submodule "projects/rocprofiler-systems/external/kokkos"]
 	path = projects/rocprofiler-systems/examples/lulesh/external/kokkos
 	url = https://github.com/kokkos/kokkos.git
@@ -112,3 +109,6 @@
 [submodule "projects/rocprofiler-systems/external/onetbb"]
 	path = projects/rocprofiler-systems/external/onetbb
 	url = https://github.com/uxlfoundation/oneTBB.git
+[submodule "projects/rocprofiler-compute/src/vendored/pyyaml"]
+	path = projects/rocprofiler-compute/src/vendored/pyyaml
+	url = https://github.com/yaml/pyyaml.git

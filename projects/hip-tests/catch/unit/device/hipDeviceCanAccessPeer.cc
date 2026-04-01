@@ -27,7 +27,7 @@
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceCanAccessPeer_positive) {
+HIP_TEST_CASE(Unit_hipDeviceCanAccessPeer_positive) {
   int canAccessPeer = 0;
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
@@ -71,7 +71,7 @@ TEST_CASE(Unit_hipDeviceCanAccessPeer_positive) {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceCanAccessPeer_negative) {
+HIP_TEST_CASE(Unit_hipDeviceCanAccessPeer_negative) {
   int canAccessPeer = 0;
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {

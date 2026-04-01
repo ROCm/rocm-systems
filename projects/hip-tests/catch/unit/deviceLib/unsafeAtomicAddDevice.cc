@@ -30,7 +30,7 @@ void unsafeAdd_d(double *p, double v)
 )"};
 
 
-TEST_CASE(Unit_unsafeAtomicAdd) {
+HIP_TEST_CASE(Unit_unsafeAtomicAdd) {
   using namespace std;
   int device = 0;
   hipDeviceProp_t props;

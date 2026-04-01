@@ -9,7 +9,7 @@
 texture<float, 2, hipReadModeElementType> tex;
 
 // Test for hipTexRefSetMipmappedArray and hipTexRefGetMipmappedArray, including error handling
-TEST_CASE(Unit_hipTexRefSetGetMipmappedArray) {
+HIP_TEST_CASE(Unit_hipTexRefSetGetMipmappedArray) {
   CHECK_IMAGE_SUPPORT;
 
   // Retrieve the texture reference for our symbol

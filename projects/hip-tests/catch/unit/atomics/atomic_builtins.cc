@@ -64,7 +64,7 @@ void AtomicBuiltinsRTCWrapper(const char* program_source, int expected_errors_nu
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_AtomicBuiltins_Negative_Parameters_RTC) {
+HIP_TEST_CASE(Unit_AtomicBuiltins_Negative_Parameters_RTC) {
   AtomicBuiltinsRTCWrapper(kBuiltinStore, 5, 5);
   AtomicBuiltinsRTCWrapper(kBuiltinLoad, 4, 4);
   AtomicBuiltinsRTCWrapper(kBuiltinCompExWeak, 5, 7);

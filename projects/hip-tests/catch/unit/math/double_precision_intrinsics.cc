@@ -23,7 +23,7 @@
   }
 
 #define MATH_UNARY_DP_TEST_DEF_IMPL(func_name, ref_func, validator_builder)                        \
-  TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                      \
+  HIP_TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                     \
     UnaryDoublePrecisionTest(func_name##_kernel, ref_func, validator_builder);                     \
   }
 
@@ -90,7 +90,7 @@ MATH_UNARY_DP_TEST_DEF_IMPL(__dsqrt_rn, static_cast<double (*)(double)>(std::sqr
   }
 
 #define MATH_BINARY_DP_TEST_DEF_IMPL(func_name, ref_func, validator_builder)                       \
-  TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                      \
+  HIP_TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                     \
     BinaryFloatingPointTest(func_name##_kernel, ref_func, validator_builder);                      \
   }
 
@@ -196,7 +196,7 @@ MATH_BINARY_DP_TEST_DEF_IMPL(__ddiv_rn, __ddiv_rn_ref, EqValidatorBuilderFactory
   }
 
 #define MATH_TERNARY_DP_TEST_DEF_IMPL(func_name, ref_func, validator_builder)                      \
-  TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                      \
+  HIP_TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                     \
     TernaryFloatingPointTest(func_name##_kernel, ref_func, validator_builder);                     \
   }
 

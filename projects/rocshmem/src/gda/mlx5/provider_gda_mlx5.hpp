@@ -25,11 +25,9 @@
 #ifndef LIBRARY_SRC_GDA_MLX5_GDA_PROVIDER_HPP_
 #define LIBRARY_SRC_GDA_MLX5_GDA_PROVIDER_HPP_
 
-extern "C" {
-#include "gda/mlx5/mlx5dv.h"
-}
-
 #include "gda/endian.hpp"
+#include "gda/mlx5/mlx5dv_core.hpp"
+#include "gda/mlx5/mlx5_ifc_core.hpp"
 
 namespace rocshmem {
 
@@ -203,7 +201,8 @@ public:
         raddr, rkey,
         laddr, lkey, byte_count,
         send_inline)} { }
-} __attribute__((__packed__)) __attribute__((__aligned__(64)));
+} __attribute__((__aligned__(64)));
+
 static_assert(sizeof(gda_mlx5_wqe) == sizeof(gda_mlx5_wqe_segment[4]),
               "mlx5 WQEs have up to 4 segments");
 
@@ -228,34 +227,39 @@ union gda_mlx5_db_register {
   __device__ constexpr inline gda_mlx5_db_register(const gda_mlx5_wqe& wqe)
     : gda_mlx5_db_register{wqe.ctrl} { }
 } __attribute__((__packed__)) __attribute__((__aligned__(8)));
+static_assert(sizeof(gda_mlx5_db_register) == sizeof(uint64_t),
+              "mlx5 doorbells registers must be written as an atomic 64-bit write");
 
 /* BlueFlame buffer size should technically be checked, but it seems to always be 256B
  * BlueFlame buffer "must be written in chunks of DWORDs or multiple DWORDs"
  * WQEs need to be aligned to WQEBB (64B), which implies that the BlueFlame buffer is as well?
+ * given that a UAR page is 4 KiB and that the array of BlueFlame buffers
+ * begins at offset 0x800 in the UAR page, BlueFlame buffers *should* be aligned to 256 bytes
  * first 8 bytes is the doorbell register */
 union gda_mlx5_bf_buffer {
   gda_mlx5_db_register db_reg;
-  uint8_t              data[256];
-  __be32               dword[64];
-} __attribute__((__packed__)) __attribute__((__aligned__(64)));
-static_assert(sizeof(gda_mlx5_bf_buffer) == 256, "mlx5 BlueFlame buffers are 256 bytes");
+  uint8_t              data[MLX5_DB_BLUEFLAME_BUFFER_SIZE];
+  __be32               dword[MLX5_DB_BLUEFLAME_BUFFER_SIZE / sizeof(__be32)];
+} __attribute__((__packed__)) __attribute__((__aligned__(alignof(gda_mlx5_wqe))));
+static_assert(sizeof(gda_mlx5_bf_buffer) == MLX5_DB_BLUEFLAME_BUFFER_SIZE,
+              "mlx5 BlueFlame buffers are 256 bytes");
 
 /* BlueFlame buffers are paired into two halves that should be written alternately
- * I think this only matters when using the BlueFlame mechanism, which requires Write Combining
+ * This only matters when using the BlueFlame mechanism, which requires Write Combining
  * If just ringing the doorbell, we can write to the same half */
 struct gda_mlx5_doorbell {
-  gda_mlx5_bf_buffer bf[2];
-} __attribute__((__packed__)) __attribute__((__aligned__(64)));
-static_assert(sizeof(gda_mlx5_doorbell) == 512, "mlx5 BlueFlame buffer pairs are 512 bytes");
+  gda_mlx5_bf_buffer bf[1];
+} __attribute__((__packed__)) __attribute__((__aligned__(alignof(gda_mlx5_bf_buffer))));
+static_assert(sizeof(gda_mlx5_doorbell) == sizeof(gda_mlx5_bf_buffer[1]),
+              "mlx5 non-cached doorbells are a single BlueFlame buffer");
 
 template <typename T>
 struct gda_mlx5_device_queue {
   T* buf;
   __be32* dbrec;
-  uint32_t lock;
 
   __host__ inline gda_mlx5_device_queue(T* buf, __be32* dbrec)
-    : buf{buf}, dbrec{dbrec}, lock{0} { }
+    : buf{buf}, dbrec{dbrec} { }
 
   __host__ inline gda_mlx5_device_queue() : gda_mlx5_device_queue{nullptr, nullptr} { }
 };
@@ -268,28 +272,85 @@ struct gda_mlx5_device_cq : public gda_mlx5_device_queue<mlx5_cqe64> {
 struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
   gda_mlx5_doorbell* db;
   uint64_t post;
-  uint32_t bf_offset;
+  uint32_t lock;
   uint16_t depth;
-  uint16_t tail;
 
   __host__ inline gda_mlx5_device_sq(gda_mlx5_wqe* buf, __be32* dbrec,
                                      gda_mlx5_doorbell* db, uint16_t depth)
     : gda_mlx5_device_queue{buf, dbrec},
-      db{db}, post{0}, bf_offset{0}, depth{depth}, tail{0} { }
+      db{db}, post{0}, lock{0}, depth{depth} { }
 
   __host__ inline gda_mlx5_device_sq() : gda_mlx5_device_sq{nullptr, nullptr, nullptr, 0} { }
 
-  __device__ inline gda_mlx5_bf_buffer* swap_bf_buffer() {
-    uint32_t prior_offset = bf_offset;
-    bf_offset ^= 0x1;
-    return &db->bf[prior_offset];
+  __device__ inline gda_mlx5_bf_buffer* bf_buffer() {
+    return &db->bf[0];
+  }
+};
+
+/*
+ * QP layout:
+ * [ [ WQ: WQE | WQE | WQE | ... | WQE ] : 64 * 2^N
+ *   [ CQ: CQE ]                         : 64
+ *   [ padding - to AMDGPU cache line  ] : 64
+ *   [ padding - to page table - 256   ] : 3712 - max(4096 - 64 * 2^N, 0)
+ *   [ SQ DBREC ]                        : 8
+ *   [ padding - to AMDGPU cache line  ] : 120
+ *   [ CQ DBREC ]                        : 8
+ *   [ padding - to AMDGPU cache line  ] : 120
+ * ]
+ * Total size: 4096 if sq_depth < 64, else 4096 + 64 * 2^N
+ */
+struct mlx5_devx_qp {
+  ibv_context*      ctx;
+  mlx5dv_devx_obj*  devx_cq_obj;
+  mlx5dv_devx_obj*  devx_qp_obj;
+  mlx5dv_devx_uar*  uar;
+  mlx5dv_devx_umem* umem;
+  void*             cq;
+  void*             sq;
+  uint32_t*         cq_dbrec;
+  uint32_t*         qp_dbrec;
+  uint32_t          cqn;
+  uint32_t          qpn;
+  uint32_t          cq_depth;
+  uint16_t          sq_depth;
+
+  void dump(int conn_num);
+
+  inline size_t cq_offset() {
+    return reinterpret_cast<uint8_t*>(cq) - reinterpret_cast<uint8_t*>(sq);
+  }
+  inline size_t wq_offset() {
+    return reinterpret_cast<uint8_t*>(sq) - reinterpret_cast<uint8_t*>(sq);
+  }
+  inline size_t cq_dbrec_offset() {
+    return reinterpret_cast<uint8_t*>(cq_dbrec) - reinterpret_cast<uint8_t*>(sq);
+  }
+  inline size_t qp_dbrec_offset() {
+    return reinterpret_cast<uint8_t*>(qp_dbrec) - reinterpret_cast<uint8_t*>(sq);
   }
 };
 
 struct mlx5dv_funcs_t {
   int (*init_obj)(struct mlx5dv_obj *obj, uint64_t obj_type);
+  struct ibv_context * (*open_device)(struct ibv_device *device, struct mlx5dv_context_attr *attr);
+  struct mlx5dv_devx_obj * (*devx_obj_create)(
+      struct ibv_context *context, const void *in, size_t inlen, void *out, size_t outlen);
+  int (*devx_obj_modify)(
+      struct mlx5dv_devx_obj *obj, const void *in, size_t inlen, void *out, size_t outlen);
+  int (*devx_obj_destroy)(struct mlx5dv_devx_obj *obj);
+  struct mlx5dv_devx_umem * (*devx_umem_reg_ex)(
+      struct ibv_context *ctx, struct mlx5dv_devx_umem_in *umem_in);
+  int (*devx_umem_dereg)(struct mlx5dv_devx_umem *umem);
+  struct mlx5dv_devx_uar * (*devx_alloc_uar)(struct ibv_context *context, uint32_t flags);
+  void (*devx_free_uar)(struct mlx5dv_devx_uar *devx_uar);
+  int (*devx_query_eqn)(struct ibv_context *context, uint32_t vector, uint32_t *eqn);
+
+  int create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx, struct ibv_pd* pd, uint16_t sq_depth);
+  int modify_qp(mlx5_devx_qp& qp, struct ibv_qp_attr *attr, int attr_mask, uint32_t gid_type);
+  int destroy_qp(mlx5_devx_qp& qp);
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
 #endif  //LIBRARY_SRC_GDA_MLX5_GDA_PROVIDER_HPP_

@@ -38,7 +38,7 @@ bool hasUniqueStreamIds(const std::vector<unsigned long long>& streamIds) {
 /**
  *  @brief Pass uninitialized stream and id as nullptr to check if the API behaves as expected.
  */
-TEST_CASE(Unit_hipStreamGetId_Negative) {
+HIP_TEST_CASE(Unit_hipStreamGetId_Negative) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   SECTION("Null Pointer") {
@@ -51,7 +51,7 @@ TEST_CASE(Unit_hipStreamGetId_Negative) {
  *  @brief Pass null stream, legacy stream and streamperthread, check the API behaves as expected.
  *  Also, check the stream id generated is not same for any two streams.
  */
-TEST_CASE(Unit_hipStreamGetId_Basic) {
+HIP_TEST_CASE(Unit_hipStreamGetId_Basic) {
   hipStream_t stream1, stream2;
   unsigned long long id1, id2, id3, id4, id5;
   SECTION("Unique Stream Id") {
@@ -86,7 +86,7 @@ TEST_CASE(Unit_hipStreamGetId_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipStreamGetId_WithDifferentStreamCreateAPIs) {
+HIP_TEST_CASE(Unit_hipStreamGetId_WithDifferentStreamCreateAPIs) {
   hipStream_t stream_1 = nullptr, stream_2 = nullptr;
   unsigned long long streamId_1 = 0, streamId_2 = 0;
 
@@ -148,7 +148,7 @@ void launchFunction() {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipStreamGetId_MultipleThreads) {
+HIP_TEST_CASE(Unit_hipStreamGetId_MultipleThreads) {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
   INFO("Number of threads supported : " << threadsSupported);
 
@@ -179,7 +179,7 @@ TEST_CASE(Unit_hipStreamGetId_MultipleThreads) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipStreamGetId_MultiDevice) {
+HIP_TEST_CASE(Unit_hipStreamGetId_MultiDevice) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -218,7 +218,7 @@ TEST_CASE(Unit_hipStreamGetId_MultiDevice) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipStreamGetId_MultiProcess) {
+HIP_TEST_CASE(Unit_hipStreamGetId_MultiProcess) {
   auto pid = fork();
   REQUIRE(pid >= 0);
 

@@ -46,7 +46,7 @@ __global__ void test_gws(int* buf, size_t buf_size, unsigned long long* tmp_buf,
   }
 }
 
-TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
+HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Basic) {
   // Use default device for validating the test
   int device;
   HIP_CHECK(hipGetDevice(&device));

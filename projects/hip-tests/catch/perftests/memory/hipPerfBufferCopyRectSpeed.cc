@@ -203,7 +203,7 @@ static bool hipPerfBufferCopyRectSpeed_test(int p_tests) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfBufferCopyRectSpeed_test) {
+HIP_TEST_CASE(Perf_hipPerfBufferCopyRectSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

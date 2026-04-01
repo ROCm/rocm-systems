@@ -58,7 +58,7 @@ class Experiment {
       }
     }
   }
-  
+
   template<typename... Args, typename F = void (*)(Args...)>
   void do_warmup(const uint64_t iterations, const uint64_t dispatch_per_stream, F func, Args... args) const {
     for (uint64_t i = 0; i < iterations; i++) {
@@ -95,7 +95,7 @@ class Experiment {
   std::vector<hipStream_t> streams_;
 };
 
-TEST_CASE(Perf_hipPerfMultiStreamKernelLaunch) {
+HIP_TEST_CASE(Perf_hipPerfMultiStreamKernelLaunch) {
   constexpr uint64_t KERNEL_SLEEP_US = 100;
   constexpr uint64_t KERNEL_DISPATCHES_PER_STREAM = 10;
   constexpr uint64_t WARMUP_KERNEL_DISPATCHES_PER_STREAM = 10;

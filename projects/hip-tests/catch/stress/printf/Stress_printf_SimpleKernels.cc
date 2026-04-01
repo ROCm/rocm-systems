@@ -577,7 +577,7 @@ bool test_synchronized_printf(uint32_t num_blocks, uint32_t threads_per_block,
 #endif
 }  // namespace hipPrintfStressTest
 
-TEST_CASE(Stress_printf_ConstStr) {
+HIP_TEST_CASE(Stress_printf_ConstStr) {
 #ifdef __linux__
   printf("Test: Stress_printf_ConstStr\n");
   bool TestPassed = true;
@@ -593,7 +593,7 @@ TEST_CASE(Stress_printf_ConstStr) {
 #endif
 }
 
-TEST_CASE(Stress_printf_IfElseConditionalStr) {
+HIP_TEST_CASE(Stress_printf_IfElseConditionalStr) {
 #ifdef __linux__
   printf("Test: Stress_printf_IfElseConditionalStr\n");
   bool TestPassed = true;
@@ -609,7 +609,7 @@ TEST_CASE(Stress_printf_IfElseConditionalStr) {
 #endif
 }
 
-TEST_CASE(Stress_printf_IfConditionalStr) {
+HIP_TEST_CASE(Stress_printf_IfConditionalStr) {
 #ifdef __linux__
   printf("Test: Stress_printf_IfConditionalStr\n");
   bool TestPassed = true;
@@ -625,7 +625,7 @@ TEST_CASE(Stress_printf_IfConditionalStr) {
 #endif
 }
 
-TEST_CASE(Stress_printf_VariableStr) {
+HIP_TEST_CASE(Stress_printf_VariableStr) {
 #ifdef __linux__
   printf("Test: Stress_printf_VariableStr\n");
   bool TestPassed = true;
@@ -640,7 +640,7 @@ TEST_CASE(Stress_printf_VariableStr) {
 #endif
 }
 
-TEST_CASE(Stress_printf_DependentCalc) {
+HIP_TEST_CASE(Stress_printf_DependentCalc) {
 #ifdef __linux__
   printf("Test: Stress_printf_DependentCalc\n");
   bool TestPassed = true;
@@ -655,7 +655,7 @@ TEST_CASE(Stress_printf_DependentCalc) {
 #endif
 }
 
-TEST_CASE(Stress_printf_DecimalStr) {
+HIP_TEST_CASE(Stress_printf_DecimalStr) {
 #ifdef __linux__
   printf("Test: Stress_printf_DecimalStr\n");
   bool TestPassed = true;
@@ -670,7 +670,7 @@ TEST_CASE(Stress_printf_DecimalStr) {
 #endif
 }
 
-TEST_CASE(Stress_printf_SharedMem) {
+HIP_TEST_CASE(Stress_printf_SharedMem) {
 #ifdef __linux__
   printf("Test: Stress_printf_SharedMem\n");
   bool TestPassed = true;
@@ -685,7 +685,7 @@ TEST_CASE(Stress_printf_SharedMem) {
 #endif
 }
 
-TEST_CASE(Stress_printf_SynchronizedPrintf) {
+HIP_TEST_CASE(Stress_printf_SynchronizedPrintf) {
 #ifdef __linux__
   printf("Test: Stress_printf_SynchronizedPrintf\n");
   bool TestPassed = true;
@@ -699,7 +699,7 @@ TEST_CASE(Stress_printf_SynchronizedPrintf) {
 #endif
 }
 
-TEST_CASE(Stress_printf_AtomicCalc) {
+HIP_TEST_CASE(Stress_printf_AtomicCalc) {
 #ifdef __linux__
   printf("Test: Stress_printf_AtomicCalc\n");
   bool TestPassed = true;

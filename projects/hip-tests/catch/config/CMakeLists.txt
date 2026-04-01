@@ -37,15 +37,17 @@ set(HIP_TEST_PARAMETERS_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_test_parameters.h
 file(GLOB HIP_TESTS_GROUP_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/*.yaml)
 file(GLOB HIP_TESTS_UNIT_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
 
-add_custom_target(check_hip_tests_config ALL
-    COMMAND "${Python3_EXECUTABLE}" "${CONFIG_CHECK_SCRIPT}" "${HIP_TESTS_CONFIGS_DIR}"
-    COMMENT "Validating hip-tests YAML configurations"
-)
+if(ENABLE_YAML_TAGS)
+    add_custom_target(check_hip_tests_config ALL
+        COMMAND "${Python3_EXECUTABLE}" "${CONFIG_CHECK_SCRIPT}" "${HIP_TESTS_CONFIGS_DIR}"
+        COMMENT "Validating hip-tests YAML configurations"
+    )
 
-add_custom_target(check_hip_tests_sources ALL
-    COMMAND "${Python3_EXECUTABLE}" "${SOURCES_CHECK_SCRIPT}" "${HIP_TESTS_CONFIGS_DIR}" "${CMAKE_SOURCE_DIR}"
-    COMMENT "Checking hip-tests sources for missing YAML configurations"
-)
+    add_custom_target(check_hip_tests_sources ALL
+        COMMAND "${Python3_EXECUTABLE}" "${SOURCES_CHECK_SCRIPT}" "${HIP_TESTS_CONFIGS_DIR}" "${CMAKE_SOURCE_DIR}"
+        COMMENT "Checking hip-tests sources for missing YAML configurations"
+    )
+endif()
 
 # Generate both test definitions and parameter headers from YAML
 # - hip_tests_config.hh: TEST_CASE macros with tags
@@ -65,5 +67,7 @@ add_custom_command(
 
 # Ensure the generated header files are built before the main target
 add_custom_target(hip_tests_config DEPENDS ${HIP_TESTS_CONFIG_HEADER} ${HIP_TEST_PARAMETERS_HEADER})
-add_dependencies(hip_tests_config check_hip_tests_config check_hip_tests_sources)
+if(ENABLE_YAML_TAGS)
+    add_dependencies(hip_tests_config check_hip_tests_config check_hip_tests_sources)
+endif()
 set_source_files_properties(${HIP_TESTS_CONFIG_HEADER} ${HIP_TEST_PARAMETERS_HEADER} PROPERTIES GENERATED TRUE)

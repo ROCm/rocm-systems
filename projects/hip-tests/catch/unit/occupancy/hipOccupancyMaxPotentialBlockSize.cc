@@ -19,7 +19,7 @@ static __global__ void f1(float* a) { *a = 1.0; }
 
 template <typename T> static __global__ void f2(T* a) { *a = 1; }
 
-TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters) {
   // Common negative tests
   MaxPotentialBlockSizeNegative([](int* gridSize, int* blockSize) {
     return hipOccupancyMaxPotentialBlockSize(gridSize, blockSize, f1, 0, 0);
@@ -38,7 +38,7 @@ TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters) {
 #endif
 }
 
-TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation) {
+HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation) {
   hipDeviceProp_t devProp;
 
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
@@ -61,7 +61,7 @@ TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation) {
   }
 }
 
-TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_TemplateInvocation) {
+HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialBlockSize_Positive_TemplateInvocation) {
   hipDeviceProp_t devProp;
 
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));

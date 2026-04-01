@@ -235,7 +235,7 @@ void hipPerfDeviceConcurrency::checkData(uint* ptr) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfDeviceConcurrency) {
+HIP_TEST_CASE(Perf_hipPerfDeviceConcurrency) {
   hipPerfDeviceConcurrency deviceConcurrency;
   deviceConcurrency.open();
   int nGpu = deviceConcurrency.getNumGpus();

@@ -164,9 +164,9 @@ class GLBufferWithData {
   GLuint vbo_ = 0;
   size_t size_;
 };
- 
+
 // Use GLImageObject from gl_interop_common.hh for texture interop tests
- 
+
 /**
  * @brief Result of a buffer interop cycle operation.
  */
@@ -221,7 +221,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   result.success = true;
   return result;
 }
- 
+
  /**
   * @brief Helper to verify HIP GL device enumeration works.
   */
@@ -229,12 +229,12 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    const int device_count = HipTest::getDeviceCount();
    unsigned int gl_device_count = 0;
    std::vector<int> gl_devices(device_count, -1);
- 
+
    hipError_t err = hipGLGetDevices(&gl_device_count, gl_devices.data(),
                                     device_count, hipGLDeviceListAll);
    return (err == hipSuccess && gl_device_count >= 1);
  }
- 
+
  /**
   * @brief Simple kernel for data manipulation on device.
   */
@@ -244,73 +244,73 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      data[idx] += value;
    }
  }
- 
+
  }  // anonymous namespace
- 
+
  //==============================================================================
  // SECTION 1: Basic Context Switching Tests
  //==============================================================================
- 
+
  /**
   * @brief Test basic HIP GL interop with two GL contexts, switching once.
   *
   * Verifies that after switching from context 1 to context 2, GL interop
   * operations correctly use the new context.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_Basic") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_Basic) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    // Create first GL context
    GLUTWindow window1;
    window1.makeCurrent();
- 
+
    INFO("Created first GL context (window " << window1.id() << ")");
    REQUIRE(verifyGLDeviceEnumeration());
- 
+
    // Perform interop operations with first context
    auto result1 = performBufferInteropCycle();
    REQUIRE(result1.success);
    REQUIRE(result1.devicePtr != nullptr);
    INFO("First context: Mapped buffer at " << result1.devicePtr << ", size " << result1.size);
- 
+
    // Create second GL context and switch
    GLUTWindow window2;
    window2.makeCurrent();
- 
+
    INFO("Created second GL context (window " << window2.id() << ")");
    REQUIRE(window1.id() != window2.id());
- 
+
    // Verify interop re-initialization for second context
    REQUIRE(verifyGLDeviceEnumeration());
- 
+
    // Perform interop operations with second context
    auto result2 = performBufferInteropCycle();
    REQUIRE(result2.success);
    REQUIRE(result2.devicePtr != nullptr);
    INFO("Second context: Mapped buffer at " << result2.devicePtr << ", size " << result2.size);
- 
+
    INFO("Successfully used HIP-GL interop with two different GL contexts");
  }
- 
+
  /**
   * @brief Test that different GL contexts get separate interop setups.
   *
   * Verifies that resources registered in one context are truly associated
   * with that context and not shared incorrectly.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_SeparateContextSetups") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SeparateContextSetups) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    // Create two contexts
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
   // Use context 1: create and use buffer (standard size from common header)
   window1.makeCurrent();
   REQUIRE(verifyGLDeviceEnumeration());
@@ -345,103 +345,103 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr1, &size1, resource1));
   REQUIRE(size1 == GLBufferObject::kSize);
   HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0));
- 
+
    // Cleanup
    window1.makeCurrent();
    HIP_CHECK(hipGraphicsUnregisterResource(resource1));
    window2.makeCurrent();
    HIP_CHECK(hipGraphicsUnregisterResource(resource2));
  }
- 
+
  //==============================================================================
  // SECTION 2: Multiple Context Switch Tests
  //==============================================================================
- 
+
  /**
   * @brief Test switching back and forth between GL contexts multiple times.
   *
   * Verifies that the interop continues to work correctly after multiple
   * context switches in an alternating pattern.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_BackAndForth") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_BackAndForth) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
    REQUIRE(window1.id() != window2.id());
- 
+
    for (int iter = 0; iter < kDefaultIterations; ++iter) {
      INFO("Iteration " << iter + 1 << " of " << kDefaultIterations);
- 
+
      // Use first context
      window1.makeCurrent();
      REQUIRE(verifyGLDeviceEnumeration());
      auto result1 = performBufferInteropCycle();
      REQUIRE(result1.success);
- 
+
      // Use second context
      window2.makeCurrent();
      REQUIRE(verifyGLDeviceEnumeration());
      auto result2 = performBufferInteropCycle();
      REQUIRE(result2.success);
    }
- 
+
    INFO("Successfully switched between GL contexts " << kDefaultIterations << " times");
  }
- 
+
  /**
   * @brief Test rapid context switching under stress.
   *
   * Performs many rapid context switches to verify the locking mechanism
   * handles high-frequency switches correctly.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_RapidSwitching") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RapidSwitching) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
    GLUTWindow window3;
- 
+
    // Rapid switching between 3 contexts
    for (int iter = 0; iter < kRapidSwitchIterations; ++iter) {
      int contextChoice = iter % 3;
- 
+
      switch (contextChoice) {
        case 0: window1.makeCurrent(); break;
        case 1: window2.makeCurrent(); break;
        case 2: window3.makeCurrent(); break;
      }
- 
+
      REQUIRE(verifyGLDeviceEnumeration());
    }
- 
+
    INFO("Successfully completed " << kRapidSwitchIterations << " rapid context switches");
  }
- 
+
  /**
   * @brief Test context switching with different switch patterns.
   *
   * Tests various patterns: sequential, round-robin, random-like.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_Patterns") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_Patterns) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    std::vector<std::unique_ptr<GLUTWindow>> windows;
    constexpr int kNumContexts = 4;
- 
+
    for (int i = 0; i < kNumContexts; ++i) {
      windows.push_back(std::make_unique<GLUTWindow>());
    }
- 
+
    SECTION("Sequential pattern: 0-1-2-3-0-1-2-3...") {
      for (int iter = 0; iter < kStressIterations; ++iter) {
        for (int ctx = 0; ctx < kNumContexts; ++ctx) {
@@ -450,7 +450,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
        }
      }
    }
- 
+
    SECTION("Reverse pattern: 3-2-1-0-3-2-1-0...") {
      for (int iter = 0; iter < kStressIterations; ++iter) {
        for (int ctx = kNumContexts - 1; ctx >= 0; --ctx) {
@@ -459,7 +459,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
        }
      }
    }
- 
+
    SECTION("Ping-pong pattern: 0-3-1-2-0-3-1-2...") {
      constexpr std::array<int, 4> pattern = {0, 3, 1, 2};
      for (int iter = 0; iter < kStressIterations; ++iter) {
@@ -469,7 +469,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
        }
      }
    }
- 
+
    SECTION("Same context repeated then switch") {
      for (int ctx = 0; ctx < kNumContexts; ++ctx) {
        // Use same context multiple times
@@ -482,11 +482,11 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      }
    }
  }
- 
+
  //==============================================================================
  // SECTION 3: Context Switch Without Explicit hipGLGetDevices
  //==============================================================================
- 
+
  /**
   * @brief Test that GL interop functions detect context switch implicitly.
   *
@@ -494,17 +494,17 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * functions. This test verifies that registration functions also properly
   * detect and handle context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_RegisterWithoutGetDevices") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RegisterWithoutGetDevices) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    // First context - explicit initialization
    GLUTWindow window1;
    window1.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
- 
+
   GLBufferObject buffer1;
   hipGraphicsResource* resource1 = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
@@ -524,7 +524,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    hipGraphicsResource* resource2 = nullptr;
    HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
    REQUIRE(resource2 != nullptr);
- 
+
    HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
    void* devPtr = nullptr;
    size_t size = 0;
@@ -532,10 +532,10 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    REQUIRE(devPtr != nullptr);
    HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0));
    HIP_CHECK(hipGraphicsUnregisterResource(resource2));
- 
+
    INFO("Successfully used GL interop after context switch without hipGLGetDevices");
  }
- 
+
  /**
   * @brief Test that all GL interop APIs detect context switches.
   *
@@ -543,19 +543,19 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * hipGraphicsGLRegisterImage, hipGraphicsMapResources) properly detects
   * context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_AllAPIsDetectSwitch") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_AllAPIsDetectSwitch) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
    // Initialize with context 1
    window1.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
- 
+
   SECTION("hipGraphicsGLRegisterBuffer detects switch") {
     window2.makeCurrent();
     // Don't call hipGLGetDevices, directly try to register
@@ -587,18 +587,18 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
     GLBufferObject buffer2;
     hipGraphicsResource* resource2 = nullptr;
     HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
- 
+
      // Map should work with context 2's buffer
      HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
      HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0));
- 
+
      // Cleanup
      HIP_CHECK(hipGraphicsUnregisterResource(resource2));
      window1.makeCurrent();
      HIP_CHECK(hipGraphicsUnregisterResource(resource1));
    }
  }
- 
+
 //==============================================================================
 // SECTION 4: Sequential Operations Tests
 //==============================================================================
@@ -611,16 +611,16 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  * Note: True multi-threaded GL interop is not possible because OpenGL
  * contexts are thread-local - a context can only be current on one thread.
  */
- TEST_CASE("Unit_hipGL_ContextSwitch_SequentialStableContext") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SequentialStableContext) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window;
    window.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
- 
+
    // NOTE: OpenGL contexts are thread-local. A GL context can only be current
    // on ONE thread at a time. All GL operations and HIP GL interop operations
    // (which internally use GL functions) must be called from the thread that
@@ -629,29 +629,29 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    // This test validates multiple sequential interop operations on a stable
    // context (no context switching). True multi-threaded GL interop would
    // require each thread to have its own GL context.
- 
+
    int successCount = 0;
    int failureCount = 0;
    constexpr int kTotalOps = kOperationsPerBatch * kStressIterations;
- 
+
   for (int i = 0; i < kTotalOps; ++i) {
     GLBufferObject buffer;
     hipGraphicsResource* resource = nullptr;
- 
+
      hipError_t err = hipGraphicsGLRegisterBuffer(&resource, buffer,
                                                   hipGraphicsRegisterFlagsNone);
      if (err != hipSuccess) {
        ++failureCount;
        continue;
      }
- 
+
      err = hipGraphicsMapResources(1, &resource, 0);
      if (err != hipSuccess) {
        (void)hipGraphicsUnregisterResource(resource);
        ++failureCount;
        continue;
      }
- 
+
      void* devPtr = nullptr;
      size_t size = 0;
      err = hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource);
@@ -661,27 +661,27 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
        ++failureCount;
        continue;
      }
- 
+
      err = hipGraphicsUnmapResources(1, &resource, 0);
      if (err != hipSuccess) {
        (void)hipGraphicsUnregisterResource(resource);
        ++failureCount;
        continue;
      }
- 
+
      err = hipGraphicsUnregisterResource(resource);
      if (err != hipSuccess) {
        ++failureCount;
        continue;
      }
- 
+
      ++successCount;
    }
- 
+
   INFO("Successes: " << successCount << ", Failures: " << failureCount);
   REQUIRE(successCount == kTotalOps);
 }
- 
+
 /**
  * @brief Test interop operations interleaved with context switches.
  *
@@ -692,20 +692,20 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  * This validates that the HIP GL interop implementation correctly handles
  * context switches and re-establishes interop state when the context changes.
  */
- TEST_CASE("Unit_hipGL_ContextSwitch_InterleavedWithSwitch") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_InterleavedWithSwitch) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
    window1.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
- 
+
    int switchCount = 0;
    int operationCount = 0;
- 
+
    // Interleave context switches with interop operations on the same thread
    // (OpenGL contexts cannot be shared across threads simultaneously)
    for (int i = 0; i < kStressIterations; ++i) {
@@ -716,7 +716,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
        window2.makeCurrent();
      }
      ++switchCount;
- 
+
      // Perform interop operations on the now-current context
      for (int j = 0; j < kOperationsPerBatch; ++j) {
        if (verifyGLDeviceEnumeration()) {
@@ -724,12 +724,12 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
        }
      }
    }
- 
+
    INFO("Switches: " << switchCount << ", Operations: " << operationCount);
    REQUIRE(switchCount > 0);
    REQUIRE(operationCount > 0);
  }
- 
+
 /**
  * @brief Test rapid switching between multiple contexts with device enumeration.
  *
@@ -738,88 +738,88 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  * thread across 4 different contexts, ensuring HIP GL interop correctly
  * re-establishes state for each context on every switch.
  */
- TEST_CASE("Unit_hipGL_ContextSwitch_RapidMultiContextSwitching") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RapidMultiContextSwitching) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    std::vector<std::unique_ptr<GLUTWindow>> windows;
    constexpr int kNumContexts = 4;
- 
+
    for (int i = 0; i < kNumContexts; ++i) {
      windows.push_back(std::make_unique<GLUTWindow>());
    }
- 
+
    // Initialize first context
    windows[0]->makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
- 
+
    int successCount = 0;
- 
+
    // Rapidly switch between all contexts on the same thread
    // This tests the HIP GL interop's ability to handle context changes
    for (int round = 0; round < kStressIterations; ++round) {
      for (int contextIdx = 0; contextIdx < kNumContexts; ++contextIdx) {
        windows[contextIdx]->makeCurrent();
- 
+
        // Try to enumerate devices (requires GL interop setup for this context)
        if (verifyGLDeviceEnumeration()) {
          ++successCount;
        }
      }
    }
- 
+
    INFO("Successful rapid context switches: " << successCount);
    // All should succeed since we're on a single thread with proper context switching
    REQUIRE(successCount == kStressIterations * kNumContexts);
  }
- 
+
  //==============================================================================
  // SECTION 5: Edge Cases and Error Handling
  //==============================================================================
- 
+
  /**
   * @brief Test behavior when switching to the same context repeatedly.
   *
   * Verifies that switching to the same context (no actual change) works
   * correctly and doesn't cause issues with the locking mechanism.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_SameContextRepeated") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SameContextRepeated) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window;
    window.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
- 
+
    // Repeatedly "switch" to the same context
    for (int i = 0; i < kStressIterations; ++i) {
      window.makeCurrent();  // Same context, should use fast path
      auto result = performBufferInteropCycle();
      REQUIRE(result.success);
    }
- 
+
    INFO("Successfully performed " << kStressIterations <<
         " operations on same context without switching");
  }
- 
+
  /**
   * @brief Test interop when switching back to a previously used context.
   *
   * Verifies that returning to a previously used context (A->B->A) works.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_ReturnToPreviousContext") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ReturnToPreviousContext) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
    // Context A -> B -> A -> B -> A
    for (int cycle = 0; cycle < kDefaultIterations; ++cycle) {
      // Use context A
@@ -827,13 +827,13 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      REQUIRE(verifyGLDeviceEnumeration());
      auto result1 = performBufferInteropCycle();
      REQUIRE(result1.success);
- 
+
      // Use context B
      window2.makeCurrent();
      REQUIRE(verifyGLDeviceEnumeration());
      auto result2 = performBufferInteropCycle();
      REQUIRE(result2.success);
- 
+
      // Return to context A
      window1.makeCurrent();
      REQUIRE(verifyGLDeviceEnumeration());
@@ -841,22 +841,22 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      REQUIRE(result3.success);
    }
  }
- 
+
  /**
   * @brief Test interop with resources created in different contexts.
   *
   * Verifies proper handling when resources are associated with specific
   * GL contexts.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_ResourceContextAssociation") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ResourceContextAssociation) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
   // Create buffer in context 1
   window1.makeCurrent();
   REQUIRE(verifyGLDeviceEnumeration());
@@ -874,7 +874,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   // Register buffer from context 2
   hipGraphicsResource* resource2 = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
- 
+
    // Use context 2's resource
    HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
    void* devPtr2 = nullptr;
@@ -883,7 +883,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    REQUIRE(devPtr2 != nullptr);
    HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0));
    HIP_CHECK(hipGraphicsUnregisterResource(resource2));
- 
+
    // Switch back and use context 1's resource
    window1.makeCurrent();
    HIP_CHECK(hipGraphicsMapResources(1, &resource1, 0));
@@ -894,100 +894,100 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0));
    HIP_CHECK(hipGraphicsUnregisterResource(resource1));
  }
- 
+
  //==============================================================================
  // SECTION 6: Data Integrity Tests
  //==============================================================================
- 
+
  /**
   * @brief Test data integrity across context switches.
   *
   * Verifies that data written to a buffer in one context switch cycle
   * is preserved and can be read correctly.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_DataIntegrity") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_DataIntegrity) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
    // Test data
    constexpr size_t kFloatCount = 256;
    std::vector<float> inputData(kFloatCount);
    for (size_t i = 0; i < kFloatCount; ++i) {
      inputData[i] = static_cast<float>(i) * 1.5f;
    }
- 
+
   window1.makeCurrent();
   REQUIRE(verifyGLDeviceEnumeration());
 
   // Create buffer and fill with data
   GLBufferWithData buffer(kFloatCount * sizeof(float));
   buffer.fill(inputData.data(), inputData.size() * sizeof(float));
- 
+
    // Register and map buffer
    hipGraphicsResource* resource = nullptr;
    HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource, buffer, hipGraphicsRegisterFlagsNone));
    HIP_CHECK(hipGraphicsMapResources(1, &resource, 0));
- 
+
    void* devPtr = nullptr;
    size_t size = 0;
    HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource));
    REQUIRE(devPtr != nullptr);
- 
+
    // Modify data on device
    constexpr float kAddValue = 100.0f;
    int blockSize = 256;
    int numBlocks = (kFloatCount + blockSize - 1) / blockSize;
    simpleAddKernel<<<numBlocks, blockSize>>>(static_cast<float*>(devPtr), kFloatCount, kAddValue);
    HIP_CHECK(hipDeviceSynchronize());
- 
+
    HIP_CHECK(hipGraphicsUnmapResources(1, &resource, 0));
- 
+
    // Switch to another context and back
    window2.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
    auto result = performBufferInteropCycle();
    REQUIRE(result.success);
- 
+
    // Switch back to original context
    window1.makeCurrent();
- 
+
    // Read back and verify data
    std::vector<float> outputData(kFloatCount);
    buffer.read(outputData.data(), outputData.size() * sizeof(float));
- 
+
    for (size_t i = 0; i < kFloatCount; ++i) {
      float expected = inputData[i] + kAddValue;
      REQUIRE(outputData[i] == Catch::Approx(expected).epsilon(0.001f));
    }
- 
+
    HIP_CHECK(hipGraphicsUnregisterResource(resource));
    INFO("Data integrity verified after context switch");
  }
- 
+
  /**
   * @brief Test data operations in alternating contexts.
   *
   * Performs data operations alternating between two contexts, verifying
   * each context's data remains independent and correct.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_AlternatingDataOperations") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_AlternatingDataOperations) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
    constexpr size_t kFloatCount = 128;
    constexpr float kValue1 = 1.0f;
    constexpr float kValue2 = 2.0f;
- 
+
   // Initialize context 1
   window1.makeCurrent();
   REQUIRE(verifyGLDeviceEnumeration());
@@ -1001,7 +1001,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   std::vector<float> data2(kFloatCount, kValue2);
   GLBufferWithData buffer2(kFloatCount * sizeof(float));
   buffer2.fill(data2.data(), data2.size() * sizeof(float));
- 
+
    // Alternating operations
    for (int iter = 0; iter < kDefaultIterations; ++iter) {
      // Modify buffer1
@@ -1016,7 +1016,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_CHECK(hipDeviceSynchronize());
      HIP_CHECK(hipGraphicsUnmapResources(1, &res1, 0));
      HIP_CHECK(hipGraphicsUnregisterResource(res1));
- 
+
      // Modify buffer2
      window2.makeCurrent();
      hipGraphicsResource* res2 = nullptr;
@@ -1030,41 +1030,41 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_CHECK(hipGraphicsUnmapResources(1, &res2, 0));
      HIP_CHECK(hipGraphicsUnregisterResource(res2));
    }
- 
+
    // Verify data
    window1.makeCurrent();
    std::vector<float> result1(kFloatCount);
    buffer1.read(result1.data(), result1.size() * sizeof(float));
    float expected1 = kValue1 + (kDefaultIterations * 0.1f);
    REQUIRE(result1[0] == Catch::Approx(expected1).epsilon(0.001f));
- 
+
    window2.makeCurrent();
    std::vector<float> result2(kFloatCount);
    buffer2.read(result2.data(), result2.size() * sizeof(float));
    float expected2 = kValue2 + (kDefaultIterations * 0.2f);
    REQUIRE(result2[0] == Catch::Approx(expected2).epsilon(0.001f));
- 
+
    INFO("Alternating data operations verified across context switches");
  }
- 
+
  //==============================================================================
  // SECTION 7: Image/Texture Tests
  //==============================================================================
- 
+
  /**
   * @brief Test GL texture interop across context switches.
   *
   * Verifies that texture resources work correctly when switching contexts.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_TextureInterop") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_TextureInterop) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
   // Context 1: register and use a texture
   window1.makeCurrent();
   REQUIRE(verifyGLDeviceEnumeration());
@@ -1090,33 +1090,33 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   HIP_CHECK(hipGraphicsGLRegisterImage(&texResource2, texture2, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsNone));
   REQUIRE(texResource2 != nullptr);
- 
+
    HIP_CHECK(hipGraphicsMapResources(1, &texResource2, 0));
    hipArray_t array2 = nullptr;
    HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array2, texResource2, 0, 0));
    REQUIRE(array2 != nullptr);
    HIP_CHECK(hipGraphicsUnmapResources(1, &texResource2, 0));
- 
+
    // Cleanup
    HIP_CHECK(hipGraphicsUnregisterResource(texResource2));
    window1.makeCurrent();
    HIP_CHECK(hipGraphicsUnregisterResource(texResource1));
- 
+
    INFO("Successfully tested texture interop across context switches");
  }
- 
+
  /**
   * @brief Test mixed buffer and texture resources across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_MixedResources") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MixedResources) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
   // Context 1: buffer
   window1.makeCurrent();
   REQUIRE(verifyGLDeviceEnumeration());
@@ -1133,14 +1133,14 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   hipGraphicsResource* texResource = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterImage(&texResource, texture2, GL_TEXTURE_2D,
                                        hipGraphicsRegisterFlagsNone));
- 
+
    // Use texture in context 2
    HIP_CHECK(hipGraphicsMapResources(1, &texResource, 0));
    hipArray_t array = nullptr;
    HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array, texResource, 0, 0));
    REQUIRE(array != nullptr);
    HIP_CHECK(hipGraphicsUnmapResources(1, &texResource, 0));
- 
+
    // Switch back to context 1 and use buffer
    window1.makeCurrent();
    HIP_CHECK(hipGraphicsMapResources(1, &bufResource, 0));
@@ -1149,35 +1149,35 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, bufResource));
    REQUIRE(devPtr != nullptr);
    HIP_CHECK(hipGraphicsUnmapResources(1, &bufResource, 0));
- 
+
    // Cleanup
    HIP_CHECK(hipGraphicsUnregisterResource(bufResource));
    window2.makeCurrent();
    HIP_CHECK(hipGraphicsUnregisterResource(texResource));
  }
- 
+
  //==============================================================================
  // SECTION 8: Stream-Based Operations
  //==============================================================================
- 
+
  /**
   * @brief Test context switching with stream-based operations.
   *
   * Verifies that stream-based mapping/unmapping works correctly
   * across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_StreamOperations") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_StreamOperations) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
    window1.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
- 
+
   // Create stream
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -1185,19 +1185,19 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   GLBufferObject buffer1;
   hipGraphicsResource* resource1 = nullptr;
   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
- 
+
    // Map with stream
    HIP_CHECK(hipGraphicsMapResources(1, &resource1, stream));
- 
+
    void* devPtr = nullptr;
    size_t size = 0;
    HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr, &size, resource1));
    REQUIRE(devPtr != nullptr);
- 
+
    // Unmap with stream
    HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, stream));
    HIP_CHECK(hipStreamSynchronize(stream));
- 
+
   // Switch context and do same with new buffer
   window2.makeCurrent();
   REQUIRE(verifyGLDeviceEnumeration());
@@ -1218,26 +1218,26 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   HIP_CHECK(hipGraphicsUnregisterResource(resource1));
   HIP_CHECK(hipStreamDestroy(stream));
 }
- 
+
  /**
   * @brief Test multiple streams across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_MultipleStreams") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MultipleStreams) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
    constexpr int kNumStreams = 4;
    std::array<hipStream_t, kNumStreams> streams;
- 
+
    for (int i = 0; i < kNumStreams; ++i) {
      HIP_CHECK(hipStreamCreate(&streams[i]));
    }
- 
+
    for (int iter = 0; iter < kDefaultIterations; ++iter) {
     // Context 1
     window1.makeCurrent();
@@ -1265,18 +1265,18 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
       HIP_CHECK(hipGraphicsUnregisterResource(resource));
     }
   }
- 
+
    // Synchronize and cleanup streams
    for (int i = 0; i < kNumStreams; ++i) {
      HIP_CHECK(hipStreamSynchronize(streams[i]));
      HIP_CHECK(hipStreamDestroy(streams[i]));
    }
  }
- 
+
  //==============================================================================
  // SECTION 9: Stress Tests
  //==============================================================================
- 
+
 /**
  * @brief High-frequency context switch stress test with buffer operations.
  *
@@ -1284,7 +1284,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  * enumeration, this test performs full buffer interop cycles on each switch,
  * stressing both context switching and resource management together.
  */
-TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
+HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   if (!HipTest::isImageSupported()) {
     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
     return;
@@ -1313,21 +1313,21 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
   INFO("Successful buffer operations: " << successCount << " / " << kRapidSwitchIterations);
   REQUIRE(successCount == kRapidSwitchIterations);
 }
- 
+
  /**
   * @brief Test many buffers registered across multiple context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_ManyBuffersStress") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ManyBuffersStress) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
    constexpr int kBuffersPerContext = 10;
- 
+
    for (int round = 0; round < kDefaultIterations; ++round) {
     // Context 1: create and use many buffers
     window1.makeCurrent();
@@ -1371,7 +1371,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
       HIP_CHECK(hipGraphicsGLRegisterBuffer(&res, *buffers2.back(), hipGraphicsRegisterFlagsNone));
       resources2.push_back(res);
     }
- 
+
      for (auto res : resources2) {
        HIP_CHECK(hipGraphicsMapResources(1, &res, 0));
      }
@@ -1382,28 +1382,28 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
        HIP_CHECK(hipGraphicsUnregisterResource(res));
      }
    }
- 
+
    INFO("Successfully handled many buffers across context switches");
  }
- 
+
  /**
   * @brief Long-running context switch stress test.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_LongRunningStress") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_LongRunningStress) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
    GLUTWindow window3;
- 
+
    constexpr int kTotalOperations = 100;
    int successCount = 0;
- 
+
    auto startTime = std::chrono::steady_clock::now();
- 
+
    for (int iter = 0; iter < kTotalOperations; ++iter) {
      GLUTWindow* currentWindow = nullptr;
      switch (iter % 3) {
@@ -1411,9 +1411,9 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
        case 1: currentWindow = &window2; break;
        case 2: currentWindow = &window3; break;
      }
- 
+
      currentWindow->makeCurrent();
- 
+
      if (verifyGLDeviceEnumeration()) {
        auto result = performBufferInteropCycle();
        if (result.success) {
@@ -1421,37 +1421,37 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
        }
      }
    }
- 
+
    auto endTime = std::chrono::steady_clock::now();
    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
- 
+
    INFO("Completed " << successCount << " / " << kTotalOperations <<
         " operations in " << duration.count() << " ms");
    REQUIRE(successCount == kTotalOperations);
  }
- 
+
  //==============================================================================
  // SECTION 10: Resource Flags Tests
  //==============================================================================
- 
+
  /**
   * @brief Test different registration flags across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_RegistrationFlags") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RegistrationFlags) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
    std::array<unsigned int, 3> flags = {
      hipGraphicsRegisterFlagsNone,
      hipGraphicsRegisterFlagsReadOnly,
      hipGraphicsRegisterFlagsWriteDiscard
    };
- 
+
   for (auto flag : flags) {
     INFO("Testing flag: " << flag);
 
@@ -1478,20 +1478,20 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
     HIP_CHECK(hipGraphicsUnregisterResource(res2));
   }
 }
- 
+
  //==============================================================================
  // SECTION 11: Context Destruction Tests
  //==============================================================================
- 
+
  /**
   * @brief Test behavior when a GL context is destroyed and a new one is created.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_ContextDestruction") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ContextDestruction) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    // Create and use first context
    {
      GLUTWindow window1;
@@ -1500,7 +1500,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
      auto result = performBufferInteropCycle();
      REQUIRE(result.success);
    }  // window1 destroyed here
- 
+
    // Create new context after first one is gone
    {
      GLUTWindow window2;
@@ -1510,52 +1510,52 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
      auto result = performBufferInteropCycle();
      REQUIRE(result.success);
    }
- 
+
    INFO("Successfully handled context destruction and recreation");
  }
- 
+
  /**
   * @brief Test multiple context creation/destruction cycles.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_MultipleDestructionCycles") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MultipleDestructionCycles) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    for (int cycle = 0; cycle < kDefaultIterations; ++cycle) {
      INFO("Cycle " << cycle + 1 << " of " << kDefaultIterations);
- 
+
      GLUTWindow window;
      window.makeCurrent();
      REQUIRE(verifyGLDeviceEnumeration());
      auto result = performBufferInteropCycle();
      REQUIRE(result.success);
    }  // Window destroyed each iteration
- 
+
    INFO("Successfully completed " << kDefaultIterations << " context destruction cycles");
  }
- 
+
  //==============================================================================
  // SECTION 12: Special Cases
  //==============================================================================
- 
+
  /**
   * @brief Test hipGLGetDevices with different device list types across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_DeviceListTypes") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_DeviceListTypes) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    const int device_count = HipTest::getDeviceCount();
    GLUTWindow window1;
    GLUTWindow window2;
- 
+
    auto testDeviceList = [&](hipGLDeviceList listType, const char* name) {
      INFO("Testing device list type: " << name);
- 
+
      window1.makeCurrent();
      unsigned int count1 = 0;
      std::vector<int> devices1(device_count, -1);
@@ -1564,7 +1564,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
        HIP_CHECK(hipGLGetDevices(&count1, devices1.data(), device_count, listType));
        REQUIRE(count1 >= 1);
      }
- 
+
      window2.makeCurrent();
      unsigned int count2 = 0;
      std::vector<int> devices2(device_count, -1);
@@ -1573,33 +1573,33 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress") {
        REQUIRE(count2 >= 1);
      }
    };
- 
+
    testDeviceList(hipGLDeviceListAll, "hipGLDeviceListAll");
    testDeviceList(hipGLDeviceListCurrentFrame, "hipGLDeviceListCurrentFrame");
  }
- 
+
  /**
   * @brief Test that the first GL interop operation properly initializes context.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_FirstOperationInitialization") {
+ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_FirstOperationInitialization) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
    }
- 
+
    GLUTWindow window;
    window.makeCurrent();
- 
+
    // First operation - should trigger initialization
    const int device_count = HipTest::getDeviceCount();
    unsigned int gl_device_count = 0;
    std::vector<int> gl_devices(device_count, -1);
    HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
    REQUIRE(gl_device_count >= 1);
- 
+
    // Subsequent operations should work
    auto result = performBufferInteropCycle();
    REQUIRE(result.success);
- 
+
   INFO("First operation successfully initialized GL interop");
 }

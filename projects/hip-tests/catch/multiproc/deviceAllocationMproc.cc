@@ -298,7 +298,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
 /**
  * Multiprocess device side malloc test.
  */
-TEST_CASE(Unit_deviceAllocation_Malloc_MultProcess) {
+HIP_TEST_CASE(Unit_deviceAllocation_Malloc_MultProcess) {
   auto res = testDeviceAllocMulProc(true);
   REQUIRE(res == true);
 }
@@ -306,7 +306,7 @@ TEST_CASE(Unit_deviceAllocation_Malloc_MultProcess) {
 /**
  * Multiprocess device side new test.
  */
-TEST_CASE(Unit_deviceAllocation_New_MultProcess) {
+HIP_TEST_CASE(Unit_deviceAllocation_New_MultProcess) {
   auto res = testDeviceAllocMulProc(false);
   REQUIRE(res == true);
 }
@@ -314,7 +314,7 @@ TEST_CASE(Unit_deviceAllocation_New_MultProcess) {
 /**
  * Multiprocess device side malloc, write and free test.
  */
-TEST_CASE(Unit_deviceAllocation_MallocFree_MultProcess) {
+HIP_TEST_CASE(Unit_deviceAllocation_MallocFree_MultProcess) {
   auto res = testDeviceMemMulProc(true);
   REQUIRE(res == true);
 }
@@ -322,7 +322,7 @@ TEST_CASE(Unit_deviceAllocation_MallocFree_MultProcess) {
 /**
  * Multiprocess device side new, write and delete test.
  */
-TEST_CASE(Unit_deviceAllocation_NewDelete_MultProcess) {
+HIP_TEST_CASE(Unit_deviceAllocation_NewDelete_MultProcess) {
   auto res = testDeviceMemMulProc(false);
   REQUIRE(res == true);
 }

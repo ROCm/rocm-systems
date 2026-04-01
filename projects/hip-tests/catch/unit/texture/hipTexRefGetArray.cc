@@ -10,7 +10,7 @@
 
 texture<float, 1, hipReadModeElementType> tex;
 
-TEST_CASE(Unit_hipTexRefGetArray_Positive) {
+HIP_TEST_CASE(Unit_hipTexRefGetArray_Positive) {
   CHECK_IMAGE_SUPPORT
   hipArray_t array_set = nullptr;
   hipArray_t array_get = nullptr;
@@ -34,7 +34,7 @@ TEST_CASE(Unit_hipTexRefGetArray_Positive) {
   HIP_CHECK(hipModuleUnload(module));
 }
 
-TEST_CASE(Unit_hipTexRefGetArray_Negative) {
+HIP_TEST_CASE(Unit_hipTexRefGetArray_Negative) {
   CHECK_IMAGE_SUPPORT
   hipArray_t array_set = nullptr;
   hipArray_t array_get = nullptr;

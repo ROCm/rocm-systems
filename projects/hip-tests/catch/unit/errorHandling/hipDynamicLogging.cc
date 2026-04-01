@@ -28,7 +28,7 @@ static bool hipDynamicLoggingTest() {
   HIP_CHECK(hipExtSetLoggingParams(4, 0, -1));
 
   // Logging is disabled here - allocate memory
-  int* dptr = nullptr;  
+  int* dptr = nullptr;
   HIP_CHECK(hipMalloc(&dptr, sizeof(int)));
 
   // Stop capture after hipMalloc and check no output (logging disabled)
@@ -45,7 +45,7 @@ static bool hipDynamicLoggingTest() {
   HIP_CHECK(hipExtEnableLogging());
   HIP_CHECK(hipMemset(dptr, 0x00, sizeof(int)));
 
-  // Disable logging 
+  // Disable logging
   HIP_CHECK(hipExtDisableLogging());
 
   // Stop capture after disabling logging and check for output
@@ -60,7 +60,7 @@ static bool hipDynamicLoggingTest() {
 
   INFO("Successfully captured HIP logging output (" << logging_output.size() << " bytes)");
   INFO("Logging output: " << logging_output);
-  
+
   return true;
 }
 
@@ -73,12 +73,12 @@ static bool hipDynamicLoggingTest() {
  *    3. hipMemset operation produces logging output during enabled period
  * Test source
  * ------------------------
- *  - unit/errorHandling/hipDynamicLogging.cc  
+ *  - unit/errorHandling/hipDynamicLogging.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipDynamicLogging_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_Basic) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -97,12 +97,12 @@ TEST_CASE("Unit_hipDynamicLogging_Positive_Basic") {
  *    and that logging can be enabled/disabled multiple times
  * Test source
  * ------------------------
- *  - unit/errorHandling/hipDynamicLogging.cc  
+ *  - unit/errorHandling/hipDynamicLogging.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipDynamicLogging_Positive_MultipleEnableDisable") {
+HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_MultipleEnableDisable) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -118,14 +118,14 @@ TEST_CASE("Unit_hipDynamicLogging_Positive_MultipleEnableDisable") {
 
   // Set different logging parameters
   HIP_CHECK(hipExtSetLoggingParams(3, 0, -1));
-  
+
   for (int i = 0; i < 3; ++i) {
     // Start capture and enable logging
     capture.startCapture();
     HIP_CHECK(hipExtEnableLogging());
     HIP_CHECK(hipMemset(dptr, 0x42, sizeof(int)));
     HIP_CHECK(hipExtDisableLogging());
-    
+
     // Check that we captured some output
     std::string output = capture.stopCapture();
     REQUIRE(output.size() > 0);

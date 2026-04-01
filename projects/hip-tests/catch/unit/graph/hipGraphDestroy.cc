@@ -26,7 +26,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphDestroy_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGraphDestroy_Positive_Basic) {
   hipGraph_t graph = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -47,7 +47,7 @@ TEST_CASE(Unit_hipGraphDestroy_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphDestroy_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphDestroy_Negative_Parameters) {
   HIP_CHECK_ERROR(hipGraphDestroy(static_cast<hipGraph_t>(nullptr)), hipErrorInvalidValue);
 }
 

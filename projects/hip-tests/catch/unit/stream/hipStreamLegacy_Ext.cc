@@ -63,7 +63,7 @@ static __global__ void addOneKernel(int* a, int size) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_WithBlockingStream) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_WithBlockingStream) {
   int* hostArrSrc = new int[N];
   REQUIRE(hostArrSrc != nullptr);
   fillHostArray(hostArrSrc, N, 1);
@@ -145,7 +145,7 @@ void launchFunction(hipStream_t stream) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_MultipleThreads) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_MultipleThreads) {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
   const int numberOfThreads = (threadsSupported >= 10) ? 10 : threadsSupported;
 
@@ -171,7 +171,7 @@ TEST_CASE(Unit_hipStreamLegacy_MultipleThreads) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_NegetiveCase) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_NegetiveCase) {
   hipStream_t stream = hipStreamLegacy;
   REQUIRE(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal) ==
           hipErrorStreamCaptureUnsupported);
@@ -193,7 +193,7 @@ TEST_CASE(Unit_hipStreamLegacy_NegetiveCase) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_WithNonBlockingStream) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_WithNonBlockingStream) {
   int* hostArrSrc = new int[N];
   REQUIRE(hostArrSrc != nullptr);
   fillHostArray(hostArrSrc, N, 10);
@@ -240,7 +240,7 @@ TEST_CASE(Unit_hipStreamLegacy_WithNonBlockingStream) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_WithStreamPerThread) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_WithStreamPerThread) {
   int* hostArrSrc = new int[N];
   REQUIRE(hostArrSrc != nullptr);
   fillHostArray(hostArrSrc, N, 15);
@@ -282,7 +282,7 @@ TEST_CASE(Unit_hipStreamLegacy_WithStreamPerThread) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_MultiDevice) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_MultiDevice) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -337,7 +337,7 @@ TEST_CASE(Unit_hipStreamLegacy_MultiDevice) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_H2H_H2D_D2D_D2H_Default) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_H2H_H2D_D2D_D2H_Default) {
   int* hostArr1 = new int[N];
   REQUIRE(hostArr1 != nullptr);
   fillHostArray(hostArr1, N, 30);
@@ -405,7 +405,7 @@ TEST_CASE(Unit_hipStreamLegacy_H2H_H2D_D2D_D2H_Default) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_MultiDeviceMultiOperation) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_MultiDeviceMultiOperation) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -527,7 +527,7 @@ static void copyFromDeviceToHost(int* devArr, int* hostArr) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation) {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
 
   if (threadsSupported < 2) {
@@ -581,7 +581,7 @@ TEST_CASE(Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -619,7 +619,7 @@ TEST_CASE(Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation) {
 
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
-  
+
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i]
                        << " Expected value : 500 or 501 \n");
@@ -666,7 +666,7 @@ static void operationsInDev1(int* devArrDev1, int* hostArrDst) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -728,7 +728,7 @@ TEST_CASE(Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_InChildProcess) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_InChildProcess) {
   hip::SpawnProc proc("hipStreamLegacy_exe", true);
   REQUIRE(proc.run() == 0);
 }
@@ -745,7 +745,7 @@ TEST_CASE(Unit_hipStreamLegacy_InChildProcess) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipStreamLegacy_WithKernel) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_WithKernel) {
   int* hostArrSrc = new int[N];
   REQUIRE(hostArrSrc != nullptr);
   fillHostArray(hostArrSrc, N, 1);
@@ -787,7 +787,7 @@ TEST_CASE(Unit_hipStreamLegacy_WithKernel) {
  *  - HIP_VERSION >= 6.3
  */
 
-TEST_CASE(Unit_hipStreamLegacy_hipStreamSynchronize) {
+HIP_TEST_CASE(Unit_hipStreamLegacy_hipStreamSynchronize) {
   int* hostArrSrc = new int[N];
   REQUIRE(hostArrSrc != nullptr);
   fillHostArray(hostArrSrc, N, 1);

@@ -32,7 +32,7 @@ class ExampleBenchmark : public Benchmark<ExampleBenchmark> {
   }
 };
 
-TEST_CASE(Performance_Example) {
+HIP_TEST_CASE(Performance_Example) {
   ExampleBenchmark benchmark;
 
   // to override cmd options

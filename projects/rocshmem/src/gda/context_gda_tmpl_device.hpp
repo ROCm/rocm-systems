@@ -65,7 +65,7 @@ __device__ void GDAContext::put_nbi(T *dest, const T *source, size_t nelems, int
 
 template <typename T>
 __device__ T GDAContext::g(const T *source, int pe) {
-  T ret;
+  T ret{};
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
@@ -416,8 +416,6 @@ __device__ void GDAContext::internal_ring_allreduce(
     T *dst, const T *src, int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
     int n_seg, int seg_size, int chunk_size) {
 
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int PE_start = team_obj->tinfo_wrt_world->pe_start;
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
@@ -697,14 +695,12 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
 
 template <typename T>
 __device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
-                                          T *dest, const size_t dest_nelems[],
+                                          T *dest, [[maybe_unused]] const size_t dest_nelems[],
                                           const size_t dest_displs[],
-                                          T *source, const size_t source_nelems[],
+                                          T *source, [[maybe_unused]] const size_t source_nelems[],
                                           const size_t source_displs[]) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int pe_size       = team_obj->num_pes;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int stride = team_obj->tinfo_wrt_world->stride;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   uint64_t a2a_sn   = team_obj->alltoall_sequence_number;
@@ -809,9 +805,7 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team, T 
                                                         const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
-  int stride = team_obj->tinfo_wrt_world->stride;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;

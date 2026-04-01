@@ -15,7 +15,7 @@
  3) Pass initialRefcount as 0
  4) Pass initialRefcount as INT_MAX
  */
-TEST_CASE(Unit_hipGraphReleaseUserObject_Negative) {
+HIP_TEST_CASE(Unit_hipGraphReleaseUserObject_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

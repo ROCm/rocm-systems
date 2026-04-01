@@ -242,7 +242,7 @@ static bool cpu_to_gpu_coherency() {
  *    - Test to be run only on AMD.
  */
 
-TEST_CASE(Unit_cache_coherency_cpu_gpu) {
+HIP_TEST_CASE(Unit_cache_coherency_cpu_gpu) {
   bool passed = true;
   // Coherency between CPU and GPU sharing host and device memory.
   REQUIRE(passed == cpu_to_gpu_coherency());

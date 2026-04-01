@@ -54,7 +54,7 @@ static __global__ void vector_square(int* A_d, size_t N_ELMTS) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphRemoveDependencies_Positive_Functional) {
+HIP_TEST_CASE(Unit_hipGraphRemoveDependencies_Positive_Functional) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   int *A_d, *B_d, *C_d;
@@ -148,7 +148,7 @@ TEST_CASE(Unit_hipGraphRemoveDependencies_Positive_Functional) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphRemoveDependenciesPositive_CapturedStream) {
+HIP_TEST_CASE(Unit_hipGraphRemoveDependenciesPositive_CapturedStream) {
   hipGraph_t graph;
   constexpr size_t N = 1024;
   int *A_d, *B_d, *C_d;
@@ -204,7 +204,7 @@ TEST_CASE(Unit_hipGraphRemoveDependenciesPositive_CapturedStream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphRemoveDependencies_Positive_ChangeComputeFunc) {
+HIP_TEST_CASE(Unit_hipGraphRemoveDependencies_Positive_ChangeComputeFunc) {
   hipStream_t streamForGraph;
   HIP_CHECK(hipStreamCreate(&streamForGraph));
   constexpr size_t N = 1024;
@@ -316,7 +316,7 @@ TEST_CASE(Unit_hipGraphRemoveDependencies_Positive_ChangeComputeFunc) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphRemoveDependencies_Positive_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphRemoveDependencies_Positive_Parameters) {
   constexpr size_t Nbytes = 1024;
   hipGraphNode_t memcpyH2D_A;
   hipGraphNode_t memcpyD2H_A;
@@ -404,7 +404,7 @@ TEST_CASE(Unit_hipGraphRemoveDependencies_Positive_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphRemoveDependencies_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphRemoveDependencies_Negative_Parameters) {
   hipGraph_t graph{};
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event_start, event_end;

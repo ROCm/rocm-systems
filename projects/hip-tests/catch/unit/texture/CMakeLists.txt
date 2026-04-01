@@ -142,6 +142,7 @@ else()
   set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
 endif()
 
+get_filename_component(HIP_TEST_LABELS ${CMAKE_CURRENT_SOURCE_DIR} NAME)
 hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
