@@ -519,6 +519,13 @@ TEST(rocrtstFunc, SvmMemory_Negative_Test) {
     RunCustomTestEpilog(&smt);
 }
 
+TEST(rocrtstFunc, SvmMemory_AccessedBy_All_Devices_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestAccessedByAllDevices();
+    RunCustomTestEpilog(&smt);
+}
+
 TEST(rocrtstFunc, VirtMemory_Basic_Test) {
     VirtMemoryTestBasic vmt;
 
