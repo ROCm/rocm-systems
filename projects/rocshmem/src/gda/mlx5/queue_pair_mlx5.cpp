@@ -76,8 +76,8 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const g
   gda_mlx5_db_register db_val{wqe};
   __be32 be_sq_wqebb_counter = endian::to_be<uint32_t>(sq_wqebb_counter);
 
-  // gda_mlx5_bf_buffer::swap_bf_buffer returns current doorbell and swaps them
-  gda_mlx5_bf_buffer* bf = mlx5_sq.swap_bf_buffer();
+  // get BlueFlame buffer from SQ
+  gda_mlx5_bf_buffer* bf = mlx5_sq.bf_buffer();
 
   // store sq_wqebb_counter to doorbell record
   __hip_atomic_store(mlx5_sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
@@ -271,7 +271,7 @@ __device__ void QueuePair::mlx5_quiet_single() {
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-__device__ void QueuePair::mlx5_post_wqe_rma(int pe, int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
+__device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
   uint64_t qp_lane_mask;
   uint8_t qp_lane_count;
   uint8_t qp_lane_id;
@@ -317,7 +317,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int pe, int32_t length, uintptr_t l
 }
 
 // called with all active lanes using different QPs
-__device__ void QueuePair::mlx5_post_wqe_rma_single(int pe, int32_t length, uintptr_t laddr,
+__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
                                                     uintptr_t raddr, uint8_t opcode, bool ring_db) {
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);
@@ -352,7 +352,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int pe, int32_t length, uint
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo(int pe, int32_t length, uintptr_t raddr, uint8_t opcode,
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int pe, [[maybe_unused]] int32_t length, uintptr_t raddr, uint8_t opcode,
                                                  int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
   uint64_t qp_lane_mask;
   uint8_t qp_lane_count;
@@ -415,7 +415,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(int pe, int32_t length, uintptr
 }
 
 // called with all active lanes using different QPs
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(int pe, int32_t length, uintptr_t raddr, uint8_t opcode,
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int pe, [[maybe_unused]] int32_t length, uintptr_t raddr, uint8_t opcode,
                                                         int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);

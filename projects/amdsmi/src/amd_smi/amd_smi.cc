@@ -63,7 +63,6 @@
 #include "amd_smi/impl/nic/amd_smi_nic_device.h"
 #include "amd_smi/impl/nic/amd_smi_switch_device.h"
 #endif  // BRCM_NIC
-#include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
@@ -1388,7 +1387,6 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
   status = smi_amdgpu_get_board_info(gpu_device, board_info);
   if (board_info->product_serial[0] == '\0') {
@@ -3054,7 +3052,7 @@ amdsmi_status_t amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processo
     current_partition_str = current_partition;
   }
 
-  ss << __PRETTY_FUNCTION__ << " | After attepting to set memory partition to "
+  ss << __PRETTY_FUNCTION__ << " | After attempting to set memory partition to "
      << req_user_partition << "\n"
      << " | Current memory partition is " << current_partition_str << "\n"
      << " | Returning: " << smi_amdgpu_get_status_string(ret, false)
@@ -3663,7 +3661,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
 
   status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, 0, &tmp_partition_id);
   const uint32_t partition_num = 0;  // Each partition should show the their respective
-                                     // partition_id at positon 0 of the array.
+                                     // partition_id at position 0 of the array.
                                      // We are no longer populating only the primary partition
                                      // for BM/Guest.
 
@@ -4053,6 +4051,9 @@ amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
 
 amdsmi_status_t amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
                                              amdsmi_pcie_bandwidth_t* bandwidth) {
+  if (bandwidth == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   return rsmi_wrapper(rsmi_dev_pci_bandwidth_get, processor_handle, 0,
                       reinterpret_cast<rsmi_pcie_bandwidth_t*>(bandwidth));
 }

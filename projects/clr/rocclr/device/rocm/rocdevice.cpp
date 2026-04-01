@@ -35,12 +35,14 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 #define OPENCL_VERSION_STR XSTR(OPENCL_MAJOR) "." XSTR(OPENCL_MINOR)
@@ -187,6 +189,8 @@ void Device::checkAtomicSupport() {
 }
 
 Device::~Device() {
+  WaitForHsaAsyncHandlersIdle();
+
   if (coopHostcallBuffer_) {
     amd::disableHostcalls(coopHostcallBuffer_);
     context().svmFree(coopHostcallBuffer_);
@@ -252,6 +256,38 @@ Device::~Device() {
 }
 
 void NullDevice::tearDown() {}
+
+void Device::WaitForHsaAsyncHandlersIdle() {
+  constexpr int kDrainTimeoutMs = 5000;
+  const std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
+  const std::chrono::steady_clock::duration fast_timeout =
+      std::chrono::milliseconds(kDrainTimeoutMs);
+
+  auto sumQueuedHandlers = [this]() -> uint64_t {
+    uint64_t sum = 0;
+    std::scoped_lock lock(vgpusAccess_);
+    for (VirtualGPU* vgpu : vgpus_) {
+      if (vgpu != nullptr) {
+        sum += vgpu->QueuedAsyncHandlers().load(std::memory_order_acquire);
+      }
+    }
+    return sum;
+  };
+
+  while (sumQueuedHandlers() != 0) {
+    if (std::chrono::steady_clock::now() - start_time > fast_timeout) {
+      const uint64_t remaining = sumQueuedHandlers();
+      if (remaining != 0) {
+        LogPrintfError(
+            "WaitForHsaAsyncHandlersIdle: %d ms elapsed, VirtualGPU queued_async total=%llu; "
+            "proceeding with device destruction.",
+            kDrainTimeoutMs, static_cast<unsigned long long>(remaining));
+      }
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+}
 
 bool NullDevice::init() {
   // Create offline devices for all ISAs not already associated with an online

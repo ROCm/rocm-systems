@@ -399,34 +399,9 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     }
   }
 
-  if (DEBUG_HIP_KERNARG_COPY_OPT) {
-    if (CL_SUCCESS !=
-        kernelCommand->captureHIPArgsAndValidate(kernelParams, kernargs, kernargs_size)) {
-      kernelCommand->release();
-      return hipErrorOutOfMemory;
-    }
-
-  } else {
-    for (size_t i = 0; i < kernel->signature().numParameters(); ++i) {
-      const amd::KernelParameterDescriptor& desc = kernel->signature().at(i);
-      if (kernelParams == nullptr) {
-        assert(kernargs != nullptr);
-        // only copy if this parameter lies fully inside the passed buffer
-        if (desc.offset_ + desc.size_ <= kernargs_size) {
-          kernel->parameters().set(i, desc.size_, kernargs + desc.offset_,
-                                   desc.type_ == T_POINTER /*svmBound*/);
-        }
-      } else {
-        kernel->parameters().set(i, desc.size_, kernelParams[i],
-                                 desc.type_ == T_POINTER /*svmBound*/);
-      }
-    }
-
-    // Capture the kernel arguments
-    if (CL_SUCCESS != kernelCommand->captureOpenCLArgsAndValidate()) {
-      kernelCommand->release();
-      return hipErrorOutOfMemory;
-    }
+  if (CL_SUCCESS != kernelCommand->captureHIPArgsAndValidate(kernelParams, kernargs, kernargs_size)) {
+    kernelCommand->release();
+    return hipErrorOutOfMemory;
   }
 
   command = kernelCommand;
@@ -454,12 +429,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
     LogPrintfError("%s", "Function passed is null");
     return hipErrorInvalidResourceHandle;
   }
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
-  amd::Kernel* kernel = function->kernel();
-  std::optional<std::scoped_lock<std::recursive_mutex>> lock;
-  if (!DEBUG_HIP_KERNARG_COPY_OPT) {
-    lock.emplace(function->dflock_);
-  }
+  amd::Kernel* kernel = hip::DeviceFunc::asFunction(f)->kernel();
 
   hipError_t status =
       ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId, params);

@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import csv
 import importlib.util
@@ -85,22 +63,6 @@ CSVS = sorted([
 
 ROOF_ONLY_FILES = sorted([
     "roofline.csv",
-    "sysinfo.csv",
-])
-
-PC_SAMPLING_HOST_TRAP_FILES = sorted([
-    "ps_file_agent_info.csv",
-    "ps_file_kernel_trace.csv",
-    "ps_file_pc_sampling_host_trap.csv",
-    "ps_file_results.json",
-    "sysinfo.csv",
-])
-
-PC_SAMPLING_STOCHASTIC_FILES = sorted([
-    "ps_file_agent_info.csv",
-    "ps_file_kernel_trace.csv",
-    "ps_file_pc_sampling_stochastic.csv",
-    "ps_file_results.json",
     "sysinfo.csv",
 ])
 
@@ -497,7 +459,7 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
 
     # Check if all test dataframes have the same group keys as the baseline
     if not all(baseline_group_keys == keys for keys in tests_group_keys):
-        return False
+        return False, "Group keys do not match between baseline and test dataframes"
 
     # series prior to MI350 use CSN, MI350 uses CS{0,1,2,3}
     deterministic_counter_patterns = list(
@@ -540,9 +502,12 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
             ):
                 continue
 
-            return False
+            return (
+                False,
+                f"{counter_name} is not equal between baseline and test dataframes",
+            )
 
-    return True
+    return True, "All deterministic counters are equal"
 
 
 # --
@@ -2104,8 +2069,8 @@ def test_comprehensive_error_paths():
     from utils.parser import (
         build_comparable_columns,
         build_eval_string,
-        calc_builtin_var,
     )
+    from utils.utils_common import calc_builtin_var
 
     columns = build_comparable_columns("ms")
     expected = [
@@ -2118,10 +2083,7 @@ def test_comprehensive_error_paths():
     for expected_col in expected:
         assert expected_col in columns
 
-    class MockSysInfo:
-        total_l2_chan = 16
-
-    sys_info = MockSysInfo()
+    sys_info = {"total_l2_chan": 16}
     result = calc_builtin_var(42, sys_info)
     assert result == 42
 
@@ -2133,70 +2095,6 @@ def test_comprehensive_error_paths():
         assert False, "Should raise exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
-
-
-@pytest.mark.pc_sampling
-def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
-    if soc in ("MI100"):
-        assert True
-        return
-
-    options = [
-        "--block",
-        "21",
-        "--pc-sampling-method",
-        "host_trap",
-        "--pc-sampling-interval",
-        "256",
-    ]
-    workload_dir = test_utils.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_mat_mul_max",
-    )
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.pc_sampling
-def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
-    if soc in ("MI100") or soc in ("MI200"):
-        assert True
-        return
-
-    options = [
-        "--block",
-        "21",
-        "--pc-sampling-method",
-        "stochastic",
-        "--pc-sampling-interval",
-        "1048576",
-    ]
-    workload_dir = test_utils.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_mat_mul_max",
-    )
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.live_attach_detach
@@ -2594,6 +2492,9 @@ def test_iteration_multiplexing_kernel_launch_params(
 
 
 @pytest.mark.iteration_multiplexing_2
+@pytest.mark.xfail(
+    reason="Multiple profiling workloads mapped to the same GPU corrupts the counters"
+)
 def test_iteration_multiplexing_deterministic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,

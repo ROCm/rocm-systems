@@ -114,7 +114,7 @@ void callCollectiveForked(int nranks,  int collID, const std::vector<int>& sendB
 
     for(int r = 0; r < nranks; ++r){
       if(pipe(childPipes[r].data()) == -1)
-        TEST_ERROR("child %i pipe Failed\n", r);
+        TEST_ERROR("child %i pipe Failed", r);
     } 
 
     auto createNCCLid = [&](int rank){

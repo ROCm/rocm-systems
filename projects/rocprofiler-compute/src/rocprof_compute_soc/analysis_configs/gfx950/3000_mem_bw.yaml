@@ -94,8 +94,11 @@ Panel Config:
         L1 utilization:
           value: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
           unit: Percent
-        L1 latency:
+        L1 average latency:
           value: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TOTAL_ACCESSES_sum)
+          unit: Cycles per Request
+        L1 latency:
+          value: AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)
           unit: Cycles per Request
         L1-L2 throughput (reads + writes):
           value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
@@ -103,17 +106,29 @@ Panel Config:
         L1-L2 throughput (total):
           value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
           unit: Requests per Cycle
-        L2 read latency:
+        L2 read average latency:
           value: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
           unit: Cycles per Request
-        L2 write latency:
+        L2 read latency:
+          value: AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)
+          unit: Cycles per Request
+        L2 write average latency:
           value: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum)
           unit: Cycles per Request
-        UTCL1 latency:
+        L2 write latency:
+          value: AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)
+          unit: Cycles per Request
+        UTCL1 average latency:
           value: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
           unit: Cycles per Request
-        UTCL1 to UTCL2 latency:
+        UTCL1 latency:
+          value: AVG(TCP_CLIENT_UTCL1_INFLIGHT_sum) / AVG(TCP_UTCL1_REQUEST_sum)
+          unit: Cycles per Request
+        UTCL1 to UTCL2 average latency:
           value: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
+          unit: Cycles per Request
+        UTCL1 to UTCL2 latency:
+          value: AVG(TCP_UTCL1_UTCL2_INFLIGHT_sum) / AVG(TCP_UTCL1_TRANSLATION_MISS_sum)
           unit: Cycles per Request
   - metric_table:
       id: 3003
@@ -393,6 +408,363 @@ Panel Config:
         Num CUs:
           value: $cu_per_gpu
           unit: Count
+  - metric_table:
+      id: 3007
+      title: L2 Cache
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        L2 hit rate:
+          value: ((SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)) * 100)
+          unit: Percent
+        L2 utilization:
+          value: ((SUM(TCC_BUSY_sum) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)) * 100)
+          unit: Percent
+        L2 tag stall rate:
+          value: ((SUM(TCC_TAG_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 input buffer stall rate:
+          value: ((SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 latency FIFO full rate:
+          value: ((SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 write data FIFO full rate:
+          value: ((SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 to EA write stall rate:
+          value: ((SUM(TCC_EA0_WRREQ_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 to EA too many writes stall:
+          value: ((SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 to EA read credit stall (HBM):
+          value: ((SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 to EA write credit stall (HBM):
+          value: ((SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 to EA read credit stall (GMI):
+          value: ((SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 to EA write credit stall (GMI):
+          value: ((SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 to EA read credit stall (IO):
+          value: ((SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 to EA write credit stall (IO):
+          value: ((SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+  - metric_table:
+      id: 3008
+      title: L2 Traffic
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        L2 read request rate:
+          value: SUM(TCC_READ_sum) / SUM(TCC_BUSY_sum)
+          unit: Requests per Cycle
+        L2 write request rate:
+          value: SUM(TCC_WRITE_sum) / SUM(TCC_BUSY_sum)
+          unit: Requests per Cycle
+        L2 total request rate:
+          value: SUM(TCC_REQ_sum) / SUM(TCC_BUSY_sum)
+          unit: Requests per Cycle
+        L2 to EA read average latency:
+          value: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)
+          unit: Cycles per Request
+        L2 to EA read latency:
+          value: AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)
+          unit: Cycles per Request
+        L2 to EA write average latency:
+          value: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum)
+          unit: Cycles per Request
+        L2 to EA write latency:
+          value: AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)
+          unit: Cycles per Request
+        L2 to EA atomic average latency:
+          value: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)
+          unit: Cycles per Request
+        L2 to EA atomic latency:
+          value: AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)
+          unit: Cycles per Request
+        L2 writeback rate:
+          value: ((SUM(TCC_WRITEBACK_sum) / SUM(TCC_REQ_sum)) * 100)
+          unit: Percent
+        L2 eviction rate:
+          value: ((SUM(TCC_NORMAL_EVICT_sum) / SUM(TCC_REQ_sum)) * 100)
+          unit: Percent
+        L2 to EA read BW:
+          value: ((SUM((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64)
+            + (TCC_EA0_RDREQ_128B_sum * 128))) / (SUM(End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+        L2 to EA write and atomic BW:
+          value: ((SUM((TCC_EA0_WRREQ_64B_sum * 64) + (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum), TCC_EA0_WRREQ_sum)
+            * 32))) / (SUM(End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+        HBM read fraction:
+          value: ((SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)) * 100)
+          unit: Percent
+        HBM write fraction:
+          value: ((SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)) * 100)
+          unit: Percent
+        Non-coherent request rate:
+          value: ((SUM(TCC_NC_REQ_sum) / SUM(TCC_REQ_sum)) * 100)
+          unit: Percent
+        Uncached request rate:
+          value: ((SUM(TCC_UC_REQ_sum) / SUM(TCC_REQ_sum)) * 100)
+          unit: Percent
+        Coherent cached request rate:
+          value: ((SUM(TCC_CC_REQ_sum) / SUM(TCC_REQ_sum)) * 100)
+          unit: Percent
+        Probe request rate:
+          value: SUM(TCC_PROBE_sum) / SUM(TCC_BUSY_sum)
+          unit: Requests per Cycle
+        Probe eviction rate:
+          value: ((SUM(TCC_PROBE_EVICT_sum) / SUM(TCC_PROBE_sum)) * 100)
+          unit: Percent
+  - metric_table:
+      id: 3009
+      title: L2 Raw Counter Values
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        TCC_BUSY:
+          value: SUM(TCC_BUSY_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_REQ:
+          value: SUM(TCC_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_READ:
+          value: SUM(TCC_READ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_WRITE:
+          value: SUM(TCC_WRITE_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_ATOMIC:
+          value: SUM(TCC_ATOMIC_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_HIT:
+          value: SUM(TCC_HIT_sum) / SUM($denom)
+          unit: (Hits + $normUnit)
+        TCC_MISS:
+          value: SUM(TCC_MISS_sum) / SUM($denom)
+          unit: (Misses + $normUnit)
+        TCC_TAG_STALL:
+          value: SUM(TCC_TAG_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_IB_STALL:
+          value: SUM(TCC_IB_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_LATENCY_FIFO_FULL:
+          value: SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_SRC_FIFO_FULL:
+          value: SUM(TCC_SRC_FIFO_FULL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_WRITEBACK:
+          value: SUM(TCC_WRITEBACK_sum) / SUM($denom)
+          unit: (Cachelines + $normUnit)
+        TCC_NORMAL_EVICT:
+          value: SUM(TCC_NORMAL_EVICT_sum) / SUM($denom)
+          unit: (Cachelines + $normUnit)
+        TCC_EA0_RDREQ:
+          value: SUM(TCC_EA0_RDREQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_EA0_RDREQ_32B:
+          value: SUM(TCC_EA0_RDREQ_32B_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_EA0_RDREQ_64B:
+          value: SUM(TCC_EA0_RDREQ_64B_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_EA0_RDREQ_128B:
+          value: SUM(TCC_EA0_RDREQ_128B_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_EA0_RDREQ_LEVEL:
+          value: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_RDREQ_DRAM:
+          value: SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_EA0_WRREQ:
+          value: SUM(TCC_EA0_WRREQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_EA0_WRREQ_64B:
+          value: SUM(TCC_EA0_WRREQ_64B_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_EA0_WRREQ_STALL:
+          value: SUM(TCC_EA0_WRREQ_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_WRREQ_LEVEL:
+          value: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_WRREQ_DRAM:
+          value: SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_TOO_MANY_EA_WRREQS_STALL:
+          value: SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_ATOMIC:
+          value: SUM(TCC_EA0_ATOMIC_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_EA0_ATOMIC_LEVEL:
+          value: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_RDREQ_DRAM_CREDIT_STALL:
+          value: SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_WRREQ_DRAM_CREDIT_STALL:
+          value: SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_RDREQ_GMI_CREDIT_STALL:
+          value: SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_WRREQ_GMI_CREDIT_STALL:
+          value: SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_RDREQ_IO_CREDIT_STALL:
+          value: SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_EA0_WRREQ_IO_CREDIT_STALL:
+          value: SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCC_NC_REQ:
+          value: SUM(TCC_NC_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_UC_REQ:
+          value: SUM(TCC_UC_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_CC_REQ:
+          value: SUM(TCC_CC_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_PROBE:
+          value: SUM(TCC_PROBE_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCC_PROBE_EVICT:
+          value: SUM(TCC_PROBE_EVICT_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        Num L2 Channels:
+          value: $total_l2_chan
+          unit: Count
+  - metric_table:
+      id: 3010
+      title: Normalized L2 Stall Metrics (%)
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        # Normalized stall metrics use $GRBM_GUI_ACTIVE_PER_XCD as denominator
+        # This enables direct comparison with L1 stall metrics (same denominator)
+        Normalized L2 - Tag stall:
+          value: (SUM(TCC_TAG_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 - Input buffer stall:
+          value: (SUM(TCC_IB_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 - Latency FIFO full:
+          value: (SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 - Source FIFO full:
+          value: (SUM(TCC_SRC_FIFO_FULL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 to EA - Write stall:
+          value: (SUM(TCC_EA0_WRREQ_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 to EA - Too many writes stall:
+          value: (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 to EA - Read credit stall (HBM):
+          value: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 to EA - Write credit stall (HBM):
+          value: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 to EA - Read credit stall (GMI):
+          value: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 to EA - Write credit stall (GMI):
+          value: (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 to EA - Read credit stall (IO):
+          value: (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+        Normalized L2 to EA - Write credit stall (IO):
+          value: (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+          unit: Percent
+  - metric_table:
+      id: 3011
+      title: Normalized L2 Throughput Metrics (per Second)
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        # Normalized throughput metrics use wall-clock time for absolute measurement
+        Normalized L2 read requests:
+          value: SUM(TCC_READ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+          unit: Requests/s
+        Normalized L2 write requests:
+          value: SUM(TCC_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+          unit: Requests/s
+        Normalized L2 total requests:
+          value: SUM(TCC_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+          unit: Requests/s
+        Normalized L2 to EA read requests:
+          value: SUM(TCC_EA0_RDREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+          unit: Requests/s
+        Normalized L2 to EA write requests:
+          value: SUM(TCC_EA0_WRREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+          unit: Requests/s
+        Normalized L2 hits:
+          value: SUM(TCC_HIT_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+          unit: Hits/s
+        Normalized L2 misses:
+          value: SUM(TCC_MISS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+          unit: Misses/s
+  - metric_table:
+      id: 3012
+      title: L2 Bottleneck Detection Indicators
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        # Memory BW bound: High BW utilization (>80%) + High credit stalls (>10%)
+        L2 Back Pressure Indicator:
+          value: ((SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 Memory BW Bound - Read Credit Pressure:
+          value: ((SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 Memory BW Bound - Write Credit Pressure:
+          value: ((SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 Memory BW Bound - Combined Credit Pressure:
+          value: ((SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 Internal Resource Pressure - Latency FIFO:
+          value: ((SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 Internal Resource Pressure - Source FIFO:
+          value: ((SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
+        L2 Cache Efficiency:
+          value: ((SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)) * 100)
+          unit: Percent
+        L2 to Memory Traffic Ratio:
+          value: ((SUM(TCC_EA0_RDREQ_sum + TCC_EA0_WRREQ_sum) / SUM(TCC_REQ_sum)) * 100)
+          unit: Percent
+        L2 Remote Access Pressure (GMI):
+          value: ((SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
+          unit: Percent
   metrics_description:
     # Table 3001: L1 Cache Stalls (upstream to downstream)
     L1 Cache - VMEM stalled by L1 Cache: >-
@@ -466,30 +838,58 @@ Panel Config:
     L1 utilization: >-
       Percentage of time TCP is actively processing requests (busy cycles / free-running cycles).
       Equation: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
-    L1 latency: >-
-      Average cycles to complete memory access, from wave entering to wave leaving TCP.
+    L1 average latency: >-
+      Average latency to complete memory access, from wave entering to wave leaving TCP.
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TOTAL_ACCESSES_sum)
+    L1 latency: >-
+      Latency to complete memory access, from wave entering to wave leaving TCP.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)
     L1-L2 throughput (reads + writes): >-
       L1 to L2 request throughput for reads and writes per TCP busy cycle.
       Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
     L1-L2 throughput (total): >-
       Total L1 to L2 request throughput including reads, writes, and atomics per TCP busy cycle.
       Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
-    L2 read latency: >-
-      Average cycles to get a read response from L2 (TCC), including reads and atomics with return.
+    L2 read average latency: >-
+      Average latency to get a read response from L2 (TCC), including reads and atomics with return.
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
-    L2 write latency: >-
-      Average cycles to get a write acknowledgment from L2 (TCC), including writes and atomics without return.
+    L2 read latency: >-
+      Latency to get a read response from L2 (TCC), including reads and atomics with return.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)
+    L2 write average latency: >-
+      Average latency to get a write acknowledgment from L2 (TCC), including writes and atomics without return.
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum)
-    UTCL1 latency: >-
-      Average cycles for UTCL1 (L1 TLB) address translation, from request to completion.
+    L2 write latency: >-
+      Latency to get a write acknowledgment from L2 (TCC), including writes and atomics without return.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)
+    UTCL1 average latency: >-
+      Average latency for UTCL1 (L1 TLB) address translation, from request to completion.
       Includes both hits and misses. High latency indicates TLB pressure or UTCL2 miss penalty.
       MI350 restored this counter (removed in MI300 for power savings).
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
-    UTCL1 to UTCL2 latency: >-
-      Average cycles for UTCL1 misses to be resolved by UTCL2 (L2 TLB).
+    UTCL1 latency: >-
+      Latency for UTCL1 (L1 TLB) address translation, from request to completion.
+      Includes both hits and misses. High latency indicates TLB pressure or UTCL2 miss penalty.
+      MI350 restored this counter (removed in MI300 for power savings).
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_CLIENT_UTCL1_INFLIGHT_sum) / AVG(TCP_UTCL1_REQUEST_sum)
+    UTCL1 to UTCL2 average latency: >-
+      Average latency for UTCL1 misses to be resolved by UTCL2 (L2 TLB).
       Only counts requests that missed UTCL1 and went to UTCL2. High latency indicates page table walk overhead.
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
+    UTCL1 to UTCL2 latency: >-
+      Latency for UTCL1 misses to be resolved by UTCL2 (L2 TLB).
+      Only counts requests that missed UTCL1 and went to UTCL2. High latency indicates page table walk overhead.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_UTCL1_UTCL2_INFLIGHT_sum) / AVG(TCP_UTCL1_TRANSLATION_MISS_sum)
     # Table 3003: TD Return Path
     TD - stalled by TCP: >-
       Percentage of TD busy time spent waiting for TCP (L1 cache) data. A high rate indicates L1 data return bottleneck.
@@ -597,3 +997,267 @@ Panel Config:
       Wavefronts returned to CU via TD per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
       Equation: SUM(TD_LOAD_WAVEFRONT_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+    # Table 3007: L2 Cache
+    L2 hit rate: >-
+      The ratio of L2 cache hits over total cache accesses (hits + misses). A low hit rate (<= 50%)
+      indicates the workload exceeds L2 cache capacity.
+      Equation: (SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)) * 100
+    L2 utilization: >-
+      The ratio of active L2 cycles over total available L2 cycles across all channels.
+      High utilization indicates the L2 cache is heavily loaded.
+      Equation: (SUM(TCC_BUSY_sum) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    L2 tag stall rate: >-
+      The percentage of active L2 cycles where the tag pipeline was stalled for any reason.
+      A high rate (>= 10%) indicates the L2 tag pipeline is a bottleneck.
+      Equation: (SUM(TCC_TAG_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 input buffer stall rate: >-
+      The percentage of active L2 cycles where the input buffer output was stalled,
+      meaning L2 cannot accept new requests from L1. A high rate (>= 10%) indicates
+      L2 is backpressuring L1 (L1-to-L2 interface bottleneck).
+      Equation: (SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 latency FIFO full rate: >-
+      The percentage of active L2 cycles where the latency FIFO was full, indicating
+      too many requests are pending in the L2 cache.
+      Equation: (SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 write data FIFO full rate: >-
+      The percentage of active L2 cycles where the source data FIFO was full, indicating
+      the write data path is saturated.
+      Equation: (SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 to EA write stall rate: >-
+      The percentage of active L2 cycles where write requests to the EA interface were stalled.
+      A high rate (>= 10%) indicates the EA write path is saturated.
+      Equation: (SUM(TCC_EA0_WRREQ_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 to EA too many writes stall: >-
+      The percentage of active L2 cycles where L2 could not send a write request to EA
+      because the maximum number of pending EA write requests was reached. High values
+      indicate write credit starvation at the L2-to-memory interface.
+      Equation: (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 to EA read credit stall (HBM): >-
+      The percentage of active L2 cycles where read requests were stalled due to HBM
+      credit exhaustion. High values indicate HBM read bandwidth is saturated.
+      Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 to EA write credit stall (HBM): >-
+      The percentage of active L2 cycles where write requests were stalled due to HBM
+      credit exhaustion. High values indicate HBM write bandwidth is saturated.
+      Equation: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 to EA read credit stall (GMI): >-
+      The percentage of active L2 cycles where read requests were stalled due to GMI
+      credit exhaustion. High values indicate remote read bandwidth is saturated.
+      Equation: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 to EA write credit stall (GMI): >-
+      The percentage of active L2 cycles where write requests were stalled due to GMI
+      credit exhaustion. High values indicate remote write bandwidth is saturated.
+      Equation: (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 to EA read credit stall (IO): >-
+      The percentage of active L2 cycles where read requests were stalled due to IO
+      interface credit exhaustion. High values indicate PCIe/IO read bandwidth is saturated.
+      Equation: (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 to EA write credit stall (IO): >-
+      The percentage of active L2 cycles where write requests were stalled due to IO
+      interface credit exhaustion. High values indicate PCIe/IO write bandwidth is saturated.
+      Equation: (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    # Table 3008: L2 Traffic
+    L2 read request rate: >-
+      The number of L2 read requests per active L2 cycle, across all L2 channels.
+      Equation: SUM(TCC_READ_sum) / SUM(TCC_BUSY_sum)
+    L2 write request rate: >-
+      The number of L2 write requests per active L2 cycle, across all L2 channels.
+      Equation: SUM(TCC_WRITE_sum) / SUM(TCC_BUSY_sum)
+    L2 total request rate: >-
+      The total number of L2 requests per active L2 cycle, across all L2 channels.
+      Equation: SUM(TCC_REQ_sum) / SUM(TCC_BUSY_sum)
+    L2 to EA read average latency: >-
+      The average number of cycles an EA read request was in flight, from the L2 side.
+      Weighted average across all L2 channels (SUM/SUM gives more weight to channels with more requests).
+      Equation: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)
+    L2 to EA read latency: >-
+      The number of cycles an EA read request was in flight, from the L2 side.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel).
+      Equation: AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)
+    L2 to EA write average latency: >-
+      The average number of cycles an EA write request was in flight, from the L2 side.
+      Weighted average across all L2 channels (SUM/SUM gives more weight to channels with more requests).
+      Equation: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum)
+    L2 to EA write latency: >-
+      The number of cycles an EA write request was in flight, from the L2 side.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel).
+      Equation: AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)
+    L2 to EA atomic average latency: >-
+      The average number of cycles an EA atomic request was in flight, from the L2 side.
+      Weighted average across all L2 channels (SUM/SUM gives more weight to channels with more requests).
+      Equation: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)
+    L2 to EA atomic latency: >-
+      The number of cycles an EA atomic request was in flight, from the L2 side.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel).
+      Equation: AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)
+    L2 writeback rate: >-
+      The percentage of L2 requests that result in dirty cache line writebacks to memory.
+      Equation: (SUM(TCC_WRITEBACK_sum) / SUM(TCC_REQ_sum)) * 100
+    L2 eviction rate: >-
+      The percentage of L2 requests that result in cache line evictions due to capacity.
+      Equation: (SUM(TCC_NORMAL_EVICT_sum) / SUM(TCC_REQ_sum)) * 100
+    L2 to EA read BW: >-
+      The read bandwidth from L2 to the EA interface, calculated from
+      the mix of 32B, 64B, and 128B read request sizes.
+      Equation: ((SUM((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128))) / (SUM(End_Timestamp - Start_Timestamp)))
+    L2 to EA write and atomic BW: >-
+      The write and atomic bandwidth from L2 to the EA interface.
+      Equation: ((SUM((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32))) / (SUM(End_Timestamp - Start_Timestamp)))
+    HBM read fraction: >-
+      The percentage of L2 to EA read requests destined for the accelerator's local HBM.
+      Equation: (SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)) * 100
+    HBM write fraction: >-
+      The percentage of L2 to EA write requests destined for the accelerator's local HBM.
+      Equation: (SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)) * 100
+    Non-coherent request rate: >-
+      The percentage of L2 requests that are non-coherent (NC). Non-coherent requests
+      bypass cache coherence checks, typically used for streaming or write-only data.
+      Equation: (SUM(TCC_NC_REQ_sum) / SUM(TCC_REQ_sum)) * 100
+    Uncached request rate: >-
+      The percentage of L2 requests that are uncached (UC). Uncached requests bypass
+      the L2 cache entirely, going directly to memory.
+      Equation: (SUM(TCC_UC_REQ_sum) / SUM(TCC_REQ_sum)) * 100
+    Coherent cached request rate: >-
+      The percentage of L2 requests that are coherently cached (CC). These requests
+      participate in cache coherence protocols.
+      Equation: (SUM(TCC_CC_REQ_sum) / SUM(TCC_REQ_sum)) * 100
+    Probe request rate: >-
+      The number of external probe requests (for cache coherence) per active L2 cycle.
+      High probe rates indicate significant coherence traffic.
+      Equation: SUM(TCC_PROBE_sum) / SUM(TCC_BUSY_sum)
+    Probe eviction rate: >-
+      The percentage of probe requests that result in cache line evictions or invalidations.
+      High values indicate external coherence traffic is evicting useful data.
+      Equation: (SUM(TCC_PROBE_EVICT_sum) / SUM(TCC_PROBE_sum)) * 100
+    # Table 3010: Normalized L2 Stall Metrics (%)
+    # These metrics use $GRBM_GUI_ACTIVE_PER_XCD as denominator, enabling direct comparison with L1 stalls.
+    Normalized L2 - Tag stall: >-
+      Percentage of kernel execution time the L2 tag pipeline was stalled for any reason.
+      This is the primary L2 bottleneck indicator (lump sum of all internal TCC stalls).
+      Normalized to kernel cycles for cross-component comparison with L1 stalls.
+      Equation: (SUM(TCC_TAG_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 - Input buffer stall: >-
+      Percentage of kernel execution time the L2 input buffer was stalled, meaning L2
+      cannot accept new requests from L1. Indicates L1-to-L2 interface bottleneck.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_IB_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 - Latency FIFO full: >-
+      Percentage of kernel execution time the L2 latency FIFO was full, indicating
+      too many requests are pending in the L2 cache. Suggests L2 internal congestion.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 - Source FIFO full: >-
+      Percentage of kernel execution time the L2 source data FIFO was full, indicating
+      the write data path is saturated.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_SRC_FIFO_FULL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 to EA - Write stall: >-
+      Percentage of kernel execution time L2 write requests to L2 to memory through EA were stalled.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_EA0_WRREQ_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 to EA - Too many writes stall: >-
+      Percentage of kernel execution time L2 could not send write requests to memory
+      because maximum pending EA write requests was reached. Indicates write credit starvation.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 to EA - Read credit stall (HBM): >-
+      Percentage of kernel execution time L2 read requests were stalled due to HBM
+      credit exhaustion. High values indicate HBM read bandwidth is saturated.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 to EA - Write credit stall (HBM): >-
+      Percentage of kernel execution time L2 write requests were stalled due to HBM
+      credit exhaustion. High values indicate HBM write bandwidth is saturated.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 to EA - Read credit stall (GMI): >-
+      Percentage of kernel execution time L2 read requests were stalled due to GMI
+      credit exhaustion. High values indicate remote read bandwidth is saturated.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 to EA - Write credit stall (GMI): >-
+      Percentage of kernel execution time L2 write requests were stalled due to GMI
+      credit exhaustion. High values indicate remote write bandwidth is saturated.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 to EA - Read credit stall (IO): >-
+      Percentage of kernel execution time L2 read requests were stalled due to IO
+      interface credit exhaustion. High values indicate PCIe/IO read bandwidth is saturated.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    Normalized L2 to EA - Write credit stall (IO): >-
+      Percentage of kernel execution time L2 write requests were stalled due to IO
+      interface credit exhaustion. High values indicate PCIe/IO write bandwidth is saturated.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD)) * 100
+    # Table 3011: Normalized L2 Throughput Metrics (per Second)
+    Normalized L2 read requests: >-
+      L2 read requests per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TCC_READ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+    Normalized L2 write requests: >-
+      L2 write requests per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TCC_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+    Normalized L2 total requests: >-
+      Total L2 requests per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TCC_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+    Normalized L2 to EA read requests: >-
+      L2 to memory through EA read requests per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TCC_EA0_RDREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+    Normalized L2 to EA write requests: >-
+      L2 to memory through EA write requests per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TCC_EA0_WRREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+    Normalized L2 hits: >-
+      L2 cache hits per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TCC_HIT_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+    Normalized L2 misses: >-
+      L2 cache misses per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TCC_MISS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+    # Table 3012: L2 Bottleneck Detection Indicators
+    # Thresholds: >=10% back pressure indicates bottleneck
+    L2 Back Pressure Indicator: >-
+      Percentage of L2 busy time the input buffer was stalled.
+      A rate >= 10% indicates L2 is backpressuring L1 (GL1/GL2 potential bottleneck).
+      Equation: (SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 Memory BW Bound - Read Credit Pressure: >-
+      Percentage of L2 busy time read requests were stalled due to HBM credit exhaustion.
+      High values (>10%) combined with high memory utilization indicate memory read bandwidth bound.
+      Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 Memory BW Bound - Write Credit Pressure: >-
+      Percentage of L2 busy time write requests were stalled due to HBM credit exhaustion.
+      High values (>10%) combined with high memory utilization indicate memory write bandwidth bound.
+      Equation: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 Memory BW Bound - Combined Credit Pressure: >-
+      Combined HBM read and write credit stall percentage.
+      This is the primary memory bandwidth bound indicator. High values (>10%) with
+      high memory utilization (>80%) strongly indicate memory bandwidth is the bottleneck.
+      Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 Internal Resource Pressure - Latency FIFO: >-
+      Percentage of L2 busy time the latency FIFO was full.
+      A rate >= 10% indicates L2 internal resource exhaustion bottleneck.
+      This is one of the TCC_TAG_STALL breakdown components (LFIFO full, 2-deep).
+      Equation: (SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 Internal Resource Pressure - Source FIFO: >-
+      Percentage of L2 busy time the source data FIFO was full.
+      A rate >= 10% indicates L2 write data path bottleneck.
+      Equation: (SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100
+    L2 Cache Efficiency: >-
+      L2 cache hit rate. A low rate (<50%) indicates the workload exceeds L2 cache
+      capacity, leading to high memory traffic. This helps distinguish cache-bound
+      from memory bandwidth-bound scenarios.
+      Equation: (SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)) * 100
+    L2 to Memory Traffic Ratio: >-
+      Percentage of L2 requests that result in L2 to memory through EA traffic.
+      High ratio (>50%) indicates most L2 requests go to memory (poor cache locality).
+      Low ratio suggests good cache hit rate and workload fits in L2.
+      Equation: (SUM(TCC_EA0_RDREQ_sum + TCC_EA0_WRREQ_sum) / SUM(TCC_REQ_sum)) * 100
+    L2 Remote Access Pressure (GMI): >-
+      Combined GMI read and write credit stall percentage.
+      High values indicate remote memory access bottleneck (multi-GPU or multi-socket).
+      Equation: (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100

@@ -293,6 +293,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "rocprof_binary",
         "rocprof_config",
         "xgmi",
+        "sdma",
         "group_by_queue",
         "group_by_stream",
         "openmp",
@@ -325,6 +326,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "hip",
         "scratch_memory",
         "rocm",
+        "selective_regions",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")

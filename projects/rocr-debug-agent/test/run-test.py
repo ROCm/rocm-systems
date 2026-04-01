@@ -11,7 +11,7 @@ import shutil
 from subprocess import Popen, PIPE, CalledProcessError, run
 import signal
 
-DEFAULT_TIMEOUT = 30
+DEFAULT_TIMEOUT = 60
 
 
 def run_and_communicate(

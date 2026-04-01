@@ -41,12 +41,13 @@
 #include <regex>
 
 #include "amd_smi/impl/amd_smi_common.h"
-#include "amd_smi/impl/amd_smi_test_flags.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd::smi {
+
+#define AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
 
 AMDSmiSystem& AMDSmiSystem::getInstance() {
   static AMDSmiSystem instance;
@@ -270,8 +271,7 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
   amdsmi_status_t amd_smi_status;
 
   // populate GPU sockets and processors
-  // Also initialize GPU devices when the test flag is set (for mutual exclusion testing)
-  if ((flags & AMDSMI_INIT_AMD_GPUS) || (flags & AMD_SMI_INIT_FLAG_RESRV_TEST1)) {
+  if (flags & AMDSMI_INIT_AMD_GPUS) {
     amd_smi_status = populate_amd_gpu_devices();
     if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
   }
@@ -340,11 +340,9 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   AMDSmiSystem::cleanup();
-  // init rsmi — forward the test flag so the mutex becomes non-blocking
+  // init rsmi
   rsmi_driver_state_t state;
-  uint64_t rsmi_flags =
-      (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1) ? RSMI_INIT_FLAG_RESRV_TEST1 : 0;
-  rsmi_status_t ret = rsmi_init(rsmi_flags);
+  rsmi_status_t ret = rsmi_init(0);
   if (ret != RSMI_STATUS_SUCCESS) {
     if (rsmi_driver_status(&state) == RSMI_STATUS_SUCCESS &&
         state != RSMI_DRIVER_MODULE_STATE_LIVE) {

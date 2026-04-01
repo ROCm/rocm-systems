@@ -27,8 +27,8 @@
 #include <cstdint>
 #include <iostream>
 
-#include "../test_common.h"
 #include "../test_utils.h"
+#include "amd_smi/amdsmi.h"
 
 TestEvtNotifReadWrite::TestEvtNotifReadWrite() : TestBase() {
   set_title("AMDSMI Event Notification Read/Write Test");
@@ -62,7 +62,6 @@ void TestEvtNotifReadWrite::Run(void) {
   uint32_t dv_ind;
 
   TestBase::Run();
-  PRINT_VERBOSITY();
   if (num_monitor_devs() == 0) {
     return;
   }
@@ -80,18 +79,15 @@ void TestEvtNotifReadWrite::Run(void) {
   }
 
   for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
-    DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "gpu=" + std::to_string(dv_ind),
-                       VERB(STANDARD));
     ret = amdsmi_init_gpu_event_notification(processor_handles_[dv_ind]);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "Event notification is not supported for this driver version." << std::endl;
+      }
       return;
     }
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", "gpu=" + std::to_string(dv_ind),
-                       VERB(STANDARD));
     ret = amdsmi_set_gpu_event_notification_mask(processor_handles_[dv_ind], mask);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   }
 
@@ -99,10 +95,7 @@ void TestEvtNotifReadWrite::Run(void) {
   uint32_t num_elem = 10;
   bool read_again = false;
 
-  DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "", VERB(STANDARD));
   ret = amdsmi_get_gpu_event_notification(10000, &num_elem, data);
-  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
-                        AMDSMI_STATUS_INSUFFICIENT_SIZE, AMDSMI_STATUS_NO_DATA);
   if (ret == AMDSMI_STATUS_SUCCESS || ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
     EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
     IF_VERB(STANDARD) {
@@ -131,10 +124,7 @@ void TestEvtNotifReadWrite::Run(void) {
   // In case GPU Pre reset event was collected in the previous read,
   // read again to get the GPU Post reset event.
   if (read_again) {
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "", VERB(STANDARD));
     ret = amdsmi_get_gpu_event_notification(10000, &num_elem, data);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
-                          AMDSMI_STATUS_INSUFFICIENT_SIZE, AMDSMI_STATUS_NO_DATA);
     if (ret == AMDSMI_STATUS_SUCCESS || ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
       EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
       IF_VERB(STANDARD) {
@@ -159,9 +149,7 @@ void TestEvtNotifReadWrite::Run(void) {
   }
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
-    DISPLAY_AMDSMI_API("amdsmi_stop_gpu_event_notification", "", VERB(STANDARD));
     ret = amdsmi_stop_gpu_event_notification(processor_handles_[dv_ind]);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   }
 }

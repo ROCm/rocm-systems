@@ -71,7 +71,7 @@ jobs:
       ROCPROFSYS_KEEP_TEST_OUTPUT: 0
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-systems/
 
@@ -249,7 +249,7 @@ jobs:
     - name: CTest Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
         path: |
@@ -258,7 +258,7 @@ jobs:
     - name: Data Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
@@ -280,7 +280,7 @@ jobs:
       ROCPROFSYS_MAX_THREADS: '64'
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-systems/
 

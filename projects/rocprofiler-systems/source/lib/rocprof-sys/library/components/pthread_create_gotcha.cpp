@@ -515,6 +515,21 @@ pthread_create_gotcha::shutdown(int64_t _tid)
     }
 }
 
+std::mutex pthread_create_gotcha::s_mutex = {};
+
+void
+pthread_create_gotcha::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    pthread_create_gotcha_t::set_ready(false);
+}
+void
+pthread_create_gotcha::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    pthread_create_gotcha_t::set_ready(true);
+}
+
 void
 pthread_create_gotcha::set_data(wrappee_t _v)
 {

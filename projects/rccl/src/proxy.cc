@@ -830,11 +830,26 @@ static ncclResult_t ncclProxyGetPostedOps(struct ncclProxyState* proxyState, int
   if (state->active == NULL) {
     pthread_mutex_lock(&pool->mutex);
     if (pool->nextOps == -1 && !state->stop) {
-      ncclProfilerStartProxyCtrlEvent(proxyState->profilerContext, &eHandle);
-      ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlSleep);
-      pthread_cond_wait(&pool->cond, &pool->mutex);
-      ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlWakeup);
-      ncclProfilerStopProxyCtrlEvent(eHandle);
+#ifdef ENABLE_ROCSHMEM
+      if (proxyState->rocshmemEnabled) {
+        while (pool->nextOps == -1 && !state->stop) {
+          pthread_mutex_unlock(&pool->mutex);
+#if defined(__x86_64__)
+          __builtin_ia32_pause();
+#elif defined(__aarch64__)
+          __asm__ __volatile__("yield");
+#endif
+          pthread_mutex_lock(&pool->mutex);
+        }
+      } else
+#endif
+      {
+        ncclProfilerStartProxyCtrlEvent(proxyState->profilerContext, &eHandle);
+        ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlSleep);
+        pthread_cond_wait(&pool->cond, &pool->mutex);
+        ncclProfilerRecordProxyCtrlEventState(eHandle, 0, ncclProfilerProxyCtrlWakeup);
+        ncclProfilerStopProxyCtrlEvent(eHandle);
+      }
     }
   }
   state->nextOps = pool->nextOps;
@@ -1914,6 +1929,9 @@ ncclResult_t ncclProxyInit(struct ncclComm* comm, struct ncclSocket* sock, union
   assert(comm->sharedRes->proxyState == NULL);
   NCCLCHECK(ncclCalloc(&comm->sharedRes->proxyState, 1));
   comm->proxyState = comm->sharedRes->proxyState;
+#ifdef ENABLE_ROCSHMEM
+  comm->proxyState->rocshmemEnabled = false;
+#endif
   comm->proxyState->refCount = 1;
   comm->proxyState->listenSock = sock;
   comm->proxyState->peerAddresses = peerAddresses;

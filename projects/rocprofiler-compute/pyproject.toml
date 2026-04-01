@@ -63,6 +63,7 @@ docstring-code-line-length = "dynamic"
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+    "-rx",
 ]
 
 pythonpath = [
@@ -99,7 +100,6 @@ markers = [
     "num_xcds_cli_output",
     "sets_func",
     "sets_perf",
-    "pc_sampling",
     "live_attach_detach",
     "roofline_1",
     "roofline_2",
