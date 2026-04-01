@@ -264,4 +264,16 @@ execute_process(
   COMMAND bash -c "sed -i 's/ncclIbSetNetAttr/rocmNetIbSetNetAttr/g' ${ROCM_NETIB_FILE}"
   WORKING_DIRECTORY ${RCCL_SRC_DIR}
 )
+execute_process(
+  COMMAND bash -c "sed -i 's/cuMemGetHandleForAddressRange/hipMemGetHandleForAddressRange/g' ${ROCM_NETIB_FILE}"
+  WORKING_DIRECTORY ${RCCL_SRC_DIR}
+)
+execute_process(
+  COMMAND bash -c "sed -i 's/(CUdeviceptr)/(hipDeviceptr_t)/g' ${ROCM_NETIB_FILE}"
+  WORKING_DIRECTORY ${RCCL_SRC_DIR}
+)
+execute_process(
+  COMMAND bash -c "sed -i 's/CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD/hipMemRangeHandleTypeDmaBufFd/g' ${ROCM_NETIB_FILE}"
+  WORKING_DIRECTORY ${RCCL_SRC_DIR}
+)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
