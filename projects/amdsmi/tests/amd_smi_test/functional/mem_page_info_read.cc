@@ -80,10 +80,10 @@ void TestMemPageInfoRead::Run(void) {
 
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       // Verify api support checking functionality is working
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu=" + std::to_string(i),
-                         VERB(STANDARD));
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages(nullptr)",
+                         "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], nullptr, nullptr);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_SUPPORTED);
       ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
       continue;
     } else {
@@ -92,8 +92,8 @@ void TestMemPageInfoRead::Run(void) {
         std::cout << "\tNumber of memory page records: " << num_pages << std::endl;
       }
       // Verify api support checking functionality is working
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu=" + std::to_string(i),
-                         VERB(STANDARD));
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages(nullptr)",
+                         "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], nullptr, nullptr);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);

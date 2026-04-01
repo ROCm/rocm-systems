@@ -7583,16 +7583,7 @@ rsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
     return RSMI_STATUS_BUSY;
   }
 
-  // Use nanosleep in a loop so that signals (e.g. SIGCHLD) do not
-  // shorten the sleep and cause the mutex to be released prematurely.
-  struct timespec remaining = {static_cast<time_t>(seconds), 0};
-  while (remaining.tv_sec > 0 || remaining.tv_nsec > 0) {
-    struct timespec interval = remaining;
-    if (nanosleep(&interval, &remaining) == 0) {
-      break;
-    }
-    // EINTR: a signal interrupted the sleep; remaining has time left, retry.
-  }
+  amd::smi::sleep_interruptible(seconds);
 
   return RSMI_STATUS_SUCCESS;
 }

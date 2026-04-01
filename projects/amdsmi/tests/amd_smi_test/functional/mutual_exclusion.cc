@@ -269,6 +269,7 @@ void TestMutualExclusion::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_id", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_id(processor_handles_[0], &dmy_ui16);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
     DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "0", VERB(STANDARD));
     ret = amdsmi_get_temp_metric(processor_handles_[0], AMDSMI_TEMPERATURE_TYPE_EDGE,

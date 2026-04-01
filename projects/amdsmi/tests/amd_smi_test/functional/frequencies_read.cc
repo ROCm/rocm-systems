@@ -138,11 +138,11 @@ void TestFrequenciesRead::Run(void) {
 
       PrintDeviceHeader(processor_handles_[i]);
 
-      freq_output(AMDSMI_CLK_TYPE_MEM, "Supported GPU Memory");
-      freq_output(AMDSMI_CLK_TYPE_SYS, "Supported GPU");
-      freq_output(AMDSMI_CLK_TYPE_DF, "Data Fabric Clock");
-      freq_output(AMDSMI_CLK_TYPE_DCEF, "Display Controller Engine Clock");
-      freq_output(AMDSMI_CLK_TYPE_SOC, "SOC Clock");
+      freq_output(AMDSMI_CLK_TYPE_MEM, "GPU Memory Clock (mclk)");
+      freq_output(AMDSMI_CLK_TYPE_SYS, "GPU Clock (sclk)");
+      freq_output(AMDSMI_CLK_TYPE_DF, "Data Fabric Clock (fclk)");
+      freq_output(AMDSMI_CLK_TYPE_DCEF, "Display Controller Engine Clock (dcefclk)");
+      freq_output(AMDSMI_CLK_TYPE_SOC, "SOC Clock (socclk)");
 
       // Verify api support checking functionality is working
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth(nullptr)", "gpu=" + std::to_string(i),
