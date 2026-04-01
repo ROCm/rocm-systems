@@ -558,7 +558,7 @@ def _should_split_file(coll, redop, ty):
   if not is_split_compile:
     return False
   if not _split_file_patterns:
-    return True
+    return False
   basename = paste("_", coll_camel_to_lower[coll], redop and redop.lower(), ty)
   return any(fnmatch(basename, pat) for pat in _split_file_patterns)
 

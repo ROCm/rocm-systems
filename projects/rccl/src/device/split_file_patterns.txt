@@ -1,4 +1,3 @@
 # Device files to fully split when ENABLE_SPLIT_DEVICE_COMPILE is ON.
 # One basename or glob pattern per line (fnmatch syntax).
-all_reduce_*
-reduce_scatter_*_bf16
+# (empty = no splitting)
