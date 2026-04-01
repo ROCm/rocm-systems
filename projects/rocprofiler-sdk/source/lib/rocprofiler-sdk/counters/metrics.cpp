@@ -48,6 +48,8 @@
 #include <cstdlib>
 #include <memory>
 #include <system_error>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -118,12 +120,33 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         return data;
     });
 
+    // Helper lambda to return empty counter_metrics_t on error
+    auto return_empty = []() {
+        return counter_metrics_t{
+            .arch_to_metric = MetricMap{}, .id_to_metric = {}, .arch_to_id = {}};
+    };
+
     std::stringstream counter_data;
     if(override.data.empty() || override.append)
     {
         ROCP_INFO << "Loading Counter Config: " << filename;
         std::ifstream file(filename);
+
+        // Validate file was opened successfully
+        if(!file.is_open() || !file.good())
+        {
+            ROCP_ERROR << "Failed to open counter configuration file: " << filename;
+            return return_empty();
+        }
+
         counter_data << file.rdbuf();
+
+        // Check if file was empty or read failed
+        if(counter_data.str().empty())
+        {
+            ROCP_ERROR << "Counter configuration file is empty or unreadable: " << filename;
+            return return_empty();
+        }
     }
     else
     {
@@ -131,63 +154,244 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         counter_data << override.data;
     }
 
-    auto     yaml       = YAML::Load(counter_data.str());
+    // Wrap YAML parsing in exception handling
+    YAML::Node yaml;
+    try
+    {
+        yaml = YAML::Load(counter_data.str());
+    } catch(const YAML::ParserException& e)
+    {
+        ROCP_ERROR << "YAML parsing error in counter configuration: " << e.what();
+        return return_empty();
+    } catch(const YAML::Exception& e)
+    {
+        ROCP_ERROR << "YAML error in counter configuration: " << e.what();
+        return return_empty();
+    } catch(const std::exception& e)
+    {
+        ROCP_ERROR << "Unexpected error parsing counter configuration: " << e.what();
+        return return_empty();
+    }
+
+    // Validate required YAML structure
+    if(!yaml["rocprofiler-sdk"])
+    {
+        ROCP_ERROR << "YAML missing required top-level key 'rocprofiler-sdk'";
+        return return_empty();
+    }
+
+    if(!yaml["rocprofiler-sdk"]["counters"])
+    {
+        ROCP_ERROR << "YAML missing required key 'rocprofiler-sdk.counters'";
+        return return_empty();
+    }
+
     auto     header     = yaml["rocprofiler-sdk"]["counters"];
     uint64_t current_id = 0;
     if(!override.data.empty() && override.append)
     {
-        append_yaml = YAML::Load(override.data);
-        if(append_yaml["rocprofiler-sdk"] && append_yaml["rocprofiler-sdk"]["counters"])
+        try
         {
-            for(const auto& counter : append_yaml["rocprofiler-sdk"]["counters"])
+            append_yaml = YAML::Load(override.data);
+            if(append_yaml["rocprofiler-sdk"] && append_yaml["rocprofiler-sdk"]["counters"])
             {
-                header.push_back(counter);
+                for(const auto& counter : append_yaml["rocprofiler-sdk"]["counters"])
+                {
+                    header.push_back(counter);
+                }
             }
-        }
-        else
+            else
+            {
+                ROCP_ERROR << "Invalid extra counters YAML format. Expected structure:\n"
+                           << "rocprofiler-sdk:\n"
+                           << "  counters-schema-version: 1\n"
+                           << "  counters:\n"
+                           << "  - name: COUNTER_NAME\n"
+                           << "    description: 'Counter description'\n"
+                           << "    properties: []\n"
+                           << "    definitions:\n"
+                           << "    - architectures:\n"
+                           << "      - gfx942\n"
+                           << "      block: BLOCK_NAME\n"
+                           << "      event: EVENT_ID\n"
+                           << "Got:\n"
+                           << override.data;
+            }
+        } catch(const YAML::Exception& e)
         {
-            ROCP_ERROR << "Invalid extra counters YAML format. Expected structure:\n"
-                       << "rocprofiler-sdk:\n"
-                       << "  counters-schema-version: 1\n"
-                       << "  counters:\n"
-                       << "  - name: COUNTER_NAME\n"
-                       << "    description: 'Counter description'\n"
-                       << "    properties: []\n"
-                       << "    definitions:\n"
-                       << "    - architectures:\n"
-                       << "      - gfx942\n"
-                       << "      block: BLOCK_NAME\n"
-                       << "      event: EVENT_ID\n"
-                       << "Got:\n"
-                       << override.data;
+            ROCP_ERROR << "YAML error in override data: " << e.what();
+        } catch(const std::exception& e)
+        {
+            ROCP_ERROR << "Unexpected error parsing override data: " << e.what();
         }
     }
 
+    // Track counter names per architecture to detect duplicates
+    std::unordered_map<std::string, std::unordered_set<std::string>> arch_counter_names;
+    // Track which duplicates we've already warned about (static to persist across calls)
+    static std::unordered_set<std::string> warned_duplicates;
+
     for(const auto& counter : header)
     {
-        auto counter_name = counter["name"].as<std::string>();
-        auto description  = counter["description"].as<std::string>();
+        // Validate required counter fields exist and have correct types
+        if(!counter["name"])
+        {
+            ROCP_WARNING << "Counter entry missing required 'name' field. Skipping counter.";
+            continue;
+        }
+
+        if(!counter["description"])
+        {
+            ROCP_WARNING << "Counter entry missing required 'description' field. Skipping counter.";
+            continue;
+        }
+
+        if(!counter["definitions"])
+        {
+            ROCP_WARNING << "Counter entry missing required 'definitions' field. Skipping counter.";
+            continue;
+        }
+
+        std::string counter_name;
+        std::string description;
+
+        // Safely extract counter name and description with type checking
+        try
+        {
+            counter_name = counter["name"].as<std::string>();
+            description  = counter["description"].as<std::string>();
+
+            // Validate name is not empty (description can be empty)
+            if(counter_name.empty())
+            {
+                ROCP_WARNING << "Counter has empty name field. Skipping counter.";
+                continue;
+            }
+        } catch(const YAML::BadConversion& e)
+        {
+            ROCP_WARNING << "Counter has invalid type for 'name' or 'description' field "
+                         << "(expected string). Skipping counter.";
+            continue;
+        }
+
         for(const auto& definition : counter["definitions"])
         {
+            if(!definition["architectures"])
+            {
+                ROCP_WARNING << fmt::format(
+                    "Counter '{}' definition missing 'architectures' field. Skipping definition.",
+                    counter_name);
+                continue;
+            }
+
+            if(!definition["architectures"].IsSequence() || definition["architectures"].size() == 0)
+            {
+                ROCP_WARNING << fmt::format(
+                    "Counter '{}' has empty or invalid 'architectures' list. Skipping definition.",
+                    counter_name);
+                continue;
+            }
+
             for(const auto& arch : definition["architectures"])
             {
-                auto& metricVec =
-                    ret.emplace(arch.as<std::string>(), std::vector<Metric>()).first->second;
+                std::string arch_str;
+                try
+                {
+                    arch_str = arch.as<std::string>();
+
+                    if(arch_str.empty())
+                    {
+                        ROCP_WARNING << fmt::format(
+                            "Counter '{}' has empty architecture string. Skipping.", counter_name);
+                        continue;
+                    }
+                } catch(const YAML::BadConversion& e)
+                {
+                    ROCP_WARNING << fmt::format(
+                        "Counter '{}' has invalid architecture type (expected string). Skipping.",
+                        counter_name);
+                    continue;
+                }
+
+                // Check for duplicate counter name in this architecture
+                if(!arch_counter_names[arch_str].insert(counter_name).second)
+                {
+                    // Only warn once per unique counter+arch combination
+                    auto dup_key = arch_str + ":" + counter_name;
+                    if(warned_duplicates.insert(dup_key).second)
+                    {
+                        ROCP_WARNING << fmt::format(
+                            "Duplicate counter '{}' found in YAML for architecture {}. "
+                            "Using first definition, ignoring duplicate.",
+                            counter_name,
+                            arch_str);
+                    }
+                    continue;  // Skip this duplicate definition
+                }
+
+                // Extract and validate block, event, and expression fields
+                std::string block_str;
+                std::string event_str;
+                std::string expression_str;
+
+                try
+                {
+                    block_str = (definition["block"] ? definition["block"].as<std::string>() : "");
+                    event_str = (definition["event"] ? definition["event"].as<std::string>() : "");
+                    expression_str =
+                        (definition["expression"] ? definition["expression"].as<std::string>()
+                                                  : "");
+                } catch(const YAML::BadConversion& e)
+                {
+                    ROCP_WARNING << fmt::format(
+                        "Counter '{}' has invalid type for block/event/expression field. "
+                        "Expected string. Skipping definition.",
+                        counter_name);
+                    continue;
+                }
+
+                // Validate counter definition is complete
+                // Counter must have either: (block AND event) OR expression
+                bool has_block      = !block_str.empty();
+                bool has_event      = !event_str.empty();
+                bool has_expression = !expression_str.empty();
+
+                // Validate: must have expression OR both block+event
+                if(!has_expression && !(has_block && has_event))
+                {
+                    std::string issue;
+                    if(has_block && !has_event)
+                        issue = fmt::format("has block '{}' but missing event", block_str);
+                    else if(!has_block && has_event)
+                        issue = fmt::format("has event '{}' but missing block", event_str);
+                    else
+                        issue = "missing both block/event and expression";
+
+                    ROCP_WARNING << fmt::format(
+                        "Counter '{}' for architecture {} {}. "
+                        "Hardware counters need both block AND event, OR an expression. Skipping.",
+                        counter_name,
+                        arch_str,
+                        issue);
+                    continue;
+                }
+
+                auto& metricVec = ret.emplace(arch_str, std::vector<Metric>()).first->second;
                 if(metricVec.empty())
                 {
                     const auto constants = get_constants(current_id);
                     metricVec.insert(metricVec.end(), constants.begin(), constants.end());
                     current_id += constants.size();
                 }
-                metricVec.emplace_back(
-                    arch.as<std::string>(),
-                    counter_name,
-                    (definition["block"] ? definition["block"].as<std::string>() : ""),
-                    (definition["event"] ? definition["event"].as<std::string>() : ""),
-                    description,
-                    (definition["expression"] ? definition["expression"].as<std::string>() : ""),
-                    "",
-                    current_id);
+
+                metricVec.emplace_back(arch_str,
+                                       counter_name,
+                                       block_str,
+                                       event_str,
+                                       description,
+                                       expression_str,
+                                       "",
+                                       current_id);
                 current_id++;
             }
         }

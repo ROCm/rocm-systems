@@ -22,6 +22,7 @@
 
 #include "dimensions.hpp"
 
+#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
@@ -113,10 +114,20 @@ generate_dimensions(rocprofiler_agent_id_t agent_id)
         {
             // Generate dimensions for this specific agent
             dims.emplace(ast.out_id().handle, ast_copy.set_dimensions(agent_id));
-        } catch(std::runtime_error& e)
+        } catch(const std::runtime_error& e)
         {
-            ROCP_FATAL << metric << " has improper dimensions"
-                       << " " << e.what();
+            ROCP_WARNING << fmt::format(
+                "Invalid counter '{}' in YAML configuration - {}. Counter will be skipped.",
+                metric,
+                e.what());
+            continue;
+        } catch(const std::exception& e)
+        {
+            ROCP_WARNING << fmt::format(
+                "Unexpected error processing counter '{}': {}. Counter will be skipped.",
+                metric,
+                e.what());
+            continue;
         }
     }
     return {.id_to_dim = dims};

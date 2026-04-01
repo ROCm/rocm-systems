@@ -119,8 +119,16 @@ process_agent_counters(rocprofiler_agent_id_t    agent_id,
                 auto _dim_ids  = std::vector<rocprofiler_counter_dimension_id_t>{};
                 auto _dim_info = std::vector<rocprofiler_counter_record_dimension_info_t>{};
 
-                ROCPROFILER_CHECK(rocprofiler_query_counter_info(
-                    counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, &_info));
+                auto status = rocprofiler_query_counter_info(
+                    counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, &_info);
+
+                // Skip invalid counters instead of aborting
+                if(status != ROCPROFILER_STATUS_SUCCESS)
+                {
+                    // Silently skip - the root cause warning was already logged in dimensions.cpp
+                    // when the counter failed dimension generation. No need to log again here.
+                    continue;
+                }
 
                 if(counters_set_data != nullptr && counters_set_data->count(_info.name) == 0)
                     continue;
