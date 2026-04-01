@@ -292,6 +292,9 @@ get_trace_delay();
 double
 get_trace_duration();
 
+std::string
+get_trace_region();
+
 double
 get_sampling_freq();
 

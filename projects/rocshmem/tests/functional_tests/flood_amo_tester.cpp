@@ -68,7 +68,7 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
       // shuffle ordering so that threads in the wave put to a
       // different pe 'simultaneously'
       auto pe = (t_id + j) % num_pe;
-      uint64_t ret{0};
+      [[maybe_unused]] uint64_t ret{0};
       switch (type) {
       case FloodWaitAmoTestType:
       case FloodAddTestType:
@@ -192,7 +192,7 @@ FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
   const int max_sustainable_wgs = max_co_resident_wgs_per_cu * num_cus;
 
   // Print warning if num_wgs exceeds max co-resident work-groups
-  if (args.num_wgs > max_sustainable_wgs) {
+  if (static_cast<unsigned int>(args.num_wgs) > static_cast<unsigned int>(max_sustainable_wgs)) {
     std::cout << "Warning: Number of work-groups (" << args.num_wgs
               << ") exceeds max sustainable work-groups ("
               << max_sustainable_wgs << ")." << std::endl;
@@ -204,13 +204,13 @@ FloodAmoTester::~FloodAmoTester() {
   CHECK_HIP(hipFree(grid_psync));
 }
 
-void FloodAmoTester::resetBuffers(size_t size) {
+void FloodAmoTester::resetBuffers([[maybe_unused]] size_t size) {
   CHECK_HIP(hipMemset(s_buf, 0, sizeof(uint64_t) * args.num_wgs));
   CHECK_HIP(hipMemset(grid_psync, 0, 4 * sizeof(int)));
 }
 
 void FloodAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                size_t size) {
+                                [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
   int num_pes {rocshmem_n_pes()};
 
@@ -222,7 +222,7 @@ void FloodAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   num_timed_msgs = loop * gridSize.x * blockSize.x * num_pes;
 }
 
-void FloodAmoTester::verifyResults(size_t size) {
+void FloodAmoTester::verifyResults([[maybe_unused]] size_t size) {
   int num_pes {rocshmem_n_pes()};
 
   assert(size == sizeof(uint64_t));
@@ -230,7 +230,7 @@ void FloodAmoTester::verifyResults(size_t size) {
   if (*verification_error) {
     std::cerr << "Data validation error (found by device kernel)" << std::endl;
     uint64_t expected = static_cast<uint64_t>(args.loop + args.skip) * num_pes * (args.wg_size * (args.wg_size+1)) / 2;
-    for(auto wg = 0; wg < args.num_wgs; wg++) {
+    for(unsigned int wg = 0; wg < static_cast<unsigned int>(args.num_wgs); wg++) {
       if (expected != s_buf[wg]) {
         std::cerr << "Data validation error for wg " << wg << std::endl;
         std::cerr << " Got " << s_buf[wg]

@@ -786,7 +786,7 @@ void Tester::print(uint64_t size) {
   size_t total_size = size_factor * size * num_timed_msgs;
   size_t volume = total_size / num_loops;
 
-  double timer_avg = timerAvgInMicroseconds();
+  [[maybe_unused]] double timer_avg = timerAvgInMicroseconds();
   double time_us = gpuCyclesToMicroseconds(max_end_time - min_start_time);
   double time_s = time_us / 1e6;
 
@@ -799,7 +799,7 @@ void Tester::print(uint64_t size) {
 
   float total_kern_time_ms;
   CHECK_HIP(hipEventElapsedTime(&total_kern_time_ms, start_event, stop_event));
-  float total_kern_time_s = total_kern_time_ms / 1000;
+  [[maybe_unused]] float total_kern_time_s = total_kern_time_ms / 1000;
 
   int field_width = 20;
   int float_precision = 2;

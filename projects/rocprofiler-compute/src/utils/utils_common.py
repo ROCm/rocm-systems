@@ -14,6 +14,7 @@ import selectors
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 import time
@@ -1023,6 +1024,47 @@ def print_status(msg: str) -> None:
     console_log(msg)
     console_log("~" * (msg_length + 1))
     console_log("")
+
+
+def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
+    """
+    Create temporary directory with rocprofiler metrics config files.
+
+    Writes two config files:
+    - counter_defs.yaml: For backward compatibility (excludes firmware restrictions)
+    - config.yaml: Current version with full config
+
+    Args:
+        sdk_config: The rocprofiler-sdk configuration dictionary.
+
+    Returns:
+        Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var).
+    """
+    tmpfile_parent = Path(
+        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir="/tmp")
+    )
+
+    # counter_defs.yaml is for backward compatibility with previous versions of sdk
+    tmpfile_path_old = tmpfile_parent / "counter_defs.yaml"
+    # Current version of sdk uses config.yaml instead of counter_defs.yaml
+    tmpfile_path_new = tmpfile_parent / "config.yaml"
+
+    with open(tmpfile_path_old, "w") as tmpfile:
+        # Old sdk does not support firmware restrictions
+        sdk_config_old = {
+            **sdk_config,
+            "rocprofiler-sdk": {
+                k: v
+                for k, v in sdk_config["rocprofiler-sdk"].items()
+                if k not in {"fw-restriction-schema-version", "firmware_restrictions"}
+            },
+        }
+        yaml.dump(sdk_config_old, tmpfile, default_flow_style=False, sort_keys=False)
+
+    with open(tmpfile_path_new, "w") as tmpfile:
+        yaml.dump(sdk_config, tmpfile, default_flow_style=False, sort_keys=False)
+
+    return str(tmpfile_parent)
 
 
 def set_locale_encoding() -> None:
