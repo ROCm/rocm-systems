@@ -861,28 +861,49 @@ size_t PageSize() {
 bool UnmapMemory(void* va, size_t size) { return ::munmap(va, size) == 0; }
 
 bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
-  void* mapped_ptr = ::mmap(va, size, MemProtToOsProt(perms), 
-                            MAP_SHARED | MAP_FIXED, fd, cpu_addr);
+  void* mapped_ptr =
+        mmap(va, size, MemProtToOsProt(perms), MAP_SHARED | MAP_FIXED, fd, cpu_addr);
   if (mapped_ptr != va)
       return false;
   return true;
 }
 
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
-  size = AlignUp(size, PageSize());
+  bool huge_tlb = false;
+  constexpr size_t kLargePageSize = 2 * 1024 * 1024;
+
+  size_t page_size = PageSize();
+  if (std::getenv("HSA_FORCE_HUGETLB") && size >= kLargePageSize) {
+    huge_tlb = true;
+    page_size = kLargePageSize;
+  }
+  size = AlignUp(size, page_size);
   // check for invalid input size
   if (size == 0) {
     return NULL;
   }
-  alignment = std::max(PageSize(), AlignUp(alignment, PageSize()));
+  alignment = std::max(page_size, AlignUp(alignment, page_size));
   assert(IsPowerOfTwo(alignment) && "not a power of 2");
 
-  size_t requested = size + alignment - PageSize();
-  address mem = (address)::mmap(start, requested, MemProtToOsProt(prot),
-                                MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS, 0, 0);
+  size_t requested = size + alignment - page_size;
+  address mem = NULL;
+  if (!huge_tlb) {
+    mem = (address)::mmap(start, requested, MemProtToOsProt(prot),
+                                  MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS, 0, 0);
 
-  // check for out of memory
-  if (mem == MAP_FAILED) return NULL;
+    // check for out of memory
+    if (mem == MAP_FAILED) return NULL;
+  } else {
+    mem = (address)::mmap(start, requested, MemProtToOsProt(prot),
+                                  MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS, 0, 0);
+    if (mem == MAP_FAILED) {
+      //fallback to default behavior
+      mem = (address)::mmap(start, requested, MemProtToOsProt(prot),
+                                  MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS, 0, 0);
+      // check for out of memory
+      if (mem == MAP_FAILED) return NULL;
+    }
+  }
 
   address aligned = AlignUp(mem, alignment);
 
@@ -902,8 +923,7 @@ void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   }
 
   // Hint to enable THP for large host allocations which can help in performance gain
-  constexpr size_t kLargePageSize = 2 * 1024 * 1024;
-  if (size >= kLargePageSize) {
+  if (size >= kLargePageSize && !huge_tlb) {
     int status = madvise(aligned, size, MADV_HUGEPAGE);
     if (status) {
       fprintf(stderr,
