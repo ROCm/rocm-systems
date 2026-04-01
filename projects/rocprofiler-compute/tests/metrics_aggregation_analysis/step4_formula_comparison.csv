@@ -1,0 +1,49 @@
+workload,metric_name,category,unit,n_dispatches,n_valid_ratios,AVG(A/B),SUM(A)/SUM(B),AVG(A)/AVG(B),MIN(A/B),MAX(A/B),diff_AVG_vs_SUM,diff_AVG_vs_SUM_pct,diff_AVGAVG_vs_SUM,diff_AVGAVG_vs_SUM_pct,num_nan_count,denom_nan_count,nan_mismatch
+vcopy_uniform,L2 Cache Hit Rate,rate,%,100,100,33.564344,33.564344,33.564344,33.556768,33.564421,0.0,0.0,0.0,0.0,0,0,False
+vcopy_uniform,L2-Fabric Read Latency,latency,cycles,100,100,1065.848238,1065.85238,1065.85238,1013.588813,1640.060952,-0.004142,-0.0,0.0,0.0,0,0,False
+vcopy_uniform,L2 Cache BW,throughput,GB/s,100,100,5252.37419,5237.198552,5237.198552,3142.304478,5490.866087,15.175638,0.29,0.0,0.0,0,0,False
+vcopy_uniform,IPC,normalized_counter,insts/cycle,100,100,0.217677,0.217427,0.217427,0.158903,0.2236,0.000251,0.12,0.0,0.0,0,0,False
+vcopy_uniform,Instructions per Wavefront,normalized_counter,insts/wave,100,100,20.0,20.0,20.0,20.0,20.0,0.0,0.0,0.0,0.0,0,0,False
+vcopy_uniform,vL1D Cache Hit Rate,rate,%,100,100,87.5,87.5,87.5,87.5,87.5,0.0,0.0,0.0,0.0,0,0,False
+nbody_multi,L2 Cache Hit Rate,rate,%,10,10,92.52989,92.52989,92.52989,92.525736,92.531444,-0.0,-0.0,0.0,0.0,0,0,False
+nbody_multi,L2-Fabric Read Latency,latency,cycles,10,10,1035.353159,1035.351636,1035.351636,1025.295564,1040.996719,0.001523,0.0,0.0,0.0,0,0,False
+nbody_multi,L2 Cache BW,throughput,GB/s,10,10,20.655708,20.654895,20.654895,20.449167,20.827355,0.000813,0.0,-0.0,-0.0,0,0,False
+nbody_multi,IPC,normalized_counter,insts/cycle,10,10,0.839805,0.839805,0.839805,0.839757,0.839873,0.0,0.0,0.0,0.0,0,0,False
+nbody_multi,Instructions per Wavefront,normalized_counter,insts/wave,10,10,1254961.228814,1254961.228814,1254961.228814,1254961.228814,1254961.228814,0.0,0.0,0.0,0.0,0,0,False
+nbody_multi,vL1D Cache Hit Rate,rate,%,10,10,75.001457,75.001457,75.001457,75.001457,75.001457,0.0,0.0,0.0,0.0,0,0,False
+vcopy_small,L2 Cache Hit Rate,rate,%,5,5,47.742386,47.738693,47.738693,47.019868,48.112294,0.003692,0.01,0.0,0.0,0,0,False
+vcopy_small,L2-Fabric Read Latency,latency,cycles,5,5,662.020624,668.621073,668.621073,560.173077,1028.115854,-6.600449,-0.99,0.0,0.0,0,0,False
+vcopy_small,L2 Cache BW,throughput,GB/s,5,5,59.578694,57.990244,57.990244,43.260759,67.134694,1.58845,2.74,0.0,0.0,0,0,False
+vcopy_small,IPC,normalized_counter,insts/cycle,5,5,0.031938,0.031751,0.031751,0.02773,0.035112,0.000187,0.59,0.0,0.0,0,0,False
+vcopy_small,Instructions per Wavefront,normalized_counter,insts/wave,5,5,20.0,20.0,20.0,20.0,20.0,0.0,0.0,0.0,0.0,0,0,False
+vcopy_small,vL1D Cache Hit Rate,rate,%,5,5,87.5,87.5,87.5,87.5,87.5,0.0,0.0,0.0,0.0,0,0,False
+memcopy_multi,L2 Cache Hit Rate,rate,%,1001,1001,33.336843,33.336843,33.336843,33.336512,33.336843,0.0,0.0,0.0,0.0,0,0,False
+memcopy_multi,L2-Fabric Read Latency,latency,cycles,1001,1001,2341.451234,2341.451232,2341.451232,2241.748024,2412.256965,2e-06,0.0,0.0,0.0,0,0,False
+memcopy_multi,L2 Cache BW,throughput,GB/s,1001,1001,8525.921165,8525.694123,8525.694123,8400.332738,8664.235102,0.227041,0.0,-0.0,-0.0,0,0,False
+memcopy_multi,IPC,normalized_counter,insts/cycle,1001,1001,0.192157,0.192151,0.192151,0.189245,0.1974,6e-06,0.0,0.0,0.0,0,0,False
+memcopy_multi,Instructions per Wavefront,normalized_counter,insts/wave,1001,1001,19.000015,19.000015,19.000015,19.000015,19.000015,0.0,0.0,0.0,0.0,0,0,False
+memcopy_multi,vL1D Cache Hit Rate,rate,%,1001,1001,87.500037,87.500037,87.500037,87.500037,87.500037,0.0,0.0,0.0,0.0,0,0,False
+mixed_kernels,L2 Cache Hit Rate,rate,%,30,30,53.143452,33.866669,33.866669,33.336512,92.531444,19.276783,56.92,-0.0,-0.0,0,0,False
+mixed_kernels,L2-Fabric Read Latency,latency,cycles,30,30,1490.515967,2326.304311,2326.304311,1014.54903,2380.404592,-835.788344,-35.93,0.0,0.0,0,0,False
+mixed_kernels,L2 Cache BW,throughput,GB/s,30,30,4549.177365,1821.372291,1821.372291,20.449167,8623.038697,2727.805074,149.77,0.0,0.0,0,0,False
+mixed_kernels,IPC,normalized_counter,insts/cycle,30,30,0.415427,0.599982,0.599982,0.158903,0.839873,-0.184555,-30.76,0.0,0.0,0,0,False
+mixed_kernels,Instructions per Wavefront,normalized_counter,insts/wave,30,30,418333.40961,159.661761,159.661761,19.000015,1254961.228814,418173.747849,261912.27,0.0,0.0,0,0,False
+mixed_kernels,vL1D Cache Hit Rate,rate,%,30,30,83.333831,87.336627,87.336627,75.001457,87.500037,-4.002796,-4.58,0.0,0.0,0,0,False
+synthetic_clean,L2 Cache Hit Rate,rate,%,10,10,42.457576,43.435115,43.435115,3.0,90.909091,-0.977539,-2.25,0.0,0.0,0,0,False
+synthetic_clean,L2-Fabric Read Latency,latency,cycles,10,10,58.055556,67.696629,67.696629,50.0,80.0,-9.641074,-14.24,0.0,0.0,0,0,False
+synthetic_clean,L2 Cache BW,throughput,GB/s,10,10,1279.36,328.0,328.0,12.8,6400.0,951.36,290.05,0.0,0.0,0,0,False
+synthetic_clean,IPC,normalized_counter,insts/cycle,10,10,0.881667,1.176614,1.176614,0.5,1.333333,-0.294947,-25.07,0.0,0.0,0,0,False
+synthetic_clean,Instructions per Wavefront,normalized_counter,insts/wave,10,10,100.0,100.0,100.0,100.0,100.0,0.0,0.0,0.0,0.0,0,0,False
+synthetic_clean,vL1D Cache Hit Rate,rate,%,10,10,68.395556,94.96997,94.96997,12.5,98.4,-26.574414,-27.98,0.0,0.0,0,0,False
+synthetic_aligned_nan,L2 Cache Hit Rate,rate,%,10,8,45.07197,49.60396,49.60396,3.0,90.909091,-4.531991,-9.14,0.0,0.0,2,2,False
+synthetic_aligned_nan,L2-Fabric Read Latency,latency,cycles,10,8,59.375,69.716088,69.716088,50.0,80.0,-10.341088,-14.83,0.0,0.0,2,2,False
+synthetic_aligned_nan,L2 Cache BW,throughput,GB/s,10,10,1279.36,328.0,328.0,12.8,6400.0,951.36,290.05,0.0,0.0,0,0,False
+synthetic_aligned_nan,IPC,normalized_counter,insts/cycle,10,10,0.881667,1.176614,1.176614,0.5,1.333333,-0.294947,-25.07,0.0,0.0,0,0,False
+synthetic_aligned_nan,Instructions per Wavefront,normalized_counter,insts/wave,10,10,100.0,100.0,100.0,100.0,100.0,0.0,0.0,0.0,0.0,0,0,False
+synthetic_aligned_nan,vL1D Cache Hit Rate,rate,%,10,10,68.395556,94.96997,94.96997,12.5,98.4,-26.574414,-27.98,0.0,0.0,0,0,False
+synthetic_mismatch_nan,L2 Cache Hit Rate,rate,%,10,5,32.933333,47.205882,33.718487,3.0,80.0,-14.272549,-30.23,-13.487395,-28.57,3,5,True
+synthetic_mismatch_nan,L2-Fabric Read Latency,latency,cycles,10,5,60.0,43.377483,49.574267,50.0,80.0,16.622517,38.32,6.196783,14.29,3,2,True
+synthetic_mismatch_nan,L2 Cache BW,throughput,GB/s,10,10,1279.36,328.0,328.0,12.8,6400.0,951.36,290.05,0.0,0.0,0,0,False
+synthetic_mismatch_nan,IPC,normalized_counter,insts/cycle,10,5,0.796667,0.760462,0.869099,0.5,1.25,0.036205,4.76,0.108637,14.29,3,2,True
+synthetic_mismatch_nan,Instructions per Wavefront,normalized_counter,insts/wave,10,7,100.0,54.554865,77.935522,100.0,100.0,45.445135,83.3,23.380657,42.86,3,0,True
+synthetic_mismatch_nan,vL1D Cache Hit Rate,rate,%,10,10,68.395556,94.96997,94.96997,12.5,98.4,-26.574414,-27.98,0.0,0.0,0,0,False
