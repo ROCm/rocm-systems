@@ -820,6 +820,18 @@ struct agent_handle_t
   size_t chain_ordinal;
 };
 
+/* KMD version.  */
+using version_t = std::pair<unsigned int, unsigned int>;
+
+/* A KMD agent.  */
+struct agent_t
+{
+  agent_handle_t handle;
+
+  /* The KMD version this agent is running.  */
+  version_t kmd_version;
+};
+
 struct queue_handle_t
 {
   os_agent_id_t agent_id;
@@ -834,6 +846,15 @@ to_string (kmd::agent_handle_t agent)
 {
   return string_printf ("{adapter=%xp, device=%xp, ordinal=%lld}",
                         agent.adapter, agent.device, agent.chain_ordinal);
+}
+
+template <>
+std::string
+to_string (kmd::agent_t agent)
+{
+  return string_printf ("{%s, {major=%u, minor=%u}}",
+                        to_string (agent.handle).c_str (),
+                        agent.kmd_version.first, agent.kmd_version.second);
 }
 
 template <>
@@ -1030,8 +1051,39 @@ private:
   /* Retrieve the queue ID understood by the driver from the queue_id).  */
   ULONG queue_kmd_id (os_queue_id_t id) const { return id & 0xffffff; }
 
-  NTSTATUS send_escape (const kmd::agent_handle_t &agent,
-                        KMDDBGRIF_DBGR_CMDS &arg) const;
+  NTSTATUS send_escape (const kmd::agent_t &agent, KMDDBGRIF_DBGR_CMDS &arg,
+                        bool hardware_access = true) const;
+
+  /* The next few methods wrap send_escape for escapes we call from
+     more than one place.  */
+
+  std::pair<NTSTATUS, KMDDBGRIF_GET_RUNTIME_INFO_OUTPUT>
+  get_runtime_info (const kmd::agent_t &agent) const
+  {
+    KMDDBGRIF_DBGR_CMDS cmd{};
+    cmd.Input.cmd = KMD_DBGR_CMD_OP_GET_RUNTIME_INFO;
+    auto res = send_escape (agent, cmd, false);
+    return { res, cmd.Output.getRuntimeInfoOut };
+  }
+
+  NTSTATUS
+  enable_global_trap (const kmd::agent_t &agent,
+                      const KMDDBGRIF_ENABLE_GLOBAL_TRAP_INPUT &input) const
+  {
+    KMDDBGRIF_DBGR_CMDS cmd{};
+    cmd.Input.cmd = KMD_DBGR_CMD_OP_ENABLE_GLOBAL_TRAP;
+    cmd.Input.enableGlobalTrapIn = input;
+    return send_escape (agent, cmd, true);
+  }
+
+  NTSTATUS disable_global_trap (const kmd::agent_t &agent) const
+  {
+    KMDDBGRIF_ENABLE_GLOBAL_TRAP_INPUT input{};
+    input.enable = false;
+    input.exceptionMask = 0;
+    input.umdEventHandle64 = 0;
+    return enable_global_trap (agent, input);
+  }
 
   /* Helper function used to group queues by agent they belong to.  */
   std::pair<std::vector<const os_queue_id_t *>,
@@ -1040,13 +1092,13 @@ private:
 
   kmd::d3d_t m_d3d;
 
-  /* List of connected agents.  This is initialized at constructior time.
+  /* List of connected agents.  This is initialized at constructor time.
      Agent IDs reported to the core are indexes in this vector.  */
-  std::vector<kmd::agent_handle_t> m_agents;
+  std::vector<kmd::agent_t> m_agents;
 
   /* The agent through which we can contact runtime (if runtime is
      enabled).  */
-  mutable std::optional<const kmd::agent_handle_t *> m_agent_to_runtime;
+  mutable std::optional<const kmd::agent_t *> m_agent_to_runtime;
   bool m_is_debug_enabled{ false };
 
   /* Local process handle used for VM read/write.  */
@@ -1068,10 +1120,10 @@ kmd_driver_t::~kmd_driver_t ()
      device can be listed multiple times in a LDA chain, make sure to
      de-duplicate the handles first.  */
   std::set<D3DKMT_HANDLE> devices, adapters;
-  for (const auto &handle : m_agents)
+  for (const auto &agent : m_agents)
     {
-      devices.insert (handle.device);
-      adapters.insert (handle.adapter);
+      devices.insert (agent.handle.device);
+      adapters.insert (agent.handle.adapter);
     }
 
   for (D3DKMT_HANDLE device : devices)
@@ -1179,9 +1231,30 @@ kmd_driver_t::init_adapter (D3DKMT_HANDLE adapter)
       static constexpr uint16_t PCIE_VENSOR_ID_AMD = 0x1002;
       if (proxy_info.VendorID[chain_id] == PCIE_VENSOR_ID_AMD)
         {
+          kmd::agent_t agent{ { adapter, create_device.hDevice, chain_id },
+                              {} };
+
+          KMDDBGRIF_DBGR_CMDS cmd{};
+          cmd.Input.cmd = KMD_DBGR_CMD_OP_GET_TRAP_VERSION;
+
+          if (auto status = send_escape (agent, cmd, false);
+              status != STATUS_SUCCESS)
+            {
+              warning ("failed to retrieve AMDGPU driver's version for %s: %s",
+                       to_string (agent.handle).c_str (),
+                       to_string (status).c_str ());
+
+              /* This version will fail the check_version() validation
+                 later.  */
+              agent.kmd_version = { 0, 0 };
+            }
+          else
+            agent.kmd_version = { cmd.Output.getTrapVersionOut.majorVersion,
+                                  cmd.Output.getTrapVersionOut.minorVersion };
+
           use_adapter = true;
           destroy_device.release ();
-          m_agents.push_back ({ adapter, create_device.hDevice, chain_id });
+          m_agents.push_back (agent);
         }
     }
 
@@ -1191,8 +1264,8 @@ kmd_driver_t::init_adapter (D3DKMT_HANDLE adapter)
 }
 
 NTSTATUS
-kmd_driver_t::send_escape (const kmd::agent_handle_t &agent,
-                           KMDDBGRIF_DBGR_CMDS &arg) const
+kmd_driver_t::send_escape (const kmd::agent_t &agent, KMDDBGRIF_DBGR_CMDS &arg,
+                           bool hardware_access) const
 {
   TRACE_DRIVER_BEGIN (param_in (agent), param_in (arg.Input));
 
@@ -1205,7 +1278,7 @@ kmd_driver_t::send_escape (const kmd::agent_handle_t &agent,
   static_assert (sizeof (payload)
                  == sizeof (PROXY_ESCAPE_INFO) + sizeof (KMDDBGRIF_DBGR_CMDS));
 
-  payload.proxy_header.gpuOrdinal = agent.chain_ordinal;
+  payload.proxy_header.gpuOrdinal = agent.handle.chain_ordinal;
   payload.proxy_header.privateDataLengthBytes = sizeof (KMDDBGRIF_DBGR_CMDS);
   payload.proxy_header.version = PXDRV_HEADER_VERSION;
   payload.proxy_header.adapterDriverId = AdapterProxyDriver;
@@ -1225,9 +1298,9 @@ kmd_driver_t::send_escape (const kmd::agent_handle_t &agent,
   D3DKMT_ESCAPE escape_info = {};
   escape_info.pPrivateDriverData = &payload;
   escape_info.PrivateDriverDataSize = sizeof (payload);
-  escape_info.Flags.HardwareAccess = true;
-  escape_info.hDevice = agent.device;
-  escape_info.hAdapter = agent.adapter;
+  escape_info.Flags.HardwareAccess = hardware_access;
+  escape_info.hDevice = agent.handle.device;
+  escape_info.hAdapter = agent.handle.adapter;
   escape_info.Type = D3DKMT_ESCAPE_DRIVERPRIVATE;
   escape_info.hContext = 0;
 
@@ -1242,26 +1315,18 @@ kmd_driver_t::send_escape (const kmd::agent_handle_t &agent,
 amd_dbgapi_status_t
 kmd_driver_t::check_version () const
 {
-  using version_t = std::pair<unsigned int, unsigned int>;
-  constexpr version_t min_version = { 1, 0 };
-  constexpr version_t max_version = { 2, 0 };
+  constexpr kmd::version_t min_version = { 1, 0 };
+  constexpr kmd::version_t max_version = { 2, 0 };
 
   for (const auto &agent : m_agents)
     {
-      KMDDBGRIF_DBGR_CMDS cmd{};
-      cmd.Input.cmd = KMD_DBGR_CMD_OP_GET_TRAP_VERSION;
-
-      if (auto status = send_escape (agent, cmd); status != STATUS_SUCCESS)
-        return nt_status_to_dbgapi_status (status);
-
-      const version_t kmd_version{ cmd.Output.getTrapVersionOut.majorVersion,
-                                   cmd.Output.getTrapVersionOut.minorVersion };
-      if (kmd_version < min_version || kmd_version >= max_version)
+      if (agent.kmd_version < min_version || agent.kmd_version >= max_version)
         {
           warning ("AMDGPU driver's version %u.%u not supported "
-                   "(mursion must be >= %u.%u and < %u.%u)",
-                   kmd_version.first, kmd_version.second, min_version.first,
-                   min_version.second, max_version.first, max_version.second);
+                   "(version must be >= %u.%u and < %u.%u)",
+                   agent.kmd_version.first, agent.kmd_version.second,
+                   min_version.first, min_version.second, max_version.first,
+                   max_version.second);
           return AMD_DBGAPI_STATUS_ERROR_RESTRICTION;
         }
     }
@@ -1320,13 +1385,13 @@ kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
   *agent_count = std::min (snapshot_count, m_agents.size ());
 
   size_t snapshot_idx = 0;
-  for (const auto &agent_handle : m_agents)
+  for (const auto &agent : m_agents)
     {
-      os_agent_info_t &agent = snapshots[snapshot_idx++];
-      agent = {};
+      os_agent_info_t &os_agent_info = snapshots[snapshot_idx++];
+      os_agent_info = {};
 
       /* Query the agent name from the OS.  */
-      agent.name = get_adapter_name (agent_handle.adapter);
+      os_agent_info.name = get_adapter_name (agent.handle.adapter);
 
       /* Query the rest of the information to MKD.  */
       KMDDBGRIF_DBGR_CMDS cmd{};
@@ -1334,59 +1399,59 @@ kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
       cmd.Input.getDeviceInfoIn.exceptionMaskToClear
         = kmd_exception_mask (exceptions_cleared);
 
-      if (auto status = send_escape (agent_handle, cmd);
-          status != STATUS_SUCCESS)
+      if (auto status = send_escape (agent, cmd); status != STATUS_SUCCESS)
         return nt_status_to_dbgapi_status (status);
 
       KMDDBGR_DEVICE_INFO &kmd_snap = cmd.Output.getDeviceInfoOut.deviceInfo;
-      agent.os_agent_id = std::distance (&m_agents.front (), &agent_handle);
-      agent.gfxip = { kmd_snap.gfxTargetVersion / 10000,
-                      (kmd_snap.gfxTargetVersion / 100) % 100,
-                      kmd_snap.gfxTargetVersion % 100 };
+      os_agent_info.os_agent_id = std::distance (&m_agents.front (), &agent);
+      os_agent_info.gfxip = { kmd_snap.gfxTargetVersion / 10000,
+                              (kmd_snap.gfxTargetVersion / 100) % 100,
+                              kmd_snap.gfxTargetVersion % 100 };
 
-      agent.domain = kmd_snap.pciSegment;
-      agent.location_id = kmd_snap.locationId;
+      os_agent_info.domain = kmd_snap.pciSegment;
+      os_agent_info.location_id = kmd_snap.locationId;
 
-      agent.vendor_id = kmd_snap.vendorId;
-      agent.device_id = kmd_snap.deviceId;
-      agent.revision_id = kmd_snap.revisionId;
-      agent.subsystem_vendor_id = kmd_snap.subVendorId;
-      agent.subsystem_device_id = kmd_snap.subDeviceId;
+      os_agent_info.vendor_id = kmd_snap.vendorId;
+      os_agent_info.device_id = kmd_snap.deviceId;
+      os_agent_info.revision_id = kmd_snap.revisionId;
+      os_agent_info.subsystem_vendor_id = kmd_snap.subVendorId;
+      os_agent_info.subsystem_device_id = kmd_snap.subDeviceId;
 
-      agent.simd_count = kmd_snap.simdCount;
-      agent.max_waves_per_simd = kmd_snap.maxWavesPerSimd;
-      agent.shader_engine_count
+      os_agent_info.simd_count = kmd_snap.simdCount;
+      os_agent_info.max_waves_per_simd = kmd_snap.maxWavesPerSimd;
+      os_agent_info.shader_engine_count
         = kmd_snap.arrayCount / kmd_snap.simdArraysPerEngine;
-      agent.xcc_count = 1; /* KMD does not support multi-XCC architectures.  */
+      /* KMD does not support multi-XCC architectures.  */
+      os_agent_info.xcc_count = 1;
 
-      agent.fw_version = kmd_snap.fwVersion;
+      os_agent_info.fw_version = kmd_snap.fwVersion;
 
-      agent.local_address_aperture_base = kmd_snap.ldsBase;
-      agent.local_address_aperture_limit = kmd_snap.ldsLimit;
-      agent.private_address_aperture_base = kmd_snap.scratchBase;
-      agent.private_address_aperture_limit = kmd_snap.scratchLimit;
+      os_agent_info.local_address_aperture_base = kmd_snap.ldsBase;
+      os_agent_info.local_address_aperture_limit = kmd_snap.ldsLimit;
+      os_agent_info.private_address_aperture_base = kmd_snap.scratchBase;
+      os_agent_info.private_address_aperture_limit = kmd_snap.scratchLimit;
 
-      agent.debugging_supported
+      os_agent_info.debugging_supported
         = kmd_snap.capability & KMD_DBGR_CAP_TRAP_DEBUG_SUPPORT;
-      agent.address_watch_supported
+      os_agent_info.address_watch_supported
         = kmd_snap.capability & KMD_DBGR_CAP_WATCH_POINTS_SUPPORTED;
-      agent.address_watch_register_count
+      os_agent_info.address_watch_register_count
         = 1 << ((kmd_snap.capability
                  & KMD_DBGR_CAP_WATCH_POINTS_TOTALBITS_MASK)
                 >> KMD_DBGR_CAP_WATCH_POINTS_TOTALBITS_SHIFT);
-      agent.precise_memory_supported
+      os_agent_info.precise_memory_supported
         = kmd_snap.capability
           & KMD_DBGR_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
-      agent.firmware_supported
+      os_agent_info.firmware_supported
         = kmd_snap.capability & KMD_DBGR_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
 
-      agent.address_watch_mask_bits = utils::bit_mask (
+      os_agent_info.address_watch_mask_bits = utils::bit_mask (
         ((kmd_snap.debugProp & KMD_DBGR_DBG_WATCH_ADDR_MASK_LO_BIT_MASK)
          >> KMD_DBGR_DBG_WATCH_ADDR_MASK_LO_BIT_SHIFT),
         ((kmd_snap.debugProp & KMD_DBGR_DBG_WATCH_ADDR_MASK_HI_BIT_MASK)
          >> KMD_DBGR_DBG_WATCH_ADDR_MASK_HI_BIT_SHIFT));
-      agent.watchpoint_exclusive = false; /* TODO.  */
-      agent.ttmps_always_initialized
+      os_agent_info.watchpoint_exclusive = false; /* TODO.  */
+      os_agent_info.ttmps_always_initialized
         = kmd_snap.debugProp & KMD_DBGR_DBG_DISPATCH_INFO_ALWAYS_VALID;
     }
 
@@ -1406,34 +1471,23 @@ kmd_driver_t::enable_debug (os_exception_mask_t exceptions_reported,
 
   dbgapi_assert (!is_debug_enabled () && "debug is already enabled");
 
-  std::vector<const kmd::agent_handle_t *> activated (m_agents.size ());
+  std::vector<const kmd::agent_t *> activated (m_agents.size ());
   auto rollback = utils::make_scope_exit (
     [&activated, this] ()
     {
       for (auto agent : activated)
-        {
-          KMDDBGRIF_DBGR_CMDS cmd{};
-          cmd.Input.cmd = KMD_DBGR_CMD_OP_ENABLE_GLOBAL_TRAP;
-          cmd.Input.enableGlobalTrapIn.enable = false;
-          cmd.Input.enableGlobalTrapIn.exceptionMask = 0;
-          cmd.Input.enableGlobalTrapIn.umdEventHandle64 = 0;
-
-          if (send_escape (*agent, cmd) != STATUS_SUCCESS)
-            warning ("Failed to disable debug");
-        }
+        if (disable_global_trap (*agent) != STATUS_SUCCESS)
+          warning ("Failed to disable debug");
     });
 
+  KMDDBGRIF_ENABLE_GLOBAL_TRAP_INPUT input{};
+  input.enable = true;
+  input.exceptionMask = kmd_exception_mask (exceptions_reported);
+  input.umdEventHandle64 = reinterpret_cast<uint64_t> (notifier);
   for (auto const &agent : m_agents)
     {
-      KMDDBGRIF_DBGR_CMDS cmd{};
-      cmd.Input.cmd = KMD_DBGR_CMD_OP_ENABLE_GLOBAL_TRAP;
-      cmd.Input.enableGlobalTrapIn.enable = true;
-      cmd.Input.enableGlobalTrapIn.exceptionMask
-        = kmd_exception_mask (exceptions_reported);
-      cmd.Input.enableGlobalTrapIn.umdEventHandle64
-        = reinterpret_cast<uint64_t> (notifier);
-
-      if (auto status = send_escape (agent, cmd); status != STATUS_SUCCESS)
+      if (auto status = enable_global_trap (agent, input);
+          status != STATUS_SUCCESS)
         return nt_status_to_dbgapi_status (status);
       activated.push_back (&agent);
     }
@@ -1446,20 +1500,18 @@ kmd_driver_t::enable_debug (os_exception_mask_t exceptions_reported,
      has runtime and remember it).*/
   for (auto const &agent : m_agents)
     {
-      KMDDBGRIF_DBGR_CMDS cmd{};
-      cmd.Input.cmd = KMD_DBGR_CMD_OP_GET_RUNTIME_INFO;
+      auto [status, output] = get_runtime_info (agent);
+      if (status != STATUS_SUCCESS)
+        continue;
 
-      if (send_escape (agent, cmd) == STATUS_SUCCESS
-          && os_runtime_state (
-               cmd.Output.getRuntimeInfoOut.rocRuntimeInfo.runtimeState)
-               == os_runtime_state_t::enabled)
+      if (os_runtime_state (output.rocRuntimeInfo.runtimeState)
+          == os_runtime_state_t::enabled)
         {
-          runtime_info->runtime_state = os_runtime_state (
-            cmd.Output.getRuntimeInfoOut.rocRuntimeInfo.runtimeState);
+          runtime_info->runtime_state
+            = os_runtime_state (output.rocRuntimeInfo.runtimeState);
           runtime_info->r_debug = static_cast<amd_dbgapi_global_address_t> (
-            cmd.Output.getRuntimeInfoOut.rocRuntimeInfo.rDebug);
-          runtime_info->ttmp_setup
-            = cmd.Output.getRuntimeInfoOut.rocRuntimeInfo.ttmpSetup;
+            output.rocRuntimeInfo.rDebug);
+          runtime_info->ttmp_setup = output.rocRuntimeInfo.ttmpSetup;
           m_agent_to_runtime.emplace (&agent);
           break;
         }
@@ -1504,11 +1556,7 @@ kmd_driver_t::disable_debug ()
 
   for (auto const &agent : m_agents)
     {
-      KMDDBGRIF_DBGR_CMDS cmd{};
-      cmd.Input.cmd = KMD_DBGR_CMD_OP_ENABLE_GLOBAL_TRAP;
-      cmd.Input.enableGlobalTrapIn.enable = false;
-
-      NTSTATUS current_status = send_escape (agent, cmd);
+      NTSTATUS current_status = disable_global_trap (agent);
 
       if (current_status == STATUS_DRIVER_PROCESS_TERMINATED)
         status = AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED;
@@ -1531,7 +1579,7 @@ kmd_driver_t::send_exceptions (os_exception_mask_t exceptions,
   dbgapi_assert (is_debug_enabled () && "debug is not enabled");
 
   /* If per device or per agent, we need to figure which KMD to talk to.  */
-  std::optional<const kmd::agent_handle_t *> agent;
+  std::optional<const kmd::agent_t *> agent;
   std::optional<ULONG> queue;
 
   if (agent_id.has_value ())
@@ -1586,18 +1634,16 @@ kmd_driver_t::query_debug_event (os_exception_mask_t *exceptions_present,
     return AMD_DBGAPI_STATUS_SUCCESS;
 
   /* TODO some fairness so we round-robin-ish across all the adapters?  */
-  for (const auto &agent_handle : m_agents)
+  for (const auto &agent : m_agents)
     {
-      os_agent_id_t agent_id
-        = std::distance (&m_agents.front (), &agent_handle);
+      os_agent_id_t agent_id = std::distance (&m_agents.front (), &agent);
 
       KMDDBGRIF_DBGR_CMDS cmd{};
       cmd.Input.cmd = KMD_DBGR_CMD_OP_GET_EXCEPTIONS;
       cmd.Input.getExceptionsIn.exceptionMaskToClear
         = kmd_exception_mask (exceptions_cleared);
 
-      if (auto status = send_escape (agent_handle, cmd);
-          status != STATUS_SUCCESS)
+      if (auto status = send_escape (agent, cmd); status != STATUS_SUCCESS)
         return nt_status_to_dbgapi_status (status);
 
       if (cmd.Output.getExceptionsOut.noExceptions)
@@ -1670,23 +1716,19 @@ kmd_driver_t::query_exception_info (os_exception_code_t exception,
         {
           /* The runtime got activated, we need to query additional information
              explicitly.  */
-          KMDDBGRIF_DBGR_CMDS querystate_cmd{};
-          querystate_cmd.Input.cmd = KMD_DBGR_CMD_OP_GET_RUNTIME_INFO;
-
-          if (auto status = send_escape (agent, querystate_cmd);
-              status != STATUS_SUCCESS)
+          auto [status, output] = get_runtime_info (agent);
+          if (status != STATUS_SUCCESS)
             return nt_status_to_dbgapi_status (status);
 
           /* The runtime state returned by this call is the "most up to date",
              so that's the one we keep.  */
           os_exception_info->runtime_info.runtime_state
-            = os_runtime_state (querystate_cmd.Output.getRuntimeInfoOut
-                                  .rocRuntimeInfo.runtimeState);
+            = os_runtime_state (output.rocRuntimeInfo.runtimeState);
           os_exception_info->runtime_info.r_debug
             = static_cast<amd_dbgapi_global_address_t> (
-              querystate_cmd.Output.getRuntimeInfoOut.rocRuntimeInfo.rDebug);
+              output.rocRuntimeInfo.rDebug);
           os_exception_info->runtime_info.ttmp_setup
-            = querystate_cmd.Output.getRuntimeInfoOut.rocRuntimeInfo.ttmpSetup;
+            = output.rocRuntimeInfo.ttmpSetup;
           m_agent_to_runtime.emplace (&agent);
         }
       else
@@ -2231,7 +2273,9 @@ kmd_driver_t::xfer_agent_memory_partial (os_agent_id_t agent_id,
       cmd.Input.readBufferIn.size = *size;
     }
 
-  auto status = send_escape (m_agents[agent_id], cmd);
+  const auto &agent = m_agents[agent_id];
+  bool hardware_access = agent.kmd_version < kmd::version_t{ 1, 3 };
+  auto status = send_escape (agent, cmd, hardware_access);
   if (status == STATUS_SUCCESS)
     {
       *size = ((read == nullptr) ? cmd.Output.writeBufferOut.bytesWritten
