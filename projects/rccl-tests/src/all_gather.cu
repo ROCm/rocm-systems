@@ -36,7 +36,7 @@
  // from true transport errors.
  // ====================================================================
  
- __device__ static float encode_value(int rank, int ch, int nChannels,
+ __host__ __device__ static float encode_value(int rank, int ch, int nChannels,
                                       int nRanks, int fillMode) {
    switch (fillMode) {
    case 2:  return (float)((nRanks * nChannels - 1) - (rank * nChannels + ch));
@@ -112,7 +112,87 @@
    *paramcount = base;
  }
  
- testResult_t AllGatherInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
+ // ---- Fault injection for testing debug features ----
+// Corrupts the SEND buffer during initData so the AllGather naturally
+// propagates wrong data.  No NCCL / stream interaction at all.
+//
+// NCCL_TESTS_INJECT_ERROR=<mode> (0=off, 1=NaN, 2=wrong_rank, 3=wrong_channel, 4=corrupt)
+// NCCL_TESTS_INJECT_RANK=<rank>  which rank's send buffer to corrupt (default 1)
+// NCCL_TESTS_INJECT_CH=<ch>      which channel to corrupt (default 0)
+static int getInjectError() {
+  static int val = -1;
+  if (val == -1) {
+    const char* env = getenv("NCCL_TESTS_INJECT_ERROR");
+    val = (env) ? atoi(env) : 0;
+  }
+  return val;
+}
+
+__global__ void inject_fill_kernel(float* buf, size_t offset, size_t len, float value) {
+  size_t idx = (size_t)blockDim.x * (size_t)blockIdx.x + (size_t)threadIdx.x;
+  if (idx < len) {
+    buf[offset + idx] = value;
+  }
+}
+
+__global__ void inject_nan_fill_kernel(float* buf, size_t offset, size_t len) {
+  size_t idx = (size_t)blockDim.x * (size_t)blockIdx.x + (size_t)threadIdx.x;
+  if (idx < len) {
+    uint32_t nan_bits = 0xFFFFFFFF;
+    memcpy(&buf[offset + idx], &nan_bits, sizeof(float));
+  }
+}
+
+static void injectSendError(float* sendBuf, size_t sendcount, int rank,
+                             int nranks, int nChannels, int fillMode) {
+  int mode = getInjectError();
+  if (mode == 0) return;
+
+  const char* irEnv = getenv("NCCL_TESTS_INJECT_RANK");
+  int targetRank = (irEnv) ? atoi(irEnv) : 1;
+  if (rank != targetRank) return;
+
+  const char* icEnv = getenv("NCCL_TESTS_INJECT_CH");
+  int targetCh = (icEnv) ? atoi(icEnv) : 0;
+  if (targetCh >= nChannels) targetCh = nChannels - 1;
+
+  size_t floatsPerCh = sendcount / nChannels;
+  size_t chOffset = targetCh * floatsPerCh;
+  int threads = 256;
+  size_t blocks = (floatsPerCh + threads - 1) / threads;
+
+  static int printed = 0;
+  if (!printed) {
+    printed = 1;
+    printf("[INJECT] mode=%d targetRank=%d targetCh=%d nranks=%d sendcount=%zu floatsPerCh=%zu\n",
+           mode, targetRank, targetCh, nranks, sendcount, floatsPerCh);
+  }
+
+  switch (mode) {
+  case 1:
+    inject_nan_fill_kernel<<<blocks, threads>>>(sendBuf, chOffset, floatsPerCh);
+    break;
+  case 2: {
+    int fakeRank = (targetRank + 1) % nranks;
+    float fakeVal = encode_value(fakeRank, targetCh, nChannels, nranks, fillMode);
+    inject_fill_kernel<<<blocks, threads>>>(sendBuf, chOffset, floatsPerCh, fakeVal);
+    break;
+  }
+  case 3: {
+    int fakeCh = (targetCh + 1) % nChannels;
+    float fakeVal = encode_value(rank, fakeCh, nChannels, nranks, fillMode);
+    inject_fill_kernel<<<blocks, threads>>>(sendBuf, chOffset, floatsPerCh, fakeVal);
+    break;
+  }
+  case 4:
+    inject_fill_kernel<<<blocks, threads>>>(sendBuf, chOffset, floatsPerCh, -999.0f);
+    break;
+  }
+}
+
+// ====================================================================
+
+testResult_t AllGatherInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
    size_t sendcount = args->sendBytes / wordSize(type);
    size_t recvcount = args->expectedBytes / wordSize(type);
    int nranks = args->nProcs*args->nThreads*args->nGpus;
@@ -185,17 +265,21 @@
  
          int threads = 256;
          size_t blocks = (sendcount + threads - 1) / threads;
-         fill_per_channel_kernel<<<blocks, threads>>>(
-             data, sendcount, floats_per_channel, nChannels, rank, nranks, fillMode);
-         CUDACHECK(cudaGetLastError());
- 
-         size_t total_floats = recvcount;
-         size_t blocks_exp = (total_floats + threads - 1) / threads;
-         fill_expected_allgather_kernel<<<blocks_exp, threads>>>(
-             (float*)args->expected[i], sendcount, floats_per_channel, nChannels, nranks, fillMode);
-         CUDACHECK(cudaGetLastError());
- 
-         CUDACHECK(cudaDeviceSynchronize());
+        fill_per_channel_kernel<<<blocks, threads>>>(
+            data, sendcount, floats_per_channel, nChannels, rank, nranks, fillMode);
+        CUDACHECK(cudaGetLastError());
+
+        // Corrupt the send buffer AFTER filling — the AllGather will
+        // naturally propagate the wrong data, triggering debug features.
+        injectSendError(data, sendcount, rank, nranks, nChannels, fillMode);
+
+        size_t total_floats = recvcount;
+        size_t blocks_exp = (total_floats + threads - 1) / threads;
+        fill_expected_allgather_kernel<<<blocks_exp, threads>>>(
+            (float*)args->expected[i], sendcount, floats_per_channel, nChannels, nranks, fillMode);
+        CUDACHECK(cudaGetLastError());
+
+        CUDACHECK(cudaDeviceSynchronize());
        }
        return testSuccess;
      }
@@ -232,7 +316,7 @@
    *busBw = baseBw * factor;
  }
  
- testResult_t AllGatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
+testResult_t AllGatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
    if (deviceImpl == 0) {
      char* sptr = (char*)sendbuff + sendoffset;
      char* rptr = (char*)recvbuff + recvoffset;
