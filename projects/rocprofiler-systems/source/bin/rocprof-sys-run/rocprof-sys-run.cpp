@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "rocprof-sys-run.hpp"
+#include "common/environment.hpp"
 #include "common/output.hpp"
 #include "core/mproc.hpp"
 
@@ -46,7 +47,7 @@ get_verbose(parser_data_t& _data)
     auto& verbose = _data.verbose;
     verbose       = tim::get_env<int>("ROCPROFSYS_VERBOSE", verbose, false);
     auto _debug   = tim::get_env<bool>("ROCPROFSYS_DEBUG", false, false);
-    if(_debug) verbose += 8;
+    if(_debug) verbose += rocprofsys::common::debug_verbose_boost;
     return verbose;
 }
 }  // namespace
@@ -82,9 +83,10 @@ main(int argc, char** argv)
     if(!_argv.empty())
     {
         auto _verbose = get_verbose(_parse_data);
-        output::print_updated_environment(_parse_data.current, _parse_data.updated,
-                                          _verbose, "ROCPROFSYS: ");
-        output::print_command(_parse_data.command, _verbose, "ROCPROFSYS: ");
+        if(_verbose >= 0)
+            output::print_environment(_parse_data.current, _parse_data.updated,
+                                      _verbose >= 1, "ROCPROFSYS: ");
+        if(_verbose >= 1) output::print_command(_parse_data.command, "ROCPROFSYS: ");
         _argv.emplace_back(nullptr);
         _envp.emplace_back(nullptr);
 

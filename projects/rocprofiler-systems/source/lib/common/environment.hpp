@@ -66,6 +66,9 @@ namespace rocprofsys
 {
 inline namespace common
 {
+// well above the highest verbose threshold (3) so debug mode enables all verbose output
+constexpr int debug_verbose_boost = 8;
+
 namespace
 {
 

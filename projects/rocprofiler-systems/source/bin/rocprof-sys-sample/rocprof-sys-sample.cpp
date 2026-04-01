@@ -57,11 +57,11 @@ main(int argc, char** argv)
     add_torch_library_path(_env, _argv);
 
     auto _verbose = get_verbose_level();
-    output::print_updated_environment(_env, get_updated_envs(), _verbose);
+    if(_verbose >= 0) output::print_environment(_env, get_updated_envs(), _verbose >= 1);
 
     if(!_argv.empty())
     {
-        output::print_command(_argv, _verbose);
+        if(_verbose >= 1) output::print_command(_argv);
         _argv.emplace_back(nullptr);
         _env.emplace_back(nullptr);
 

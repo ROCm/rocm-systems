@@ -76,8 +76,7 @@ main(int argc, char** argv)
             for(const auto& eitr : citr)
                 update_env(_env, eitr.first, eitr.second);
             auto _prefix = std::to_string(_n++) + ":  ";
-            output::print_updated_environment(_env, get_updated_envs(), get_verbose(),
-                                              _prefix);
+            output::print_environment(_env, get_updated_envs(), true, _prefix);
         }
     }
 
@@ -89,8 +88,9 @@ main(int argc, char** argv)
             for(const auto& eitr : _causal_env.front())
                 update_env(_env, eitr.first, eitr.second);
             auto _verbose = get_verbose();
-            output::print_updated_environment(_env, get_updated_envs(), _verbose, "0: ");
-            output::print_command(_argv, _verbose, "0: ");
+            if(_verbose >= 0)
+                output::print_environment(_env, get_updated_envs(), _verbose >= 1, "0: ");
+            if(_verbose >= 1) output::print_command(_argv, "0: ");
             _argv.emplace_back(nullptr);
             _env.emplace_back(nullptr);
             return execvpe(_argv.front(), _argv.data(), _env.data());
@@ -122,9 +122,10 @@ main(int argc, char** argv)
                 for(const auto& eitr : citr)
                     update_env(_env, eitr.first, eitr.second);
                 auto _verbose = get_verbose();
-                output::print_updated_environment(_env, get_updated_envs(), _verbose,
-                                                  _prefix.str());
-                output::print_command(_argv, _verbose, _prefix.str());
+                if(_verbose >= 0)
+                    output::print_environment(_env, get_updated_envs(), _verbose >= 1,
+                                              _prefix.str());
+                if(_verbose >= 1) output::print_command(_argv, _prefix.str());
                 _argv.emplace_back(nullptr);
                 _env.emplace_back(nullptr);
                 return execvpe(_argv.front(), _argv.data(), _env.data());

@@ -38,23 +38,17 @@ build_command_string(const std::vector<char*>& _argv)
 }
 
 inline void
-print_command(const std::vector<char*>& _argv, int _verbose,
-              std::string_view _prefix = {})
+print_command(const std::vector<char*>& _argv, std::string_view _prefix = {})
 {
-    if(_verbose < 1) return;
-
     auto _cmd = build_command_string(_argv);
     std::cout << _prefix << "Executing '" << _cmd << "'..." << std::endl;
 }
 
 template <typename UpdatedEnvsT>
 inline void
-print_updated_environment(const std::vector<char*>& _env,
-                          const UpdatedEnvsT& _updated_envs, int _verbose,
-                          std::string_view _prefix = {})
+print_environment(const std::vector<char*>& _env, const UpdatedEnvsT& _updated_envs,
+                  bool _include_general_vars = false, std::string_view _prefix = {})
 {
-    if(_verbose < 0) return;
-
     auto _env_sorted = _env;
     std::sort(_env_sorted.begin(), _env_sorted.end(),
               [](const char* const _lhs, const char* const _rhs) {
@@ -77,7 +71,7 @@ print_updated_environment(const std::vector<char*>& _env,
     std::vector<std::string_view> _updated_vars(_env_sorted.begin(), partition_point);
 
     std::vector<std::string_view> _general_vars;
-    if(_verbose >= 1)
+    if(_include_general_vars)
     {
         constexpr std::string_view rocprofsys_prefix = "ROCPROFSYS";
         std::copy_if(partition_point, valid_end, std::back_inserter(_general_vars),
