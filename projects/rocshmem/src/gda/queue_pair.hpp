@@ -71,10 +71,9 @@ class ActiveWFInfo {
  public:
   uint64_t     activemask{0};
 
+  int          pe{-1};
   ThreadScope  scope{ThreadScope::thread};
   uint64_t     pe_group_mask{0};
-  int          pe{-1};
-
   // Number of active lanes in the wave with the same PE
   uint8_t      num_pe_group_lanes{0};
   // Logical lane id within the group of threads with the same PE.
