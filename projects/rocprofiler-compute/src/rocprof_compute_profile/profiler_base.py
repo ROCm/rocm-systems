@@ -172,6 +172,7 @@ class RocProfCompute_Base:
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
+    @abstractmethod
     def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to profiling."""
         args = self.get_args()
