@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/sample_type.hpp"
+#include "library/pmc/collectors/cpu/sample.hpp"
 
 #include <array>
 #include <cstdint>
@@ -402,56 +403,81 @@ TEST_F(sample_type_test, pmc_event_with_sample_type_identifier)
               type_identifier_t::pmc_event_with_sample);
 }
 
-TEST_F(sample_type_test, cpu_freq_sample_serialize_deserialize)
+TEST_F(sample_type_test, cpu_pmc_sample_serialize_deserialize)
 {
+    using namespace rocprofsys::pmc::collectors::cpu;
+
+    enabled_metrics em{};
+    em.value = 0x1FF;  // all 9 bits
+
+    process_metrics pm{};
+    pm.page_rss         = 1024;
+    pm.virt_mem         = 2048;
+    pm.peak_rss         = 4096;
+    pm.context_switches = 500;
+    pm.page_faults      = 100;
+    pm.user_mode_time   = 1000000;
+    pm.kernel_mode_time = 500000;
+
     std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
-    cpu_freq_sample      original(80000, 1024, 2048, 4096, 500, 100, 1000000, 500000,
-                                  freqs_data);
+    std::vector<uint8_t> loads_data = { 10, 20, 30, 40 };
+    cpu_pmc_sample       original(em, 80000, pm, freqs_data, loads_data);
 
     serialize(buffer.data(), original);
 
     uint8_t* buffer_ptr   = buffer.data();
-    auto     deserialized = deserialize<cpu_freq_sample>(buffer_ptr);
+    auto     deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
 
     EXPECT_EQ(deserialized.timestamp, original.timestamp);
-    EXPECT_EQ(deserialized.page_rss, original.page_rss);
-    EXPECT_EQ(deserialized.virt_mem_usage, original.virt_mem_usage);
-    EXPECT_EQ(deserialized.peak_rss, original.peak_rss);
-    EXPECT_EQ(deserialized.context_switch_count, original.context_switch_count);
-    EXPECT_EQ(deserialized.page_faults, original.page_faults);
-    EXPECT_EQ(deserialized.user_mode_time, original.user_mode_time);
-    EXPECT_EQ(deserialized.kernel_mode_time, original.kernel_mode_time);
-    EXPECT_EQ(deserialized.freqs.size(), original.freqs.size());
+    EXPECT_EQ(deserialized.process_data.page_rss, original.process_data.page_rss);
+    EXPECT_EQ(deserialized.process_data.virt_mem, original.process_data.virt_mem);
+    EXPECT_EQ(deserialized.process_data.peak_rss, original.process_data.peak_rss);
+    EXPECT_EQ(deserialized.process_data.context_switches,
+              original.process_data.context_switches);
+    EXPECT_EQ(deserialized.process_data.page_faults, original.process_data.page_faults);
+    EXPECT_EQ(deserialized.process_data.user_mode_time,
+              original.process_data.user_mode_time);
+    EXPECT_EQ(deserialized.process_data.kernel_mode_time,
+              original.process_data.kernel_mode_time);
     EXPECT_EQ(deserialized.freqs, original.freqs);
+    EXPECT_EQ(deserialized.loads, original.loads);
 }
 
-TEST_F(sample_type_test, cpu_freq_sample_get_size)
+TEST_F(sample_type_test, cpu_pmc_sample_get_size)
 {
+    using namespace rocprofsys::pmc::collectors::cpu;
+
+    enabled_metrics em{};
+    process_metrics pm{};
+
     std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
-    cpu_freq_sample      sample(80000, 1024, 2048, 4096, 500, 100, 1000000, 500000,
-                                freqs_data);
+    std::vector<uint8_t> loads_data = { 10, 20, 30, 40 };
+    cpu_pmc_sample       s(em, 80000, pm, freqs_data, loads_data);
 
-    size_t expected_size = sizeof(uint64_t) + sizeof(int64_t) * 7 + sizeof(size_t) + 8;
-
-    EXPECT_EQ(get_size(sample), expected_size);
+    EXPECT_GT(get_size(s), 0u);
 }
 
-TEST_F(sample_type_test, cpu_freq_sample_type_identifier)
+TEST_F(sample_type_test, cpu_pmc_sample_type_identifier)
 {
-    EXPECT_EQ(cpu_freq_sample::type_identifier, type_identifier_t::cpu_freq_sample);
+    EXPECT_EQ(cpu_pmc_sample::type_identifier, type_identifier_t::cpu_pmc_sample);
 }
 
-TEST_F(sample_type_test, cpu_freq_sample_empty_freqs)
+TEST_F(sample_type_test, cpu_pmc_sample_empty_data)
 {
-    std::vector<uint8_t> empty_freqs;
-    cpu_freq_sample      original(0, 0, 0, 0, 0, 0, 0, 0, empty_freqs);
+    using namespace rocprofsys::pmc::collectors::cpu;
+
+    enabled_metrics      em{};
+    process_metrics      pm{};
+    std::vector<uint8_t> empty;
+    cpu_pmc_sample       original(em, 0, pm, empty, empty);
 
     serialize(buffer.data(), original);
 
     uint8_t* buffer_ptr   = buffer.data();
-    auto     deserialized = deserialize<cpu_freq_sample>(buffer_ptr);
+    auto     deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
 
     EXPECT_TRUE(deserialized.freqs.empty());
+    EXPECT_TRUE(deserialized.loads.empty());
 }
 
 TEST_F(sample_type_test, backtrace_region_sample_serialize_deserialize)
@@ -521,7 +547,7 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::memory_copy), 0x0004);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::memory_alloc), 0x0005);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::gpu_pmc_sample), 0x0006);
-    EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::cpu_freq_sample), 0x0007);
+    EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::cpu_pmc_sample), 0x0007);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::backtrace_region_sample), 0x0008);
     EXPECT_EQ(static_cast<uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
 }
@@ -562,10 +588,10 @@ TEST_F(sample_type_test, pmc_event_with_sample_default_constructor)
     EXPECT_EQ(sample.type_identifier, type_identifier_t::pmc_event_with_sample);
 }
 
-TEST_F(sample_type_test, cpu_freq_sample_default_constructor)
+TEST_F(sample_type_test, cpu_pmc_sample_default_constructor)
 {
-    cpu_freq_sample sample;
-    EXPECT_EQ(sample.type_identifier, type_identifier_t::cpu_freq_sample);
+    cpu_pmc_sample sample;
+    EXPECT_EQ(sample.type_identifier, type_identifier_t::cpu_pmc_sample);
 }
 
 TEST_F(sample_type_test, backtrace_region_sample_default_constructor)

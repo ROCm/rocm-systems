@@ -14,6 +14,11 @@
 #    include "library/pmc/collectors/nic/perfetto_policy.hpp"
 #endif
 
+#include "library/pmc/collectors/cpu/cache_policy.hpp"
+#include "library/pmc/collectors/cpu/collector.hpp"
+#include "library/pmc/collectors/cpu/perfetto_policy.hpp"
+#include "library/pmc/device_providers/procfs/provider.hpp"
+
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/state.hpp"
@@ -71,6 +76,13 @@ struct nic_production_config
 };
 #endif
 
+struct cpu_production_config
+{
+    using SettingsApi = collectors::settings_policy;
+    using PerfettoApi = collectors::cpu::perfetto_policy;
+    using CacheApi    = collectors::cpu::cache_policy;
+};
+
 using provider_factory_t =
     device_providers::amd_smi::provider_factory<drivers::amd_smi::driver_factory>;
 using provider_t      = provider_factory_t::provider_t;
@@ -79,12 +91,20 @@ using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_co
 using nic_collector_t = collectors::nic::collector<provider_t, nic_production_config>;
 #endif
 
+using cpu_provider_factory_t =
+    device_providers::procfs::provider_factory<drivers::procfs::driver_factory>;
+using cpu_provider_t  = cpu_provider_factory_t::provider_t;
+using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_production_config>;
+
 std::shared_ptr<provider_t> g_device_provider;
 
 std::unique_ptr<gpu_collector_t> g_gpu_collector;
 #if defined(ROCPROFSYS_BUILD_AINIC)
 std::unique_ptr<nic_collector_t> g_nic_collector;
 #endif
+
+std::shared_ptr<cpu_provider_t>  g_cpu_provider;
+std::unique_ptr<cpu_collector_t> g_cpu_collector;
 
 std::vector<collectors::collector_slice> g_collector_slices;
 
@@ -147,11 +167,15 @@ setup()
         g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
 #endif
 
+        g_cpu_provider  = cpu_provider_factory_t::create();
+        g_cpu_collector = std::make_unique<cpu_collector_t>(g_cpu_provider);
+
         g_collector_slices.clear();
         g_collector_slices.emplace_back(*g_gpu_collector);
 #if defined(ROCPROFSYS_BUILD_AINIC)
         g_collector_slices.emplace_back(*g_nic_collector);
 #endif
+        g_collector_slices.emplace_back(*g_cpu_collector);
 
         for(auto& slice : g_collector_slices)
         {
@@ -201,6 +225,7 @@ post_process()
     }
     g_collector_slices.clear();
     g_device_provider.reset();
+    g_cpu_provider.reset();
 }
 
 void
@@ -235,7 +260,9 @@ postfork_child_cleanup()
 #if defined(ROCPROFSYS_BUILD_AINIC)
     g_nic_collector.reset();
 #endif
+    g_cpu_collector.reset();
     g_device_provider.reset();
+    g_cpu_provider.reset();
     is_initialized() = false;
 }
 

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/config.hpp"
+#include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "logger/debug.hpp"
@@ -33,6 +34,14 @@ using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::nic_device_filter;
 using ::rocprofsys::pmc::collectors::nic::enabled_metrics;
 }  // namespace nic
+
+// Import CPU types into collectors namespace
+namespace cpu
+{
+using ::rocprofsys::pmc::device_filter;
+using ::rocprofsys::pmc::device_selection_mode;
+using ::rocprofsys::pmc::collectors::cpu::enabled_metrics;
+}  // namespace cpu
 
 namespace
 {
@@ -130,6 +139,47 @@ struct settings_policy
     {
         nic::enabled_metrics result;
         result.value = nic::ALL_NIC_METRICS;
+        return result;
+    }
+
+    /**
+     * @brief Get CPU device filter based on ROCPROFSYS_SAMPLING_CPUS setting.
+     *
+     * Parses numeric range (e.g., "0-3", "0,2,4") or special values "all"/"none".
+     */
+    static device_filter get_cpu_device_filter() noexcept
+    {
+        auto filter = rocprofsys::get_sampling_cpus();
+        if(filter == "all" || filter == "on" || filter.empty())
+        {
+            device_filter result;
+            result.mode = device_selection_mode::ALL;
+            return result;
+        }
+
+        if(filter == "none" || filter == "off")
+        {
+            device_filter result;
+            result.mode = device_selection_mode::NONE;
+            return result;
+        }
+
+        auto          enabled_cpus = parse_numeric_range(filter);
+        device_filter result;
+        result.mode    = device_selection_mode::SPECIFIC;
+        result.indices = enabled_cpus;
+        return result;
+    }
+
+    /**
+     * @brief Get CPU enabled metrics.
+     *
+     * All 9 CPU metrics are enabled by default.
+     */
+    static cpu::enabled_metrics get_cpu_enabled_metrics() noexcept
+    {
+        cpu::enabled_metrics result;
+        result.value = ::rocprofsys::pmc::collectors::cpu::ALL_CPU_METRICS;
         return result;
     }
 

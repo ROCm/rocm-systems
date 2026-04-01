@@ -518,12 +518,18 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_sample)
+rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample)
 {
     struct core_freq_sample
     {
         size_t id;
         float  value;
+    };
+
+    struct core_load_sample
+    {
+        size_t id;
+        double value;
     };
 
     auto deserialize_freqs = [](const std::vector<uint8_t>& buffer) {
@@ -542,6 +548,22 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
         return result;
     };
 
+    auto deserialize_loads = [](const std::vector<uint8_t>& buffer) {
+        std::vector<core_load_sample> result;
+        size_t                        offset = 0;
+
+        while(offset + sizeof(double) + sizeof(size_t) <= buffer.size())
+        {
+            core_load_sample core_sample;
+            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
+            offset += sizeof(size_t);
+            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(double));
+            offset += sizeof(double);
+            result.push_back(core_sample);
+        }
+        return result;
+    };
+
     const auto* _name            = trait::name<category::cpu_freq>::value;
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
@@ -553,39 +575,49 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
 
     auto insert_event_and_sample = [&](const char* name, double value) {
         m_data_processor->insert_pmc_event(event_id, base_id, name, value);
-        m_data_processor->insert_sample(name, _cpu_freq_sample.timestamp, event_id);
+        m_data_processor->insert_sample(name, _cpu_pmc_sample.timestamp, event_id);
     };
 
     insert_event_and_sample(trait::name<category::process_page>::value,
-                            static_cast<double>(_cpu_freq_sample.page_rss) /
+                            static_cast<double>(_cpu_pmc_sample.process_data.page_rss) /
                                 units::megabyte);
     insert_event_and_sample(trait::name<category::process_virt>::value,
-                            static_cast<double>(_cpu_freq_sample.virt_mem_usage) /
+                            static_cast<double>(_cpu_pmc_sample.process_data.virt_mem) /
                                 units::megabyte);
     insert_event_and_sample(trait::name<category::process_peak>::value,
-                            static_cast<double>(_cpu_freq_sample.peak_rss) /
+                            static_cast<double>(_cpu_pmc_sample.process_data.peak_rss) /
                                 units::megabyte);
     insert_event_and_sample(trait::name<category::process_context_switch>::value,
-                            _cpu_freq_sample.context_switch_count);
+                            _cpu_pmc_sample.process_data.context_switches);
     insert_event_and_sample(trait::name<category::process_page_fault>::value,
-                            _cpu_freq_sample.page_faults);
-    insert_event_and_sample(trait::name<category::process_user_mode_time>::value,
-                            static_cast<double>(_cpu_freq_sample.user_mode_time) /
-                                units::sec);
-    insert_event_and_sample(trait::name<category::process_kernel_mode_time>::value,
-                            static_cast<double>(_cpu_freq_sample.kernel_mode_time) /
-                                units::sec);
+                            _cpu_pmc_sample.process_data.page_faults);
+    insert_event_and_sample(
+        trait::name<category::process_user_mode_time>::value,
+        static_cast<double>(_cpu_pmc_sample.process_data.user_mode_time) / units::sec);
+    insert_event_and_sample(
+        trait::name<category::process_kernel_mode_time>::value,
+        static_cast<double>(_cpu_pmc_sample.process_data.kernel_mode_time) / units::sec);
 
-    auto get_track_name = [](const auto& cpu_id) {
+    auto get_freq_track_name = [](const auto& cpu_id) {
         return std::string(trait::name<category::cpu_freq>::value) + " [" +
                std::to_string(cpu_id) + "]";
     };
 
-    auto core_freq_samples = deserialize_freqs(_cpu_freq_sample.freqs);
+    auto core_freq_samples = deserialize_freqs(_cpu_pmc_sample.freqs);
     for(const auto& core : core_freq_samples)
     {
-        insert_event_and_sample(get_track_name(core.id).c_str(),
-                                static_cast<double>(core.value));
+        insert_event_and_sample(get_freq_track_name(core.id).c_str(), core.value);
+    }
+
+    auto get_load_track_name = [](const auto& cpu_id) {
+        return std::string(trait::name<category::cpu_load>::value) + " [" +
+               std::to_string(cpu_id) + "]";
+    };
+
+    auto core_load_samples = deserialize_loads(_cpu_pmc_sample.loads);
+    for(const auto& core : core_load_samples)
+    {
+        insert_event_and_sample(get_load_track_name(core.id).c_str(), core.value);
     }
 }
 
