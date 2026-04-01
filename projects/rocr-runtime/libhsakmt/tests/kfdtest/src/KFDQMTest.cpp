@@ -2295,15 +2295,27 @@ TEST_F(KFDQMTest, Atomics) {
 TEST_F(KFDQMTest, mGPUShareBO) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    unsigned int src_node = 2;
-    unsigned int dst_node = 1;
+    const std::vector<int> gpuNodes = m_NodeInfo.GetNodesWithGPU();
+    if (gpuNodes.size() < 2) {
+        LOG() << "Skipping test: At least two GPUs are required." << std::endl;
+        return;
+    }
 
+    unsigned int src_node, dst_node;
     if (g_TestDstNodeId != -1 && g_TestNodeId != -1) {
         src_node = g_TestNodeId;
         dst_node = g_TestDstNodeId;
+    } else {
+        src_node = gpuNodes[0];
+        dst_node = gpuNodes[1];
     }
 
     HsaMemoryBuffer shared_addr(PAGE_SIZE, dst_node, true, false, false, false);
+    if (!SVMAPISupported_GPU(src_node) || !SVMAPISupported_GPU(dst_node)) {
+        LOG() << "SVM API is not supported on nodes. Need to map to nodes." << std::endl;
+        unsigned int both_nodes[] = {(unsigned int)src_node, (unsigned int)dst_node};
+        ASSERT_SUCCESS(shared_addr.MapMemToNodes(both_nodes, 2));
+    }
 
     HsaMemoryBuffer srcNodeMem(PAGE_SIZE, src_node);
     HsaMemoryBuffer dstNodeMem(PAGE_SIZE, dst_node);
