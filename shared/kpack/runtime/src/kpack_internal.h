@@ -19,6 +19,21 @@
 #include "rocm_kpack/kpack.h"
 #include "rocm_kpack/kpack_types.h"
 
+// 64-bit file seek/tell for archives >2GB.
+// Windows `long` is 32-bit even on x64, so ftell/fseek overflow at 2GB.
+#ifdef _WIN32
+#include <io.h>
+inline int64_t kpack_ftell(FILE* f) { return _ftelli64(f); }
+inline int kpack_fseek(FILE* f, int64_t offset, int origin) {
+  return _fseeki64(f, offset, origin);
+}
+#else
+inline int64_t kpack_ftell(FILE* f) { return static_cast<int64_t>(ftello(f)); }
+inline int kpack_fseek(FILE* f, int64_t offset, int origin) {
+  return fseeko(f, static_cast<off_t>(offset), origin);
+}
+#endif
+
 // POC NOTE: This is proof-of-concept code with intentional limitations:
 // - Uses fopen/fread instead of mmap for file access
 // - Caches entire Zstd blob in memory (can be large for big archives)

@@ -31,6 +31,12 @@ if(NOT ROCPROFSYS_GFX_TARGETS)
 endif()
 
 # Master branch contains stable releases
+set(OMPVV_CHECKOUT_BRANCH
+    "master"
+    CACHE STRING
+    "Branch, tag, or SHA to checkout for OpenMP V&V suite"
+)
+
 rocprofiler_systems_checkout_git_submodule(
   RELATIVE_PATH
   external/ompvv
@@ -41,7 +47,7 @@ rocprofiler_systems_checkout_git_submodule(
   REPO_URL
   https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV.git
   REPO_BRANCH
-  "master"
+  "${OMPVV_CHECKOUT_BRANCH}"
 )
 
 set(ROCPROFSYS_OMPVV_SUBMODULE_DIR "${PROJECT_SOURCE_DIR}/external/ompvv")

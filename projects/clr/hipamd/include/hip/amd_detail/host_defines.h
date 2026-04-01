@@ -101,6 +101,9 @@ template <typename _Tp, bool = is_arithmetic<_Tp>::value> struct is_signed : pub
 template <typename _Tp> struct is_signed<_Tp, true> : public true_or_false_type<_Tp(-1) < _Tp(0)> {
 };
 
+template< class... >
+using void_t = void;
+
 template <class T> auto test_returnable(int)
     -> decltype(void(static_cast<T (*)()>(nullptr)), true_type{});
 template <class> auto test_returnable(...) -> false_type;
@@ -141,6 +144,24 @@ template <class T> struct remove_cv<const volatile T> {
   typedef T type;
 };
 
+template <typename T>
+struct remove_reference
+{ using type = T; };
+
+template <typename T>
+struct remove_reference<T&>
+{ using type = T; };
+
+template <typename T>
+struct remove_reference<T&&>
+{ using type = T; };
+
+template <typename T>
+struct remove_cvref {
+  using type = typename remove_cv<typename remove_reference<T>::type>::type;
+};
+
+
 template <class T> struct is_void : public is_same<void, typename remove_cv<T>::type> {};
 
 template <class From, class To> struct is_convertible
@@ -158,7 +179,8 @@ template <typename _Tp> struct is_standard_layout
     : public integral_constant<bool, __is_standard_layout(_Tp)> {};
 
 template <typename _Tp> struct is_trivial : public integral_constant<bool, __is_trivial(_Tp)> {};
-
+template <typename _Tp> struct is_trivially_copyable :
+  public integral_constant<bool, __is_trivially_copyable(_Tp)> {};
 
 template <bool B, class T, class F> struct conditional {
   using type = T;

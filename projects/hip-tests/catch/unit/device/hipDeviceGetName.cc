@@ -130,10 +130,6 @@ HIP_TEST_CASE(Unit_hipDeviceGetName_CheckPropName) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipDeviceGetName_PartialFill) {
-#if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-108");
-  return;
-#endif
   std::array<char, LEN> name;
 
   int numDevices = 0;

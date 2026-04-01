@@ -576,7 +576,7 @@ class AMDSMICommands:
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
-        # Handle multiple Switchs
+        # Handle multiple Switches
         handled_multiple_switchs, device_handle = self.helpers.handle_switchs(
             args, self.logger, self.list_switch
         )
@@ -2286,7 +2286,7 @@ class AMDSMICommands:
                     gpu_args_enabled = True
                     break
 
-        # Handle CPU and GPU intialization cases
+        # Handle CPU and GPU initialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
             # Print out all CPU and all GPU static info only if no device was specified.
             # If a GPU or CPU argument is provided only print out the specified device.
@@ -4718,7 +4718,7 @@ class AMDSMICommands:
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["ddr_bandwidth"]["response"] = "N/A"
                 logging.debug(
-                    "Failed to get ddr bandwdith for cpu %s | %s", cpu_id, e.get_error_info()
+                    "Failed to get ddr bandwidth for cpu %s | %s", cpu_id, e.get_error_info()
                 )
         if args.cpu_temp:
             static_dict["cpu_temp"] = {}
@@ -5225,7 +5225,7 @@ class AMDSMICommands:
             nic_metric_str = json.dumps(nic_metric_info, indent=4)
             logging.debug("NIC Metrics table for %s | %s", nic_id, nic_metric_str)
         except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Unabled to load NIC Metrics table for %s | %s", nic_id, e.err_info)
+            logging.debug("Unable to load NIC Metrics table for %s | %s", nic_id, e.err_info)
 
         logging.debug(f"Metric Arg information for NIC {nic_id} on {self.helpers.os_info()}")
         logging.debug(f"Args:   {current_platform_args}")
@@ -5387,7 +5387,7 @@ class AMDSMICommands:
         # Handle multiple Switches
         if isinstance(args.switch, list):
             if len(args.switch) > 1:
-                # Deepcopy switchs as recursion will destroy the switch list
+                # Deepcopy switches as recursion will destroy the switch list
                 stored_switches = []
                 for switch in args.switch:
                     stored_switches.append(switch)
@@ -5401,7 +5401,7 @@ class AMDSMICommands:
                         switch=device_handle,
                     )
 
-                # Reload original switchs
+                # Reload original switches
                 args.switch = stored_switches
 
                 # Print multiple device output
@@ -5434,7 +5434,7 @@ class AMDSMICommands:
             switch_metric_str = json.dumps(switch_metric_info, indent=4)
             logging.debug("SWITCH Metrics table for %s | %s", switch_id, switch_metric_str)
         except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Unabled to load SWITCH Metrics table for %s | %s", switch_id, e.err_info)
+            logging.debug("Unable to load SWITCH Metrics table for %s | %s", switch_id, e.err_info)
 
         logging.debug(f"Metric Arg information for SWITCH {switch_id} on {self.helpers.os_info()}")
         logging.debug(f"Args:   {current_platform_args}")
@@ -5820,7 +5820,7 @@ class AMDSMICommands:
                     core_args_enabled = True
                     break
 
-        # Handle CPU and GPU driver intialization cases
+        # Handle CPU and GPU driver initialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
             logging.debug(
                 "gpu_args_enabled: %s, cpu_args_enabled: %s, core_args_enabled: %s",
@@ -6846,9 +6846,9 @@ class AMDSMICommands:
             #         "link_status": "ENABLED" - devices linked; "DISABLED" - devices not linked; Correlated to access
             #         "link_type": "SELF" - current node, "PCIE", "XGMI", "N/A" - no link,"UNKNOWN" - unidentified link type
             #         "num_hops": num_hops - # of hops between devices
-            #         "bandwidth": numa_bw - The NUMA "minimum bandwidth-maximum bandwidth" beween src and dest nodes
+            #         "bandwidth": numa_bw - The NUMA "minimum bandwidth-maximum bandwidth" between src and dest nodes
             #                      "N/A" - self node or not connected devices
-            #         "coherent": coherent - Coherant / Non-Coherant io links
+            #         "coherent": coherent - Coherent / Non-Coherent io links
             #         "atomics": atomics - 32 and 64-bit atomic io link capability between nodes
             #         "dma": dma - P2P direct memory access (DMA) link capability between nodes
             #         "bi_dir": bi_dir - P2P bi-directional link capability between nodes
@@ -7260,7 +7260,7 @@ class AMDSMICommands:
 
             if self.logger.is_human_readable_format():
                 self.logger.multiple_device_output = tabular_output
-                self.logger.table_title = "CACHE COHERANCY TABLE"
+                self.logger.table_title = "CACHE COHERENCY TABLE"
                 self.logger.print_output(multiple_device_enabled=True, tabular=True)
 
         if args.atomics:
@@ -7402,7 +7402,7 @@ class AMDSMICommands:
                 "  ENABLED / DISABLED = Link is enabled or disabled",
                 "  N/A = Not supported",
                 "  T/F = True / False",
-                "  C/NC = Coherant / Non-Coherant io links",
+                "  C/NC = Coherent / Non-Coherent io links",
                 "  64,32 = 64 bit and 32 bit atomic support",
                 "  <BW from>-<BW to>",
             ]
@@ -9401,7 +9401,7 @@ class AMDSMICommands:
             if args.core == None:
                 args.core = self.core_handles
 
-        # Handle CPU and GPU intialization cases
+        # Handle CPU and GPU initialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
             # Print out all CPU and all GPU static info only if no device was specified.
             # If a GPU or CPU argument is provided only print out the specified device.
@@ -9588,6 +9588,9 @@ class AMDSMICommands:
             args.power_cap = power_cap
         if clean_local_data:
             args.clean_local_data = clean_local_data
+        # Normalize gpureset: not available on VMs
+        if not self.helpers.is_baremetal():
+            args.gpureset = False
 
         # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "gtt") and args.gtt:
@@ -10844,7 +10847,7 @@ class AMDSMICommands:
         ### XCP Metrics ###
         ###################
         # Must come after process list - XCP detail is a multi-dimensional array, which is displayed
-        # in tabular format with XCP values for same gpu shown on muliple lines.
+        # in tabular format with XCP values for same gpu shown on multiple lines.
         if args.violation:
             violation_status = {
                 "pviol": "N/A",
@@ -11480,7 +11483,7 @@ class AMDSMICommands:
     def partition(
         self, args, multiple_devices=False, gpu=None, current=None, memory=None, accelerator=None
     ):
-        """Display parition information for the target GPU
+        """Display partition information for the target GPU
         param:
             args - argparser args to pass to subcommand
             multiple_devices (bool) - True if checking for multiple devices
@@ -11566,7 +11569,7 @@ class AMDSMICommands:
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     current_mem_cap = "N/A"
                     logging.debug(
-                        "Failed to get current memory partition capabilties for GPU %s | %s",
+                        "Failed to get current memory partition capabilities for GPU %s | %s",
                         gpu_id,
                         e.get_error_info(),
                     )
@@ -12050,7 +12053,7 @@ class AMDSMICommands:
         base_board_temps=None,
         gtt=None,
     ):
-        """List node informations
+        """List node information
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args
