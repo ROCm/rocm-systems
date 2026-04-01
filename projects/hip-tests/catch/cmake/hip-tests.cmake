@@ -119,15 +119,18 @@ function(hip_gen_exe_target)
     endforeach()
     # add binary to global list of binaries to install
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ${_EXE_NAME})
-    set(_DISCOVER_ARGS
+    # SKIP_REGULAR_EXPRESSION must be under PROPERTIES (Catch2 does not accept it as a
+    # top-level keyword). JSON DisabledTests skips print HIP_SKIP_THIS_TEST and exit 0.
+    set(_CATCH_TEST_PROPERTIES SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST")
+    if(DEFINED HIP_TEST_LABELS)
+      list(APPEND _CATCH_TEST_PROPERTIES LABELS "${HIP_TEST_LABELS}")
+    endif()
+    catch_discover_tests(
+      "${_EXE_NAME}"
       DISCOVERY_MODE PRE_TEST
       ADD_TAGS_AS_LABELS
-      SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST"
+      PROPERTIES ${_CATCH_TEST_PROPERTIES}
     )
-    if (DEFINED HIP_TEST_LABELS)
-      list(APPEND _DISCOVER_ARGS PROPERTIES LABELS "${HIP_TEST_LABELS}")
-    endif()
-    catch_discover_tests("${_EXE_NAME}" ${_DISCOVER_ARGS})
     file(GLOB CTEST_INC_FILES "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}-*_include.cmake")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${CTEST_INC_FILES})
 
