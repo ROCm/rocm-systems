@@ -9,13 +9,10 @@ import pkgutil
 import re
 import shlex
 import shutil
-import tempfile
 import time
 import traceback
 from pathlib import Path
 from typing import Any, Union, cast
-
-import yaml
 
 import config
 import utils.utils_profile_csv as csv_ops
@@ -29,17 +26,18 @@ from utils.logger import (
 )
 from utils.utils_common import (
     capture_subprocess_output,
+    create_temp_rocprofiler_metrics_path,
     get_rocprof_cmd,
     parse_text,
     perform_attach_detach,
 )
+from vendored import yaml
 
 
 def run_prof(
     fnames: Union[list[str], str],
     profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
     workload_dir: str,
-    mspec: Any,  # noqa: ANN401
     loglevel: int,
     format_rocprof_output: str,
     torch_trace_enabled: bool = False,
@@ -103,26 +101,20 @@ def run_prof(
         config.rocprof_compute_home
         / "rocprof_compute_soc"
         / "profile_configs"
-        / "counter_defs.yaml",
-    ) as file:
-        counter_defs = yaml.safe_load(file)
+        / "sdk_config.yaml",
+    ) as filename:
+        sdk_config = yaml.safe_load(filename)
     # Extra counter definitions
     for fname in fnames if multiple_files else [fnames]:
         if Path(fname).with_suffix(".yaml").exists():
             with open(Path(fname).with_suffix(".yaml")) as file:
-                counter_defs["rocprofiler-sdk"]["counters"].extend(
+                sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
-    # TODO: Write counter definitions to a user specified path
-    # Write counter definitions to a temporary file
-    tmpfile_path = (
-        Path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
-        / "counter_defs.yaml"
-    )
-    with open(tmpfile_path, "w") as tmpfile:
-        yaml.dump(counter_defs, tmpfile, default_flow_style=False, sort_keys=False)
     # Set counter definitions
-    new_env["ROCPROFILER_METRICS_PATH"] = str(tmpfile_path.parent)
+    new_env["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
+        sdk_config
+    )
     console_debug(
         "Adding env var for counter definitions: "
         f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
@@ -420,18 +412,18 @@ def gen_sysinfo(
     mspec: Any,  # noqa: ANN401
     soc: Any,  # noqa: ANN401
 ) -> None:
-    df = mspec.get_class_members()
+    data = mspec.get_class_members()
 
     # Append workload information to machine specs
-    df["command"] = app_cmd
-    df["workload_path"] = workload_dir
+    data["command"] = app_cmd
+    data["workload_path"] = workload_dir
 
     blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
     if not skip_roof:
         blocks.append("roofline")
-    df["ip_blocks"] = "|".join(blocks)
+    data["ip_blocks"] = "|".join(blocks)
 
-    df.to_csv(workload_dir + "/" + "sysinfo.csv", index=False)
+    csv_ops.write_csv_from_dicts(workload_dir + "/" + "sysinfo.csv", [data])
 
 
 def get_submodules(package_name: str) -> list[str]:

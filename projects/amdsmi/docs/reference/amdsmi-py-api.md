@@ -40,7 +40,7 @@ Initialize GPUs only example:
 
 ```python
 try:
-    # by default we initalize with AmdSmiInitFlags.INIT_AMD_GPUS
+    # by default we initialize with AmdSmiInitFlags.INIT_AMD_GPUS
     ret = amdsmi_init()
     # continue with amdsmi
 except AmdSmiException as e:
@@ -902,7 +902,7 @@ try:
             firmware_list = amdsmi_get_fw_info(device)['fw_list']
             for firmware_block in firmware_list:
                 print(firmware_block['fw_name'])
-                # String formated hex or decimal value ie: 21.00.00.AC or 130
+                # String formatted hex or decimal value ie: 21.00.00.AC or 130
                 print(firmware_block['fw_version'])
 except AmdSmiException as e:
     print(e)
@@ -917,7 +917,7 @@ Input parameters:
 
 * `processor_handle` device which to query
 
-Output: Dictionary of activites to their respective usage percentage or 'N/A' if not supported
+Output: Dictionary of activities to their respective usage percentage or 'N/A' if not supported
 
 Field | Description
 ---|---
@@ -2670,7 +2670,7 @@ Input parameters:
 * `sensor_type` part of device from which temperature should be obtained
 * `metric` enum indicated which temperature value should be retrieved
 
-Output: Temperature as integer in millidegrees Celcius
+Output: Temperature as integer in millidegrees Celsius
 
 Exceptions that can be thrown by `amdsmi_get_temp_metric` function:
 
@@ -2762,7 +2762,7 @@ Output: List containing dictionaries with fields
 
 Field | Description
 ---|---
-`timestamp` | The timestamp when the counter is retreived - Resolution: 1 ns
+`timestamp` | The timestamp when the counter is retrieved - Resolution: 1 ns
 `Dictionary for each counter` | <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`type`</td><td>Counter that was requested</td></tr><tr><td>`value`</td><td>Value gotten for utilization counter</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_utilization_count` function:
@@ -3140,7 +3140,7 @@ Field | Description
 ---|---
 `curr_sclk_range` | <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range</td></tr></tbody></table>
 `curr_mclk_range` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range</td></tr></tbody></table>
-`sclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range limt</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range limit</td></tr></tbody></table>
+`sclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range limit</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range limit</td></tr></tbody></table>
 `mclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range limit</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range limit</td></tr></tbody></table>
 `curve.vc_points` | List of voltage curve points
 `num_regions` | The number of voltage curve regions
@@ -3273,7 +3273,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_pm_metrics_info
 
-Description: This function will retreive the name and value for each
+Description: This function will retrieve the name and value for each
 item in the pm metrics table with the given processor handle.
 
 Input parameters:
@@ -4608,13 +4608,13 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_subsystem_name
 
-Description: Get the name string for the device subsytem
+Description: Get the name string for the device subsystem
 
 Input parameters:
 
 * `processor_handle` device which to query
 
-Output: device subsytem
+Output: device subsystem
 
 Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_name` function:
 
@@ -4724,7 +4724,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_minmax_bandwidth_between_processors
 
-Description: Retreive minimal and maximal io link bandwidth between 2 GPUs.
+Description: Retrieve minimal and maximal io link bandwidth between 2 GPUs.
 
 Input parameters:
 
@@ -5476,7 +5476,7 @@ Output: Dictionary holding the following fields.
 Field | Description
 ---|---
 `UNKNOWN` | Virtualization mode not detected
-`BAREMETAL` | Baremetal paltform detected
+`BAREMETAL` | Baremetal platform detected
 `HOST` | Host/Hypervisor platform detected
 `GUEST` | Guest/Virtual Machine detected
 `PASSTHROUGH` | GPU Passthrough mode detected

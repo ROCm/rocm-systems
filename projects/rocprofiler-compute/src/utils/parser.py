@@ -18,7 +18,14 @@ from utils.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
-from utils.utils_common import normalize_filter_to_str_list
+from utils.utils_common import (
+    BUILD_IN_VARS,
+    SUPPORTED_DENOM,
+    SUPPORTED_FIELD,
+    calc_builtin_var,
+    expand_placeholder_ranges,
+    normalize_filter_to_str_list,
+)
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -34,46 +41,6 @@ from utils.utils_common import normalize_filter_to_str_list
 PMC_KERNEL_TOP_TABLE_ID: int = 1
 # 002 is ID of pmc_dispatch_info.csv table
 PMC_DISPATCH_INFO_TABLE_ID: int = 2
-
-# Build-in $denom defined in mongodb query:
-#       "denom": {
-#              "$switch" : {
-#                 "branches": [
-#                    {
-#                         "case":  { "$eq": [ $normUnit, "per Wave"]} ,
-#                         "then":  "&SQ_WAVES"
-#                    },
-#                    {
-#                         "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
-#                         "then":  "&GRBM_GUI_ACTIVE"
-#                    },
-#                    {
-#                         "case":  { "$eq": [ $normUnit, "per Sec"]} ,
-#                         "then":  {"$divide":[{"$subtract": ["&End_Timestamp",
-#                                                              "&Start_Timestamp" ]},
-#                                              1000000000]}
-#              }
-#       }
-SUPPORTED_DENOM: dict[str, str] = {
-    "per_wave": "SQ_WAVES",
-    "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
-    "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
-    "per_kernel": "1",
-}
-
-# Build-in defined in mongodb variables:
-BUILD_IN_VARS: dict[str, str] = {
-    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-    "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-    "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
-        $GRBM_GUI_ACTIVE_PER_XCD)), 0) / $max_waves_per_cu) * 8) + \
-        MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
-        $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
-    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / \
-        1000) * $max_sclk)), 0)",
-    "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
-}
 
 SUPPORTED_CALL: dict[str, str] = {
     # If the below has a single arg, like(expr), it is an aggr,
@@ -757,56 +724,6 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
     return visited, counters
 
 
-def calc_builtin_var(var: Union[int, str], sys_info: pd.Series) -> int:  # type: ignore[return]
-    """
-    Calculate build-in variable based on sys_info:
-    """
-    if isinstance(var, int):
-        return var
-    elif isinstance(var, str) and var.startswith("$total_l2_chan"):
-        return int(sys_info.total_l2_chan)
-    else:
-        console_error(f'Built-in var "{var}" is not supported')
-
-
-def build_metric_list(
-    arch_configs: schema.ArchConfig,
-    sys_info: pd.Series,
-) -> None:
-    """
-    Populate arch_configs.metric_list from the panel configs.
-
-    Builds the metric_list mapping (panel/table/metric IDs -> display names)
-    without constructing DataFrames or metric_counters.  Use this directly when
-    only the metric listing is needed (e.g. --list-metrics, --list-blocks).
-    """
-    metric_list = {}
-
-    _expand_placeholder_ranges(arch_configs, sys_info)
-
-    for panel_id, panel in arch_configs.panel_configs.items():
-        for data_source in panel["data source"]:
-            for type, data_config in data_source.items():
-                if type == "metric_table":
-                    data_source_idx = str(data_config["id"] // 100)
-                    if data_source_idx != "0":
-                        metric_list[data_source_idx] = panel["title"]
-
-                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                    metric_list[table_idx] = data_config["title"]
-
-                    for i, (key, entries) in enumerate(data_config["metric"].items()):
-                        metric_idx = f"{table_idx}.{i}"
-                        if _metric_has_valid_expr(entries, data_config):
-                            metric_list[metric_idx] = key
-
-                elif type in ("raw_csv_table", "pc_sampling_table"):
-                    data_source_idx = str(data_config["id"] // 100)
-                    metric_list[data_source_idx] = panel["title"]
-
-    setattr(arch_configs, "metric_list", metric_list)
-
-
 @demarcate
 def build_dfs(
     arch_configs: schema.ArchConfig,
@@ -833,7 +750,9 @@ def build_dfs(
     dfs_type = {}
     metric_counters = {}
 
-    _expand_placeholder_ranges(arch_configs, sys_info)
+    arch_configs.panel_configs = expand_placeholder_ranges(
+        arch_configs.panel_configs, sys_info
+    )
 
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
@@ -977,7 +896,7 @@ def build_metric_value_string(
     for id, df in dfs.items():
         if dfs_type[id] == "metric_table":
             for expr in df.columns:
-                if expr in schema.SUPPORTED_FIELD:
+                if expr in SUPPORTED_FIELD:
                     # NB: apply all build-in before building the whole string
                     df[expr] = df[expr].apply(
                         update_denominator_string, normal_unit=normal_unit
@@ -998,64 +917,6 @@ def build_metric_value_string(
                     df[expr] = df[expr].apply(
                         update_normal_unit_string, normal_unit=normal_unit
                     )
-
-
-def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
-    """
-    Return True if a metric entry has at least one evaluatable expression field
-    that is not None and not the string "None".
-
-    Expression fields are identified by matching the header display name against
-    schema.SUPPORTED_FIELD, excluding Peak-prefixed fields which are empirical values.
-    """
-    for header_key, header_display in data_config["header"].items():
-        if header_display in schema.SUPPORTED_FIELD and not header_display.startswith(
-            "Peak"
-        ):
-            expr_value = entries.get(header_key)
-            if expr_value is not None and expr_value != "None":
-                return True
-    return False
-
-
-def _expand_placeholder_ranges(
-    arch_configs: schema.ArchConfig,
-    sys_info: pd.Series,
-) -> None:
-    """
-    Expand placeholder_range entries in metric_table data configs in-place.
-
-    Some metric tables define a range of metrics via a placeholder key that is
-    expanded into individual entries at load time. sys_info is required to
-    resolve built-in range variables; if it is None the table is cleared.
-    """
-    for _panel_id, panel in arch_configs.panel_configs.items():
-        for data_source in panel["data source"]:
-            for type, data_config in data_source.items():
-                if (
-                    type == "metric_table"
-                    and "metric" in data_config
-                    and "placeholder_range" in data_config["metric"]
-                ):
-                    new_metrics = {}
-                    if sys_info is not None:
-                        # NB: support single placeholder for now!!
-                        p_range = data_config["metric"].pop("placeholder_range")
-                        metric, metric_expr = data_config["metric"].popitem()
-                        for p, r in p_range.items():
-                            # NB: We have to resolve placeholder range first if it
-                            #   is a build-in var. It will be too late to do it in
-                            #   eval_metric(). This is the only reason we need
-                            #   sys_info at this stage.
-                            var = calc_builtin_var(r, sys_info)
-                            for i in range(var):
-                                new_key = metric.replace(p, str(i))
-                                new_val = {
-                                    k: v.replace(p, str(i))
-                                    for k, v in metric_expr.items()
-                                }
-                                new_metrics[new_key] = new_val
-                    data_config["metric"] = new_metrics
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
@@ -1121,7 +982,7 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, Union[int, float]]:
         sys_vars_collection[f"ammolite__{var_name}"] = variable_value
 
     # Special case for total_l2_chan
-    total_l2_channel_count = calc_builtin_var("$total_l2_chan", sys_info)
+    total_l2_channel_count = calc_builtin_var("$total_l2_chan", sys_info.to_dict())
     if np.isnan(total_l2_channel_count) or total_l2_channel_count == 0:
         console_warning(
             "total_l2_chan is not available in sysinfo.csv, please provide the correct "
@@ -1234,7 +1095,7 @@ def eval_metric(
         if dfs_type[df_id] == "metric_table":
             for row_id, row in df.iterrows():
                 for expr in df.columns:
-                    if expr in schema.SUPPORTED_FIELD and expr.lower() != "alias":
+                    if expr in SUPPORTED_FIELD and expr.lower() != "alias":
                         if row[expr]:
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
@@ -2061,7 +1922,7 @@ def build_comparable_columns(time_unit: str) -> list[str]:
     """
     Build comparable columns/headers for display
     """
-    comparable_columns = schema.SUPPORTED_FIELD
+    comparable_columns = list(SUPPORTED_FIELD)  # Copy to avoid mutating the original
     top_stat_base = [
         "Count",
         "Sum",
@@ -2096,4 +1957,5 @@ def correct_sys_info(mspec: MachineSpecs, specs_correction: str) -> pd.DataFrame
             console_error(
                 "analyze", f'Invalid spec "{key}". Use --specs to see valid options'
             )
-    return mspec.get_class_members()
+    # Convert dict to DataFrame for downstream pandas-based processing
+    return pd.DataFrame(mspec.get_class_members(), index=[0])

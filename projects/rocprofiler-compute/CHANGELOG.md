@@ -10,6 +10,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Introduced support for MI350P GPU
 
+* ``--view table`` option in analyze mode to force all TTY output to plain tables and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables). The ``--view`` argument is reserved for future TTY views (e.g. other chart styles).
+
 ### Changed
 
 * Standalone roofline (`--roof-only` option) in profile mode now creates `roofline.csv` only. HTML roofline charts are generated via `rocprof-compute analyze`. The `calc_ai_profile()` function has been removed; `calc_ai_analyze()` is the single source of truth for arithmetic intensity calculation.
@@ -20,6 +22,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Profile mode output format:
   * Profile mode now creates separate counter collection files for each application replay (pmc_perf_*.csv or results_*.csv).
   * Analyze mode automatically merges these files into a unified pmc_perf.csv containing information from all application replays during pre-processing.
+
+* ROCm Compute Profiler now builds and runs profile mode with vanilla Python without requiring any Python dependencies to be installed via `pip`.
+  * Note that analysis mode will still require Python dependencies and will report any missing packages.
 
 ### Removed
 

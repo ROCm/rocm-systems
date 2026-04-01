@@ -1,0 +1,1013 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rocpd-ai-analysis-output",
+  "title": "ROCInsight AI Analysis Output",
+  "description": "JSON output schema for 'rocinsight analyze --format json' and the rocinsight.ai_analysis Python API. Consumers MUST check schema_version before parsing.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "metadata",
+    "profiling_info",
+    "summary",
+    "execution_breakdown",
+    "hotspots",
+    "memory_analysis",
+    "hardware_counters",
+    "recommendations",
+    "warnings",
+    "errors"
+  ],
+  "additionalProperties": false,
+  "properties": {
+
+    "schema_version": {
+      "type": "string",
+      "enum": ["0.1.0", "0.2.0", "0.3.0", "0.4.0"],
+      "description": "Version of this JSON schema. Tools MUST validate this field before parsing. Breaking changes increment the major number. See SCHEMA_CHANGELOG.md for migration guidance."
+    },
+
+    "metadata": {
+      "type": "object",
+      "description": "Metadata about the analysis run itself.",
+      "required": [
+        "rocpd_version",
+        "analysis_version",
+        "database_file",
+        "analysis_timestamp",
+        "analysis_duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "rocpd_version": {
+          "type": "string",
+          "description": "Version of the rocprofiler-sdk / rocpd package that produced this output.",
+          "examples": ["6.3.0", "7.0.0"]
+        },
+        "analysis_version": {
+          "type": "string",
+          "description": "Version of the AI analysis module. Follows SemVer.",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "examples": ["0.1.0"]
+        },
+        "database_file": {
+          "type": ["string", "null"],
+          "description": "Absolute or relative path to the rocpd .db file that was analyzed. Null for Tier 0 (source-only) analysis where no database is provided."
+        },
+        "analysis_timestamp": {
+          "type": "string",
+          "description": "ISO 8601 timestamp of when the analysis was performed.",
+          "examples": ["2026-02-17T18:00:00.123456"]
+        },
+        "analysis_duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock time taken to run the analysis in milliseconds."
+        },
+        "custom_prompt": {
+          "type": ["string", "null"],
+          "description": "User-supplied question or focus area passed via --prompt. May be omitted or null when not provided."
+        }
+      }
+    },
+
+    "profiling_info": {
+      "type": "object",
+      "description": "Information about the profiling session that produced the database.",
+      "required": [
+        "total_duration_ns",
+        "profiling_mode",
+        "analysis_tier",
+        "gpus"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "total_duration_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock duration of the profiled application in nanoseconds."
+        },
+        "profiling_mode": {
+          "type": "string",
+          "enum": [
+            "source_only",
+            "sys_trace_only",
+            "sys_trace_with_counters",
+            "pc_sampling",
+            "thread_trace"
+          ],
+          "description": "How the profiling data was collected. 'source_only' is used for Tier 0 (static source analysis with no database). Determines which analysis tiers are available."
+        },
+        "analysis_tier": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4,
+          "description": "Highest analysis tier available. 0=source-only (no database), 1=trace only, 2=hardware counters, 3=PC sampling, 4=thread trace."
+        },
+        "gpus": {
+          "type": "array",
+          "description": "List of GPU devices present in the profiling session.",
+          "items": {
+            "type": "object",
+            "required": ["name", "architecture"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Human-readable GPU model name.",
+                "examples": ["AMD Instinct MI300X", "AMD Radeon RX 7900 XTX"]
+              },
+              "architecture": {
+                "type": "string",
+                "description": "GFX architecture identifier.",
+                "examples": ["gfx942", "gfx90a", "gfx1100"]
+              },
+              "agent_id": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "HSA agent ID for this GPU."
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "summary": {
+      "type": "object",
+      "description": "High-level performance summary and bottleneck classification.",
+      "required": [
+        "overall_assessment",
+        "primary_bottleneck",
+        "confidence",
+        "key_findings"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "overall_assessment": {
+          "type": "string",
+          "description": "Human-readable one-to-three sentence summary of the workload performance."
+        },
+        "primary_bottleneck": {
+          "type": "string",
+          "enum": [
+            "compute",
+            "memory_transfer",
+            "memory_bandwidth",
+            "latency",
+            "mixed",
+            "unknown"
+          ],
+          "description": "Classified primary bottleneck type for the workload."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Confidence score for the bottleneck classification (0.0 to 1.0). Higher values indicate stronger evidence."
+        },
+        "key_findings": {
+          "type": "array",
+          "description": "Ordered list of the most significant findings from the analysis. First item is most important.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+
+    "execution_breakdown": {
+      "type": ["object", "null"],
+      "description": "Time distribution across execution categories. Null for Tier 0 (source-only) analysis where no database is available. All *_ns values are in nanoseconds, all *_pct values sum to approximately 100.0.",
+      "required": [
+        "total_runtime_ns",
+        "kernel_time_ns",
+        "kernel_time_pct",
+        "memcpy_time_ns",
+        "memcpy_time_pct",
+        "api_overhead_ns",
+        "api_overhead_pct",
+        "idle_time_ns",
+        "idle_time_pct"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "total_runtime_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total observed runtime in nanoseconds (max_end - min_start across all operations)."
+        },
+        "kernel_time_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total GPU kernel execution time in nanoseconds."
+        },
+        "kernel_time_pct": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "description": "Percentage of total runtime spent in GPU kernels."
+        },
+        "memcpy_time_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total memory copy time in nanoseconds (all directions: H2D, D2H, D2D)."
+        },
+        "memcpy_time_pct": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "description": "Percentage of total runtime spent in memory copies."
+        },
+        "api_overhead_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Estimated API and launch overhead in nanoseconds."
+        },
+        "api_overhead_pct": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "description": "Percentage of total runtime spent in API and launch overhead."
+        },
+        "idle_time_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "GPU idle time in nanoseconds (gaps between operations)."
+        },
+        "idle_time_pct": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "description": "Percentage of total runtime the GPU was idle."
+        }
+      }
+    },
+
+    "hotspots": {
+      "type": "array",
+      "description": "Top kernels ranked by total execution time (descending). Contains up to --top-kernels entries.",
+      "items": {
+        "type": "object",
+        "required": [
+          "rank",
+          "name",
+          "calls",
+          "total_duration_ns",
+          "avg_duration_ns",
+          "min_duration_ns",
+          "max_duration_ns",
+          "pct_of_total"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "rank": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "1-based rank by total execution time (1 = hottest kernel)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Demangled kernel name as reported by rocprofv3."
+          },
+          "calls": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Total number of dispatches (invocations) of this kernel."
+          },
+          "total_duration_ns": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Sum of all dispatch durations for this kernel in nanoseconds."
+          },
+          "avg_duration_ns": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Average dispatch duration in nanoseconds."
+          },
+          "min_duration_ns": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Minimum dispatch duration in nanoseconds."
+          },
+          "max_duration_ns": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum dispatch duration in nanoseconds."
+          },
+          "pct_of_total": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 100.0,
+            "description": "Percentage of total runtime this kernel accounts for."
+          }
+        }
+      }
+    },
+
+    "memory_analysis": {
+      "type": "object",
+      "description": "Memory copy statistics grouped by transfer direction. Keys are direction strings.",
+      "propertyNames": {
+        "enum": [
+          "Host-to-Device",
+          "Device-to-Host",
+          "Device-to-Device",
+          "Peer-to-Peer",
+          "Unknown"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "count",
+          "total_bytes",
+          "total_duration_ns",
+          "avg_bytes",
+          "avg_duration_ns",
+          "bandwidth_gbps"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of memory copy operations in this direction."
+          },
+          "total_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total bytes transferred in this direction."
+          },
+          "total_duration_ns": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total time spent on copies in this direction, in nanoseconds."
+          },
+          "avg_bytes": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Average bytes per copy operation."
+          },
+          "avg_duration_ns": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Average duration per copy operation in nanoseconds."
+          },
+          "bandwidth_gbps": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Achieved memory bandwidth in gigabytes per second (GB/s). Computed as total_bytes / total_duration_ns, which has units of bytes/ns and is numerically equal to GB/s. Note: the field name suffix '_gbps' is an abbreviation for 'gigabytes per second', not gigabits per second (Gbps)."
+          }
+        }
+      }
+    },
+
+    "hardware_counters": {
+      "type": "object",
+      "description": "Tier 2 hardware performance counter data. Present in all outputs; check has_counters before using counter fields.",
+      "required": ["has_counters"],
+      "additionalProperties": false,
+      "properties": {
+        "has_counters": {
+          "type": "boolean",
+          "description": "True when the database contains hardware counter data (collected via --pmc). When false, all other fields in this object are null or empty."
+        },
+        "metrics": {
+          "type": ["object", "null"],
+          "description": "Derived metrics computed from raw counters. Null when has_counters is false.",
+          "additionalProperties": false,
+          "properties": {
+            "gpu_utilization_pct": {
+              "type": ["number", "null"],
+              "minimum": 0.0,
+              "maximum": 100.0,
+              "description": "GPU utilization percentage derived from GRBM_GUI_ACTIVE / GRBM_COUNT * 100."
+            },
+            "avg_waves": {
+              "type": ["number", "null"],
+              "minimum": 0.0,
+              "description": "Average wave occupancy (active wavefronts per CU) from SQ_WAVES counter."
+            },
+            "max_waves": {
+              "type": ["number", "null"],
+              "minimum": 0.0,
+              "description": "Maximum wave occupancy observed."
+            },
+            "min_waves": {
+              "type": ["number", "null"],
+              "minimum": 0.0,
+              "description": "Minimum wave occupancy observed."
+            }
+          }
+        },
+        "counters": {
+          "type": ["object", "null"],
+          "description": "Raw hardware counter statistics keyed by counter name (e.g., GRBM_COUNT, SQ_WAVES). Null when has_counters is false.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["sample_count", "avg_value", "min_value", "max_value", "total_value"],
+            "additionalProperties": false,
+            "properties": {
+              "sample_count": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Number of samples collected for this counter."
+              },
+              "avg_value": {
+                "type": "number",
+                "description": "Average counter value across all samples."
+              },
+              "min_value": {
+                "type": "number",
+                "description": "Minimum counter value."
+              },
+              "max_value": {
+                "type": "number",
+                "description": "Maximum counter value."
+              },
+              "total_value": {
+                "type": "number",
+                "description": "Sum of all counter samples."
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "recommendations": {
+      "type": "array",
+      "description": "Prioritized, actionable optimization recommendations with structured tool commands. Ordered by priority (HIGH first) then by estimated impact.",
+      "items": {
+        "$ref": "#/$defs/recommendation"
+      }
+    },
+
+    "warnings": {
+      "type": "array",
+      "description": "Non-fatal warnings about missing data, limited analysis scope, or degraded accuracy.",
+      "items": {
+        "type": "object",
+        "required": ["severity", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["warning", "info"],
+            "description": "'warning' means the analysis may be incomplete. 'info' is purely informational."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable warning message."
+          },
+          "recommendation": {
+            "type": ["string", "null"],
+            "description": "Suggested action to resolve or work around this warning."
+          }
+        }
+      }
+    },
+
+    "errors": {
+      "type": "array",
+      "description": "Non-fatal errors encountered during analysis. An empty array means the analysis completed successfully. If this array is non-empty, some analysis sections may be incomplete.",
+      "items": {
+        "type": "string"
+      }
+    },
+
+    "llm_enhanced_explanation": {
+      "type": ["string", "null"],
+      "description": "Natural language explanation generated by an LLM (Anthropic Claude or OpenAI GPT) when --llm is enabled. Null when LLM enhancement was not requested or failed. Tools MUST treat this as supplementary; all actionable data is in the structured fields above."
+    },
+
+    "tier0": {
+      "type": "object",
+      "description": "Tier 0 static source-code analysis results. Present when --source-dir is used (source_only mode) or in combined mode (-i + --source-dir). Absent in pure Tier 1/2/3/4 runs.",
+      "required": [
+        "source_dir",
+        "analysis_timestamp",
+        "programming_model",
+        "files_scanned",
+        "kernel_count",
+        "recommendations",
+        "suggested_counters"
+      ],
+      "properties": {
+        "source_dir": {
+          "type": "string",
+          "description": "Path to the source directory that was scanned."
+        },
+        "analysis_timestamp": {
+          "type": "string",
+          "description": "ISO 8601 timestamp of the source analysis."
+        },
+        "programming_model": {
+          "type": "string",
+          "description": "Detected GPU programming model (e.g. HIP, CUDA, OpenCL, Python/PyTorch)."
+        },
+        "files_scanned": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of source files scanned."
+        },
+        "files_skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of source files skipped."
+        },
+        "kernel_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of GPU kernel definitions detected."
+        },
+        "detected_kernels": {
+          "type": "array",
+          "description": "List of detected GPU kernel definitions.",
+          "items": { "type": "object" }
+        },
+        "detected_patterns": {
+          "type": "array",
+          "description": "List of GPU usage patterns detected in the source.",
+          "items": { "type": "object" }
+        },
+        "risk_areas": {
+          "type": "array",
+          "description": "List of potential performance risk areas identified.",
+          "items": { "type": "string" }
+        },
+        "already_instrumented": {
+          "type": "boolean",
+          "description": "True when ROCTx markers or other instrumentation are already present."
+        },
+        "roctx_marker_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of ROCTx marker calls found in the source."
+        },
+        "recommendations": {
+          "type": "array",
+          "description": "Ordered profiling and optimization recommendations from static analysis.",
+          "items": { "$ref": "#/$defs/recommendation" }
+        },
+        "suggested_counters": {
+          "type": "array",
+          "description": "List of hardware counters recommended for the next profiling pass.",
+          "items": { "type": "string" }
+        },
+        "suggested_first_command": {
+          "type": ["string", "null"],
+          "description": "Ready-to-run rocprofv3 command suggested as the first profiling step."
+        },
+        "llm_explanation": {
+          "type": ["string", "null"],
+          "description": "LLM-generated explanation of the source analysis findings."
+        }
+      }
+    },
+
+    "interval_timeline": {
+      "type": "object",
+      "description": "GPU timeline computed via interval arithmetic (TraceLens methodology)",
+      "properties": {
+        "total_wall_ns":      { "type": "integer" },
+        "true_compute_ns":    { "type": "integer" },
+        "true_compute_pct":   { "type": "number"  },
+        "exposed_memcpy_ns":  { "type": "integer" },
+        "exposed_memcpy_pct": { "type": "number"  },
+        "idle_ns":            { "type": "integer" },
+        "idle_pct":           { "type": "number"  }
+      }
+    },
+
+    "kernel_categories": {
+      "type": "array",
+      "description": "Kernel execution time aggregated by TraceLens op category",
+      "items": {
+        "type": "object",
+        "properties": {
+          "category":           { "type": "string"  },
+          "count":              { "type": "integer" },
+          "total_ns":           { "type": "integer" },
+          "pct_of_kernel_time": { "type": "number"  },
+          "avg_duration_ns":    { "type": "integer" },
+          "pct_of_total_time":  { "type": "number"  }
+        }
+      }
+    },
+
+    "short_kernels": {
+      "type": "object",
+      "description": "Short kernel analysis (TraceLens methodology)",
+      "properties": {
+        "threshold_us":              { "type": "number"  },
+        "total_kernels":             { "type": "integer" },
+        "short_kernel_count":        { "type": "integer" },
+        "short_kernel_pct":          { "type": "number"  },
+        "wasted_ns":                 { "type": "integer" },
+        "wasted_pct_of_kernel_time": { "type": "number"  },
+        "histogram": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "bucket_label": { "type": "string"  },
+              "count":        { "type": "integer" }
+            }
+          }
+        },
+        "top_offenders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":            { "type": "string"  },
+              "count":           { "type": "integer" },
+              "avg_us":          { "type": "number"  },
+              "total_wasted_ns": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+
+    "att_trace": {
+      "type": ["object", "null"],
+      "description": "Tier 3 Advanced Thread Trace instruction-level stall analysis. Present when --att-dir is used and ATT CSV data is found. Absent in Tier 1/2 runs.",
+      "properties": {
+        "has_att_data": {
+          "type": "boolean",
+          "description": "True when valid ATT CSV data was parsed successfully."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Error or status message when has_att_data is false."
+        },
+        "summary": {
+          "type": "object",
+          "description": "Aggregated ATT statistics across all traced kernels.",
+          "properties": {
+            "kernel_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of kernels with valid ATT trace data."
+            },
+            "high_stall_kernels": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of kernels with stall_ratio >= 0.60 on the top stalling instruction."
+            }
+          }
+        },
+        "kernels": {
+          "type": "array",
+          "description": "Per-kernel ATT analysis results, sorted by total_weighted_stall descending.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Demangled kernel function name."
+              },
+              "csv_file": {
+                "type": "string",
+                "description": "Path to the ATT stats CSV file for this kernel."
+              },
+              "instruction_count": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Total number of instructions parsed from the CSV."
+              },
+              "avg_stall_ratio": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": "Average stall_ratio across all instructions (stall_cycles / total_latency_cycles)."
+              },
+              "stall_category": {
+                "type": "string",
+                "description": "Classified bottleneck type derived from top stalling instruction PC prefix.",
+                "examples": ["att_vmem_latency", "att_lds_conflict", "att_branch_divergence", "att_dependency", "att_unknown"]
+              },
+              "total_weighted_stall": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Sum of (stall_cycles * hitcount) across all instructions — primary sort key."
+              },
+              "top_stalling_instructions": {
+                "type": "array",
+                "description": "Top 10 instructions ranked by weighted_stall (stall_cycles * hitcount) descending.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "pc_offset": {
+                      "type": "string",
+                      "description": "Instruction identifier or PC offset as reported by rocprofv3 ATT."
+                    },
+                    "hitcount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Number of times this instruction was sampled."
+                    },
+                    "total_latency_cycles": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Total latency cycles accumulated for this instruction."
+                    },
+                    "stall_cycles": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Total stall cycles for this instruction."
+                    },
+                    "stall_ratio": {
+                      "type": "number",
+                      "minimum": 0.0,
+                      "maximum": 1.0,
+                      "description": "Fraction of latency spent stalling (stall_cycles / total_latency_cycles)."
+                    },
+                    "weighted_stall": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "stall_cycles * hitcount — composite severity score used for ranking."
+                    },
+                    "source_line": {
+                      "type": "string",
+                      "description": "Source file and line number associated with this instruction, if available."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+
+    "recommendation_command": {
+      "type": "object",
+      "description": "A single structured command recommendation for one ROCm profiling tool.",
+      "required": ["tool", "description", "flags", "args", "full_command"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": ["rocprofv3", "rocprof-sys", "rocprof-compute"],
+          "description": "The ROCm profiling tool to invoke. 'rocprofv3' for trace/counter collection, 'rocprof-sys' for system-level profiling (Omnitrace), 'rocprof-compute' for kernel-level hardware counter analysis."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable explanation of what this command does and why it is recommended for this issue."
+        },
+        "flags": {
+          "type": "array",
+          "description": "Boolean flags to pass to the tool (no associated value). Order is preserved in full_command.",
+          "items": {
+            "type": "string",
+            "description": "A single flag, e.g. '--sys-trace', '--hsa-trace', '--hip-trace'."
+          },
+          "examples": [
+            ["--sys-trace", "--hsa-trace"],
+            ["--hip-trace"]
+          ]
+        },
+        "args": {
+          "type": "array",
+          "description": "Named arguments with optional values to pass to the tool. Arguments with null value are treated as boolean flags and merged into 'flags' semantically, but kept separate for structured access.",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Argument name including leading dashes, e.g. '--pmc', '-d', '-o'."
+              },
+              "value": {
+                "type": ["string", "null"],
+                "description": "Argument value. Null means the argument is a flag with no value (duplicate of flags for structured access). String values are included verbatim in full_command.",
+                "examples": ["SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE", "./output_dir", "profile"]
+              }
+            }
+          },
+          "examples": [
+            [
+              {"name": "--pmc", "value": "SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE"},
+              {"name": "-d", "value": "./output"},
+              {"name": "-o", "value": "profile"}
+            ]
+          ]
+        },
+        "full_command": {
+          "type": "string",
+          "description": "Complete ready-to-run shell command including tool name, all flags, all args, and application placeholder '-- ./app'. Consumers can display this directly for copy-paste. Application arguments should be appended after '-- ./app'.",
+          "examples": [
+            "rocprofv3 --sys-trace --pmc SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE -d ./output -o profile -- ./app",
+            "rocprof-sys --trace-gpu-memory -- ./app",
+            "rocprof-compute -i profile.db --filter kernel_name -- ./app"
+          ]
+        }
+      }
+    },
+
+    "recommendation": {
+      "type": "object",
+      "description": "A single optimization recommendation with structured text explanation and tool commands.",
+      "required": [
+        "id",
+        "priority",
+        "category",
+        "issue",
+        "suggestion"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable identifier for this recommendation type. Can be used by tools to suppress or track specific recommendations across runs.",
+          "examples": [
+            "ROCPD-MEMCPY-001",
+            "ROCPD-COMPUTE-001",
+            "ROCPD-OCCUPANCY-001",
+            "ROCPD-KERNEL-FUSION-001"
+          ]
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["HIGH", "MEDIUM", "LOW", "INFO"],
+          "description": "Recommendation priority. HIGH items should be addressed first. INFO items are observations that do not require action."
+        },
+        "category": {
+          "type": "string",
+          "description": "Optimization category for grouping and filtering.",
+          "examples": [
+            "Memory Transfer",
+            "Compute Bottleneck",
+            "Occupancy",
+            "Kernel Fusion",
+            "Memory Access Pattern",
+            "API Overhead",
+            "General"
+          ]
+        },
+        "issue": {
+          "type": "string",
+          "description": "Concise description of the detected performance problem, including measured values where available."
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "High-level recommendation explaining what to do to address the issue."
+        },
+        "actions": {
+          "type": "array",
+          "description": "Concrete, numbered implementation steps to resolve the issue. Ordered from most to least impactful.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "estimated_impact": {
+          "type": "string",
+          "description": "Qualitative or quantitative estimate of the expected performance improvement if this recommendation is implemented.",
+          "examples": [
+            "15-30% reduction in total runtime when transfers dominate",
+            "Eliminates ~25% of launch overhead for workloads with many small kernels",
+            "May improve GPU utilization from 45% toward >80%"
+          ]
+        },
+        "commands": {
+          "type": "array",
+          "description": "Ordered list of structured profiling commands to help investigate or validate this recommendation. Each command targets a specific ROCm tool. Consumers should offer these as copy-paste suggestions.",
+          "items": {
+            "$ref": "#/$defs/recommendation_command"
+          }
+        }
+      }
+    },
+
+    "examples": {
+      "description": "Non-normative examples showing typical field values for each analysis tier.",
+      "tier1_minimal": {
+        "schema_version": "0.1.0",
+        "metadata": {
+          "rocpd_version": "6.3.0",
+          "analysis_version": "0.1.0",
+          "database_file": "/path/to/out_results.db",
+          "analysis_timestamp": "2026-02-17T18:00:00.000000",
+          "analysis_duration_ms": 42,
+          "custom_prompt": null
+        },
+        "profiling_info": {
+          "total_duration_ns": 156800000,
+          "profiling_mode": "sys_trace_only",
+          "analysis_tier": 1,
+          "gpus": [
+            {"name": "AMD Instinct MI300X", "architecture": "gfx942", "agent_id": 1}
+          ]
+        },
+        "summary": {
+          "overall_assessment": "Workload is memory-transfer-bound with significant launch overhead from many small kernel dispatches.",
+          "primary_bottleneck": "memory_transfer",
+          "confidence": 0.82,
+          "key_findings": [
+            "Memory copies consume 25.3% of total runtime (40 small transfers)",
+            "add_scalar_kernel dominates at 45.2% of kernel time",
+            "180 kernel dispatches with average duration 8.7 μs (high launch overhead)"
+          ]
+        },
+        "execution_breakdown": {
+          "total_runtime_ns": 156800000,
+          "kernel_time_ns": 67200000,
+          "kernel_time_pct": 42.8,
+          "memcpy_time_ns": 39700000,
+          "memcpy_time_pct": 25.3,
+          "api_overhead_ns": 49900000,
+          "api_overhead_pct": 31.8,
+          "idle_time_ns": 0,
+          "idle_time_pct": 0.0
+        },
+        "hotspots": [
+          {
+            "rank": 1,
+            "name": "add_scalar_kernel",
+            "calls": 50,
+            "total_duration_ns": 30384000,
+            "avg_duration_ns": 607680.0,
+            "min_duration_ns": 580000,
+            "max_duration_ns": 650000,
+            "pct_of_total": 45.2
+          }
+        ],
+        "memory_analysis": {
+          "Host-to-Device": {
+            "count": 20,
+            "total_bytes": 4194304,
+            "total_duration_ns": 19850000,
+            "avg_bytes": 209715.2,
+            "avg_duration_ns": 992500.0,
+            "bandwidth_gbps": 0.21
+          },
+          "Device-to-Host": {
+            "count": 20,
+            "total_bytes": 4194304,
+            "total_duration_ns": 19850000,
+            "avg_bytes": 209715.2,
+            "avg_duration_ns": 992500.0,
+            "bandwidth_gbps": 0.21
+          }
+        },
+        "hardware_counters": {
+          "has_counters": false,
+          "metrics": null,
+          "counters": null
+        },
+        "recommendations": [
+          {
+            "id": "ROCPD-MEMCPY-001",
+            "priority": "HIGH",
+            "category": "Memory Transfer",
+            "issue": "Memory copies account for 25.3% of execution time across 40 small transfers",
+            "suggestion": "Batch the 40 small transfers into 1-2 large transfers to amortize per-transfer overhead",
+            "actions": [
+              "1. Allocate a single pinned host buffer for all data",
+              "2. Copy all data in one hipMemcpy call",
+              "3. Use hipMemcpyAsync with streams to overlap with computation"
+            ],
+            "estimated_impact": "15-25% reduction in total runtime",
+            "commands": [
+              {
+                "tool": "rocprofv3",
+                "description": "Trace HIP and HSA memory copy operations with timing to measure transfer bottleneck",
+                "flags": ["--sys-trace", "--hsa-trace"],
+                "args": [
+                  {"name": "-d", "value": "./memcpy_output"},
+                  {"name": "-o", "value": "profile"}
+                ],
+                "full_command": "rocprofv3 --sys-trace --hsa-trace -d ./memcpy_output -o profile -- ./app"
+              },
+              {
+                "tool": "rocprof-sys",
+                "description": "Detailed memory transfer timeline with PCIe bandwidth and overlap analysis",
+                "flags": [],
+                "args": [
+                  {"name": "--trace-gpu-memory", "value": null}
+                ],
+                "full_command": "rocprof-sys --trace-gpu-memory -- ./app"
+              }
+            ]
+          }
+        ],
+        "warnings": [
+          {
+            "severity": "warning",
+            "message": "No hardware counters collected. Analysis limited to Tier 1 (trace data only).",
+            "recommendation": "Collect counters with: rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app"
+          }
+        ],
+        "errors": [],
+        "llm_enhanced_explanation": null
+      }
+    }
+  }
+}

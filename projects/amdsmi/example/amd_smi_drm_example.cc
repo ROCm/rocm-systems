@@ -1587,7 +1587,7 @@ int main() {
         std::cout << std::dec << "\tcurrent_dclk1=" << smu.current_dclk1 << "\n";
 
         std::cout << "\n";
-        std::cout << "TROTTLE STATUS:\n";
+        std::cout << "THROTTLE STATUS:\n";
         std::cout << std::dec << "\tthrottle_status=" << smu.throttle_status << "\n";
 
         std::cout << "\n";

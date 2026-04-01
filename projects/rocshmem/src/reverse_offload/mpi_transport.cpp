@@ -47,7 +47,7 @@ namespace rocshmem {
   }
 
 MPITransport::MPITransport(MPI_Comm comm, Queue* q)
-  : queue{q}, Transport{} {
+  : Transport{}, queue{q} {
 
   assert(comm != MPI_COMM_NULL);
 
@@ -252,7 +252,7 @@ rocshmem_team_t get_external_team(ROTeam *team) {
   return reinterpret_cast<rocshmem_team_t>(team);
 }
 
-void MPITransport::createNewTeam(ROBackend *backend, Team *parent_team,
+void MPITransport::createNewTeam(ROBackend *backend, [[maybe_unused]] Team *parent_team,
                                    TeamInfo *team_info_wrt_parent,
                                    TeamInfo *team_info_wrt_world, int num_pes,
                                    int my_pe_in_new_team, MPI_Comm team_comm,
@@ -341,7 +341,7 @@ static MPI_Datatype convertType(ro_net_types type) {
   }
 }
 
-void MPITransport::team_reduction(void *dst, void *src, int size, int win_id,
+void MPITransport::team_reduction(void *dst, void *src, int size, [[maybe_unused]] int win_id,
                                   int contextId, MPI_Comm team, ROCSHMEM_OP op,
                                   ro_net_types type, volatile char* status,
                                   bool blocking) {
@@ -366,7 +366,7 @@ void MPITransport::team_reduction(void *dst, void *src, int size, int win_id,
 void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
                                   int contextId, MPI_Comm team, int root,
                                   ro_net_types type, volatile char *status,
-                                  bool blocking) {
+                                  [[maybe_unused]] bool blocking) {
   auto *bp{backend_proxy->get()};
 
   MPI_Comm comm{team};
@@ -403,9 +403,9 @@ void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
 }
 
 void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
-                            int contextId, MPI_Comm team, void *ata_buffptr,
+                            int contextId, MPI_Comm team, [[maybe_unused]] void *ata_buffptr,
                             ro_net_types type, volatile char *status,
-                            bool blocking) {
+                            [[maybe_unused]] bool blocking) {
   auto *bp{backend_proxy->get()};
 
   MPI_Comm comm{team};
@@ -451,9 +451,9 @@ void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
 }
 
 void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
-                            int contextId, MPI_Comm team, void *ata_buffptr,
+                            int contextId, MPI_Comm team, [[maybe_unused]] void *ata_buffptr,
                             ro_net_types type, volatile char *status,
-                            bool blocking) {
+                            [[maybe_unused]] bool blocking) {
   auto *bp{backend_proxy->get()};
 
   MPI_Comm comm{team};
@@ -499,7 +499,7 @@ void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
 
 void MPITransport::putMem(void *dst, void *src, int size, int pe, int win_id,
                           int contextId, volatile char *status, bool blocking,
-                          bool inline_data) {
+                          [[maybe_unused]] bool inline_data) {
   queue->flush_hdp();
 
   auto *bp{backend_proxy->get()};
@@ -520,7 +520,7 @@ void MPITransport::putMem(void *dst, void *src, int size, int pe, int win_id,
 }
 
 void MPITransport::amoFOP(void *dst, void *src, void *val, int pe, int win_id,
-                          int contextId, volatile char *status, bool blocking,
+                          [[maybe_unused]] int contextId, volatile char *status, [[maybe_unused]] bool blocking,
                           ROCSHMEM_OP op, ro_net_types type) {
   queue->flush_hdp();
 
@@ -542,8 +542,8 @@ void MPITransport::amoFOP(void *dst, void *src, void *val, int pe, int win_id,
 }
 
 void MPITransport::amoFCAS(void *dst, void *src, void *val, int pe,
-                           int win_id, int contextId, volatile char *status,
-                           bool blocking, void *cond, ro_net_types type) {
+                           int win_id, [[maybe_unused]] int contextId, volatile char *status,
+                           [[maybe_unused]] bool blocking, void *cond, ro_net_types type) {
   queue->flush_hdp();
 
   auto *bp{backend_proxy->get()};
@@ -607,7 +607,6 @@ void MPITransport::progress() {
     NET_CHECK(mpilib_ftable_.Testsome(incount, uptr_req_arr.get(), &outcount,
                            testsome_indices.data(), MPI_STATUSES_IGNORE));
 
-    auto *bp{backend_proxy->get()};
     for (int i{0}; i < outcount; i++) {
       int index{testsome_indices[i]};
       int contextId{requests[index].properties.contextId};
@@ -657,8 +656,6 @@ void MPITransport::progress() {
 }
 
 void MPITransport::quiet(int contextId, volatile char *status) {
-  auto *bp{backend_proxy->get()};
-
   if (!outstanding[contextId]) {
     DPRINTF("Finished Quiet immediately for contextId %d at status addr %p\n",
             contextId, status);

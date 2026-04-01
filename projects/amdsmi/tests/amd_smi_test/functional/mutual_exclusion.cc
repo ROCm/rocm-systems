@@ -136,7 +136,7 @@ void TestMutualExclusion::Run(void) {
     sleep(2);
     TestBase::Run();
     IF_VERB(STANDARD) {
-      std::cout << "TESTER process: verifing that all amdsmi_dev_* functions "
+      std::cout << "TESTER process: verifying that all amdsmi_dev_* functions "
                    "return AMDSMI_STATUS_BUSY because MUTEX_HOLDER process "
                    "holds the mutex"
                 << std::endl;
