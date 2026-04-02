@@ -125,6 +125,10 @@ jobs:
           git config --global --add safe.directory '*'
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory /__w/rocm-systems/rocm-systems
+          git config --system --add safe.directory '*'
+          git config --system --add safe.directory ${GITHUB_WORKSPACE}
+          git config --system --add safe.directory /__w/rocm-systems/rocm-systems
+          git config --system --add safe.directory /__w/rocm-systems/rocm-systems/projects/rocprofiler-sdk
 
       - name: Init/Update submodules
         run: git submodule update --init --recursive --jobs 16
@@ -205,8 +209,18 @@ jobs:
         timeout-minutes: 60
         shell: bash
         working-directory: projects/rocprofiler-sdk/
+        env:
+          GIT_CEILING_DIRECTORIES: /__w
         run: |
           git config --global --add safe.directory '*'
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          git config --global --add safe.directory /__w/rocm-systems/rocm-systems
+          git config --global --add safe.directory /__w/rocm-systems/rocm-systems/projects/rocprofiler-sdk
+          git config --system --add safe.directory '*'
+          git config --system --add safe.directory ${GITHUB_WORKSPACE}
+          git config --system --add safe.directory /__w/rocm-systems/rocm-systems
+          git config --system --add safe.directory /__w/rocm-systems/rocm-systems/projects/rocprofiler-sdk
+          git config --list --show-origin | grep safe || true
           CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH} \
           cmake -B build \
             -DROCPROFILER_DEP_ROCMCORE=ON \
