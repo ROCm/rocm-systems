@@ -376,7 +376,6 @@ mi_gpu_spec:
             GL1C: 4
             GL2A: 4
             GL2C: 4
-            GRBM: 2
         models:
           - gpu_model: strix_halo
             partition_mode:
