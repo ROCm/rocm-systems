@@ -4222,16 +4222,63 @@ typedef void (*hsa_amd_queue_intercept_handler)(const void* pkts, uint64_t pkt_c
  * @details This function retrofits intercept queue functionality onto a queue
  * that was not created with intercept support. The migration protocol suspends
  * the queue, swaps internal fields to route packets through the callback, and
- * resumes the queue.
+ * resumes the queue. After a successful attach, all subsequent packet
+ * submissions through the queue will be routed through the callback before
+ * being forwarded to the hardware.
  *
- * @param[in] queue Pointer to the queue to attach to.
- * @param[in] callback The intercept handler callback function.
- * @param[in] user_data User data passed to the callback.
+ * If the queue is already intercepted (via prior attach or creation-time
+ * intercept), the callback is added to the existing intercept chain and
+ * HSA_STATUS_SUCCESS is returned.
  *
- * @retval ::HSA_STATUS_SUCCESS The intercept was attached successfully.
+ * Thread safety: This function is thread-safe with respect to concurrent
+ * queue operations. The lifecycle state machine prevents concurrent
+ * migration and destroy operations. Concurrent packet submissions during
+ * the migration are safe but may bypass interception (see limitations).
+ *
+ * @par Known Limitations
+ * - **Transition-window packet loss**: Packets submitted by other threads
+ *   between the field swap and queue resume may bypass interception. This
+ *   is bounded to 0-N packets per concurrent submitting thread where N
+ *   is the number of packets that thread submits during the swap window
+ *   (typically < 100 microseconds).
+ * - **Device-side enqueue bypass**: Packets enqueued by device-side
+ *   dispatch (child kernels) see the swapped base_address and route
+ *   through the proxy buffer, but timing may cause some to bypass.
+ * - **Cooperative queues**: Cannot be intercepted (returns error).
+ *   Cooperative queues share scheduling state that is incompatible
+ *   with individual queue suspension.
+ * - **Pre-GFX11 global disruption**: On pre-GFX11 hardware (MI100,
+ *   MI200, MI300X), queue suspend causes a global unmap/remap affecting
+ *   ALL queues on the device. On GFX11+ (RDNA 3/4), only the target
+ *   queue is affected via MES-based suspend.
+ * - **ROCgdb interaction**: If using ROCgdb, attach the debugger before
+ *   the profiler to avoid conflicts with queue suspension mechanisms.
+ * - **Application base_address caching**: Applications that cache
+ *   base_address from hsa_queue_t before attach will write to the old
+ *   HW ring buffer, bypassing interception. Well-behaved HSA applications
+ *   re-read base_address on each submission.
+ *
+ * @par Diagnostic Logging
+ * Set environment variable HSA_INTERCEPT_DEBUG=1 to enable verbose
+ * logging of the migration protocol steps.
+ *
+ * @param[in] queue Pointer to the queue to attach to. Must not be NULL.
+ *   Must be a valid queue created by hsa_queue_create or
+ *   hsa_amd_queue_intercept_create. Must not be a cooperative queue.
+ * @param[in] callback The intercept handler callback function. Must not
+ *   be NULL. Called for each batch of packets submitted to the queue.
+ *   The callback receives the packet array, count, user packet index,
+ *   user_data, and a writer function to forward packets to hardware.
+ * @param[in] user_data User data passed to the callback on each invocation.
+ *   May be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The intercept was attached successfully,
+ *   or the callback was added to an existing intercept chain.
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT callback is NULL.
- * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE queue is invalid or cooperative.
- * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES Failed to allocate resources.
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE queue is NULL, invalid,
+ *   cooperative, or has a concurrent migration/destroy in progress.
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES Failed to allocate proxy
+ *   buffer or signal resources for the intercept queue.
  */
 hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
     hsa_queue_t* queue,
@@ -4241,10 +4288,35 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
 /**
  * @brief Detach an intercept queue from a queue, restoring original state.
  *
- * @param[in] queue Pointer to the queue to detach from.
+ * @details This function removes a previously attached intercept queue from
+ * a queue, restoring the original packet flow directly to the hardware.
+ * The protocol suspends the queue, flushes pending proxy packets to the
+ * hardware ring buffer, restores original field values (base_address,
+ * doorbell_signal, core_queue), and resumes the queue.
+ *
+ * Only queues that were intercepted via hsa_amd_queue_intercept_attach can
+ * be detached. Queues created with hsa_amd_queue_intercept_create cannot
+ * be detached (returns HSA_STATUS_ERROR_INVALID_QUEUE).
+ *
+ * Thread safety: This function is thread-safe. Concurrent packet
+ * submissions are drained before restoration. After successful detach,
+ * the queue operates identically to before attach with no leaked
+ * resources.
+ *
+ * @par Known Limitations
+ * - **Flush capacity**: If the hardware ring buffer is full when detach
+ *   flushes pending proxy packets, the flush will retry with bounded
+ *   retries. Excess packets beyond ring capacity may be dropped.
+ * - **In-progress callbacks**: Detach waits for any in-progress intercept
+ *   callback invocations to complete before proceeding.
+ *
+ * @param[in] queue Pointer to the queue to detach from. Must not be NULL.
+ *   Must be a queue currently intercepted via hsa_amd_queue_intercept_attach.
  *
  * @retval ::HSA_STATUS_SUCCESS The intercept was detached successfully.
- * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE queue is not intercepted.
+ *   The queue is restored to its original state.
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE queue is NULL, not intercepted,
+ *   or was created with hsa_amd_queue_intercept_create (not retrofit).
  */
 hsa_status_t HSA_API hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
 
