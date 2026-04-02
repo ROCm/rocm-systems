@@ -223,7 +223,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
     if (IsInterceptMarkerPacket(&packets[i])) ++marker_count;
   }
 
-  AqlPacket* ring = reinterpret_cast<AqlPacket*>(wrapped->amd_queue_.hsa_queue.base_address);
+  AqlPacket* ring = reinterpret_cast<AqlPacket*>(hw_ring_buf_);
   uint64_t mask = wrapped->amd_queue_.hsa_queue.size - 1;
 
   while (true) {
@@ -281,7 +281,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       atomic::Store(&ring[barrier & mask].barrier_and.header, kBarrierHeader,
                     std::memory_order_release);
       // Update the wrapped queue's doorbell so it knows there is a new packet in the queue.
-      HSA::hsa_signal_store_screlease(wrapped->amd_queue_.hsa_queue.doorbell_signal, barrier);
+      HSA::hsa_signal_store_screlease(hw_doorbell_, barrier);
 
       // Record the retry point
       retry_index_ = barrier;
@@ -327,7 +327,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
         }
         atomic::Store(&ring[write & mask].packet.header, packets[first_written_packet_index].packet.header,
                       std::memory_order_release);
-        HSA::hsa_signal_store_screlease(wrapped->amd_queue_.hsa_queue.doorbell_signal,
+        HSA::hsa_signal_store_screlease(hw_doorbell_,
                                         write + write_index - 1);
       }
       return packets_index;
