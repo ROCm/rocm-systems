@@ -90,6 +90,77 @@ void adapterFree(WinAdapter* pWinAdapter) {
 
 /*
  *
+ * Local library path resolution
+ *
+ */
+
+// If a DLL with the same base filename as libraryName exists in OpenCL.dll's
+// own directory, return a pointer to the local path (valid until the next call).
+// Otherwise return libraryName unchanged.
+static const char* khrIcdGetLocalLibraryPath(const char* libraryName) {
+  static char localDir[MAX_PATH] = {0};
+  static BOOL localDirResolved = FALSE;
+  static size_t localDirLen = 0;
+  static char localPath[MAX_PATH];
+
+  if (!libraryName) {
+    return libraryName;
+  }
+
+  // Resolve OpenCL.dll's directory once.
+  if (!localDirResolved) {
+    HMODULE hSelf = NULL;
+    if (GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR)&khrIcdGetLocalLibraryPath, &hSelf)) {
+      DWORD pathLen = GetModuleFileNameA(hSelf, localDir, MAX_PATH);
+      if (pathLen > 0 && pathLen < MAX_PATH) {
+        // Strip the filename to get the directory (keep trailing backslash).
+        char* lastSlash = strrchr(localDir, '\\');
+        if (lastSlash) {
+          *(lastSlash + 1) = '\0';
+          localDirLen = (size_t)(lastSlash + 1 - localDir);
+        }
+      }
+    }
+    localDirResolved = TRUE;
+  }
+
+  if (localDirLen == 0) {
+    return libraryName;
+  }
+
+  // Extract base filename from libraryName (strip directory prefix).
+  const char* baseName = libraryName;
+  const char* c;
+  for (c = libraryName; *c; ++c) {
+    if (*c == '\\' || *c == '/') {
+      baseName = c + 1;
+    }
+  }
+
+  if (*baseName == '\0') {
+    return libraryName;
+  }
+
+  // Construct <OpenCL.dll dir>\<baseName> and check if it exists.
+  if (localDirLen + strlen(baseName) >= MAX_PATH) {
+    return libraryName;
+  }
+  memcpy(localPath, localDir, localDirLen);
+  strcpy(localPath + localDirLen, baseName);
+
+  if (GetFileAttributesA(localPath) != INVALID_FILE_ATTRIBUTES) {
+    KHR_ICD_TRACE("Preferring local library %s over %s\n", localPath, libraryName);
+    return localPath;
+  }
+
+  return libraryName;
+}
+
+/*
+ *
  * Vendor enumeration functions
  *
  */
@@ -170,7 +241,7 @@ BOOL CALLBACK khrIcdOsVendorsEnumerate(PINIT_ONCE InitOnce, PVOID Parameter, PVO
                  ++iterAdapter) {
               if (iterAdapter->luid.LowPart == AdapterDesc.AdapterLuid.LowPart &&
                   iterAdapter->luid.HighPart == AdapterDesc.AdapterLuid.HighPart) {
-                khrIcdVendorAdd(iterAdapter->szName);
+                khrIcdVendorAdd(khrIcdGetLocalLibraryPath(iterAdapter->szName));
                 break;
               }
             }
@@ -187,7 +258,7 @@ BOOL CALLBACK khrIcdOsVendorsEnumerate(PINIT_ONCE InitOnce, PVOID Parameter, PVO
   // Go through the list again, putting any remaining adapters at the end of the list in an
   // undefined order
   for (WinAdapter* iterAdapter = pWinAdapterBegin; iterAdapter != pWinAdapterEnd; ++iterAdapter) {
-    khrIcdVendorAdd(iterAdapter->szName);
+    khrIcdVendorAdd(khrIcdGetLocalLibraryPath(iterAdapter->szName));
     adapterFree(iterAdapter);
   }
 
