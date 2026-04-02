@@ -116,65 +116,6 @@ def _is_cycle_counter(name: str) -> bool:
     return any(kw in upper for kw in cycle_keywords)
 
 
-def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Merge counters across unique dispatches from the
-    input dataframe and return processed dataframe.
-    """
-    if df.empty:
-        return df
-
-    data: list[dict[str, Any]] = []
-
-    # Group by unique kernel and merge into a single row
-    for _, group_df in df.groupby([
-        "Dispatch_ID",
-        "Kernel_Name",
-        "Grid_Size",
-        "Workgroup_Size",
-        "LDS_Per_Workgroup",
-    ]):
-        # Cross-pass duration normalization: each profiling pass re-runs the
-        # kernel, and execution times vary. Cycle-based counters (busy cycles,
-        # wave cycles, wait cycles, stall cycles) accumulate proportionally to
-        # duration, so we scale them to a common reference (the longest pass)
-        # to make cross-pass ratios accurate. Event-based counters (instruction
-        # counts, cache requests, wave counts) are deterministic per dispatch
-        # and are left unscaled.
-        durations = (group_df["End_Timestamp"] - group_df["Start_Timestamp"]).astype(
-            float
-        )
-        ref_duration = durations.max()
-        scale_factors = ref_duration / durations.clip(lower=1)
-        is_cycle = group_df["Counter_Name"].map(_is_cycle_counter)
-        adjusted_scales = scale_factors.where(is_cycle, 1.0)
-        scaled_values = group_df["Counter_Value"].astype(float) * adjusted_scales
-
-        row = {
-            "GPU_ID": group_df["GPU_ID"].iloc[0],
-            "Grid_Size": group_df["Grid_Size"].iloc[0],
-            "Workgroup_Size": group_df["Workgroup_Size"].iloc[0],
-            "LDS_Per_Workgroup": group_df["LDS_Per_Workgroup"].iloc[0],
-            "Scratch_Per_Workitem": group_df["Scratch_Per_Workitem"].iloc[0],
-            "Arch_VGPR": group_df["Arch_VGPR"].iloc[0],
-            "Accum_VGPR": group_df["Accum_VGPR"].iloc[0],
-            "SGPR": group_df["SGPR"].iloc[0],
-            "Kernel_Name": group_df["Kernel_Name"].iloc[0],
-            "Kernel_ID": group_df["Kernel_ID"].iloc[0],
-            "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
-            "End_Timestamp": group_df["End_Timestamp"].iloc[0],
-        }
-        # Each counter will become its own column (cycle counters normalized)
-        row.update(dict(zip(group_df["Counter_Name"], scaled_values)))
-        data.append(row)
-    df = pd.DataFrame(data)
-    # Rank GPU IDs, map lowest number to 0, next to 1, etc.
-    df["GPU_ID"] = df["GPU_ID"].rank(method="dense").astype(int) - 1
-    # Reset dispatch IDs
-    df["Dispatch_ID"] = range(len(df))
-    return df
-
-
 def update_rocpd_pmc_events(counter_info: list[dict], rocpd_db_path: str) -> None:
     """Updates pmc_event table in the given rocpd database path."""
     try:
