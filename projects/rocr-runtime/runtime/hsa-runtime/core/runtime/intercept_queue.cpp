@@ -1,3 +1,4 @@
+#include <thread>
 ////////////////////////////////////////////////////////////////////////////////
 //
 // The University of Illinois/NCSA
@@ -530,6 +531,143 @@ InterceptQueue::InterceptQueue(NonOwningTag tag, Queue* existing_queue)
   saved_base_address_ = hw_ring_buf_;
   saved_doorbell_signal_ = hw_doorbell_;
   // original_shared_queue_ and saved_core_queue_ are set during the attach protocol
+}
+
+
+hsa_status_t InterceptQueue::Unwrap() {
+  if (!is_retrofitted()) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  // PHASE 1: QUIESCE
+  // Step 1: Stop packet processing
+  active_ = false;
+
+  // Step 2: Tell async handler to quit
+  quit_ = true;
+
+  // Steps 3-4: Acquire/release lock_ to wait for in-progress StoreRelaxed
+  {
+    std::lock_guard<std::mutex> lock(lock_);
+    // Any in-progress StoreRelaxed has now completed
+  }
+
+  // PHASE 2: FLUSH + RESTORE
+  AMD::AqlQueue* aql_queue = static_cast<AMD::AqlQueue*>(get_wrapped());
+
+  // Step 5: Acquire scratch_lock_
+  std::lock_guard<std::mutex> scratch_guard(aql_queue->GetScratchLock());
+
+  // Step 6: Suspend the queue
+  aql_queue->SuspendForMigration();
+
+  // Step 7: Flush pending proxy packets to HW ring buffer
+  {
+    uint64_t proxy_write = atomic::Load(&amd_queue_.write_dispatch_id,
+                                        std::memory_order_acquire);
+    amd_queue_v2_t& app_amd_queue = original_shared_queue_->amd_queue;
+    uint64_t hw_write = atomic::Load(&app_amd_queue.write_dispatch_id,
+                                     std::memory_order_acquire);
+    uint64_t hw_read = atomic::Load(&app_amd_queue.read_dispatch_id,
+                                    std::memory_order_acquire);
+    uint64_t hw_size = app_amd_queue.hsa_queue.size;
+    uint64_t mask = hw_size - 1;
+
+    // 7a: Flush valid proxy packets
+    if (proxy_write > hw_write) {
+      AqlPacket* proxy_ring = reinterpret_cast<AqlPacket*>(&buffer_[0]);
+      AqlPacket* hw_ring = reinterpret_cast<AqlPacket*>(hw_ring_buf_);
+
+      uint64_t flush_count = 0;
+      for (uint64_t i = hw_write; i < proxy_write; i++) {
+        AqlPacket& pkt = proxy_ring[i & mask];
+        uint16_t header = atomic::Load(&pkt.packet.header, std::memory_order_acquire);
+        if (!AqlPacket::IsValid(header)) {
+          debug_print("Detach: skipping unwritten packet at index %lu
+", (unsigned long)i);
+          continue;
+        }
+        hw_ring[i & mask] = pkt;
+        flush_count++;
+      }
+
+      if (flush_count > 0) {
+        atomic::Store(&app_amd_queue.write_dispatch_id, proxy_write,
+                      std::memory_order_release);
+      }
+    }
+
+    // 7b: Flush overflow packets
+    if (!overflow_.empty()) {
+      uint64_t hw_write_now = atomic::Load(&app_amd_queue.write_dispatch_id,
+                                           std::memory_order_acquire);
+      AqlPacket* hw_ring = reinterpret_cast<AqlPacket*>(hw_ring_buf_);
+
+      for (size_t idx = 0; idx < overflow_.size(); idx++) {
+        uint64_t hw_r = atomic::Load(&app_amd_queue.read_dispatch_id,
+                                     std::memory_order_acquire);
+        uint64_t hw_w = atomic::Load(&app_amd_queue.write_dispatch_id,
+                                     std::memory_order_acquire);
+        if ((hw_w - hw_r) >= hw_size) {
+          debug_print("Detach: dropping %zu overflow packets (HW ring full)
+",
+                      overflow_.size() - idx);
+          break;
+        }
+        uint64_t slot = atomic::Add(&app_amd_queue.write_dispatch_id, (uint64_t)1,
+                                    std::memory_order_acq_rel);
+        hw_ring[slot & mask] = overflow_[idx];
+      }
+      overflow_.clear();
+    }
+  }
+
+  // Step 8: Restore original fields
+  amd_queue_v2_t& app_amd_queue = original_shared_queue_->amd_queue;
+  atomic::Store(&app_amd_queue.hsa_queue.base_address,
+                saved_base_address_, std::memory_order_release);
+  atomic::Store(&app_amd_queue.hsa_queue.doorbell_signal,
+                saved_doorbell_signal_, std::memory_order_release);
+  __atomic_store_n(&original_shared_queue_->core_queue,
+                   saved_core_queue_, __ATOMIC_RELEASE);
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+
+  // Step 9: Resume the queue
+  aql_queue->ResumeFromMigration();
+
+  // Step 9.5: Wait for retry barrier completion
+  if (IsPendingRetryPoint(get_wrapped()->LoadReadIndexRelaxed())) {
+    int poll_count = 0;
+    while (IsPendingRetryPoint(get_wrapped()->LoadReadIndexRelaxed())) {
+      std::this_thread::yield();
+      if (++poll_count > 100000) {
+        debug_print("Detach: retry barrier wait timed out
+");
+        break;
+      }
+    }
+  }
+
+  // scratch_lock_ released when scratch_guard goes out of scope
+
+  // PHASE 3: CLEANUP
+  // Step 11: Wait for async doorbell handler to terminate
+  async_doorbell_->StoreRelaxed(DOORBELL_MAX);
+  hsa_signal_value_t val = async_doorbell_->ExchRelaxed(1);
+  if (val != 0)
+    async_doorbell_->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, -1,
+                                  HSA_WAIT_STATE_BLOCKED);
+
+  // Step 12: Destroy async doorbell signal
+  async_doorbell_->DestroySignal();
+  async_doorbell_ = nullptr;
+
+  // Step 13: Update lifecycle state
+  aql_queue->CompleteMigration();  // Sets back to ACTIVE-equivalent state
+  // Actually, for detach we want ACTIVE state
+  aql_queue->AbortMigration();  // Resets to ACTIVE (safe because we hold exclusive access)
+
+  return HSA_STATUS_SUCCESS;
 }
 
 
