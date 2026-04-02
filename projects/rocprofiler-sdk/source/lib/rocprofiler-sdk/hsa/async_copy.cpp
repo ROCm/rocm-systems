@@ -338,7 +338,7 @@ convert_hsa_handle(Up _hsa_object)
 }
 
 bool
-async_copy_handler(hsa_signal_value_t , void* arg)
+async_copy_handler(hsa_signal_value_t, void* arg)
 {
     // if we have fully finalized, delete the data and return
     if(registration::get_fini_status() > 0)
