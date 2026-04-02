@@ -56,11 +56,11 @@ my_args = argparse.Namespace(
     diagnostic="WARNING",
     diagnostic_index=DIAGNOSTIC_CHOICES.index("WARNING"),
     output=None,
-    printStreamInfo=False,
-    printCmdsOnly=False,
-    reduceCmds=True,
-    useAllCmdOptions=False,
-    addLogLevel="",
+    print_stream=False,
+    print_cmds_only=False,
+    reduce_cmds=True,
+    use_all_cmd_options=False,
+    add_log_level="",
     verbose=common.VERBOSITY_NORMAL,
 )
 
@@ -81,12 +81,12 @@ class TestAmdSmiCli(unittest.TestCase):
 
         self.use_encoding = locale.getpreferredencoding()
 
-        self.AddCmdMods = True
-        self.AddDeviceArgs = True
-        self.AddWatchArgs = True
-        self.AddLogLevel = ""
-        if my_args.addLogLevel:
-            self.AddLogLevel = f"--loglevel {my_args.addLogLevel}"
+        self.add_cmd_mods = True
+        self.add_device_args = True
+        self.add_watch_args = True
+        self.add_log_level = ""
+        if my_args.add_log_level:
+            self.add_log_level = f"--loglevel {my_args.add_log_level}"
         return
 
     @classmethod
@@ -98,10 +98,10 @@ class TestAmdSmiCli(unittest.TestCase):
         cls.FAIL = 1
         cls.tab = "    "
 
-        cls.openBracket = "["
-        cls.closeBracket = "]"
-        cls.openCurlyBrace = "{"
-        cls.closeCurlyBrace = "}"
+        cls.open_bracket = "["
+        cls.close_bracket = "]"
+        cls.open_curly_brace = "{"
+        cls.close_curly_brace = "}"
 
         # Record starting values
         cmd = "amd-smi metric --json"
@@ -219,8 +219,19 @@ class TestAmdSmiCli(unittest.TestCase):
 
         return
 
+    def tearDown(self):
+        # Clean up temp file and folder if they exist
+        if os.path.exists(self.tmp_filename):
+            os.chmod(self.tmp_filename, stat.S_IWRITE)
+            os.remove(self.tmp_filename)
+        if os.path.exists(self.tmp_folder):
+            shutil.rmtree(self.tmp_folder)
+        self.common.print(
+            f"Teardown triggered | Cleaned up file: {self.tmp_filename} and folder: {self.tmp_folder}"
+        )
+
     @classmethod
-    def StrToNumber(cls, num_str):
+    def str_to_number(cls, num_str):
         rc = 0
         num_str = num_str.strip()
         try:
@@ -235,7 +246,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 value = num_str
         return (rc, value)
 
-    def _PrintResults(self, results, fail_on_results=False):
+    def print_results(self, results, fail_on_results=False):
         if results:
             cmd_len = 0
             for cmd, _ in results:
@@ -263,7 +274,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 self.fail(f"Fail:\n\n{msg}")
         return
 
-    def _get_monitor_metric_data(self, monitor1, monitor2, metric):
+    def get_monitor_metric_data(self, monitor1, monitor2, metric):
         data = []
         for i in range(len(monitor1)):
             data.append(
@@ -317,7 +328,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 data[i][key] = [data1, data2, abs(data1 - data2), unit]
         return data
 
-    def _compare_monitor_metric_data(self, component, data):
+    def compare_monitor_metric_data(self, component, data):
         failures = []
         for i in range(len(data)):
             msg_title = f"Monitor to {component}: gpu={i}"
@@ -344,12 +355,12 @@ class TestAmdSmiCli(unittest.TestCase):
                     failures.append((cmd, _msg))
         return failures
 
-    def FindArgs(self, cmd, match_str):
+    def find_args(self, cmd, match_str):
         if (
             (not match_str)
-            or (not self.AddDeviceArgs and "Device" in match_str)
-            or (not self.AddWatchArgs and "Watch" in match_str)
-            or (not self.AddCmdMods and "Command" in match_str)
+            or (not self.add_device_args and "Device" in match_str)
+            or (not self.add_watch_args and "Watch" in match_str)
+            or (not self.add_cmd_mods and "Command" in match_str)
         ):
             return ["pass"]
 
@@ -417,7 +428,7 @@ class TestAmdSmiCli(unittest.TestCase):
                         else:
                             print(f"ERROR: bad sub arg {items[item_index]}")
                     elif len(items) > item_index:
-                        if items[item_index + 1][0:1] == self.openBracket:
+                        if items[item_index + 1][0:1] == self.open_bracket:
                             items[item_index + 1] = items[item_index + 1][1:]
                         sub_arg = items[item_index + 1]
                         # Expand out sub_args
@@ -503,12 +514,12 @@ class TestAmdSmiCli(unittest.TestCase):
             return ["pass"]
         return options
 
-    def CreateCmds(self, cmd_name, list1_name, list2_name, list3_name, list4_name):
+    def create_cmds(self, cmd_name, list1_name, list2_name, list3_name, list4_name):
         cmd = f"amd-smi {cmd_name} --help"
-        list1_args = self.FindArgs(cmd, list1_name)
-        list2_args = self.FindArgs(cmd, list2_name)
-        list3_args = self.FindArgs(cmd, list3_name)
-        list4_args = self.FindArgs(cmd, list4_name)
+        list1_args = self.find_args(cmd, list1_name)
+        list2_args = self.find_args(cmd, list2_name)
+        list3_args = self.find_args(cmd, list3_name)
+        list4_args = self.find_args(cmd, list4_name)
         if my_args.diagnostic == "DEBUG":
             print(f"{list1_name}: {'*' * 80}")
             print(json.dumps(list1_args, sort_keys=False, indent=4), flush=True)
@@ -523,29 +534,31 @@ class TestAmdSmiCli(unittest.TestCase):
         cmd = f"amd-smi {cmd_name}"
         for list1_arg in list1_args:
             if list1_arg != "pass":
-                cmds.append((f"{cmd} {list1_arg} {self.AddLogLevel}", self.PASS))
+                cmds.append((f"{cmd} {list1_arg} {self.add_log_level}", self.PASS))
                 if not list1_arg:
-                    cmds.append((f"{cmd} --file {self.tmp_filename} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{json}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{json_file}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{json_file_append}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{json_file_overwrite}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{csv}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{csv_file}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{csv_file_append}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{csv_file_overwrite}} {self.AddLogLevel}", self.PASS))
+                    cmds.append(
+                        (f"{cmd} --file {self.tmp_filename} {self.add_log_level}", self.PASS)
+                    )
+                    cmds.append((f"{cmd} {{json}} {self.add_log_level}", self.PASS))
+                    cmds.append((f"{cmd} {{json_file}} {self.add_log_level}", self.PASS))
+                    cmds.append((f"{cmd} {{json_file_append}} {self.add_log_level}", self.PASS))
+                    cmds.append((f"{cmd} {{json_file_overwrite}} {self.add_log_level}", self.PASS))
+                    cmds.append((f"{cmd} {{csv}} {self.add_log_level}", self.PASS))
+                    cmds.append((f"{cmd} {{csv_file}} {self.add_log_level}", self.PASS))
+                    cmds.append((f"{cmd} {{csv_file_append}} {self.add_log_level}", self.PASS))
+                    cmds.append((f"{cmd} {{csv_file_overwrite}} {self.add_log_level}", self.PASS))
             else:
                 list1_arg = ""
             for list2_arg in list2_args:
                 if list2_arg != "pass":
-                    cmds.append((f"{cmd} {list1_arg} {list2_arg} {self.AddLogLevel}", self.PASS))
+                    cmds.append((f"{cmd} {list1_arg} {list2_arg} {self.add_log_level}", self.PASS))
                 else:
                     list2_arg = ""
                 for list3_arg in list3_args:
                     if list3_arg != "pass":
                         cmds.append(
                             (
-                                f"{cmd} {list1_arg} {list2_arg} {list3_arg} {self.AddLogLevel}",
+                                f"{cmd} {list1_arg} {list2_arg} {list3_arg} {self.add_log_level}",
                                 self.PASS,
                             )
                         )
@@ -555,7 +568,7 @@ class TestAmdSmiCli(unittest.TestCase):
                         if list4_arg != "pass":
                             cmds.append(
                                 (
-                                    f"{cmd} {list1_arg} {list2_arg} {list3_arg} {list4_arg} {self.AddLogLevel}",
+                                    f"{cmd} {list1_arg} {list2_arg} {list3_arg} {list4_arg} {self.add_log_level}",
                                     self.PASS,
                                 )
                             )
@@ -564,7 +577,7 @@ class TestAmdSmiCli(unittest.TestCase):
         # Removes cmds that are invalid
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
-            while self.openCurlyBrace in cmd:
+            while self.open_curly_brace in cmd:
                 items = cmd.split()
                 # Find gpu index and mark when gpu=0
                 try:
@@ -578,52 +591,56 @@ class TestAmdSmiCli(unittest.TestCase):
                     gpu_index = 0
 
                 # Find conditional arguments
-                posOpen = cmd.find(self.openCurlyBrace)
-                if posOpen < 0:
+                pos_open = cmd.find(self.open_curly_brace)
+                if pos_open < 0:
                     break
-                posClose = cmd.find(self.closeCurlyBrace, posOpen)
-                if posClose < 0:
+                pos_close = cmd.find(self.close_curly_brace, pos_open)
+                if pos_close < 0:
                     break
-                nameStr = cmd[posOpen : posClose + 1]
+                name_str = cmd[pos_open : pos_close + 1]
 
                 if (
-                    nameStr == "{json}"
-                    or "json_file" in nameStr
-                    or nameStr == "{csv}"
-                    or "csv_file" in nameStr
+                    name_str == "{json}"
+                    or "json_file" in name_str
+                    or name_str == "{csv}"
+                    or "csv_file" in name_str
                 ):
                     # For adding file options
-                    if nameStr == "{json}":
-                        cmd = cmd.replace(nameStr, "--json", 1)
-                    elif nameStr == "{json_file}":
-                        cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename}", 1)
-                    elif nameStr == "{json_file_append}":
-                        cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename} --append", 1)
-                    elif nameStr == "{json_file_overwrite}":
+                    if name_str == "{json}":
+                        cmd = cmd.replace(name_str, "--json", 1)
+                    elif name_str == "{json_file}":
+                        cmd = cmd.replace(name_str, f"--json --file {self.tmp_filename}", 1)
+                    elif name_str == "{json_file_append}":
                         cmd = cmd.replace(
-                            nameStr, f"--json --file {self.tmp_filename} --overwrite", 1
+                            name_str, f"--json --file {self.tmp_filename} --append", 1
                         )
-                    elif nameStr == "{csv}":
-                        cmd = cmd.replace(nameStr, "--csv", 1)
-                    elif nameStr == "{csv_file}":
-                        cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename}", 1)
-                    elif nameStr == "{csv_file_append}":
-                        cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename} --append", 1)
-                    elif nameStr == "{csv_file_overwrite}":
+                    elif name_str == "{json_file_overwrite}":
                         cmd = cmd.replace(
-                            nameStr, f"--csv --file {self.tmp_filename} --overwrite", 1
+                            name_str, f"--json --file {self.tmp_filename} --overwrite", 1
+                        )
+                    elif name_str == "{csv}":
+                        cmd = cmd.replace(name_str, "--csv", 1)
+                    elif name_str == "{csv_file}":
+                        cmd = cmd.replace(name_str, f"--csv --file {self.tmp_filename}", 1)
+                    elif name_str == "{csv_file_append}":
+                        cmd = cmd.replace(name_str, f"--csv --file {self.tmp_filename} --append", 1)
+                    elif name_str == "{csv_file_overwrite}":
+                        cmd = cmd.replace(
+                            name_str, f"--csv --file {self.tmp_filename} --overwrite", 1
                         )
                     else:
-                        print(f"Error: could not replace json/csv options, {nameStr}  cmd={cmd}")
+                        print(f"Error: could not replace json/csv options, {name_str}  cmd={cmd}")
                         cmd = ""
-                elif nameStr == "{watch_time}" or nameStr == "{watch_iterations}":
+                elif name_str == "{watch_time}" or name_str == "{watch_iterations}":
                     # For adding watch options
-                    if nameStr == "{watch_time}":
-                        cmd = cmd.replace(nameStr, "--watch 1 --watch_time 2", 1)
+                    if name_str == "{watch_time}":
+                        cmd = cmd.replace(name_str, "--watch 1 --watch_time 2", 1)
                     else:
-                        cmd = cmd.replace(nameStr, "--watch 1 --iterations 2", 1)
+                        cmd = cmd.replace(name_str, "--watch 1 --iterations 2", 1)
                 elif (
-                    nameStr == "{min_power}" or nameStr == "{avg_power}" or nameStr == "{max_power}"
+                    name_str == "{min_power}"
+                    or name_str == "{avg_power}"
+                    or name_str == "{max_power}"
                 ):
                     # For setting --power-cap
                     # Find power_type
@@ -644,13 +661,13 @@ class TestAmdSmiCli(unittest.TestCase):
                         min_power = power_type["min_power_limit"]["value"]
                         max_power = power_type["max_power_limit"]["value"]
                         avg_power = int((min_power + max_power) / 2)
-                        if nameStr == "{min_power}":
+                        if name_str == "{min_power}":
                             cmd = cmd.replace("{min_power}", str(min_power), 1)
-                        elif nameStr == "{avg_power}":
+                        elif name_str == "{avg_power}":
                             cmd = cmd.replace("{avg_power}", str(avg_power), 1)
-                        elif nameStr == "{max_power}":
+                        elif name_str == "{max_power}":
                             cmd = cmd.replace("{max_power}", str(max_power), 1)
-                elif nameStr == "{perf_determinism}":
+                elif name_str == "{perf_determinism}":
                     clock_sys = self.static_data["gpu_data"][gpu_index]["clock"]["sys"]
                     if clock_sys != "N/A" and len(clock_sys["frequency_levels"]):
                         num = len(clock_sys["frequency_levels"])
@@ -661,28 +678,28 @@ class TestAmdSmiCli(unittest.TestCase):
                         )
                     else:
                         cmd = ""
-                elif "clk_limit" in nameStr:
+                elif "clk_limit" in name_str:
                     clock = self.metric_data["gpu_data"][gpu_index]["clock"]
                     clk_type = None
                     clk_type_name = None
                     limit_type = None
                     clk_limit_name = None
-                    if nameStr == "{clk_limit_sclk_min}":
+                    if name_str == "{clk_limit_sclk_min}":
                         clk_type = "SCLK"
                         clk_type_name = "socclk_0"
                         limit_type = "MIN"
                         clk_limit_name = "min_clk"
-                    elif nameStr == "{clk_limit_sclk_max}":
+                    elif name_str == "{clk_limit_sclk_max}":
                         clk_type = "SCLK"
                         clk_type_name = "socclk_0"
                         limit_type = "MAX"
                         clk_limit_name = "max_clk"
-                    elif nameStr == "{clk_limit_mclk_min}":
+                    elif name_str == "{clk_limit_mclk_min}":
                         clk_type = "MCLK"
                         clk_type_name = "mem_0"
                         limit_type = "MAX"
                         clk_limit_name = "min_clk"
-                    elif nameStr == "{clk_limit_mclk_max}":
+                    elif name_str == "{clk_limit_mclk_max}":
                         clk_type = "MCLK"
                         clk_type_name = "mem_0"
                         limit_type = "MIN"
@@ -690,25 +707,25 @@ class TestAmdSmiCli(unittest.TestCase):
                     clk_type_limit_name = clock[clk_type_name][clk_limit_name]
                     if isinstance(clk_type_limit_name, dict):
                         value = clk_type_limit_name["value"]
-                        cmd = cmd.replace(nameStr, f"{clk_type} {limit_type} {value}", 1)
+                        cmd = cmd.replace(name_str, f"{clk_type} {limit_type} {value}", 1)
                     else:
                         cmd = ""
-                elif "clk_level" in nameStr:
+                elif "clk_level" in name_str:
                     clock = self.static_data["gpu_data"][gpu_index]["clock"]
                     value = -1
-                    if nameStr == "{clk_level_sclk}":
+                    if name_str == "{clk_level_sclk}":
                         clk_type = "SCLK"
                         clk_type_name = "sys"
-                    elif nameStr == "{clk_level_mclk}":
+                    elif name_str == "{clk_level_mclk}":
                         clk_type = "MCLK"
                         clk_type_name = "mem"
-                    elif nameStr == "{clk_level_fclk}":
+                    elif name_str == "{clk_level_fclk}":
                         clk_type = "FCLK"
                         clk_type_name = "df"
-                    elif nameStr == "{clk_level_socclk}":
+                    elif name_str == "{clk_level_socclk}":
                         clk_type = "SOCCLK"
                         clk_type_name = "soc"
-                    elif nameStr == "{clk_level_pcie}":
+                    elif name_str == "{clk_level_pcie}":
                         bus = self.static_data["gpu_data"][gpu_index]["bus"]
                         clk_type = "PCIE"
                         pcie_levels = bus["pcie_levels"]
@@ -726,10 +743,10 @@ class TestAmdSmiCli(unittest.TestCase):
                             else:
                                 value = 0
                     if value >= 0:
-                        cmd = cmd.replace(nameStr, f"{clk_type} {value}", 1)
+                        cmd = cmd.replace(name_str, f"{clk_type} {value}", 1)
                     else:
                         cmd = ""
-                elif nameStr == "{soc_pstate}":
+                elif name_str == "{soc_pstate}":
                     soc_pstate = self.static_data["gpu_data"][gpu_index]["soc_pstate"]
                     if isinstance(soc_pstate, dict):
                         num_supported = int(soc_pstate["num_supported"])
@@ -739,12 +756,12 @@ class TestAmdSmiCli(unittest.TestCase):
                                 num = num_supported - 1
                             else:
                                 num = 0
-                            cmd = cmd.replace(nameStr, f"{num}", 1)
+                            cmd = cmd.replace(name_str, f"{num}", 1)
                         else:
                             cmd = ""
                     else:
                         cmd = ""
-                elif nameStr == "{xgmi_plpd}":
+                elif name_str == "{xgmi_plpd}":
                     xgmi_plpd = self.static_data["gpu_data"][gpu_index]["xgmi_plpd"]
                     if isinstance(xgmi_plpd, dict):
                         num_supported = int(xgmi_plpd["num_supported"])
@@ -754,7 +771,7 @@ class TestAmdSmiCli(unittest.TestCase):
                                 num = num_supported - 1
                             else:
                                 num = 0
-                            cmd = cmd.replace(nameStr, f"{num}", 1)
+                            cmd = cmd.replace(name_str, f"{num}", 1)
                         else:
                             cmd = ""
                     else:
@@ -777,7 +794,7 @@ class TestAmdSmiCli(unittest.TestCase):
                     cmds[index] = ("", cond)
 
         # Pare down commands
-        if my_args.reduceCmds:
+        if my_args.reduce_cmds:
             file_mods = ["--file", "--json", "--csv"]
             watch_mods = ["--watch", "--watch_time", "--iterations"]
 
@@ -856,7 +873,7 @@ class TestAmdSmiCli(unittest.TestCase):
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
 
-    def _GetErrorCode(self, std_out, std_err, cond):
+    def get_error_code(self, std_out, std_err, cond):
         error_code = 0
         items = []
         output_stream = None
@@ -874,10 +891,10 @@ class TestAmdSmiCli(unittest.TestCase):
                 output_stream = "std_err"
                 items = std_err.strip().split()
         if items:
-            _, error_code = self.StrToNumber(items[-1])
+            _, error_code = self.str_to_number(items[-1])
         return (error_code, output_stream)
 
-    def _GetCmdReturnMsg(self, rc, error_code, cond):
+    def get_cmd_return_msg(self, rc, error_code, cond):
         msg = ""
         rc = str(rc)
         passed = False
@@ -902,13 +919,13 @@ class TestAmdSmiCli(unittest.TestCase):
             msg = f"Success: Received and Expected {expected} ({error_code:>3s})"
         return (msg, passed)
 
-    def RunCmds(self, cmds):
+    def run_cmds(self, cmds):
         failures = []
         successes = []
         for cmd, cond in cmds:
-            if my_args.diagnostic == "INFO" or my_args.printCmdsOnly:
+            if my_args.diagnostic == "INFO" or my_args.print_cmds_only:
                 print(f"cmd={cmd}")
-            if my_args.printCmdsOnly:
+            if my_args.print_cmds_only:
                 continue
 
             # Remove output file if it exists
@@ -971,7 +988,7 @@ class TestAmdSmiCli(unittest.TestCase):
             else:
                 (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
 
-            error_code, output_stream = self._GetErrorCode(std_out, std_err, cond)
+            error_code, output_stream = self.get_error_code(std_out, std_err, cond)
 
             passed_file = True
             if "--file" in cmd:
@@ -995,7 +1012,7 @@ class TestAmdSmiCli(unittest.TestCase):
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
-            msg, passed = self._GetCmdReturnMsg(rc, error_code, cond)
+            msg, passed = self.get_cmd_return_msg(rc, error_code, cond)
 
             # When testing for the file, if file test failed mark test as fail
             # This keeps the fail and pass output together
@@ -1005,13 +1022,13 @@ class TestAmdSmiCli(unittest.TestCase):
             if passed:
                 successes.append((cmd, msg))
             else:
-                if my_args.printStreamInfo:
+                if my_args.print_stream:
                     msg = f"{msg}, stream={output_stream}"
                 failures.append((cmd, msg))
 
             if cmd_trigger:
-                error_code_trigger, _ = self._GetErrorCode(std_out_trigger, std_err_trigger, cond)
-                msg_trigger, _ = self._GetCmdReturnMsg(rc_trigger, error_code_trigger, self.PASS)
+                error_code_trigger, _ = self.get_error_code(std_out_trigger, std_err_trigger, cond)
+                msg_trigger, _ = self.get_cmd_return_msg(rc_trigger, error_code_trigger, self.PASS)
                 # Even if the trigger cmd failed, put the output in with the cmd fail or pass output
                 if passed:
                     successes.append((f"{self.tab}trigger: {cmd_trigger}", msg_trigger))
@@ -1025,20 +1042,9 @@ class TestAmdSmiCli(unittest.TestCase):
                 print(f"{self.tab}std_out={std_out}")
                 print(f"{self.tab}std_err={std_err}")
 
-        self._PrintResults(successes)
-        self._PrintResults(failures, fail_on_results=True)
+        self.print_results(successes)
+        self.print_results(failures, fail_on_results=True)
         return
-
-    def tearDown(self):
-        # Clean up temp file and folder if they exist
-        if os.path.exists(self.tmp_filename):
-            os.chmod(self.tmp_filename, stat.S_IWRITE)
-            os.remove(self.tmp_filename)
-        if os.path.exists(self.tmp_folder):
-            shutil.rmtree(self.tmp_folder)
-        self.common.print(
-            f"Teardown triggered | Cleaned up file: {self.tmp_filename} and folder: {self.tmp_folder}"
-        )
 
     def test_help(self):
         self.common.print_func_name("")
@@ -1067,7 +1073,7 @@ class TestAmdSmiCli(unittest.TestCase):
         for cmd_arg in cmd_args:
             cmds.append((f"amd-smi {cmd_arg} --help", self.PASS))
 
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_valid(self):
@@ -1081,7 +1087,7 @@ class TestAmdSmiCli(unittest.TestCase):
             # ('amd-smi metric --watch 1 --json', self.PASS),
         ]
 
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_invalid(self):
@@ -1229,7 +1235,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 num_supported = int(xgmi_plpd["num_supported"])
                 cmds.append((f"amd-smi set --xgmi-plpd {num_supported} --gpu {index}", self.FAIL))
 
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_default(self):
@@ -1239,7 +1245,7 @@ class TestAmdSmiCli(unittest.TestCase):
 
         cmds = [("amd-smi", self.PASS)]
 
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_version(self):
@@ -1253,7 +1259,7 @@ class TestAmdSmiCli(unittest.TestCase):
             ("amd-smi version --gpu_version", self.PASS),
         ]
 
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_list(self):
@@ -1261,10 +1267,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi list"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "list", "List Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_static(self):
@@ -1272,10 +1278,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi static"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "static", "Static Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_firmware(self):
@@ -1283,14 +1289,14 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi firmware"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "firmware", "Firmware Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
-        cmds = self.CreateCmds(
+        self.run_cmds(cmds)
+        cmds = self.create_cmds(
             "ucode", "Firmware Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_bad_pages(self):
@@ -1298,10 +1304,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi bad-pages"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "bad-pages", "Bad Pages Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_metric(self):
@@ -1309,14 +1315,14 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi metric"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "metric",
             "Metric arguments:",
             "Device Arguments:",
             "Command Modifiers:",
             "Watch Arguments:",
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_process(self):
@@ -1324,14 +1330,14 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi process"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "process",
             "Process arguments:",
             "Device Arguments:",
             "Command Modifiers:",
             "Watch Arguments:",
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_event(self):
@@ -1339,10 +1345,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi event"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "event", "Event Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_topology(self):
@@ -1350,10 +1356,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi topology"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "topology", "Topology arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_set(self):
@@ -1369,10 +1375,10 @@ class TestAmdSmiCli(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException:
                 power_profile[index] = None
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
 
         # Restore starting values
         cmds = []
@@ -1529,7 +1535,7 @@ class TestAmdSmiCli(unittest.TestCase):
             )
 
         self.common.print("Restore Starting Values")
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
 
         return
 
@@ -1538,10 +1544,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi reset"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "reset", "Reset Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_monitor(self):
@@ -1549,14 +1555,14 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi monitor"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "monitor",
             "Monitor Arguments:",
             "Device Arguments:",
             "Command Modifiers:",
             "Watch Arguments:",
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_monitor_serial(self):
@@ -1573,15 +1579,15 @@ class TestAmdSmiCli(unittest.TestCase):
         monitor2 = json.loads(data2)
         metric3 = json.loads(data3)
 
-        data = self._get_monitor_metric_data(monitor1, monitor2, None)
-        monitor_fails = self._compare_monitor_metric_data("Monitor", data)
+        data = self.get_monitor_metric_data(monitor1, monitor2, None)
+        monitor_fails = self.compare_monitor_metric_data("Monitor", data)
 
-        data = self._get_monitor_metric_data(monitor2, None, metric3)
-        metric_fails = self._compare_monitor_metric_data("Metric", data)
+        data = self.get_monitor_metric_data(monitor2, None, metric3)
+        metric_fails = self.compare_monitor_metric_data("Metric", data)
 
         failures = monitor_fails + metric_fails
         if len(failures) > 0:
-            self._PrintResults(failures, fail_on_results=True)
+            self.print_results(failures, fail_on_results=True)
         return
 
     def test_monitor_parallel(self):
@@ -1630,8 +1636,8 @@ class TestAmdSmiCli(unittest.TestCase):
 
         monitor1 = json.loads(data1)
         monitor2 = json.loads(data2)
-        data = self._get_monitor_metric_data(monitor1, monitor2, None)
-        monitor_fails = self._compare_monitor_metric_data("Monitor", data)
+        data = self.get_monitor_metric_data(monitor1, monitor2, None)
+        monitor_fails = self.compare_monitor_metric_data("Monitor", data)
 
         # Monitor to Metric
         cmd = "amd-smi monitor --json"
@@ -1658,13 +1664,13 @@ class TestAmdSmiCli(unittest.TestCase):
 
         monitor = json.loads(data2)
         metric3 = json.loads(data1)
-        data = self._get_monitor_metric_data(monitor, None, metric3)
-        metric_fails = self._compare_monitor_metric_data("Metric", data)
+        data = self.get_monitor_metric_data(monitor, None, metric3)
+        metric_fails = self.compare_monitor_metric_data("Metric", data)
 
         # Report failures
         failures = monitor_fails + metric_fails
         if len(failures) > 0:
-            self._PrintResults(failures, fail_on_results=True)
+            self.print_results(failures, fail_on_results=True)
         return
 
     def test_monitor_with_workload(self):
@@ -1719,13 +1725,13 @@ class TestAmdSmiCli(unittest.TestCase):
 
         monitor1 = json.loads(data1)
         monitor2 = json.loads(data2)
-        data = self._get_monitor_metric_data(monitor1, monitor2, None)
-        monitor_fails = self._compare_monitor_metric_data("Workload", data)
+        data = self.get_monitor_metric_data(monitor1, monitor2, None)
+        monitor_fails = self.compare_monitor_metric_data("Workload", data)
 
         # Report failures
         failures = monitor_fails
         if len(failures) > 0:
-            self._PrintResults(failures, fail_on_results=True)
+            self.print_results(failures, fail_on_results=True)
         return
 
     def test_xgmi(self):
@@ -1733,10 +1739,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi xgmi"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "xgmi", "XGMI arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_partition(self):
@@ -1749,10 +1755,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi partition"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "partition", "Partition arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_ras(self):
@@ -1760,16 +1766,16 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi ras"
         self.common.print(msg)
 
-        if not my_args.printCmdsOnly:
+        if not my_args.print_cmds_only:
             if self.common.TODO_SKIP_FAIL:
                 msg = "Not Yet Implemented"
                 self.common.print(msg)
                 self.skipTest(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "ras", "RAS arguments:", "CPER Arguments", "Device Arguments:", "Command Modifiers:"
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_node(self):
@@ -1777,10 +1783,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi node"
         self.common.print(msg)
 
-        cmds = self.CreateCmds(
+        cmds = self.create_cmds(
             "node", "Node arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
-        self.RunCmds(cmds)
+        self.run_cmds(cmds)
         return
 
     def test_static_mem_carveout_gtt(self):
@@ -1859,25 +1865,25 @@ if __name__ == "__main__":
         "--output", type=str, default=None, help="file for output, default=%(default)s"
     )
     parser.add_argument(
-        "--printStreamInfo",
+        "--print_stream",
         action="store_true",
         default=False,
         help="Print where output is streamed, default=%(default)s",
     )
     parser.add_argument(
-        "--printCmdsOnly",
+        "--print_cmds_only",
         action="store_true",
         default=False,
         help="Print cmds only, default=%(default)s",
     )
     parser.add_argument(
-        "--useAllCmdOptions",
+        "--use_all_cmd_options",
         action="store_true",
         default=False,
         help="Use all cmd option combinations, default=%(default)s",
     )
     parser.add_argument(
-        "--addLogLevel",
+        "--add_log_level",
         choices=DIAGNOSTIC_CHOICES,
         type=str,
         default="",
@@ -1885,7 +1891,7 @@ if __name__ == "__main__":
     )
     my_args, remaining = parser.parse_known_args(sys.argv[1:])
 
-    my_args.reduceCmds = not my_args.useAllCmdOptions
+    my_args.reduce_cmds = not my_args.use_all_cmd_options
     my_args.diagnostic_index = DIAGNOSTIC_CHOICES.index(my_args.diagnostic)
     my_args.verbose = common.VERBOSITY_NORMAL
 
@@ -1903,7 +1909,7 @@ if __name__ == "__main__":
 
     # Detect if ran without sudo or root privileges
     # Run if only printing commands
-    if os.geteuid() != 0 and not my_args.printCmdsOnly:
+    if os.geteuid() != 0 and not my_args.print_cmds_only:
         print(
             "Some tests may require elevated privileges (sudo/root) to run completely.\n",
             file=sys.stderr,

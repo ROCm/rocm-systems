@@ -445,7 +445,7 @@ class Common:
                 error_code_name = self.error_map[error_code]
         return (error_code, error_code_name)
 
-    def check_ret(self, msg, exc, expected_code_name=None, printIt=True):
+    def check_ret(self, msg, exc, expected_code_name=None, print_it=True):
         # Returns True if the test FAILED (i.e. the result did not match expected).
         # Callers use the pattern: `if self.check_ret(...): raise_exception = e`
         if isinstance(exc, str) and len(exc) == 0:
@@ -468,14 +468,14 @@ class Common:
             for ec in expected_code_name:
                 if not self.check_ret(msg, exc, ec, False):  # check without printing
                     # This expected code matched - print once and return success
-                    if self.verbose > VERBOSITY_QUIET and printIt:
+                    if self.verbose > VERBOSITY_QUIET and print_it:
                         if msg:
                             print(f"{msg}\n", end="")
                         print(f"\tTest PASSED with expected result {ec}", flush=True)
                     return False
 
             # No expected result matched - print failure (respects same guards as single-condition path)
-            if self.verbose > VERBOSITY_QUIET and printIt:
+            if self.verbose > VERBOSITY_QUIET and print_it:
                 if msg:
                     print(f"{msg}\n", end="")
                 print(
@@ -496,7 +496,7 @@ class Common:
         else:
             status_msg = f"\tTest FAILED with expected result {expected_code_name} but received {error_code_name}"
             status_ret = True
-        if self.verbose > VERBOSITY_QUIET and printIt:
+        if self.verbose > VERBOSITY_QUIET and print_it:
             if msg:
                 print(f"{msg}\n", end="")
             print(f"{status_msg}", flush=True)
