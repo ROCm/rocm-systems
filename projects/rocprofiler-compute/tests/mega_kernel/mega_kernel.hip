@@ -1144,6 +1144,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
     // ds_add_f64, ds_min_f64, ds_max_f64
     //
 #if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
+    {
         if (tid < 32) {
             ds_atomic_f64_test[tid] = 0.0;
         }
