@@ -118,6 +118,12 @@ typedef void (*hsa_amd_queue_intercept_handler)(const void* pkts, uint64_t pkt_c
 hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
                                               hsa_amd_queue_intercept_handler callback,
                                               void* user_data);
+
+hsa_status_t hsa_amd_queue_intercept_attach(hsa_queue_t* queue,
+                                            hsa_amd_queue_intercept_handler callback,
+                                            void* user_data);
+
+hsa_status_t hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
 hsa_status_t hsa_amd_queue_intercept_create(
     hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
@@ -277,6 +283,8 @@ struct AmdExtTable {
   decltype(hsa_amd_counted_queue_release)* hsa_amd_counted_queue_release_fn;
   decltype(hsa_amd_memory_async_batch_copy)* hsa_amd_memory_async_batch_copy_fn;
   decltype(hsa_amd_agent_preload) *hsa_amd_agent_preload_fn;
+  decltype(hsa_amd_queue_intercept_attach)* hsa_amd_queue_intercept_attach_fn;
+  decltype(hsa_amd_queue_intercept_detach)* hsa_amd_queue_intercept_detach_fn;
 };
 
 // Table to export HSA Core Runtime Apis
