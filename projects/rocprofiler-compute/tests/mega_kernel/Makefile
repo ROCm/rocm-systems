@@ -7,9 +7,9 @@
 #   - MI350/MI355X (CDNA4): gfx950
 #
 #   RDNA 3.5 (Strix / Strix Halo APU):
-#   - Strix Point B0 (RDNA 3.5): gfx1150
-#   - Strix Point B1 (RDNA 3.5): gfx1151
-#   - Strix Halo (RDNA 3.5): gfx1152
+#   - Strix Point (RDNA 3.5): gfx1150
+#   - Strix Halo (RDNA 3.5): gfx1151
+#   - Krackan (RDNA 3.5): gfx1152
 #
 #   RDNA4 (Consumer):
 #   - RX 9070 XT/9070 (RDNA4): gfx1201
@@ -21,8 +21,8 @@
 #   make gfx942    - Build for MI300 (gfx942/CDNA3)
 #   make gfx90a    - Build for MI250 (gfx90a/CDNA2)
 #   make gfx1150   - Build for Strix Point (gfx1150/RDNA3.5)
-#   make gfx1151   - Build for Strix Point (gfx1151/RDNA3.5)
-#   make gfx1152   - Build for Strix Halo (gfx1152/RDNA3.5)
+#   make gfx1151   - Build for Strix Halo (gfx1151/RDNA3.5)
+#   make gfx1152   - Build for Krackan (gfx1152/RDNA3.5)
 #   make gfx1201   - Build for RX 9070 XT (gfx1201/RDNA4)
 #   make gfx1200   - Build for RX 9060 (gfx1200/RDNA4)
 #   make all-arch  - Build for all supported architectures
