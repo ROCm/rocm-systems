@@ -54,6 +54,13 @@
 #include "core/inc/exceptions.h"
 #include "core/util/locks.h"
 
+// Forward declarations for friend access
+extern "C" {
+hsa_status_t hsa_amd_queue_intercept_attach(
+    hsa_queue_t* queue, hsa_amd_queue_intercept_handler callback, void* user_data);
+hsa_status_t hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
+}
+
 namespace rocr {
 namespace core {
 
@@ -303,6 +310,14 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
 
   static bool HandleAsyncDoorbell(hsa_signal_value_t value, void* arg);
   static void PacketWriter(const void* pkts, uint64_t pkt_count);
+
+  // Friend the API functions that need access to private members
+  friend hsa_status_t ::hsa_amd_queue_intercept_attach(
+      hsa_queue_t*, hsa_amd_queue_intercept_handler, void*);
+  friend hsa_status_t ::hsa_amd_queue_intercept_detach(hsa_queue_t*);
+
+  // Make HandleAsyncDoorbell public for attach protocol registration
+  // (already declared as static bool HandleAsyncDoorbell above, need it accessible)
 
   // Private constructor for retrofit (non-owning) path
   InterceptQueue(NonOwningTag tag, Queue* existing_queue);

@@ -1398,6 +1398,175 @@ hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
   CATCH;
 }
 
+
+// Attach an intercept queue to an existing, active queue.
+// The migration protocol suspends the queue, swaps fields, and resumes.
+hsa_status_t hsa_amd_queue_intercept_attach(
+    hsa_queue_t* queue,
+    hsa_amd_queue_intercept_handler callback,
+    void* user_data) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(queue);
+  IS_BAD_PTR(callback);
+
+  core::Queue* core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  // If already intercepted, just add the new callback
+  if (core::InterceptQueue::IsType(core_queue)) {
+    core::InterceptQueue* iq = static_cast<core::InterceptQueue*>(core_queue);
+    iq->AddInterceptor(callback, user_data);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // Must be an AqlQueue
+  if (!AMD::AqlQueue::IsType(core_queue)) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  AMD::AqlQueue* aql_queue = static_cast<AMD::AqlQueue*>(core_queue);
+
+  // Reject cooperative queues
+  if (aql_queue->amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  // Lifecycle check: prevent concurrent migration/destroy
+  if (!aql_queue->TryBeginMigration()) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  // Scope guard to abort migration on failure
+  bool migration_committed = false;
+  auto lifecycle_guard = [&]() {
+    if (!migration_committed) aql_queue->AbortMigration();
+  };
+
+  // Step 2: Create InterceptQueue via WrapExisting (non-owning)
+  core::InterceptQueue* intercept =
+      core::InterceptQueue::WrapExisting(core_queue, callback, user_data);
+  if (intercept == nullptr) {
+    lifecycle_guard();
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  // Scope guard to clean up intercept on failure
+  bool intercept_committed = false;
+  auto intercept_guard = [&]() {
+    if (!intercept_committed) delete intercept;
+  };
+
+  // Get the application's SharedQueue
+  core::SharedQueue* app_sq = reinterpret_cast<core::SharedQueue*>(
+      reinterpret_cast<uintptr_t>(queue) -
+      offsetof(core::SharedQueue, amd_queue.hsa_queue));
+
+  // PHASE 2: SUSPEND + SWAP (under scratch_lock_)
+  {
+    // Step 4: Acquire scratch_lock_
+    std::lock_guard<std::mutex> lock(aql_queue->GetScratchLock());
+
+    // Step 5: Suspend the queue
+    aql_queue->SuspendForMigration();
+
+    // Step 6: Snapshot HW state
+    uint64_t snapshot_write = atomic::Load(&app_sq->amd_queue.write_dispatch_id,
+                                            std::memory_order_acquire);
+
+    // Step 7: Initialize proxy state at snapshot values
+    intercept->amd_queue_.write_dispatch_id = snapshot_write;
+    intercept->amd_queue_.read_dispatch_id = snapshot_write;
+    // next_packet_ and retry_index_ are set in the constructor
+
+    // Step 8: Save original fields for rollback/detach
+    // (saved_base_address_ and saved_doorbell_signal_ already set in WrapExisting)
+    // Need to save core_queue and SharedQueue pointer
+    intercept->saved_core_queue_ = app_sq->core_queue;
+    intercept->original_shared_queue_ = app_sq;
+
+    // Step 9: Swap fields in application's SharedQueue
+    // 9a: Swap base_address FIRST
+    atomic::Store(&app_sq->amd_queue.hsa_queue.base_address,
+                  intercept->amd_queue_.hsa_queue.base_address,
+                  std::memory_order_release);
+
+    // 9b: Swap doorbell_signal SECOND
+    atomic::Store(&app_sq->amd_queue.hsa_queue.doorbell_signal,
+                  intercept->amd_queue_.hsa_queue.doorbell_signal,
+                  std::memory_order_release);
+
+    // 9c: Swap core_queue LAST
+    __atomic_store_n(&app_sq->core_queue, static_cast<core::Queue*>(intercept),
+                     __ATOMIC_RELEASE);
+
+    // 9d: Full memory barrier
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+
+    // Step 10: Register async doorbell handler (AFTER swap)
+    auto err = core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+        core::Signal::Convert(intercept->async_doorbell_),
+        HSA_SIGNAL_CONDITION_NE,
+        intercept->async_doorbell_->LoadRelaxed(),
+        core::InterceptQueue::HandleAsyncDoorbell, intercept);
+    if (err != HSA_STATUS_SUCCESS) {
+      // Rollback: restore original fields
+      atomic::Store(&app_sq->amd_queue.hsa_queue.base_address,
+                    intercept->saved_base_address_, std::memory_order_release);
+      atomic::Store(&app_sq->amd_queue.hsa_queue.doorbell_signal,
+                    intercept->saved_doorbell_signal_, std::memory_order_release);
+      __atomic_store_n(&app_sq->core_queue, intercept->saved_core_queue_,
+                       __ATOMIC_RELEASE);
+
+      aql_queue->ResumeFromMigration();
+      intercept_guard();
+      lifecycle_guard();
+      return err;
+    }
+
+    // Step 11: Resume the queue
+    aql_queue->ResumeFromMigration();
+
+    // Step 12: Release scratch_lock_ (implicit from lock_guard)
+  }
+
+  // Step 13: Commit - dismiss guards
+  aql_queue->CompleteMigration();
+  migration_committed = true;
+  intercept_committed = true;
+
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+// Detach an intercept queue from an existing queue, restoring original state.
+hsa_status_t hsa_amd_queue_intercept_detach(hsa_queue_t* queue) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(queue);
+
+  core::Queue* core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  if (!core::InterceptQueue::IsType(core_queue)) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  core::InterceptQueue* iq = static_cast<core::InterceptQueue*>(core_queue);
+  if (!iq->is_retrofitted()) {
+    // Not a retrofit InterceptQueue - cannot detach creation-time intercept
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  hsa_status_t status = iq->Unwrap();
+  if (status == HSA_STATUS_SUCCESS) {
+    delete iq;
+  }
+
+  return status;
+  CATCH;
+}
+
 hsa_status_t hsa_amd_register_system_event_handler(hsa_amd_system_event_callback_t callback,
                                                    void* data) {
   TRY;
