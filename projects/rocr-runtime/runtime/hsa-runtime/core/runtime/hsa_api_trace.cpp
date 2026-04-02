@@ -64,6 +64,10 @@ hsa_status_t hsa_amd_queue_intercept_attach(hsa_queue_t* queue,
                                             hsa_amd_queue_intercept_handler callback,
                                             void* user_data);
 hsa_status_t hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
+hsa_status_t hsa_amd_gpu_agent_iterate_queues(
+    hsa_agent_t agent,
+    hsa_amd_gpu_agent_queue_callback_t callback,
+    void* data);
 }   //  namespace amd
 
 namespace core {

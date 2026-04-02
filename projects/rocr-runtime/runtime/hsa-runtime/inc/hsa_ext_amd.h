@@ -4320,6 +4320,7 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
  */
 hsa_status_t HSA_API hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
 
+
 /**
  * @brief Callback type for iterating queues on a GPU agent.
  *

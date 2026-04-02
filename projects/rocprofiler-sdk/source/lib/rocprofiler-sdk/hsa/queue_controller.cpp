@@ -669,33 +669,6 @@ queue_controller_init(RocAttachDispatchTable* attach_table)
     *(get_attach_table()) = attach_table;
 }
 
-
-void
-QueueController::attach_to_existing_queues()
-{
-    // Check if the HSA runtime supports hsa_amd_queue_intercept_attach.
-    // This API was added in the queue intercept retrofit work and may not
-    // be present in older HSA runtimes.
-    if(!_ext_table.hsa_amd_queue_intercept_attach_fn)
-    {
-        ROCP_INFO << "hsa_amd_queue_intercept_attach not available in HSA runtime; "
-                     "skipping retrofit attach to existing queues";
-        return;
-    }
-
-    // When using the attach table path, existing queues are already tracked
-    // by the attach library via hsa_amd_queue_intercept_create at queue
-    // creation time. The hsa_amd_queue_intercept_attach API is specifically
-    // useful for queues created BEFORE the attach library was loaded
-    // (truly-late attach scenario).
-    //
-    // For now, we log that the capability is available. The actual retrofit
-    // attach is performed per-queue as needed during late-attach workflows.
-
-    ROCP_INFO << "hsa_amd_queue_intercept_attach API is available for "
-                 "late-attach queue retrofit";
-}
-
 bool
 QueueController::should_exclude_queue(hsa_queue_t* queue) const
 {
@@ -708,9 +681,7 @@ QueueController::should_exclude_queue(hsa_queue_t* queue) const
     // Exclude queues that the profiler itself created (internal queues).
     // These are tracked in the _queues map.
     bool is_own_queue = false;
-    _queues.rlock([&](const queue_map_t& map) {
-        is_own_queue = (map.find(queue) != map.end());
-    });
+    _queues.rlock([&](const queue_map_t& map) { is_own_queue = (map.find(queue) != map.end()); });
     if(is_own_queue) return true;
 
     // Exclude explicitly excluded queues
