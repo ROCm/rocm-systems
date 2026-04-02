@@ -3698,4 +3698,472 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
     }
 }
 
+// Performance
+
+TEST_F(NetIbMPITest, PerfSingleNicVsFourNicMerged) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 processes";
+
+    const int rank = MPIEnvironment::world_rank;
+    const int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int nGpus = 0;
+    ASSERT_EQ(hipGetDeviceCount(&nGpus), hipSuccess);
+    ASSERT_GT(nGpus, 0) << "Test requires at least one GPU per process";
+    ASSERT_EQ(hipSetDevice(rank % nGpus), hipSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    struct DeviceInfo {
+        int index;
+        int speed;
+        char name[256];
+    };
+
+    auto GatherAndPrintAllRanksDeviceInfo = [&](const std::vector<DeviceInfo>& localInfos) {
+        int localCount = static_cast<int>(localInfos.size());
+
+        if (rank == 0) {
+            std::vector<DeviceInfo> peerInfos;
+            int peerCount = 0;
+
+            MPI_Recv(&peerCount, 1, MPI_INT, peerRank, 6001, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            peerInfos.resize(peerCount);
+            if (peerCount > 0) {
+                MPI_Recv(peerInfos.data(), peerCount * sizeof(DeviceInfo), MPI_BYTE,
+                         peerRank, 6002, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            }
+
+            for (const auto& info : localInfos) {
+                fprintf(stderr, "Rank 0 dev %d name=%s speed=%d\n",
+                        info.index, info.name, info.speed);
+            }
+            for (const auto& info : peerInfos) {
+                fprintf(stderr, "Rank 1 dev %d name=%s speed=%d\n",
+                        info.index, info.name, info.speed);
+            }
+        } else {
+            MPI_Send(&localCount, 1, MPI_INT, peerRank, 6001, MPI_COMM_WORLD);
+            if (localCount > 0) {
+                MPI_Send(const_cast<DeviceInfo*>(localInfos.data()),
+                         localCount * sizeof(DeviceInfo), MPI_BYTE,
+                         peerRank, 6002, MPI_COMM_WORLD);
+            }
+        }
+    };
+
+    std::vector<ncclNetProperties_t> props(ndev);
+    std::vector<int> physDevs;
+    std::vector<DeviceInfo> localDeviceInfos;
+    localDeviceInfos.reserve(ndev);
+
+    for (int i = 0; i < ndev; i++) {
+        memset(&props[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
+
+        if (!props[i].name || !strchr(props[i].name, '+')) {
+            physDevs.push_back(i);
+        }
+
+        DeviceInfo info{};
+        info.index = i;
+        info.speed = props[i].speed;
+        snprintf(info.name, sizeof(info.name), "%s",
+                 props[i].name ? props[i].name : "null");
+        localDeviceInfos.push_back(info);
+    }
+
+    GatherAndPrintAllRanksDeviceInfo(localDeviceInfos);
+
+    ASSERT_FALSE(physDevs.empty()) << "No physical NICs found";
+    ASSERT_GE((int)physDevs.size(), 4)
+        << "Test requires at least 4 physical NICs for 4-NIC merged device";
+
+    const int singleDev = physDevs[0];
+    const int mergedDev = CreateMergedDevice(4, rank);
+    ASSERT_GE(mergedDev, 0);
+
+    struct PerfResult {
+        double gbps = 0.0;
+        double seconds = 0.0;
+        size_t bytes = 0;
+    };
+
+    struct CaseSummary {
+        int dev = -1;
+        char label[64];
+        char devName[256];
+        int devSpeed = 0;
+        PerfResult perf;
+    };
+
+    auto BuildCaseSummary = [&](int dev, const char* label, const PerfResult& perf) -> CaseSummary {
+        CaseSummary s{};
+        s.dev = dev;
+        snprintf(s.label, sizeof(s.label), "%s", label);
+        s.perf = perf;
+
+        ncclNetProperties_t p;
+        memset(&p, 0, sizeof(p));
+        ncclResult_t r = GetDeviceProperties(dev, &p);
+        EXPECT_EQ(r, ncclSuccess) << "GetDeviceProperties failed for " << label;
+        if (r == ncclSuccess) {
+            snprintf(s.devName, sizeof(s.devName), "%s", p.name ? p.name : "null");
+            s.devSpeed = p.speed;
+        } else {
+            snprintf(s.devName, sizeof(s.devName), "unknown");
+            s.devSpeed = -1;
+        }
+        return s;
+    };
+
+    auto ReceivePeerCaseSummaryOnRank0 = [&](const CaseSummary& local, int mpiTag) -> CaseSummary {
+        CaseSummary peer{};
+        if (rank == 0) {
+            MPI_Recv(&peer, sizeof(CaseSummary), MPI_BYTE, peerRank, mpiTag,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        } else {
+            MPI_Send(const_cast<CaseSummary*>(&local), sizeof(CaseSummary), MPI_BYTE,
+                     peerRank, mpiTag, MPI_COMM_WORLD);
+        }
+        return peer;
+    };
+
+auto RunPerfCase = [&](int dev, const char* label, int tagBase) -> PerfResult {
+        static constexpr int kWarmupIters = 5;
+        static constexpr int kTimedIters = 20;
+        static constexpr size_t kTransferSize = 64 * 1024 * 1024; // 64 MB
+        static constexpr int kNumParallelConnections = 5;
+
+        SCOPED_TRACE(label);
+
+        struct ThreadContext {
+            ConnectionPair pair{};
+            void* comm = nullptr;
+            void* buf = nullptr;
+            void* mh = nullptr;
+            double seconds = 0.0;
+            size_t bytes = 0;
+            bool ok = true;
+            std::string err;
+        };
+
+        struct HipFreeDeleter {
+            void operator()(void* p) const {
+                if (p) (void)hipFree(p);
+            }
+        };
+
+        std::vector<ThreadContext> ctxs(kNumParallelConnections);
+
+        // Setup all connections in the main thread only.
+        for (int i = 0; i < kNumParallelConnections; i++) {
+            SetupConnection(dev, ctxs[i].pair, rank, peerRank);
+            ctxs[i].comm = (rank == 0) ? ctxs[i].pair.recvComm : ctxs[i].pair.sendComm;
+            if (ctxs[i].comm == nullptr) {
+                ADD_FAILURE() << label << " comm is null for conn " << i;
+                return PerfResult{};
+            }
+        }
+
+        // Hold all connections open for whole case.
+        std::vector<std::unique_ptr<NetConnectionGuard>> connGuards;
+        connGuards.reserve(kNumParallelConnections);
+        for (int i = 0; i < kNumParallelConnections; i++) {
+            auto g = std::make_unique<NetConnectionGuard>(net_);
+            if (rank == 0) {
+                g->setRecvComm(ctxs[i].pair.recvComm);
+                g->setListenComm(ctxs[i].pair.listenComm);
+            } else {
+                g->setSendComm(ctxs[i].pair.sendComm);
+            }
+            connGuards.push_back(std::move(g));
+        }
+
+        using HipBufPtr = std::unique_ptr<void, HipFreeDeleter>;
+        std::vector<HipBufPtr> bufs;
+        bufs.reserve(kNumParallelConnections);
+
+        std::vector<std::unique_ptr<NetMHandleGuard>> mhGuards;
+        mhGuards.reserve(kNumParallelConnections);
+
+        for (int i = 0; i < kNumParallelConnections; i++) {
+            void* buf = nullptr;
+            if (hipMalloc(&buf, kTransferSize) != hipSuccess || buf == nullptr) {
+                ADD_FAILURE() << label << " hipMalloc failed for conn " << i;
+                return PerfResult{};
+            }
+
+            if (rank == 1) {
+                std::vector<uint8_t> hostPattern(kTransferSize);
+                for (size_t j = 0; j < kTransferSize; j++) {
+                    hostPattern[j] =
+                        static_cast<uint8_t>((j + tagBase + i * 100) % kBytePatternModulo);
+                }
+                if (hipMemcpy(buf, hostPattern.data(), kTransferSize, hipMemcpyHostToDevice) !=
+                    hipSuccess) {
+                    ADD_FAILURE() << label << " hipMemcpy H2D failed for conn " << i;
+                    (void)hipFree(buf);
+                    return PerfResult{};
+                }
+            } else {
+                if (hipMemset(buf, 0, kTransferSize) != hipSuccess) {
+                    ADD_FAILURE() << label << " hipMemset failed for conn " << i;
+                    (void)hipFree(buf);
+                    return PerfResult{};
+                }
+            }
+
+            ctxs[i].buf = buf;
+            bufs.emplace_back(buf);
+
+            void* mh = nullptr;
+            if (RegisterMemory(ctxs[i].comm, buf, kTransferSize, NCCL_PTR_CUDA, &mh) !=
+                    ncclSuccess ||
+                mh == nullptr) {
+                ADD_FAILURE() << label << " RegisterMemory failed for conn " << i;
+                return PerfResult{};
+            }
+
+            ctxs[i].mh = mh;
+            mhGuards.emplace_back(
+                std::make_unique<NetMHandleGuard>(mh, NetMHandleDeleter(net_, ctxs[i].comm)));
+        }
+
+        if (hipDeviceSynchronize() != hipSuccess) {
+            ADD_FAILURE() << label << " hipDeviceSynchronize failed before warmup";
+            return PerfResult{};
+        }
+
+        // Warmup in lockstep from main thread so both ranks stay aligned before timed section.
+        for (int iter = 0; iter < kWarmupIters; iter++) {
+            std::vector<void*> reqs(kNumParallelConnections, nullptr);
+
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            if (rank == 0) {
+                for (int i = 0; i < kNumParallelConnections; i++) {
+                    void* rb[1] = {ctxs[i].buf};
+                    size_t rs[1] = {kTransferSize};
+                    int rt[1] = {tagBase + iter * 100 + i};
+                    void* rh[1] = {ctxs[i].mh};
+                    ncclResult_t r =
+                        PostRecv(ctxs[i].pair.recvComm, 1, rb, rs, rt, rh, &reqs[i]);
+                    if (r != ncclSuccess || reqs[i] == nullptr) {
+                        ADD_FAILURE() << label << " warmup PostRecv failed, conn " << i
+                                      << " iter " << iter;
+                        return PerfResult{};
+                    }
+                }
+            } else {
+                for (int i = 0; i < kNumParallelConnections; i++) {
+                    int attempts = 0;
+                    do {
+                        ncclResult_t r = PostSend(ctxs[i].pair.sendComm, ctxs[i].buf,
+                                                  kTransferSize,
+                                                  tagBase + iter * 100 + i,
+                                                  ctxs[i].mh, &reqs[i]);
+                        if (r != ncclSuccess) {
+                            ADD_FAILURE() << label << " warmup PostSend failed, conn " << i
+                                          << " iter " << iter;
+                            return PerfResult{};
+                        }
+                        if (reqs[i]) break;
+                        attempts++;
+                        usleep(kPollIntervalUs);
+                    } while (attempts < kMaxRetryAttempts);
+
+                    if (reqs[i] == nullptr) {
+                        ADD_FAILURE() << label << " warmup PostSend returned null req, conn " << i
+                                      << " iter " << iter;
+                        return PerfResult{};
+                    }
+                }
+            }
+
+            for (int i = 0; i < kNumParallelConnections; i++) {
+                int sizes[1] = {0};
+                if (WaitForCompletion(reqs[i], sizes, kLargeTransferTimeoutMs) != ncclSuccess) {
+                    ADD_FAILURE() << label << " warmup WaitForCompletion failed, conn " << i
+                                  << " iter " << iter;
+                    return PerfResult{};
+                }
+                if (rank == 0 && sizes[0] != (int)kTransferSize) {
+                    ADD_FAILURE() << label << " warmup size mismatch, conn " << i
+                                  << " iter " << iter
+                                  << " expected " << kTransferSize
+                                  << " got " << sizes[0];
+                    return PerfResult{};
+                }
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        std::vector<std::thread> threads;
+        threads.reserve(kNumParallelConnections);
+
+        for (int i = 0; i < kNumParallelConnections; i++) {
+            threads.emplace_back([&, i]() {
+                auto& c = ctxs[i];
+                const int localTagBase = tagBase + 10000 + i * 1000;
+
+                double t0 = MPI_Wtime();
+
+                for (int iter = 0; iter < kTimedIters; iter++) {
+                    const int tag = localTagBase + iter;
+                    void* req = nullptr;
+
+                    if (rank == 0) {
+                        void* rb[1] = {c.buf};
+                        size_t rs[1] = {kTransferSize};
+                        int rt[1] = {tag};
+                        void* rh[1] = {c.mh};
+
+                        ncclResult_t r =
+                            PostRecv(c.pair.recvComm, 1, rb, rs, rt, rh, &req);
+                        if (r != ncclSuccess || req == nullptr) {
+                            c.ok = false;
+                            c.err = "PostRecv failed or returned null req";
+                            return;
+                        }
+                    } else {
+                        int attempts = 0;
+                        do {
+                            ncclResult_t r =
+                                PostSend(c.pair.sendComm, c.buf, kTransferSize, tag, c.mh, &req);
+                            if (r != ncclSuccess) {
+                                c.ok = false;
+                                c.err = "PostSend failed";
+                                return;
+                            }
+                            if (req) break;
+                            attempts++;
+                            usleep(kPollIntervalUs);
+                        } while (attempts < kMaxRetryAttempts);
+
+                        if (req == nullptr) {
+                            c.ok = false;
+                            c.err = "PostSend returned null req after retries";
+                            return;
+                        }
+                    }
+
+                    int sizes[1] = {0};
+                    ncclResult_t wr = WaitForCompletion(req, sizes, kLargeTransferTimeoutMs);
+                    if (wr != ncclSuccess) {
+                        c.ok = false;
+                        c.err = "WaitForCompletion failed";
+                        return;
+                    }
+
+                    if (rank == 0 && sizes[0] != (int)kTransferSize) {
+                        c.ok = false;
+                        c.err = "Received size mismatch";
+                        return;
+                    }
+                }
+
+                c.seconds = MPI_Wtime() - t0;
+                c.bytes = kTransferSize * (size_t)kTimedIters;
+            });
+        }
+
+        for (auto& th : threads) th.join();
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        bool allOk = true;
+        for (int i = 0; i < kNumParallelConnections; i++) {
+            if (!ctxs[i].ok) {
+                allOk = false;
+                ADD_FAILURE() << label << " conn " << i << " failed: " << ctxs[i].err;
+            }
+        }
+        if (!allOk) return PerfResult{};
+
+        PerfResult result;
+        result.seconds = 0.0;
+        result.bytes = 0;
+
+        for (int i = 0; i < kNumParallelConnections; i++) {
+            result.seconds = std::max(result.seconds, ctxs[i].seconds);
+            result.bytes += ctxs[i].bytes;
+        }
+
+        result.gbps = (result.seconds > 0.0)
+                          ? ((double)result.bytes * 8.0 / result.seconds / 1.0e9)
+                          : 0.0;
+
+        fprintf(stderr,
+                "[ PERF ][rank%d] %s parallel=%d bytes=%zu time=%.6f s bw=%.3f Gbit/s\n",
+                rank, label, kNumParallelConnections, result.bytes, result.seconds, result.gbps);
+
+        return result;
+    };
+
+    PerfResult singleLocalPerf = RunPerfCase(singleDev, "SingleNIC", 1000);
+    CaseSummary singleLocal = BuildCaseSummary(singleDev, "SingleNIC", singleLocalPerf);
+    CaseSummary singlePeer = ReceivePeerCaseSummaryOnRank0(singleLocal, 7001);
+
+    PerfResult mergedLocalPerf = RunPerfCase(mergedDev, "Merged4NIC", 2000);
+    CaseSummary mergedLocal = BuildCaseSummary(mergedDev, "Merged4NIC", mergedLocalPerf);
+    CaseSummary mergedPeer = ReceivePeerCaseSummaryOnRank0(mergedLocal, 7002);
+
+    if (rank == 0) {
+        double localRatio =
+            (singleLocal.perf.gbps > 0.0) ? (mergedLocal.perf.gbps / singleLocal.perf.gbps) : 0.0;
+        double peerRatio =
+            (singlePeer.perf.gbps > 0.0) ? (mergedPeer.perf.gbps / singlePeer.perf.gbps) : 0.0;
+        double singleAvg = 0.5 * (singleLocal.perf.gbps + singlePeer.perf.gbps);
+        double mergedAvg = 0.5 * (mergedLocal.perf.gbps + mergedPeer.perf.gbps);
+        double avgRatio = (singleAvg > 0.0) ? (mergedAvg / singleAvg) : 0.0;
+
+        fprintf(stderr,
+                "[ PERF ][rank0] %s dev=%d name=%s speed=%d bytes=%zu time=%.6f s bw=%.3f Gbit/s\n",
+                singleLocal.label, singleLocal.dev, singleLocal.devName, singleLocal.devSpeed,
+                singleLocal.perf.bytes, singleLocal.perf.seconds, singleLocal.perf.gbps);
+        fprintf(stderr,
+                "[ PERF ][rank1] %s dev=%d name=%s speed=%d bytes=%zu time=%.6f s bw=%.3f Gbit/s\n",
+                singlePeer.label, singlePeer.dev, singlePeer.devName, singlePeer.devSpeed,
+                singlePeer.perf.bytes, singlePeer.perf.seconds, singlePeer.perf.gbps);
+
+        fprintf(stderr,
+                "[ PERF ][rank0] %s dev=%d name=%s speed=%d bytes=%zu time=%.6f s bw=%.3f Gbit/s\n",
+                mergedLocal.label, mergedLocal.dev, mergedLocal.devName, mergedLocal.devSpeed,
+                mergedLocal.perf.bytes, mergedLocal.perf.seconds, mergedLocal.perf.gbps);
+        fprintf(stderr,
+                "[ PERF ][rank1] %s dev=%d name=%s speed=%d bytes=%zu time=%.6f s bw=%.3f Gbit/s\n",
+                mergedPeer.label, mergedPeer.dev, mergedPeer.devName, mergedPeer.devSpeed,
+                mergedPeer.perf.bytes, mergedPeer.perf.seconds, mergedPeer.perf.gbps);
+
+        fprintf(stderr,
+                "[ PERF ][rank0] ratio %s/%s = %.3fx\n",
+                mergedLocal.label, singleLocal.label, localRatio);
+        fprintf(stderr,
+                "[ PERF ][rank1] ratio %s/%s = %.3fx\n",
+                mergedPeer.label, singlePeer.label, peerRatio);
+        fprintf(stderr,
+                "[ PERF ][avg  ] %s=%.3f Gbit/s, %s=%.3f Gbit/s, ratio=%.3fx\n",
+                singleLocal.label, singleAvg, mergedLocal.label, mergedAvg, avgRatio);
+
+        EXPECT_GT(singleLocal.perf.gbps, 0.0);
+        EXPECT_GT(mergedLocal.perf.gbps, 0.0);
+        EXPECT_GT(singlePeer.perf.gbps, 0.0);
+        EXPECT_GT(mergedPeer.perf.gbps, 0.0);
+
+        EXPECT_GT(mergedLocal.perf.gbps, 0.5 * singleLocal.perf.gbps)
+            << "Merged 4-NIC bandwidth is unexpectedly much worse than single NIC on rank 0";
+        EXPECT_GT(mergedPeer.perf.gbps, 0.5 * singlePeer.perf.gbps)
+            << "Merged 4-NIC bandwidth is unexpectedly much worse than single NIC on rank 1";
+    }
+}
+
 #endif // MPI_TESTS_ENABLED
