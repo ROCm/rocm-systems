@@ -64,13 +64,15 @@ hipcc -g ea_hbm_read_bw.hip -o ea_hbm_read_bw
 # From the rocprofiler-compute root directory:
 
 # Profile baseline
-src/rocprof-compute profile -n ea_test_baseline -b 30 \
+src/rocprof-compute profile -n ea_test_baseline \
+    -b 30.13 30.14 30.15 30.16 30.17 30.18 \
     --membw-analysis --experimental --no-roof \
     --output-directory /tmp/ea_test_baseline \
     -- ./sample/membw_analysis_test_suite/ea/ea_hbm_read_bw
 
 # Profile optimized
-src/rocprof-compute profile -n ea_test_opt -b 30 \
+src/rocprof-compute profile -n ea_test_opt \
+    -b 30.13 30.14 30.15 30.16 30.17 30.18 \
     --membw-analysis --experimental --no-roof \
     --output-directory /tmp/ea_test_opt \
     -- ./sample/membw_analysis_test_suite/ea/ea_hbm_read_bw opt
@@ -78,12 +80,22 @@ src/rocprof-compute profile -n ea_test_opt -b 30 \
 
 ## Analyzing
 
-```bash
-src/rocprof-compute analyze --path /tmp/ea_test_baseline \
-    -b 30.13 30.14 30.16 30.18 --membw-analysis --experimental
+Side-by-side baseline vs. optimized comparison:
 
-src/rocprof-compute analyze --path /tmp/ea_test_opt \
-    -b 30.13 30.14 30.16 30.18 --membw-analysis --experimental
+```bash
+src/rocprof-compute analyze \
+    -p /tmp/ea_test_baseline -p /tmp/ea_test_opt \
+    -b 30.13 30.14 30.15 30.16 30.17 30.18 --membw-analysis --experimental
+```
+
+To analyze each run independently:
+
+```bash
+src/rocprof-compute analyze -p /tmp/ea_test_baseline \
+    -b 30.13 30.14 30.15 30.16 30.17 30.18 --membw-analysis --experimental
+
+src/rocprof-compute analyze -p /tmp/ea_test_opt \
+    -b 30.13 30.14 30.15 30.16 30.17 30.18 --membw-analysis --experimental
 ```
 
 ## Validation Results (MI350X)
