@@ -149,7 +149,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
       releaseResources();
     }
 
-    if (profilingInfo().enabled_) {
+    if (profilingInfo().enabled_ && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
       amd::activity_prof::ReportActivity(command());
     }
 
@@ -296,19 +296,10 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
 
 const Event::EventWaitList Event::nullWaitList(0);
 
-static bool IsActivityEnabledAndCommit(cl_command_type type) {
-  auto op = amd::activity_prof::OperationId(type);
-  if (amd::activity_prof::IsEnabled(op)) {
-    amd::activity_prof::CommitRecord(op);
-    return true;
-  }
-  return false;
-}
-
 // ================================================================================================
 Command::Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                  uint32_t commandWaitBits, const Event* waitingEvent)
-    : Event(queue, IsActivityEnabledAndCommit(type) ||
+    : Event(queue, amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type)) ||
                        queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
                        Agent::shouldPostEventEvents()),
       queue_(&queue),
@@ -388,10 +379,9 @@ void Command::enqueue() {
     std::scoped_lock sl(queue_->vdev()->execution());
     queue_->FormSubmissionBatch(this);
 
-    // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks.
-    // Also flush unconditionally when the batch exceeds the size threshold.
+    // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
     if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
-        (type() == CL_COMMAND_TASK) || queue_->ShouldFlushBatch()) {
+        (type() == CL_COMMAND_TASK)) {
       // The current HSA signal tracking logic requires profiling enabled for the markers
       EnableProfiling();
       // Update batch head for the current marker. Hence the status of all commands can be
@@ -404,6 +394,7 @@ void Command::enqueue() {
       queue_->ResetSubmissionBatch();
     } else {
       submit(*queue_->vdev());
+      queue_->FlushSubmissionBatch(this);
     }
   } else {
     queue_->append(*this);
