@@ -1193,7 +1193,11 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         pk_f16_passed = true;
     }
 #else
-    pk_f16_passed = true;
+    // Packed FP16 global atomic not available for this ISA — bypass (not a failure).
+    if (lane_id == 0) {
+        atomicMin(&results->atomic_pk_f16_passed, -1);
+    }
+    pk_f16_passed = false;
 #endif
 
     // ========================================================================
@@ -1227,13 +1231,16 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         pk_bf16_passed = true;
     }
 #elif defined(__gfx90a__)
-    // MI200: No packed BF16 atomics - bypass
-    if (lane_id == 0 && tid < 32) {
+    // MI200: No packed BF16 atomics — bypass (atomicAdd skipped for gfx90a below).
+    if (lane_id == 0) {
         atomicMin(&results->atomic_pk_bf16_passed, -1);
     }
-    pk_bf16_passed = true;
+    pk_bf16_passed = false;
 #else
-    pk_bf16_passed = true;
+    if (lane_id == 0) {
+        atomicMin(&results->atomic_pk_bf16_passed, -1);
+    }
+    pk_bf16_passed = false;
 #endif
 
     // ========================================================================
@@ -1251,12 +1258,13 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         (void)old_val;
     }
 #elif defined(__gfx1200__) || defined(__gfx1201__)
+    {
         int compare_val = 0;
         int swap_val = tid + 1;
         int old_val = 0;
-        
+
         long long cas_data = ((long long)swap_val << 32) | (unsigned int)compare_val;
-        
+
         asm volatile(
             "global_atomic_cmpswap_b32 %0, %1, %2, off th:TH_ATOMIC_RETURN\n\t"
             ASM_WAITCNT_VMEM
@@ -1264,11 +1272,15 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
             : "v"(&global_int_ptr[(tid % 64) + 192]), "v"(cas_data)
             : "memory"
         );
-        
+
         cas_passed = true;
     }
 #else
-    cas_passed = true;
+    // CAS path not implemented for this ISA — bypass.
+    if (lane_id == 0) {
+        atomicMin(&results->atomic_cas_passed, -1);
+    }
+    cas_passed = false;
 #endif
 
     // Record results
