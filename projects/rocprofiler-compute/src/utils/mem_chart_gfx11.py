@@ -493,7 +493,6 @@ def create_mem_chart_diagram(
     std_arrow_len = 8
     std_arrow_left = "<" + "-" * std_arrow_len
     std_arrow_right = "-" * std_arrow_len + ">"
-    "<" + "-" * (std_arrow_len - 1) + ">"
 
     kernel_edge_width = 16
     kernel_arrow_left = "<" + "-" * (kernel_edge_width - 1)
