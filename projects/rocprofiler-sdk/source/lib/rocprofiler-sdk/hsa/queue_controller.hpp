@@ -34,6 +34,7 @@
 #include <functional>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -100,6 +101,17 @@ public:
     // serialization related signals if not compiled in debug mode.
     void print_debug_signals() const;
 
+    // Attach intercept handlers to all existing queues using the
+    // hsa_amd_queue_intercept_attach HSA runtime API. This is used during
+    // late-attach to retrofit profiling onto queues created before the
+    // profiler was loaded. Queues that are cooperative, already intercepted,
+    // or belong to the profiler's own internal queues are excluded.
+    void attach_to_existing_queues();
+
+    // Check if a queue should be excluded from retrofit interception.
+    // Returns true for cooperative queues and profiler-internal queues.
+    bool should_exclude_queue(hsa_queue_t* queue) const;
+
 #if !defined(NDEBUG)
     // Tracks the creation of all signals in queues, used for debugging and disabled
     // in release mode (adds locking around signal creation).
@@ -116,6 +128,7 @@ private:
     common::Synchronized<client_id_map_t> _callback_cache     = {};
     agent_cache_map_t                     _supported_agents   = {};
     std::atomic<bool>                     _serialized_enabled = {false};
+    std::unordered_set<hsa_queue_t*>      _excluded_queues    = {};
     common::Synchronized<
         std::unordered_map<rocprofiler_agent_id_t,
                            std::shared_ptr<common::Synchronized<hsa::profiler_serializer>>>>
