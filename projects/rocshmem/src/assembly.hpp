@@ -271,14 +271,14 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src,
   // #pragma unroll
   for (int i = 0; i < work_per_thread; i++) {
     regs[i] = llvm_amdgcn_raw_buffer_load_b128(
-        *reinterpret_cast<i32x4*>(src), thread_idx + i * stride, 0u, 0b10011u);
+        *reinterpret_cast<i32x4*>(src), thread_idx, i * stride, 0b10011u);
   }
   // #pragma unroll
   for (int i = 0; i < work_per_thread; i++) {
     llvm_amdgcn_raw_buffer_store_b128(regs[i], *reinterpret_cast<i32x4*>(dst),
-                                      thread_idx + i * stride, 0u, 0b10011u);
+                                      thread_idx, i * stride, 0b10011u);
   }
-  __builtin_amdgcn_s_setprio(0);
+  // __builtin_amdgcn_s_setprio(0);
   __builtin_amdgcn_s_barrier();
 
 #endif
