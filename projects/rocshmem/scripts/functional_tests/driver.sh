@@ -235,8 +235,9 @@ ExecTest() {
     DRIVER_RETURN_STATUS=1
     if [ $IS_RETRY -eq 0 ]; then
       # Track failed tests with their parameters for potential retry
+      # Capture environment/config state to ensure retry runs under same conditions
       FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
-      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE")
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}")
     else
       # Track tests that failed even after retry
       RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
@@ -635,10 +636,31 @@ RerunFailedTests() {
   RETRY_FAILED_LIST=""
   RETRY_PASSED_LIST=""
 
-  # Rerun each failed test
+  # Rerun each failed test with the same environment/config state
   for test_params in "${FAILED_TESTS[@]}"; do
-    IFS='|' read -r test_name num_ranks num_wg num_threads max_msg_size <<< "$test_params"
+    IFS='|' read -r test_name num_ranks num_wg num_threads max_msg_size use_default_stream max_contexts notimeout noverif <<< "$test_params"
+
+    # Restore environment state from original test run
+    if [[ -n "$use_default_stream" ]]; then
+      export ROCSHMEM_TEST_USE_DEFAULT_STREAM="$use_default_stream"
+    fi
+    if [[ -n "$max_contexts" ]]; then
+      export ROCSHMEM_MAX_NUM_CONTEXTS="$max_contexts"
+    fi
+    if [[ -n "$notimeout" ]]; then
+      NOTIMEOUT="$notimeout"
+    fi
+    if [[ -n "$noverif" ]]; then
+      NOVERIF="$noverif"
+    fi
+
     ExecTest "$test_name" "$num_ranks" "$num_wg" "$num_threads" "$max_msg_size" 1
+
+    # Clean up environment state after retry
+    unset ROCSHMEM_TEST_USE_DEFAULT_STREAM
+    unset ROCSHMEM_MAX_NUM_CONTEXTS
+    unset NOTIMEOUT
+    unset NOVERIF
   done
 
   echo ""
@@ -721,13 +743,13 @@ case $TEST in
     ;;
 esac
 
-EXIT_STATUS=$(($DRIVER_RETURN_STATUS || $?))
+EXIT_STATUS=$DRIVER_RETURN_STATUS
 
 # If there were failures, try to rerun them once (only if below threshold)
 if [ $EXIT_STATUS -ne 0 ] && [ ${#FAILED_TESTS[@]} -gt 0 ]; then
   if [ ${#FAILED_TESTS[@]} -le $RETRY_THRESHOLD ]; then
     RerunFailedTests
-    EXIT_STATUS=$(($DRIVER_RETURN_STATUS || $?))
+    EXIT_STATUS=$DRIVER_RETURN_STATUS
   else
     echo ""
     echo "========================================================================"
