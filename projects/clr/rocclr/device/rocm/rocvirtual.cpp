@@ -965,18 +965,25 @@ bool VirtualGPU::processOpenCLMemObjects(const amd::Kernel& kernel, const_addres
 bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address params) {
   assert(amd::IS_HIP && "HIP-only function is called on non-HIP path");
 
-  // HIP doesn't really require any processing, this whole function only exists for logging
-  // purposes, so skip it entirely if logging isn't enabled.
-  if (!IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN))
-    return true;
-
-  Kernel& hsaKernel =
-      const_cast<Kernel&>(static_cast<const Kernel&>(*(kernel.getDeviceKernel(dev()))));
   const amd::KernelSignature& signature = kernel.signature();
-
+  const amd::KernelParameters& kernelParams = kernel.parameters();
+  amd::Memory* const* memories =
+      reinterpret_cast<amd::Memory* const*>(params + kernelParams.memoryObjOffset());
   for (size_t i = 0; i < signature.numParameters(); ++i) {
     const amd::KernelParameterDescriptor& desc = signature.at(i);
 
+    if (desc.type_ == T_POINTER &&
+      (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_GLOBAL ||
+       desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_CONSTANT)) {
+      uint32_t index = desc.info_.arrayIndex_;
+      amd::Memory* mem = memories[index];
+      if (mem != nullptr && desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
+        Image* image = static_cast<Image*>(mem->getDeviceMemory(dev()));
+        const uint64_t image_srd = image->getHsaImageObject().handle;
+        assert(amd::isMultipleOf(image_srd, sizeof(image_srd)));
+        WriteAqlArgAt(const_cast<address>(params), image_srd, sizeof(image_srd), desc.offset_);
+      }
+    }
     if (desc.type_ == T_POINTER) {
       const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
 
