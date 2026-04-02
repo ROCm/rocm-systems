@@ -22,9 +22,10 @@ THE SOFTWARE.
 
 
 // Stub implementations for topo_expl
-#include "hipify_rccl/include/comm.h"
-#include "hipify_rccl/include/collectives.h"
-#include "hipify_rccl/include/net.h"
+#include "comm.h"
+#include "collectives.h"
+#include "net.h"
+#include <climits>
 
 // Stub for ncclCommCount - just return the nRanks from the comm
 extern "C" ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
@@ -45,4 +46,9 @@ rcclIBNicInfo rcclPrimaryNic() {
 
 bool rcclUseAinic() {
   return false;
+}
+
+// Stub for ncclParamWorkArgsBytes - needed by connect.cc and paths.cc
+int64_t ncclParamWorkArgsBytes() {
+  return INT64_MAX;
 }
