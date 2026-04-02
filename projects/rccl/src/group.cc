@@ -398,6 +398,26 @@ static void reclaimPlannerState(struct ncclComm* comm) {
       comm->connectRecv[i].masks[j] = 0UL;
     }
   }
+  for (int c = 0; c < MAXCHANNELS; c++) {
+    struct ncclChannelPeer** peers = comm->channels[c].peers;
+    if (peers == NULL) continue;
+    for (int p = 0; p < comm->nRanks; p++) {
+      struct ncclChannelPeer* peerComm = peers[p];
+      if (peerComm == NULL) continue;
+      for (int i = 0; i < NCCL_MAX_CONNS; i++) {
+        struct ncclConnector* sendConn = &peerComm->send[i];
+        struct ncclConnector* recvConn = &peerComm->recv[i];
+        if (sendConn->p2pOnly && sendConn->transportComm == NULL) {
+          sendConn->hasSeen = 0;
+          sendConn->p2pOnly = 0;
+        }
+        if (recvConn->p2pOnly && recvConn->transportComm == NULL) {
+          recvConn->hasSeen = 0;
+          recvConn->p2pOnly = 0;
+        }
+      }
+    }
+  }
   while (!ncclIntruQueueEmpty(&comm->planner.planQueue)) {
     struct ncclKernelPlan* plan = ncclIntruQueueDequeue(&comm->planner.planQueue);
     if (!plan->persistent) {
