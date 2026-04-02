@@ -112,7 +112,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          sparse-checkout: projects/rocprofiler-sdk
+          sparse-checkout: |
+            projects/rocprofiler-sdk
+            projects/rocr-runtime
+            projects/clr
+            projects/hip
           submodules: true
           set-safe-directory: true
 
