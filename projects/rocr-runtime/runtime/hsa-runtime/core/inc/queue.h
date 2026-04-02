@@ -203,10 +203,10 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   ///
   /// @return Queue * Pointer to the Queue's implementation object
   static __forceinline Queue* Convert(const hsa_queue_t* queue) {
-    return (queue != nullptr)
-        ? reinterpret_cast<SharedQueue*>(reinterpret_cast<uintptr_t>(queue) -
-                                         offsetof(SharedQueue, amd_queue.hsa_queue))->core_queue
-        : nullptr;
+    if (queue == nullptr) return nullptr;
+    SharedQueue* sq = reinterpret_cast<SharedQueue*>(
+        reinterpret_cast<uintptr_t>(queue) - offsetof(SharedQueue, amd_queue.hsa_queue));
+    return __atomic_load_n(&sq->core_queue, __ATOMIC_ACQUIRE);
   }
 
   /// @brief Inactivate the queue object. Once inactivate a
