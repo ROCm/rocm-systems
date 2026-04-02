@@ -17,7 +17,12 @@ from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
 from utils.logger import console_error, console_log, console_warning
-from utils.utils_analysis import NS_TO_MS, CallTreeNode, simplify_kernel_name
+from utils.utils_analysis import (
+    NS_TO_MS,
+    CallTreeNode,
+    get_bw_scale_and_unit,
+    simplify_kernel_name,
+)
 from utils.utils_common import (
     METRIC_ID_RE,
     convert_metric_id_to_panel_info,
@@ -37,52 +42,6 @@ KERNEL_NAME_WRAP_WIDTH = 40
 def wrap_kernel_name(name: str) -> str:
     """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
     return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
-
-
-def _get_bw_scale_and_unit(value: float) -> tuple[float, str]:
-    """
-    Determine the appropriate scale and unit for a bandwidth value.
-
-    Args:
-        value: Bandwidth value in Bytes/s
-
-    Returns:
-        Tuple of (divisor, unit_string)
-    """
-    if value >= 1e12:
-        return 1e12, "TB/s"
-    elif value >= 1e9:
-        return 1e9, "GB/s"
-    elif value >= 1e6:
-        return 1e6, "MB/s"
-    elif value >= 1e3:
-        return 1e3, "KB/s"
-    else:
-        return 1.0, "B/s"
-
-
-def format_bw_human_readable(value: float, precision: int = 2) -> str:
-    """
-    Format bandwidth value from Bytes/s to human-readable format.
-
-    Supports TB/s, GB/s, MB/s, KB/s, and B/s units.
-
-    Args:
-        value: Bandwidth value in Bytes/s
-        precision: Number of decimal places
-
-    Returns:
-        Human-readable bandwidth string with appropriate unit
-    """
-    if value is None or pd.isna(value):
-        return "N/A"
-    try:
-        value = float(value)
-    except (ValueError, TypeError):
-        return str(value)
-
-    divisor, unit = _get_bw_scale_and_unit(value)
-    return f"{value / divisor:.{precision}f} {unit}"
 
 
 def format_bw_columns_human_readable(
@@ -135,7 +94,7 @@ def format_bw_columns_human_readable(
             continue
 
         # Get the scale and unit based on the primary value
-        divisor, unit = _get_bw_scale_and_unit(primary_value)
+        divisor, unit = get_bw_scale_and_unit(primary_value)
 
         # Scale all numeric bandwidth columns with the same divisor
         for col in value_columns:

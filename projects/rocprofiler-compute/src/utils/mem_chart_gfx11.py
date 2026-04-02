@@ -39,6 +39,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from utils.utils_analysis import format_bw_human_readable
+
 # Keys = ``metric:`` names under each ``metric_table`` in
 # ``analysis_configs/gfx1151/0300_Memory_Chart.yaml`` (tables 301–309), in panel order.
 # Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
@@ -238,49 +240,9 @@ def format_value(
         return f"{value:.{precision}f}%"
     elif unit in ("GB/s", "Bytes/s"):
         # Handle both legacy GB/s and new Bytes/s units
-        return format_bw_human_readable(value, unit)
+        return format_bw_human_readable(value, unit, precision)
     else:
         return f"{value:.{precision}f}{unit}"
-
-
-def format_bw_human_readable(
-    value: Union[int, float, str, None], unit: str = "Bytes/s", precision: int = 1
-) -> str:
-    """
-    Format bandwidth value to human-readable format (TB/s, GB/s, MB/s, KB/s).
-
-    Args:
-        value: Bandwidth value (in Bytes/s if unit='Bytes/s', or in GB/s if unit='GB/s')
-        unit: Input unit - 'Bytes/s' or 'GB/s' (legacy)
-        precision: Number of decimal places
-
-    Returns:
-        Human-readable bandwidth string with appropriate unit
-    """
-    if value is None:
-        return "N/A"
-    try:
-        value = float(value)
-    except (ValueError, TypeError):
-        return "N/A"
-
-    # Convert to Bytes/s first if needed
-    if unit == "GB/s":
-        bytes_per_sec = value * 1e9
-    else:
-        bytes_per_sec = value
-
-    # Convert to appropriate unit
-    if bytes_per_sec >= 1e12:
-        return f"{bytes_per_sec / 1e12:.{precision}f} TB/s"
-    elif bytes_per_sec >= 1e9:
-        return f"{bytes_per_sec / 1e9:.{precision}f} GB/s"
-    elif bytes_per_sec >= 1e6:
-        return f"{bytes_per_sec / 1e6:.{precision}f} MB/s"
-    elif bytes_per_sec >= 1e3:
-        return f"{bytes_per_sec / 1e3:.{precision}f} KB/s"
-    else:
-        return f"{bytes_per_sec:.{precision}f} B/s"
 
 
 def format_sci(value: Union[int, float, str, None], precision: int = 2) -> str:
@@ -308,24 +270,7 @@ def format_bw_gbps(value: Union[int, float, str, None], precision: int = 1) -> s
     Returns:
         Human-readable bandwidth string with appropriate unit
     """
-    if value is None:
-        return "N/A"
-    try:
-        value = float(value)
-    except (ValueError, TypeError):
-        return "N/A"
-
-    # value is in Bytes/s, convert to appropriate unit
-    if value >= 1e12:
-        return f"{value / 1e12:.{precision}f} TB/s"
-    elif value >= 1e9:
-        return f"{value / 1e9:.{precision}f} GB/s"
-    elif value >= 1e6:
-        return f"{value / 1e6:.{precision}f} MB/s"
-    elif value >= 1e3:
-        return f"{value / 1e3:.{precision}f} KB/s"
-    else:
-        return f"{value:.{precision}f} B/s"
+    return format_bw_human_readable(value, precision=precision)
 
 
 def get_metric(d: dict[str, Any], key: str, default: Any = None) -> Any:  # noqa: ANN401
