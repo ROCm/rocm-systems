@@ -48,6 +48,228 @@ from amdisa.gpuisa import (
 )
 from amdisa.isa_profile import IsaProfile
 
+
+def _fill_padding_gaps(
+    sorted_fields: list[MicrocodeField], bit_cnt: int
+) -> list[MicrocodeField]:
+    """Synthesize missing reserved/padding fields by detecting bit gaps.
+
+    XML spec versions 1.0.0 and 1.1.0 omit reserved/padding fields from
+    the MicrocodeFormat. This synthesizes them from gaps in the declared
+    bit offsets so that the generated C++ bitfield structs account for
+    every bit in the encoding layout.
+
+    Args:
+        sorted_fields: Fields sorted by bit_offset (ascending).
+        bit_cnt: Total bit width of the encoding.
+
+    Returns:
+        List of synthesized MicrocodeField padding entries (may be empty
+        if no gaps exist).
+    """
+    ucode_fields_bit_cnt = sum(f.bit_cnt for f in sorted_fields)
+    if ucode_fields_bit_cnt == bit_cnt:
+        return []
+    pads: list[MicrocodeField] = []
+    next_bit_off = 0
+    for f in sorted_fields:
+        if next_bit_off != int(f.bit_offset):
+            pad_bit_cnt = int(f.bit_offset) - next_bit_off
+            pad_name = f'pad_{next_bit_off}'
+            if pad_bit_cnt > 1:
+                pad_name += f'_{next_bit_off + pad_bit_cnt - 1}'
+            pads.append(MicrocodeField(pad_name, pad_bit_cnt, next_bit_off))
+        next_bit_off = int(f.bit_offset) + int(f.bit_cnt)
+    if next_bit_off < bit_cnt:
+        pad_bit_cnt = bit_cnt - next_bit_off
+        pad_name = f'pad_{next_bit_off}'
+        if pad_bit_cnt > 1:
+            pad_name += f'_{next_bit_off + pad_bit_cnt - 1}'
+        pads.append(MicrocodeField(pad_name, pad_bit_cnt, next_bit_off))
+    return pads
+
+
+def _parse_enc_id_masks(
+    enc_id_mask: str,
+    max_enc_bits: int,
+    enc_field_bit_cnt: int,
+    op_field_bit_cnt: int,
+) -> tuple[tuple[int, int], tuple[int, int], int]:
+    """Parse an encoding identifier mask into (flat_enc_mask, op_mask, dont_care_bits).
+
+    The encoding identifier mask is a binary string where '1' bits mark the
+    encoding field and '0' bits separate encoding from opcode. This function
+    derives the slice positions for the encoding field and opcode field, plus
+    the number of don't-care bits available in the primary decode table index.
+
+    Args:
+        enc_id_mask: Binary string identifier mask (e.g. '111111111000000000000000').
+        max_enc_bits: Maximum bits for the primary decode table index.
+        enc_field_bit_cnt: Bit width of the encoding identifier field.
+        op_field_bit_cnt: Bit width of the opcode field.
+
+    Returns:
+        Tuple of (flat_enc_mask, op_mask, dont_care_bits) where each mask is
+        a (start, end) slice pair into the identifier string.
+    """
+    bit_masks = [
+        (x.start(), x.end()) for x in re.finditer(r'1+', enc_id_mask)
+    ]
+    flat_enc_mask = bit_masks[0]
+    if len(bit_masks) == 1:
+        op_mask = (
+            bit_masks[0][0] + enc_field_bit_cnt,
+            bit_masks[0][0] + enc_field_bit_cnt + op_field_bit_cnt,
+        )
+        if (flat_enc_mask[1] - flat_enc_mask[0]) > max_enc_bits:
+            flat_enc_mask = (
+                flat_enc_mask[0],
+                flat_enc_mask[0] + max_enc_bits,
+            )
+    else:
+        op_mask = (
+            bit_masks[1][0],
+            bit_masks[1][0] + op_field_bit_cnt,
+        )
+    dont_care_bits = max_enc_bits - (flat_enc_mask[1] - flat_enc_mask[0])
+    return flat_enc_mask, op_mask, dont_care_bits
+
+
+def _collapse_register_ranges(
+    pairs: list,
+    opnd_type_name: str,
+    flt_name_map: dict,
+) -> tuple[list[tuple[str, str]], list[OperandNamePattern]]:
+    """Process predefined value pairs into (enum_name, value) list and name patterns.
+
+    Collapses adjacent register entries (v0–v255, s0–s103, etc.) into
+    range sentinels (_MIN / _MAX), collects integer range patterns, float
+    constant names, and literal/named operand patterns.
+
+    Args:
+        pairs: List of XML elements with Name and Value children.
+        opnd_type_name: The operand type enum name prefix (e.g. 'OperandType').
+        flt_name_map: Dict mapping float values to enum name suffixes.
+
+    Returns:
+        Tuple of (predef_vals_list, name_patterns).
+    """
+    predef_vals_list: list[tuple[str, str]] = []
+    name_patterns: list[OperandNamePattern] = []
+    first = True
+    last = False
+    current_range_prefix = ''
+    current_range_min_enum = ''
+    current_range_max_idx = -1
+    current_int_min_enum = ''
+
+    for pair_idx, predef_val_pair in enumerate(pairs):
+        predef_name = xs.get_node_text(predef_val_pair.find(xs.NAME))
+        predef_val = xs.get_node_text(predef_val_pair.find(xs.VALUE))
+        original_name = predef_name
+        reg_match = re.match(r'^\s*(v|s|ttmp|acc)([0-9]+)$', predef_name)
+        if reg_match:
+            prefix = reg_match.group(1)
+            reg_idx = int(reg_match.group(2))
+            label_map = {
+                'v': 'VGPR', 's': 'SGPR',
+                'ttmp': 'TTMP', 'acc': 'ACC',
+            }
+            label = label_map[prefix]
+            if prefix != current_range_prefix:
+                first = True
+            if first:
+                first = False
+                predef_name = f'{opnd_type_name}_{label}_MIN'
+                current_range_prefix = prefix
+                current_range_min_enum = predef_name
+                current_range_max_idx = reg_idx
+            else:
+                if reg_idx > current_range_max_idx:
+                    current_range_max_idx = reg_idx
+                next_pair = None
+                if pair_idx + 1 < len(pairs):
+                    next_name = xs.get_node_text(
+                        pairs[pair_idx + 1].find(xs.NAME)
+                    )
+                    next_match = re.match(
+                        r'^\s*(v|s|ttmp|acc)([0-9]+)$', next_name
+                    )
+                    if next_match:
+                        next_pair = next_match.group(1)
+                if next_pair != prefix:
+                    last = True
+                    predef_name = f'{opnd_type_name}_{label}_MAX'
+                    name_patterns.append(OperandNamePattern(
+                        OperandNamePattern.REG_RANGE,
+                        prefix=current_range_prefix,
+                        min_enum=current_range_min_enum,
+                        max_enum=predef_name,
+                    ))
+                else:
+                    continue
+        else:
+            try:
+                int_val = int(predef_name)
+                if int_val < 0:
+                    if int_val == -1:
+                        predef_name = opnd_type_name + '_NEG_INT_MIN'
+                        current_int_min_enum = predef_name
+                    elif int_val == -16:
+                        predef_name = opnd_type_name + '_NEG_INT_MAX'
+                        name_patterns.append(OperandNamePattern(
+                            OperandNamePattern.NEG_INT,
+                            min_enum=current_int_min_enum,
+                            max_enum=predef_name,
+                        ))
+                    else:
+                        continue
+                else:
+                    if int_val == 0:
+                        predef_name = opnd_type_name + '_POS_INT_MIN'
+                        current_int_min_enum = predef_name
+                    elif int_val == 64:
+                        predef_name = opnd_type_name + '_POS_INT_MAX'
+                        name_patterns.append(OperandNamePattern(
+                            OperandNamePattern.POS_INT,
+                            min_enum=current_int_min_enum,
+                            max_enum=predef_name,
+                        ))
+                    else:
+                        continue
+            except ValueError:
+                try:
+                    flt_val = float(predef_name)
+                    predef_name = (
+                        f'{opnd_type_name}_FLOAT_'
+                        f'{flt_name_map[flt_val]}'
+                    )
+                    name_patterns.append(OperandNamePattern(
+                        OperandNamePattern.FLOAT_CONST,
+                        operand_name=original_name,
+                        enum_name=predef_name,
+                    ))
+                except ValueError:
+                    predef_name = f'{opnd_type_name}_{predef_name.upper()}'
+                    if original_name.lower() == 'src_literal':
+                        name_patterns.append(OperandNamePattern(
+                            OperandNamePattern.LITERAL,
+                            enum_name=predef_name,
+                        ))
+                    else:
+                        name_patterns.append(OperandNamePattern(
+                            OperandNamePattern.NAMED,
+                            operand_name=original_name,
+                            enum_name=predef_name,
+                        ))
+        if last:
+            first = True
+            last = False
+        predef_vals_list.append((predef_name, predef_val))
+
+    return predef_vals_list, name_patterns
+
+
 class Parser:
     """Parses a machine-readable AMD GPU ISA specification file.
 
@@ -163,11 +385,21 @@ class Parser:
     def parse_encoding_conditions(
         self, conds_node: elem_tree.Element
     ) -> list[tuple[str, str]]:
-        """Parse all encoding conditions under the given node."""
-        return [
-            self.parse_condition(cond_node)
-            for cond_node in conds_node.findall(xs.ENCODING_COND)
-        ]
+        """Parse all encoding conditions under the given node.
+
+        Duplicate condition names are silently dropped — the first
+        occurrence wins. This handles a CDNA3 XML bug where ENC_FLAT
+        repeats three identical ``default`` EncodingCondition blocks
+        (P2 workaround).
+        """
+        seen: set[str] = set()
+        result: list[tuple[str, str]] = []
+        for cond_node in conds_node.findall(xs.ENCODING_COND):
+            name, expr = self.parse_condition(cond_node)
+            if name not in seen:
+                seen.add(name)
+                result.append((name, expr))
+        return result
 
     def parse_ucode_bitmap(
         self, enc_node: elem_tree.Element, bit_cnt: int
@@ -186,10 +418,13 @@ class Parser:
         enc_field_bit_cnt: int | None = None
         op_field_bit_cnt: int | None = None
         opm_field_bit_cnt = 0
+        enc_name_raw = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
+        renames = self.profile.field_renames(enc_name_raw.upper())
         for field in enc_node.findall(
             f'./{xs.UCODE_FMT}/{xs.BITMAP}/{xs.FIELD}'
         ):
             field_name = xs.get_node_text(field.find(xs.FIELD_NAME)).lower()
+            field_name = renames.get(field_name, field_name)
             field_bit_cnt = int(xs.get_node_text(
                 field.find(f'{xs.BIT_LAYOUT}/{xs.RANGE}/{xs.BIT_CNT}')
             ))
@@ -208,35 +443,10 @@ class Parser:
         ucode_fields.sort(key=lambda x: x.bit_offset)
 
         # XML bug: versions 1.0.0 and 1.1.0 omit reserved/padding fields
-        # from the MicrocodeFormat. We synthesize them by detecting gaps
-        # between declared fields. The generated C++ bitfield structs need
-        # every bit accounted for to match the hardware encoding layout.
-        ucode_fields_bit_cnt = sum(f.bit_cnt for f in ucode_fields)
-        if ucode_fields_bit_cnt != bit_cnt:
-            next_bit_off = 0
-            ucode_pads = []
-            for ucode_field in ucode_fields:
-                if next_bit_off != int(ucode_field.bit_offset):
-                    pad_bit_cnt = int(ucode_field.bit_offset) - next_bit_off
-                    pad_name = f'pad_{next_bit_off}'
-                    if pad_bit_cnt > 1:
-                        pad_name += f'_{next_bit_off + pad_bit_cnt - 1}'
-                    ucode_pads.append(
-                        MicrocodeField(pad_name, pad_bit_cnt, next_bit_off)
-                    )
-                next_bit_off = (
-                    int(ucode_field.bit_offset) + int(ucode_field.bit_cnt)
-                )
-            # Also check for a trailing gap after the last declared field.
-            if next_bit_off < bit_cnt:
-                pad_bit_cnt = bit_cnt - next_bit_off
-                pad_name = f'pad_{next_bit_off}'
-                if pad_bit_cnt > 1:
-                    pad_name += f'_{next_bit_off + pad_bit_cnt - 1}'
-                ucode_pads.append(
-                    MicrocodeField(pad_name, pad_bit_cnt, next_bit_off)
-                )
-            ucode_fields.extend(ucode_pads)
+        # from the MicrocodeFormat. Synthesize them from gaps in the declared
+        # bit offsets so that the generated C++ bitfield structs account for
+        # every bit in the encoding layout.
+        ucode_fields.extend(_fill_padding_gaps(ucode_fields, bit_cnt))
 
         enc_name = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
         if enc_field_bit_cnt is None:
@@ -274,38 +484,9 @@ class Parser:
         )
 
         enc_id_mask = xs.get_node_text(enc_node.find(xs.ENCODING_IDENTIFIER_MASK))
-        bit_masks = [
-            (x.start(), x.end()) for x in re.finditer(r'1+', enc_id_mask)
-        ]
-
-        # The encoding identifier mask is a binary string where '1' bits
-        # mark the encoding field and '0' bits separate encoding from opcode.
-        # Most encodings have a single contiguous run of '1' bits (the
-        # encoding field followed by the opcode field). Some encodings
-        # (e.g., VOP3 variants) have a split mask with two separate runs
-        # of '1' bits, the first run is the encoding field and the second
-        # is the opcode field.
-        flat_enc_mask = bit_masks[0]
-        if len(bit_masks) == 1:
-            op_mask = (
-                bit_masks[0][0] + inst_enc.enc_field_bit_cnt,
-                bit_masks[0][0]
-                + inst_enc.enc_field_bit_cnt
-                + inst_enc.op_field_bit_cnt,
-            )
-            if (flat_enc_mask[1] - flat_enc_mask[0]) > max_enc_bits:
-                flat_enc_mask = (
-                    flat_enc_mask[0],
-                    flat_enc_mask[0] + max_enc_bits,
-                )
-        else:
-            op_mask = (
-                bit_masks[1][0],
-                bit_masks[1][0] + inst_enc.op_field_bit_cnt,
-            )
-
-        dont_care_bits = max_enc_bits - (
-            flat_enc_mask[1] - flat_enc_mask[0]
+        flat_enc_mask, op_mask, dont_care_bits = _parse_enc_id_masks(
+            enc_id_mask, max_enc_bits,
+            inst_enc.enc_field_bit_cnt, inst_enc.op_field_bit_cnt,
         )
         effective_op_bits = (
             inst_enc.op_field_bit_cnt + inst_enc.opm_field_bit_cnt
@@ -632,142 +813,10 @@ class Parser:
                 f'.//{xs.OPERAND_PREDEFINED_VALS}'
             )
             if opnd_predefined_val is not None:
-                predef_vals_list: list[tuple[str, str]] = []
-                name_patterns: list[OperandNamePattern] = []
-                first = True
-                last = False
-                current_range_prefix = ''
-                current_range_min_enum = ''
-                current_range_max_idx = -1
-                current_int_min_enum = ''
                 pairs = list(opnd_predefined_val)
-                for pair_idx, predef_val_pair in enumerate(pairs):
-                    predef_name = xs.get_node_text(
-                        predef_val_pair.find(xs.NAME)
-                    )
-                    predef_val = xs.get_node_text(
-                        predef_val_pair.find(xs.VALUE)
-                    )
-                    original_name = predef_name
-                    reg_match = re.match(
-                        r'^\s*(v|s|ttmp|acc)([0-9]+)$', predef_name
-                    )
-                    if reg_match:
-                        prefix = reg_match.group(1)
-                        reg_idx = int(reg_match.group(2))
-                        label_map = {
-                            'v': 'VGPR', 's': 'SGPR',
-                            'ttmp': 'TTMP', 'acc': 'ACC',
-                        }
-                        label = label_map[prefix]
-                        # Reset state when transitioning between register
-                        # prefixes so that min/max markers are emitted
-                        # correctly for each category.
-                        if prefix != current_range_prefix:
-                            first = True
-                        if first:
-                            first = False
-                            predef_name = f'{opnd_type_name}_{label}_MIN'
-                            current_range_prefix = prefix
-                            current_range_min_enum = predef_name
-                            current_range_max_idx = reg_idx
-                        else:
-                            if reg_idx > current_range_max_idx:
-                                current_range_max_idx = reg_idx
-                            # Peek ahead: emit MAX if the next entry is not
-                            # the same register prefix (or this is the last).
-                            next_pair = None
-                            if pair_idx + 1 < len(pairs):
-                                next_name = xs.get_node_text(
-                                    pairs[pair_idx + 1].find(xs.NAME)
-                                )
-                                next_match = re.match(
-                                    r'^\s*(v|s|ttmp|acc)([0-9]+)$',
-                                    next_name,
-                                )
-                                if next_match:
-                                    next_pair = next_match.group(1)
-                            if next_pair != prefix:
-                                last = True
-                                predef_name = (
-                                    f'{opnd_type_name}_{label}_MAX'
-                                )
-                                name_patterns.append(OperandNamePattern(
-                                    OperandNamePattern.REG_RANGE,
-                                    prefix=current_range_prefix,
-                                    min_enum=current_range_min_enum,
-                                    max_enum=predef_name,
-                                ))
-                            else:
-                                continue
-                    else:
-                        try:
-                            int_val = int(predef_name)
-                            if int_val < 0:
-                                if int_val == -1:
-                                    predef_name = (
-                                        opnd_type_name + '_NEG_INT_MIN'
-                                    )
-                                    current_int_min_enum = predef_name
-                                elif int_val == -16:
-                                    predef_name = (
-                                        opnd_type_name + '_NEG_INT_MAX'
-                                    )
-                                    name_patterns.append(OperandNamePattern(
-                                        OperandNamePattern.NEG_INT,
-                                        min_enum=current_int_min_enum,
-                                        max_enum=predef_name,
-                                    ))
-                                else:
-                                    continue
-                            else:
-                                if int_val == 0:
-                                    predef_name = (
-                                        opnd_type_name + '_POS_INT_MIN'
-                                    )
-                                    current_int_min_enum = predef_name
-                                elif int_val == 64:
-                                    predef_name = (
-                                        opnd_type_name + '_POS_INT_MAX'
-                                    )
-                                    name_patterns.append(OperandNamePattern(
-                                        OperandNamePattern.POS_INT,
-                                        min_enum=current_int_min_enum,
-                                        max_enum=predef_name,
-                                    ))
-                                else:
-                                    continue
-                        except ValueError:
-                            try:
-                                flt_val = float(predef_name)
-                                predef_name = (
-                                    f'{opnd_type_name}_FLOAT_'
-                                    f'{self.profile.flt_name_map[flt_val]}'
-                                )
-                                name_patterns.append(OperandNamePattern(
-                                    OperandNamePattern.FLOAT_CONST,
-                                    operand_name=original_name,
-                                    enum_name=predef_name,
-                                ))
-                            except ValueError:
-                                predef_name = (
-                                    f'{opnd_type_name}_{predef_name.upper()}'
-                                )
-                                if original_name.lower() == 'src_literal':
-                                    name_patterns.append(OperandNamePattern(
-                                        OperandNamePattern.LITERAL,
-                                        enum_name=predef_name,
-                                    ))
-                                else:
-                                    name_patterns.append(OperandNamePattern(
-                                        OperandNamePattern.NAMED,
-                                        operand_name=original_name,
-                                        enum_name=predef_name,
-                                    ))
-                    if last:
-                        first = True
-                        last = False
-                    predef_vals_list.append((predef_name, predef_val))
+                predef_vals_list, name_patterns = _collapse_register_ranges(
+                    pairs, opnd_type_name, self.profile.flt_name_map
+                )
                 self.isa_spec.opnd_selectors.append(
                     OperandSelector(
                         opnd_type_name, predef_vals_list, name_patterns
