@@ -124,6 +124,11 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
   // retry barrier packet is inserted.
   assert(!IsPendingRetryPoint(next_packet_) &&
          "Packet intercept error: initial retry index is incompatible with IsPendingRetryPoint.\n");
+  // Save HW pointers BEFORE modifying amd_queue_ fields.
+  // These are used by Submit() to access the real HW ring buffer and doorbell.
+  hw_ring_buf_ = wrapped->amd_queue_.hsa_queue.base_address;
+  hw_doorbell_ = wrapped->amd_queue_.hsa_queue.doorbell_signal;
+
   buffer_ = SharedArray<AqlPacket, 4096>(wrapped->amd_queue_.hsa_queue.size);
   amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
 

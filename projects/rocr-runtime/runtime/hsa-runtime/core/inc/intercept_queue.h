@@ -288,6 +288,20 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
  private:
+  // HW ring buffer address, saved BEFORE the base_address swap.
+  // Used by Submit() to write packets to the HW queue.
+  // For creation-time InterceptQueue: set from wrapped->amd_queue_.hsa_queue.base_address
+  //   at construction (before any swap).
+  // For retrofit InterceptQueue: set from the original base_address before swap.
+  void* hw_ring_buf_ = nullptr;
+
+  // HW doorbell signal, saved BEFORE the doorbell_signal swap.
+  // Used by Submit() to ring the HW doorbell after writing packets.
+  // For creation-time InterceptQueue: set from wrapped->amd_queue_.hsa_queue.doorbell_signal
+  //   at construction.
+  // For retrofit InterceptQueue: set from the original doorbell_signal before swap.
+  hsa_signal_t hw_doorbell_ = {};
+
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;
     return rtti_id_;
