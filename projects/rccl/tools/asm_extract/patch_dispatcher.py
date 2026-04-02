@@ -50,6 +50,11 @@ def patch_abs_symbols(lines, max_res):
             result.append(f'{m.group(1)}.numbered_sgpr, {max_res["next_free_sgpr"]}\n')
             continue
 
+        m = re.match(r'(\s*\.set\s+\S+)\.(num_named_barrier),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.num_named_barrier, 0\n')
+            continue
+
         m = re.match(r'(\s*\.set\s+\S+)\.(private_seg_size),\s*(.*)', line)
         if m:
             result.append(f'{m.group(1)}.private_seg_size, {max_res["private_segment_fixed_size"]}\n')

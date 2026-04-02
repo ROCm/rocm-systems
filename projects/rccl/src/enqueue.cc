@@ -226,6 +226,7 @@ static void addWorkBatchToPlan(
     batch->nextExtends = 0;
     batch->workType = (uint32_t)workType;
     batch->funcId = devFuncId;
+    INFO(NCCL_INIT, "addWorkBatchToPlan: channelId=%d workType=%d devFuncId=%d", channelId, (int)workType, devFuncId);
     batch->offsetBase = workOffset;
     batch->offsetBitset = 0;
     offset = 0;
