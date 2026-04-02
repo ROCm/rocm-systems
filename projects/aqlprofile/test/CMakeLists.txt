@@ -41,6 +41,7 @@ target_include_directories ( ${EXE_NAME}
     ${ROCM_ROOT_DIR}/include
     ${TEST_DIR}/parser/
     ${TEST_DIR}/../src/core/include
+    ${TEST_DIR}/../src
 )
 target_link_libraries( ${EXE_NAME}
   PRIVATE
