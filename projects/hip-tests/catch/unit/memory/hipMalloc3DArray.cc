@@ -154,7 +154,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, usho
   const unsigned int flag = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore);
 #endif
   if (flag == hipArraySurfaceLoadStore) {
-    HipTest::HIP_SKIP_TEST("Skipped: tracked issue EXSWCPHIPT-58.");
+    HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-58.");
     return;
   }
   CAPTURE(flag);

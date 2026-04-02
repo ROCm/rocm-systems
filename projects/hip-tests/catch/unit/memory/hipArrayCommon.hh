@@ -86,7 +86,7 @@ struct Sizes {
         return;
       }
       default: {
-        HipTest::HIP_SKIP_TEST("Skipped: array flag not supported.");
+        HipTest::HIP_SKIP_TEST("array flag not supported.");
         return;
       }
     }

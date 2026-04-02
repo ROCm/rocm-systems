@@ -563,7 +563,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_MemAdvise_SetGet) {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   if (prop.concurrentManagedAccess == 0) {
     HipTest::HIP_SKIP_TEST(
-        "Skipped: concurrent managed access is not supported for this test.");
+        "concurrent managed access is not supported for this test.");
     return;
   }
   int numDevices = HipTest::getDeviceCount();

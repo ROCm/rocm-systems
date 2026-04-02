@@ -198,7 +198,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci) {
     pclose(fpipe);
 
     if (lspciCheck == nullptr) {
-      HipTest::HIP_SKIP_TEST("Skipped: lspci is not available on this system.");
+      HipTest::HIP_SKIP_TEST("lspci is not available on this system.");
       return;
     }
   }

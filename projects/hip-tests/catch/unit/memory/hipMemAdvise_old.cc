@@ -324,7 +324,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
 
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   if (setenv("HSA_XNACK", "1", 1) != 0) {
-    HipTest::HIP_SKIP_TEST("Skipped: cannot set XNACK via environment.");
+    HipTest::HIP_SKIP_TEST("cannot set XNACK via environment.");
     return;
   }
 

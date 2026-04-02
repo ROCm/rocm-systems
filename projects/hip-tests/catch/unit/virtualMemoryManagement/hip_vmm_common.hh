@@ -36,7 +36,7 @@
     hipDeviceAttribute_t attr = hipDeviceAttributeDmaBufSupported;                                 \
     HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
     if (value == 0) {                                                                              \
-      HipTest::HIP_SKIP_TEST("Skipped: DMA-BUF is not supported for this test on this device.");                  \
+      HipTest::HIP_SKIP_TEST("DMA-BUF is not supported for this test on this device.");                  \
       return;                                                                                      \
     }                                                                                              \
   }

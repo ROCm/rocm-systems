@@ -91,7 +91,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, usho
 #else
   desc.Flags = GENERATE(0, hipArraySurfaceLoadStore);
   if (desc.Flags == hipArraySurfaceLoadStore) {
-    HipTest::HIP_SKIP_TEST("Skipped: tracked issue EXSWCPHIPT-58.");
+    HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-58.");
     return;
   }
 #endif

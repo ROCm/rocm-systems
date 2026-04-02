@@ -221,7 +221,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
   char* host_ptr = nullptr;
   const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
   if (total_ram_mb == 0) {
-    HipTest::HIP_SKIP_TEST("Skipped: total system memory could not be queried.");
+    HipTest::HIP_SKIP_TEST("total system memory could not be queried.");
     return;
   }
 

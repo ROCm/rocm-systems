@@ -465,64 +465,64 @@ inline bool areWarpMatchFunctionsSupported() {
  */
 namespace SkipReason {
 inline constexpr char const kPeerAccessUnavailable[] =
-    "Skipped: peer access is not available between devices.";
+    "peer access is not available between devices.";
 inline constexpr char const kFewerThanTwoGpus[] =
-    "Skipped: fewer than two GPUs (numDevices < 2).";
+    "fewer than two GPUs (numDevices < 2).";
 inline constexpr char const kMemoryPoolUnsupported[] =
-    "Skipped: runtime does not support memory pools.";
+    "runtime does not support memory pools.";
 inline constexpr char const kHostPinnedMemoryUnsupported[] =
-    "Skipped: host pinned memory mapping is not supported.";
+    "host pinned memory mapping is not supported.";
 inline constexpr char const kManagedMemoryUnsupported[] =
-    "Skipped: GPU does not support managed memory.";
+    "GPU does not support managed memory.";
 inline constexpr char const kPageableMemoryAccessUnsupported[] =
-    "Skipped: pageable access unsupported; hipMallocManaged may host-allocate (OOM risk).";
-inline constexpr char const kNoGpuDevice[] = "Skipped: no GPU device available.";
+    "pageable access unsupported; hipMallocManaged may host-allocate (OOM risk).";
+inline constexpr char const kNoGpuDevice[] = "no GPU device available.";
 inline constexpr char const kCoherentHostAllocFailed[] =
-    "Skipped: coherent host allocation failed (SVM may be unsupported).";
+    "coherent host allocation failed (SVM may be unsupported).";
 inline constexpr char const kMipmappedArraysUnsupported[] =
-    "Skipped: mipmapped arrays are not supported on this device or configuration.";
+    "mipmapped arrays are not supported on this device or configuration.";
 inline constexpr char const kCooperativeLaunchUnsupported[] =
-    "Skipped: cooperative launch is not supported.";
+    "cooperative launch is not supported.";
 inline constexpr char const kPcieAtomicUnsupported[] =
-    "Skipped: PCIe atomics are not supported on this device.";
+    "PCIe atomics are not supported on this device.";
 inline constexpr char const kStreamWaitValueUnsupported[] =
-    "Skipped: hipStreamWaitValue is not supported on this device.";
+    "hipStreamWaitValue is not supported on this device.";
 inline constexpr char const kStreamPriorityRangeUnsupported[] =
-    "Skipped: stream priority range is not supported on this device.";
+    "stream priority range is not supported on this device.";
 inline constexpr char const kWarpShuffleUnsupported[] =
-    "Skipped: warp shuffle is not supported on this device.";
+    "warp shuffle is not supported on this device.";
 inline constexpr char const kWarpVoteUnsupported[] =
-    "Skipped: warp vote is not supported on this device.";
+    "warp vote is not supported on this device.";
 inline constexpr char const kVmmUnsupported[] =
-    "Skipped: virtual memory management (VMM) is not supported.";
+    "virtual memory management (VMM) is not supported.";
 inline constexpr char const kFineGrainHwUnsupported[] =
-    "Skipped: fine-grained memory / atomic hardware support is not available on this device.";
+    "fine-grained memory / atomic hardware support is not available on this device.";
 inline constexpr char const kTextureImageUnsupported[] =
-    "Skipped: texture/image is not supported on this device.";
+    "texture/image is not supported on this device.";
 inline constexpr char const kApiUnsupportedOnNvidia[] =
-    "Skipped: API is not supported on NVIDIA; test skipped.";
+    "API is not supported on NVIDIA.";
 inline constexpr char const kTextureGatherUnsupportedAmd[] =
-    "Skipped: texture gather arrays are not supported on AMD backend.";
-inline constexpr char const kGlewInitFailed[] = "Skipped: GLEW initialization failed.";
+    "texture gather arrays are not supported on AMD backend.";
+inline constexpr char const kGlewInitFailed[] = "GLEW initialization failed.";
 inline constexpr char const kAssertionsDisabled[] =
-    "Skipped: assertions are disabled in this build.";
+    "assertions are disabled in this build.";
 inline constexpr char const kConcurrentKernelExecutionUnsupported[] =
-    "Skipped: concurrent kernel execution is not supported.";
+    "concurrent kernel execution is not supported.";
 inline constexpr char const kManagedNoConcurrentAccess[] =
-    "Skipped: test targets devices without concurrent managed access.";
+    "test targets devices without concurrent managed access.";
 inline constexpr char const kHostNumaUnavailable[] =
-    "Skipped: host NUMA is not available.";
+    "host NUMA is not available.";
 inline constexpr char const kGpuXnackNotEnabled[] =
-    "Skipped: GPU is not XNACK-enabled.";
+    "GPU is not XNACK-enabled.";
 inline constexpr char const kMemcpyPeerSameSrcDstDevice[] =
-    "Skipped: source and destination device are the same.";
+    "source and destination device are the same.";
 inline constexpr char const kRequiredDeviceCountNotMet[] =
-    "Skipped: required number of devices is not available.";
+    "required number of devices is not available.";
 inline constexpr char const kNotEnoughFreeGpuMemory[] =
-    "Skipped: not enough free GPU memory";
+    "not enough free GPU memory";
 inline constexpr char const kNotEnoughFreeHostMemory[] =
-    "Skipped: not enough free host memory";
-inline constexpr char const kRequiresLinux[] = "Skipped: this test requires Linux.";
+    "not enough free host memory";
+inline constexpr char const kRequiresLinux[] = "this test requires Linux.";
 }  // namespace SkipReason
 
 /**
@@ -715,7 +715,7 @@ class BlockingContext {
 // skip the current test if they are not available.
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
   if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
-    HipTest::HIP_SKIP_TEST("Skipped: warp match functions are not supported on this device.");      \
+    HipTest::HIP_SKIP_TEST("warp match functions are not supported on this device.");      \
     return;                                                                                        \
   }
 

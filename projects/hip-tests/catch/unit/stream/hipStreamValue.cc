@@ -71,7 +71,7 @@ bool streamWaitValueSupported() {
     auto getAttributeError = hipDeviceGetAttribute(
         &waitValueSupport, hipDeviceAttributeCanUseStreamWaitValue, device_id);
     if (getAttributeError != hipSuccess) {
-      HipTest::HIP_SKIP_TEST("Skipped: required stream attribute is not supported.");
+      HipTest::HIP_SKIP_TEST("required stream attribute is not supported.");
       return false;
     }
     if (waitValueSupport == 1) return true;

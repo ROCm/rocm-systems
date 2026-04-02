@@ -85,7 +85,7 @@ static void runTest(const int width, const float offsetX = 0) {
     free(hData);
     HIP_CHECK(hipFree(hipBuff));
     HipTest::HIP_SKIP_TEST(
-        "Skipped: sRGB is not supported for hipResourceTypeLinear on AMD devices.");
+        "sRGB is not supported for hipResourceTypeLinear on AMD devices.");
     return;
   }
 #endif

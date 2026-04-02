@@ -83,7 +83,7 @@ static void GlutError(const char *fmt, va_list ap)
 
     // Mark this test as skipped because this error could be
     // due to system doesn't have display connected, e.g: Jenkins CI machine
-    HipTest::HIP_SKIP_TEST("Skipped: GLUT initialization failed.");
+    HipTest::HIP_SKIP_TEST("GLUT initialization failed.");
 
     glutExit();
     exit(1);
