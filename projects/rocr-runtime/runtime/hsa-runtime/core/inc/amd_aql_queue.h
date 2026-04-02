@@ -316,7 +316,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   enum { ERROR_HANDLER_DONE = 1, ERROR_HANDLER_TERMINATE = 2, ERROR_HANDLER_SCRATCH_RETRY = 4 };
 
   // Queue currently suspended or scheduled
-  bool suspended_;
+  std::atomic<bool> suspended_;
 
   // Thunk dispatch and wavefront scheduling priority
   HSA::hsa_amd_queue_priority_internal_t priority_;
