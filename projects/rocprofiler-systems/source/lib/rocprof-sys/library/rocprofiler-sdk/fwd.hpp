@@ -24,6 +24,7 @@
 
 #include "common/synchronized.hpp"
 #include "core/agent_manager.hpp"
+#include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -123,7 +124,7 @@ using backtrace_operation_map_t =
 struct client_data
 {
     static constexpr size_t num_buffers  = 5;
-    static constexpr size_t num_contexts = 2;
+    static constexpr size_t num_contexts = 4;
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
@@ -137,6 +138,8 @@ struct client_data
     rocprofiler_client_finalize_t             client_fini               = nullptr;
     rocprofiler_context_id_t                  primary_ctx               = { 0 };
     rocprofiler_context_id_t                  counter_ctx               = { 0 };
+    rocprofiler_context_id_t                  code_object_ctx           = { 0 };
+    rocprofiler_context_id_t                  control_ctx               = { 0 };
     rocprofiler_buffer_id_t                   kernel_dispatch_buffer    = { 0 };
     rocprofiler_buffer_id_t                   scratch_memory_buffer     = { 0 };
     rocprofiler_buffer_id_t                   memory_copy_buffer        = { 0 };
@@ -157,7 +160,10 @@ struct client_data
     void                        initialize();
     void                        initialize_event_info();
     void                        set_agents();
-    context_id_vec_t            get_contexts() const;
+    context_id_vec_t            get_all_contexts() const;
+    context_id_vec_t            get_main_contexts() const;
+    rocprofiler_context_id_t    get_control_context() const;
+    rocprofiler_context_id_t    get_code_obj_context() const;
     buffer_id_vec_t             get_buffers() const;
     const rocprofsys_agent_t*   get_agent(rocprofiler_agent_id_t _id) const;
     const tool_agent*           get_gpu_tool_agent(rocprofiler_agent_id_t id) const;
@@ -169,12 +175,30 @@ struct client_data
 };
 
 inline client_data::context_id_vec_t
-client_data::get_contexts() const
+client_data::get_all_contexts() const
+{
+    return context_id_vec_t{ primary_ctx, counter_ctx, code_object_ctx, control_ctx };
+}
+
+inline client_data::context_id_vec_t
+client_data::get_main_contexts() const
 {
     return context_id_vec_t{
         primary_ctx,
         counter_ctx,
     };
+}
+
+inline rocprofiler_context_id_t
+client_data::get_control_context() const
+{
+    return control_ctx;
+}
+
+inline rocprofiler_context_id_t
+client_data::get_code_obj_context() const
+{
+    return code_object_ctx;
 }
 
 inline client_data::buffer_id_vec_t

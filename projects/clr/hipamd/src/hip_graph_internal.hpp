@@ -1252,7 +1252,7 @@ class GraphKernelNode : public GraphNode {
 
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
     hipFunction_t func = getFunc(kernelParams_, dev_id_);
-    hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
+    amd::Kernel* kernel = hip::asKernel(func);
     std::string label;
     char buffer[4096];
     if (flag == hipGraphDebugDotFlagsVerbose) {
@@ -1261,7 +1261,7 @@ class GraphKernelNode : public GraphNode {
               "handle | func handle} | {%p | %p}}\n| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} | {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
-              label_, GetID(), function->name().c_str(), kernelParams_.gridDim.x,
+              label_, GetID(), kernel->name().c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z, kernelParams_.blockDim.x,
               kernelParams_.blockDim.y, kernelParams_.blockDim.z,
               globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
@@ -1277,7 +1277,7 @@ class GraphKernelNode : public GraphNode {
               "| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} |\n| {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
-              label_, GetID(), function->name().c_str(), kernelAttr_.accessPolicyWindow.base_ptr,
+              label_, GetID(), kernel->name().c_str(), kernelAttr_.accessPolicyWindow.base_ptr,
               kernelAttr_.accessPolicyWindow.num_bytes, kernelAttr_.accessPolicyWindow.hitRatio,
               kernelAttr_.accessPolicyWindow.hitProp, kernelAttr_.accessPolicyWindow.missProp,
               kernelAttr_.cooperative, kernelAttr_.priority);
@@ -1285,14 +1285,14 @@ class GraphKernelNode : public GraphNode {
     }
     else if (flag == hipGraphDebugDotFlagsKernelNodeParams) {
       sprintf(buffer, "%d\n%s\n\\<\\<\\<(%u,%u,%u),(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>",
-              GetID(), function->name().c_str(), kernelParams_.gridDim.x,
+              GetID(), kernel->name().c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z,
               kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
               globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
               kernelParams_.sharedMemBytes);
       label = buffer;
     } else {
-      label = std::to_string(GetID()) + "\n" + function->name() + "\n";
+      label = std::to_string(GetID()) + "\n" + kernel->name() + "\n";
     }
     return label;
   }
@@ -1324,8 +1324,7 @@ class GraphKernelNode : public GraphNode {
     if (!func) {
       return hipErrorInvalidDeviceFunction;
     }
-    hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-    amd::Kernel* kernel = function->kernel();
+    amd::Kernel* kernel = hip::asKernel(func);
     if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
       auto device = g_devices[dev_id_]->devices()[0];
       device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(*device));

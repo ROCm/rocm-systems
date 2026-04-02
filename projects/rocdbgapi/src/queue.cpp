@@ -32,8 +32,8 @@
 #include "utils.h"
 #include "wave.h"
 
-#include <hsa/amd_hsa_queue.h>
-#include <hsa/hsa.h>
+#include "hsa/amd_hsa_queue.h"
+#include "hsa/hsa.h"
 
 #include <array>
 #include <cinttypes>

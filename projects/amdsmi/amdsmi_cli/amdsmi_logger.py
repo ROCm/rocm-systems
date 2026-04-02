@@ -318,7 +318,7 @@ class AMDSMILogger:
         # First Capitalize all keys in the json object
         capitalized_json = self._capitalize_keys(json_object)
 
-        # Increase tabbing for device arguments by pulling them out of the main dictionary and assiging them to an empty string
+        # Increase tabbing for device arguments by pulling them out of the main dictionary and assigning them to an empty string
         tabbed_dictionary = {}
         for key, value in capitalized_json.items():
             if key not in ["GPU", "CPU", "CORE", "BRCM_NIC", "BRCM_SWITCH", "AI_NIC"]:
@@ -357,7 +357,7 @@ class AMDSMILogger:
         yaml_output = yaml_output.replace("AMDSMI_SPACING_REMOVAL:\n", "")
         yaml_output = yaml_output.replace("'", "")  # Remove ''
 
-        # Remove process_info indicies for Host parity:
+        # Remove process_info indices for Host parity:
         yaml_output = re.sub(r"PROCESS_INFO_[0-9]+:", "PROCESS_INFO:", yaml_output)
 
         clean_yaml_output = ""
@@ -418,7 +418,7 @@ class AMDSMILogger:
         output_dict = {}
         # First flatten out values
 
-        # separetly handle ras and process and firmware
+        # separately handle ras and process and firmware
 
         # If there are multi values, and the values are all dicts
         # Then flatten the sub values with parent key
@@ -691,7 +691,7 @@ class AMDSMILogger:
         dual_csv_output=False,
         dynamic=False,
     ):
-        """Print current output acording to format and then destination
+        """Print current output according to format and then destination
         params:
             multiple_device_enabled (bool) - True if printing output from
                 multiple devices

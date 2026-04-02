@@ -148,7 +148,7 @@ SignalingOperationsTester::~SignalingOperationsTester() {
   CHECK_HIP(hipFree(fetched_value));
 }
 
-void SignalingOperationsTester::resetBuffers(size_t size) {
+void SignalingOperationsTester::resetBuffers([[maybe_unused]] size_t size) {
   memset(s_buf, '0', max_msg_size * args.wg_size);
   memset(r_buf, '1', max_msg_size * args.wg_size);
   *fetched_value = -1;

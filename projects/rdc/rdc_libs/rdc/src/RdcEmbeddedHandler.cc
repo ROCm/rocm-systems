@@ -57,7 +57,7 @@ class smi_initializer {
     ret = amdsmi_init(init_flag);
 #ifdef ENABLE_ESMI_LIB
     if (ret != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "Failed to initalize amdsmi with CPUs enabled.. Disabling CPUs.");
+      RDC_LOG(RDC_ERROR, "Failed to initialize amdsmi with CPUs enabled.. Disabling CPUs.");
       init_flag &= ~AMDSMI_INIT_AMD_CPUS;
       ret = amdsmi_init(init_flag);
     }

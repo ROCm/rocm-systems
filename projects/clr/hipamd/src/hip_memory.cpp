@@ -2806,6 +2806,14 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
+  if (attrs != nullptr && !stream.device().settings().sdma_swap_supported_) {
+    for (size_t i = 0; i < numAttrs; ++i) {
+      if (attrs[i].flags & hipMemcpyFlagExtOpSwap) {
+        return hipErrorNotSupported;
+      }
+    }
+  }
+
   // Classify copies by type and group them
   std::vector<size_t> bufferCopyIndices;
   std::vector<size_t> hostToHostIndices;
@@ -3621,7 +3629,6 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     if (attributes->isManaged) {
       attributes->type = hipMemoryTypeManaged;
     }
-    HIP_RETURN(hipSuccess);
   } else {
     attributes->type = hipMemoryTypeUnregistered;
     attributes->devicePointer = nullptr;

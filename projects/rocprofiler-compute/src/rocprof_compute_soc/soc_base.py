@@ -1,32 +1,11 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import math
 import os
 import re
+import shutil
 import sys
 from abc import abstractmethod
 from pathlib import Path
@@ -42,18 +21,20 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
-from utils.roofline_calc import validate_roofline_csv
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    BUILD_IN_VARS,
     METRIC_ID_RE,
+    SUPPORTED_DENOM,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
+    create_temp_rocprofiler_metrics_path,
     get_panel_alias,
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
     resolve_rocm_library_path,
+    validate_roofline_csv,
 )
 from vendored import yaml
 
@@ -419,8 +400,15 @@ class OmniSoC_Base:
 
         # Point to counter definition
         old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
-        os.environ["ROCPROFILER_METRICS_PATH"] = str(
-            config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
+        with open(
+            config.rocprof_compute_home
+            / "rocprof_compute_soc"
+            / "profile_configs"
+            / "sdk_config.yaml",
+        ) as filename:
+            sdk_config = yaml.safe_load(filename)
+        os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
+            sdk_config
         )
 
         # Backward compatibility support for sdk avail module moved from
@@ -445,18 +433,32 @@ class OmniSoC_Base:
             except ImportError:
                 console_error("Failed to import rocprofiler-sdk avail module.")
 
-        avail.loadLibrary.libname = resolve_rocm_library_path(
-            str(
-                Path(args.rocprofiler_sdk_tool_path).parent
-                / "librocprofv3-list-avail.so"
-            )
+        # librocprofv3-list-avail.so location varies by ROCm version:
+        #   ROCm >= 7.1: <rocm_path>/lib/rocprofiler-sdk/
+        #   ROCm 7.0.x:  <rocm_path>/libexec/rocprofiler-sdk/
+        avail_lib_name = "librocprofv3-list-avail.so"
+        avail_lib_path = resolve_rocm_library_path(
+            str(Path(args.rocprofiler_sdk_tool_path).parent / avail_lib_name)
         )
+        if not Path(avail_lib_path).exists():
+            avail_lib_path = resolve_rocm_library_path(
+                str(
+                    Path(args.rocprofiler_sdk_tool_path).parents[2]
+                    / "libexec"
+                    / "rocprofiler-sdk"
+                    / avail_lib_name
+                )
+            )
+        avail.loadLibrary.libname = avail_lib_path
         counters = avail.get_counters()
         rocprof_counters = {
             counter.name
             for counter in counters[list(counters.keys())[0]]
             if hasattr(counter, "block") or hasattr(counter, "expression")
         }
+        # Delete counter definition temporary directory
+        if os.environ.get("ROCPROFILER_METRICS_PATH"):
+            shutil.rmtree(os.environ["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
         # Reset env. var.
         if old_rocprofiler_metrics_path is None:
             del os.environ["ROCPROFILER_METRICS_PATH"]
