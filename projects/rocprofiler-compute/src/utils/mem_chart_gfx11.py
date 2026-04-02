@@ -199,23 +199,6 @@ class Edge:
 
 
 @dataclass
-class AlignedEdgesGroup(RectBlock):
-    edges: list[Edge] = field(default_factory=list)
-    top_padding: int = 0
-    compact: bool = False
-
-    def render_text(self) -> Text:
-        lines = []
-        for _ in range(self.top_padding):
-            lines.append("")
-        for edge in self.edges:
-            lines.append(f"[{edge.color}]{edge.label}[/{edge.color}]")
-            lines.append(f"[{edge.color}]{edge.arrow}[/{edge.color}]")
-            lines.append("")
-        return Text.from_markup("\n".join(lines))
-
-
-@dataclass
 class SubBlock:
     label: str
     attributes: list[str] = field(default_factory=list)

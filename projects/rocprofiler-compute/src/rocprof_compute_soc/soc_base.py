@@ -299,7 +299,7 @@ class OmniSoC_Base:
             if alias not in panel_alias_dict:
                 raise KeyError(f"Unknown panel alias: {alias!r}")
             block_id = str(panel_alias_dict[alias])
-            print(f"alias: {alias}, block id: {block_id}")
+            console_log(f"alias: {alias}, block id: {block_id}")
 
         file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
 
