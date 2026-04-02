@@ -804,8 +804,7 @@ __device__ void test_atomic_add_f64([[maybe_unused]] double* global_mem, TestRes
 #endif
 }
 
-__device__ void test_atomic_min_max_f32(float* global_mem, TestResults* results, int lane_id) {
-    (void)global_mem;
+__device__ void test_atomic_min_max_f32(TestResults* results, int lane_id) {
     __shared__ unsigned int shared_atomic_min_max_f32;
     float my_val = (float)lane_id + 1.0f;
     
@@ -3521,7 +3520,7 @@ extern "C" __global__ void _mega_kernel(
     __syncthreads();
     test_atomic_add_f64(global_double, results, lane_id);
     __syncthreads();
-    test_atomic_min_max_f32(global_float + 1, results, lane_id);
+    test_atomic_min_max_f32(results, lane_id);
     __syncthreads();
     test_atomic_int(global_int, results, lane_id);
     __syncthreads();

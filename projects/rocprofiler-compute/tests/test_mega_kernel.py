@@ -354,7 +354,8 @@ def run_mega_kernel_test(
 
         print(f"Launching kernel: grid={grid_size}, block={block_size}")
         print(
-            f"Shared memory size: {shared_mem_size} bytes ({shared_mem_size / 1024:.2f} KB)"
+            "Shared memory size: "
+            f"{shared_mem_size} bytes ({shared_mem_size / 1024:.2f} KB)"
         )
         print(f"MFMA mode: {mfma_mode_names[mfma_mode]}")
 

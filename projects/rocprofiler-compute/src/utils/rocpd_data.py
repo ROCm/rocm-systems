@@ -4,9 +4,6 @@
 import csv
 import sqlite3
 from contextlib import ExitStack, closing
-from typing import Any
-
-import pandas as pd
 
 from utils.logger import console_error
 

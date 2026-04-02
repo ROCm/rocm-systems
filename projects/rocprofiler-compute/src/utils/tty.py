@@ -115,8 +115,6 @@ def format_bw_columns_human_readable(
     if not bw_rows.any():
         return df_copy
 
-    # Columns that should all be scaled together (numeric bandwidth values)
-    bw_numeric_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
     # Columns that hold percentage values (should be recalculated)
     pct_cols = ["Pct of Peak", "PoP"]
 
@@ -140,7 +138,7 @@ def format_bw_columns_human_readable(
         divisor, unit = _get_bw_scale_and_unit(primary_value)
 
         # Scale all numeric bandwidth columns with the same divisor
-        for col in bw_numeric_cols:
+        for col in value_columns:
             if col not in df_copy.columns:
                 continue
             try:
@@ -852,7 +850,7 @@ def format_table_output(
 
     if is_single_run and is_gfx115x and "Unit" in df.columns:
         # Identify value columns to format
-        value_cols = ["Value", "Avg", "Min", "Max"]
+        value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = format_bw_columns_human_readable(df, value_cols, args.decimal)
 
     # When --view table is set, force table output and ignore cli_style from config
