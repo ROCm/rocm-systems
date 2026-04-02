@@ -106,10 +106,13 @@ def run_prof(
         sdk_config = yaml.safe_load(filename)
     # Extra counter definitions
     for fname in fnames if multiple_files else [fnames]:
-        if not fname.startswith("pmc_perf_"):
+        fname_path = Path(fname)
+        if not fname_path.name.startswith("pmc_perf_"):
             continue
-        counter_def_fname = "counter_def_" + fname[len("pmc_perf_") :]
-        if Path(counter_def_fname).exists():
+        counter_def_fname = fname_path.parent / (
+            "counter_def_" + fname_path.name[len("pmc_perf_") :]
+        )
+        if counter_def_fname.exists():
             with open(Path(counter_def_fname)) as file:
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
