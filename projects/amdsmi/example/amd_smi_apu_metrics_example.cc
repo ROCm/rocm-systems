@@ -2,12 +2,8 @@
  * Standalone debug tool to read and print APU metrics from a gpu_metrics binary file.
  * Supports gpu_metrics v2.4 and v3.0.
  *
- * Build:
- *   g++ -std=c++17 -o apu_metrics_dump example/amd_smi_apu_metrics_dump.cc
- *
  * Usage:
  *   ./apu_metrics_dump /path/to/gpu_metrics
- *   ./apu_metrics_dump /sys/class/drm/card0/device/gpu_metrics
  */
 
 #include <cstdint>
@@ -168,6 +164,20 @@ static std::string fmt_pwr_mw32(uint32_t v) {
   return buf;
 }
 
+static std::string fmt_w_from_mw16(uint16_t v) {
+  if (v == U16_NA) return "N/A";
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%.0f W", v / 1000.0);
+  return buf;
+}
+
+static std::string fmt_w_from_mw32(uint32_t v) {
+  if (v == U32_NA) return "N/A";
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%.0f W", v / 1000.0);
+  return buf;
+}
+
 static std::string fmt_mhz(uint16_t v) {
   if (v == U16_NA) return "N/A";
   return std::to_string(v) + " MHz";
@@ -183,6 +193,12 @@ static std::string fmt_percent_centi(uint16_t v) {
 static std::string fmt_percent(uint16_t v) {
   if (v == U16_NA) return "N/A";
   return std::to_string(v) + " %";
+}
+
+static const char* throttle_status_str(uint32_t v) {
+  if (v == U32_NA) return "N/A";
+  if (v == 0) return "UNTHROTTLED";
+  return "THROTTLED";
 }
 
 // -- v2.4 printer --
@@ -280,91 +296,76 @@ static void print_v30(const std::vector<uint8_t>& buf) {
   printf("APU METRICS v3.0\n");
   printf("================\n\n");
 
+  printf("    USAGE:\n");
+  printf("        GFX_ACTIVITY: %s\n", fmt_percent(m.average_gfx_activity).c_str());
+  printf("        UMC_ACTIVITY: N/A\n");
+  printf("        MM_ACTIVITY: N/A\n");
+  printf("        VCN_ACTIVITY: [%s, N/A, N/A, N/A]\n",
+         fmt_percent(m.average_vcn_activity).c_str());
+  printf("        JPEG_ACTIVITY: [");
+  for (int i = 0; i < 32; ++i) {
+    if (i > 0) printf(", ");
+    printf("N/A");
+  }
+  printf("]\n");
+  printf("        GFX_BUSY_INST: N/A\n");
+  printf("        JPEG_BUSY: N/A\n");
+  printf("        VCN_BUSY: N/A\n");
+
+  printf("    POWER:\n");
+  printf("        SOCKET_POWER: %s\n", fmt_w_from_mw32(m.average_socket_power).c_str());
+  printf("        GFX_VOLTAGE: N/A\n");
+  printf("        SOC_VOLTAGE: N/A\n");
+  printf("        MEM_VOLTAGE: N/A\n");
+  const bool is_throttled =
+      (m.throttle_residency_prochot != 0 && m.throttle_residency_prochot != U32_NA) ||
+      (m.throttle_residency_spl != 0 && m.throttle_residency_spl != U32_NA) ||
+      (m.throttle_residency_fppt != 0 && m.throttle_residency_fppt != U32_NA) ||
+      (m.throttle_residency_sppt != 0 && m.throttle_residency_sppt != U32_NA) ||
+      (m.throttle_residency_thm_core != 0 && m.throttle_residency_thm_core != U32_NA) ||
+      (m.throttle_residency_thm_gfx != 0 && m.throttle_residency_thm_gfx != U32_NA) ||
+      (m.throttle_residency_thm_soc != 0 && m.throttle_residency_thm_soc != U32_NA);
+  printf("        THROTTLE_STATUS: %s\n", is_throttled ? "THROTTLED" : "UNTHROTTLED");
+  printf("        POWER_MANAGEMENT: N/A\n");
+
+  printf("    CLOCK:\n");
+  printf("        GFX_0:\n");
+  printf("            CLK: %s\n", fmt_mhz(m.average_gfxclk_frequency).c_str());
+  printf("            MIN_CLK: N/A\n");
+  printf("            MAX_CLK: %s\n", fmt_mhz(m.current_gfx_maxfreq).c_str());
+  printf("            DEEP_SLEEP: N/A\n");
+  printf("        MEM_0:\n");
+  printf("            CLK: %s\n", fmt_mhz(m.average_uclk_frequency).c_str());
+  printf("            MIN_CLK: N/A\n");
+  printf("            MAX_CLK: N/A\n");
+  printf("            DEEP_SLEEP: N/A\n");
+  printf("        VCLK_0:\n");
+  printf("            CLK: %s\n", fmt_mhz(m.average_vclk_frequency).c_str());
+  printf("        DCLK_0:\n");
+  printf("            CLK: N/A\n");
+  printf("        FCLK_0:\n");
+  printf("            CLK: %s\n", fmt_mhz(m.average_fclk_frequency).c_str());
+  printf("            MIN_CLK: N/A\n");
+  printf("            MAX_CLK: N/A\n");
+  printf("            DEEP_SLEEP: N/A\n");
+  printf("        SOCCLK_0:\n");
+  printf("            CLK: %s\n", fmt_mhz(m.average_socclk_frequency).c_str());
+  printf("            MIN_CLK: N/A\n");
+  printf("            MAX_CLK: N/A\n");
+  printf("            DEEP_SLEEP: N/A\n");
+
   printf("    TEMPERATURE:\n");
-  printf("        GFX:  %s\n", fmt_temp_centi(m.temperature_gfx).c_str());
-  printf("        SOC:  %s\n", fmt_temp_centi(m.temperature_soc).c_str());
-  printf("        SKIN: %s\n", fmt_temp_centi(m.temperature_skin).c_str());
-  for (int i = 0; i < 16; ++i) {
-    if (m.temperature_core[i] != 0 && m.temperature_core[i] != U16_NA)
-      printf("        CORE[%d]: %s\n", i, fmt_temp_centi(m.temperature_core[i]).c_str());
-  }
+  printf("        EDGE: %s\n", fmt_temp_centi(m.temperature_gfx).c_str());
+  printf("        HOTSPOT: %s\n", fmt_temp_centi(m.temperature_soc).c_str());
+  printf("        MEM: N/A\n");
 
-  printf("\n    UTILIZATION:\n");
-  printf("        GFX_ACTIVITY: %s\n", fmt_percent_centi(m.average_gfx_activity).c_str());
-  printf("        VCN_ACTIVITY: %s\n", fmt_percent_centi(m.average_vcn_activity).c_str());
-
-  printf("        IPU_ACTIVITY: [");
-  for (int i = 0; i < 8; ++i) {
-    if (i > 0) printf(", ");
-    printf("%s", fmt_percent_centi(m.average_ipu_activity[i]).c_str());
-  }
-  printf("]\n");
-
-  printf("        CORE_C0_ACTIVITY: [");
-  for (int i = 0; i < 16; ++i) {
-    if (i > 0) printf(", ");
-    printf("%s", fmt_percent(m.average_core_c0_activity[i]).c_str());
-  }
-  printf("]\n");
-
-  printf("        DRAM_READS:  %s\n", fmt_u16(m.average_dram_reads, "MB/s").c_str());
-  printf("        DRAM_WRITES: %s\n", fmt_u16(m.average_dram_writes, "MB/s").c_str());
-  printf("        IPU_READS:   %s\n", fmt_u16(m.average_ipu_reads, "MB/s").c_str());
-  printf("        IPU_WRITES:  %s\n", fmt_u16(m.average_ipu_writes, "MB/s").c_str());
-
-  printf("\n    POWER:\n");
-  printf("        SOCKET_POWER:    %s\n", fmt_pwr_mw32(m.average_socket_power).c_str());
-  printf("        APU_POWER:       %s\n", fmt_pwr_mw32(m.average_apu_power).c_str());
-  printf("        GFX_POWER:       %s\n", fmt_pwr_mw32(m.average_gfx_power).c_str());
-  printf("        DGPU_POWER:      %s\n", fmt_pwr_mw32(m.average_dgpu_power).c_str());
-  printf("        ALL_CORE_POWER:  %s\n", fmt_pwr_mw32(m.average_all_core_power).c_str());
-  printf("        IPU_POWER:       %s\n", fmt_pwr_mw(m.average_ipu_power).c_str());
-  printf("        SYS_POWER:       %s\n", fmt_pwr_mw(m.average_sys_power).c_str());
-  printf("        STAPM_LIMIT:     %s\n", fmt_pwr_mw(m.stapm_power_limit).c_str());
-  printf("        CUR_STAPM_LIMIT: %s\n", fmt_pwr_mw(m.current_stapm_power_limit).c_str());
-
-  printf("        CORE_POWER: [");
-  for (int i = 0; i < 16; ++i) {
-    if (i > 0) printf(", ");
-    printf("%s", fmt_pwr_mw(m.average_core_power[i]).c_str());
-  }
-  printf("]\n");
-
-  printf("\n    AVERAGE CLOCK:\n");
-  printf("        GFXCLK:  %s\n", fmt_mhz(m.average_gfxclk_frequency).c_str());
-  printf("        SOCCLK:  %s\n", fmt_mhz(m.average_socclk_frequency).c_str());
-  printf("        UCLK:    %s\n", fmt_mhz(m.average_uclk_frequency).c_str());
-  printf("        FCLK:    %s\n", fmt_mhz(m.average_fclk_frequency).c_str());
-  printf("        VCLK:    %s\n", fmt_mhz(m.average_vclk_frequency).c_str());
-  printf("        VPECLK:  %s\n", fmt_mhz(m.average_vpeclk_frequency).c_str());
-  printf("        IPUCLK:  %s\n", fmt_mhz(m.average_ipuclk_frequency).c_str());
-  printf("        MPIPU:   %s\n", fmt_mhz(m.average_mpipu_frequency).c_str());
-
-  printf("\n    CURRENT CLOCK:\n");
-  printf("        GFX_MAXFREQ:  %s\n", fmt_mhz(m.current_gfx_maxfreq).c_str());
-  printf("        CORE_MAXFREQ: %s\n", fmt_mhz(m.current_core_maxfreq).c_str());
-  for (int i = 0; i < 16; ++i) {
-    if (m.current_coreclk[i] != 0 && m.current_coreclk[i] != U16_NA)
-      printf("        CORECLK[%2d]: %s\n", i, fmt_mhz(m.current_coreclk[i]).c_str());
-  }
-
-  printf("\n    THROTTLE RESIDENCY:\n");
-  auto fmt_thr = [](uint32_t v) -> std::string {
-    if (v == U32_NA) return "N/A";
-    if (v == 0) return "0";
-    return std::to_string(v);
-  };
-  printf("        PROCHOT:  %s\n", fmt_thr(m.throttle_residency_prochot).c_str());
-  printf("        SPL:      %s\n", fmt_thr(m.throttle_residency_spl).c_str());
-  printf("        FPPT:     %s\n", fmt_thr(m.throttle_residency_fppt).c_str());
-  printf("        SPPT:     %s\n", fmt_thr(m.throttle_residency_sppt).c_str());
-  printf("        THM_CORE: %s\n", fmt_thr(m.throttle_residency_thm_core).c_str());
-  printf("        THM_GFX:  %s\n", fmt_thr(m.throttle_residency_thm_gfx).c_str());
-  printf("        THM_SOC:  %s\n", fmt_thr(m.throttle_residency_thm_soc).c_str());
-
-  printf("\n    TIMESTAMP:\n");
-  printf("        SYSTEM_CLOCK_COUNTER: %lu ns\n", (unsigned long)m.system_clock_counter);
-  printf("        TIME_FILTER_ALPHA:    %u us\n", m.time_filter_alphavalue);
+  printf("    PCIE:\n");
+  printf("        WIDTH: N/A\n");
+  printf("        SPEED: N/A\n");
+  printf("        BANDWIDTH: N/A\n");
+  printf("        REPLAY_COUNT: N/A\n");
+  printf("        L0_TO_RECOVERY_COUNT: N/A\n");
+  printf("        REPLAY_ROLL_OVER_COUNT: N/A\n");
 }
 
 // -- main --
