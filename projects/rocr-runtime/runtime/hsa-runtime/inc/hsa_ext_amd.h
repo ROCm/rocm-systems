@@ -4320,6 +4320,40 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
  */
 hsa_status_t HSA_API hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
 
+/**
+ * @brief Callback type for iterating queues on a GPU agent.
+ *
+ * @param[in] queue Pointer to the queue.
+ * @param[in] agent The agent that owns the queue.
+ * @param[in] data User data passed to the iterator.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Continue iteration.
+ * @retval Any other value Stop iteration and return this status.
+ */
+typedef hsa_status_t (*hsa_amd_gpu_agent_queue_callback_t)(hsa_queue_t* queue,
+                                                           hsa_agent_t agent,
+                                                           void* data);
+
+/**
+ * @brief Iterate over all application-visible queues on a GPU agent.
+ *
+ * @details Invokes @p callback once for each active AQL queue belonging to
+ * the specified GPU agent. Internal/runtime queues are excluded. Iteration
+ * stops early if @p callback returns a status other than ::HSA_STATUS_SUCCESS.
+ *
+ * @param[in] agent The GPU agent whose queues to iterate.
+ * @param[in] callback The callback to invoke for each queue.
+ * @param[in] data User data passed to @p callback.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Iteration completed or was stopped by callback.
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT agent is not a valid GPU agent.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT callback is NULL.
+ */
+hsa_status_t HSA_API hsa_amd_gpu_agent_iterate_queues(
+    hsa_agent_t agent,
+    hsa_amd_gpu_agent_queue_callback_t callback,
+    void* data);
+
 /** @} */
 
 #ifdef __cplusplus

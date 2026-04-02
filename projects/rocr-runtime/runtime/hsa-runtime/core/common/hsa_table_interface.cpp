@@ -1409,3 +1409,10 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(hsa_queue_t* queue,
 hsa_status_t HSA_API hsa_amd_queue_intercept_detach(hsa_queue_t* queue) {
   return amdExtTable->hsa_amd_queue_intercept_detach_fn(queue);
 }
+
+hsa_status_t HSA_API hsa_amd_gpu_agent_iterate_queues(
+    hsa_agent_t agent,
+    hsa_amd_gpu_agent_queue_callback_t callback,
+    void* data) {
+  return amdExtTable->hsa_amd_gpu_agent_iterate_queues_fn(agent, callback, data);
+}

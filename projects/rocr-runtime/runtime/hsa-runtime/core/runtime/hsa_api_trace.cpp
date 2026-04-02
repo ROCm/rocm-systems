@@ -489,6 +489,7 @@ void HsaApiTable::UpdateAmdExts() {
   amd_ext_api.hsa_amd_agent_preload_fn = AMD::hsa_amd_agent_preload;
   amd_ext_api.hsa_amd_queue_intercept_attach_fn = AMD::hsa_amd_queue_intercept_attach;
   amd_ext_api.hsa_amd_queue_intercept_detach_fn = AMD::hsa_amd_queue_intercept_detach;
+  amd_ext_api.hsa_amd_gpu_agent_iterate_queues_fn = AMD::hsa_amd_gpu_agent_iterate_queues;
 }
 
 void HsaApiTable::UpdateTools() {

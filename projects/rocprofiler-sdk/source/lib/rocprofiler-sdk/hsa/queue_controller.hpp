@@ -89,6 +89,11 @@ public:
 
     common::Synchronized<hsa::profiler_serializer>& serializer(const Queue*);
 
+    // Attach intercept handlers to queues that already exist on GPU agents.
+    // Used for late-start profiling when the queue create interceptor was not
+    // installed before the application created its queues.
+    void attach_to_existing_queues();
+
     /**
      * Disable serialization for QueueController, has no effect if counter collection
      * is not in use (which defaults to no serialization mechanism). Should only be used for

@@ -132,6 +132,11 @@ hsa_status_t hsa_amd_queue_intercept_attach(hsa_queue_t* queue,
 
 hsa_status_t hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
 
+hsa_status_t hsa_amd_gpu_agent_iterate_queues(
+    hsa_agent_t agent,
+    hsa_amd_gpu_agent_queue_callback_t callback,
+    void* data);
+
 #ifdef __cplusplus
 }
 #endif
@@ -296,6 +301,7 @@ struct AmdExtTable {
   decltype(hsa_amd_agent_preload) *hsa_amd_agent_preload_fn;
   decltype(hsa_amd_queue_intercept_attach)* hsa_amd_queue_intercept_attach_fn;
   decltype(hsa_amd_queue_intercept_detach)* hsa_amd_queue_intercept_detach_fn;
+  decltype(hsa_amd_gpu_agent_iterate_queues)* hsa_amd_gpu_agent_iterate_queues_fn;
 };
 
 // Table to export HSA Core Runtime Apis

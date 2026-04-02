@@ -1647,6 +1647,36 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_detach(hsa_queue_t* queue) {
   CATCH;
 }
 
+hsa_status_t HSA_API hsa_amd_gpu_agent_iterate_queues(
+    hsa_agent_t agent,
+    hsa_amd_gpu_agent_queue_callback_t callback,
+    void* data) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(callback);
+
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  IS_VALID(core_agent);
+
+  if (core_agent->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  GpuAgent* gpu_agent = static_cast<GpuAgent*>(core_agent);
+  const auto& queues = gpu_agent->GetAqlQueues();
+
+  for (core::Queue* q : queues) {
+    hsa_queue_t* hsa_q = core::Queue::Convert(q);
+    hsa_status_t status = callback(hsa_q, agent, data);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
+  }
+
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
 hsa_status_t hsa_amd_register_system_event_handler(hsa_amd_system_event_callback_t callback,
                                                    void* data) {
   TRY;

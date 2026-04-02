@@ -272,6 +272,7 @@ global:
 	hsa_amd_counted_queue_release;
 	hsa_amd_queue_intercept_attach;
 	hsa_amd_queue_intercept_detach;
+	hsa_amd_gpu_agent_iterate_queues;
 local:
     *;
 };

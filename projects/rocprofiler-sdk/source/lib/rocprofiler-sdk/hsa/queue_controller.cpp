@@ -332,8 +332,110 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         {
             core_table.hsa_queue_create_fn  = hsa::create_queue;
             core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+
+            // Attach to any queues that were created before we installed
+            // the create interceptor (late-start profiling).
+            attach_to_existing_queues();
         }
     }
+}
+
+void
+QueueController::attach_to_existing_queues()
+{
+    if(!_ext_table.hsa_amd_queue_intercept_attach_fn)
+    {
+        ROCP_INFO << "hsa_amd_queue_intercept_attach not available, cannot attach to existing "
+                     "queues";
+        return;
+    }
+
+    if(!_ext_table.hsa_amd_gpu_agent_iterate_queues_fn)
+    {
+        ROCP_INFO << "hsa_amd_gpu_agent_iterate_queues not available, cannot discover existing "
+                     "queues";
+        return;
+    }
+
+    struct attach_data
+    {
+        QueueController* controller;
+        size_t           attached;
+        size_t           skipped;
+        size_t           failed;
+    };
+
+    auto data = attach_data{this, 0, 0, 0};
+
+    for(const auto& [_, agent_info] : get_supported_agents())
+    {
+        auto status = _ext_table.hsa_amd_gpu_agent_iterate_queues_fn(
+            agent_info.get_hsa_agent(),
+            [](hsa_queue_t* queue, hsa_agent_t agent, void* user_data) -> hsa_status_t {
+                auto* ctx = static_cast<attach_data*>(user_data);
+                auto* qc  = ctx->controller;
+
+                // Check if we already manage this queue
+                if(qc->get_queue(*queue) != nullptr)
+                {
+                    ctx->skipped++;
+                    return HSA_STATUS_SUCCESS;
+                }
+
+                // Find the matching agent
+                const AgentCache* matched_agent = nullptr;
+                for(const auto& [idx, ai] : qc->get_supported_agents())
+                {
+                    if(ai.get_hsa_agent().handle == agent.handle)
+                    {
+                        matched_agent = &ai;
+                        break;
+                    }
+                }
+
+                if(!matched_agent)
+                {
+                    ROCP_WARNING << "Could not find agent " << agent.handle
+                                 << " for existing queue, skipping";
+                    ctx->skipped++;
+                    return HSA_STATUS_SUCCESS;
+                }
+
+                auto set_write_interceptor = [&queue, &qc](hsa_amd_queue_intercept_handler wi,
+                                                           void*                           data) {
+                    auto attach_status =
+                        qc->get_ext_table().hsa_amd_queue_intercept_attach_fn(queue, wi, data);
+                    ROCP_FATAL_IF(attach_status != HSA_STATUS_SUCCESS)
+                        << "hsa_amd_queue_intercept_attach failed with status " << attach_status;
+                };
+
+                auto new_queue = std::make_unique<rocprofiler::hsa::Queue>(*matched_agent,
+                                                                           qc->get_core_table(),
+                                                                           qc->get_ext_table(),
+                                                                           queue,
+                                                                           set_write_interceptor);
+
+                qc->serializer(new_queue.get()).wlock([&](auto& serializer) {
+                    serializer.add_queue(&queue, *new_queue);
+                });
+                qc->add_queue(queue, std::move(new_queue));
+                ctx->attached++;
+
+                ROCP_INFO << "Attached intercept to existing queue for HSA agent handle "
+                          << agent.handle;
+                return HSA_STATUS_SUCCESS;
+            },
+            &data);
+
+        if(status != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "hsa_amd_gpu_agent_iterate_queues failed for agent "
+                         << agent_info.get_hsa_agent().handle << " with status " << status;
+        }
+    }
+
+    ROCP_INFO << "attach_to_existing_queues: attached=" << data.attached
+              << " skipped=" << data.skipped << " failed=" << data.failed;
 }
 
 const Queue*
