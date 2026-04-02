@@ -109,18 +109,19 @@ jobs:
           apt-get install -y git
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
 
-      - name: Checkout
+      - name: Clone ROCProfiler SDK & HIP/CLR & ROCR-Runtime
         uses: actions/checkout@v4
-        env:
-          GIT_CONFIG_GLOBAL: /tmp/.gitconfig
         with:
           sparse-checkout: |
             projects/rocprofiler-sdk
             projects/rocr-runtime
             projects/clr
             projects/hip
-          submodules: true
+          submodules: false
           set-safe-directory: true
+
+      - name: Init/Update submodules
+        run: git submodule update --init --recursive --jobs 16
 
       - name: Setup
         shell: bash
