@@ -194,7 +194,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  size_t numElements = 8 * 1024 * 1024;
+  size_t numElements = 64 * 1024 * 1024;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                    mem_pool, stream));
 
@@ -207,8 +207,8 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
 
   hipMemPoolAttr attr;
   attr = hipMemPoolAttrReleaseThreshold;
-  // The pool must hold 128MB
-  std::uint64_t threshold = 128 * 1024 * 1024;
+  // The pool must hold 512MB
+  std::uint64_t threshold = 512 * 1024 * 1024;
   HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &threshold));
 
   // Not a real free, since kernel isn't done
@@ -233,7 +233,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
 
   std::uint64_t res_after_sync = 0;
   HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_after_sync));
-  // Since hipMemPoolAttrReleaseThreshold is 128 MB sync does nothing to the freed memory
+  // Since hipMemPoolAttrReleaseThreshold is 512 MB sync does nothing to the freed memory
   REQUIRE(res_after_trim == res_after_sync);
 
   HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
@@ -256,7 +256,7 @@ HIP_TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
   attr = hipMemPoolAttrUsedMemHigh;
   HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &value64));
   // Make sure the high watermark usage works - the both buffers must be reported
-  REQUIRE(sizeof(float) * (8 * 1024 * 1024 + 1024) == value64);
+  REQUIRE(sizeof(float) * (64 * 1024 * 1024 + 1024) == value64);
 
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
