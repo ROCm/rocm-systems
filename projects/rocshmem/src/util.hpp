@@ -499,8 +499,9 @@ template <typename... Args>
 
   // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
   constexpr size_t ELEMENT_SIZE{16};
+  constexpr size_t COUNT{16};
   
-  for (size_t work_per_thread{16}; work_per_thread > 1; work_per_thread >>= 1 ){
+  for (size_t work_per_thread{COUNT}; work_per_thread > 1; work_per_thread >>= 1 ){
     // number of elements to be handled by each thread
     size_t thread_bytes = ELEMENT_SIZE * work_per_thread;
     size_t block_bytes = thread_bytes * block_size;
@@ -573,9 +574,10 @@ template <typename... Args>
 
   // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
   constexpr size_t ELEMENT_SIZE{16};
+  constexpr size_t COUNT{16};
   // number of elements to be handled by each thread
 
-  for (size_t work_per_thread{16}; work_per_thread > 1; work_per_thread >>= 1 ){
+  for (size_t work_per_thread{COUNT}; work_per_thread > 1; work_per_thread >>= 1 ){
     // number of elements to be handled by each thread
     size_t thread_bytes = ELEMENT_SIZE * work_per_thread;
     size_t block_bytes = thread_bytes * wave_size;
