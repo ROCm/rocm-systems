@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <thread>
+#include "core/inc/intercept_queue.h"
 #include "core/inc/amd_aql_queue.h"
 
 #ifdef __linux__
@@ -414,6 +415,21 @@ void AqlQueue::Destroy() {
       }
       break;  // DESTROYING state - another thread is destroying
     }
+  }
+
+  // IMPORTANT: Call Inactivate() BEFORE checking for intercept wrapping.
+  // Inactivate() calls DestroyQueue on the KFD side, ensuring no more
+  // async GPU signals (HandleInsufficientScratch) can fire.
+  // This prevents the race where HandleInsufficientScratch accesses
+  // amd_queue_ fields after Unwrap() releases scratch_lock_ but before
+  // delete this.
+  Inactivate();
+
+  // If the queue is intercepted (wrapped), unwrap first to restore fields
+  // and clean up the InterceptQueue before destroying the AqlQueue.
+  core::Queue* current = core::Queue::Convert(public_handle());
+  if (core::InterceptQueue::IsType(current)) {
+    static_cast<core::InterceptQueue*>(current)->Unwrap();
   }
 
   if (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE) {
