@@ -65,11 +65,10 @@ Panel Config:
       Percentage of GUI-active cycles the Command Processor was busy.
       Per sample: 100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).
       CP handles kernel dispatch and command stream processing.
-    # To be fixed: GRBM_GL2C_BUSY not available - commenting out description
-    # GL2C Busy: |-
-    #   Percentage of GUI-active cycles the GL2 Cache was busy.
-    #   Per sample: 100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).
-    #   High utilization indicates memory-intensive workload.
+    GL2C Busy: |-
+      Percentage of GUI-active cycles the GL2 Cache was busy.
+      Per sample: 100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).
+      High utilization indicates memory-intensive workload.
     TA Busy: |-
       Percentage of GUI-active cycles the Texture Addresser was busy.
       Per sample: 100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).

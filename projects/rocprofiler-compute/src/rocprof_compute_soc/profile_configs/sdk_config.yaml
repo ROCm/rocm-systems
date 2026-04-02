@@ -32604,6 +32604,23 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: accumulate(SQC_ICACHE_INFLIGHT_LEVEL, HIGH_RES)
+  - name: TCC_PROBE_EVICT_sum
+    description: Number of evictions/invalidations due to probes. Not windowable. Sum over TCC instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: reduce(TCC_PROBE_EVICT,sum)
+  - name: TCP_CACHE_MISS_sum
+    description: Total L1 cache miss requests sent from this TCP to all TCCs. Sum over TCP instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      expression: reduce(TCP_CACHE_MISS,sum)
   fw-restriction-schema-version: 1
   firmware_restrictions:
   - affected_architectures:
