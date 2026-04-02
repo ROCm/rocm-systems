@@ -25,9 +25,6 @@ from utils.utils_common import (
     get_uuid,
 )
 
-# Bandwidth units that need human-readable formatting
-BW_UNITS = ["Bytes/s", "bytes/s"]
-
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
     """True when ``--view table`` was given (plain tables; ignore cli_style)."""
