@@ -120,6 +120,12 @@ jobs:
           submodules: false
           set-safe-directory: true
 
+      - name: Configure safe directory
+        run: |
+          git config --global --add safe.directory '*'
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          git config --global --add safe.directory /__w/rocm-systems/rocm-systems
+
       - name: Init/Update submodules
         run: git submodule update --init --recursive --jobs 16
 
