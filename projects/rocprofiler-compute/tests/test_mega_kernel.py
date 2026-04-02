@@ -375,7 +375,9 @@ def run_mega_kernel_test(
         h_input = (c_float * batch_size)(*[float(i) for i in range(batch_size)])
         hip.hipMemcpyHtoD(d_input_buffer, byref(h_input), batch_size * sizeof(c_float))
         zeros_out = (c_float * batch_size)()
-        hip.hipMemcpyHtoD(d_output_buffer, byref(zeros_out), batch_size * sizeof(c_float))
+        hip.hipMemcpyHtoD(
+            d_output_buffer, byref(zeros_out), batch_size * sizeof(c_float)
+        )
         hip.hipMemcpyHtoD(
             d_async_lds_src, byref(zeros_out), batch_size * sizeof(c_float)
         )
