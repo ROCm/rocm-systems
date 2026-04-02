@@ -7,7 +7,11 @@
 #ifndef _VECTOR_TYPES_H_
 #define _VECTOR_TYPES_H_
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#include <hip/hip_runtime.h>
+#else
 #include <cuda_runtime.h>
+#endif
 
 // Helper functions to use vectorized types
 

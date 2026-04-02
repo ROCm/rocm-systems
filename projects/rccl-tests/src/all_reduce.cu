@@ -27,8 +27,10 @@
 #include <algorithm>
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
-#include "vector_types.h"
+#include "rccl_vector_types.h"
+#if !defined(__HIP_PLATFORM_AMD__)
 #include "multimem_ops.h"
+#endif
 constexpr int WARP_SIZE = 32;
 #endif
 
@@ -83,6 +85,9 @@ testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
       return testSuccess;
     case 3: // allReduceMultimemKernel
     case 4: // allReduceMultimemVectorizedKernel
+#if defined(__HIP_PLATFORM_AMD__)
+      return testNotImplemented;
+#else
       if (!commProperties->multimemSupport) {
         fprintf(stderr, "This test requires multimem support, but multimem support is not enabled for this communicator.\n");
         return testInternalError;
@@ -90,6 +95,7 @@ testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
       reqs->lsaMultimem = true;
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
+#endif
     default:
       return testNotImplemented;
   }
@@ -105,9 +111,13 @@ testResult_t AllReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
       return true;
     case 3: // allReduceMultimemKernel
     case 4: // allReduceMultimemVectorizedKernel
+#if defined(__HIP_PLATFORM_AMD__)
+      return false;
+#else
       reqs->lsaMultimem = true;
       reqs->lsaBarrierCount = deviceCtaCount;
       return true;
+#endif
     default:
       return false;
   }
@@ -312,6 +322,7 @@ __global__ void allReduceLsaVectorizedKernel(ncclWindow_t sendwin, size_t sendof
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
+#if !defined(__HIP_PLATFORM_AMD__)
 /*
  * Kernel 3: allReduceMultimemKernel - Multi-memory Hardware-Accelerated AllReduce
  *
@@ -490,6 +501,7 @@ __global__ void allReduceMultimemVectorizedKernel(ncclWindow_t sendwin, size_t s
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 #endif
+#endif
 
 testResult_t AllReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
 
@@ -509,6 +521,7 @@ testResult_t AllReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
     TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(allReduceLsaVectorizedKernel, type, op),
                sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
     return testSuccess;
+#if !defined(__HIP_PLATFORM_AMD__)
   case 3:
     TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(allReduceMultimemKernel, type, op),
                sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
@@ -517,6 +530,7 @@ testResult_t AllReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
     TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(allReduceMultimemVectorizedKernel, type, op),
                sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
     return testSuccess;
+#endif
 #endif
   }
 
