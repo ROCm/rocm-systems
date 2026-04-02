@@ -28,8 +28,8 @@ function(hip_add_exe_to_target)
     PROPERTY ${_PROPERTY}
     STANDALONE_FLAG 0
   )
-  # If STANDALONE_TESTS==1, also generate per-file targets
-  if(STANDALONE_TESTS EQUAL "1")
+  if(STANDALONE_TESTS)
+    # Generate per-file targets
     hip_gen_exe_target(
       NAME ${_NAME}
       TEST_TARGET_NAME ${_TEST_TARGET_NAME}
