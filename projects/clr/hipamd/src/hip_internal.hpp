@@ -133,6 +133,17 @@ const char* ihipGetErrorName(hipError_t hip_error);
 #define HIP_INIT_API_NO_RETURN(cid, ...)                                                           \
   HIP_INIT_API_INTERNAL(1, cid, __VA_ARGS__)
 
+// Version without logging for internal __hip* functions (high frequency, low value logs)
+#define HIP_INIT_API_NOLOG(cid)                                                                    \
+  if (amd::Device::IsGPUInError()) {                                                              \
+    HIP_RETURN_NOLOG(ConvertCLErrorIntoHIPError(amd::Device::GetGPUError()));                      \
+  }                                                                                                \
+  HIP_INIT(0)                                                                                      \
+  HIP_CB_SPAWNER_OBJECT(cid);                                                                      \
+  if (hip::g_devices.empty()) {                                                                    \
+    HIP_RETURN_NOLOG(hipErrorNoDevice);                                                            \
+  }
+
 // Helper: update thread-local error state from a return code.
 // Overrides with GPU error if the device is in an error state.
 #define HIP_UPDATE_ERROR_STATE(ret)                                                                \
@@ -156,6 +167,11 @@ const char* ihipGetErrorName(hipError_t hip_error);
 #define HIP_RETURN(ret, ...)                                                                       \
   HIP_UPDATE_ERROR_STATE(ret)                                                                      \
   HIP_ERROR_PRINT(hip::tls.last_command_error_, __VA_ARGS__)                                       \
+  return hip::tls.last_command_error_;
+
+// Version without logging for internal __hip* functions
+#define HIP_RETURN_NOLOG(ret)                                                                      \
+  HIP_UPDATE_ERROR_STATE(ret)                                                                      \
   return hip::tls.last_command_error_;
 
 #define HIP_RETURN_ONFAIL(func)          \

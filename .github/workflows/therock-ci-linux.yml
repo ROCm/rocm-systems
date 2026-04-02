@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 9a38f01d34a90ecabd87d6cdf197466eab4e84ab # 2026-03-20
+          ref: 3272cd77d15e7972b26f68a477a3d61fe4a93591 # 2026-03-26 commit
 
       - name: Install python deps
         run: |
@@ -69,7 +69,7 @@ jobs:
       - name: Patch rocm-systems
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
+          # rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
 
       - name: Configure Projects
         env:

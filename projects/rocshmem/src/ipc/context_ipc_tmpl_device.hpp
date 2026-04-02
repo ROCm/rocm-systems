@@ -286,8 +286,6 @@ __device__ void IPCContext::internal_ring_allreduce(
     T *dst, const T *src, int nelems, IPCTeam *team_obj,  // NOLINT(runtime/int)
     int n_seg, int seg_size, int chunk_size) {
 
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int PE_start = team_obj->tinfo_wrt_world->pe_start;
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
@@ -475,11 +473,11 @@ __device__ void IPCContext::alltoall(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ void IPCContext::alltoallv(rocshmem_team_t team,
-                                      T *dest, const size_t dest_nelems[],
-                                      const size_t dest_displs[],
-                                      T *source, const size_t source_nelems[],
-                                      const size_t source_displs[]) {
+__device__ void IPCContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
+                                      [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
+                                      [[maybe_unused]] const size_t dest_displs[],
+                                      [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
+                                      [[maybe_unused]] const size_t source_displs[]) {
   printf("rocshmem::ipc:alltoallv not implemented\n");
   abort();
 }

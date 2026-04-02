@@ -428,6 +428,10 @@ hipError_t hipMemPoolTrimTo(hipMemPool_t mem_pool, size_t min_bytes_to_hold);
 hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device, hipStream_t stream);
 hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location,
                                   unsigned int flags, hipStream_t stream);
+hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                    size_t num_prefetch_locs, unsigned long long flags,
+                                    hipStream_t stream);
 hipError_t hipMemPtrGetInfo(void* ptr, size_t* size);
 hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttribute attribute,
                                    const void* dev_ptr, size_t count);
@@ -1175,6 +1179,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMemPoolTrimTo_fn = hip::hipMemPoolTrimTo;
   ptrDispatchTable->hipMemPrefetchAsync_fn = hip::hipMemPrefetchAsync;
   ptrDispatchTable->hipMemPrefetchAsync_v2_fn = hip::hipMemPrefetchAsync_v2;
+  ptrDispatchTable->hipMemPrefetchBatchAsync_fn = hip::hipMemPrefetchBatchAsync;
   ptrDispatchTable->hipMemPtrGetInfo_fn = hip::hipMemPtrGetInfo;
   ptrDispatchTable->hipMemRangeGetAttribute_fn = hip::hipMemRangeGetAttribute;
   ptrDispatchTable->hipMemRangeGetAttributes_fn = hip::hipMemRangeGetAttributes;
@@ -2134,15 +2139,17 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetAttribute_fn, 514);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 25
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetAttribute_fn, 515);
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetFunction_fn, 516);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
+HIP_ENFORCE_ABI(HipDispatchTable, hipMemPrefetchBatchAsync_fn, 517);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 517)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 518)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 25,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 26,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif
