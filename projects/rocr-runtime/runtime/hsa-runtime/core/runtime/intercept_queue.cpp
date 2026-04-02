@@ -126,18 +126,18 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
          "Packet intercept error: initial retry index is incompatible with IsPendingRetryPoint.\n");
   // Save HW pointers BEFORE modifying amd_queue_ fields.
   // These are used by Submit() to access the real HW ring buffer and doorbell.
-  hw_ring_buf_ = wrapped->amd_queue_.hsa_queue.base_address;
-  hw_doorbell_ = wrapped->amd_queue_.hsa_queue.doorbell_signal;
+  hw_ring_buf_ = get_wrapped()->amd_queue_.hsa_queue.base_address;
+  hw_doorbell_ = get_wrapped()->amd_queue_.hsa_queue.doorbell_signal;
 
-  buffer_ = SharedArray<AqlPacket, 4096>(wrapped->amd_queue_.hsa_queue.size);
+  buffer_ = SharedArray<AqlPacket, 4096>(get_wrapped()->amd_queue_.hsa_queue.size);
   amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
 
   // Pre-allocate staging buffer with queue size
-  staging_buffer_.resize(wrapped->amd_queue_.hsa_queue.size);
+  staging_buffer_.resize(get_wrapped()->amd_queue_.hsa_queue.size);
 
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help trigger application errors.
-  for (uint32_t pkt_id = 0; pkt_id < wrapped->amd_queue_.hsa_queue.size; ++pkt_id) {
+  for (uint32_t pkt_id = 0; pkt_id < get_wrapped()->amd_queue_.hsa_queue.size; ++pkt_id) {
     buffer_[pkt_id].packet.header = HSA_PACKET_TYPE_INVALID;
   }
 
@@ -224,12 +224,12 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
   }
 
   AqlPacket* ring = reinterpret_cast<AqlPacket*>(hw_ring_buf_);
-  uint64_t mask = wrapped->amd_queue_.hsa_queue.size - 1;
+  uint64_t mask = get_wrapped()->amd_queue_.hsa_queue.size - 1;
 
   while (true) {
-    uint64_t write = wrapped->LoadWriteIndexRelaxed();
-    uint64_t read = wrapped->LoadReadIndexRelaxed();
-    uint64_t free_slots = wrapped->amd_queue_.hsa_queue.size - (write - read);
+    uint64_t write = get_wrapped()->LoadWriteIndexRelaxed();
+    uint64_t read = get_wrapped()->LoadReadIndexRelaxed();
+    uint64_t free_slots = get_wrapped()->amd_queue_.hsa_queue.size - (write - read);
     bool pending_retry_point = IsPendingRetryPoint(read);
 
     uint64_t submitted_count = count - marker_count;
@@ -238,7 +238,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
     // can never submit them all at once. So submit what will fit, leaving one
     // slot free for the retry barrier packet if it is not already on the
     // queue.
-    if (submitted_count >= wrapped->amd_queue_.hsa_queue.size) {
+    if (submitted_count >= get_wrapped()->amd_queue_.hsa_queue.size) {
       submitted_count = free_slots - (pending_retry_point ? 0 : 1);
     }
 
@@ -266,7 +266,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       assert(free_slots >= 1 &&
              "Packet intercept error: there is no free slot for a retry barrier packet.\n");
       // Reserve a slot for the barrier packet.
-      uint64_t barrier = wrapped->AddWriteIndexRelaxed(1);
+      uint64_t barrier = get_wrapped()->AddWriteIndexRelaxed(1);
       assert(barrier == write &&
              "Packet intercept error: wrapped queue has been updated by another thread.\n");
       ++write;
@@ -274,7 +274,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       // Submit barrier which will wake async queue processing.
       ring[barrier & mask].packet.body = {};
       ring[barrier & mask].barrier_and.completion_signal = Signal::Convert(async_doorbell_);
-      if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
+      if (get_wrapped()->IsDeviceMemRingBuf() && needsPcieOrdering()) {
         // Ensure the packet body is written as header may get reordered when writing over PCIE
         _mm_sfence();
       }
@@ -291,7 +291,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
     // submitted.
     uint64_t new_write = submitted_count == 0
         ? write
-        : wrapped->CasWriteIndexRelaxed(write, write + submitted_count);
+        : get_wrapped()->CasWriteIndexRelaxed(write, write + submitted_count);
     if (new_write == write) {
       uint64_t packets_index = 0;
       uint64_t write_index = 0;
@@ -302,7 +302,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
         if (IsInterceptMarkerPacket(&packets[packets_index])) {
           const amd_aql_intercept_marker_t* marker_packet =
               reinterpret_cast<const amd_aql_intercept_marker_t*>(&packets[packets_index]);
-          marker_packet->callback(marker_packet, &wrapped->amd_queue_.hsa_queue,
+          marker_packet->callback(marker_packet, &get_wrapped()->amd_queue_.hsa_queue,
                                   write + write_index);
         } else {
           if (write_index == 0) {
@@ -321,7 +321,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
         ++packets_index;
       }
       if (write_index != 0) {
-        if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
+        if (get_wrapped()->IsDeviceMemRingBuf() && needsPcieOrdering()) {
           // Ensure the packet body is written as header may get reordered when writing over PCIE
           _mm_sfence();
         }
@@ -365,7 +365,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
   Cursor.queue = this;
 
   AqlPacket* ring = reinterpret_cast<AqlPacket*>(amd_queue_.hsa_queue.base_address);
-  uint64_t mask = wrapped->amd_queue_.hsa_queue.size - 1;
+  uint64_t mask = get_wrapped()->amd_queue_.hsa_queue.size - 1;
 
   // Loop over valid packets and process.
   uint64_t end = LoadWriteIndexAcquire();
@@ -446,9 +446,9 @@ hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void*
     case HSA_AMD_QUEUE_INFO_DOORBELL_ID: 
     case HSA_QUEUE_INFO_USE_COUNT:
     case HSA_QUEUE_INFO_HW_ID: {
-      if (!AMD::AqlQueue::IsType(wrapped.get())) return HSA_STATUS_ERROR_INVALID_QUEUE;
+      if (!AMD::AqlQueue::IsType(get_wrapped())) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
-      AMD::AqlQueue* aqlQueue = static_cast<AMD::AqlQueue*>(wrapped.get());
+      AMD::AqlQueue* aqlQueue = static_cast<AMD::AqlQueue*>(get_wrapped());
       return aqlQueue->GetInfo(attribute, value);
     }
   }
