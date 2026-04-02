@@ -83,16 +83,18 @@ void AMOBitwiseTester<T>::resetBuffers([[maybe_unused]] size_t size) {
 }
 
 template <typename T>
-void AMOBitwiseTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, [[maybe_unused]] int loop,
+void AMOBitwiseTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, int loop,
                                        [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
+  n_loops = loop + args.skip;
+
   hipLaunchKernelGGL(AMOBitwiseTest, gridsize, blocksize, shared_bytes, stream,
-                     args.loop, args.skip, start_time, end_time, dest,
+                     loop, args.skip, start_time, end_time, dest,
                      ret_val, args.addr_mode, _type, _shmem_context);
 
-  num_msgs       = n_loops   * gridsize.x * blocksize.x;
-  num_timed_msgs = args.loop * gridsize.x * blocksize.x;
+  num_msgs       = n_loops * gridsize.x * blocksize.x;
+  num_timed_msgs = loop    * gridsize.x * blocksize.x;
 }
 
 template <typename G>
