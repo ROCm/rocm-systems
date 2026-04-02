@@ -4,7 +4,9 @@
 import argparse
 import ast
 import json
+import os
 import re
+import threading
 import warnings
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -16,6 +18,10 @@ import pandas as pd
 from utils import schema
 from utils.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.metric_sharding import (
+    build_shard_views,
+    compute_sharded_metric,
+)
 from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -235,6 +241,7 @@ class NoiseClamper:
     def __init__(self) -> None:
         self._count = 0
         self._max_rel_error = 0.0
+        self._lock = threading.Lock()
 
     def clamp(
         self,
@@ -330,8 +337,9 @@ class NoiseClamper:
 
     def _record_stats(self, count: int, max_rel: float) -> None:
         """Update running statistics."""
-        self._count += count
-        self._max_rel_error = max(self._max_rel_error, max_rel)
+        with self._lock:
+            self._count += count
+            self._max_rel_error = max(self._max_rel_error, max_rel)
 
     def clear(self) -> None:
         """Reset collected statistics."""
@@ -533,6 +541,8 @@ class MetricEvaluator:
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
         self._inner_expression_cache: dict[str, object] = {}
+        self._shard_views = build_shard_views(raw_pmc_df)
+        self._thread_count = 4* (os.cpu_count() or 1)
 
     def eval_expression(
         self,
@@ -588,7 +598,9 @@ class MetricEvaluator:
     ) -> Union[str, float, int]:
         """Compute inner expression once, apply aggregation."""
         if inner_expr not in self._inner_expression_cache:
-            self._inner_expression_cache[inner_expr] = self._evaluate_raw(inner_expr)
+            self._inner_expression_cache[inner_expr] = (
+                self._compute_inner_across_shards(inner_expr)
+            )
         cached = self._inner_expression_cache[inner_expr]
         aggregated = _apply_aggregation(
             aggregation_name,
@@ -598,6 +610,22 @@ class MetricEvaluator:
         return _validate_eval_result(
             aggregated,
             original_expr,
+        )
+
+    def _compute_inner_across_shards(
+        self,
+        inner_expr: str,
+    ) -> object:
+        """Evaluate inner expression across shards in parallel."""
+        if len(self._shard_views) <= 1:
+            return self._evaluate_raw(inner_expr)
+
+        base_context = self._build_eval_context()
+        return compute_sharded_metric(
+            self._shard_views,
+            inner_expr,
+            base_context,
+            self._thread_count,
         )
 
     def _evaluate_raw(
