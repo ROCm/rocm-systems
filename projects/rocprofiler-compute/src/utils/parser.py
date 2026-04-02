@@ -65,6 +65,15 @@ SUPPORTED_CALL: dict[str, str] = {
     "NOISE_CLAMP": "to_noise_clamp",
 }
 
+_SINGLE_ARG_AGGREGATIONS: frozenset[str] = frozenset({
+    "to_avg",
+    "to_min",
+    "to_max",
+    "to_median",
+    "to_std",
+    "to_sum",
+})
+
 PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 
 # ------------------------------------------------------------------------------
@@ -426,8 +435,93 @@ class CodeTransformer(ast.NodeTransformer):
         return node
 
 
+_AGGREGATION_FUNC_MAP = {
+    "to_avg": to_avg,
+    "to_min": to_min,
+    "to_max": to_max,
+    "to_median": to_median,
+    "to_std": to_std,
+    "to_sum": to_sum,
+    "to_quantile": to_quantile,
+}
+
+
+def _decompose_expression(
+    expr: str,
+) -> tuple[str, str, list]:
+    """Extract outer aggregation from a compiled expression.
+
+    Returns (aggregation_name, inner_expression, extra_args).
+    For ``to_avg(X)`` returns ``("to_avg", "X", [])``.
+    For ``to_quantile(X, 0.25)`` returns
+    ``("to_quantile", "X", [0.25])``.
+    For non-aggregated expressions returns
+    ``("none", expr, [])``.
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return ("none", expr, [])
+
+    if not isinstance(tree.body, ast.Call):
+        return ("none", expr, [])
+
+    call_node = tree.body
+    if not isinstance(call_node.func, ast.Name):
+        return ("none", expr, [])
+
+    func_name = call_node.func.id
+
+    if func_name in _SINGLE_ARG_AGGREGATIONS:
+        if len(call_node.args) != 1:
+            return ("none", expr, [])
+        inner_str = ast.unparse(call_node.args[0])
+        return (func_name, inner_str, [])
+
+    if func_name == "to_quantile" and len(call_node.args) == 2:
+        inner_str = ast.unparse(call_node.args[0])
+        quantile_val = ast.literal_eval(call_node.args[1])
+        return (func_name, inner_str, [quantile_val])
+
+    return ("none", expr, [])
+
+
+def _validate_eval_result(
+    eval_result: object,
+    expr: str,
+) -> Union[str, float, int]:
+    """Return 'N/A' for scalar NA values, pass through otherwise."""
+    if (
+        eval_result is None
+        or eval_result is pd.NA
+        or (np.isscalar(eval_result) and pd.isna(eval_result))
+    ):
+        if "None" not in expr:
+            console_warning(
+                "Could not evaluate expression "
+                f"'{expr}' - likely due to "
+                "missing counter data."
+            )
+        else:
+            console_debug(
+                f"Expression '{expr}' evaluated to None - likely explicitly specified."
+            )
+        return "N/A"
+    return eval_result
+
+
+def _apply_aggregation(
+    aggregation_name: str,
+    cached_series: object,
+    extra_args: list,
+) -> object:
+    """Apply a named aggregation function to cached values."""
+    aggregation_func = _AGGREGATION_FUNC_MAP[aggregation_name]
+    return aggregation_func(cached_series, *extra_args)
+
+
 class MetricEvaluator:
-    """Encapsulates metric evaluation logic and eliminates global variables."""
+    """Encapsulates metric evaluation logic with inner-expression caching."""
 
     def __init__(
         self,
@@ -438,69 +532,38 @@ class MetricEvaluator:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
+        self._inner_expression_cache: dict[str, object] = {}
 
-    def eval_expression(self, expr: str) -> Union[str, float, int]:
-        """Evaluate a single expression with proper local context."""
+    def eval_expression(
+        self,
+        expr: str,
+    ) -> Union[str, float, int]:
+        """Evaluate an expression, caching inner computations."""
         try:
-            # Create comprehensive local context
-            local_expr_context = {}
-            local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
-            local_expr_context.update(self.sys_vars)
-            local_expr_context.update(self.empirical_peaks)
-
-            # Add utility functions to local context
-            local_expr_context.update({
-                "to_min": to_min,
-                "to_max": to_max,
-                "to_avg": to_avg,
-                "to_median": to_median,
-                "to_std": to_std,
-                "to_int": to_int,
-                "to_sum": to_sum,
-                "to_round": to_round,
-                "to_quantile": to_quantile,
-                "to_mod": to_mod,
-                "to_concat": to_concat,
-                "to_noise_clamp": to_noise_clamp,
-            })
-
-            eval_result = eval(
-                compile(expr, "<string>", "eval"),
-                {},
-                local_expr_context,
+            agg_name, inner_expr, extra_args = _decompose_expression(expr)
+            if agg_name != "none":
+                return self._evaluate_cached_aggregation(
+                    agg_name,
+                    inner_expr,
+                    extra_args,
+                    expr,
+                )
+            raw_result = self._evaluate_raw(expr)
+            return _validate_eval_result(
+                raw_result,
+                expr,
             )
 
-            # Only return "N/A" for scalar NA values
-            # For vectors/Series, return as-is to preserve shape for
-            # downstream operations
-            # Note: None and pd.NA are not detected as scalar by np.isscalar()
-            if (
-                eval_result is None
-                or eval_result is pd.NA
-                or (np.isscalar(eval_result) and pd.isna(eval_result))
-            ):
-                # Do not give warning if None is explicitly specified in expression
-                if "None" not in expr:
-                    console_warning(
-                        f"Could not evaluate expression '{expr}' - likely "
-                        "due to missing counter data."
-                    )
-                else:
-                    console_debug(
-                        f"Expression '{expr}' evaluated to None - likely "
-                        "explicitly specified."
-                    )
-                return "N/A"
-            else:
-                return eval_result
-
-        except (TypeError, NameError, KeyError) as exception:
+        except (
+            TypeError,
+            NameError,
+            KeyError,
+        ) as exception:
             if "empirical_peak" in str(exception):
                 console_warning(f"Missing empirical peak data: {exception}.")
                 return "N/A"
-            else:
-                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
-                return "N/A"
+            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+            return "N/A"
 
         except AttributeError as attribute_error:
             console_warning(
@@ -508,13 +571,70 @@ class MetricEvaluator:
             )
             return "N/A"
 
-        except pd.errors.IntCastingNaNError as exception:
-            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+        except pd.errors.IntCastingNaNError as ex:
+            console_warning(f"Failed to evaluate expression '{expr}': {ex}.")
             return "N/A"
 
         except ValueError as value_error:
             console_warning(f"Failed to evaluate expression '{expr}': {value_error}.")
             return "N/A"
+
+    def _evaluate_cached_aggregation(
+        self,
+        aggregation_name: str,
+        inner_expr: str,
+        extra_args: list,
+        original_expr: str,
+    ) -> Union[str, float, int]:
+        """Compute inner expression once, apply aggregation."""
+        if inner_expr not in self._inner_expression_cache:
+            self._inner_expression_cache[inner_expr] = self._evaluate_raw(inner_expr)
+        cached = self._inner_expression_cache[inner_expr]
+        aggregated = _apply_aggregation(
+            aggregation_name,
+            cached,
+            extra_args,
+        )
+        return _validate_eval_result(
+            aggregated,
+            original_expr,
+        )
+
+    def _evaluate_raw(
+        self,
+        expr: str,
+    ) -> object:
+        """Evaluate an expression string via eval()."""
+        context = self._build_eval_context()
+        return eval(
+            compile(expr, "<string>", "eval"),
+            {},
+            context,
+        )
+
+    def _build_eval_context(
+        self,
+    ) -> dict[str, object]:
+        """Build the local variable context for eval()."""
+        context: dict[str, object] = {}
+        context["raw_pmc_df"] = self.raw_pmc_df
+        context.update(self.sys_vars)
+        context.update(self.empirical_peaks)
+        context.update({
+            "to_min": to_min,
+            "to_max": to_max,
+            "to_avg": to_avg,
+            "to_median": to_median,
+            "to_std": to_std,
+            "to_int": to_int,
+            "to_sum": to_sum,
+            "to_round": to_round,
+            "to_quantile": to_quantile,
+            "to_mod": to_mod,
+            "to_concat": to_concat,
+            "to_noise_clamp": to_noise_clamp,
+        })
+        return context
 
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
