@@ -805,44 +805,43 @@ __device__ void test_atomic_add_f64([[maybe_unused]] double* global_mem, TestRes
 }
 
 __device__ void test_atomic_min_max_f32(float* global_mem, TestResults* results, int lane_id) {
+    (void)global_mem;
+    __shared__ unsigned int shared_atomic_min_max_f32;
     float my_val = (float)lane_id + 1.0f;
     
     // ---------------------------------------------------------------------
     // Atomic MIN test: all lanes compete to set the minimum
-    // Initialize to a large positive value so any lane's value will be smaller.
-    // Use global unique thread ID to ensure only one thread across all blocks initializes
-    int global_tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (global_tid == 0) {
-        *global_mem = 1.0e9f;
+    // Use shared memory so each block gets an independent scratch value.
+    if (threadIdx.x == 0) {
+        shared_atomic_min_max_f32 = __float_as_uint(1.0e9f);
     }
     __syncthreads();
     
-    (void)atomicMin((unsigned int*)global_mem, __float_as_uint(my_val));
+    (void)atomicMin(&shared_atomic_min_max_f32, __float_as_uint(my_val));
     
     __syncthreads();
     
     if (lane_id == 0) {
         // Minimum should be 1.0 (from lane 0)
-        float min_val = __uint_as_float(*(unsigned int*)global_mem);
+        float min_val = __uint_as_float(shared_atomic_min_max_f32);
         bool min_passed = fabsf(min_val - 1.0f) < 1.0e-6f;
         atomicAdd(&results->atomic_min_f32_passed, min_passed ? 1 : 0);
     }
     
     // ---------------------------------------------------------------------
     // Atomic MAX test: all threads in block compete to set the maximum
-    // Initialize to zero so we can verify the atomic worked
-    // Use global unique thread ID to ensure only one thread across all blocks initializes
-    if (global_tid == 0) {
-        *global_mem = 0.0f;
+    // Reuse the same per-block shared scratch value for the max phase.
+    if (threadIdx.x == 0) {
+        shared_atomic_min_max_f32 = __float_as_uint(0.0f);
     }
     __syncthreads();
     
-    (void)atomicMax((unsigned int*)global_mem, __float_as_uint(my_val));
+    (void)atomicMax(&shared_atomic_min_max_f32, __float_as_uint(my_val));
     
     __syncthreads();
     
     if (threadIdx.x == 0) {
-        float max_val = __uint_as_float(*(unsigned int*)global_mem);
+        float max_val = __uint_as_float(shared_atomic_min_max_f32);
         // All threads in block participate with my_val = lane_id + 1
         // Since lane_id = threadIdx.x % warpSize, and warpSize = 32:
         // Maximum my_val across all threads is warpSize (when lane_id = 31)
