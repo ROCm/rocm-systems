@@ -149,8 +149,8 @@ jobs:
       - name: Setup environment variables
         shell: bash
         run: |
-          echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          echo "PATH=PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH:$HOME/.local/bin:$PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH" >> "$GITHUB_ENV"
 
       - name: Build and Install ROCR-Runtime
         if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
