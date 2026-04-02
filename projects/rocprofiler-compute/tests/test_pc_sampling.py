@@ -53,8 +53,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     Test that PC sampling works with --block 21 and --pc-sampling-method host_trap.
     """
     if soc == "MI100":
-        assert True
-        return
+        pytest.skip("PC sampling is not supported on MI 100")
 
     options = [
         "--block",
@@ -87,8 +86,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
     Test that PC sampling works with --block 21 and --pc-sampling-method stochastic.
     """
     if soc == "MI100" or soc == "MI200":
-        assert True
-        return
+        pytest.skip("PC sampling is not supported on MI 100")
 
     options = [
         "--block",
@@ -131,8 +129,7 @@ def test_multi_rank_pc_sampling_only(
     --block 21 (PC sampling only mode requires a single pass) with multi-rank.
     """
     if soc == "MI100":
-        assert True
-        return
+        pytest.skip("PC sampling is not supported on MI 100")
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
 
@@ -171,8 +168,7 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     with multi-rank.
     """
     if soc == "MI100":
-        assert True
-        return
+        pytest.skip("PC sampling is not supported on MI 100")
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
 
@@ -217,8 +213,7 @@ def test_pc_sampling_profile_then_analyze(
     run analysis on the profiling output.
     """
     if soc == "MI100":
-        assert True
-        return
+        pytest.skip("PC sampling is not supported on MI 100")
 
     options = [
         "--block",
@@ -301,8 +296,7 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
     (PC sampling with counter collection)
     """
     if soc == "MI100":
-        assert True
-        return
+        pytest.skip("PC sampling is not supported on MI 100")
 
     options = [
         "--block",

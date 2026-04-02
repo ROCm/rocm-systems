@@ -231,52 +231,48 @@ def build_agent_to_gpu_map(
         .sort_values("Node_Id")
         .reset_index(drop=True)
     )
-    return {f"Agent {row.Node_Id}": idx for idx, row in gpu_agents.iterrows()}
+    return {f"Agent {row.Node_Id}": row.Index for row in gpu_agents.itertuples()}
 
 
 @demarcate
-def create_df_kernel_top_stats_from_kernel_trace(
-    raw_data_dir: str,
-    time_unit: str,
-    sortby: str = "sum",
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def process_pc_sampling_kernel_trace(
+    workload_path: str,
+) -> pd.DataFrame:
     """
-    Build kernel-top and dispatch-info tables from a kernel trace.
+    Build kernel and dispatch info from a kernel trace.
 
     Used for PC-sampling-only runs where ``pmc_perf`` data is not
     available.  Reads ``ps_file_kernel_trace.csv`` (and optionally
-    ``ps_file_agent_info.csv`` for GPU ID mapping) from
-    *raw_data_dir*.
-
-    Returns the same ``(kernel_top_df, dispatch_info_df)`` pair
-    produced by :func:`create_df_kernel_top_stats`.
+    ``ps_file_agent_info.csv`` for GPU ID mapping)
     """
-    workload_path = Path(raw_data_dir)
-    kernel_trace_path = workload_path / "ps_file_kernel_trace.csv"
-
-    if not kernel_trace_path.exists():
+    trace_path = Path(workload_path) / "ps_file_kernel_trace.csv"
+    if not trace_path.exists():
         console_warning(
-            f"Kernel trace not found at {kernel_trace_path}. "
-            "Cannot build kernel top stats for PC sampling run."
+            f"Kernel trace not found at {trace_path}. Cannot build dispatch data."
         )
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(
+            columns=[
+                "Dispatch_Id",
+                "Kernel_Name",
+                "Start_Timestamp",
+                "End_Timestamp",
+                "GPU_ID",
+            ]
+        )
 
-    trace_df = pd.read_csv(kernel_trace_path)
+    trace_df = pd.read_csv(trace_path)
 
-    agent_to_gpu = build_agent_to_gpu_map(workload_path / "ps_file_agent_info.csv")
-    trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu)
-    trace_df["GPU_ID"] = trace_df["GPU_ID"].fillna(0).astype(int)
-
-    dispatch_info = _build_dispatch_info(trace_df)
-    dispatch_info.to_csv(workload_path / "pmc_dispatch_info.csv", index=False)
-
-    kernel_top = _build_kernel_top(trace_df, time_unit, sortby)
-    kernel_top.to_csv(workload_path / "pmc_kernel_top.csv", index=False)
-
-    return (
-        kernel_top.reset_index(drop=True),
-        dispatch_info.reset_index(drop=True),
+    # Map agent IDs to GPU IDs
+    agent_to_gpu = build_agent_to_gpu_map(
+        Path(workload_path) / "ps_file_agent_info.csv"
     )
+    trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu).fillna(0).astype(int)
+
+    trace_df = trace_df[
+        ["Dispatch_Id", "Kernel_Name", "Start_Timestamp", "End_Timestamp", "GPU_ID"]
+    ]
+
+    return trace_df
 
 
 def _build_dispatch_info(trace_df: pd.DataFrame) -> pd.DataFrame:

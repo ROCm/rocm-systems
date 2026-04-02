@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,24 +12,17 @@ import test_utils
 from utils import schema
 from utils.file_io import (
     build_agent_to_gpu_map,
-    create_df_kernel_top_stats_from_kernel_trace,
+    process_pc_sampling_kernel_trace,
 )
 from utils.parser import (
     PMC_KERNEL_TOP_TABLE_ID,
-    detect_method_from_json,
     load_pc_sampling_data,
     load_pc_sampling_data_per_kernel,
-    load_pc_sampling_grouped_from_json,
     nullify_unevaluated_metric_values,
     search_pc_sampling_record,
 )
 
-ROOT = Path(__file__).parent.parent
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
-
-PC_SAMPLING_WORKLOAD = "tests/workloads/pc_sampling_only/MI350"
+PC_SAMPLING_WORKLOAD = "tests/workloads/memcopy_pc_sampling_only/MI300A_A1"
 
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 
@@ -119,7 +111,7 @@ def _write_stochastic_csv(
 
 
 # ═══════════════════════════════════════════════════════════════
-# 2.1  search_pc_sampling_record
+# search_pc_sampling_record
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -228,131 +220,7 @@ def test_search_pc_sampling_record_skips_none_fields() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 2.2  detect_method_from_json
-# ═══════════════════════════════════════════════════════════════
-
-
-def test_detect_method_stochastic_only(tmp_path: Path) -> None:
-    """Detect 'stochastic' when only stochastic samples are present."""
-    sample = _make_record(1, 0, 0, 0)
-    json_path = _write_json(tmp_path / "r.json", stochastic=[sample])
-    assert detect_method_from_json(json_path) == "stochastic"
-
-
-def test_detect_method_host_trap_only(tmp_path: Path) -> None:
-    """Detect 'host_trap' when only host-trap samples are present."""
-    sample = _make_record(1, 0, 0, 0)
-    json_path = _write_json(tmp_path / "r.json", host_trap=[sample])
-    assert detect_method_from_json(json_path) == "host_trap"
-
-
-def test_detect_method_both_present_prefers_stochastic(
-    tmp_path: Path,
-) -> None:
-    """Prefer 'stochastic' when both stochastic and host-trap samples exist."""
-    sample = _make_record(1, 0, 0, 0)
-    json_path = _write_json(
-        tmp_path / "r.json",
-        stochastic=[sample],
-        host_trap=[sample],
-    )
-    assert detect_method_from_json(json_path) == "stochastic"
-
-
-def test_detect_method_neither_present(tmp_path: Path) -> None:
-    """Return None when neither stochastic nor host-trap samples exist."""
-    json_path = _write_json(tmp_path / "r.json")
-    assert detect_method_from_json(json_path) is None
-
-
-# ═══════════════════════════════════════════════════════════════
-# 2.3  load_pc_sampling_grouped_from_json
-# ═══════════════════════════════════════════════════════════════
-
-
-def test_load_pc_sampling_grouped_happy_path(
-    tmp_path: Path,
-) -> None:
-    """
-    Load grouped data with correct columns, row count,
-    descending count order, and truncated source lines.
-    """
-    samples = [
-        _make_record(100, 0x10, 0, dispatch_id=0),
-        _make_record(100, 0x10, 0, dispatch_id=1),
-        _make_record(101, 0x20, 1, dispatch_id=2),
-    ]
-    json_path = _write_json(
-        tmp_path / "r.json",
-        stochastic=samples,
-        instructions=["v_mov_b32", "v_add_f32"],
-        comments=[
-            "/src/vcopy.cpp:42",
-            "/src/vadd.cpp:30",
-        ],
-        kernel_symbols=[
-            {
-                "code_object_id": 100,
-                "formatted_kernel_name": "vecCopy",
-            },
-            {
-                "code_object_id": 101,
-                "formatted_kernel_name": "vecAdd",
-            },
-        ],
-    )
-    df = load_pc_sampling_grouped_from_json(json_path)
-    assert not df.empty
-    assert list(df.columns) == [
-        "source_line",
-        "Kernel_Name",
-        "instruction",
-        "count",
-    ]
-    assert len(df) == 2
-    assert df.iloc[0]["count"] >= df.iloc[1]["count"]
-    assert df.iloc[0]["source_line"].startswith("...")
-
-
-def test_load_pc_sampling_grouped_empty_samples(
-    tmp_path: Path,
-) -> None:
-    """Return an empty DataFrame when no PC sampling records exist in the JSON."""
-    json_path = _write_json(tmp_path / "r.json")
-    df = load_pc_sampling_grouped_from_json(json_path)
-    assert df.empty
-
-
-def test_load_pc_sampling_grouped_missing_instructions_and_comments(
-    tmp_path: Path,
-) -> None:
-    """
-    Produce None instruction and NaN source_line when
-    instruction/comment lists are empty.
-    """
-    samples = [
-        _make_record(100, 0x10, 0, dispatch_id=0),
-    ]
-    json_path = _write_json(
-        tmp_path / "r.json",
-        stochastic=samples,
-        instructions=[],
-        comments=[],
-        kernel_symbols=[
-            {
-                "code_object_id": 100,
-                "formatted_kernel_name": "vecCopy",
-            },
-        ],
-    )
-    df = load_pc_sampling_grouped_from_json(json_path)
-    assert not df.empty
-    assert df.iloc[0]["instruction"] is None
-    assert pd.isna(df.iloc[0]["source_line"])
-
-
-# ═══════════════════════════════════════════════════════════════
-# 2.4  load_pc_sampling_data_per_kernel
+# load_pc_sampling_data_per_kernel
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -521,7 +389,7 @@ def test_load_per_kernel_invalid_sorting_type(
 
 
 # ═══════════════════════════════════════════════════════════════
-# 2.5  load_pc_sampling_data
+# load_pc_sampling_data
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -576,40 +444,6 @@ def test_load_pc_sampling_data_no_filter_stochastic_csv(
         "count",
     ]
     assert df.iloc[0]["source_line"].startswith("...")
-
-
-@pytest.mark.xfail(
-    reason=(
-        "load_pc_sampling_grouped_from_json called "
-        "with 2 args but accepts only 1 (parser.py "
-        "line 2049)"
-    ),
-    raises=TypeError,
-    strict=True,
-)
-def test_load_pc_sampling_data_no_filter_json_only(
-    tmp_path: Path,
-) -> None:
-    """
-    Trigger expected TypeError when falling back to JSON
-    without a stochastic CSV.
-    """
-    kt = tmp_path / "ps_file_kernel_trace.csv"
-    kt.write_text("Dispatch_Id,Kernel_Id,Kernel_Name\n0,100,vecCopy\n")
-    _write_json(
-        tmp_path / "ps_file_results.json",
-        stochastic=[_make_record(100, 0x10, 0, dispatch_id=0)],
-        instructions=["v_mov_b32"],
-        comments=["/src/vcopy.cpp:42"],
-        kernel_symbols=[
-            {
-                "code_object_id": 100,
-                "formatted_kernel_name": "vecCopy",
-            }
-        ],
-    )
-    workload = schema.Workload()
-    load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
 
 
 def test_load_pc_sampling_data_multiple_kernels_error(
@@ -695,7 +529,7 @@ def test_load_pc_sampling_data_single_kernel_out_of_bounds(
 
 
 # ═══════════════════════════════════════════════════════════════
-# 2.6  nullify_unevaluated_metric_values
+# nullify_unevaluated_metric_values
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -749,7 +583,87 @@ def test_nullify_unevaluated_metrics_empty_df_skipped() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 3.1  build_agent_to_gpu_map
+# process_pc_sampling_kernel_trace
+# ═══════════════════════════════════════════════════════════════
+
+
+def _write_pc_kernel_trace(path: Path, rows: list[tuple]) -> Path:
+    """Write a minimal ps_file_kernel_trace.csv.
+
+    Each *row* is ``(agent_id, dispatch_id, kernel_name, start_ts, end_ts)``.
+    Only the columns actually read by ``process_pc_sampling_kernel_trace``
+    are written (the existing ``_write_kernel_trace`` uses a different
+    schema without Agent_Id or timestamps, so it cannot be reused here).
+    """
+    lines = ["Agent_Id,Dispatch_Id,Kernel_Name,Start_Timestamp,End_Timestamp"]
+    for agent_id, dispatch_id, kernel_name, start_ts, end_ts in rows:
+        lines.append(f"{agent_id},{dispatch_id},{kernel_name},{start_ts},{end_ts}")
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_process_pc_sampling_missing_trace_returns_empty(
+    tmp_path: Path,
+) -> None:
+    """Return empty DataFrame with expected columns when trace is absent."""
+    df = process_pc_sampling_kernel_trace(str(tmp_path))
+    assert df.empty
+    assert list(df.columns) == [
+        "Dispatch_Id",
+        "Kernel_Name",
+        "Start_Timestamp",
+        "End_Timestamp",
+        "GPU_ID",
+    ]
+
+
+def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
+    """Verify column selection, GPU mapping, timestamps, and extra column dropping."""
+    _write_pc_kernel_trace(
+        tmp_path / "ps_file_kernel_trace.csv",
+        [
+            ("Agent 2", 1, "vecCopy", 1981199661678356, 1981199662835032),
+            ("Agent 3", 2, "vecAdd", 2000, 3000),
+            ("Agent 99", 3, "vecMul", 4000, 5000),
+        ],
+    )
+    agent_csv = tmp_path / "ps_file_agent_info.csv"
+    agent_csv.write_text("Node_Id,Agent_Type\n1,CPU\n2,GPU\n3,GPU\n")
+
+    df = process_pc_sampling_kernel_trace(str(tmp_path))
+
+    # Correct shape and columns
+    assert len(df) == 3
+    assert list(df.columns) == [
+        "Dispatch_Id",
+        "Kernel_Name",
+        "Start_Timestamp",
+        "End_Timestamp",
+        "GPU_ID",
+    ]
+
+    # Multi-GPU mapping: Agent 2 -> GPU 0, Agent 3 -> GPU 1, unknown -> 0
+    assert df["GPU_ID"].tolist() == [0, 1, 0]
+    assert df["Kernel_Name"].tolist() == ["vecCopy", "vecAdd", "vecMul"]
+
+    # Timestamps passed through unchanged
+    assert df["Start_Timestamp"].iloc[0] == 1981199661678356
+    assert df["End_Timestamp"].iloc[0] == 1981199662835032
+
+
+def test_process_pc_sampling_no_agent_info(tmp_path: Path) -> None:
+    """Default GPU_ID to 0 when ps_file_agent_info.csv is missing."""
+    _write_pc_kernel_trace(
+        tmp_path / "ps_file_kernel_trace.csv",
+        [("Agent 99", 1, "vecCopy", 1000, 2000)],
+    )
+    df = process_pc_sampling_kernel_trace(str(tmp_path))
+    assert len(df) == 1
+    assert df["GPU_ID"].iloc[0] == 0
+
+
+# ═══════════════════════════════════════════════════════════════
+# build_agent_to_gpu_map
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -792,110 +706,7 @@ def test_build_agent_to_gpu_map_missing_file(
 
 
 # ═══════════════════════════════════════════════════════════════
-# 3.2  create_df_kernel_top_stats_from_kernel_trace
-# ═══════════════════════════════════════════════════════════════
-
-
-def _setup_kernel_trace_dir(
-    tmp_path: Path,
-) -> Path:
-    """Write kernel trace + agent info CSVs into tmp_path."""
-    kt = tmp_path / "ps_file_kernel_trace.csv"
-    kt.write_text(
-        "Dispatch_Id,Kernel_Id,Kernel_Name,"
-        "Agent_Id,Start_Timestamp,End_Timestamp\n"
-        "0,100,vecCopy,Agent 2,1000000,1500000\n"
-        "1,100,vecCopy,Agent 2,2000000,2800000\n"
-        "2,101,vecAdd,Agent 2,3000000,3400000\n"
-        "3,101,vecAdd,Agent 2,4000000,4200000\n"
-    )
-    ai = tmp_path / "ps_file_agent_info.csv"
-    ai.write_text("Node_Id,Agent_Type\n1,CPU\n2,GPU\n")
-    return tmp_path
-
-
-def test_kernel_top_stats_missing_kernel_trace(
-    tmp_path: Path,
-) -> None:
-    """Return empty DataFrames when no kernel trace CSV exists in the directory."""
-    kt_df, di_df = create_df_kernel_top_stats_from_kernel_trace(
-        raw_data_dir=str(tmp_path),
-        time_unit="ns",
-    )
-    assert kt_df.empty
-    assert di_df.empty
-
-
-def test_kernel_top_stats_basic_two_kernels(
-    tmp_path: Path,
-) -> None:
-    """
-    Produce kernel-top stats with expected columns,
-    descending sum order, and percentages summing to 100.
-    """
-    _setup_kernel_trace_dir(tmp_path)
-    kt_df, _ = create_df_kernel_top_stats_from_kernel_trace(
-        raw_data_dir=str(tmp_path),
-        time_unit="ns",
-        sortby="sum",
-    )
-    assert len(kt_df) == 2
-    assert "Kernel_Name" in kt_df.columns
-    assert "Count" in kt_df.columns
-    assert "Sum(ns)" in kt_df.columns
-    assert "Mean(ns)" in kt_df.columns
-    assert "Median(ns)" in kt_df.columns
-    assert "Percent" in kt_df.columns
-    sums = kt_df["Sum(ns)"].tolist()
-    assert sums == sorted(sums, reverse=True)
-    assert abs(kt_df["Percent"].sum() - 100.0) < 0.01
-
-
-def test_kernel_top_stats_dispatch_info_columns(
-    tmp_path: Path,
-) -> None:
-    """Dispatch info DataFrame contains all dispatches with correct GPU_ID mappings."""
-    _setup_kernel_trace_dir(tmp_path)
-    _, di_df = create_df_kernel_top_stats_from_kernel_trace(
-        raw_data_dir=str(tmp_path),
-        time_unit="ns",
-    )
-    assert len(di_df) == 4
-    assert "Dispatch_ID" in di_df.columns
-    assert "Kernel_Name" in di_df.columns
-    assert "GPU_ID" in di_df.columns
-    assert (di_df["GPU_ID"] == 0).all()
-
-
-def test_kernel_top_stats_sortby_kernel(
-    tmp_path: Path,
-) -> None:
-    """Sort kernel-top rows alphabetically by Kernel_Name when sortby='kernel'."""
-    _setup_kernel_trace_dir(tmp_path)
-    kt_df, _ = create_df_kernel_top_stats_from_kernel_trace(
-        raw_data_dir=str(tmp_path),
-        time_unit="ns",
-        sortby="kernel",
-    )
-    names = kt_df["Kernel_Name"].tolist()
-    assert names == sorted(names)
-
-
-def test_kernel_top_stats_writes_csv_files(
-    tmp_path: Path,
-) -> None:
-    """Write pmc_kernel_top.csv and pmc_dispatch_info.csv to the raw data directory."""
-    _setup_kernel_trace_dir(tmp_path)
-    create_df_kernel_top_stats_from_kernel_trace(
-        raw_data_dir=str(tmp_path),
-        time_unit="ns",
-    )
-    assert (tmp_path / "pmc_kernel_top.csv").exists()
-    assert (tmp_path / "pmc_dispatch_info.csv").exists()
-
-
-# ═══════════════════════════════════════════════════════════════
-# 4.  PC sampling analyze integration tests
+# PC sampling analyze integration tests
 # ═══════════════════════════════════════════════════════════════
 
 

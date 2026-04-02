@@ -1,0 +1,4 @@
+"Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH","Agent 2",2,0,281643,1,12,"vecCopy(double*, double*, double*, int, int)",1,1986623975868304,1986623975876596,0,0,4,4,16,256,1,1,1048576,1,1
+"KERNEL_DISPATCH","Agent 2",2,0,281643,2,12,"vecCopy(double*, double*, double*, int, int)",2,1986623975909003,1986623975914531,0,0,4,4,16,256,1,1,1048576,1,1
+"KERNEL_DISPATCH","Agent 2",2,0,281643,3,12,"vecCopy(double*, double*, double*, int, int)",3,1986623975930955,1986623975936443,0,0,4,4,16,256,1,1,1048576,1,1

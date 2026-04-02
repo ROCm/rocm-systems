@@ -32,6 +32,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* Filtering for block 21 (`-b 21`) in profile mode, now only performs pc sampling and skips unnecessary counter collection
+  * Filtering for block 21 in analysis mode, now skips metrics calculations and only shows kernel/dispatch/system statisitcs and pc sampling table
+
 ### Resolved issues
 
 * Fixed roofline benchmark MFMA FP16/BF16/INT8 peaks for MI 350
