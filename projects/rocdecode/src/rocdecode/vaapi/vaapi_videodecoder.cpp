@@ -79,7 +79,7 @@ void VaapiVideoDecoder::ValidateOutputFormat() {
                 break; // already an 8-bit format, no adjustment needed
         }
         if (adjusted != decoder_create_info_.output_format) {
-            logger_.WarningLog(MakeMsg("output_format (" + TOSTR(static_cast<uint32_t>(decoder_create_info_.output_format)) +
+            WarningLog(logger_, ("output_format (" + TOSTR(static_cast<uint32_t>(decoder_create_info_.output_format)) +
                 ") bit depth exceeds content bit depth (bit_depth_minus_8 = " +
                 TOSTR(decoder_create_info_.bit_depth_minus_8) + "). Adjusting output_format to " +
                 TOSTR(static_cast<uint32_t>(adjusted)) + "."));
