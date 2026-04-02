@@ -205,13 +205,14 @@ hsa_signal_value_t InterruptSignal::WaitAcquire(
       WaitRelaxed(condition, compare_value, timeout, wait_hint);
   
   std::atomic_thread_fence(std::memory_order_acquire);
-#ifdef __linux__ 
   if (std::getenv("HSA_FORCE_HUGETLB")) {
-  #if defined(__x86_64__) || defined(_M_X64)
-    __builtin_ia32_mfence(); // Pour le Steam Deck (x86)
-  #endif 
+    /* * HugeTLB on UMA/APU architectures can bypass standard x86 
+     * memory consistency models under heavy load. 
+     * We enforce a hardware-level fence (mfence) to ensure 
+     * CPU cache coherency with GPU-updated memory.
+     */
+    atomic::Fence(std::memory_order_acq_rel);
   }
-#endif
   return ret;
 }
 
