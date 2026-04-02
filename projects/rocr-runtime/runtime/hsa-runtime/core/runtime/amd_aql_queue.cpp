@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <thread>
 #include "core/inc/amd_aql_queue.h"
 
 #ifdef __linux__
@@ -398,6 +399,24 @@ AqlQueue::~AqlQueue() {
 }
 
 void AqlQueue::Destroy() {
+  // Lifecycle state machine: prevent destroy during migration
+  {
+    int spin_count = 0;
+    while (!TryBeginDestroy()) {
+      // State is MIGRATING - wait for migration to complete
+      if (GetLifecycleState() == LifecycleState::MIGRATING) {
+        if (++spin_count > 10000) {
+          fprintf(stderr, "HSA warning: Queue destroy spin-wait exceeded 10000 iterations during migration
+");
+          break;  // Proceed with destroy to avoid deadlock
+        }
+        std::this_thread::yield();
+        continue;
+      }
+      break;  // DESTROYING state - another thread is destroying
+    }
+  }
+
   if (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE) {
     agent_->GWSRelease();
     return;
@@ -621,15 +640,15 @@ int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
 }
 
 void AqlQueue::Suspend() {
-  suspended_ = true;
+  suspended_.store(true, std::memory_order_release);
   auto err =
       agent_->driver().UpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL);
   assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
 }
 
 void AqlQueue::Resume() {
-  if (suspended_) {
-    suspended_ = false;
+  if (suspended_.load(std::memory_order_acquire)) {
+    suspended_.store(false, std::memory_order_release);
     auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
                                             ring_buf_alloc_bytes_, NULL);
     assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
@@ -647,7 +666,7 @@ hsa_status_t AqlQueue::Inactivate() {
 }
 
 hsa_status_t AqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
-  if (suspended_) {
+  if (suspended_.load(std::memory_order_acquire)) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 

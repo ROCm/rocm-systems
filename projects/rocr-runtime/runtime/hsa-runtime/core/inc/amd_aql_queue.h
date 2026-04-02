@@ -316,7 +316,49 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   enum { ERROR_HANDLER_DONE = 1, ERROR_HANDLER_TERMINATE = 2, ERROR_HANDLER_SCRATCH_RETRY = 4 };
 
   // Queue currently suspended or scheduled
-  bool suspended_;
+  std::atomic<bool> suspended_;
+
+  // Lifecycle state machine for safe concurrent migration/destroy
+  enum class LifecycleState : int {
+    ACTIVE = 0,       // Normal operating state
+    MIGRATING = 1,    // Migration (intercept attach) in progress
+    DESTROYING = 2,   // Queue being destroyed
+    INTERCEPTED = 3   // Successfully wrapped with InterceptQueue
+  };
+  std::atomic<LifecycleState> lifecycle_state_{LifecycleState::ACTIVE};
+
+ public:
+  // Lifecycle state machine transitions (lock-free CAS)
+  bool TryBeginMigration() {
+    LifecycleState expected = LifecycleState::ACTIVE;
+    return lifecycle_state_.compare_exchange_strong(
+        expected, LifecycleState::MIGRATING, std::memory_order_acq_rel);
+  }
+
+  void CompleteMigration() {
+    lifecycle_state_.store(LifecycleState::INTERCEPTED, std::memory_order_release);
+  }
+
+  void AbortMigration() {
+    lifecycle_state_.store(LifecycleState::ACTIVE, std::memory_order_release);
+  }
+
+  bool TryBeginDestroy() {
+    LifecycleState expected = LifecycleState::ACTIVE;
+    if (lifecycle_state_.compare_exchange_strong(
+            expected, LifecycleState::DESTROYING, std::memory_order_acq_rel)) {
+      return true;
+    }
+    expected = LifecycleState::INTERCEPTED;
+    return lifecycle_state_.compare_exchange_strong(
+        expected, LifecycleState::DESTROYING, std::memory_order_acq_rel);
+  }
+
+  LifecycleState GetLifecycleState() const {
+    return lifecycle_state_.load(std::memory_order_acquire);
+  }
+
+ private:
 
   // Thunk dispatch and wavefront scheduling priority
   HSA::hsa_amd_queue_priority_internal_t priority_;
