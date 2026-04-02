@@ -1786,13 +1786,16 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     mock_fname_path_obj = mock.MagicMock(spec=Path)
     mock_fname_path_obj.stem = "pmc_perf_counters"
     mock_fname_path_obj.name = "pmc_perf_counters.yaml"
-    mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
+    mock_fname_path_obj.exists.return_value = False
 
     mock_out_path_obj = mock.Mock(spec=Path)
     mock_out_path_obj.exists.return_value = False
 
     mock_counter_def_path_obj = mock.Mock(spec=Path)
     mock_counter_def_path_obj.exists.return_value = False
+    mock_fname_path_obj.parent.__truediv__ = mock.Mock(
+        return_value=mock_counter_def_path_obj
+    )
 
     def path_side_effect(p_arg, *args):
         if isinstance(p_arg, Path):
