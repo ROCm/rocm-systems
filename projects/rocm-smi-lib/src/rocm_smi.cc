@@ -1679,7 +1679,7 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind, uint32_t* nu
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | Issue: could not retreive kDevPowerODVoltage" << "; returning "
+    ss << __PRETTY_FUNCTION__ << " | Issue: could not retrieve kDevPowerODVoltage" << "; returning "
        << getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
@@ -4996,7 +4996,7 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: issue writing reqested setting of " + newMemoryPartition
+       << " | Cause: issue writing requested setting of " + newMemoryPartition
        << " | Returning = " << getRSMIStatusString(err, false);
     LOG_ERROR(ss);
     return err;
@@ -5016,7 +5016,7 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << " | Fail - restart AMD GPU detected"
        << " | Device #: " << dv_ind
        << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: issue writing reqested setting of " + newMemoryPartition
+       << " | Cause: issue writing requested setting of " + newMemoryPartition
        << " | Returning = " << getRSMIStatusString(restartRet, false);
     LOG_ERROR(ss);
     return restartRet;

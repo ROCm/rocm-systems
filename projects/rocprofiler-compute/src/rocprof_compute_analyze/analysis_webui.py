@@ -20,7 +20,8 @@ from utils import file_io, parser, schema
 from utils.gui import build_bar_chart, build_table_chart
 from utils.gui_components.memchart import get_memchart
 from utils.logger import console_debug, console_error, console_warning, demarcate
-from utils.roofline_calc import calc_ai_analyze, validate_roofline_csv
+from utils.roofline_calc import calc_ai_analyze
+from utils.utils_common import validate_roofline_csv
 
 
 class webui_analysis(OmniAnalyze_Base):
@@ -243,8 +244,6 @@ class webui_analysis(OmniAnalyze_Base):
                     ai_data = calc_ai_analyze(
                         workload=workload,
                         pmc_df=pmc_df,
-                        mspec=soc[self.arch]._mspec,
-                        sort_type=str(args.sort),
                         config=self._profiling_config,
                         arch_config=arch_configs,
                     )

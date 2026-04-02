@@ -71,7 +71,7 @@ namespace {
     // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
     // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
     // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, RCCLMetadata, Pipeline, USE_ACC> prims
+    Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0, false, RCCLMetadata, Pipeline, USE_ACC> prims
       (tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, 0, work->connIndex, work->connIndex, work);
 
 #if defined(ENABLE_NPKIT)
@@ -262,7 +262,7 @@ namespace {
 #endif
 
     { // Reduce : max number of recv is 3, max number of send is 1 (binary tree + local)
-      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/0, Proto, 0, false, 0, Pipeline, USE_ACC> prims
+      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC> prims
         (tid, nthreads, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
 
 #if defined(ENABLE_NPKIT)
@@ -311,7 +311,7 @@ namespace {
     }
 
     { // Broadcast : max number of recv is 1, max number of send is 3 (binary tree + local)
-      Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/0, Proto, 0, false, 0, Pipeline, USE_ACC> prims
+      Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC> prims
         (tid, nthreads, &tree->up, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
 
 #if defined(ENABLE_NPKIT)
@@ -430,7 +430,7 @@ namespace {
 
     if (tree->up == -1) {
       // Reduce and broadcast. Max number of recv is 2, max number of send is 2
-      Primitives<T, RedOp, FanSymmetric<NCCL_MAX_DEV_ARITY>, /*Direct=*/0, Proto, 0, false, 0, Pipeline, USE_ACC>
+      Primitives<T, RedOp, FanSymmetric<NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
         prims(tid, nthreads, tree->down, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
 
 #if defined(ENABLE_NPKIT)
@@ -473,7 +473,7 @@ namespace {
       // Coverity reports that the callee treats &tree->up as an array.  However, due to the use of
       // FanAsymmetric<n, 1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/0, Proto, 0, false, 0, Pipeline, USE_ACC>
+      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
         prims(tid, nthreadsSplit, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg, 0*Proto::MaxGroupWidth, 0, 0, work);
 
 #if defined(ENABLE_NPKIT)
@@ -518,7 +518,7 @@ namespace {
       // Coverity reports that the callee treats &tree->up as an array.  However, due to the use of
       // FanAsymmetric<1, n>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/0, Proto, 0, false, 0, Pipeline, USE_ACC>
+      Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
         prims(tid-nthreadsSplit, nthreads-nthreadsSplit, &tree->up, tree->down, work->sendbuff, work->recvbuff,
             work->redOpArg, 1*Proto::MaxGroupWidth, 0, 0, work);
 
@@ -685,11 +685,11 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
         // Directly send to network
         if (work->netRegUsed) {
           if (tid == tidStartReduce) {
-            Primitives<T, RedOp, FanAsymmetric<0, 1>, /*Direct=*/0, Proto, 0>::sendPeerNotify(direct->out, 1, 1);
+            Primitives<T, RedOp, FanAsymmetric<0, 1>, /*Direct=*/1, Proto, 0>::sendPeerNotify(direct->out, 1, 1);
           }
           __syncwarp();
         } else {
-          Primitives<T, RedOp, FanAsymmetric<0, 1>, /*Direct=*/0, Proto, 0>
+          Primitives<T, RedOp, FanAsymmetric<0, 1>, /*Direct=*/1, Proto, 0>
           prims(tid-tidStartReduce, nThreadsReduce, nullptr, &direct->out, work->sendbuff, work->recvbuff,
             work->redOpArg, 3*Proto::MaxGroupWidth, 1, 1);
           for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
@@ -701,7 +701,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
       }
     } else if (tid < tidStartBcast && hasUp) {
       // Gather
-      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DIRECT_ARITY, 0>, /*Direct=*/0, Proto, 0>
+      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DIRECT_ARITY, 0>, /*Direct=*/1, Proto, 0>
         prims(tid, nThreadsGather, direct->up, NULL, work->sendbuff, work->recvbuff,
            work->redOpArg, 0*Proto::MaxGroupWidth, 0, 0, work);
       ssize_t offsetBase, peerOffset;
@@ -726,7 +726,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
         // Coverity complains about a possible overrun inside the class below, but that's actually
         // a false positive.
         // coverity[identity_transfer:FALSE]
-        Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DIRECT_ARITY>, /*Direct=*/0, Proto, 0>
+        Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DIRECT_ARITY>, /*Direct=*/1, Proto, 0>
           prims(tid-tidStartBcast, nThreadsBcast, &direct->out, direct->down, work->sendbuff, work->recvbuff,
             work->redOpArg, 1*Proto::MaxGroupWidth, 0, 0, work);
         for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
@@ -738,12 +738,12 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
       } else {
         if (work->netRegUsed) {
           if (tid == tidStartBcast) {
-            Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>::recvPeerNotify(direct->out, 0, 1);
+            Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/1, Proto, 0>::recvPeerNotify(direct->out, 0, 1);
           }
           __syncwarp();
         } else {
           // Recv from network (no post thread needed)
-          Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>
+          Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/1, Proto, 0>
             prims(tid - tidStartBcast, nThreadsBcast, &direct->out, nullptr, work->sendbuff, work->recvbuff,
               work->redOpArg, 1 * Proto::MaxGroupWidth, 0, 0);
           for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
@@ -788,7 +788,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
       if (tid < tidEndScatter) {
         // Scatter
         using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-        Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/0, Proto, 0>
+        Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/1, Proto, 0>
           prims(tid, nThreadsScatter, NULL, nvls->up, work->sendbuff, NULL,
             work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
         for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
@@ -800,7 +800,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
       } else if (tid < tidEndGather) {
         // Gather
         using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/0, Proto, 0>
+        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/1, Proto, 0>
           prims(tid - tidEndScatter, nThreadsGather, nvls->up, NULL, NULL, work->recvbuff,
             work->redOpArg, 1 * Proto::MaxGroupWidth, 1, 1);
         for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
@@ -835,7 +835,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
       if (tid < tidEndScatter) {
         // Scatter
         using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-        Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/0, Proto, 0>
+        Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/1, Proto, 0>
           prims(tid, nThreadsScatter, NULL, nvls->up, work->sendbuff, NULL,
             work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
         for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
@@ -847,7 +847,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
       } else if (tid < tidEndGather) {
         // Gather
         using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/0, Proto, 0>
+        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/1, Proto, 0>
           prims(tid - tidEndScatter, nThreadsGather, nvls->up, NULL, NULL, work->recvbuff,
             work->redOpArg, 1 * Proto::MaxGroupWidth, 1, 1);
         for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
@@ -923,7 +923,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS_TREE, NCCL_PROTO_
     if (tid < tidEndScatter) {
       // Scatter
       using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-      Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/0, Proto, 0>
+      Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/1, Proto, 0>
         prims(tid, nThreadsScatter, NULL, nvls->up, work->sendbuff, NULL,
           work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
       for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
@@ -935,7 +935,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS_TREE, NCCL_PROTO_
     } else if (tid < tidEndGather) {
       // Gather
       using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/0, Proto, 0>
+      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/1, Proto, 0>
         prims(tid - tidEndScatter, nThreadsGather, nvls->up, NULL, NULL, work->recvbuff,
           work->redOpArg, 1 * Proto::MaxGroupWidth, 1, 1);
       for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {

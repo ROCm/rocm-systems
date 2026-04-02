@@ -57,6 +57,7 @@
 
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
+#include "core/inc/signal.h"
 #include "core/util/memory.h"
 #include "core/util/utils.h"
 #include "uapi/amdxdna_accel.h"
@@ -336,6 +337,13 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   if (use_bo_shmem) {
     create_bo_args.type = AMDXDNA_BO_SHMEM;
   } else {
+    // While this is already checked in MemoryRegion::AllocateImpl, the max size is
+    // MemoryRegion::max_sysmem_alloc_size_ for HSA_HEAPTYPE_DEVICE_SVM which is incorrect
+    // for dev heap.
+    if (size > dev_heap_size) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+
     create_bo_args.type = AMDXDNA_BO_DEV;
   }
 
@@ -910,6 +918,12 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
     auto* cmd_pkt_payload =
         reinterpret_cast<hsa_amd_aie_ert_start_kernel_data_t*>(pkt->payload_data);
     FlushOperands(pkt->count, cmd_pkt_payload);
+
+    // Fire completion signal for this packet
+    if (pkt->completion_signal.handle != 0) {
+      core::Signal* sig = core::Signal::Convert(pkt->completion_signal);
+      sig->SubRelease(1);
+    }
   }
 
   // Guards will unmap and close cmd BOs and cmd_chain BO.

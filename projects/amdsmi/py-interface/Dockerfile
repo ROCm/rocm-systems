@@ -32,7 +32,7 @@ RUN TEMPDIR=$(mktemp -d) \
         && wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh \
         && ./llvm.sh 16 \
         && update-alternatives --install /usr/bin/clang clang $(which clang-16) 91 --slave /usr/bin/clang++ clang++ $(which clang++-16) \
-        && python3 -m pip install --no-cache-dir clang==16.0.1 ctypeslib2==2.3.4 -U \
+        && python3 -m pip install --no-cache-dir clang==16.0.1 ctypeslib2==2.4.0 -U \
         && rm -rf $TEMPDIR
 
 # install cmake

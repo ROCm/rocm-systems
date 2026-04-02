@@ -23,18 +23,18 @@ import json
 
 
 AMDSMI_ERROR_MESSAGES = {
-    0: "Sucess",
+    0: "Success",
     1: "Invalid parameters",
     2: "Command not supported",
     3: "Command not yet implemented",
     4: "Failed load module",
-    5: "Failed load symbole",
+    5: "Failed load symbol",
     6: "Drm error",
     7: "API call failed",
     8: "Timeout in API call",
     9: "Retry operation",
     10: "Permission Denied",
-    11: "Interrupt ocurred during execution",
+    11: "Interrupt occurred during execution",
     12: "I/O Error",
     13: "Address fault",
     14: "Error opening file",

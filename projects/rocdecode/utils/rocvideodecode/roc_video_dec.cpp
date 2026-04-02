@@ -206,6 +206,7 @@ static void GetSurfaceStrideInternal(rocDecVideoSurfaceFormat surface_format, ui
 
     switch (surface_format) {
     case rocDecVideoSurfaceFormat_NV12:
+    default:
         *pitch = align(width, 256);
         *vstride = align(height, 16);
         break;
@@ -353,7 +354,7 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     videoDecodeCreateInfo.device_id = device_id_;
     videoDecodeCreateInfo.codec_type = codec_id_;
     videoDecodeCreateInfo.chroma_format = video_chroma_format_;
-    videoDecodeCreateInfo.output_format = video_surface_format_;
+    videoDecodeCreateInfo.output_format = rocDecVideoSurfaceFormat_Native; // Signal to decode that surface format will be set based on chroma format and bit depth
     videoDecodeCreateInfo.bit_depth_minus_8 = bitdepth_minus_8_;
     videoDecodeCreateInfo.num_decode_surfaces = num_decode_surfaces_;
     videoDecodeCreateInfo.width = coded_width_;
@@ -556,6 +557,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
         else if (video_chroma_format_ == rocDecVideoChromaFormat_422)
             video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV422_16Bit : rocDecVideoSurfaceFormat_YUV422;
     }
+
     num_decode_surfaces_ = p_video_format->min_num_decode_surfaces;
 
     if (p_video_format->reconfig_options == ROCDEC_RECONFIG_NEW_SURFACES) {

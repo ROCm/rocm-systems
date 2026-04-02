@@ -32,10 +32,10 @@ using namespace rocshmem;
 
 /* Declare the global kernel template with a generic implementation */
 template <typename T>
-__global__ void AMOStandardTest(int loop, int skip, long long int *start_time,
-                                long long int *end_time, T *dest,
-                                T *ret_val, AddrMode addr_mode,
-                                TestType type, ShmemContextType ctx_type) {
+__global__ void AMOStandardTest([[maybe_unused]] int loop, [[maybe_unused]] int skip, [[maybe_unused]] long long int *start_time,
+                                [[maybe_unused]] long long int *end_time, [[maybe_unused]] T *dest,
+                                [[maybe_unused]] T *ret_val, [[maybe_unused]] AddrMode addr_mode,
+                                [[maybe_unused]] TestType type, [[maybe_unused]] ShmemContextType ctx_type) {
   return;
 }
 
@@ -78,14 +78,14 @@ AMOStandardTester<T>::~AMOStandardTester() {
 }
 
 template <typename T>
-void AMOStandardTester<T>::resetBuffers(size_t size) {
+void AMOStandardTester<T>::resetBuffers([[maybe_unused]] size_t size) {
   memset(ret_val, 0, max_msg_size * n_in  * n_loops);
   memset(dest,    0, max_msg_size * n_out * n_loops);
 }
 
 template <typename T>
-void AMOStandardTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, int loop,
-                                        size_t size) {
+void AMOStandardTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, [[maybe_unused]] int loop,
+                                        [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(AMOStandardTest, gridsize, blocksize, shared_bytes, stream,
@@ -239,7 +239,7 @@ void AMOStandardTester<T>::verifyReturnValues() {
 }
 
 template <typename T>
-void AMOStandardTester<T>::verifyResults(size_t size) {
+void AMOStandardTester<T>::verifyResults([[maybe_unused]] size_t size) {
   // PE 0 checks returns; target PE checks dest.
   if (args.myid) {
     verifyDestValues();
