@@ -1402,6 +1402,16 @@ hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
 
 // Attach an intercept queue to an existing, active queue.
 // The migration protocol suspends the queue, swaps fields, and resumes.
+//
+// Pre-GFX11 optimization note: On pre-GFX11 hardware (MI100, MI200, MI300),
+// queue suspend via hsaKmtUpdateQueue(queue_percent=0) causes a global
+// unmap/remap that disrupts ALL queues on the device, not just the target
+// queue. When attaching to multiple queues on such hardware, callers should
+// be aware that each attach call triggers a global disruption. For batch
+// attachment scenarios, the caller should collect all target queues and
+// call attach in rapid succession to minimize the total disruption window.
+// GFX11+ hardware (RDNA 3, RDNA 4) supports per-queue MES-based suspend
+// which only affects the target queue.
 hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
     hsa_queue_t* queue,
     hsa_amd_queue_intercept_handler callback,
@@ -1411,6 +1421,16 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
   IS_BAD_PTR(queue);
   IS_BAD_PTR(callback);
 
+  // Enable verbose migration logging via environment variable
+  static const bool verbose_migration = []() {
+    const char* env = getenv("HSA_INTERCEPT_DEBUG");
+    return env && (env[0] == '1' || env[0] == 'y' || env[0] == 'Y');
+  }();
+
+  if (verbose_migration) {
+    debug_print("intercept_attach: starting for queue %p\n", (void*)queue);
+  }
+
   core::Queue* core_queue = core::Queue::Convert(queue);
   IS_VALID(core_queue);
 
@@ -1418,11 +1438,19 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
   if (core::InterceptQueue::IsType(core_queue)) {
     core::InterceptQueue* iq = static_cast<core::InterceptQueue*>(core_queue);
     iq->AddInterceptor(callback, user_data);
+    if (verbose_migration) {
+      debug_print("intercept_attach: queue %p already intercepted, added callback\n",
+                  (void*)queue);
+    }
     return HSA_STATUS_SUCCESS;
   }
 
   // Must be an AqlQueue
   if (!AMD::AqlQueue::IsType(core_queue)) {
+    if (verbose_migration) {
+      debug_print("intercept_attach: queue %p is not an AqlQueue, cannot attach\n",
+                  (void*)queue);
+    }
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
@@ -1430,11 +1458,19 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
 
   // Reject cooperative queues
   if (aql_queue->amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE) {
+    if (verbose_migration) {
+      debug_print("intercept_attach: queue %p is cooperative, cannot attach\n",
+                  (void*)queue);
+    }
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
   // Lifecycle check: prevent concurrent migration/destroy
   if (!aql_queue->TryBeginMigration()) {
+    if (verbose_migration) {
+      debug_print("intercept_attach: queue %p lifecycle CAS failed "
+                  "(concurrent migration or destroy)\n", (void*)queue);
+    }
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
@@ -1448,6 +1484,10 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
   core::InterceptQueue* intercept =
       core::InterceptQueue::WrapExisting(core_queue, callback, user_data);
   if (intercept == nullptr) {
+    if (verbose_migration) {
+      debug_print("intercept_attach: queue %p WrapExisting failed "
+                  "(out of resources)\n", (void*)queue);
+    }
     lifecycle_guard();
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -1530,6 +1570,11 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
     // Step 11: Resume the queue
     aql_queue->ResumeFromMigration();
 
+    if (verbose_migration) {
+      debug_print("intercept_attach: queue %p resumed after migration\n",
+                  (void*)queue);
+    }
+
     // Step 12: Release scratch_lock_ (implicit from lock_guard)
   }
 
@@ -1537,6 +1582,11 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
   aql_queue->CompleteMigration();
   migration_committed = true;
   intercept_committed = true;
+
+  if (verbose_migration) {
+    debug_print("intercept_attach: queue %p attach completed successfully\n",
+                (void*)queue);
+  }
 
   return HSA_STATUS_SUCCESS;
   CATCH;
@@ -1548,22 +1598,49 @@ hsa_status_t HSA_API hsa_amd_queue_intercept_detach(hsa_queue_t* queue) {
   IS_OPEN();
   IS_BAD_PTR(queue);
 
+  // Enable verbose migration logging via environment variable
+  static const bool verbose_migration = []() {
+    const char* env = getenv("HSA_INTERCEPT_DEBUG");
+    return env && (env[0] == '1' || env[0] == 'y' || env[0] == 'Y');
+  }();
+
+  if (verbose_migration) {
+    debug_print("intercept_detach: starting for queue %p\n", (void*)queue);
+  }
+
   core::Queue* core_queue = core::Queue::Convert(queue);
   IS_VALID(core_queue);
 
   if (!core::InterceptQueue::IsType(core_queue)) {
+    if (verbose_migration) {
+      debug_print("intercept_detach: queue %p is not an InterceptQueue\n",
+                  (void*)queue);
+    }
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
   core::InterceptQueue* iq = static_cast<core::InterceptQueue*>(core_queue);
   if (!iq->is_retrofitted()) {
     // Not a retrofit InterceptQueue - cannot detach creation-time intercept
+    if (verbose_migration) {
+      debug_print("intercept_detach: queue %p is creation-time intercept, "
+                  "cannot detach\n", (void*)queue);
+    }
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
   hsa_status_t status = iq->Unwrap();
   if (status == HSA_STATUS_SUCCESS) {
+    if (verbose_migration) {
+      debug_print("intercept_detach: queue %p detach completed successfully\n",
+                  (void*)queue);
+    }
     delete iq;
+  } else {
+    if (verbose_migration) {
+      debug_print("intercept_detach: queue %p Unwrap failed with status %d\n",
+                  (void*)queue, (int)status);
+    }
   }
 
   return status;
