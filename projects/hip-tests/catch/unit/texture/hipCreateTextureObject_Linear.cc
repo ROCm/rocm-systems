@@ -112,7 +112,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_LinearResource) {
     REQUIRE(ret != hipSuccess);
 #else
     // API expected to return error according to cuda documentation.
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+    WARN("Skipping section: " << HipTest::SkipReason::kApiUnsupportedOnNvidia);
 #endif
   }
 

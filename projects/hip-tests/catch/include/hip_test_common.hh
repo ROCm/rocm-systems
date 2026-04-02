@@ -518,6 +518,11 @@ inline constexpr char const kMemcpyPeerSameSrcDstDevice[] =
     "Skipped: source and destination device are the same.";
 inline constexpr char const kRequiredDeviceCountNotMet[] =
     "Skipped: required number of devices is not available.";
+inline constexpr char const kNotEnoughFreeGpuMemory[] =
+    "Skipped: not enough free GPU memory";
+inline constexpr char const kNotEnoughFreeHostMemory[] =
+    "Skipped: not enough free host memory";
+inline constexpr char const kRequiresLinux[] = "Skipped: this test requires Linux.";
 }  // namespace SkipReason
 
 /**

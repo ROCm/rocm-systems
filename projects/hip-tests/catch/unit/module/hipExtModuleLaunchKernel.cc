@@ -182,14 +182,14 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
   SECTION("compressed fatbin") { HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed)); }
   SECTION("generic target in regular fatbin") {
     if (!isGenericTargetSupported()) {
-      HipTest::HIP_SKIP_TEST("Skipped: generic target is not supported on this device.");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTarget));
   }
   SECTION("generic target in compressed fatbin") {
     if (!isGenericTargetSupported()) {
-      HipTest::HIP_SKIP_TEST("Skipped: generic target is not supported on this device.");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTargetCompressed));

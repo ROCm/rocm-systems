@@ -182,7 +182,7 @@ HIP_TEST_CASE(Unit_hipModule_Functional) {
   }
   SECTION("Code object file test on multiple GPUs") {
 #ifndef __linux__
-    HipTest::HIP_SKIP_TEST("Skipped: this test requires Linux.");
+    WARN("Skipping section: " << HipTest::SkipReason::kRequiresLinux);
     return;
 #endif
     TestPassed &= testMultiTargArchCodeObj();

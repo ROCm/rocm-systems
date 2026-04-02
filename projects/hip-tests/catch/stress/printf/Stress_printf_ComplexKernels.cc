@@ -399,7 +399,7 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStream completed \n");
 #else
-  HipTest::HIP_SKIP_TEST("Skipped: this test requires Linux.");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -429,6 +429,6 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStreamMultGpu end \n");
 #else
-  HipTest::HIP_SKIP_TEST("Skipped: this test requires Linux.");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }

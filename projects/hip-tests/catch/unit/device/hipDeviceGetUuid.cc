@@ -343,7 +343,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run()== 1);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
 #endif
@@ -360,7 +360,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
 #ifdef __linux__
@@ -425,7 +425,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
     SECTION("Set Same UUID/Device ordinal more than once ") {
@@ -442,7 +442,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
       }
     }
     SECTION("Set Env Variable in child process") {

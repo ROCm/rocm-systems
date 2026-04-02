@@ -410,7 +410,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocArray_happy, uint, int, int4, ushort, short
           "tex2Dgather is not supported for gfx90a, Hence"
           "skipping the testcase for this device ") +
           std::to_string(device);
-      HipTest::HIP_SKIP_TEST(skip_msg.c_str());
+      WARN(skip_msg.c_str());
+      return;
     }
   }
 #endif

@@ -299,7 +299,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
 #ifdef __linux__
   getDeviceCount(&numDevices);
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    WARN("Skipping Linux-only P2P sections: " << HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   SECTION("Test running for testMaskedDevice") {
@@ -327,7 +327,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
     REQUIRE(TestPassed == true);
   }
 #else
-  HipTest::HIP_SKIP_TEST("Skipped: this test requires Linux.");
+  WARN("Skipping Linux-only P2P link scenarios: " << HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 

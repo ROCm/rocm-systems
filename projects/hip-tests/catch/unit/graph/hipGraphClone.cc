@@ -229,10 +229,12 @@ HIP_TEST_CASE(Unit_hipGraphClone_Functional) {
       if (canAccessPeer) {
         hipGraphClone_DeviceContextChange();
       } else {
-        HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+        WARN("Skipping device context change section: peer access is not available between devices.");
+        return;
       }
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+      WARN("Skipping device context change section: fewer than two GPUs.");
+      return;
     }
   }
 }

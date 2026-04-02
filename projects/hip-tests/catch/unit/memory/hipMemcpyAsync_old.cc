@@ -128,7 +128,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, floa
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     if (deviceCount < 2) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       int canAccessPeer = 0;
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
@@ -144,7 +144,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, floa
         HipTest::checkTest(A_h, B_h, NUM_ELM);
 
       } else {
-        HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+        WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       }
     }
   }
@@ -153,7 +153,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, floa
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     if (deviceCount < 2) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       int canAccessPeer = 0;
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
@@ -173,7 +173,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, floa
         HIP_CHECK(hipFree(C_d));
 
       } else {
-        HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+        WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       }
     }
   }

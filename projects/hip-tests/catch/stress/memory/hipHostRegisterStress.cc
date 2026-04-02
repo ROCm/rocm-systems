@@ -68,7 +68,7 @@ HIP_TEST_CASE(Stress_hipHostRegister_Oversubscription) {
   INFO("Free Host Memory = " << hostMemFree);
   // Ensure that allocsize < hostMemFree
   if (allocsize >= hostMemFree) {
-    HipTest::HIP_SKIP_TEST("Skipped: insufficient free host memory for this test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeHostMemory);
     return;
   }
   uint8_t* A = reinterpret_cast<uint8_t*>(malloc(allocsize));

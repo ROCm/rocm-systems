@@ -730,7 +730,7 @@ HIP_TEST_CASE(Unit_hipStrmPerThrdDefault) {
   HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
   SECTION("Testing_hipLaunchCooperativeKernel()") {
     if (!deviceProp.cooperativeLaunch) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      WARN("Skipping section: " << HipTest::SkipReason::kCooperativeLaunchUnsupported);
       return;
     }
     // launching hipLaunchCooperativeKernel() with Null stream

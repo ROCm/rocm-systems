@@ -43,7 +43,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetGetMipmappedArray) {
     auto res = hipMallocMipmappedArray(&mipmapped_array, &channel_desc, extent, 2 * mipmap_level,
                                        hipArrayDefault);
     if (res == hipErrorNotSupported) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
+      WARN("Skipping section: " << HipTest::SkipReason::kMipmappedArraysUnsupported);
       return;
     }
     HIP_CHECK(res);
