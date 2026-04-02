@@ -224,61 +224,6 @@ class SubBlock:
     border_color: str = "blue"
 
 
-@dataclass
-class RegularBlock(RectBlock):
-    sub_blocks: list[SubBlock] = field(default_factory=list)
-    content_text: str = ""
-    vertical_position: str = "middle"
-    color: str = "blue"
-
-    def render(self) -> Panel:
-        import re
-
-        temp_content = []
-
-        if self.content_text:
-            temp_content.append(f"[dim]{self.content_text}[/dim]")
-            temp_content.append("")
-
-        for i, sub in enumerate(self.sub_blocks):
-            if sub.show_border and sub.label:
-                box_width = self.width - 6
-                inner_width = box_width - 4
-                bc = sub.border_color
-                top_line = f"[{bc}]┌" + "─" * (box_width - 2) + f"┐[/{bc}]"
-                bottom_line = f"[{bc}]└" + "─" * (box_width - 2) + f"┘[/{bc}]"
-                temp_content.append(top_line)
-                label_clean = sub.label
-                label_pad = " " * max(0, inner_width - len(label_clean))
-                temp_content.append(
-                    f"[{bc}]│[/{bc}] [bold]{sub.label}[/bold]{label_pad} [{bc}]│[/{bc}]"
-                )
-                for attr in sub.attributes:
-                    if not attr:
-                        continue
-                    clean = re.sub(r"\[.*?\]", "", attr)
-                    pad_len = max(0, inner_width - len(clean))
-                    pad = " " * pad_len
-                    temp_content.append(f"[{bc}]│[/{bc}] {attr}{pad} [{bc}]│[/{bc}]")
-                temp_content.append(bottom_line)
-            else:
-                if sub.label:
-                    temp_content.append(f"[bold]{sub.label}[/bold]")
-                for attr in sub.attributes:
-                    temp_content.append(attr)
-            if i < len(self.sub_blocks) - 1:
-                temp_content.append("")
-
-        content = "\n".join(temp_content)
-        return Panel(
-            content,
-            title=f"[bold {self.color}]{self.label}[/bold {self.color}]",
-            border_style=self.color,
-            width=self.width,
-            height=self.height,
-        )
-
-
 def format_value(
     value: Union[int, float, str, None], unit: str = "", precision: int = 1
 ) -> str:
