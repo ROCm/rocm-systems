@@ -139,6 +139,7 @@
 .set HW_REG_SQ_PERF_SNAPSHOT_DATA1             , 0xf80f
 .set HW_REG_SQ_PERF_SNAPSHOT_DATA2             , 0xf810
 .set HW_REG_SQ_PERF_SNAPSHOT_DATA              , 0xf81b
+.set HW_REG_WAVE_SCHED_MODE                    , 26
 
   // Macro to store the Correlation ID (Dispatch ID and Doorbell ID) into the current sample slot
   //
