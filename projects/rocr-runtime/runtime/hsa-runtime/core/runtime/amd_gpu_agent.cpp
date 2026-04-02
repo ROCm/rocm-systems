@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <functional>
 #include "core/inc/amd_gpu_agent.h"
 
 #include <algorithm>
@@ -3913,6 +3914,20 @@ hsa_status_t GpuAgent::Preload(uint64_t flags) {
     PreloadBlits();
   }
 
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t GpuAgent::IterateQueues(
+    std::function<hsa_status_t(core::Queue*)> callback) const {
+  // aql_queues_ is managed by QueueCreate/QueueDestroy on this agent.
+  // Access is not mutex-protected in the existing code; the vector is
+  // modified only during queue creation and destruction.
+  for (auto* queue : aql_queues_) {
+    if (queue != nullptr) {
+      hsa_status_t status = callback(queue);
+      if (status != HSA_STATUS_SUCCESS) return status;
+    }
+  }
   return HSA_STATUS_SUCCESS;
 }
 

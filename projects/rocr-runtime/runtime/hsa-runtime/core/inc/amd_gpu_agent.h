@@ -530,6 +530,14 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Get list of AQL queues for core dump filtering
   const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
 
+  /// @brief Iterate over all active AQL queues, calling callback for each.
+  /// @param callback Function called for each queue. Return HSA_STATUS_SUCCESS
+  ///        to continue, any other value to stop iteration.
+  /// @return HSA_STATUS_SUCCESS if iteration completed, or the first non-success
+  ///         status returned by the callback.
+  hsa_status_t IterateQueues(
+      std::function<hsa_status_t(core::Queue*)> callback) const;
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
