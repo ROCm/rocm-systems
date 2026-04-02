@@ -221,9 +221,7 @@ get_hash_id(Tp&& _val)
 auto
 replace_uuid(const rocpd_db& db, std::string_view inp)
 {
-    const auto& _repl       = db.uuid;
-    const auto  replacement = (_repl.empty()) ? std::string{} : fmt::format("_{}", _repl);
-    return replace_all(std::string{inp}, std::string_view{"{{uuid}}"}, replacement);
+    return replace_all(std::string{inp}, std::string_view{"{{uuid}}"}, db.uuid);
 }
 
 template <typename... Args>
@@ -452,7 +450,7 @@ normalize_batch_table_name(const rocpd_db& db, std::string_view table)
 {
     if(db.uuid.empty()) return std::string{table};
 
-    auto suffix = fmt::format("_{}", db.uuid);
+    auto suffix = db.uuid;
     if(table.size() > suffix.size() &&
        table.substr(table.size() - suffix.size(), suffix.size()) == suffix)
     {
@@ -504,20 +502,20 @@ get_or_prepare_batch_statement(rocpd_db&                   db,
                                const pending_insert_batch& pending,
                                size_t                      rows_per_exec)
 {
-    auto batch_key =
+    const auto batch_key =
         fmt::format("{}:batch:{}:{}", pending.table, rows_per_exec, fmt::join(pending.fields, ","));
 
     auto& stmt = db.statements[batch_key];
     if(stmt) return stmt;
 
-    auto placeholders     = std::vector(pending.fields.size(), std::string{"?"});
-    auto row_placeholder  = fmt::format("({})", fmt::join(placeholders, ", "));
-    auto row_placeholders = std::vector(rows_per_exec, row_placeholder);
-    auto values_clause    = fmt::format("{}", fmt::join(row_placeholders, ", "));
-    auto fields_csv       = fmt::format("{}", fmt::join(pending.fields, ", "));
+    const auto placeholders     = std::vector(pending.fields.size(), std::string{"?"});
+    const auto row_placeholder  = fmt::format("({})", fmt::join(placeholders, ", "));
+    const auto row_placeholders = std::vector(rows_per_exec, row_placeholder);
+    const auto values_clause    = fmt::format("{}", fmt::join(row_placeholders, ", "));
+    const auto field_names      = fmt::format("{}", fmt::join(pending.fields, ", "));
 
-    auto sql =
-        fmt::format("INSERT INTO {} ({}) VALUES {};", pending.table, fields_csv, values_clause);
+    const auto sql =
+        fmt::format("INSERT INTO {} ({}) VALUES {};", pending.table, field_names, values_clause);
     SQLITE3_CHECK(sqlite3_prepare_v2(db.conn, sql.c_str(), -1, &stmt, nullptr));
     return stmt;
 }
@@ -544,7 +542,9 @@ flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending)
 {
     if(pending.rows.empty()) return;
 
-    auto pending_table = normalize_batch_table_name(db, pending.table);
+    // Some tables reference rocpd_event.id; flush rocpd_event first so FK-like
+    // relationships are satisfied before dependent rows are inserted.
+    const auto pending_table = normalize_batch_table_name(db, pending.table);
     if(pending_table != "rocpd_event")
     {
         for(auto& [_, event_pending] : db.pending_batches)
@@ -552,6 +552,8 @@ flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending)
             if(normalize_batch_table_name(db, event_pending.table) == "rocpd_event" &&
                !event_pending.rows.empty())
             {
+                // Recursively drain only the event batch first, then continue with the
+                // current table's batch in this same flush call.
                 flush_pending_insert_batch(db, event_pending);
                 break;
             }
@@ -977,7 +979,7 @@ write_rocpd(
         auto        uuid_v7 = common::generate_uuid_v7(this_pid_init_ns, seed);
 
         db.guid = fmt::format("{}", uuid_v7);
-        db.uuid = fmt::format("{}", replace_all(uuid_v7, '-', "_"));
+        db.uuid = fmt::format("_{}", replace_all(uuid_v7, '-', "_"));
 
         // reading schemata
         auto table_schema = read_schema_file(db, ROCPD_SQL_SCHEMA_ROCPD_TABLES);
