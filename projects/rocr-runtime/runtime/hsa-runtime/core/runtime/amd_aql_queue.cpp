@@ -406,8 +406,7 @@ void AqlQueue::Destroy() {
       // State is MIGRATING - wait for migration to complete
       if (GetLifecycleState() == LifecycleState::MIGRATING) {
         if (++spin_count > 10000) {
-          fprintf(stderr, "HSA warning: Queue destroy spin-wait exceeded 10000 iterations during migration
-");
+          fprintf(stderr, "HSA warning: Queue destroy spin-wait exceeded 10000 iterations during migration\n");
           break;  // Proceed with destroy to avoid deadlock
         }
         std::this_thread::yield();
