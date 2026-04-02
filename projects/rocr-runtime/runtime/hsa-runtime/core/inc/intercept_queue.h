@@ -88,6 +88,9 @@ class QueueWrapper : public Queue {
         wrapped_owned_(nullptr),
         wrapped_raw_(queue),
         owns_wrapped_(false) {
+    // Save the wrapped queue's original public_handle before overwriting it.
+    // This is needed to restore it during detach (Unwrap).
+    saved_wrapped_public_handle_ = queue->public_handle();
     memcpy(&amd_queue_, &wrapped_raw_->amd_queue_, sizeof(amd_queue_));
     wrapped_raw_->set_public_handle(wrapped_raw_, public_handle_);
   }
@@ -101,6 +104,9 @@ class QueueWrapper : public Queue {
 
   // Query ownership mode
   bool owns_wrapped() const { return owns_wrapped_; }
+
+  // Get the saved wrapped queue's original public_handle (for detach/restore)
+  hsa_queue_t* saved_wrapped_public_handle() const { return saved_wrapped_public_handle_; }
 
   hsa_status_t Inactivate() override { return get_wrapped()->Inactivate(); }
   hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override {
@@ -172,6 +178,9 @@ class QueueWrapper : public Queue {
 
   // Raw pointer to the wrapped queue (always valid)
   Queue* wrapped_raw_;
+
+  // Saved original public_handle of the wrapped queue (for detach/restore)
+  hsa_queue_t* saved_wrapped_public_handle_ = nullptr;
 
   // Whether this wrapper owns the wrapped queue
   bool owns_wrapped_;
@@ -260,6 +269,7 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   Signal* GetAsyncDoorbell() const { return async_doorbell_; }
   void SetSavedCoreQueue(Queue* q) { saved_core_queue_ = q; }
   void SetOriginalSharedQueue(SharedQueue* sq) { original_shared_queue_ = sq; }
+  void SetNextPacket(uint64_t val) { next_packet_ = val; }
   void* GetSavedBaseAddress() const { return saved_base_address_; }
   hsa_signal_t GetSavedDoorbellSignal() const { return saved_doorbell_signal_; }
   Queue* GetSavedCoreQueue() const { return saved_core_queue_; }
@@ -357,6 +367,7 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   void* saved_base_address_ = nullptr;
   hsa_signal_t saved_doorbell_signal_ = {};
   Queue* saved_core_queue_ = nullptr;
+  hsa_queue_t* saved_public_handle_ = nullptr;
   SharedQueue* original_shared_queue_ = nullptr;
 
   // HW ring buffer address, saved BEFORE the base_address swap.

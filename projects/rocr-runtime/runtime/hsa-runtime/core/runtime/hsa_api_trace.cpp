@@ -60,6 +60,10 @@ hsa_status_t hsa_amd_queue_intercept_create(
 
 hsa_status_t hsa_amd_runtime_queue_create_register(hsa_amd_runtime_queue_notifier callback,
                                                    void* user_data);
+hsa_status_t hsa_amd_queue_intercept_attach(hsa_queue_t* queue,
+                                            hsa_amd_queue_intercept_handler callback,
+                                            void* user_data);
+hsa_status_t hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
 }   //  namespace amd
 
 namespace core {
@@ -483,6 +487,8 @@ void HsaApiTable::UpdateAmdExts() {
   amd_ext_api.hsa_amd_portable_export_dmabuf_v2_fn = AMD::hsa_amd_portable_export_dmabuf_v2;
   amd_ext_api.hsa_amd_memory_async_batch_copy_fn = AMD::hsa_amd_memory_async_batch_copy;
   amd_ext_api.hsa_amd_agent_preload_fn = AMD::hsa_amd_agent_preload;
+  amd_ext_api.hsa_amd_queue_intercept_attach_fn = AMD::hsa_amd_queue_intercept_attach;
+  amd_ext_api.hsa_amd_queue_intercept_detach_fn = AMD::hsa_amd_queue_intercept_detach;
 }
 
 void HsaApiTable::UpdateTools() {

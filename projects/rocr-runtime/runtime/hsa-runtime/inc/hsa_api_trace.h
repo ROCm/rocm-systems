@@ -111,19 +111,30 @@ typedef struct amd_aql_intercept_marker_s {
   uint64_t user_data[6];
 } amd_aql_intercept_marker_t;
 
+#ifndef HSA_AMD_QUEUE_INTERCEPT_TYPES_DEFINED
+#define HSA_AMD_QUEUE_INTERCEPT_TYPES_DEFINED
 typedef void (*hsa_amd_queue_intercept_packet_writer)(const void* pkts, uint64_t pkt_count);
 typedef void (*hsa_amd_queue_intercept_handler)(const void* pkts, uint64_t pkt_count,
                                                 uint64_t user_pkt_index, void* data,
                                                 hsa_amd_queue_intercept_packet_writer writer);
+#endif
 hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
                                               hsa_amd_queue_intercept_handler callback,
                                               void* user_data);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 hsa_status_t hsa_amd_queue_intercept_attach(hsa_queue_t* queue,
                                             hsa_amd_queue_intercept_handler callback,
                                             void* user_data);
 
 hsa_status_t hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
+
+#ifdef __cplusplus
+}
+#endif
 hsa_status_t hsa_amd_queue_intercept_create(
     hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,

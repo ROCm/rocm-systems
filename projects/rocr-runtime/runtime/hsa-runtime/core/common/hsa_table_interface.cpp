@@ -1373,10 +1373,10 @@ hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue) {
   return amdExtTable->hsa_amd_counted_queue_release_fn(queue);
 }
 
-// Tools only table interfaces.
+// Tools API table interfaces - exported for tool use.
+// intercept_create and intercept_register retain C++ linkage (internal only).
 namespace rocr {
 
-// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_queue_intercept_create(
     hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
@@ -1385,11 +1385,27 @@ hsa_status_t hsa_amd_queue_intercept_create(
       agent_handle, size, type, callback, data, private_segment_size, group_segment_size, queue);
 }
 
-// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
                                               hsa_amd_queue_intercept_handler callback,
                                               void* user_data) {
   return amdExtTable->hsa_amd_queue_intercept_register_fn(queue, callback, user_data);
 }
 
+hsa_status_t hsa_amd_runtime_queue_create_register(hsa_amd_runtime_queue_notifier callback,
+                                                   void* user_data) {
+  return amdExtTable->hsa_amd_runtime_queue_create_register_fn(callback, user_data);
+}
+
 }  // namespace rocr
+
+// attach/detach have extern "C" declarations in hsa_ext_amd.h, so they export
+// with C linkage and match the version script.
+hsa_status_t HSA_API hsa_amd_queue_intercept_attach(hsa_queue_t* queue,
+                                            hsa_amd_queue_intercept_handler callback,
+                                            void* user_data) {
+  return amdExtTable->hsa_amd_queue_intercept_attach_fn(queue, callback, user_data);
+}
+
+hsa_status_t HSA_API hsa_amd_queue_intercept_detach(hsa_queue_t* queue) {
+  return amdExtTable->hsa_amd_queue_intercept_detach_fn(queue);
+}

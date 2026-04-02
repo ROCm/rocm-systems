@@ -4207,6 +4207,47 @@ typedef enum hsa_amd_log_flag_s {
  */
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void* file);
 
+// Forward declarations for intercept queue types (also in hsa_api_trace.h)
+#ifndef HSA_AMD_QUEUE_INTERCEPT_TYPES_DEFINED
+#define HSA_AMD_QUEUE_INTERCEPT_TYPES_DEFINED
+typedef void (*hsa_amd_queue_intercept_packet_writer)(const void* pkts, uint64_t pkt_count);
+typedef void (*hsa_amd_queue_intercept_handler)(const void* pkts, uint64_t pkt_count,
+                                                uint64_t user_pkt_index, void* data,
+                                                hsa_amd_queue_intercept_packet_writer writer);
+#endif
+
+/**
+ * @brief Attach an intercept queue to an existing, active HSA queue.
+ *
+ * @details This function retrofits intercept queue functionality onto a queue
+ * that was not created with intercept support. The migration protocol suspends
+ * the queue, swaps internal fields to route packets through the callback, and
+ * resumes the queue.
+ *
+ * @param[in] queue Pointer to the queue to attach to.
+ * @param[in] callback The intercept handler callback function.
+ * @param[in] user_data User data passed to the callback.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The intercept was attached successfully.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT callback is NULL.
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE queue is invalid or cooperative.
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES Failed to allocate resources.
+ */
+hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
+    hsa_queue_t* queue,
+    hsa_amd_queue_intercept_handler callback,
+    void* user_data);
+
+/**
+ * @brief Detach an intercept queue from a queue, restoring original state.
+ *
+ * @param[in] queue Pointer to the queue to detach from.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The intercept was detached successfully.
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE queue is not intercepted.
+ */
+hsa_status_t HSA_API hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
+
 /** @} */
 
 #ifdef __cplusplus

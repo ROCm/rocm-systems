@@ -1402,7 +1402,7 @@ hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
 
 // Attach an intercept queue to an existing, active queue.
 // The migration protocol suspends the queue, swaps fields, and resumes.
-hsa_status_t hsa_amd_queue_intercept_attach(
+hsa_status_t HSA_API hsa_amd_queue_intercept_attach(
     hsa_queue_t* queue,
     hsa_amd_queue_intercept_handler callback,
     void* user_data) {
@@ -1478,7 +1478,9 @@ hsa_status_t hsa_amd_queue_intercept_attach(
     // Step 7: Initialize proxy state at snapshot values
     intercept->amd_queue_.write_dispatch_id = snapshot_write;
     intercept->amd_queue_.read_dispatch_id = snapshot_write;
-    // next_packet_ and retry_index_ are set in the constructor
+    // next_packet_ must match snapshot so packet processing starts at the
+    // right position in the proxy ring buffer.
+    intercept->SetNextPacket(snapshot_write);
 
     // Step 8: Save original fields for rollback/detach
     // (saved_base_address_ and saved_doorbell_signal_ already set in WrapExisting)
@@ -1541,7 +1543,7 @@ hsa_status_t hsa_amd_queue_intercept_attach(
 }
 
 // Detach an intercept queue from an existing queue, restoring original state.
-hsa_status_t hsa_amd_queue_intercept_detach(hsa_queue_t* queue) {
+hsa_status_t HSA_API hsa_amd_queue_intercept_detach(hsa_queue_t* queue) {
   TRY;
   IS_OPEN();
   IS_BAD_PTR(queue);

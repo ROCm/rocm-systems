@@ -1,4 +1,3 @@
-#include <thread>
 ////////////////////////////////////////////////////////////////////////////////
 //
 // The University of Illinois/NCSA
@@ -46,6 +45,7 @@
 #include "core/inc/default_signal.h"
 #include "core/util/utils.h"
 #include "inc/hsa_api_trace.h"
+#include <thread>
 
 namespace rocr {
 namespace core {
@@ -172,12 +172,15 @@ InterceptQueue::~InterceptQueue() {
   // Kill the async doorbell handler
   // Doorbell may not be used during or after queue destroy, however an interrupt may be in flight.
   // Ensure doorbell value is not 0, mark for exit, wake handler and wait for termination value.
-  async_doorbell_->StoreRelaxed(DOORBELL_MAX);
-  quit_ = true;
-  hsa_signal_value_t val = async_doorbell_->ExchRelaxed(1);
-  if (val != 0)
-    async_doorbell_->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_BLOCKED);
-  async_doorbell_->DestroySignal();
+  // If async_doorbell_ is nullptr, Unwrap() already cleaned it up (retrofit detach path).
+  if (async_doorbell_ != nullptr) {
+    async_doorbell_->StoreRelaxed(DOORBELL_MAX);
+    quit_ = true;
+    hsa_signal_value_t val = async_doorbell_->ExchRelaxed(1);
+    if (val != 0)
+      async_doorbell_->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_BLOCKED);
+    async_doorbell_->DestroySignal();
+  }
 }
 
 bool InterceptQueue::HandleAsyncDoorbell(hsa_signal_value_t value, void* arg) {
@@ -477,14 +480,24 @@ InterceptQueue* InterceptQueue::WrapExisting(
     // For now, we use placement-like construction through the non-owning
     // QueueProxy path.
 
+    // Save the original public_handle BEFORE construction changes it.
+    // The QueueWrapper constructor modifies the wrapped queue's public_handle_
+    // so we must capture it here.
+    hsa_queue_t* orig_public_handle = existing_queue->public_handle();
+
     // Allocate the InterceptQueue object manually
     iq = new InterceptQueue(NonOwningTag{}, existing_queue);
 
-    // Add the user callback as an interceptor
-    iq->AddInterceptor(callback, user_data);
+    // Override saved_public_handle_ with the value captured before construction
+    iq->saved_public_handle_ = orig_public_handle;
 
-    // Add the final submit handler
+    // Add the final submit handler FIRST (at index 0).
+    // The callback chain processes from last to first, so the user
+    // callback must be added AFTER Submit so it gets called first.
     iq->AddInterceptor(Submit, iq);
+
+    // Add the user callback (at higher index, called first in chain)
+    iq->AddInterceptor(callback, user_data);
 
   } catch (...) {
     delete iq;
@@ -628,6 +641,10 @@ hsa_status_t InterceptQueue::Unwrap() {
                 saved_doorbell_signal_, std::memory_order_release);
   __atomic_store_n(&original_shared_queue_->core_queue,
                    saved_core_queue_, __ATOMIC_RELEASE);
+
+  // Restore the wrapped queue's public_handle_ so that Convert(public_handle())
+  // returns the correct queue after detach (not a dangling InterceptQueue pointer).
+  set_public_handle(saved_core_queue_, saved_public_handle_);
   std::atomic_thread_fence(std::memory_order_seq_cst);
 
   // Step 9: Resume the queue
