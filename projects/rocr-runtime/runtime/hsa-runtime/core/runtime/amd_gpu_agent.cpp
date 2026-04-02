@@ -3076,12 +3076,12 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
       HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
+  // On error, use device_datahost for signal cleanup since device_data
+  // may not be CPU-accessible on non-large BAR systems
   MAKE_NAMED_SCOPE_GUARD(freeResources, [&]() {
     if (pcs_data->device_data) {
-      if (pcs_data->device_data->done_sig0.handle)
-        HSA::hsa_signal_destroy(pcs_data->device_data->done_sig0);
-      if (pcs_data->device_data->done_sig1.handle)
-        HSA::hsa_signal_destroy(pcs_data->device_data->done_sig1);
+      if (device_datahost->done_sig0.handle) HSA::hsa_signal_destroy(device_datahost->done_sig0);
+      if (device_datahost->done_sig1.handle) HSA::hsa_signal_destroy(device_datahost->done_sig1);
 
       finegrain_deallocator()(pcs_data->device_data);
     }
@@ -3195,6 +3195,13 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     pcs_data->host_buffer_wrap_pos = 0;
     pcs_data->host_write_ptr = pcs_data->host_buffer;
     pcs_data->host_read_ptr = pcs_data->host_write_ptr;
+    pcs_data->which_buffer = 0;
+
+    // Local copies of device_data fields that we cannot read back on
+    // non-large BAR systems
+    pcs_data->done_sig0 = device_datahost->done_sig0;
+    pcs_data->done_sig1 = device_datahost->done_sig1;
+    pcs_data->buf_size = device_datahost->buf_size;
 
     pcs_data->session = &session;
 
@@ -3235,8 +3242,8 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
   free(pcs_data->cmd_data);
   system_deallocator()(pcs_data->old_val);
   HSA::hsa_signal_destroy(pcs_data->exec_pm4_signal);
-  HSA::hsa_signal_destroy(pcs_data->device_data->done_sig0);
-  HSA::hsa_signal_destroy(pcs_data->device_data->done_sig1);
+  HSA::hsa_signal_destroy(pcs_data->done_sig0);
+  HSA::hsa_signal_destroy(pcs_data->done_sig1);
   finegrain_deallocator()(pcs_data->device_data);
   system_deallocator()(pcs_data->host_buffer);
 
@@ -3352,8 +3359,8 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   // Wake up pcs_hosttrap_thread_ if it is waiting for data
-  HSA::hsa_signal_store_screlease(pcs_data->device_data->done_sig0, -1);
-  HSA::hsa_signal_store_screlease(pcs_data->device_data->done_sig1, -1);
+  HSA::hsa_signal_store_screlease(pcs_data->done_sig0, -1);
+  HSA::hsa_signal_store_screlease(pcs_data->done_sig1, -1);
 
   // Wait for the thread to finish and clean up
   os::WaitForThread(pcs_data->thread);
@@ -3534,7 +3541,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   buf_write_val = reinterpret_cast<uint64_t>(&pcs_data->device_data->buf_write_val);
   buf_written_val[0] = reinterpret_cast<uint64_t>(&pcs_data->device_data->buf_written_val0);
   buf_written_val[1] = reinterpret_cast<uint64_t>(&pcs_data->device_data->buf_written_val1);
-  buf_size = pcs_data->device_data->buf_size;
+  buf_size = pcs_data->buf_size;
 
   buf_offset =
       offsetof(pcs_sampling_data_t, reserved1) + sizeof(((pcs_sampling_data_t*)0)->reserved1);
@@ -3717,11 +3724,12 @@ void GpuAgent::PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name) {
   try {
     pcs::PcsRuntime::PcSamplingSession& session = *pcs_data.session;
     uint32_t& which_buffer = pcs_data.which_buffer;
+    pcs_data_t* pcs_data_ptr = &pcs_data;
 
     uint8_t* host_buffer_begin = pcs_data.host_buffer;
     uint8_t* host_buffer_end = pcs_data.host_buffer + pcs_data.host_buffer_size;
 
-    hsa_signal_t done_sig[] = {pcs_data.device_data->done_sig0, pcs_data.device_data->done_sig1};
+    hsa_signal_t done_sig[] = {pcs_data_ptr->done_sig0, pcs_data_ptr->done_sig1};
 
     while (pcs_data.session->isActive()) {
       // Wait for the signal to process the buffer
