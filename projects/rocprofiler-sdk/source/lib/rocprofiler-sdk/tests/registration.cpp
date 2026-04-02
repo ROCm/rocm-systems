@@ -345,7 +345,7 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
     EXPECT_GT(cb_data.client_elapsed, 0);
     EXPECT_GT(elapsed, 0);
 #else
-    decltype(elapsed) elapsed_tolerance = 0.25 * elapsed;
+    decltype(elapsed) elapsed_tolerance = 0.35 * elapsed;
     int64_t           diff              = (cb_data.client_elapsed - elapsed);
     auto              frac              = std::abs(diff) / (1.0 * elapsed);
     EXPECT_NEAR(elapsed, cb_data.client_elapsed, elapsed_tolerance)

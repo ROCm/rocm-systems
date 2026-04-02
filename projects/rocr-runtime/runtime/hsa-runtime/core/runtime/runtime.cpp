@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <cassert>
 #include <cstring>
 #include <regex>
 #include <string>
@@ -3764,10 +3765,18 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
-  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
-
-  hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
-  assert(status == HSA_STATUS_SUCCESS);
+  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+#if defined(__linux__)
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
+#endif
+    /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
+    bool result = rocr::os::UncommitMemory(va, size);
+    assert(result && "Failed to remap VA to anonymous");
+  }
+  else {
+    hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
+    assert(status == HSA_STATUS_SUCCESS);
+  }
 }
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
