@@ -75,19 +75,6 @@ void TestPciReadWrite::Run(void) {
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
-    // Verify api(s) argument checking functionality is working
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    ret = amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
-
-    // Verify api(s) argument checking functionality is working
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
@@ -96,9 +83,21 @@ void TestPciReadWrite::Run(void) {
 
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter(nullptr check)",
+                         "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+      ret = amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) { std::cout << "\tPCIe Replay Counter: " << u64int << std::endl; }
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter(nullptr check)",
+                         "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+      ret = amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+      ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
     }
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_throughput", "gpu=" + std::to_string(dv_ind),
@@ -134,6 +133,12 @@ void TestPciReadWrite::Run(void) {
                    "pp_dpm_pcie sysfs file is no longer supported on this device. "
                    "Aborting test."
                 << std::endl;
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth(nullptr check)",
+                         "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+      ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
       return;
     } else if (ret == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
       std::cout << "TEST FAILURE: Current PCIe bandwidth is not implemented.\n";
@@ -145,6 +150,18 @@ void TestPciReadWrite::Run(void) {
       std::cout << "\tInitial PCIe BW index is " << bw.transfer_rate.current << std::endl;
     }
     // Verify api support checking functionality is working
+    // NOTE:  We expect AMDSMI_STATUS_NOT_SUPPORTED, if rsmi_pcie_bandwidth_t* is NULL
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth(nullptr check)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_NOT_SUPPORTED,
+                          AMDSMI_STATUS_INVAL);
+    if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+      ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
+    } else {
+      ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+    }
+
     // First set the bitmask to all supported bandwidths
     freq_bitmask = ~(~0u << bw.transfer_rate.num_supported);
 

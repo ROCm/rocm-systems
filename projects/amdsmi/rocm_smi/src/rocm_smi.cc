@@ -2966,10 +2966,7 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t*
 
   GET_DEV_AND_KFDNODE_FROM_INDX
   DEVICE_MUTEX
-
-  if (b == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
+  CHK_API_SUPPORT_ONLY((b), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
 
   ret = get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind, &b->transfer_rate,
                         b->lanes);
@@ -3418,10 +3415,6 @@ rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sens
 
   rsmi_status_t ret;
   amd::smi::MonitorTypes mon_type;
-
-  if (voltage == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
 
   switch (metric) {
     case RSMI_VOLT_CURRENT:
@@ -4716,9 +4709,6 @@ rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t* counter
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (counter == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
   CHK_SUPPORT_NAME_ONLY(counter)
 
   rsmi_status_t ret;
