@@ -4,20 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <cstring>
-#include <vector>
-#include <sstream>
-#include <iomanip>
-
-#if HT_LINUX
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#endif
-
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
-#include <hip/hip_runtime.h>
 
 /**
  * @addtogroup hipIpcOpenMemHandle hipIpcOpenMemHandle
@@ -214,6 +202,7 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc) {
 HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_Child) {
   const char* hex = std::getenv("HIP_IPC_HANDLE");
   if (hex == nullptr || hex[0] == '\0') {
+    HipTest::HIP_SKIP_TEST("This test must be launched by parent multiprocess test.");
     return;
   }
 

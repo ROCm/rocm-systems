@@ -481,12 +481,18 @@ public:
                                     PAGE_READWRITE, 0, (DWORD)sz, name);
     if (shmHandle_ == 0) return GetLastError();
     addr_ = MapViewOfFile(shmHandle_, FILE_MAP_ALL_ACCESS, 0, 0, sz);
-    if (addr_ == NULL) return GetLastError();
+    if (addr_ == NULL) {
+      close();
+      return GetLastError();
+    }
 #else
     size_ = sz;
     shmFd_ = shm_open(name, O_RDWR | O_CREAT, 0777);
     if (shmFd_ < 0) return errno;
-    if (ftruncate(shmFd_, sz) != 0) return errno;
+    if (ftruncate(shmFd_, sz) != 0) {
+      close();
+      return errno;
+    }
     addr_ = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd_, 0);
     if (addr_ == MAP_FAILED) { addr_ = nullptr; return errno; }
 #endif
@@ -500,13 +506,23 @@ public:
     shmHandle_ = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, name);
     if (shmHandle_ == 0) return GetLastError();
     addr_ = MapViewOfFile(shmHandle_, FILE_MAP_ALL_ACCESS, 0, 0, sz);
-    if (addr_ == NULL) return GetLastError();
+    if (addr_ == NULL) {
+      close();
+      return GetLastError();
+    }
 #else
     size_ = sz;
     shmFd_ = shm_open(name, O_RDWR, 0777);
-    if (shmFd_ < 0) return errno;
+    if (shmFd_ < 0) {
+      close();
+      return errno;
+    }
     addr_ = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd_, 0);
-    if (addr_ == MAP_FAILED) { addr_ = nullptr; return errno; }
+    if (addr_ == MAP_FAILED) {
+      close();
+      addr_ = nullptr;
+      return errno;
+    }
 #endif
     opened_ = true;
     return 0;
@@ -535,11 +551,11 @@ public:
 inline void barrierWait(volatile int *barrier, volatile int *sense, unsigned int n) {
   int count;
 #if HT_WIN
-  count = InterlockedIncrement((volatile LONG *)barrier);
+  count = InterlockedIncrement(reinterpret_cast<volatile LONG *>(barrier));
 #else
-  count = __sync_add_and_fetch((int *)barrier, 1);
+  count = __sync_add_and_fetch(reinterpret_cast<int *>(barrier), 1);
 #endif
-  if ((unsigned int)count == n) {
+  if (static_cast<unsigned int>(count) == n) {
     *barrier = 0;
     *sense = 1 - *sense;
   } else {
@@ -722,6 +738,11 @@ public:
     DWORD cbRead = 0;
     if (!ReadFile(handle->mailslot, shHandle, sizeof(*shHandle), &cbRead, NULL)) {
       fprintf(stderr, "ReadFile failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    if (cbRead != sizeof(*shHandle)) {
+      fprintf(stderr, "ReadFile returned unexpected size (%lu, expected %zu)\n",
+              cbRead, sizeof(*shHandle));
       return -1;
     }
     return 0;

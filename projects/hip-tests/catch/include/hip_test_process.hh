@@ -142,7 +142,8 @@ class SpawnProc {
       if (!cmdLine.empty()) cmdLine += ' ';
       cmdLine += arg;
     }
-
+    std::vector<char> cmdLineInput(cmdLine.begin(), cmdLine.end());
+    cmdLineInput.push_back('\0');
     STARTUPINFO si = {};
     si.cb = sizeof(si);
     HANDLE hFile = INVALID_HANDLE_VALUE;
@@ -191,7 +192,7 @@ class SpawnProc {
     }
 
     memset(&process_, 0, sizeof(process_));
-    BOOL ok = CreateProcess(NULL, LPSTR(cmdLine.c_str()), NULL, NULL,
+    BOOL ok = CreateProcess(NULL, LPSTR(cmdLineInput.data()), NULL, NULL,
                             inheritHandles, 0, lpEnvironment, NULL, &si, &process_);
 
     if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
@@ -239,10 +240,25 @@ class SpawnProc {
     int exitCode = static_cast<int>(ec);
 #else
     int status = 0;
-    do {
-      if (0 > waitpid(process_, &status, 0)) return errno;
-    } while (!WIFEXITED(status));
-    int exitCode = WEXITSTATUS(status);
+    int exitCode = -1;
+    for (;;) {
+      pid_t ret = waitpid(process_, &status, 0);
+      if (ret < 0) {
+        if (errno == EINTR) {
+          continue;  // Retry if interrupted by a signal
+        }
+        return errno;
+      }
+      if (WIFEXITED(status)) {
+        exitCode = WEXITSTATUS(status);
+        break;
+      }
+      if (WIFSIGNALED(status)) {
+        // Use a conventional encoding for signal termination
+        exitCode = 128 + WTERMSIG(status);
+        break;
+      }
+    }
 #endif
 
     if (captureOutput_) {

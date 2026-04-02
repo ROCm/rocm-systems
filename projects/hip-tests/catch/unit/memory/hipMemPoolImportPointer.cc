@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipMemPoolImportPointer_Negative) {
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = 0;
   pool_props.location.type = hipMemLocationTypeDevice;
-  pool_props.handleTypes = hipMemHandleTypePosixFileDescriptor;
+  pool_props.handleTypes = handleType;
   HIP_CHECK(hipMemPoolCreate(&mempoolPfd, &pool_props));
   int* A_d;
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d), byte_size, mempoolPfd, 0));
