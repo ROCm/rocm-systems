@@ -2,126 +2,60 @@
 
 set -eux
 
-export GPU_MAX_HW_QUEUES=32
+# export GPU_MAX_HW_QUEUES=32
 
-LOG_DIR=./tests-results/logs-heatmap-loadstore-16-UNCACHED
+LOG_DIR=./tests-results-skip0/logs-heatmap-default
 mkdir -p $LOG_DIR
 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=72 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 31 -w 72 -z 512 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w1_z512_1073741824B.log
+# Test cases
+WGPUT_TEST="26" 
+WGPUT_NBI_TEST="27"
+WAVEPUT_NBI_TEST="31"
 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=1 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 1 -z 64 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w1_z64_1073741824B.log
-  
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=2 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 2 -z 64 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w2_z64_1073741824B.log
+TEST_CASE=$WGPUT_TEST
 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=4 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 4 -z 64 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w4_z64_1073741824B.log
+MPI_FLAGS="-np 2 --mca pml ucx --mca osc ucx --timeout 300 --map-by numa"
+ROCSHMEM_FLAGS="-x ROCSHMEM_HEAP_SIZE=68719476736 -x ROCSHMEM_TEST_UUID=1"
+UCX_FLAGS="-x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=8 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 8 -z 64 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w8_z64_1073741824B.log
+threads_list=(1 4 16 64 256 1024)
+workgroups_list=(1 2 4 8 16 32 64 128)
 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=16 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 16 -z 64 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w16_z64_1073741824B.log
+###############################################################################
+# Small tests
+###############################################################################
+workgroups=1
+threads_list=(1 4 16 64 256 1024)
+max_size=1048576
 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=32 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 32 -z 64 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w32_z64_1073741824B.log
+for threads in ${threads_list[@]}; do
+  mpirun $MPI_FLAGS $UCX_FLAGS $ROCSHMEM_FLAGS -x ROCSHMEM_MAX_NUM_CONTEXTS=$workgroups\
+    ./build/tests/functional_tests/rocshmem_functional_tests -a $TEST_CASE -w $workgroups -z $threads \
+    -s $max_size -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w${workgroups}_z${threads}_${max_size}B.log
+done
 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=64 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 64 -z 64 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w64_z64_1073741824B.log
+###############################################################################
+# Large tests
+###############################################################################
+threads_list=(64 256 1024)
+workgroups_list=(1 2 4 8 16 32 64 128)
+max_size=1073741824
+for workgroups in ${workgroups_list[@]}; do
+  for threads in ${threads_list[@]}; do
+    mpirun $MPI_FLAGS $UCX_FLAGS $ROCSHMEM_FLAGS -x ROCSHMEM_MAX_NUM_CONTEXTS=$workgroups\
+      ./build/tests/functional_tests/rocshmem_functional_tests -a $TEST_CASE -w $workgroups -z $threads \
+      -v $max_size -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w${workgroups}_z${threads}_${max_size}B.log
+  done
+done
 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=128 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 128 -z 64 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w128_z64_1073741824B.log
+###############################################################################
+# Special tests
+###############################################################################
+workgroups=72
+threads=512
+max_size=1073741824
+TEST_CASE=$WAVEPUT_NBI_TEST
 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=1 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 1 -z 1024 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w1_z1024_1073741824B.log
- 
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=2 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 2 -z 1024 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w2_z1024_1073741824B.log
-
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=4 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 4 -z 1024 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w4_z1024_1073741824B.log
-
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=8 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 8 -z 1024 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w8_z1024_1073741824B.log
-
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=16 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 16 -z 1024 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w16_z1024_1073741824B.log
-
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=32 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 32 -z 1024 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w32_z1024_1073741824B.log
-
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=64 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 64 -z 1024 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w64_z1024_1073741824B.log
-
-mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=128 \
- -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
- -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
- ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 128 -z 1024 \
- -v 1073741824 -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w128_z1024_1073741824B.log
-
-# mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=16 \
-#  -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
-#  -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
-#  ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 16 -z 1024 \
-#  -s 1073741824 2>&1 | tee ./tests-results/logs-heatmap-loadstore-fix/wgput_n2_w16_z1024_1073741824B.log
-
-# mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=1 \
-#  -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384 -x ROCSHMEM_HEAP_SIZE=68719476736 \
-#  -x ROCSHMEM_TEST_UUID=1 --timeout 300 --map-by numa \
-#  ./build/tests/functional_tests/rocshmem_functional_tests -a 26 -w 1 -z 64 \
-#  -s 1024 -n 1 -nskip 0 2>&1 | tee ./tests-results/logs-heatmap-after/wgput_n2_w1_z64_1024B.log
-
-#  -s 8 2>&1 | tee ./tests-results/logs-heatmap-after/wgput_n2_w16_z64_8B.log
-#  -s 1048576 2>&1 | tee ./tests-results/logs-heatmap-after/wgput_n2_w2_z64_1048576B.log
-#  -s 1024 2>&1 | tee ./tests-results/logs-heatmap-after/wgput_n2_w1_z64_64B.log
-#  -s 1024 2>&1 | tee ./tests-results/logs-heatmap-after/wgput_n2_w1_z64_1024.log
+mpirun $MPI_FLAGS $UCX_FLAGS $ROCSHMEM_FLAGS -x ROCSHMEM_MAX_NUM_CONTEXTS=$workgroups\
+      ./build/tests/functional_tests/rocshmem_functional_tests -a $TEST_CASE -w $workgroups -z $threads \
+      -v $max_size -nskip 0 2>&1 | tee $LOG_DIR/wgput_n2_w${workgroups}_z${threads}_${max_size}B.log
