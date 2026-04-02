@@ -1447,7 +1447,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     fname = tmp_path / "pmc_perf_test.yaml"
     fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     yaml_file = tmp_path / "counter_def_test.yaml"
-    yaml_file.write_text("counters:\n  - TCC_HIT")
+    yaml_file.write_text("rocprofiler-sdk:\n  counters:\n    - TCC_HIT\n")
     workload_dir = str(tmp_path / "workload")
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
@@ -1461,10 +1461,6 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "utils.utils_profile.yaml.safe_load",
-        lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}},
-    )
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 

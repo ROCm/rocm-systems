@@ -619,7 +619,7 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     jobs = data.get("jobs", [])
     if not jobs:
         return []
-    return jobs[0].get("pmc", [])
+    return jobs[0].get("pmc") or []
 
 
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:

@@ -107,8 +107,6 @@ def run_prof(
     # Extra counter definitions
     for fname in fnames if multiple_files else [fnames]:
         fname_path = Path(fname)
-        if not fname_path.name.startswith("pmc_perf_"):
-            continue
         counter_def_fname = fname_path.parent / (
             "counter_def_" + fname_path.name[len("pmc_perf_") :]
         )
@@ -172,7 +170,6 @@ def run_prof(
             shutil.copytree(
                 pass_1, Path(workload_dir) / "out" / "pmc_1", dirs_exist_ok=True
             )
-            shutil.rmtree(pass_1)
 
     # Delete counter definition temporary directory
     if new_env.get("ROCPROFILER_METRICS_PATH"):
