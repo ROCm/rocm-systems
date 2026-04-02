@@ -57,88 +57,124 @@
 namespace rocr {
 namespace core {
 
+// Tag type for non-owning wrapper construction
+struct NonOwningTag {};
+
 // @brief Generic container to forward Queue interfaces into Queue* member.
 // Class only has utility as a base type customized Queue wrappers.
+// Supports both owning (unique_ptr) and non-owning (raw pointer) modes.
 class QueueWrapper : public Queue {
  public:
-  std::unique_ptr<Queue> wrapped;
-
+  // Owning constructor: takes ownership of the queue via unique_ptr.
+  // Used by creation-time InterceptQueue paths.
   explicit QueueWrapper(std::unique_ptr<Queue> queue)
       : Queue(static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
                   sizeof(core::SharedQueue), 4096, 0, 0)),
               0, nullptr),
-        wrapped(std::move(queue)) {
-    memcpy(&amd_queue_, &wrapped->amd_queue_, sizeof(amd_queue_));
-    wrapped->set_public_handle(wrapped.get(), public_handle_);
+        wrapped_owned_(std::move(queue)),
+        wrapped_raw_(wrapped_owned_.get()),
+        owns_wrapped_(true) {
+    memcpy(&amd_queue_, &wrapped_raw_->amd_queue_, sizeof(amd_queue_));
+    wrapped_raw_->set_public_handle(wrapped_raw_, public_handle_);
+  }
+
+  // Non-owning constructor: wraps an existing queue without taking ownership.
+  // Used by retrofit InterceptQueue paths where the AqlQueue is still
+  // referenced by the agent and other parts of the runtime.
+  QueueWrapper(NonOwningTag, Queue* queue)
+      : Queue(static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
+                  sizeof(core::SharedQueue), 4096, 0, 0)),
+              0, nullptr),
+        wrapped_owned_(nullptr),
+        wrapped_raw_(queue),
+        owns_wrapped_(false) {
+    memcpy(&amd_queue_, &wrapped_raw_->amd_queue_, sizeof(amd_queue_));
+    wrapped_raw_->set_public_handle(wrapped_raw_, public_handle_);
   }
 
   ~QueueWrapper() {
     if (shared_queue_) core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
   }
 
-  hsa_status_t Inactivate() override { return wrapped->Inactivate(); }
+  // Access the wrapped queue through the appropriate pointer
+  Queue* get_wrapped() const { return wrapped_raw_; }
+
+  // Query ownership mode
+  bool owns_wrapped() const { return owns_wrapped_; }
+
+  hsa_status_t Inactivate() override { return get_wrapped()->Inactivate(); }
   hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override {
-    return wrapped->SetPriority(priority);
+    return get_wrapped()->SetPriority(priority);
   }
-  uint64_t LoadReadIndexAcquire() override { return wrapped->LoadReadIndexAcquire(); }
-  uint64_t LoadReadIndexRelaxed() override { return wrapped->LoadReadIndexRelaxed(); }
-  uint64_t LoadWriteIndexRelaxed() override { return wrapped->LoadWriteIndexRelaxed(); }
-  uint64_t LoadWriteIndexAcquire() override { return wrapped->LoadWriteIndexAcquire(); }
+  uint64_t LoadReadIndexAcquire() override { return get_wrapped()->LoadReadIndexAcquire(); }
+  uint64_t LoadReadIndexRelaxed() override { return get_wrapped()->LoadReadIndexRelaxed(); }
+  uint64_t LoadWriteIndexRelaxed() override { return get_wrapped()->LoadWriteIndexRelaxed(); }
+  uint64_t LoadWriteIndexAcquire() override { return get_wrapped()->LoadWriteIndexAcquire(); }
   void StoreReadIndexRelaxed(uint64_t value) override {
-    return wrapped->StoreReadIndexRelaxed(value);
+    return get_wrapped()->StoreReadIndexRelaxed(value);
   }
   void StoreReadIndexRelease(uint64_t value) override {
-    return wrapped->StoreReadIndexRelease(value);
+    return get_wrapped()->StoreReadIndexRelease(value);
   }
   void StoreWriteIndexRelaxed(uint64_t value) override {
-    return wrapped->StoreWriteIndexRelaxed(value);
+    return get_wrapped()->StoreWriteIndexRelaxed(value);
   }
   void StoreWriteIndexRelease(uint64_t value) override {
-    return wrapped->StoreWriteIndexRelease(value);
+    return get_wrapped()->StoreWriteIndexRelease(value);
   }
   uint64_t CasWriteIndexAcqRel(uint64_t expected, uint64_t value) override {
-    return wrapped->CasWriteIndexAcqRel(expected, value);
+    return get_wrapped()->CasWriteIndexAcqRel(expected, value);
   }
   uint64_t CasWriteIndexAcquire(uint64_t expected, uint64_t value) override {
-    return wrapped->CasWriteIndexAcquire(expected, value);
+    return get_wrapped()->CasWriteIndexAcquire(expected, value);
   }
   uint64_t CasWriteIndexRelaxed(uint64_t expected, uint64_t value) override {
-    return wrapped->CasWriteIndexRelaxed(expected, value);
+    return get_wrapped()->CasWriteIndexRelaxed(expected, value);
   }
   uint64_t CasWriteIndexRelease(uint64_t expected, uint64_t value) override {
-    return wrapped->CasWriteIndexRelease(expected, value);
+    return get_wrapped()->CasWriteIndexRelease(expected, value);
   }
   uint64_t AddWriteIndexAcqRel(uint64_t value) override {
-    return wrapped->AddWriteIndexAcqRel(value);
+    return get_wrapped()->AddWriteIndexAcqRel(value);
   }
   uint64_t AddWriteIndexAcquire(uint64_t value) override {
-    return wrapped->AddWriteIndexAcquire(value);
+    return get_wrapped()->AddWriteIndexAcquire(value);
   }
   uint64_t AddWriteIndexRelaxed(uint64_t value) override {
-    return wrapped->AddWriteIndexRelaxed(value);
+    return get_wrapped()->AddWriteIndexRelaxed(value);
   }
   uint64_t AddWriteIndexRelease(uint64_t value) override {
-    return wrapped->AddWriteIndexRelease(value);
+    return get_wrapped()->AddWriteIndexRelease(value);
   }
   hsa_status_t SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) override {
-    return wrapped->SetCUMasking(num_cu_mask_count, cu_mask);
+    return get_wrapped()->SetCUMasking(num_cu_mask_count, cu_mask);
   }
   hsa_status_t GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) override {
-    return wrapped->GetCUMasking(num_cu_mask_count, cu_mask);
+    return get_wrapped()->GetCUMasking(num_cu_mask_count, cu_mask);
   }
   void ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b,
                   hsa_fence_scope_t acquireFence = HSA_FENCE_SCOPE_NONE,
                   hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
                   hsa_signal_t* signal = NULL) override {
-    wrapped->ExecutePM4(cmd_data, cmd_size_b, acquireFence, releaseFence, signal);
+    get_wrapped()->ExecutePM4(cmd_data, cmd_size_b, acquireFence, releaseFence, signal);
   }
-  void SetProfiling(bool enabled) override { wrapped->SetProfiling(enabled); }
+  void SetProfiling(bool enabled) override { get_wrapped()->SetProfiling(enabled); }
 
  protected:
   void do_set_public_handle(hsa_queue_t* handle) override {
     public_handle_ = handle;
-    wrapped->set_public_handle(wrapped.get(), handle);
+    get_wrapped()->set_public_handle(get_wrapped(), handle);
   }
+
+ private:
+  // Owning pointer (used for creation-time intercept)
+  std::unique_ptr<Queue> wrapped_owned_;
+
+  // Raw pointer to the wrapped queue (always valid)
+  Queue* wrapped_raw_;
+
+  // Whether this wrapper owns the wrapped queue
+  bool owns_wrapped_;
 };
 
 // @brief Generic container for a proxy queue.
@@ -211,7 +247,7 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
 
   hsa_status_t Inactivate() override {
     active_ = false;
-    return wrapped->Inactivate();
+    return get_wrapped()->Inactivate();
   }
 
  private:
