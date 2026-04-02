@@ -167,7 +167,7 @@ struct MtbufMachineInst {
 struct FlatMachineInst {
   uint32_t offset : 12;
   uint32_t pad_12 : 1;
-  uint32_t sve : 1;
+  uint32_t lds : 1;
   uint32_t seg : 2;
   uint32_t sc0 : 1;
   uint32_t nt : 1;

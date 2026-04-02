@@ -1048,7 +1048,7 @@ std::string Operand::name() const {
   case OperandType::OPR_WAITCNT: {
     uint32_t vmcnt = (encoding_value_ & 0xF) | (((encoding_value_ >> 14) & 0x3) << 4);
     uint32_t expcnt = (encoding_value_ >> 4) & 0x7;
-    uint32_t lgkmcnt = (encoding_value_ >> 8) & 0x1F;
+    uint32_t lgkmcnt = (encoding_value_ >> 8) & 0x0F;
     return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
   }
   }

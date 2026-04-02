@@ -8,6 +8,8 @@ import sys
 import xml.etree.ElementTree as elem_tree
 
 from amdisa import (
+    Cdna1Profile,
+    Cdna2Profile,
     CdnaProfile,
     CodeGenerator,
     Parser,
@@ -20,8 +22,8 @@ from amdisa.semantics import derive_all_semantics
 
 _PROFILES = {
     'cdna': CdnaProfile,
-    'cdna1': CdnaProfile,
-    'cdna2': CdnaProfile,
+    'cdna1': Cdna1Profile,
+    'cdna2': Cdna2Profile,
     'cdna3': CdnaProfile,
     'cdna4': CdnaProfile,
     'rdna1': Rdna1Profile,

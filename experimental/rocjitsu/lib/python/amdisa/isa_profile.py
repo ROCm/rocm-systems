@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum, auto
 
 _FLOAT_NAME_MAP: dict[float, str] = {
     -0.5: 'NEG_HALF',
@@ -29,6 +30,24 @@ _FLOAT_NAME_MAP: dict[float, str] = {
     4.0: 'FOUR',
     0.15915494: 'ONE_OVER_TWO_PI',
 }
+
+
+class MemoryCoherencyModel(Enum):
+    """Identifies the memory coherency encoding model for an ISA family.
+
+    The five models are NOT backward-compatible: field positions, field
+    names, and semantic meanings all change across generations. execute()
+    for memory instructions must use ISA-specific logic keyed on this enum.
+
+    GFX9_GLC covers CDNA1/2 (GFX908/GFX90A). GFX940_SC0_SC1_NT covers
+    CDNA3/4. GFX10/11/12 cover RDNA generations.
+    """
+
+    GFX9_GLC        = auto()  # CDNA1, CDNA2 — GLC bit only, all memory
+    GFX940_SC0_SC1_NT = auto()  # CDNA3, CDNA4 — SC0/SC1+NT vector; GLC scalar
+    GFX10_GLC_DLC_SLC = auto()  # RDNA1, RDNA2 — GLC + DLC + SLC
+    GFX11_SC0_SC1_TH  = auto()  # RDNA3, RDNA3.5 — SC0+SC1 scope + TH hint
+    GFX12_SCOPE_TH    = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
 @dataclass
@@ -191,10 +210,12 @@ class IsaProfile(ABC):
     def waitcnt_lgkmcnt_mask(self) -> str:
         """Hex mask for the lgkmcnt field in the S_WAITCNT immediate.
 
-        CDNA uses a 5-bit field at bits [12:8] (mask 0x1F).
-        RDNA uses a 6-bit field at bits [13:8] (mask 0x3F).
+        CDNA (GFX9 family): 4-bit field at bits [11:8] → mask 0x0F.
+        RDNA1/2 (GFX10): 6-bit field at bits [13:8] → mask 0x3F.
+        RDNA3/3.5 (GFX11): layout changed; use Isa::WAITCNT_LGKMCNT_MASK.
+        RDNA4 (GFX12): S_WAITCNT removed; this property is unused.
         """
-        return '0x1F'
+        return '0x0F'
 
     def has_src_modifiers(self, enc_name: str) -> bool:
         """True if the encoding format has source input modifiers.
@@ -255,6 +276,23 @@ class IsaProfile(ABC):
             empty list (no modifiers).
         """
         return []
+
+    def field_renames(self, enc_name: str) -> dict[str, str]:
+        """Return field name remaps for an encoding's microcode fields.
+
+        Used to correct XML field names that differ from the ISA PDF.
+        The returned dict maps XML field names (lowercased) to the
+        canonical spec name. Applied during bitmap parsing so that the
+        generated C++ struct uses the correct field names.
+
+        Args:
+            enc_name: Uppercase encoding name (e.g., ``ENC_FLAT``).
+
+        Returns:
+            Dict of ``{xml_name: canonical_name}``. Default is empty
+            (no renames).
+        """
+        return {}
 
     @abstractmethod
     def is_alt_encoding(self, enc_name: str) -> bool:
@@ -466,6 +504,75 @@ class _AmdgpuProfileBase(IsaProfile):
             return _FLAT_MODIFIERS
         return []
 
+    # --- ISA dimension properties ---
+
+    @property
+    def wave_size(self) -> int:
+        """Default wavefront size in lanes (32 or 64)."""
+        return 64  # CDNA is Wave64-only; RDNA subclasses override to 32
+
+    @property
+    def wave_size_max(self) -> int:
+        """Maximum wavefront size. RDNA supports Wave32 and Wave64;
+        CDNA is Wave64-only."""
+        return self.wave_size
+
+    @property
+    def has_acc_vgpr(self) -> bool:
+        """True if this ISA has AccVGPRs (CDNA2/3/4 only)."""
+        return False
+
+    @property
+    def acc_vgpr_encoding_base(self) -> int:
+        """Encoding index where AccVGPR range begins (512 for CDNA2, 768 for CDNA3/4)."""
+        return 0
+
+    @property
+    def max_acc_vgprs(self) -> int:
+        """Number of AccVGPRs per wavefront (0 if not present)."""
+        return 0
+
+    @property
+    def waitcnt_family(self) -> str:
+        """Waitcnt encoding family name.
+
+        'gfx9'  — single S_WAITCNT; vmcnt split, lgkmcnt 4-bit at [11:8].
+                   ISAs: CDNA1, CDNA2, CDNA3, CDNA4.
+        'gfx10' — S_WAITCNT (lgkmcnt 6-bit at [13:8]) + S_WAITCNT_VSCNT.
+                   ISAs: RDNA1, RDNA2.
+        'gfx11' — S_WAITCNT with changed layout (expcnt at [2:0], lgkmcnt
+                   6-bit at [9:4], vmcnt 6-bit at [15:10]).
+                   ISAs: RDNA3, RDNA3.5.
+        'gfx12' — S_WAITCNT removed; replaced by split S_WAIT_* instructions.
+                   ISAs: RDNA4.
+        """
+        return 'gfx9'
+
+    @property
+    def has_mfma(self) -> bool:
+        """True if this ISA has MFMA matrix instructions (all CDNA)."""
+        return False
+
+    @property
+    def has_wmma(self) -> bool:
+        """True if this ISA has WMMA matrix instructions (RDNA3+)."""
+        return False
+
+    @property
+    def flat_scratch_mechanism(self) -> str:
+        """How scratch base is located: 'hwreg' (CDNA3/4) or 'sgpr_pair'."""
+        return 'sgpr_pair'
+
+    @property
+    def has_vopd(self) -> bool:
+        """True if this ISA supports VOPD dual-issue instructions (RDNA3+)."""
+        return False
+
+    @property
+    def coherency_model(self) -> MemoryCoherencyModel:
+        """Memory coherency encoding model for this ISA family."""
+        return MemoryCoherencyModel.GFX9_GLC
+
 
 class CdnaProfile(_AmdgpuProfileBase):
     """ISA profile for the CDNA family (CDNA1 through CDNA4).
@@ -508,6 +615,16 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
 
+    # XML bug (P1): CDNA3/4 ENC_FLAT lists field 'SVE' at bit 13 but the
+    # ISA PDF (CDNA3 Table 100, CDNA4 Table 101) names the field 'LDS'.
+    # The LDS field controls whether FLAT accesses local data store vs. VGPR.
+    _FLAT_FIELD_RENAMES: dict[str, str] = {'sve': 'lds'}
+
+    def field_renames(self, enc_name: str) -> dict[str, str]:
+        if enc_name.upper() == 'ENC_FLAT':
+            return self._FLAT_FIELD_RENAMES
+        return {}
+
     @property
     def cmpx_writes_vcc(self) -> bool:
         return True
@@ -528,6 +645,94 @@ class CdnaProfile(_AmdgpuProfileBase):
     def skip_encodings(self) -> frozenset[str]:
         return frozenset({'ENC_VOP3PX2'})
 
+    # ISA dimension properties for CDNA3/4 (the two ISAs this profile covers).
+    # Cdna1Profile and Cdna2Profile override the ones that differ.
+
+    @property
+    def has_mfma(self) -> bool:
+        return True
+
+    @property
+    def has_acc_vgpr(self) -> bool:
+        return True
+
+    @property
+    def acc_vgpr_encoding_base(self) -> int:
+        return 768  # CDNA3/4: AccVGPR range starts at encoding 768
+
+    @property
+    def max_acc_vgprs(self) -> int:
+        return 256
+
+    @property
+    def flat_scratch_mechanism(self) -> str:
+        return 'hwreg'  # CDNA3/4 use HW register for scratch base
+
+    @property
+    def coherency_model(self) -> MemoryCoherencyModel:
+        return MemoryCoherencyModel.GFX940_SC0_SC1_NT
+
+
+class Cdna1Profile(CdnaProfile):
+    """ISA profile for CDNA1 (GFX908 / MI100).
+
+    Differs from CDNA3/4 (the CdnaProfile defaults):
+    - No AccVGPRs.
+    - GFX9-style GLC-only coherency model.
+    - Scratch base via SGPR pair (not HW register).
+    - ENC_VOP3PX2 does not exist in CDNA1 XML.
+    """
+
+    @property
+    def has_acc_vgpr(self) -> bool:
+        return False
+
+    @property
+    def acc_vgpr_encoding_base(self) -> int:
+        return 0
+
+    @property
+    def max_acc_vgprs(self) -> int:
+        return 0
+
+    @property
+    def flat_scratch_mechanism(self) -> str:
+        return 'sgpr_pair'
+
+    @property
+    def coherency_model(self) -> MemoryCoherencyModel:
+        return MemoryCoherencyModel.GFX9_GLC
+
+    @property
+    def skip_encodings(self) -> frozenset[str]:
+        return frozenset()
+
+
+class Cdna2Profile(CdnaProfile):
+    """ISA profile for CDNA2 (GFX90A / MI200).
+
+    Differs from CDNA3/4 (the CdnaProfile defaults):
+    - AccVGPRs start at encoding 512 (not 768).
+    - GFX9-style GLC-only coherency model.
+    - Scratch base via SGPR pair.
+    - ENC_VOP3PX2 does not exist in CDNA2 XML.
+    """
+
+    @property
+    def acc_vgpr_encoding_base(self) -> int:
+        return 512  # CDNA2: AccVGPR range starts at encoding 512
+
+    @property
+    def flat_scratch_mechanism(self) -> str:
+        return 'sgpr_pair'
+
+    @property
+    def coherency_model(self) -> MemoryCoherencyModel:
+        return MemoryCoherencyModel.GFX9_GLC
+
+    @property
+    def skip_encodings(self) -> frozenset[str]:
+        return frozenset()
 
 
 class Rdna1Profile(_AmdgpuProfileBase):
@@ -556,7 +761,7 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:
-        # RDNA uses a 6-bit lgkmcnt field at bits [13:8].
+        # RDNA1/2 uses a 6-bit lgkmcnt field at bits [13:8].
         return '0x3F'
 
     @property
@@ -570,6 +775,22 @@ class Rdna1Profile(_AmdgpuProfileBase):
     @property
     def max_enc_order(self) -> int:
         return 46
+
+    @property
+    def wave_size(self) -> int:
+        return 32  # RDNA default is Wave32
+
+    @property
+    def wave_size_max(self) -> int:
+        return 64  # RDNA supports Wave32 and Wave64
+
+    @property
+    def waitcnt_family(self) -> str:
+        return 'gfx10'
+
+    @property
+    def coherency_model(self) -> MemoryCoherencyModel:
+        return MemoryCoherencyModel.GFX10_GLC_DLC_SLC
 
 
 class Rdna3Profile(_AmdgpuProfileBase):
@@ -599,6 +820,8 @@ class Rdna3Profile(_AmdgpuProfileBase):
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:
+        # GFX11 layout differs from GFX10; this mask applies to the
+        # lgkmcnt field at bits [9:4] in the new S_WAITCNT encoding.
         return '0x3F'
 
     @property
@@ -616,6 +839,30 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def skip_encodings(self) -> frozenset[str]:
         return self._SKIP
+
+    @property
+    def wave_size(self) -> int:
+        return 32
+
+    @property
+    def wave_size_max(self) -> int:
+        return 64
+
+    @property
+    def waitcnt_family(self) -> str:
+        return 'gfx11'
+
+    @property
+    def has_wmma(self) -> bool:
+        return True
+
+    @property
+    def has_vopd(self) -> bool:
+        return True
+
+    @property
+    def coherency_model(self) -> MemoryCoherencyModel:
+        return MemoryCoherencyModel.GFX11_SC0_SC1_TH
 
 
 class Rdna4Profile(_AmdgpuProfileBase):
@@ -647,6 +894,8 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     @property
     def waitcnt_lgkmcnt_mask(self) -> str:
+        # RDNA4 removed S_WAITCNT; this property is unused but kept for
+        # completeness. Returns 0x3F as a safe no-op default.
         return '0x3F'
 
     @property
@@ -664,6 +913,30 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def skip_encodings(self) -> frozenset[str]:
         return self._SKIP
+
+    @property
+    def wave_size(self) -> int:
+        return 32
+
+    @property
+    def wave_size_max(self) -> int:
+        return 64
+
+    @property
+    def waitcnt_family(self) -> str:
+        return 'gfx12'
+
+    @property
+    def has_wmma(self) -> bool:
+        return True
+
+    @property
+    def has_vopd(self) -> bool:
+        return True
+
+    @property
+    def coherency_model(self) -> MemoryCoherencyModel:
+        return MemoryCoherencyModel.GFX12_SCOPE_TH
 
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """RDNA4 mnemonic rules.
