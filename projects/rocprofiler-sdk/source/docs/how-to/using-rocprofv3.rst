@@ -82,13 +82,14 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Specifies the PC sample generation frequency.
 
    * - Basic tracing
-     - | ``--hip-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br|
+     - | ``--hip-trace`` [BOOL] |br| |br| |br| |br| |br| |br|
        | ``--marker-trace`` [BOOL] |br| |br| |br| |br| |br|
        | ``--kernel-trace`` [BOOL] |br| |br|
-       | ``--memory-copy-trace`` [BOOL] |br| |br| |br| |br|
+       | ``--memory-copy-trace`` [BOOL] |br| |br| |br|
        | ``--memory-allocation-trace`` [BOOL] |br| |br| |br| |br|
+       | ``--kfd-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br| |br| |br|
        | ``--scratch-memory-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--hsa-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br| |br|
+       | ``--hsa-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br|
        | ``--rccl-trace`` [BOOL] |br| |br| |br| |br|
        | ``--kokkos-trace`` [BOOL] |br| |br| |br| |br|
        | ``--rocdecode-trace`` [BOOL]
@@ -97,6 +98,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Collects kernel dispatch traces. |br| |br|
        | Collects memory copy traces. This was a part of the HIP and HSA traces in previous ``rocprof`` versions. |br| |br|
        | Collects memory allocation traces. Displays starting address, allocation size, and the agent where allocation occurs. |br| |br|
+       | Collects ``--kfd-page-migration-trace``, ``--kfd-page-mapping-trace``, ``--kfd-queue-trace``, and ``--kfd-dropped-events-trace``. KFD (Kernel Fusion Driver) traces capture low-level driver routines involving mapping, unmapping, and migration of data between GPU and system memories, as well as eviction/restoration of GPU queues to facilitate such routines. |br| |br|
        | Collects scratch memory operations traces. Helps in determining scratch allocations and manage them efficiently. |br| |br|
        | Collects ``--hsa-core-trace``, ``--hsa-amd-trace``, ``--hsa-image-trace``, and ``--hsa-finalizer-trace``. This option only enables the HSA API tracing. Unlike previous iterations of ``rocprof``, this doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
        | Collects traces for RCCL (ROCm Communication Collectives Library), which is also pronounced as 'Rickle'. |br| |br|
@@ -107,15 +109,23 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
      - | ``--hip-runtime-trace`` [BOOL] |br| |br| |br| |br|
        | ``--hip-compiler-trace`` [BOOL] |br| |br| |br| |br|
        | ``--hsa-core-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--hsa-amd-trace`` [BOOL] |br| |br| |br| |br| |br|
+       | ``--hsa-amd-trace`` [BOOL] |br| |br| |br| |br|
        | ``--hsa-image-trace`` [BOOL] |br| |br| |br| |br| |br|
-       | ``--hsa-finalizer-trace`` [BOOL]
+       | ``--hsa-finalizer-trace`` [BOOL] |br| |br| |br| |br| |br|
+       | ``--kfd-page-migration-trace`` [BOOL] |br| |br| |br|
+       | ``--kfd-page-mapping-trace`` [BOOL] |br| |br| |br|
+       | ``--kfd-queue-trace`` [BOOL] |br| |br| |br|
+       | ``--kfd-dropped-events-trace`` [BOOL]
      - | Collects HIP Runtime API traces. For example, public HIP API functions starting with ``hip`` such as ``hipSetDevice``. |br| |br|
        | Collects HIP Compiler generated code traces. For example, HIP API functions starting with ``__hip`` such as ``__hipRegisterFatBinary``. |br| |br|
        | Collects HSA API traces (core API). For example, HSA functions prefixed with only ``hsa_`` such as ``hsa_init``. |br| |br|
        | Collects HSA API traces (AMD-extension API). For example, HSA functions prefixed with ``hsa_amd_`` such as ``hsa_amd_coherency_get_type``. |br| |br|
        | Collects HSA API traces (image-extenson API). For example, HSA functions prefixed with only ``hsa_ext_image_`` such as ``hsa_ext_image_get_capability``. |br| |br|
-       | Collects HSA API traces (Finalizer-extension API). For example, HSA functions prefixed with only ``hsa_ext_program_`` such as ``hsa_ext_program_create``.
+       | Collects HSA API traces (Finalizer-extension API). For example, HSA functions prefixed with only ``hsa_ext_program_`` such as ``hsa_ext_program_create``. |br| |br|
+       | Collects traces of KFD events involving migration of pages across device memories. |br| |br|
+       | Collects traces of KFD events involving faulting, mapping, and invalidation of pages. |br| |br|
+       | Collects traces of KFD events involving GPU queue eviction and restoration operations. |br| |br|
+       | Collects traces of KFD events dropped by the KFD device driver.
 
    * - Counter collection
      - | ``--pmc`` [PMC ...]
