@@ -907,6 +907,197 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
     }
 }
 
+// =============================================================================
+// Test: SendRecvDifferentMemoryTypes
+//
+// Creates two 4-NIC merged virtual devices from different physical NICs.
+// Rank 0 (receiver) uses merged device A, Rank 1 (sender) uses merged device B.
+// Tests all four memory type combinations: host→host, host→GPU, GPU→host, GPU→GPU.
+//
+// This exercises:
+//   - Asymmetric merged device usage (different vNIC per rank)
+//   - Multi-QP data path with 4 QPs per rank
+//   - GDR path selection based on pointer type
+//   - Memory registration across multiple Protection Domains
+//   - Flush semantics for GPU memory receives
+// =============================================================================
+TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // --- Init and discover devices ---
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    std::vector<ncclNetProperties_t> props(ndev);
+    std::vector<int> physDevs;
+    for (int i = 0; i < ndev; i++) {
+        memset(&props[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
+        if (!props[i].name || !strchr(props[i].name, '+'))
+            physDevs.push_back(i);
+    }
+
+    // --- Select 4 compatible devices per rank ---
+    int needed = 8;
+    if ((int)physDevs.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
+
+    int targetSpeed = props[physDevs[0]].speed;
+    std::vector<int> compat;
+    for (int d : physDevs)
+        if (props[d].speed == targetSpeed) compat.push_back(d);
+    if ((int)compat.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
+
+    // Rank 0: first 4, Rank 1: next 4
+    int offset = (rank == 1) ? 4 : 0;
+    std::vector<int> selected(compat.begin() + offset, compat.begin() + offset + 4);
+
+    // --- Create merged device ---
+    ncclNetVDeviceProps_t vProps;
+    memset(&vProps, 0, sizeof(vProps));
+    vProps.ndevs = 4;
+    for (int i = 0; i < 4; i++) vProps.devs[i] = selected[i];
+
+    int mergedDev = -1;
+    ncclResult_t res = MakeVirtualDevice(&mergedDev, &vProps);
+    if (res != ncclSuccess || mergedDev < 0)
+        GTEST_SKIP() << "Rank " << rank << " failed to create merged device";
+
+    ncclNetProperties_t mProps;
+    memset(&mProps, 0, sizeof(mProps));
+    ASSERT_EQ(GetDeviceProperties(mergedDev, &mProps), ncclSuccess);
+
+    // --- Check GDR support across both ranks ---
+    int localGdr = (mProps.ptrSupport & NCCL_PTR_CUDA) ? 1 : 0;
+    int globalGdr = 0;
+    MPI_Allreduce(&localGdr, &globalGdr, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    bool gdr = (globalGdr == 1);
+
+    // --- Test each memory type combination ---
+    struct Combo { int send, recv; const char* desc; };
+    Combo combos[] = {
+        {NCCL_PTR_HOST, NCCL_PTR_HOST, "Host->Host"},
+        {NCCL_PTR_HOST, NCCL_PTR_CUDA, "Host->GPU"},
+        {NCCL_PTR_CUDA, NCCL_PTR_HOST, "GPU->Host"},
+        {NCCL_PTR_CUDA, NCCL_PTR_CUDA, "GPU->GPU"},
+    };
+
+    for (auto& c : combos) {
+        bool needGpu = (c.send == NCCL_PTR_CUDA || c.recv == NCCL_PTR_CUDA);
+        if (needGpu && !gdr) {
+            if (rank == 0) fprintf(stderr, "  [SKIP] %s (no GDR)\n", c.desc);
+            MPI_Barrier(MPI_COMM_WORLD);
+            continue;
+        }
+
+        int memType = (rank == 0) ? c.recv : c.send;
+
+        // Connection
+        ConnectionPair pair;
+        ncclNetHandle_t handle;
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(mergedDev, &handle, &pair.listenComm), ncclSuccess);
+            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+            while (!pair.recvComm) AcceptConnection(pair.listenComm, &pair.recvComm);
+        } else {
+            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            while (!pair.sendComm) ConnectToRemote(mergedDev, &handle, &pair.sendComm);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        NetConnectionGuard conn(net_);
+        if (rank == 0) { conn.setRecvComm(pair.recvComm); conn.setListenComm(pair.listenComm); }
+        else conn.setSendComm(pair.sendComm);
+
+        // Buffer
+        const size_t sz = kSmallBufferSize;
+        void* buf = nullptr;
+        if (memType == NCCL_PTR_CUDA) { HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&buf, sz)); }
+        else { buf = malloc(sz); ASSERT_NE(buf, nullptr); }
+        auto delBuf = [memType](void* ptr) {
+            if (ptr) {
+                if (memType == NCCL_PTR_CUDA) {
+                    hipError_t err = hipFree(ptr);
+                    if (err != hipSuccess) {
+                        fprintf(stderr, "WARNING: hipFree failed: %s\n", hipGetErrorString(err));
+                    }
+                } else {
+                    free(ptr);
+                }
+            }
+        };
+        std::unique_ptr<void, decltype(delBuf)> bufG(buf, delBuf);
+
+        // Register
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        void* mh = nullptr;
+        ASSERT_EQ(RegisterMemory(comm, buf, sz, memType, &mh), ncclSuccess);
+        NetMHandleGuard mhG(mh, NetMHandleDeleter(net_, comm));
+
+        // Fill / clear
+        uint8_t seed = (uint8_t)(c.send * 10 + c.recv * 3 + 42);
+        int tag = 700 + c.send * 2 + c.recv;
+        if (rank == 1) {
+            std::vector<uint8_t> pat(sz);
+            for (size_t i = 0; i < sz; i++) pat[i] = (seed + i) % kBytePatternModulo;
+            if (memType == NCCL_PTR_CUDA)
+                HIP_TEST_CHECK_GTEST_FAIL(hipMemcpy(buf, pat.data(), sz, hipMemcpyHostToDevice));
+            else memcpy(buf, pat.data(), sz);
+        } else {
+            if (memType == NCCL_PTR_CUDA) HIP_TEST_CHECK_GTEST_FAIL(hipMemset(buf, 0, sz));
+            else memset(buf, 0, sz);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Transfer
+        void* req = nullptr;
+        if (rank == 0) {
+            void* b[1] = {buf}; size_t s[1] = {sz}; int t[1] = {tag}; void* h[1] = {mh};
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, b, s, t, h, &req), ncclSuccess);
+            ASSERT_NE(req, nullptr);
+        } else {
+            for (int a = 0; !req && a < kMaxRetryAttempts; a++) {
+                ASSERT_EQ(PostSend(pair.sendComm, buf, sz, tag, mh, &req), ncclSuccess);
+                if (!req) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(req, nullptr) << "isend stuck NULL";
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int csz[1] = {0};
+        ASSERT_EQ(WaitForCompletion(req, csz), ncclSuccess);
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Verify on receiver
+        if (rank == 0) {
+            EXPECT_EQ(csz[0], (int)sz);
+            if (memType == NCCL_PTR_CUDA) {
+                void* fb[1]={buf}; int fs[1]={(int)sz}; void* fh[1]={mh}; void* fr=nullptr;
+                if (FlushRecv(pair.recvComm,1,fb,fs,fh,&fr)==ncclSuccess && fr)
+                    ASSERT_EQ(WaitForCompletion(fr, nullptr), ncclSuccess);
+            }
+            std::vector<uint8_t> out(sz);
+            if (memType == NCCL_PTR_CUDA)
+                HIP_TEST_CHECK_GTEST_FAIL(hipMemcpy(out.data(), buf, sz, hipMemcpyDeviceToHost));
+            else memcpy(out.data(), buf, sz);
+
+            bool ok = true;
+            for (size_t i = 0; i < sz && ok; i++)
+                ok = (out[i] == (uint8_t)((seed + i) % kBytePatternModulo));
+            EXPECT_TRUE(ok) << "Data mismatch for " << c.desc;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+}
+
 // Flush Tests
 
 TEST_F(NetIbMPITest, FlushAfterRecv) {
