@@ -52,8 +52,8 @@ def kernel_supports_p2pdma():
 
 def find_hip_runtimes():
     """
-    Populate a global list of HIP runtime libraries by looking in the
-    usual places.
+    Populate the global mapping of HIP runtime library paths to AIS
+    support flags by looking in the usual places.
     """
 
     # NOTE: CodeQL will be unhappy if you are not careful about paths
