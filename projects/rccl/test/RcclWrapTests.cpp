@@ -159,6 +159,14 @@ static bool isProtoStrValid(const char* envStr)
     return false; // No match found
 }
 
+// Helper that exercises CUCHECK with a guaranteed-to-fail HIP call
+static ncclResult_t triggerCucheckFailure()
+{
+    CUCHECK(hipPointerGetAttribute(nullptr, HIP_POINTER_ATTRIBUTE_CONTEXT,
+                                   (hipDeviceptr_t)0x1));
+    return ncclSuccess;
+}
+
 // Helper function to validate algorithm string against known valid algorithms
 static bool isAlgoStrValid(const char* envStr)
 {
@@ -1299,6 +1307,26 @@ TEST(Rcclwrap, AllPxnTests)
     bool allTestsPassed = ProcessIsolatedTestRunner::executeAllTests(options);
 
     EXPECT_TRUE(allTestsPassed) << "One or more PXN process-isolated tests failed";
+}
+
+TEST(Rcclwrap, CucheckMacro_CheckStickyHipErrorOnFailure)
+{
+    hipError_t hipErr = hipSetDevice(0);
+    if(hipErr != hipSuccess)
+    {
+        GTEST_SKIP() << "No GPU available";
+    }
+
+    // Clear any pre-existing sticky error so we start clean
+    (void)hipGetLastError();
+
+    // Force a HIP failure through CUCHECK using an invalid device pointer (0x1)
+    ncclResult_t ret = triggerCucheckFailure();
+
+    EXPECT_EQ(ncclUnhandledCudaError, ret)
+        << "CUCHECK should return ncclUnhandledCudaError on failure";
+    EXPECT_EQ(hipSuccess, hipGetLastError())
+        << "CUCHECK must clear sticky HIP error after failure";
 }
 
 TEST(Rcclwrap, CucheckgotoMacro_CheckStickyHipErrorOnFailure)
