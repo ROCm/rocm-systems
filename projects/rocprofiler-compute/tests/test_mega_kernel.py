@@ -9,7 +9,7 @@ that exercises most GPU instructions and features across different AMD GPU
 architectures (CDNA >= MI200, RDNA 3.5 Strix/Strix Halo gfx1150/gfx1151,
 and RDNA4 RX 9070 XT).
 
-Not registered in CTest (see CMakeLists.txt under "Utils tests"): run manually, e.g.
+Not registered in CTest (see CMakeqLists.txt under "Utils tests"): run manually, e.g.
 ``pytest tests/test_mega_kernel.py``, when HIP/hipRTC and a matching GPU are available.
 
 """
@@ -285,38 +285,6 @@ def run_mega_kernel_test(
 
     kernel_source = load_kernel_source(str(kernel_path))
 
-    # Compile kernel
-    module, func = compile_mega_kernel(kernel_source, arch)
-
-    # Allocate device memory
-    print(f"\nAllocating device memory (batch_size={batch_size})...")
-
-    # Results structure
-    d_results = hip.hipMalloc(sizeof(TestResults))
-
-    # Global memory buffers for atomic tests
-    # Kernel uses global_int[tid % 64 + offset]; offset up to 192
-    # Maximum index: 64 + 192 = 256
-    GLOBAL_INT_SIZE = 256
-    GLOBAL_FLOAT_SIZE = 256
-    GLOBAL_DOUBLE_SIZE = 64
-
-    d_global_float = hip.hipMalloc(GLOBAL_FLOAT_SIZE * sizeof(c_float))
-    d_global_double = hip.hipMalloc(GLOBAL_DOUBLE_SIZE * sizeof(c_double))
-    d_global_int = hip.hipMalloc(GLOBAL_INT_SIZE * sizeof(c_int))
-
-    # Input/output buffers
-    d_input_buffer = hip.hipMalloc(batch_size * sizeof(c_float))
-    d_output_buffer = hip.hipMalloc(batch_size * sizeof(c_float))
-
-    # Async LDS test buffers
-    d_async_lds_src = hip.hipMalloc(batch_size * sizeof(c_float))
-    d_async_lds_dst = hip.hipMalloc(batch_size * sizeof(c_float))
-
-    # TDM test buffers
-    d_tdm_src = hip.hipMalloc(batch_size * sizeof(c_int))
-    d_tdm_dst = hip.hipMalloc(batch_size * sizeof(c_int))
-
     # Calculate grid dimensions
     grid_size = (batch_size + block_size - 1) // block_size
 
@@ -333,46 +301,91 @@ def run_mega_kernel_test(
         + sizeof(c_int)  # lds_atomic_counter for LDS atomic test
     )
 
-    print(f"Launching kernel: grid={grid_size}, block={block_size}")
-    print(
-        f"Shared memory size: {shared_mem_size} bytes ({shared_mem_size / 1024:.2f} KB)"
-    )
     mfma_mode_names = ["both", "asm", "builtin"]
     if not isinstance(mfma_mode, int) or not (0 <= mfma_mode < len(mfma_mode_names)):
         raise ValueError(
             f"Invalid mfma_mode {mfma_mode!r}; expected one of 0, 1, or 2 "
             f"corresponding to {mfma_mode_names}."
         )
-    print(f"MFMA mode: {mfma_mode_names[mfma_mode]}")
 
-    # Init device buffers before launch (cross-block race; kernel skips memset)
-    h_results_zero = TestResults()
-    hip.hipMemcpyHtoD(d_results, byref(h_results_zero), sizeof(TestResults))
-    zeros_f = (c_float * GLOBAL_FLOAT_SIZE)()
-    hip.hipMemcpyHtoD(
-        d_global_float, byref(zeros_f), GLOBAL_FLOAT_SIZE * sizeof(c_float)
-    )
-    zeros_d = (c_double * GLOBAL_DOUBLE_SIZE)()
-    hip.hipMemcpyHtoD(
-        d_global_double, byref(zeros_d), GLOBAL_DOUBLE_SIZE * sizeof(c_double)
-    )
-    zeros_i = (c_int * GLOBAL_INT_SIZE)()
-    hip.hipMemcpyHtoD(d_global_int, byref(zeros_i), GLOBAL_INT_SIZE * sizeof(c_int))
-    # Input buffer: same as main.cpp (float)i for memory verification
-    h_input = (c_float * batch_size)(*[float(i) for i in range(batch_size)])
-    hip.hipMemcpyHtoD(d_input_buffer, byref(h_input), batch_size * sizeof(c_float))
-    zeros_out = (c_float * batch_size)()
-    hip.hipMemcpyHtoD(d_output_buffer, byref(zeros_out), batch_size * sizeof(c_float))
-    hip.hipMemcpyHtoD(d_async_lds_src, byref(zeros_out), batch_size * sizeof(c_float))
-    hip.hipMemcpyHtoD(d_async_lds_dst, byref(zeros_out), batch_size * sizeof(c_float))
-    zeros_tdm = (c_int * batch_size)()
-    hip.hipMemcpyHtoD(d_tdm_src, byref(zeros_tdm), batch_size * sizeof(c_int))
-    hip.hipMemcpyHtoD(d_tdm_dst, byref(zeros_tdm), batch_size * sizeof(c_int))
+    module = None
+    device_buffers: list[hip.HIPDeviceMemory] = []
+
+    def _device_malloc(size: int) -> hip.HIPDeviceMemory:
+        mem = hip.hipMalloc(size)
+        device_buffers.append(mem)
+        return mem
 
     tex_id = 0
     surf_id = 0
-    d_surf_buffer = None
+
     try:
+        # Compile kernel
+        module, func = compile_mega_kernel(kernel_source, arch)
+
+        # Allocate device memory
+        print(f"\nAllocating device memory (batch_size={batch_size})...")
+
+        # Results structure
+        d_results = _device_malloc(sizeof(TestResults))
+
+        # Global memory buffers for atomic tests
+        # Kernel uses global_int[tid % 64 + offset]; offset up to 192
+        # Maximum index: 64 + 192 = 256
+        GLOBAL_INT_SIZE = 256
+        GLOBAL_FLOAT_SIZE = 256
+        GLOBAL_DOUBLE_SIZE = 64
+
+        d_global_float = _device_malloc(GLOBAL_FLOAT_SIZE * sizeof(c_float))
+        d_global_double = _device_malloc(GLOBAL_DOUBLE_SIZE * sizeof(c_double))
+        d_global_int = _device_malloc(GLOBAL_INT_SIZE * sizeof(c_int))
+
+        # Input/output buffers
+        d_input_buffer = _device_malloc(batch_size * sizeof(c_float))
+        d_output_buffer = _device_malloc(batch_size * sizeof(c_float))
+
+        # Async LDS test buffers
+        d_async_lds_src = _device_malloc(batch_size * sizeof(c_float))
+        d_async_lds_dst = _device_malloc(batch_size * sizeof(c_float))
+
+        # TDM test buffers
+        d_tdm_src = _device_malloc(batch_size * sizeof(c_int))
+        d_tdm_dst = _device_malloc(batch_size * sizeof(c_int))
+
+        print(f"Launching kernel: grid={grid_size}, block={block_size}")
+        print(
+            f"Shared memory size: {shared_mem_size} bytes ({shared_mem_size / 1024:.2f} KB)"
+        )
+        print(f"MFMA mode: {mfma_mode_names[mfma_mode]}")
+
+        # Init device buffers before launch (cross-block race; kernel skips memset)
+        h_results_zero = TestResults()
+        hip.hipMemcpyHtoD(d_results, byref(h_results_zero), sizeof(TestResults))
+        zeros_f = (c_float * GLOBAL_FLOAT_SIZE)()
+        hip.hipMemcpyHtoD(
+            d_global_float, byref(zeros_f), GLOBAL_FLOAT_SIZE * sizeof(c_float)
+        )
+        zeros_d = (c_double * GLOBAL_DOUBLE_SIZE)()
+        hip.hipMemcpyHtoD(
+            d_global_double, byref(zeros_d), GLOBAL_DOUBLE_SIZE * sizeof(c_double)
+        )
+        zeros_i = (c_int * GLOBAL_INT_SIZE)()
+        hip.hipMemcpyHtoD(d_global_int, byref(zeros_i), GLOBAL_INT_SIZE * sizeof(c_int))
+        # Input buffer: same as main.cpp (float)i for memory verification
+        h_input = (c_float * batch_size)(*[float(i) for i in range(batch_size)])
+        hip.hipMemcpyHtoD(d_input_buffer, byref(h_input), batch_size * sizeof(c_float))
+        zeros_out = (c_float * batch_size)()
+        hip.hipMemcpyHtoD(d_output_buffer, byref(zeros_out), batch_size * sizeof(c_float))
+        hip.hipMemcpyHtoD(
+            d_async_lds_src, byref(zeros_out), batch_size * sizeof(c_float)
+        )
+        hip.hipMemcpyHtoD(
+            d_async_lds_dst, byref(zeros_out), batch_size * sizeof(c_float)
+        )
+        zeros_tdm = (c_int * batch_size)()
+        hip.hipMemcpyHtoD(d_tdm_src, byref(zeros_tdm), batch_size * sizeof(c_int))
+        hip.hipMemcpyHtoD(d_tdm_dst, byref(zeros_tdm), batch_size * sizeof(c_int))
+
         # Strix (gfx1150/1151/1152): mirror mega_kernel/main.cpp for tex/surf
         # so TEX load/store counters increment under rocprof.
         if _is_strix_rdna35(arch):
@@ -392,7 +405,7 @@ def run_mega_kernel_test(
 
             tex_id = hip.hipCreateTextureObject(res_tex, tex_desc)
 
-            d_surf_buffer = hip.hipMalloc(lin_bytes)
+            d_surf_buffer = _device_malloc(lin_bytes)
             hip.hipMemset(d_surf_buffer, 0, lin_bytes)
 
             res_surf = hip.HIPResourceDesc()
@@ -477,8 +490,10 @@ def run_mega_kernel_test(
             hip.hipDestroyTextureObject(tex_id)
         if surf_id:
             hip.hipDestroySurfaceObject(surf_id)
-        if d_surf_buffer is not None:
-            hip.hipFree(d_surf_buffer)
+        for mem in reversed(device_buffers):
+            hip.hipFree(mem)
+        if module is not None:
+            del module
 
 
 def print_test_results(results: TestResults, arch: str):
