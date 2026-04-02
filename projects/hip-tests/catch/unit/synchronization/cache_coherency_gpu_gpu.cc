@@ -270,7 +270,7 @@ static bool gpu_to_gpu_coherency() {
  */
 
 HIP_TEST_CASE(Unit_cache_coherency_gpu_gpu) {
-  bool passed = true;
   // Coherency between GPUs accessing local or remote FB.
-  REQUIRE(passed == gpu_to_gpu_coherency());
+  bool result = gpu_to_gpu_coherency();
+  REQUIRE(result);
 }
