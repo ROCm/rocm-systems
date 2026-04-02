@@ -264,7 +264,7 @@ the correct instruction syntax:
     // CDNA syntax: dword suffix, glc for return
     asm volatile("global_atomic_add %0, %1, %2, off glc" : "=v"(old) : "v"(addr), "v"(val) : "memory");
     
-#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1200__) || defined(__gfx1201__) || defined() || defined()
+#elif defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1200__) || defined(__gfx1201__)
     // RDNA4 syntax: explicit type suffix, TH_ATOMIC_RETURN for return
     asm volatile("global_atomic_add_u32 %0, %1, %2, off th:TH_ATOMIC_RETURN" : "=v"(old) : "v"(addr), "v"(val) : "memory");
 #endif
