@@ -304,6 +304,9 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   static bool HandleAsyncDoorbell(hsa_signal_value_t value, void* arg);
   static void PacketWriter(const void* pkts, uint64_t pkt_count);
 
+  // Private constructor for retrofit (non-owning) path
+  InterceptQueue(NonOwningTag tag, Queue* existing_queue);
+
   // Submit packets to the wrapped queue and return number of packets that were
   // submitted.
   uint64_t Submit(const AqlPacket* packets, uint64_t count);

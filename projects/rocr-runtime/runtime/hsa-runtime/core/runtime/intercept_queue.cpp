@@ -455,5 +455,83 @@ hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void*
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
+InterceptQueue* InterceptQueue::WrapExisting(
+    Queue* existing_queue,
+    hsa_amd_queue_intercept_handler callback,
+    void* user_data) {
+  // Validate input
+  if (existing_queue == nullptr || callback == nullptr) return nullptr;
+
+  InterceptQueue* iq = nullptr;
+  try {
+    // Create a non-owning InterceptQueue
+    // We cannot use the normal constructor because it takes unique_ptr (owning).
+    // Instead, we construct in-place with the non-owning path.
+    //
+    // The InterceptQueue constructor does too much (allocates signals, registers
+    // async handler, etc). We need a lighter-weight construction for WrapExisting
+    // that does NOT register the async handler yet (that happens during the
+    // actual swap in the attach protocol).
+    //
+    // For now, we use placement-like construction through the non-owning
+    // QueueProxy path.
+
+    // Allocate the InterceptQueue object manually
+    iq = new InterceptQueue(NonOwningTag{}, existing_queue);
+
+    // Add the user callback as an interceptor
+    iq->AddInterceptor(callback, user_data);
+
+    // Add the final submit handler
+    iq->AddInterceptor(Submit, iq);
+
+  } catch (...) {
+    delete iq;
+    return nullptr;
+  }
+
+  return iq;
+}
+
+// Private constructor for retrofit (non-owning) path
+InterceptQueue::InterceptQueue(NonOwningTag tag, Queue* existing_queue)
+    : QueueProxy(tag, existing_queue),
+      LocalSignal(0, false),
+      DoorbellSignal(signal()),
+      next_packet_(0),
+      retry_index_(0),
+      quit_(false),
+      active_(true) {
+  // Save HW pointers BEFORE any modifications
+  hw_ring_buf_ = get_wrapped()->amd_queue_.hsa_queue.base_address;
+  hw_doorbell_ = get_wrapped()->amd_queue_.hsa_queue.doorbell_signal;
+
+  // Allocate proxy buffer with same size as the existing queue
+  buffer_ = SharedArray<AqlPacket, 4096>(get_wrapped()->amd_queue_.hsa_queue.size);
+  amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
+
+  // Pre-allocate staging buffer
+  staging_buffer_.resize(get_wrapped()->amd_queue_.hsa_queue.size);
+
+  // Fill the proxy ring buffer with invalid packet headers
+  for (uint32_t pkt_id = 0; pkt_id < get_wrapped()->amd_queue_.hsa_queue.size; ++pkt_id) {
+    buffer_[pkt_id].packet.header = HSA_PACKET_TYPE_INVALID;
+  }
+
+  // Allocate async doorbell signal (but do NOT register handler yet)
+  if (!core::g_use_interrupt_wait)
+    async_doorbell_ = new DefaultSignal(DOORBELL_MAX);
+  else
+    async_doorbell_ = new InterruptSignal(DOORBELL_MAX);
+  this->signal_ = async_doorbell_->signal_;
+  amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);
+
+  // Save the existing queue state for future detach
+  saved_base_address_ = hw_ring_buf_;
+  saved_doorbell_signal_ = hw_doorbell_;
+  // original_shared_queue_ and saved_core_queue_ are set during the attach protocol
+}
+
+
 }  // namespace core
 }  // namespace rocr
