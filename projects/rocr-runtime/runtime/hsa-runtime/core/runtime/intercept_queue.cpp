@@ -583,8 +583,7 @@ hsa_status_t InterceptQueue::Unwrap() {
         AqlPacket& pkt = proxy_ring[i & mask];
         uint16_t header = atomic::Load(&pkt.packet.header, std::memory_order_acquire);
         if (!AqlPacket::IsValid(header)) {
-          debug_print("Detach: skipping unwritten packet at index %lu
-", (unsigned long)i);
+          debug_print("Detach: skipping unwritten packet at index %lu\n", (unsigned long)i);
           continue;
         }
         hw_ring[i & mask] = pkt;
@@ -609,8 +608,7 @@ hsa_status_t InterceptQueue::Unwrap() {
         uint64_t hw_w = atomic::Load(&app_amd_queue.write_dispatch_id,
                                      std::memory_order_acquire);
         if ((hw_w - hw_r) >= hw_size) {
-          debug_print("Detach: dropping %zu overflow packets (HW ring full)
-",
+          debug_print("Detach: dropping %zu overflow packets (HW ring full)\n",
                       overflow_.size() - idx);
           break;
         }
@@ -641,8 +639,7 @@ hsa_status_t InterceptQueue::Unwrap() {
     while (IsPendingRetryPoint(get_wrapped()->LoadReadIndexRelaxed())) {
       std::this_thread::yield();
       if (++poll_count > 100000) {
-        debug_print("Detach: retry barrier wait timed out
-");
+        debug_print("Detach: retry barrier wait timed out\n");
         break;
       }
     }
