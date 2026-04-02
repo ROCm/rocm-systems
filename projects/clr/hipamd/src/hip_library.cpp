@@ -285,7 +285,7 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
 
   const auto* const d_kernel = hip::asKernel(kernel);
   if (d_kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+    HIP_RETURN(hipErrorInvalidHandle);
   }
 
   auto* currentDevice = hip::getCurrentDevice();
