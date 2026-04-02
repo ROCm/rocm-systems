@@ -29,6 +29,7 @@ concurrency:
 
 env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+  GIT_CONFIG_GLOBAL: ${{ github.workspace }}/.gitconfig
   ROCM_PATH: "/opt/rocm"
   ENABLE_ROCR_BUILD: "true"
   ENABLE_HIP_CLR_BUILD: "true"
