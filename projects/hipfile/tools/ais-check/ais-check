@@ -227,7 +227,7 @@ def main():
         print(u.sysname, u.nodename, u.release, u.version, u.machine)
 
         print()
-        print("Found these HIP libraries (some may be symlinks):")
+        print("Found these HIP libraries (some may be redundant symlinks):")
         for lib, support in hip_libraries.items():
             if support:
                 pretty_supported = "supported"
