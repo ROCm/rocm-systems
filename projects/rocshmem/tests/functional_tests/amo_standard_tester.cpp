@@ -59,7 +59,7 @@ template <typename T>
 AMOStandardTester<T>::AMOStandardTester(TesterArguments args) : Tester(args) {
   n_out   = (args.addr_mode == AddrMode::PerBlock) ? args.num_wgs : 1;
   n_in    = args.num_wgs * args.wg_size;
-  n_loops = args.loop + args.skip;
+  n_loops = std::max(args.loop, args.loop_large) + args.skip;
 
   // One return per *thread* per loop
   CHECK_HIP(hipMalloc((void **)&ret_val, max_msg_size * n_in * n_loops));
@@ -79,6 +79,7 @@ AMOStandardTester<T>::~AMOStandardTester() {
 
 template <typename T>
 void AMOStandardTester<T>::resetBuffers([[maybe_unused]] size_t size) {
+  n_loops = num_loops + args.skip;
   memset(ret_val, 0, max_msg_size * n_in  * n_loops);
   memset(dest,    0, max_msg_size * n_out * n_loops);
 }
