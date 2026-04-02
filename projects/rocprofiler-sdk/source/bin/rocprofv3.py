@@ -750,7 +750,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         filter_options,
         "--selected-regions",
-        help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0)",
+        help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0).",
     )
     add_parser_bool_argument(
         filter_options,

@@ -2488,6 +2488,46 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& command) {
+  std::scoped_lock lock(execution());
+  profilingBegin(command);
+
+  auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
+  hsa_signal_t active = Barriers().ActiveSignal(command.Count(), timestamp_);
+
+  const bool enable_system_memory =
+      (dev().settings().hmmFlags_ & Settings::Hmm::EnableSystemMemory) != 0;
+
+  for (size_t idx = 0; idx < command.Count(); idx++) {
+    void* dev_ptr = command.DevicePointers()[idx];
+    size_t size = command.Sizes()[idx];
+    const roc::Device* target_dev = static_cast<const roc::Device*>(command.TargetDevices()[idx]);
+    bool cpu_access = target_dev == nullptr;
+
+    hsa_agent_t agent = (cpu_access || enable_system_memory) ? dev().getCpuAgent(CpuDeviceId)
+                                                             : target_dev->getBackendDevice();
+
+    hsa_status_t status = Hsa::svm_prefetch_async(dev_ptr, size, agent, wait_events.size(),
+                                                  wait_events.data(), active);
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+            "HSA prefetch batch async[%zu] dev_ptr=0x%zx, size=%zu, wait_event=0x%zx, "
+            "completion_signal=0x%zx",
+            idx, dev_ptr, size, wait_events.empty() ? 0 : wait_events[0].handle, active.handle);
+
+    if (status != HSA_STATUS_SUCCESS) {
+      Barriers().ResetCurrentSignal();
+      LogError("HSA prefetch batch async failed in batch operation");
+      command.setStatus(CL_INVALID_OPERATION);
+      profilingEnd();
+      return;
+    }
+  }
+
+  addSystemScope();
+  profilingEnd();
+}
+
+// ================================================================================================
 bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memory& dstMem,
                             bool entire, const amd::Coord3D& srcOrigin,
                             const amd::Coord3D& dstOrigin, const amd::Coord3D& size,
