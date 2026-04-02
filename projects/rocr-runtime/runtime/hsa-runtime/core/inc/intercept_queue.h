@@ -185,6 +185,9 @@ class QueueProxy : public QueueWrapper {
  public:
   explicit QueueProxy(std::unique_ptr<Queue> queue) : QueueWrapper(std::move(queue)) {}
 
+  // Non-owning constructor for retrofit path
+  QueueProxy(NonOwningTag tag, Queue* queue) : QueueWrapper(tag, queue) {}
+
   uint64_t LoadReadIndexAcquire() override {
     return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_acquire);
   }
@@ -239,6 +242,19 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
  public:
   explicit InterceptQueue(std::unique_ptr<Queue> queue);
   ~InterceptQueue();
+
+  // NEW: wrap an existing, active queue in-place (non-owning)
+  // Returns nullptr on failure. Does NOT perform the field swap.
+  static InterceptQueue* WrapExisting(
+      Queue* existing_queue,
+      hsa_amd_queue_intercept_handler callback,
+      void* user_data);
+
+  // NEW: undo a WrapExisting operation (detach protocol)
+  hsa_status_t Unwrap();
+
+  // NEW: check if this InterceptQueue was created via WrapExisting
+  bool is_retrofitted() const { return !QueueWrapper::owns_wrapped(); }
 
   void AddInterceptor(hsa_amd_queue_intercept_handler interceptor, void* data) {
     assert(interceptor != nullptr && "Packet intercept callback was nullptr.");
@@ -324,6 +340,12 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
  private:
+  // --- Retrofit Saved State (for detach restoration) ---
+  void* saved_base_address_ = nullptr;
+  hsa_signal_t saved_doorbell_signal_ = {};
+  Queue* saved_core_queue_ = nullptr;
+  SharedQueue* original_shared_queue_ = nullptr;
+
   // HW ring buffer address, saved BEFORE the base_address swap.
   // Used by Submit() to write packets to the HW queue.
   // For creation-time InterceptQueue: set from wrapped->amd_queue_.hsa_queue.base_address

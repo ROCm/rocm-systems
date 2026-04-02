@@ -230,6 +230,14 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Get HSA queue ID for core dump filtering
   HSA_QUEUEID aql_queue_id() const { return queue_id_; }
 
+ public:
+  // Public accessors for migration support
+  std::mutex& GetScratchLock() { return scratch_lock_; }
+  void* GetHwRingBuffer() const { return ring_buf_; }
+  uint32_t GetRingBufAllocBytes() const { return ring_buf_alloc_bytes_; }
+  void SuspendForMigration() { Suspend(); }
+  void ResumeFromMigration() { Resume(); }
+
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
