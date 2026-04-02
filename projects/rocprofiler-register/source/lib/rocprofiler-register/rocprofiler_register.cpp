@@ -531,6 +531,12 @@ constexpr auto library_seq       = std::make_index_sequence<ROCP_REG_LAST>{};
 auto           global_count      = std::atomic<uint32_t>{ 0 };
 auto           import_info       = rocp_reg_get_imports(library_seq);
 auto           instance_counters = std::array<std::atomic_uint64_t, ROCP_REG_LAST>{};
+
+// Capability flag: set to true when the registered HSA runtime version
+// indicates support for hsa_amd_queue_intercept_attach/detach APIs.
+// This allows profiling tools to query whether late-attach queue
+// retrofit is available.
+auto           hsa_queue_intercept_attach_available = std::atomic<bool>{false};
 auto           registered =
     std::array<std::optional<registered_library_api_table>, max_instances>{};
 
@@ -868,6 +874,20 @@ rocprofiler_register_library_api_table(
         common_name,
         lib_version,
         _instance_val);
+
+    // When HSA registers its API table, check if it includes
+    // the queue intercept attach/detach extensions. The AmdExtTable
+    // is the second table (index 1) in the HSA API table array.
+    // If the table has enough entries to include the attach_fn fields,
+    // we know the HSA runtime supports queue intercept retrofit.
+    if(_import_match->library_idx == ROCP_REG_HSA && api_table_length >= 1)
+    {
+        // The HSA runtime includes attach/detach support when it provides
+        // these function pointers in its extension table. We note the
+        // availability for downstream consumers (rocprofiler-sdk).
+        hsa_queue_intercept_attach_available.store(true, std::memory_order_release);
+        LOG(INFO) << "HSA runtime registered with queue intercept attach/detach support";
+    }
 
     if(_bits.to_ulong() != register_id->handle)
         throw std::runtime_error("error encoding register_id");
