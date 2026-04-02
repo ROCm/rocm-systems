@@ -22,12 +22,31 @@ Execution semantics are provided by ``SemanticsSpec`` from
 import cgen
 import re
 
+from dataclasses import dataclass, field as _field
 from datetime import datetime
 from collections.abc import Sequence
 from typing import TextIO
 
 from amdisa.gpuisa import InstEncoding, Instruction, IsaSpec, OperandNamePattern
 from amdisa.semantics import InstructionSemantics, SemanticsSpec
+
+
+@dataclass
+class CodegenConfig:
+    """Configuration for C++ code generation paths and namespaces.
+
+    Collecting these constants here avoids scattering them as literals
+    across ~15 locations in the generator and makes the generator usable
+    by projects with different namespace conventions.
+
+    Attributes:
+        namespace: Top-level C++ namespace enclosing all generated code.
+        include_base: Base path prefix for architecture-specific includes
+            (e.g. ``'rocjitsu/isa/arch/amdgpu'``).
+    """
+
+    namespace: str = 'rocjitsu'
+    include_base: str = 'rocjitsu/isa/arch/amdgpu'
 
 
 class CppFile:
@@ -149,6 +168,23 @@ class CppFile:
                 self.gen_cpp(f)
 
 
+class _SemanticEmitter:
+    """Entry point for execute() body generation.
+
+    Phase 0 introduces this class as a named abstraction; Phase B.9 completes
+    the full method extraction (one ``emit_<cls>`` method per semantic class,
+    replacing the ~600-line ``if cls == ...`` chain in ``_gen_execute_body``).
+
+    Attributes:
+        _spec: Parsed ISA specification.
+        _semantics: Optional semantic metadata for execute() bodies.
+    """
+
+    def __init__(self, spec: IsaSpec, semantics: SemanticsSpec | None) -> None:
+        self._spec = spec
+        self._semantics = semantics
+
+
 class CodeGenerator:
     """Generates C++ code from a parsed machine-readable ISA specification.
 
@@ -162,6 +198,7 @@ class CodeGenerator:
         isa_spec: Parsed ISA specification with encodings and instructions.
         out_path: Output directory for generated C++ files.
         semantics: Optional semantic metadata for generating execute() bodies.
+        config: Code generation configuration (namespace, include paths).
     """
 
     def __init__(
@@ -169,10 +206,13 @@ class CodeGenerator:
         isa_spec: IsaSpec,
         out_path: str,
         semantics: SemanticsSpec | None = None,
+        config: CodegenConfig | None = None,
     ) -> None:
         self.isa_spec = isa_spec
         self.out_path = out_path
         self.semantics = semantics
+        self.config = config if config is not None else CodegenConfig()
+        self._emitter = _SemanticEmitter(isa_spec, semantics)
 
     def gen_all(self) -> None:
         """Generate all C++ objects.
@@ -541,11 +581,10 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'waitcnt':
-            lgkm_mask = self.isa_spec.profile.waitcnt_lgkmcnt_mask
             L.append(f'  uint16_t imm = static_cast<uint16_t>({src_ops[0]}.encoding_value_);')
             L.append('  uint8_t vm = (imm & 0xF) | ((imm >> 10) & 0x30);')
             L.append('  uint8_t exp = (imm >> 4) & 0x7;')
-            L.append(f'  uint8_t lgkm = (imm >> 8) & {lgkm_mask};')
+            L.append('  uint8_t lgkm = (imm >> 8) & Isa::WAITCNT_LGKMCNT_MASK;')
             L.append('  wf.set_wait_target(vm, lgkm, exp);')
             return '\n'.join(L)
 
