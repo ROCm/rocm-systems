@@ -1,5 +1,5 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+//Copyright (c) Advanced Micro Devices, Inc.
+//SPDX-License-Identifier:  MIT
 
 /**
  * / GPU Mega Kernel Unit Test

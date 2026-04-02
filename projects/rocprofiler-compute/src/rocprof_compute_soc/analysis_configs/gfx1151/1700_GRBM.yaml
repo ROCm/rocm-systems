@@ -31,12 +31,11 @@ Panel Config:
           min: MIN((100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           max: MAX((100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           unit: Percent
-        # To be fixed: GRBM_GL2C_BUSY not available - commenting out metric
-        # GL2C Busy:
-        #   avg: AVG((100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-        #   min: MIN((100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-        #   max: MAX((100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-        #   unit: Percent
+        GL2C Busy:
+          avg: AVG((100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN((100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          max: MAX((100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          unit: Percent
 
   # =========================================================================
   # Shader Engine Utilization
