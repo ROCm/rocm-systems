@@ -210,6 +210,20 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_REQUIRED rocprofv3-test-rocpd
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-generation-truncated
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank
+        --truncate-kernels -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary
+        -o out_trunc -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation-truncated
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
 #########################################################################################
 #
 # Region category filtering tests
@@ -334,6 +348,23 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 60
     LABELS "integration-tests;rocpd;region-category"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-region-category)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-truncate-kernels
+    TEST_PATHS validate_truncate_kernels.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
+         --csv-input-truncated
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_trunc_kernels_summary.csv
+         --csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/kernels_summary.csv
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    FIXTURES_REQUIRED
+        rocprofv3-test-rocpd-generation-truncated
+        rocprofv3-test-rocpd-generation)
 
 #########################################################################################
 #

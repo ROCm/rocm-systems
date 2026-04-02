@@ -87,6 +87,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to NONE category summary output directory.",
     )
+    parser.addoption(
+        "--csv-input-truncated",
+        action="store",
+        help="Path to truncated kernels summary CSV file.",
+    )
 
     pd.set_option("display.width", 2000)
     # increase debug display of pandas dataframes
@@ -207,3 +212,36 @@ def summary_multiple_dir(request):
 @pytest.fixture
 def summary_none_dir(request):
     return request.config.getoption("--summary-none-dir")
+
+
+@pytest.fixture
+def csv_kernels_truncated(request):
+    """Load truncated kernels summary CSV file"""
+    filename = request.config.getoption("--csv-input-truncated")
+    if not filename:
+        pytest.skip("--csv-input-truncated not provided")
+    if not os.path.exists(filename):
+        raise FileExistsError(f"{filename} does not exist")
+    return pd.read_csv(filename)
+
+
+@pytest.fixture
+def csv_kernels_full(request):
+    """Load full kernels summary CSV file from existing --csv-input list"""
+    filenames = request.config.getoption("--csv-input")
+    if not filenames:
+        pytest.skip("--csv-input not provided")
+
+    # Find kernels_summary.csv in the list
+    kernel_summary_file = None
+    for f in filenames:
+        if "kernels_summary.csv" in f:
+            kernel_summary_file = f
+            break
+
+    if not kernel_summary_file:
+        pytest.skip("kernels_summary.csv not found in --csv-input list")
+    if not os.path.exists(kernel_summary_file):
+        raise FileExistsError(f"{kernel_summary_file} does not exist")
+
+    return pd.read_csv(kernel_summary_file)
