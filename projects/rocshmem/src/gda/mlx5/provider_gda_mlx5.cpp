@@ -329,7 +329,7 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
             "[Warning] Cannot provide dedicated DBs to each QP, "
             "rocSHMEM correctness is not guaranteed "
             "MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED is not supported by the installed rdma-core/OFED."
-            "Please upgrade network stack.\n");
+            "Please upgrade network stack to rdma-core v45 or later.\n");
 
     qp.uar = mlx5dv.devx_alloc_uar(ctx, MLX5DV_UAR_ALLOC_TYPE_BF);
   }
