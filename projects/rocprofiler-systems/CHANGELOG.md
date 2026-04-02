@@ -6,6 +6,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 
+### Added
+
+- Support for pause and resume of profiling via `roctxProfilerPause` and `roctxProfilerResume`.
+- Support for selective region tracing via the `ROCPROFSYS_TRACE_REGION` environment variable, limiting tracing to specified regions.
+
 ### Changed
 
 - `rocprof-sys-avail` no longer queries GPU devices or hardware counters unless `--hw-counters` or `--all` is requested, reducing startup time and allowing settings/component queries in environments without GPU/ROCm.

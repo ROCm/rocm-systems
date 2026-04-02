@@ -76,6 +76,7 @@
 #include "logger/debug.hpp"
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <condition_variable>
@@ -1044,6 +1045,28 @@ store_sampling_data_in_cache(int64_t                                    _tid,
 
 auto static_strings = std::set<std::string>{};
 
+struct pause_interval_t
+{
+    uint64_t pause_ts  = 0;
+    uint64_t resume_ts = 0;
+};
+
+auto sampling_paused  = std::atomic<bool>{ false };
+auto pause_mutex      = std::mutex{};
+auto pause_intervals  = std::vector<pause_interval_t>{};
+auto pending_pause_ts = std::atomic<uint64_t>{ 0 };
+
+bool
+spans_pause_interval(uint64_t _beg, uint64_t _end)
+{
+    if(pause_intervals.empty()) return false;
+
+    const auto _it = std::lower_bound(
+        pause_intervals.cbegin(), pause_intervals.cend(), _beg,
+        [](const auto& _interval, uint64_t _val) { return _interval.resume_ts < _val; });
+
+    return _it != pause_intervals.cend() && _it->pause_ts <= _end;
+}
 }  // namespace
 
 unique_ptr_t<std::set<int>>&
@@ -1078,12 +1101,14 @@ shutdown()
 void
 block_samples()
 {
+    LOG_DEBUG("Blocking sampling...");
     trait::runtime_enabled<sampler_t>::set(false);
 }
 
 void
 unblock_samples()
 {
+    LOG_DEBUG("Unblocking sampling...");
     trait::runtime_enabled<sampler_t>::set(true);
 }
 
@@ -1291,10 +1316,11 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
         if(!_bt_data || !_bt_time || _bt_data->empty() || _bt_time->get_tid() != _tid)
             continue;
 
-        auto _ret    = timer_sampling_data{};
-        _ret.m_tid   = _bt_time->get_tid();
-        _ret.m_beg   = _last->get<backtrace_timestamp>()->get_timestamp();
-        _ret.m_end   = _bt_time->get_timestamp();
+        auto _ret  = timer_sampling_data{};
+        _ret.m_tid = _bt_time->get_tid();
+        _ret.m_beg = _last->get<backtrace_timestamp>()->get_timestamp();
+        _ret.m_end = _bt_time->get_timestamp();
+
         _ret.m_stack = backtrace::filter_and_patch(_bt_data->get());
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
@@ -1311,7 +1337,10 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
             }
         }
 
-        _results.emplace_back(std::move(_ret));
+        if(!spans_pause_interval(_ret.m_beg, _ret.m_end))
+        {
+            _results.emplace_back(std::move(_ret));
+        }
         _last = itr;
     }
 
@@ -1345,13 +1374,17 @@ parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>&
                 continue;
             }
 
-            auto _ret     = overflow_sampling_data{};
-            _ret.m_tid    = _bt_time->get_tid();
-            _ret.m_beg    = _last_call_ts + _perf_ts_offset;
-            _ret.m_end    = pitr.first + _perf_ts_offset;
+            auto _ret  = overflow_sampling_data{};
+            _ret.m_tid = _bt_time->get_tid();
+            _ret.m_beg = _last_call_ts + _perf_ts_offset;
+            _ret.m_end = pitr.first + _perf_ts_offset;
+
             _ret.m_stack  = pitr.second;
             _last_call_ts = pitr.first;
-            _results.emplace_back(std::move(_ret));
+            if(!spans_pause_interval(_ret.m_beg, _ret.m_end))
+            {
+                _results.emplace_back(std::move(_ret));
+            }
         }
     }
 
@@ -1913,6 +1946,44 @@ postfork_child_cleanup()
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
         pmc::postfork_child_cleanup();
 }
+
+void
+pause()
+{
+    bool _expected = false;
+    if(!sampling_paused.compare_exchange_strong(_expected, true))
+    {
+        LOG_WARNING("sampling::pause() called but sampling is already paused");
+        return;
+    }
+
+    LOG_DEBUG("Pausing sampling...");
+    pending_pause_ts.store(tim::get_clock_real_now<uint64_t, std::nano>());
+    block_samples();
+}
+
+void
+resume()
+{
+    bool _expected = true;
+    if(!sampling_paused.compare_exchange_strong(_expected, false))
+    {
+        LOG_WARNING("sampling::resume() called but sampling is not paused");
+        return;
+    }
+
+    LOG_DEBUG("Resuming sampling...");
+    auto _pause_ts  = pending_pause_ts.exchange(0);
+    auto _resume_ts = tim::get_clock_real_now<uint64_t, std::nano>();
+    if(_pause_ts > 0)
+    {
+        auto _lk = std::lock_guard<std::mutex>{ pause_mutex };
+        pause_intervals.push_back(pause_interval_t{ _pause_ts, _resume_ts });
+    }
+
+    unblock_samples();
+}
+
 }  // namespace sampling
 }  // namespace rocprofsys
 

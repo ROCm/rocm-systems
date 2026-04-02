@@ -23,8 +23,9 @@ THE SOFTWARE.
 #include "vaapi_videodecoder.h"
 
 VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) : decoder_create_info_{decoder_create_info},
-    va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_ {VAProfileNone}, va_context_id_{0}, va_surface_ids_{{}},
-    supports_modifiers_{false}, pic_params_buf_id_{0}, iq_matrix_buf_id_{0}, num_slices_{0}, slice_data_buf_id_{0} {
+    output_surface_format_override_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_ {VAProfileNone},
+    va_context_id_{0}, va_surface_ids_{{}}, supports_modifiers_{false}, pic_params_buf_id_{0}, iq_matrix_buf_id_{0}, num_slices_{0},
+    slice_data_buf_id_{0} {
 };
 
 VaapiVideoDecoder::~VaapiVideoDecoder() {
@@ -57,9 +58,71 @@ VaapiVideoDecoder::~VaapiVideoDecoder() {
     }
 }
 
+void VaapiVideoDecoder::ValidateOutputFormat() {
+    // When content is 8-bit; a 16-bit output format would exceed the content bit depth.
+    if (decoder_create_info_.bit_depth_minus_8 == 0) {
+        rocDecVideoSurfaceFormat adjusted = decoder_create_info_.output_format;
+        switch (decoder_create_info_.output_format) {
+            case rocDecVideoSurfaceFormat_P016:
+                adjusted = rocDecVideoSurfaceFormat_NV12;
+                break;
+            case rocDecVideoSurfaceFormat_YUV444_16Bit:
+                adjusted = rocDecVideoSurfaceFormat_YUV444;
+                break;
+            case rocDecVideoSurfaceFormat_YUV420_16Bit:
+                adjusted = rocDecVideoSurfaceFormat_YUV420;
+                break;
+            case rocDecVideoSurfaceFormat_YUV422_16Bit:
+                adjusted = rocDecVideoSurfaceFormat_YUV422;
+                break;
+            default:
+                break; // already an 8-bit format, no adjustment needed
+        }
+        if (adjusted != decoder_create_info_.output_format) {
+            logger_.WarningLog(MakeMsg("output_format (" + TOSTR(static_cast<uint32_t>(decoder_create_info_.output_format)) +
+                ") bit depth exceeds content bit depth (bit_depth_minus_8 = " +
+                TOSTR(decoder_create_info_.bit_depth_minus_8) + "). Adjusting output_format to " +
+                TOSTR(static_cast<uint32_t>(adjusted)) + "."));
+            decoder_create_info_.output_format = adjusted;
+        }
+    }
+}
+
+void VaapiVideoDecoder::SetNativeOutputFormat() {
+    switch (decoder_create_info_.chroma_format) {
+        case rocDecVideoChromaFormat_Monochrome:
+        case rocDecVideoChromaFormat_420:
+            decoder_create_info_.output_format = (decoder_create_info_.bit_depth_minus_8 > 0) ? rocDecVideoSurfaceFormat_P016 : rocDecVideoSurfaceFormat_NV12;
+            break;
+        case rocDecVideoChromaFormat_422:
+            decoder_create_info_.output_format = (decoder_create_info_.bit_depth_minus_8 > 0) ? rocDecVideoSurfaceFormat_YUV422_16Bit : rocDecVideoSurfaceFormat_YUV422;
+            break;
+        case rocDecVideoChromaFormat_444:
+            decoder_create_info_.output_format = (decoder_create_info_.bit_depth_minus_8 > 0) ? rocDecVideoSurfaceFormat_YUV444_16Bit : rocDecVideoSurfaceFormat_YUV444;
+            break;
+        default:
+            decoder_create_info_.output_format = rocDecVideoSurfaceFormat_NV12;
+            break;
+    }
+}
+
+void VaapiVideoDecoder::CheckOutputFormat() {
+    if (decoder_create_info_.output_format == rocDecVideoSurfaceFormat_Native) {
+        output_surface_format_override_ = false;
+        // Resolve Native to the concrete format that matches the stream's chroma format and bit depth.
+        SetNativeOutputFormat();
+    } else {
+        output_surface_format_override_ = true;
+        ValidateOutputFormat();
+    }
+}
+
 rocDecStatus VaapiVideoDecoder::InitializeDecoder() {
     FunctionEntryLog(logger_);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
+
+    // Check if the output surface format is set by the user or native.
+    CheckOutputFormat();
 
     // Before initializing the VAAPI, first check to see if the requested codec config is supported
     if (!IsCodecConfigSupported(decoder_create_info_.device_id, decoder_create_info_.codec_type, decoder_create_info_.chroma_format,
@@ -376,6 +439,13 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
     decoder_create_info_.target_width = reconfig_params->target_width;
     decoder_create_info_.bit_depth_minus_8 = reconfig_params->bit_depth_minus_8;
 
+    // Adjust output format if needed
+    if (output_surface_format_override_) {
+        ValidateOutputFormat();
+    } else {
+        SetNativeOutputFormat();
+    }
+
     rocDecStatus rocdec_status;
     if (create_va_config) {
         rocdec_status = CreateDecoderConfig();
@@ -480,21 +550,30 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
     surf_attrib.value.type = VAGenericValueTypeInteger;
     uint32_t surface_format;
     switch (decoder_create_info_.chroma_format) {
-        case rocDecVideoChromaFormat_Monochrome:
+        case rocDecVideoChromaFormat_Monochrome: {
             surface_format = VA_RT_FORMAT_YUV400;
             surf_attrib.value.value.i = VA_FOURCC_Y800;
+        }
             break;
-        case rocDecVideoChromaFormat_420:
-            if (decoder_create_info_.bit_depth_minus_8 == 2) {
-                surface_format = VA_RT_FORMAT_YUV420_10;
-                surf_attrib.value.value.i = VA_FOURCC_P010;
-            } else if (decoder_create_info_.bit_depth_minus_8 == 4) {
-                surface_format = VA_RT_FORMAT_YUV420_12;
-                surf_attrib.value.value.i = VA_FOURCC_P012;
-            } else {
+        case rocDecVideoChromaFormat_420: {
+            // If the user sets the output surface format
+            // Special case for 8-bit output requirement even when the stream is 10-bit and above
+            if (output_surface_format_override_ && decoder_create_info_.output_format == rocDecVideoSurfaceFormat_NV12) {
                 surface_format = VA_RT_FORMAT_YUV420;
                 surf_attrib.value.value.i = VA_FOURCC_NV12;
+            } else {
+                if (decoder_create_info_.bit_depth_minus_8 == 2) {
+                    surface_format = VA_RT_FORMAT_YUV420_10;
+                    surf_attrib.value.value.i = VA_FOURCC_P010;
+                } else if (decoder_create_info_.bit_depth_minus_8 == 4) {
+                    surface_format = VA_RT_FORMAT_YUV420_12;
+                    surf_attrib.value.value.i = VA_FOURCC_P012;
+                } else {
+                    surface_format = VA_RT_FORMAT_YUV420;
+                    surf_attrib.value.value.i = VA_FOURCC_NV12;
+                }
             }
+        }
             break;
         case rocDecVideoChromaFormat_422:
             surface_format = VA_RT_FORMAT_YUV422;

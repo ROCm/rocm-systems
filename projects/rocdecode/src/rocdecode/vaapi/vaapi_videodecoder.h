@@ -101,6 +101,7 @@ public:
 
 private:
     RocDecoderCreateInfo decoder_create_info_;
+    bool output_surface_format_override_;
     VADisplay va_display_;
     VAConfigAttrib va_config_attrib_;
     VAConfigID va_config_id_;
@@ -117,6 +118,9 @@ private:
 
     RocDecLogger logger_;
 
+    void SetNativeOutputFormat();
+    void ValidateOutputFormat();
+    void CheckOutputFormat();
     bool IsCodecConfigSupported(int device_id, rocDecVideoCodec codec_type, rocDecVideoChromaFormat chroma_format, uint32_t bit_depth_minus8, rocDecVideoSurfaceFormat output_format);
     rocDecStatus CreateDecoderConfig();
     rocDecStatus CreateSurfaces();
