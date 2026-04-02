@@ -231,7 +231,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             hsa::get_core_table()->hsa_signal_destroy_fn(packet.interrupt_signal);
         }
 
-        if(_should_destroy_signal(packet.completion_signal))
+        if(_should_destroy_signal(packet.completion_signal) &&
+           packet.completion_signal != packet.interrupt_signal)
         {
             ROCP_TRACE << fmt::format("Destroying completion signal {{.handle={}}}",
                                       packet.completion_signal.handle);
@@ -803,31 +804,18 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
     });
 #endif
 
-    if(signal)
-    {
-        ROCP_INFO_IF(signal->get().value.handle != raw_signal.handle)
-            << fmt::format("signal handle does not match raw signal handle: {} vs {}",
-                           signal->get().value.handle,
-                           raw_signal.handle);
+    ROCP_CI_LOG_IF(WARNING, signal && !signal->in_use())
+        << fmt::format("pooled signal has not been acquired: hsa_signal_t(.handle={})",
+                       signal->get().value.handle);
 
-        ROCP_FATAL_IF(!signal->in_use())
-            << fmt::format("pooled signal has not been acquired: hsa_signal_t(.handle={})",
-                           signal->get().value.handle);
+    hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
+        raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
 
-        hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-            raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
-        ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-            << "Error: hsa_amd_signal_async_handler failed with error code " << status
-            << " :: " << hsa::get_hsa_status_string(status);
-    }
-    else
-    {
-        hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-            raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
-        ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-            << "Error: hsa_amd_signal_async_handler failed with error code " << status
-            << " :: " << hsa::get_hsa_status_string(status);
-    }
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) << fmt::format(
+        "Error: hsa_amd_signal_async_handler (signal={.handle={}) failed with error code {} :: {} ",
+        raw_signal.handle,
+        static_cast<int>(status),
+        hsa::get_hsa_status_string(status));
 }
 
 Queue::pooled_signal_t*

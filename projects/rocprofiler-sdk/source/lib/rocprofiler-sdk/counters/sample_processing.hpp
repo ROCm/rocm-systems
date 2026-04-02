@@ -33,12 +33,12 @@ namespace counters
 {
 struct completed_cb_params_t
 {
-    std::shared_ptr<counter_callback_info>       info;
-    std::shared_ptr<hsa::queue_info_session_t>   session;
-    const hsa::packet_data_t*                    packet_data = nullptr;  // owned by session
-    kernel_dispatch::profiling_time              dispatch_time;
-    std::shared_ptr<counter_config>              prof_config;
-    std::unique_ptr<rocprofiler::hsa::AQLPacket> pkt;
+    std::shared_ptr<counter_callback_info>       info          = nullptr;
+    std::shared_ptr<hsa::queue_info_session_t>   session       = nullptr;
+    const hsa::packet_data_t*                    packet_data   = nullptr;  // owned by session
+    kernel_dispatch::profiling_time              dispatch_time = {};
+    std::shared_ptr<counter_config>              prof_config   = nullptr;
+    std::unique_ptr<rocprofiler::hsa::AQLPacket> pkt           = nullptr;
 };
 
 void
@@ -49,6 +49,5 @@ callback_thread_stop();
 
 void
 process_callback_data(completed_cb_params_t&& params);
-
 }  // namespace counters
 }  // namespace rocprofiler
