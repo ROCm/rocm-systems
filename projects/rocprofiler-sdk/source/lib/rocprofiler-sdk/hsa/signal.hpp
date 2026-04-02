@@ -31,9 +31,7 @@ namespace hsa
 // pair of hsa signal and user data pointer for async handler
 struct signal_t
 {
-    // bool         handler_is_set = false;
     hsa_signal_t value = {.handle = 0};
-    // void*        data           = nullptr;
 };
 }  // namespace hsa
 }  // namespace rocprofiler

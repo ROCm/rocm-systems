@@ -458,7 +458,7 @@ WriteInterceptor(const void* packets,
 
         // Copy kernel pkt, copy is to allow for signal to be modified
         _packet_data.kernel_packet = packets_arr[i];
-        // create a referencce for short hand access
+        // create a reference for short hand access
         auto& kernel_packet = _packet_data.kernel_packet;
 
         // create our own signal that we can get a callback on. if there is an original completion
