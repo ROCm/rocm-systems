@@ -215,7 +215,7 @@ class QueuePair {
    * @param[in] db_val Doorbell value is written by method.
    */
 #if defined(GDA_MLX5)
-  __device__ void mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe);
+  __device__ void mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe);
 #endif
 #if defined(GDA_BNXT)
   __device__ void bnxt_ring_doorbell(uint32_t slot_idx);

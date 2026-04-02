@@ -1,6 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  *
  * See LICENSE.txt for license information
@@ -30,6 +30,7 @@
 #include <iostream>
 #include <utility>
 #include <vector>
+#include <map>
 
 #define CUDACHECK(cmd) do {                         \
   cudaError_t err = cmd;                            \
@@ -203,6 +204,7 @@ struct threadArgs {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   void** sendRegHandles;
   void** recvRegHandles;
+  void** biasRegHandles;
 #endif
 };
 
@@ -454,5 +456,12 @@ typedef ncclResult_t (*rcclTestsGetProtocolName_t)(int protocol, const char** pr
 extern rcclTestsGetAlgoInfo_t rcclTestsGetAlgoInfo;
 extern rcclTestsGetProtocolName_t rcclTestsGetProtocolName;
 extern rcclTestsGetAlgoName_t rcclTestsGetAlgoName;
+
+// Network counter collector (self-contained, see collector.h for full API)
+#include "collector.h"
+
+// rccl-tests wrappers that bridge threadArgs ↔ collector API
+extern NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args);
+extern void NetCounterCollectAfterAndPrint(struct threadArgs* args, const NetworkCounterContext& ctx);
 
 #endif
