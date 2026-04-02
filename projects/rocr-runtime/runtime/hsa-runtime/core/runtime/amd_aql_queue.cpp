@@ -938,7 +938,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
           dispatch_id & (amd_queue_.hsa_queue.size - 1);
 
       core::AqlPacket *dispatch_pkt =
-          &((core::AqlPacket *)amd_queue_.hsa_queue.base_address)[pkt_slot_idx];
+          &((core::AqlPacket *)ring_buf_)[pkt_slot_idx];
       if (dispatch_pkt->IsDispatchAndNeedsScratch()) return dispatch_pkt;
 
       dispatch_id++;
