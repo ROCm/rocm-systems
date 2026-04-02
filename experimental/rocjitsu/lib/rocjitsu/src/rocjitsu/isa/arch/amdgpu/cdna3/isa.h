@@ -64,9 +64,12 @@ public:
 };
 
 struct Isa {
-  static constexpr uint32_t WF_SIZE = 64;           ///< Lanes per wavefront (SIMD64).
-  static constexpr uint32_t MAX_SGPRS_PER_WF = 104; ///< Max scalar GPRs per wavefront.
-  static constexpr uint32_t MAX_VGPRS_PER_WF = 256; ///< Max vector GPRs per wavefront.
+  static constexpr uint32_t WF_SIZE = 64;               ///< Lanes per wavefront (SIMD64).
+  static constexpr uint32_t MAX_SGPRS_PER_WF = 102;     ///< Max scalar GPRs per wavefront.
+  static constexpr uint32_t MAX_VGPRS_PER_WF = 256;     ///< Max vector GPRs per wavefront.
+  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 256; ///< Max AccVGPRs per wavefront.
+  static constexpr uint8_t WAITCNT_LGKMCNT_MASK =
+      0x0F; ///< lgkmcnt field mask in S_WAITCNT (4-bit at [11:8]).
 
   using Context = amdgpu::Wavefront;
   using Decoder = cdna3::Decoder;
