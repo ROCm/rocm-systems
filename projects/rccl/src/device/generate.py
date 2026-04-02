@@ -653,7 +653,6 @@ for fn in primary_funcs:
 
   with open(filepath, "w") as f:
     out = f.write
-    out('#define NCCL_DEFINE_SHMEM\n')
     out('#include "common.h"\n')
     out('#include "%s.h"\n\n' % lower_coll)
     if guard:

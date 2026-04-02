@@ -13,7 +13,6 @@
 #include "nvtx_payload_schemas.h"
 #include "msccl/msccl_lifecycle.h"
 #include "device/hierarchical_ag_shuffle.h"
-
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif

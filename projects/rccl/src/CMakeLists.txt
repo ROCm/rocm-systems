@@ -34,7 +34,6 @@ set(SRC_FILES
   src/device/broadcast.h
   src/device/common.h
   src/device/common_kernel.h
-  src/device/device_kernel_decls.h
   src/device/op128.h
   src/device/primitives.h
   src/device/prims_ll128.h
@@ -461,10 +460,11 @@ if(ENABLE_DEVICE_LINKER)
   endif()
   # Remove specialized/ directory (compiled separately by the device pipeline)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/specialized/")
-  # Remove common.cu.cpp and onerank.cu.cpp (compiled host-only by device pipeline)
+  # Remove files compiled separately by the device pipeline
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp, common.cu, onerank.cu)")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp, common.cu, onerank.cu, collectives.cc)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
@@ -492,9 +492,7 @@ add_library(rccl ${HIP_SOURCES})
 #==================================================================================================
 if(ENABLE_DEVICE_LINKER)
   include(${PROJECT_SOURCE_DIR}/cmake/DeviceLinker.cmake)
-  # Link-only dependency: host .cc compilations proceed in parallel with the
-  # device linker pipeline; only the final link of librccl.so waits.
-  set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS "${COMMON_FAT_OBJ};${ONERANK_FAT_OBJ}")
+  add_dependencies(rccl device_linker_build)
   target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
 endif()
 

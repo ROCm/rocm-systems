@@ -25,7 +25,7 @@
 #include "ce_coll.h"
 #include "nvtx.h"
 #include "scheduler.h"
-#include "device_kernel_decls.h"
+#include "common.h"
 #include "api_trace.h"
 #include "rccl_common.h"
 
@@ -226,7 +226,6 @@ static void addWorkBatchToPlan(
     batch->nextExtends = 0;
     batch->workType = (uint32_t)workType;
     batch->funcId = devFuncId;
-    INFO(NCCL_INIT, "addWorkBatchToPlan: channelId=%d workType=%d devFuncId=%d", channelId, (int)workType, devFuncId);
     batch->offsetBase = workOffset;
     batch->offsetBitset = 0;
     offset = 0;

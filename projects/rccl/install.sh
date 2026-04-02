@@ -461,8 +461,8 @@ fi
 
 check_exit_code "$?"
 
-# Enable ninja build for time tracing
-if [[ "${time_trace}" == true ]]; then
+# Enable ninja build for time tracing or device linker
+if [[ "${time_trace}" == true || "${device_linker}" == true ]]; then
     if ! hash ninja &>/dev/null ; then
         echo "ninja could not be found"
         echo "Use \"${time_trace_ninja_msg}\" to install ninja"

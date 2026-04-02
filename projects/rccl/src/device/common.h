@@ -18,7 +18,16 @@
 
 #define __syncwarp()
 
-#define STORE(DST, SRC) st_relaxed_sys_global((DST), (SRC))
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define STORE(DST, SRC) \
+  { __hip_atomic_store((__attribute__((address_space(1))) __typeof__(*(DST)) *)(DST), (SRC), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); }
+#elif defined(__GFX9__)
+#define STORE(DST, SRC) \
+  { __atomic_store_n((DST), (SRC), __ATOMIC_RELAXED); }
+#else
+#define STORE(DST, SRC) \
+  { __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST); }
+#endif
 
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1151__) || defined(__gfx1200__) || defined(__gfx1201__)
 #define __trace_hwreg() \
@@ -180,10 +189,8 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-#ifdef NCCL_DEFINE_SHMEM
-__device__ __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
-__device__ __shared__ ncclShmemData ncclShmem;
-#endif
+__shared__ ncclShmemData ncclShmem;
+__shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
 
 #ifdef ENABLE_FAULT_INJECTION
 __device__ inline void insert_random_delay_per_warp() {
@@ -713,7 +720,14 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 #endif
 }
 
-#include "device_kernel_decls.h"
+__global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+#ifdef ENABLE_COLLTRACE
+__global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+#endif
 
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}

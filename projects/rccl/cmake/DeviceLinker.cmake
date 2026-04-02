@@ -122,26 +122,6 @@ set(DL_DEVICE_COMPILE_FLAGS
 )
 
 # ===========================================================================
-# LDS pointer transform: convert LDS-derived pointers to address_space(3)
-# ===========================================================================
-set(LDS_TRANSFORM_STAMP "${DEVICE_BUILD_DIR}/lds_transform.stamp")
-set(LDS_TRANSFORM_SCRIPT "${SCRIPTS_DIR}/lds_pointer_transform.py")
-
-add_custom_command(
-  OUTPUT  ${LDS_TRANSFORM_STAMP}
-  COMMAND ${Python3_EXECUTABLE} ${LDS_TRANSFORM_SCRIPT}
-    --dir ${HIPIFY_DIR}/src/device
-    --dir ${HIPIFY_DIR}/src/device/network/unpack
-    --gendir ${GEN_DIR}
-  COMMAND ${CMAKE_COMMAND} -E touch ${LDS_TRANSFORM_STAMP}
-  DEPENDS ${LDS_TRANSFORM_SCRIPT}
-  COMMENT "DL: LDS pointer transform on hipified device headers"
-  VERBATIM
-)
-add_custom_target(lds_transform DEPENDS ${LDS_TRANSFORM_STAMP})
-add_dependencies(lds_transform hipify_all)
-
-# ===========================================================================
 # Per-specialized-kernel commands (compile -> extract -> assemble)
 # ===========================================================================
 set(SPECIALIZED_FILES_TXT "${GEN_DIR}/specialized_files.txt")
@@ -172,14 +152,14 @@ foreach(ENTRY ${SPECIALIZED_ENTRIES})
   add_custom_command(
     OUTPUT  ${ASM_OUT}
     COMMAND ${DL_CLANG}
-      -DNCCL_DEFINE_SHMEM
+      -DRCCL_DEVICE_LINKER
       ${DL_COMPILE_DEFS}
       ${DL_INCLUDE_DIRS}
       ${DL_DEVICE_COMPILE_FLAGS}
       -S
       -o ${ASM_OUT}
       ${SRC}
-    DEPENDS ${SRC} ${LDS_TRANSFORM_STAMP}
+    DEPENDS ${SRC}
     COMMENT "DL compile: ${CPP_FILE}"
     VERBATIM
   )
@@ -219,7 +199,7 @@ set(COMMON_DEVICE_ASM "${DEVICE_BUILD_DIR}/common_device.s")
 add_custom_command(
   OUTPUT  ${COMMON_DEVICE_ASM}
   COMMAND ${DL_CLANG}
-    -DNCCL_DEFINE_SHMEM
+    -DRCCL_DEVICE_LINKER
     -DUSE_INDIRECT_FUNCTION_CALL
     ${DL_COMPILE_DEFS}
     ${DL_INCLUDE_DIRS}
@@ -232,7 +212,7 @@ add_custom_command(
     -S
     -o ${COMMON_DEVICE_ASM}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/device/common.cu.cpp ${LDS_TRANSFORM_STAMP}
+  DEPENDS ${HIPIFY_DIR}/src/device/common.cu.cpp
   COMMENT "DL compile dispatcher: common.cu.cpp -> assembly (with -g)"
   VERBATIM
 )
@@ -329,7 +309,7 @@ add_custom_command(
   COMMAND ${DL_CLANG}
     -x hip --offload-host-only --offload-arch=${DL_GPU_TARGET}
     -Xclang -fcuda-include-gpubinary -Xclang ${DEVICE_HIPFB}
-    -DNCCL_DEFINE_SHMEM
+    -DRCCL_DEVICE_LINKER
     -DUSE_INDIRECT_FUNCTION_CALL
     ${DL_COMPILE_DEFS}
     ${DL_INCLUDE_DIRS}
@@ -339,7 +319,7 @@ add_custom_command(
     -w
     -c -o ${COMMON_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
-  DEPENDS ${DEVICE_HIPFB} ${HIPIFY_DIR}/src/device/common.cu.cpp ${LDS_TRANSFORM_STAMP}
+  DEPENDS ${DEVICE_HIPFB} ${HIPIFY_DIR}/src/device/common.cu.cpp
   COMMENT "DL host compile: common.cu.cpp with embedded device binary"
   VERBATIM
 )
@@ -353,7 +333,7 @@ add_custom_command(
   OUTPUT  ${ONERANK_FAT_OBJ}
   COMMAND ${DL_CLANG}
     -x hip --offload-arch=${DL_GPU_TARGET}
-    -DNCCL_DEFINE_SHMEM
+    -DRCCL_DEVICE_LINKER
     ${DL_COMPILE_DEFS}
     ${DL_INCLUDE_DIRS}
     ${DL_OPT_FLAGS}
@@ -362,8 +342,32 @@ add_custom_command(
     -w
     -c -o ${ONERANK_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/onerank.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/device/onerank.cu.cpp ${LDS_TRANSFORM_STAMP}
+  DEPENDS ${HIPIFY_DIR}/src/device/onerank.cu.cpp
   COMMENT "DL compile: onerank.cu.cpp (normal fat object)"
+  VERBATIM
+)
+
+# ===========================================================================
+# collectives.cc: contains a __global__ kernel launch (hierarchicalAGShuffle)
+# so it needs full HIP compilation, not --offload-host-only.
+# ===========================================================================
+set(COLLECTIVES_FAT_OBJ "${DEVICE_BUILD_DIR}/collectives.o")
+
+add_custom_command(
+  OUTPUT  ${COLLECTIVES_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip --offload-arch=${DL_GPU_TARGET}
+    -DRCCL_DEVICE_LINKER
+    ${DL_COMPILE_DEFS}
+    ${DL_INCLUDE_DIRS}
+    ${DL_OPT_FLAGS}
+    -std=c++17
+    -fPIC
+    -w
+    -c -o ${COLLECTIVES_FAT_OBJ}
+    ${HIPIFY_DIR}/src/collectives.cc
+  DEPENDS ${HIPIFY_DIR}/src/collectives.cc
+  COMMENT "DL compile: collectives.cc (has __global__ kernel)"
   VERBATIM
 )
 
@@ -371,13 +375,14 @@ add_custom_command(
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ}
 )
 add_dependencies(device_linker_build hipify_all)
 
 set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
   ${ONERANK_FAT_OBJ}
+  ${COLLECTIVES_FAT_OBJ}
 )
 
 # ===========================================================================
@@ -398,14 +403,14 @@ foreach(ENTRY ${SPECIALIZED_ENTRIES})
   add_custom_command(
     OUTPUT  ${IR_OUT}
     COMMAND ${DL_CLANG}
-      -DNCCL_DEFINE_SHMEM
+      -DRCCL_DEVICE_LINKER
       ${DL_COMPILE_DEFS}
       ${DL_INCLUDE_DIRS}
       ${DL_DEVICE_COMPILE_FLAGS}
       -emit-llvm -S
       -o ${IR_OUT}
       ${SRC}
-    DEPENDS ${SRC} ${LDS_TRANSFORM_STAMP}
+    DEPENDS ${SRC}
     COMMENT "DL IR: ${CPP_FILE}"
     VERBATIM
   )

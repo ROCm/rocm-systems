@@ -123,9 +123,9 @@ private:
     // volatile is faster than acquire but not as correct. Make sure reduceCopy
     // loads data using volatile so it doesn't see stale data in L1.
 #if defined(__gfx1200__) || defined(__gfx1201__)
-    return ld_acquire_sys_global(ptr);
+    return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
-    return ld_relaxed_sys_global(ptr);
+    return __atomic_load_n(ptr, __ATOMIC_RELAXED);
 #endif
   }
 
@@ -225,7 +225,7 @@ private:
     }
 
     if ((flags & Send*RolePostSend) && next_hdp_reg)
-      STORE(next_hdp_reg, (uint32_t)0x1);
+      STORE((unsigned int *)next_hdp_reg, 0x1);
 
     if (flags & (Recv*RolePostRecv | Send*RolePostSend)) {
       step += StepPerSlice;

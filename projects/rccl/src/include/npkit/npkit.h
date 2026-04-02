@@ -13,7 +13,7 @@
 
 #include "npkit/npkit_event.h"
 #include "npkit/npkit_struct.h"
-#include "nccl.h"
+#include "common.h"
 
 #define NPKIT_GET_GPU_TIMESTAMP wall_clock64
 #define NPKIT_GET_CPU_TIMESTAMP_FROM_BLOCK \
