@@ -337,6 +337,13 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   if (use_bo_shmem) {
     create_bo_args.type = AMDXDNA_BO_SHMEM;
   } else {
+    // While this is already checked in MemoryRegion::AllocateImpl, the max size is
+    // MemoryRegion::max_sysmem_alloc_size_ for HSA_HEAPTYPE_DEVICE_SVM which is incorrect
+    // for dev heap.
+    if (size > dev_heap_size) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
+
     create_bo_args.type = AMDXDNA_BO_DEV;
   }
 

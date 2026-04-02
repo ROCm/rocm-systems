@@ -31,10 +31,10 @@ namespace rocshmem {
 Queue::Queue() { }
 
 Queue::Queue(size_t max_queues, size_t queue_size)
-    : max_queues_{max_queues},
-      queue_size_{queue_size},
-      queue_proxy_{max_queues, queue_size},
-      queue_desc_proxy_{max_queues} { }
+    : queue_proxy_{max_queues, queue_size},
+      queue_desc_proxy_{max_queues},
+      max_queues_{max_queues},
+      queue_size_{queue_size} { }
 
 uint64_t Queue::get_read_index(uint64_t queue_index) {
   return descriptor(queue_index)->read_index % queue_size_;

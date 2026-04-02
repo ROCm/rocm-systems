@@ -191,7 +191,6 @@ class RocProfCompute_Base:
             )
 
         gen_sysinfo(
-            workload_name=args.name,
             workload_dir=args.path,
             app_cmd=args.remaining,
             skip_roof=args.no_roof,
@@ -239,7 +238,6 @@ class RocProfCompute_Base:
                 fnames=str_fnames,
                 profiler_options=options,
                 workload_dir=args.path,
-                mspec=self._soc._mspec,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
                 torch_trace_enabled=getattr(args, "torch_trace", False),

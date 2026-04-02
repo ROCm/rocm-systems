@@ -66,7 +66,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
   int wf_size = get_wf_size(deviceId);
-  for(int i{0}; i < FETCHING_ATOMIC_CNT; i+=wf_size) {
+  for(uint32_t i{0}; i < FETCHING_ATOMIC_CNT; i+=wf_size) {
     fetching_atomic_freelist->push_back(fetching_atomic + i);
   }
 
@@ -129,18 +129,18 @@ __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
 /******************************************************************************
  ************************ PROVIDER-SPECIFIC HELPERS ***************************
  *****************************************************************************/
-__device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy) {
+__device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_post_wqe_rma(pe, size, laddr, raddr, opcode, cy);
+    ionic_post_wqe_rma(size, laddr, raddr, opcode, cy);
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     if ((cy == THREAD) ||
         (cy == WAVE && is_thread_zero_in_wave())) {
-      bnxt_post_wqe_rma(pe, size, laddr, raddr, opcode);
+      bnxt_post_wqe_rma(size, laddr, raddr, opcode);
     }
     return;
 #endif
@@ -148,7 +148,7 @@ __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, u
   case GDAProvider::MLX5:
     if ((cy == THREAD) ||
         (cy == WAVE && is_thread_zero_in_wave())) {
-      mlx5_post_wqe_rma(pe, size, laddr, raddr, opcode);
+      mlx5_post_wqe_rma(size, laddr, raddr, opcode);
     }
     return;
 #endif
@@ -157,11 +157,11 @@ __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr, u
   }
 }
 
-__device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
+__device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_post_wqe_rma_single(0 /*pe (unused)*/, size, laddr, raddr, opcode, Collectivity::THREAD);
+    ionic_post_wqe_rma_single(size, laddr, raddr, opcode, Collectivity::THREAD);
     return;
 #endif
 #if defined(GDA_BNXT)
@@ -171,7 +171,7 @@ __device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr, ui
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_post_wqe_rma_single(0 /* pe (unused) */, size, laddr, raddr, opcode, ring_db);
+    mlx5_post_wqe_rma_single(size, laddr, raddr, opcode, ring_db);
     return;
 #endif
   default:

@@ -151,7 +151,7 @@ void TestProcInfoRead::Run(void) {
         std::cout << dev_inds[i];
       }
       std::cout << std::endl;
-      // Reset amt_allocd back to the amount acutally allocated
+      // Reset amt_allocd back to the amount actually allocated
       amt_allocd = num_devices;
     }
 
