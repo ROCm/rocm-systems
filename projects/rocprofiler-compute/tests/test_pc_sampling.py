@@ -86,7 +86,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
     Test that PC sampling works with --block 21 and --pc-sampling-method stochastic.
     """
     if soc == "MI100" or soc == "MI200":
-        pytest.skip("PC sampling is not supported on MI 100")
+        pytest.skip("PC sampling is not supported")
 
     options = [
         "--block",

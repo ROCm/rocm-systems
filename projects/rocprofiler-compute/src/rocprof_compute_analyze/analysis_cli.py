@@ -95,6 +95,7 @@ class cli_analysis(OmniAnalyze_Base):
                 parser.nullify_unevaluated_metric_values(workload)
                 continue
 
+            # create 'mega dataframe'
             workload.raw_pmc = file_io.create_df_pmc(
                 path_info[0],
                 args.nodes,

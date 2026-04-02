@@ -62,8 +62,8 @@ class db_analysis(OmniAnalyze_Base):
                 "for profiling data with rocpd output format."
             )
 
-        self._pc_sampling_data_per_workload = self.calc_pc_sampling_data()
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
+        self._pc_sampling_data_per_workload = self.calc_pc_sampling_data()
         self._pmc_df_per_workload = self.calc_pmc_df_data()
         self._pmc_df_per_workload = self.apply_pmc_filters()
         self._dispatch_data_per_workload = self.calc_dispatch_data()
@@ -713,7 +713,6 @@ class db_analysis(OmniAnalyze_Base):
                     "end_timestamp": trace_df["End_Timestamp"],
                 })
                 dispatch_data_per_workload[workload_path] = trace_df
-
             else:
                 dispatch_data_per_workload[workload_path] = pd.DataFrame([
                     {

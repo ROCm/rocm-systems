@@ -275,60 +275,6 @@ def process_pc_sampling_kernel_trace(
     return trace_df
 
 
-def _build_dispatch_info(trace_df: pd.DataFrame) -> pd.DataFrame:
-    """Extract per-dispatch info from a kernel trace DataFrame."""
-    columns = ["Dispatch_Id", "Kernel_Name", "GPU_ID"]
-    return trace_df[columns].rename(columns={"Dispatch_Id": "Dispatch_ID"})
-
-
-def _build_kernel_top(
-    trace_df: pd.DataFrame,
-    time_unit: str,
-    sortby: str,
-) -> pd.DataFrame:
-    """Aggregate per-kernel timing stats from a kernel trace."""
-    execution_times = trace_df["End_Timestamp"] - trace_df["Start_Timestamp"]
-    time_stats = pd.DataFrame({
-        "Kernel_Name": trace_df["Kernel_Name"],
-        "ExeTime": execution_times,
-    })
-
-    grouped = (
-        time_stats
-        .groupby("Kernel_Name")["ExeTime"]
-        .agg(["count", "sum", "mean", "median"])
-        .reset_index()
-    )
-
-    time_unit_suffix = f"({time_unit})"
-    grouped = grouped.rename(
-        columns={
-            "count": "Count",
-            "sum": f"Sum{time_unit_suffix}",
-            "mean": f"Mean{time_unit_suffix}",
-            "median": f"Median{time_unit_suffix}",
-        }
-    )
-
-    time_divisor = config.TIME_UNITS[time_unit]
-    for col in [
-        f"Sum{time_unit_suffix}",
-        f"Mean{time_unit_suffix}",
-        f"Median{time_unit_suffix}",
-    ]:
-        grouped[col] = grouped[col] / time_divisor
-
-    sum_column = f"Sum{time_unit_suffix}"
-    grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
-
-    if sortby == "sum":
-        grouped = grouped.sort_values(sum_column, ascending=False)
-    elif sortby == "kernel":
-        grouped = grouped.sort_values("Kernel_Name")
-
-    return grouped
-
-
 @demarcate
 def create_df_pmc(
     raw_data_root_dir: str,
