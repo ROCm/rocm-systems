@@ -75,7 +75,7 @@ inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName,
                                   long unsigned int lineNum, amdsmi_status_t returnCode,
                                   Args... args) {
   // Input:
-  //     isVerbose  : Toggle for outputing to std_out
+  //     isVerbose  : Toggle for outputting to std_out
   //                  True : Allow printing
   //                  False: No printing
   //     fileName   : Name of file calling this routine
@@ -102,8 +102,8 @@ inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName,
   //            where:
   //                 X1 API error code
   //                XX1 API error code string
-  //                 X2 API exptected error code
-  //                XX2 API exptected error code string
+  //                 X2 API expected error code
+  //                XX2 API expected error code string
   //
   // TODO(amdsmi_team):
   //     1. Use this function to verify expected return codes and report failures
