@@ -236,7 +236,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
   }
 }
 
-// can be called with all active lanes using any number of different QPs, don't assume anything
+// called with all active lanes using different QPs
 __device__ void QueuePair::mlx5_quiet() {
   mlx5_poll_cq_until(mlx5_sq.depth);
 }
@@ -325,7 +325,9 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length,
   release_lock(&mlx5_sq.lock);
 }
 
-// can be called with all active lanes using any number of different QPs, don't assume anything
+/* can be called with all active lanes using any number of different QPs, don't assume anything
+ * assumes that `fetching' is constant across all lanes using the same QP
+ * TODO: make `fetching' a template parameter */
 __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length,
     uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
@@ -360,6 +362,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
                    raddr, rkey,
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
                    reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+  uint64_t ret_val = 0;
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -374,13 +377,17 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
     mlx5_ring_doorbell(mlx5_sq.post, wqe);
     // release SQ lock
     release_lock(&mlx5_sq.lock);
+    // wait until fetch completes
+    if (fetching) {
+      mlx5_quiet_single();
+    }
   }
 
   if (fetching) {
-    mlx5_quiet();
+    ret_val = __hip_atomic_load(atomic_laddr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 
-  return fetching ? *atomic_laddr : 0;
+  return ret_val;
 }
 
 // called with all active lanes using different QPs
@@ -409,6 +416,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
                    raddr, rkey,
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
                    reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+  uint64_t ret_val = 0;
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -418,16 +426,17 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single([[maybe_unused]] int32_t
   if (fetching) {
     fetching_atomic_idx += 1;
   }
-  // ring doorbell for this WQE (note: need to check this for correctness)
+  // ring doorbell for this WQE
   mlx5_ring_doorbell(mlx5_sq.post, wqe);
   // release SQ lock
   release_lock(&mlx5_sq.lock);
-
+  // wait until fetch completes
   if (fetching) {
     mlx5_quiet_single();
+    ret_val = __hip_atomic_load(atomic_laddr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 
-  return fetching ? *atomic_laddr : 0;
+  return ret_val;
 }
 
 }  // namespace rocshmem
