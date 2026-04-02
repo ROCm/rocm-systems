@@ -29,7 +29,6 @@ concurrency:
 
 env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-  GIT_CONFIG_GLOBAL: ${{ runner.temp }}/.gitconfig
   ROCM_PATH: "/opt/rocm"
   ENABLE_ROCR_BUILD: "true"
   ENABLE_HIP_CLR_BUILD: "true"
@@ -37,6 +36,8 @@ env:
 jobs:
   build-docs:
     runs-on: ubuntu-latest
+    env:
+      GIT_CONFIG_GLOBAL: ${{ runner.temp }}/.gitconfig
     container: continuumio/miniconda3
     permissions:
       contents: read
@@ -76,6 +77,8 @@ jobs:
 
   build-docs-from-source:
     runs-on: linux-gfx942-1gpu-ossci-rocm
+    env:
+      GIT_CONFIG_GLOBAL: ${{ runner.temp }}/.gitconfig
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
