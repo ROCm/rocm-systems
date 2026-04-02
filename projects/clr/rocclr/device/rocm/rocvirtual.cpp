@@ -499,7 +499,9 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     // The signal was assigned to the global marker's event, hence runtime can't reuse it
     // and needs a new signal
     std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
-    if ((signal != nullptr) && CreateSignal(signal.get())) {
+    // Makes ure the same signal type is created with the same interrupt flag, since the tracking
+    // list relies on that for the reuse
+    if ((signal != nullptr) && CreateSignal(signal.get(), signal_list_[current_id_]->flags_.interrupt_)) {
       signal_list_[current_id_]->release();
       signal_list_[current_id_] = signal.release();
     } else {
