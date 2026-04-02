@@ -281,6 +281,11 @@
           "test_filter": "EnqueueCountTests.*"
         },
         {
+          "name": "DeviceOp128",
+          "description": "BytePack roundtrip, load/store, and special value tests for op128.h",
+          "test_filter": "PackRoundtripTest.*"
+        },
+        {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
         }
