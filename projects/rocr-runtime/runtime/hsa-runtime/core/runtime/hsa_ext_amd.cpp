@@ -58,6 +58,7 @@
 #include "core/inc/default_signal.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/intercept_queue.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/ipc_signal.h"
 #include "core/inc/runtime.h"
@@ -1482,8 +1483,8 @@ hsa_status_t hsa_amd_queue_intercept_attach(
     // Step 8: Save original fields for rollback/detach
     // (saved_base_address_ and saved_doorbell_signal_ already set in WrapExisting)
     // Need to save core_queue and SharedQueue pointer
-    intercept->saved_core_queue_ = app_sq->core_queue;
-    intercept->original_shared_queue_ = app_sq;
+    intercept->SetSavedCoreQueue(app_sq->core_queue);
+    intercept->SetOriginalSharedQueue(app_sq);
 
     // Step 9: Swap fields in application's SharedQueue
     // 9a: Swap base_address FIRST
@@ -1505,17 +1506,17 @@ hsa_status_t hsa_amd_queue_intercept_attach(
 
     // Step 10: Register async doorbell handler (AFTER swap)
     auto err = core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
-        core::Signal::Convert(intercept->async_doorbell_),
+        core::Signal::Convert(intercept->GetAsyncDoorbell()),
         HSA_SIGNAL_CONDITION_NE,
-        intercept->async_doorbell_->LoadRelaxed(),
+        intercept->GetAsyncDoorbell()->LoadRelaxed(),
         core::InterceptQueue::HandleAsyncDoorbell, intercept);
     if (err != HSA_STATUS_SUCCESS) {
       // Rollback: restore original fields
       atomic::Store(&app_sq->amd_queue.hsa_queue.base_address,
-                    intercept->saved_base_address_, std::memory_order_release);
+                    intercept->GetSavedBaseAddress(), std::memory_order_release);
       atomic::Store(&app_sq->amd_queue.hsa_queue.doorbell_signal,
-                    intercept->saved_doorbell_signal_, std::memory_order_release);
-      __atomic_store_n(&app_sq->core_queue, intercept->saved_core_queue_,
+                    intercept->GetSavedDoorbellSignal(), std::memory_order_release);
+      __atomic_store_n(&app_sq->core_queue, intercept->GetSavedCoreQueue(),
                        __ATOMIC_RELEASE);
 
       aql_queue->ResumeFromMigration();

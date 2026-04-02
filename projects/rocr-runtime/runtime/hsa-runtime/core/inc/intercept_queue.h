@@ -54,13 +54,6 @@
 #include "core/inc/exceptions.h"
 #include "core/util/locks.h"
 
-// Forward declarations for friend access
-extern "C" {
-hsa_status_t hsa_amd_queue_intercept_attach(
-    hsa_queue_t* queue, hsa_amd_queue_intercept_handler callback, void* user_data);
-hsa_status_t hsa_amd_queue_intercept_detach(hsa_queue_t* queue);
-}
-
 namespace rocr {
 namespace core {
 
@@ -263,6 +256,14 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   // NEW: check if this InterceptQueue was created via WrapExisting
   bool is_retrofitted() const { return !QueueWrapper::owns_wrapped(); }
 
+  // Public accessors for attach/detach protocol
+  Signal* GetAsyncDoorbell() const { return async_doorbell_; }
+  void SetSavedCoreQueue(Queue* q) { saved_core_queue_ = q; }
+  void SetOriginalSharedQueue(SharedQueue* sq) { original_shared_queue_ = sq; }
+  void* GetSavedBaseAddress() const { return saved_base_address_; }
+  hsa_signal_t GetSavedDoorbellSignal() const { return saved_doorbell_signal_; }
+  Queue* GetSavedCoreQueue() const { return saved_core_queue_; }
+
   void AddInterceptor(hsa_amd_queue_intercept_handler interceptor, void* data) {
     assert(interceptor != nullptr && "Packet intercept callback was nullptr.");
     interceptors.push_back(std::make_pair(interceptor, data));
@@ -308,16 +309,10 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
 
   static const hsa_signal_value_t DOORBELL_MAX = 0xFFFFFFFFFFFFFFFFull;
 
+ public:
   static bool HandleAsyncDoorbell(hsa_signal_value_t value, void* arg);
+ private:
   static void PacketWriter(const void* pkts, uint64_t pkt_count);
-
-  // Friend the API functions that need access to private members
-  friend hsa_status_t ::hsa_amd_queue_intercept_attach(
-      hsa_queue_t*, hsa_amd_queue_intercept_handler, void*);
-  friend hsa_status_t ::hsa_amd_queue_intercept_detach(hsa_queue_t*);
-
-  // Make HandleAsyncDoorbell public for attach protocol registration
-  // (already declared as static bool HandleAsyncDoorbell above, need it accessible)
 
   // Private constructor for retrofit (non-owning) path
   InterceptQueue(NonOwningTag tag, Queue* existing_queue);
