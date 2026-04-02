@@ -491,7 +491,7 @@ class VirtualGPU : public device::VirtualDevice {
       std::vector<device::Memory*>& wrtBackImageBuffer  //!< Images for writeback
   );
   //! HIP-specific version of processMemObjects.
-  //! Does nothing except logging
+  //! Currently used for logging and patching ImageObject arguments.
   bool processHIPMemObjects(const amd::Kernel& kernel,  //!< AMD kernel object for execution
                             const_address params        //!< Pointer to the param's store
   );

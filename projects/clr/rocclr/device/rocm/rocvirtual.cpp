@@ -977,43 +977,47 @@ bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address p
        desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_CONSTANT)) {
       uint32_t index = desc.info_.arrayIndex_;
       amd::Memory* mem = memories[index];
-      if (mem != nullptr && desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
-        Image* image = static_cast<Image*>(mem->getDeviceMemory(dev()));
-        const uint64_t image_srd = image->getHsaImageObject().handle;
-        assert(amd::isMultipleOf(image_srd, sizeof(image_srd)));
-        WriteAqlArgAt(const_cast<address>(params), image_srd, sizeof(image_srd), desc.offset_);
+      if (mem != nullptr) {
+        if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
+          Image* image = static_cast<Image*>(mem->getDeviceMemory(dev()));
+          const uint64_t image_srd = image->getHsaImageObject().handle;
+          assert(amd::isMultipleOf(image_srd, sizeof(image_srd)));
+          WriteAqlArgAt(const_cast<address>(params), image_srd, sizeof(image_srd), desc.offset_);
+        }
       }
     }
-    if (desc.type_ == T_POINTER) {
-      const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
+    if (IsLogEnabled(amd::LOG_DEBUG, amd::LOG_KERN)) {
+      if (desc.type_ == T_POINTER) {
+        const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
 
-      ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
-              desc.name_.c_str(), globalAddress);
-    } else if (desc.type_ == T_VOID) {
-      const_address srcArgPtr = params + desc.offset_;
-      if (desc.size_ > 8) {
-        std::string bytes = "0x";
-        constexpr size_t kMaxBytes = 64;
-        for (size_t j = 0; j < std::min(desc.size_, kMaxBytes); j++) {
-          char byteStr[4];
-          snprintf(byteStr, sizeof(byteStr), "%02x ",
-                   reinterpret_cast<const uint8_t*>(srcArgPtr)[j]);
-          bytes += byteStr;
+        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
+                desc.name_.c_str(), globalAddress);
+      } else if (desc.type_ == T_VOID) {
+        const_address srcArgPtr = params + desc.offset_;
+        if (desc.size_ > 8) {
+          std::string bytes = "0x";
+          constexpr size_t kMaxBytes = 64;
+          for (size_t j = 0; j < std::min(desc.size_, kMaxBytes); j++) {
+            char byteStr[4];
+            snprintf(byteStr, sizeof(byteStr), "%02x ",
+                    reinterpret_cast<const uint8_t*>(srcArgPtr)[j]);
+            bytes += byteStr;
+          }
+          if (desc.size_ > kMaxBytes) {
+            bytes += "...";
+          }
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
+                  desc.typeName_.c_str(), desc.name_.c_str(), bytes.c_str(), desc.size_);
+        } else {
+          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
+                  desc.typeName_.c_str(), desc.name_.c_str(),
+                  (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
+                  : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
+                  : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
+                  : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
+                                      : 0LL,
+                  desc.size_);
         }
-        if (desc.size_ > kMaxBytes) {
-          bytes += "...";
-        }
-        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
-                desc.typeName_.c_str(), desc.name_.c_str(), bytes.c_str(), desc.size_);
-      } else {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
-                desc.typeName_.c_str(), desc.name_.c_str(),
-                (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
-                : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
-                : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
-                : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
-                                    : 0LL,
-                desc.size_);
       }
     }
   }
