@@ -708,6 +708,7 @@ class db_analysis(OmniAnalyze_Base):
                 trace_df = pd.DataFrame({
                     "dispatch_id": trace_df["Dispatch_Id"],
                     "kernel_name": trace_df["Kernel_Name"],
+                    "gpu_id": trace_df["GPU_ID"],
                     "start_timestamp": trace_df["Start_Timestamp"],
                     "end_timestamp": trace_df["End_Timestamp"],
                 })

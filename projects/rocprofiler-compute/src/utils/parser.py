@@ -1844,7 +1844,7 @@ def nullify_unevaluated_metric_values(
         if df is None or df.empty:
             continue
         for col in df.columns:
-            if col in schema.SUPPORTED_FIELD and col.lower() != "alias":
+            if col in SUPPORTED_FIELD and col.lower() != "alias":
                 df[col] = "N/A"
 
 
