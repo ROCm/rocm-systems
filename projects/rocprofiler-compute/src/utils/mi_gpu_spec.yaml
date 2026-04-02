@@ -370,7 +370,6 @@ mi_gpu_spec:
             CPC:  2
             GCEA: 2
             TCP:  4
-            TA:   2
             SPI:  6
             GL1A: 4
             GL1C: 4
