@@ -63,6 +63,13 @@ public:
     [[nodiscard]] const nlohmann::json* raw_json(const std::string& name);
 
     /**
+     * Translate a legacy preset flag (e.g., "--balanced") to new syntax
+     * ("--preset=balanced"). Returns empty string if the argument is not
+     * a recognized legacy preset flag. Emits a deprecation warning to stderr.
+     */
+    [[nodiscard]] std::string translate_legacy_flag(std::string_view arg) const;
+
+    /**
      * Apply a preset's settings using a caller-provided callback.
      * @return true if the preset was found and applied.
      */
@@ -98,6 +105,7 @@ private:
     std::optional<preset_info> load_file(const std::string& filepath);
     std::string                resolve_filepath(const std::string& name_or_path);
     void                       ensure_all_loaded();
+    void                       load_embedded();
 
     std::string                           m_directory;
     std::map<std::string, preset_info>    m_presets;

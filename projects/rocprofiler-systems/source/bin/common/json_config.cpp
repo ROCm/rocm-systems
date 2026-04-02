@@ -88,6 +88,8 @@ resolve_schema_config(const nlohmann::json& j)
     {
         const auto& tracing = j["tracing"];
         resolve_enabled(result, tracing, "enabled", env_vars::TRACE);
+        if(tracing.contains("legacy"))
+            resolve_enabled(result, tracing["legacy"], "enabled", env_vars::TRACE_LEGACY);
         resolve_value(result, tracing, "buffer_size_kb",
                       env_vars::PERFETTO_BUFFER_SIZE_KB);
         resolve_value(result, tracing, "fill_policy", env_vars::PERFETTO_FILL_POLICY);
@@ -116,6 +118,7 @@ resolve_schema_config(const nlohmann::json& j)
         resolve_value(result, sampling, "duration_sec", env_vars::SAMPLING_DURATION);
         resolve_value(result, sampling, "cpus", env_vars::SAMPLING_CPUS);
         resolve_value(result, sampling, "gpus", env_vars::SAMPLING_GPUS);
+        resolve_value(result, sampling, "ainics", env_vars::SAMPLING_AINICS);
     }
 
     // --- Domains section ---
@@ -158,6 +161,10 @@ resolve_schema_config(const nlohmann::json& j)
                 }
 
                 resolve_value(result, gpu, "sampling_rate_hz", env_vars::AMD_SMI_FREQ);
+                resolve_value(result, gpu, "process_sampling_freq",
+                              env_vars::PROCESS_SAMPLING_FREQ);
+                if(gpu.contains("ainic"))
+                    resolve_enabled(result, gpu["ainic"], "enabled", env_vars::USE_AINIC);
             }
         }
 
@@ -249,6 +256,16 @@ resolve_schema_config(const nlohmann::json& j)
                 {
                     result[std::string{ env_vars::USE_RCCLP }] = "true";
                 }
+                if(runtimes.contains("shmem") && runtimes["shmem"].contains("enabled") &&
+                   runtimes["shmem"]["enabled"].get<bool>())
+                {
+                    result[std::string{ env_vars::USE_SHMEM }] = "true";
+                }
+                if(runtimes.contains("ucx") && runtimes["ucx"].contains("enabled") &&
+                   runtimes["ucx"]["enabled"].get<bool>())
+                {
+                    result[std::string{ env_vars::USE_UCX }] = "true";
+                }
             }
         }
     }
@@ -277,11 +294,18 @@ resolve_schema_config(const nlohmann::json& j)
         resolve_value(result, causal, "mode", env_vars::CAUSAL_MODE);
         resolve_value(result, causal, "backend", env_vars::CAUSAL_BACKEND);
         resolve_value(result, causal, "binary_scope", env_vars::CAUSAL_BINARY_SCOPE);
+        resolve_value(result, causal, "binary_exclude", env_vars::CAUSAL_BINARY_EXCLUDE);
         resolve_value(result, causal, "function_scope", env_vars::CAUSAL_FUNCTION_SCOPE);
+        resolve_value(result, causal, "function_exclude",
+                      env_vars::CAUSAL_FUNCTION_EXCLUDE);
         resolve_value(result, causal, "source_scope", env_vars::CAUSAL_SOURCE_SCOPE);
+        resolve_value(result, causal, "source_exclude", env_vars::CAUSAL_SOURCE_EXCLUDE);
         if(causal.contains("end_to_end"))
             resolve_enabled(result, causal["end_to_end"], "enabled",
                             env_vars::CAUSAL_END_TO_END);
+        resolve_value(result, causal, "delay_sec", env_vars::CAUSAL_DELAY);
+        resolve_value(result, causal, "duration_sec", env_vars::CAUSAL_DURATION);
+        resolve_value(result, causal, "random_seed", env_vars::CAUSAL_RANDOM_SEED);
     }
 
     // --- Hardware counters section ---
@@ -317,6 +341,8 @@ resolve_schema_config(const nlohmann::json& j)
         resolve_value(result, adv, "timemory_components", env_vars::TIMEMORY_COMPONENTS);
         resolve_value(result, adv, "network_interface", env_vars::NETWORK_INTERFACE);
         resolve_value(result, adv, "trace_periods", env_vars::TRACE_PERIODS);
+        resolve_value(result, adv, "trace_period_clock_id",
+                      env_vars::TRACE_PERIOD_CLOCK_ID);
     }
 
     return result;
@@ -644,6 +670,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
 
     // --- Tracing ---
     export_section_enabled(j, env_map, env_vars::TRACE, "tracing");
+    export_enabled(j, env_map, env_vars::TRACE_LEGACY, "tracing", "legacy");
     export_int_value(j, env_map, env_vars::PERFETTO_BUFFER_SIZE_KB, "tracing",
                      "buffer_size_kb");
     export_string_value(j, env_map, env_vars::PERFETTO_FILL_POLICY, "tracing",
@@ -662,6 +689,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
                         "duration_sec");
     export_string_value(j, env_map, env_vars::SAMPLING_CPUS, "sampling", "cpus");
     export_string_value(j, env_map, env_vars::SAMPLING_GPUS, "sampling", "gpus");
+    export_string_value(j, env_map, env_vars::SAMPLING_AINICS, "sampling", "ainics");
 
     // --- Domains: GPU ---
     if(auto v = get_val(env_vars::USE_AMD_SMI))
@@ -684,6 +712,10 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
         }
         if(auto freq = get_val(env_vars::AMD_SMI_FREQ))
             set_json_int(j["domains"]["gpu"]["sampling_rate_hz"]["value"], *freq);
+        if(auto freq = get_val(env_vars::PROCESS_SAMPLING_FREQ))
+            set_json_double(j["domains"]["gpu"]["process_sampling_freq"]["value"], *freq);
+        if(auto v = get_val(env_vars::USE_AINIC))
+            j["domains"]["gpu"]["ainic"]["enabled"] = is_truthy(*v);
     }
 
     // --- Domains: ROCm ---
@@ -703,6 +735,9 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
             }
         }
     }
+
+    if(auto v = get_val(env_vars::ROCM_GROUP_BY_QUEUE))
+        j["domains"]["rocm"]["group_by_queue"]["enabled"] = is_truthy(*v);
 
     // --- Domains: CPU ---
     if(auto v = get_val(env_vars::USE_PROCESS_SAMPLING))
@@ -729,6 +764,10 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
         j["domains"]["parallel"]["runtimes"]["kokkos"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_RCCLP))
         j["domains"]["parallel"]["runtimes"]["rccl"]["enabled"] = is_truthy(*v);
+    if(auto v = get_val(env_vars::USE_SHMEM))
+        j["domains"]["parallel"]["runtimes"]["shmem"]["enabled"] = is_truthy(*v);
+    if(auto v = get_val(env_vars::USE_UCX))
+        j["domains"]["parallel"]["runtimes"]["ucx"]["enabled"] = is_truthy(*v);
 
     // --- Output ---
     export_string_value(j, env_map, env_vars::OUTPUT_PATH, "output", "path");
@@ -750,6 +789,27 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_enabled(j, env_map, env_vars::PAPI_MULTIPLEXING, "hardware_counters",
                    "papi_multiplexing");
 
+    // --- Causal profiling ---
+    export_section_enabled(j, env_map, env_vars::USE_CAUSAL, "causal");
+    export_string_value(j, env_map, env_vars::CAUSAL_MODE, "causal", "mode");
+    export_string_value(j, env_map, env_vars::CAUSAL_BACKEND, "causal", "backend");
+    export_string_value(j, env_map, env_vars::CAUSAL_BINARY_SCOPE, "causal",
+                        "binary_scope");
+    export_string_value(j, env_map, env_vars::CAUSAL_BINARY_EXCLUDE, "causal",
+                        "binary_exclude");
+    export_string_value(j, env_map, env_vars::CAUSAL_FUNCTION_SCOPE, "causal",
+                        "function_scope");
+    export_string_value(j, env_map, env_vars::CAUSAL_FUNCTION_EXCLUDE, "causal",
+                        "function_exclude");
+    export_string_value(j, env_map, env_vars::CAUSAL_SOURCE_SCOPE, "causal",
+                        "source_scope");
+    export_string_value(j, env_map, env_vars::CAUSAL_SOURCE_EXCLUDE, "causal",
+                        "source_exclude");
+    export_enabled(j, env_map, env_vars::CAUSAL_END_TO_END, "causal", "end_to_end");
+    export_double_value(j, env_map, env_vars::CAUSAL_DELAY, "causal", "delay_sec");
+    export_double_value(j, env_map, env_vars::CAUSAL_DURATION, "causal", "duration_sec");
+    export_int_value(j, env_map, env_vars::CAUSAL_RANDOM_SEED, "causal", "random_seed");
+
     // --- Advanced ---
     export_int_value(j, env_map, env_vars::VERBOSE, "advanced", "verbose");
     export_enabled(j, env_map, env_vars::DEBUG, "advanced", "debug");
@@ -765,6 +825,64 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_string_value(j, env_map, env_vars::NETWORK_INTERFACE, "advanced",
                         "network_interface");
     export_string_value(j, env_map, env_vars::TRACE_PERIODS, "advanced", "trace_periods");
+    export_string_value(j, env_map, env_vars::TRACE_PERIOD_CLOCK_ID, "advanced",
+                        "trace_period_clock_id");
+
+    // ========================================================================
+    // Intentionally excluded environment variables
+    // ========================================================================
+    //
+    // The following ROCPROFSYS_* env vars are NOT included in the JSON preset
+    // schema. These are internal runtime settings whose values depend on the
+    // specific invocation context, tooling infrastructure, or low-level
+    // implementation details. Including them in presets would be harmful:
+    // a preset should describe *what* to profile, not *how* the profiler
+    // manages its own internals.
+    //
+    // If any of these are later deemed useful as preset configuration, they
+    // should be moved into the appropriate schema section (e.g., tracing,
+    // advanced) on a case-by-case basis — NOT bulk-exposed via an "internal"
+    // domain.
+    //
+    // Session-specific (depend on the invocation, not the profiling intent):
+    //   ROCPROFSYS_CONFIG_FILE     - Path to the user's config file; set at
+    //                                invocation time, not a profiling choice.
+    //   ROCPROFSYS_OUTPUT_PREFIX   - Per-run output prefix (e.g., test name);
+    //                                set by test harness or user per-run.
+    //   ROCPROFSYS_TRACE_REGION    - Region filter for selective tracing;
+    //                                depends on the specific application.
+    //
+    // Internal plumbing (implementation details users should not configure):
+    //   ROCPROFSYS_ENABLED                 - Master profiler enable flag.
+    //                                        Always true when running via CLI
+    //                                        tools; setting to false in a
+    //                                        preset would silently disable
+    //                                        all profiling.
+    //   ROCPROFSYS_SUPPRESS_CONFIG         - Suppress config file loading.
+    //   ROCPROFSYS_SUPPRESS_PARSING        - Suppress config parsing.
+    //                                        These are used internally by
+    //                                        rocprof-sys-avail; setting them
+    //                                        in a preset would break config
+    //                                        file handling.
+    //   ROCPROFSYS_USE_PID                 - Include PID in output paths.
+    //                                        Managed automatically by the
+    //                                        output subsystem.
+    //   ROCPROFSYS_PERFETTO_BACKEND        - Perfetto backend (inprocess/
+    //                                        system). Low-level transport
+    //                                        choice, not a profiling concern.
+    //   ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS - Perfetto flush interval.
+    //                                        Performance tuning for the trace
+    //                                        writer, not user-facing.
+    //   ROCPROFSYS_PROCESS_SAMPLING_DURATION - Duration of process sampling.
+    //                                        Controlled via SAMPLING_DURATION
+    //                                        in the sampling section instead.
+    //   ROCPROFSYS_SAMPLING_OVERFLOW_EVENT  - Hardware overflow event name
+    //                                        (e.g., PERF_COUNT_HW_CACHE_REFERENCES).
+    //                                        Highly platform-specific; not
+    //                                        portable across machines.
+    //   ROCPROFSYS_CPU_FREQ_ENABLED        - CPU frequency monitoring flag.
+    //                                        Controlled indirectly via the
+    //                                        domains.cpu section instead.
 
     return j;
 }

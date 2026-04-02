@@ -374,7 +374,8 @@ INSTRUMENTATION WORKFLOW:
         }
         else
         {
-            _inpv.emplace_back(strdup(argv[i]));
+            auto translated = domain_state.registry.translate_legacy_flag(argv[i]);
+            _inpv.emplace_back(strdup(translated.empty() ? argv[i] : translated.c_str()));
         }
     }
 

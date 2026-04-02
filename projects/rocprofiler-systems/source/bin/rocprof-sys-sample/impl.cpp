@@ -934,7 +934,11 @@ PROFILING WORKFLOW:
         }
         else
         {
-            _inpv.emplace_back(argv[i]);
+            auto translated = domain_state.registry.translate_legacy_flag(argv[i]);
+            if(!translated.empty())
+                _inpv.emplace_back(strdup(translated.c_str()));
+            else
+                _inpv.emplace_back(argv[i]);
         }
     }
 

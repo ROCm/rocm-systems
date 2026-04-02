@@ -76,6 +76,9 @@ constexpr std::string_view USE_MPIP    = "ROCPROFSYS_USE_MPIP";
 constexpr std::string_view USE_OMPT    = "ROCPROFSYS_USE_OMPT";
 constexpr std::string_view USE_KOKKOSP = "ROCPROFSYS_USE_KOKKOSP";
 constexpr std::string_view USE_RCCLP   = "ROCPROFSYS_USE_RCCLP";
+constexpr std::string_view USE_AINIC   = "ROCPROFSYS_USE_AINIC";
+constexpr std::string_view USE_SHMEM   = "ROCPROFSYS_USE_SHMEM";
+constexpr std::string_view USE_UCX     = "ROCPROFSYS_USE_UCX";
 
 // --- Output ---
 constexpr std::string_view OUTPUT_PATH   = "ROCPROFSYS_OUTPUT_PATH";
@@ -97,15 +100,21 @@ constexpr std::string_view SAMPLING_PROCESS_DURATION =
     "ROCPROFSYS_SAMPLING_PROCESS_DURATION";
 
 // --- Causal profiling ---
-constexpr std::string_view USE_CAUSAL            = "ROCPROFSYS_USE_CAUSAL";
-constexpr std::string_view CAUSAL_MODE           = "ROCPROFSYS_CAUSAL_MODE";
-constexpr std::string_view CAUSAL_BACKEND        = "ROCPROFSYS_CAUSAL_BACKEND";
-constexpr std::string_view CAUSAL_VERBOSE        = "ROCPROFSYS_CAUSAL_VERBOSE";
-constexpr std::string_view CAUSAL_DEBUG          = "ROCPROFSYS_CAUSAL_DEBUG";
-constexpr std::string_view CAUSAL_BINARY_SCOPE   = "ROCPROFSYS_CAUSAL_BINARY_SCOPE";
-constexpr std::string_view CAUSAL_FUNCTION_SCOPE = "ROCPROFSYS_CAUSAL_FUNCTION_SCOPE";
-constexpr std::string_view CAUSAL_SOURCE_SCOPE   = "ROCPROFSYS_CAUSAL_SOURCE_SCOPE";
-constexpr std::string_view CAUSAL_END_TO_END     = "ROCPROFSYS_CAUSAL_END_TO_END";
+constexpr std::string_view USE_CAUSAL              = "ROCPROFSYS_USE_CAUSAL";
+constexpr std::string_view CAUSAL_MODE             = "ROCPROFSYS_CAUSAL_MODE";
+constexpr std::string_view CAUSAL_BACKEND          = "ROCPROFSYS_CAUSAL_BACKEND";
+constexpr std::string_view CAUSAL_VERBOSE          = "ROCPROFSYS_CAUSAL_VERBOSE";
+constexpr std::string_view CAUSAL_DEBUG            = "ROCPROFSYS_CAUSAL_DEBUG";
+constexpr std::string_view CAUSAL_BINARY_SCOPE     = "ROCPROFSYS_CAUSAL_BINARY_SCOPE";
+constexpr std::string_view CAUSAL_BINARY_EXCLUDE   = "ROCPROFSYS_CAUSAL_BINARY_EXCLUDE";
+constexpr std::string_view CAUSAL_FUNCTION_SCOPE   = "ROCPROFSYS_CAUSAL_FUNCTION_SCOPE";
+constexpr std::string_view CAUSAL_FUNCTION_EXCLUDE = "ROCPROFSYS_CAUSAL_FUNCTION_EXCLUDE";
+constexpr std::string_view CAUSAL_SOURCE_SCOPE     = "ROCPROFSYS_CAUSAL_SOURCE_SCOPE";
+constexpr std::string_view CAUSAL_SOURCE_EXCLUDE   = "ROCPROFSYS_CAUSAL_SOURCE_EXCLUDE";
+constexpr std::string_view CAUSAL_END_TO_END       = "ROCPROFSYS_CAUSAL_END_TO_END";
+constexpr std::string_view CAUSAL_DELAY            = "ROCPROFSYS_CAUSAL_DELAY";
+constexpr std::string_view CAUSAL_DURATION         = "ROCPROFSYS_CAUSAL_DURATION";
+constexpr std::string_view CAUSAL_RANDOM_SEED      = "ROCPROFSYS_CAUSAL_RANDOM_SEED";
 
 // --- Hardware counters ---
 constexpr std::string_view ROCM_EVENTS       = "ROCPROFSYS_ROCM_EVENTS";

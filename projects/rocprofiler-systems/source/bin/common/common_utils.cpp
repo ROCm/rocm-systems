@@ -139,29 +139,6 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     std::cerr << "\n";
 }
 
-bool
-check_rocm_available()
-{
-    // Check ROCM_PATH first, then fall back to default /opt/rocm
-    const char* rocm_path = std::getenv("ROCM_PATH");
-    if(rocm_path && std::strlen(rocm_path) > 0)
-    {
-        auto hipconfig = std::string(rocm_path) + "/bin/hipconfig";
-        if(access(hipconfig.c_str(), X_OK) == 0) return true;
-    }
-    return (access("/opt/rocm/bin/hipconfig", X_OK) == 0);
-}
-
-void
-warn_if_rocm_unavailable()
-{
-    if(!check_rocm_available())
-    {
-        std::cerr << "\nWARNING: GPU tracing requested but ROCm is not available\n\n";
-        std::cerr << "GPU features will be disabled.\n\n";
-    }
-}
-
 void
 warn_if_output_not_writable(std::string_view tool_name)
 {
@@ -322,25 +299,6 @@ run_post_parse_validation(std::string_view tool_name, std::string_view preset_na
                           bool parallel_enabled, int verbose_level,
                           preset_registry& registry)
 {
-    // Check ROCm availability once for all relevant conditions
-    bool rocm_needed = gpu_enabled || rocm_enabled;
-    if(!rocm_needed && !preset_name.empty())
-    {
-        static const std::vector<std::string> gpu_presets = {
-            "workload-trace", "trace-hpc",    "sys-trace",        "runtime-trace",
-            "trace-gpu",      "trace-openmp", "trace-hw-counters"
-        };
-        for(const auto& preset : gpu_presets)
-        {
-            if(preset_name == preset)
-            {
-                rocm_needed = true;
-                break;
-            }
-        }
-    }
-    if(rocm_needed) warn_if_rocm_unavailable();
-
     if(!preset_name.empty() && verbose_level >= 1)
     {
         print_pre_execution_info(tool_name, preset_name, registry);

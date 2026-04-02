@@ -3,6 +3,8 @@
 
 #include "common/preset_registry.hpp"
 
+#include "embedded_presets.hpp"
+
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
@@ -46,7 +48,63 @@ find_preset_directory()
 
 preset_registry::preset_registry()
 : m_directory{ find_preset_directory() }
-{}
+{
+    load_embedded();
+}
+
+void
+preset_registry::load_embedded()
+{
+    for(size_t i = 0; i < embedded_presets::num_presets; ++i)
+    {
+        const auto& entry = embedded_presets::presets[i];
+        try
+        {
+            auto        j = nlohmann::json::parse(entry.json);
+            preset_info info;
+
+            if(j.contains("metadata"))
+            {
+                const auto& meta = j["metadata"];
+                if(meta.contains("name")) info.name = meta["name"].get<std::string>();
+                if(meta.contains("cli_flag"))
+                    info.cli_flag = meta["cli_flag"].get<std::string>();
+                if(meta.contains("description"))
+                    info.description = meta["description"].get<std::string>();
+                if(meta.contains("use_case"))
+                    info.use_case = meta["use_case"].get<std::string>();
+                if(meta.contains("category"))
+                    info.category = meta["category"].get<std::string>();
+            }
+
+            info.settings = json_config::resolve_config(j);
+
+            auto name          = std::string{ entry.name };
+            m_json_cache[name] = std::move(j);
+            m_presets[name]    = std::move(info);
+        } catch(const nlohmann::json::exception& e)
+        {
+            std::cerr << "[rocprof-sys] WARNING: Failed to parse embedded preset '"
+                      << entry.name << "': " << e.what() << '\n';
+        }
+    }
+}
+
+std::string
+preset_registry::translate_legacy_flag(std::string_view arg) const
+{
+    // Must start with "--" and not contain "="
+    if(arg.size() <= 2 || arg.substr(0, 2) != "--" ||
+       arg.find('=') != std::string_view::npos)
+        return {};
+
+    auto name = std::string{ arg.substr(2) };
+    if(m_presets.count(name) == 0) return {};
+
+    std::cerr << "[rocprof-sys] WARNING: '" << arg
+              << "' is deprecated. Use '--preset=" << name << "' instead.\n";
+    return "--preset=" + name;
+}
 
 std::optional<preset_registry::preset_info>
 preset_registry::load_file(const std::string& filepath)

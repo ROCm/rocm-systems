@@ -70,18 +70,6 @@ strip_flag_prefix(std::string_view name)
 // ============================================================================
 
 /**
- * Checks if ROCm is available on the system.
- */
-bool
-check_rocm_available();
-
-/**
- * Warns if ROCm is not available.
- */
-void
-warn_if_rocm_unavailable();
-
-/**
  * Warns if the output directory is not writable.
  */
 void

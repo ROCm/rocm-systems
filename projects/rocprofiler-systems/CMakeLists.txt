@@ -530,20 +530,12 @@ install(
     COMPONENT setup
 )
 
-file(GLOB _preset_files "${PROJECT_SOURCE_DIR}/share/rocprofiler-systems/presets/*.json")
-
-# Copy presets to build tree so they are discoverable without install
-foreach(_preset_file ${_preset_files})
-    get_filename_component(_preset_name "${_preset_file}" NAME)
-    configure_file(
-        ${_preset_file}
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets/${_preset_name}
-        COPYONLY
-    )
-endforeach()
-
+# Preset JSON files are embedded into the binary at build time (see
+# source/bin/common/CMakeLists.txt). The source files in
+# share/rocprofiler-systems/presets/ remain as the source of truth.
+# Schema.json is installed for documentation/validation purposes only.
 install(
-    FILES ${_preset_files}
+    FILES "${PROJECT_SOURCE_DIR}/share/rocprofiler-systems/presets/schema.json"
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets
     COMPONENT setup
 )

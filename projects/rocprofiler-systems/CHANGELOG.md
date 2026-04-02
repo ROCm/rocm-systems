@@ -21,7 +21,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Changed
 
 - `rocprof-sys-avail` no longer queries GPU devices or hardware counters unless `--hw-counters` or `--all` is requested, reducing startup time and allowing settings/component queries in environments without GPU/ROCm.
-- Preset flags changed from `--balanced` to `--preset=balanced` syntax. The old `--<preset-name>` flags are no longer supported. Use `--preset=<name>` instead.
+- Preset flags changed from `--balanced` to `--preset=balanced` syntax. The old `--<preset-name>` flags are still supported and handled within `preset_registry`.
 
 ### Resolved issues
 

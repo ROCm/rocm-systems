@@ -9,6 +9,48 @@
 #
 # ------------------------------------------------------------------------------#
 
+# ------------------------------------------------------------------------------#
+# Embed preset JSON files into a generated header
+# Follows the same pattern as ROCPROFSYS_CONFIGURE_ROCPD_SCHEMA_FILES()
+# in cmake/Packages.cmake for SQL schema embedding.
+# ------------------------------------------------------------------------------#
+
+set(PRESET_SOURCE_DIR "${PROJECT_SOURCE_DIR}/share/rocprofiler-systems/presets")
+set(EMBEDDED_PRESET_ENTRIES "constexpr entry presets[] = {\n")
+
+file(GLOB PRESET_JSON_FILES "${PRESET_SOURCE_DIR}/*.json")
+list(SORT PRESET_JSON_FILES)
+foreach(PRESET_FILE ${PRESET_JSON_FILES})
+    get_filename_component(PRESET_BASENAME "${PRESET_FILE}" NAME_WE)
+    # Skip schema.json — it's for documentation/validation, not runtime
+    if("${PRESET_BASENAME}" STREQUAL "schema")
+        continue()
+    endif()
+    file(READ "${PRESET_FILE}" PRESET_CONTENT)
+    # Escape for C string literal (same escaping as rocpd_schema)
+    string(REPLACE "\\" "\\\\" PRESET_CONTENT "${PRESET_CONTENT}")
+    string(REPLACE "\"" "\\\"" PRESET_CONTENT "${PRESET_CONTENT}")
+    string(REPLACE "\n" "\\n\"\n\"" PRESET_CONTENT "${PRESET_CONTENT}")
+    string(
+        APPEND EMBEDDED_PRESET_ENTRIES
+        "    {\"${PRESET_BASENAME}\", \"${PRESET_CONTENT}\"},\n"
+    )
+endforeach()
+
+string(
+    APPEND EMBEDDED_PRESET_ENTRIES
+    "};\n\n"
+    "constexpr auto num_presets = sizeof(presets) / sizeof(presets[0]);\n"
+)
+
+configure_file(
+    "${PROJECT_SOURCE_DIR}/cmake/Templates/embedded_presets.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/embedded_presets.hpp"
+    @ONLY
+)
+
+# ------------------------------------------------------------------------------#
+
 add_library(
     rocprofiler-systems-bin-common
     STATIC
@@ -20,6 +62,7 @@ add_library(
 target_include_directories(
     rocprofiler-systems-bin-common
     PUBLIC ${CMAKE_CURRENT_LIST_DIR}/..
+    PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 target_link_libraries(

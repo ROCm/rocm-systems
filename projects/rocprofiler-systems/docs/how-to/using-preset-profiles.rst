@@ -362,6 +362,118 @@ Create a JSON file in the preset directory:
 The preset will be automatically discovered and available via
 ``--preset=my-preset``.
 
+JSON schema reference
+---------------------
+
+The JSON preset schema supports the following sections. See the full schema
+file at ``share/rocprofiler-systems/presets/schema.json`` for all available
+fields with descriptions and types.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Section
+     - Description
+   * - ``tracing``
+     - Perfetto trace output: ``enabled``, ``legacy``, ``buffer_size_kb``,
+       ``fill_policy``
+   * - ``profiling``
+     - Call-stack profiling: ``enabled``, ``flat_profile``
+   * - ``sampling``
+     - CPU sampling: ``enabled``, ``frequency_hz``, ``timer``, ``delay_sec``,
+       ``duration_sec``, ``cpus``, ``gpus``, ``ainics``
+   * - ``domains.gpu``
+     - GPU metrics via AMD SMI: ``enabled``, ``metrics`` (temp, power, busy,
+       mem_usage), ``sampling_rate_hz``, ``process_sampling_freq``, ``ainic``
+   * - ``domains.rocm``
+     - ROCm API tracing: ``enabled``, ``api_domains`` (hip_runtime_api,
+       kernel_dispatch, etc.), ``group_by_queue``
+   * - ``domains.cpu``
+     - CPU domain metrics: ``enabled``, ``metrics.freq``
+   * - ``domains.parallel``
+     - Parallel runtimes: ``mpi``, ``openmp``, ``kokkos``, ``rccl``,
+       ``shmem``, ``ucx``
+   * - ``output``
+     - Output control: ``path``, ``time_output``, ``file_output``,
+       ``rocpd_output``
+   * - ``hardware_counters``
+     - HW counters: ``enabled``, ``rocm_events``, ``papi_events``,
+       ``papi_multiplexing``
+   * - ``causal``
+     - Causal profiling: ``enabled``, ``mode``, ``backend``,
+       ``binary_scope``/``binary_exclude``,
+       ``function_scope``/``function_exclude``,
+       ``source_scope``/``source_exclude``, ``end_to_end``, ``delay_sec``,
+       ``duration_sec``, ``random_seed``
+   * - ``advanced``
+     - Advanced settings: ``verbose``, ``debug``, ``max_depth``,
+       ``trace_delay_sec``, ``trace_duration_sec``, ``cpu_affinity``,
+       ``collapse_threads``, ``timemory_components``, ``network_interface``,
+       ``trace_periods``, ``trace_period_clock_id``
+
+Environment variables excluded from presets
+-------------------------------------------
+
+The following ``ROCPROFSYS_*`` environment variables are intentionally
+**not included** in the JSON preset schema. These are internal runtime
+settings whose values depend on the invocation context or low-level
+implementation details. A preset should describe *what* to profile, not
+how the profiler manages its internals.
+
+**Session-specific** (depend on the invocation, not the profiling intent):
+
+.. list-table::
+   :widths: 35 65
+
+   * - ``ROCPROFSYS_CONFIG_FILE``
+     - Path to the user's config file. Set at invocation time, not a
+       profiling choice.
+   * - ``ROCPROFSYS_OUTPUT_PREFIX``
+     - Per-run output prefix (e.g., test name). Set by the test harness
+       or user for each run.
+   * - ``ROCPROFSYS_TRACE_REGION``
+     - Region filter for selective tracing. Depends on the specific
+       application being profiled.
+
+**Internal plumbing** (implementation details users should not configure
+via presets):
+
+.. list-table::
+   :widths: 35 65
+
+   * - ``ROCPROFSYS_ENABLED``
+     - Master profiler enable flag. Always ``true`` when running via CLI
+       tools. Setting to ``false`` in a preset would silently disable
+       all profiling.
+   * - ``ROCPROFSYS_SUPPRESS_CONFIG``
+     - Suppress config file loading. Used internally by
+       ``rocprof-sys-avail``.
+   * - ``ROCPROFSYS_SUPPRESS_PARSING``
+     - Suppress config parsing. Used internally. Setting in a preset
+       would break config file handling.
+   * - ``ROCPROFSYS_USE_PID``
+     - Include PID in output paths. Managed automatically by the output
+       subsystem.
+   * - ``ROCPROFSYS_PERFETTO_BACKEND``
+     - Perfetto transport backend (``inprocess``/``system``). Low-level
+       transport choice, not a profiling concern.
+   * - ``ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS``
+     - Perfetto flush interval. Performance tuning for the trace writer.
+   * - ``ROCPROFSYS_PROCESS_SAMPLING_DURATION``
+     - Duration of process sampling. Controlled via ``sampling.duration_sec``
+       in the sampling section instead.
+   * - ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``
+     - Hardware overflow event name. Highly platform-specific and not
+       portable across machines.
+   * - ``ROCPROFSYS_CPU_FREQ_ENABLED``
+     - CPU frequency monitoring. Controlled indirectly via the
+       ``domains.cpu`` section instead.
+
+These variables can still be set directly via environment variables to
+override behavior at runtime, but they are not part of the preset schema
+and will not appear in ``--export-config`` output.
+
 Troubleshooting
 ===============
 
@@ -375,13 +487,6 @@ Preset not found
 
    # Set preset directory explicitly
    export ROCPROFSYS_PRESET_DIR=/opt/rocm/share/rocprofiler-systems/presets
-
-ROCm not available warning
---------------------------
-
-If you see "GPU tracing requested but ROCm is not available", ensure ROCm
-is installed and ``/opt/rocm/bin/hipconfig`` is accessible, or set
-``ROCM_PATH`` to your ROCm installation.
 
 Viewing active configuration
 -----------------------------
