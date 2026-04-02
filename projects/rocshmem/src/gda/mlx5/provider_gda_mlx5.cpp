@@ -138,8 +138,11 @@ struct mlx5_qp_umem_alloc_info {
   // WQ always at beginning of umem allocation
   static constexpr size_t wq_offset = 0;
 
+  // use only one CQE
+  static constexpr size_t cq_depth = 1;
+
   // align CQ and doorbell records to cache line size
-  static constexpr size_t cq_size       = mlx5_align_amdgpu_cache_line(sizeof(mlx5_cqe64[2]));
+  static constexpr size_t cq_size       = mlx5_align_amdgpu_cache_line(sizeof(mlx5_cqe64) * cq_depth);
   static constexpr size_t qp_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
   static constexpr size_t cq_dbrec_size = mlx5_align_amdgpu_cache_line(MLX5_DOORBELL_RECORD_SIZE);
 
@@ -206,13 +209,6 @@ static inline mlx5dv_devx_umem* mlx5_umem_reg(const mlx5dv_funcs_t& mlx5dv,
   }
 
   return umem;
-}
-
-static inline void mlx5_initialize_cq_buffer(mlx5_cqe64* cq, uint32_t cq_depth) {
-  // CQEs must have opcode set to Invalid = 0xF and be in hardware ownership
-  constexpr uint8_t op_own_init = (MLX5_CQE_INVALID << 4) | MLX5_CQE_OWNER_MASK;
-  // simplest way is to set all bytes in the CQ to op_own_init = 0xF1
-  QPAllocator::memset(cq, op_own_init, sizeof(mlx5_cqe64) * cq_depth);
 }
 
 static inline uint32_t mlx5_pdn(const mlx5dv_funcs_t& mlx5dv, struct ibv_pd *pd) {
@@ -313,6 +309,7 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
   qp.cq       = umem_alloc_info.cq_addr(umem_buffer);
   qp.cq_dbrec = umem_alloc_info.cq_dbrec_addr(umem_buffer);
   qp.qp_dbrec = umem_alloc_info.qp_dbrec_addr(umem_buffer);
+  qp.cq_depth = umem_alloc_info.cq_depth;
   qp.sq_depth = umem_alloc_info.sq_depth;
 
   /* allocate UAR
@@ -396,6 +393,7 @@ int mlx5dv_funcs_t::destroy_qp(mlx5_devx_qp& qp) {
   qp.qp_dbrec    = nullptr;
   qp.cqn         = 0;
   qp.qpn         = 0;
+  qp.cq_depth    = 0;
   qp.sq_depth    = 0;
 
   return err;
@@ -411,9 +409,10 @@ static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
 
   DEVX_SET(create_cq_in, in, opcode, MLX5_CMD_OP_CREATE_CQ);
 
-  // use CQ length 2 until we enable true 1-CQE/collapsed CQ
-  constexpr uint32_t cq_depth = 2;
-  mlx5_initialize_cq_buffer(reinterpret_cast<mlx5_cqe64*>(qp.cq), cq_depth);
+  // CQEs must be initialized with opcode set to Invalid = 0xF and in hardware ownership
+  constexpr uint8_t op_own_init = (MLX5_CQE_INVALID << 4) | MLX5_CQE_OWNER_MASK;
+  // simplest way is to set all bytes in the CQ to op_own_init = 0xF1
+  QPAllocator::memset(qp.cq, op_own_init, sizeof(mlx5_cqe64) * qp.cq_depth);
 
   // get EQN, we don't use it but it needs to be set when creating the CQ
   uint32_t eqn = 0;
@@ -421,9 +420,11 @@ static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
   CHECK_ZERO(err, "mlx5dv_devx_query_eqn");
 
   DEVX_SET(cqc, cqc, cqe_sz,               MLX5_CQC_CQE_SZ_64_BYTES);
+  // set CQE collapsing so all CQEs are written to first CQ entry
+  DEVX_SET(cqc, cqc, cc,                   true);
   // set overrun ignore so that we don't need to ring the CQ doorbell
   DEVX_SET(cqc, cqc, oi,                   true);
-  DEVX_SET(cqc, cqc, log_cq_size,          bit_log2(cq_depth));
+  DEVX_SET(cqc, cqc, log_cq_size,          bit_log2(qp.cq_depth));
   // we don't ring the CQ doorbell anyway
   DEVX_SET(cqc, cqc, uar_page,             qp.uar->page_id);
   DEVX_SET(cqc, cqc, c_eqn_or_ext_element, eqn);
@@ -640,6 +641,7 @@ void mlx5_devx_qp::dump([[maybe_unused]] int conn_num) {
   DPRINTF("  (uint32_t*) qp_dbrec         = %p\n",    this->qp_dbrec);
   DPRINTF("  (uint32_t)  cqn              = 0x%x\n",  this->cqn);
   DPRINTF("  (void*)     cq               = %p\n",    this->cq);
+  DPRINTF("  (uint32_t)  cq_depth         = %u\n",    this->cq_depth);
   DPRINTF("  (uint32_t*) cq_dbrec         = %p\n",    this->cq_dbrec);
   DPRINTF("  (void*)     uar->reg_addr    = %p\n",    this->uar->reg_addr);
   DPRINTF("  (void*)     uar->base_addr   = %p\n",    this->uar->base_addr);

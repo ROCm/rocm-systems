@@ -1,6 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -29,7 +29,7 @@
 #include "xml.h"
 #include "coll_net.h"
 #include "model.h"
-#include "utils.h"
+#include "topo_expl_impl.h"
 #include "rocm_smi/rocm_smi.h"
 
 const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4] = { "AllGather", "AllReduce", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv" };
@@ -48,6 +48,9 @@ NCCL_PARAM(NvbPreconnect, "NVB_PRECONNECT", 0);
 NCCL_PARAM(AllocP2pNetLLBuffers, "ALLOC_P2P_NET_LL_BUFFERS", 0);
 
 thread_local int ncclDebugNoWarn = 0;
+// Flag to suppress verbose rank/host output (used by test suite)
+thread_local int topoExplSuppressVerbose = 0;
+
 ncclCollNet_t* ncclCollNet = NULL;
 
 // Get current Compute Capability
@@ -848,7 +851,9 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
         if (comm->peerInfo[r].hostHash == comm->peerInfo[rank].hostHash)
         {
           comm->topo->hostIdx = comm->topo->nHosts;
-          printf("Rank %d is on host %d\n", rank, comm->topo->hostIdx);
+          if (topoExplSuppressVerbose == 0) {
+            printf("Rank %d is on host %d\n", rank, comm->topo->hostIdx);
+          }
         }
         comm->topo->nHosts++;
       }
@@ -1189,6 +1194,7 @@ ncclResult_t initTransportsRank_3(struct ncclComm* comm, struct allGatherInfo *a
   TRACE(NCCL_INIT, "rank %d nranks %d - CONNECTED %d RINGS AND TREES", rank, nranks, comm->nChannels);
 
   // Compute time models for algorithm and protocol combinations
+  NCCLCHECKGOTO(ncclTopoInitTunerConstants(comm), ret, fail);
   NCCLCHECKGOTO(ncclTopoTuneModel(comm, comm->minCompCap, comm->maxCompCap, graphs), ret, fail);
 
   INFO(NCCL_INIT, "%d coll channels, %d nvls channels, %d p2p channels, %d p2p channels per peer", comm->nChannels, comm->nvlsChannels, comm->p2pnChannels, comm->p2pnChannelsPerPeer);
