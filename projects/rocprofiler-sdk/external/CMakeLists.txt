@@ -131,6 +131,7 @@ if(NOT TARGET PTL::ptl-static)
     add_subdirectory(ptl EXCLUDE_FROM_ALL)
 endif()
 
+# Prefer system-provided yaml-cpp over vendored one
 rocprofiler_checkout_git_submodule(
     RECURSIVE
     RELATIVE_PATH external/yaml-cpp
@@ -138,25 +139,8 @@ rocprofiler_checkout_git_submodule(
     REPO_URL https://github.com/jbeder/yaml-cpp.git
     REPO_BRANCH "master")
 
-
-# Prefer system-provided yaml-cpp over vendored one
-option(ROCPROF_USE_SYS_YAML_CPP
-        "Use system-provided yaml-cpp instead of vendored external/yaml-cpp" ON)
-
-    if (ROCPROF_USE_SYS_YAML_CPP)
-        find_package(yaml-cpp CONFIG REQUIRED)
-    else()
-        add_subdirectory(yaml-cpp EXCLUDE_FROM_ALL)
-    endif()
-
-
-target_link_libraries(rocprofiler-sdk-yaml-cpp
-                      INTERFACE yaml-cpp::yaml-cpp)
-
-if (NOT ROCPROF_USE_SYS_YAML_CPP)
-    target_include_directories(
-        rocprofiler-sdk-yaml-cpp
-        INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/yaml-cpp/include>)
+if(ROCPROFILER_BUILD_YAML_CPP)
+    add_subdirectory(yaml-cpp EXCLUDE_FROM_ALL)
 endif()
 
 # checkout submodule if not already checked out or clone repo if no .gitmodules file

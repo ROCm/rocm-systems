@@ -391,3 +391,21 @@ else()
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=0)
 
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# yaml-cpp
+#
+# ----------------------------------------------------------------------------------------#
+if (NOT ROCPROFILER_BUILD_YAML_CPP)
+    find_package(yaml-cpp CONFIG REQUIRED)
+endif()
+
+target_link_libraries(rocprofiler-sdk-yaml-cpp
+                      INTERFACE yaml-cpp::yaml-cpp)
+
+if (ROCPROFILER_BUILD_YAML_CPP)
+    target_include_directories(
+        rocprofiler-sdk-yaml-cpp
+        INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/yaml-cpp/include>)
+endif()

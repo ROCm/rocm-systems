@@ -59,6 +59,8 @@ rocprofiler_add_option(
 rocprofiler_add_option(ROCPROFILER_BUILD_FMT "Enable building fmt library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_GLOG
                        "Enable building glog (Google logging) library internally" ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_YAML_CPP
+        "Enable building yaml-cpp library" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_SQLITE3
                        "Enable building sqlite3 library internally" OFF)
 rocprofiler_add_option(ROCPROFILER_BUILD_PYBIND11
