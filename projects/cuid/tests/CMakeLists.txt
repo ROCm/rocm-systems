@@ -98,14 +98,6 @@ endif()
 # Install the test binary
 install(
     TARGETS ${AMDCUID_TST_EXECUTABLE}
-    PERMISSIONS
-        OWNER_READ
-        OWNER_WRITE
-        OWNER_EXECUTE
-        GROUP_READ
-        GROUP_EXECUTE
-        WORLD_READ
-        WORLD_EXECUTE
     DESTINATION ${TESTS_INSTALL_DIR}
     COMPONENT ${TESTS_COMPONENT}
 )

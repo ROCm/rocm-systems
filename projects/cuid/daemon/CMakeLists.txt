@@ -63,14 +63,6 @@ target_compile_definitions(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE
 # Install the daemon
 install(
     TARGETS ${AMDCUID_DAEMON_EXECUTABLE}
-    PERMISSIONS
-        OWNER_EXECUTE
-        OWNER_READ
-        OWNER_WRITE
-        GROUP_READ
-        GROUP_EXECUTE
-        WORLD_READ
-        WORLD_EXECUTE
     DESTINATION bin
     COMPONENT ${DAEMON_COMPONENT})
 
@@ -92,26 +84,18 @@ if(UNIX AND NOT APPLE)
     # intentionally outside CMAKE_INSTALL_PREFIX because systemd does not
     # discover units inside arbitrary prefixes (e.g. /opt/rocm/core) without
     # extra configuration.
-    set(SYSTEMD_UNIT_DIR "/usr/lib/systemd/system"
-        CACHE PATH "Directory where systemd unit files are installed.")
 
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/amdcuid_daemon.service.in
         ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_daemon.service
         @ONLY)
 
-    install(
-        FILES ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_daemon.service
-        DESTINATION ${SYSTEMD_UNIT_DIR}
-        COMPONENT ${DAEMON_COMPONENT})
-endif()
+    # Post-installation script for udev rules / service registration.
+    # The choice between install udev rules + systemd service (daemonize=true)
+    # or simple cron job (daemonize=false) is made at install time by
+    # reading the deployed config file, so it correctly reflects any
+    # user edits made after the build.
 
-# Post-installation script for udev rules / service registration.
-# The choice between install udev rules + systemd service (daemonize=true)
-# or simple cron job (daemonize=false) is made at install time by
-# reading the deployed config file, so it correctly reflects any
-# user edits made after the build.
-if(UNIX AND NOT APPLE)
     # Generate the post-install shell script from a template, substituting the
     # install prefix and config directory baked-in at cmake configure time.
     configure_file(
@@ -119,24 +103,24 @@ if(UNIX AND NOT APPLE)
         ${CMAKE_CURRENT_BINARY_DIR}/postinst
         @ONLY)
 
-    # Ensure the generated script is executable (required by DEB packaging).
-    execute_process(COMMAND chmod +x ${CMAKE_CURRENT_BINARY_DIR}/postinst)
+    # Configure the pre-removal script (mirrors postinst: stops service, removes
+    # udev rules, cron job, and systemd service symlink).
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/prerm.in
+        ${CMAKE_CURRENT_BINARY_DIR}/prerm
+        @ONLY)
 
-    # Hook into CPack DEB packages (postinst is run by dpkg after installation).
-    set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
-        "${CMAKE_CURRENT_BINARY_DIR}/postinst"
-        PARENT_SCOPE)
-
-    # Hook into CPack RPM packages (%post scriptlet).
-    set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE
-        "${CMAKE_CURRENT_BINARY_DIR}/postinst"
-        PARENT_SCOPE)
-
-    # Also install the script so it can be re-run manually after a cmake --install.
+    # Also install both scripts so they can be re-run manually after a cmake --install.
     install(
         PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/postinst
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
         RENAME amdcuid_postinst.sh
+        COMPONENT ${DAEMON_COMPONENT})
+
+    install(
+        PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/prerm
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
+        RENAME amdcuid_prerm.sh
         COMPONENT ${DAEMON_COMPONENT})
 endif()
 

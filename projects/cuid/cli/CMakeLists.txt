@@ -53,14 +53,6 @@ target_link_libraries(${AMDCUID_TOOL_EXECUTABLE} amdcuid_static OpenSSL::Crypto)
 # Install the tool
 install(
     TARGETS ${AMDCUID_TOOL_EXECUTABLE}
-    PERMISSIONS
-        OWNER_READ
-        OWNER_WRITE
-        OWNER_EXECUTE
-        GROUP_READ
-        GROUP_EXECUTE
-        WORLD_READ
-        WORLD_EXECUTE
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT ${CLI_COMPONENT}
 )

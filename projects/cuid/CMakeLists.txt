@@ -129,6 +129,22 @@ add_subdirectory(lib)
 add_subdirectory(cli)
 add_subdirectory(daemon)
 
+# Uninstall target
+# NOTE: /etc/amdcuid/ (HMAC key + config) is intentionally left in place by
+#       the prerm script to preserve existing CUID values across reinstalls.
+#       Remove manually with: sudo rm -rf /etc/amdcuid
+if(NOT TARGET uninstall)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake_uninstall.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        IMMEDIATE @ONLY
+    )
+    add_custom_target(uninstall
+        COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        COMMENT "Uninstalling ${AMDCUID} ..."
+    )
+endif()
+
 if(BUILD_EXAMPLES)
     add_subdirectory(example)
 endif()
@@ -136,54 +152,3 @@ endif()
 if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
-
-# ==============================================================================
-# Configure packaging
-# ==============================================================================
-# CPack version is populated with CMAKE_PROJECT_VERSION implicitly
-set(PKG_MAINTAINER_NM "AMDCUID Support")
-set(PKG_MAINTAINER_EMAIL "support@amd.com")
-set(CPACK_PACKAGE_NAME ${AMDCUID_PACKAGE} CACHE INTERNAL "")
-set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
-set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "AMD Compute Unit ID Library and Tools"
-    CACHE STRING
-    ""
-)
-set(CPACK_PACKAGING_INSTALL_PREFIX
-    "${CMAKE_INSTALL_PREFIX}"
-    CACHE PATH
-    "Default packaging prefix."
-)
-set(CPACK_PACKAGE_VERSION_MAJOR "${VERSION_MAJOR}")
-set(CPACK_PACKAGE_VERSION_MINOR "${VERSION_MINOR}")
-set(CPACK_PACKAGE_VERSION_PATCH "${VERSION_PATCH}")
-set(CPACK_PACKAGE_VERSION "${VERSION_STRING}")
-set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
-set(CPACK_GENERATOR "DEB;RPM" CACHE STRING "Default packaging generators.")
-mark_as_advanced(
-    CPACK_PACKAGE_VENDOR
-    CPACK_PACKAGE_CONTACT
-    CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    CPACK_GENERATOR
-)
-
-# Platform-specific generators
-if(WIN32)
-    set(CPACK_GENERATOR "ZIP;NSIS")
-else()
-    set(CPACK_GENERATOR "TGZ;DEB;RPM")
-    
-    # DEB-specific
-    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libssl1.1 | libssl3")
-    set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
-
-    # RPM-specific
-    set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-    set(CPACK_RPM_PACKAGE_GROUP "System Environment/Libraries")
-    set(CPACK_RPM_PACKAGE_REQUIRES "openssl-libs")
-endif()
-
-include(CPack)

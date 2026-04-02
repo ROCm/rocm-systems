@@ -35,6 +35,15 @@ UDEV_RULES_FILE="/etc/udev/rules.d/90-amdcuid.rules"
 CRON_FILE="/etc/cron.d/amdcuid"
 SERVICE_NAME="amdcuid_daemon"
 
+# Determine the correct systemd unit directory.
+# DEB-based distros (Debian, Ubuntu) use /lib/systemd/system;
+# RPM-based distros (RHEL, Fedora, SUSE) use /usr/lib/systemd/system.
+if [ -f /etc/debian_version ]; then
+    SYSTEMD_UNIT_DIR="/lib/systemd/system"
+else
+    SYSTEMD_UNIT_DIR="/usr/lib/systemd/system"
+fi
+
 if [ ! -f "$CONFIG_FILE" ]; then
     # First install: seed the shared config dir from the versioned defaults.
     mkdir -p "$CONFIG_DIR"
@@ -65,6 +74,40 @@ else
     echo "HMAC key already exists at $HMAC_KEY_FILE; leaving it unchanged."
 fi
 
+# remove any existing service, udev rules, or cron job in case we're upgrading from a previous install with different settings
+# cron job
+if [ -f "$CRON_FILE" ]; then
+    echo "Removing existing cron job for amdcuid daemon..."
+    rm -f "$CRON_FILE"
+fi
+
+# Systemd service
+if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo "Stopping $SERVICE_NAME..."
+    systemctl stop "$SERVICE_NAME" || true
+fi
+
+if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo "Disabling $SERVICE_NAME..."
+    systemctl disable "$SERVICE_NAME" || true
+fi
+
+SERVICE_LINK="$SYSTEMD_UNIT_DIR/${SERVICE_NAME}.service"
+if [ -L "$SERVICE_LINK" ] || [ -f "$SERVICE_LINK" ]; then
+    echo "Removing systemd service file: $SERVICE_LINK"
+    rm -f "$SERVICE_LINK"
+fi
+
+systemctl daemon-reload 2>/dev/null || true
+
+# Udev rules
+if [ -f "$UDEV_RULES_FILE" ]; then
+    echo "Removing udev rules: $UDEV_RULES_FILE"
+    rm -f "$UDEV_RULES_FILE"
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger 2>/dev/null || true
+fi
+
 DAEMONIZE=$(grep "^daemonize=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d '[:space:]')
 
 if [ "$DAEMONIZE" = "true" ]; then
@@ -80,30 +123,19 @@ EOF
     udevadm control --reload-rules
     udevadm trigger
 
+    # create a symlink to the service file in the systemd directory so it can be registered and started.
+    if [ -d /run/systemd/system ]; then
+        ln -s -f -r @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/amdcuid/amdcuid_daemon.service "$SYSTEMD_UNIT_DIR"/amdcuid_daemon.service
+    fi
+
     echo "Registering amdcuid_daemon as a systemd service..."
     systemctl daemon-reload
     systemctl enable "$SERVICE_NAME"
     systemctl start "$SERVICE_NAME"
-    # remove any existing cron job in case we're upgrading from a resource-constrained mode install
-    if [ -f "$CRON_FILE" ]; then
-        echo "Removing existing cron job for amdcuid daemon..."
-        rm -f "$CRON_FILE"
-    fi
 else
     # Resource-constrained mode: skip the persistent service and udev rules.
     # Instead, install a cron job so the daemon runs once at boot to generate
     # CUIDs and then exits.
     echo "Daemon mode not enabled; installing boot-time cron job for amdcuid daemon..."
     echo "@reboot root $DAEMON_BIN" > "$CRON_FILE"
-
-    # remove any existing systemd service and udev rules in case we're upgrading from a full-service install
-    if systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1; then
-        echo "Removing existing systemd service for amdcuid daemon..."
-        systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-        systemctl disable "$SERVICE_NAME" 2>/dev/null || true
-
-        rm -f "$UDEV_RULES_FILE"
-        udevadm control --reload-rules
-        udevadm trigger
-    fi
 fi

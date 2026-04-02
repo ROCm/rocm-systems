@@ -128,20 +128,16 @@ sudo make install
 # Replace <install-prefix> with the value used for CMAKE_INSTALL_PREFIX above
 sudo <install-prefix>/share/amdcuid/amdcuid_postinst.sh
 ```
+Both static and shared libraries are built.
 
-if needed, users can also create a portable install package using Cpack:
+If users need to uninstall the CUID project, they can do so with the following instructions:
 
 ```sh
-mkdir build
 cd build
-# Set CMAKE_INSTALL_PREFIX as needed (default is typically /opt/rocm/core)
-cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
-make
-cpack -G <Package type>
+# Replace <install-prefix> with the value used for CMAKE_INSTALL_PREFIX above
+sudo <install-prefix>/share/amdcuid/amdcuid_prerm.sh
+sudo make uninstall
 ```
-Currently supported package types include .deb, .rpm, .tgz, 
-
-Both static and shared libraries are built.
 
 ## License
 

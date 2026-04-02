@@ -53,11 +53,6 @@ target_link_libraries(${AMDCUID_EXAMPLE_EXECUTABLE} amdcuid_static OpenSSL::Cryp
 # Install example source into documentation
 install(
     FILES ${SRC_LIST}
-    PERMISSIONS
-        OWNER_READ
-        OWNER_WRITE
-        GROUP_READ
-        WORLD_READ
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     COMPONENT ${EXAMPLE_COMPONENT}
 )
