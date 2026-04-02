@@ -31,7 +31,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
   }
 
   if (!DeviceAttributesSupport(0, hipDeviceAttributePageableMemoryAccess)) {
-    HipTest::HIP_SKIP_TEST("Pageable memory access is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
     return;
   }
 
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
   }
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
-    HipTest::HIP_SKIP_TEST("Device supports concurrent managed access");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
     return;
   }
 
@@ -128,7 +128,7 @@ HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
   }
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
-    HipTest::HIP_SKIP_TEST("Device supports concurrent managed access");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
     return;
   }
 

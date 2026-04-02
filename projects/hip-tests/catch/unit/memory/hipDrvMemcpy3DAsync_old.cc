@@ -307,7 +307,7 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
@@ -381,7 +381,7 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));

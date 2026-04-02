@@ -376,7 +376,7 @@ static bool assemblyFile_Verification(std::string assemfilename, std::string ins
     }
   } else {
     result = true;
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kAssemblyFileMissing);
+    HipTest::HIP_SKIP_TEST("Skipped: expected assembly file not found.");
   }
   return result;
 }

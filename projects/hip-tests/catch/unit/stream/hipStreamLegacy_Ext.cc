@@ -531,9 +531,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoThreadsEachOneDiffOperation) {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
 
   if (threadsSupported < 2) {
-    HipTest::HIP_SKIP_TEST(
-        "Skipping due to machine does't "
-        "support two concurrent threads");
+    HipTest::HIP_SKIP_TEST("Skipped: machine does not support two concurrent hardware threads.");
     return;
   }
 

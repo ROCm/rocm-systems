@@ -204,7 +204,7 @@ HIP_TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
   FILE* fpipe;
   fpipe = popen("rocm_agent_enumerator", "r");
   if (fpipe == nullptr) {
-    HipTest::HIP_SKIP_TEST("Unable to create command file.\n");
+    HipTest::HIP_SKIP_TEST("Skipped: unable to create command file.");
     return;
   }
   char command_op[BUFFER_LEN];

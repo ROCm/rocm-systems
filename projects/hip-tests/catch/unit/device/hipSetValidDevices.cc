@@ -417,8 +417,7 @@ HIP_TEST_CASE(Unit_hipSetValidDevices_with_hipMemcpyPeer) {
   int canAccessPeer = -1;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 1, 0));
   if (!canAccessPeer) {
-    std::string msg = "Device is not capable of directly accessing memory from peerDevice. Skipping the test.";
-    HipTest::HIP_SKIP_TEST(msg.c_str());
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     return;
   }
   REQUIRE(canAccessPeer == 1);

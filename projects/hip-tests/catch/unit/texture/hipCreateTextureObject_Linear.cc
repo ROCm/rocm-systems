@@ -112,7 +112,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_LinearResource) {
     REQUIRE(ret != hipSuccess);
 #else
     // API expected to return error according to cuda documentation.
-    WARN("Resource view descriptor test skipped on nvidia");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
 #endif
   }
 

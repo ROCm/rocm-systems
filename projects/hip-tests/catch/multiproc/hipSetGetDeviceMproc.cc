@@ -156,8 +156,8 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int* deviceList,
   std::string visibleDeviceString;
 
   if ((NULL == deviceList) || ((deviceListLength < 1) || deviceListLength > numDevices)) {
-    INFO("Invalid argument for number of devices. Skipping current test");
-    REQUIRE(false);
+    HipTest::HIP_SKIP_TEST("Skipped: invalid device list arguments for multiproc test.");
+    return;
   }
 
   for (int i = 0; i < deviceListLength; i++) {

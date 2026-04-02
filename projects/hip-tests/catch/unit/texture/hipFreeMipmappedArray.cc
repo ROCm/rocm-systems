@@ -31,7 +31,7 @@ HIP_TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Parameters) {
   }
 
   SECTION("double free") {
-    INFO("Double free cheching isn't supported. Skipped.");
+    HipTest::HIP_SKIP_TEST("Skipped: double-free checking isn't supported.");
     return;
     hipMipmappedArray_t array;
     hipChannelFormatDesc desc = hipCreateChannelDesc<float>();

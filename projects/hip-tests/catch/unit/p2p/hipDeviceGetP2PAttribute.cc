@@ -49,7 +49,7 @@
 
 HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-119");
+  HipTest::HIP_SKIP_TEST("Skipped: tracked issue EXSWCPHIPT-119.");
   return;
 #else
 
@@ -109,7 +109,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Basic) {
 
 HIP_TEST_CASE(Unit_hipDeviceGetP2PAttribute_Negative) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-122");
+  HipTest::HIP_SKIP_TEST("Skipped: tracked issue EXSWCPHIPT-122.");
   return;
 #else
 

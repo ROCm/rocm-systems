@@ -327,7 +327,7 @@ HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
     REQUIRE(TestPassed == true);
   }
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST("Skipped: this test requires Linux.");
 #endif
 }
 

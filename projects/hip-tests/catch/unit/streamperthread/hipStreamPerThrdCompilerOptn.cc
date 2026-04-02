@@ -728,16 +728,15 @@ HIP_TEST_CASE(Unit_hipStrmPerThrdDefault) {
 
   hipDeviceProp_t deviceProp;
   HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
-  if (deviceProp.cooperativeLaunch) {
-    SECTION("Testing_hipLaunchCooperativeKernel()") {
-      // launching hipLaunchCooperativeKernel() with Null stream
-      DefaultPT2_LaunchCooperativeKernel(1);
-      // launching hipLaunchCooperativeKernel() with user created stream
-      DefaultPT2_LaunchCooperativeKernel(0);
+  SECTION("Testing_hipLaunchCooperativeKernel()") {
+    if (!deviceProp.cooperativeLaunch) {
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+      return;
     }
-  } else {
-    INFO("Cooperative Launch feature is not supported, therefore skipping");
-    INFO(" the test Testing_hipLaunchCooperativeKernel()");
+    // launching hipLaunchCooperativeKernel() with Null stream
+    DefaultPT2_LaunchCooperativeKernel(1);
+    // launching hipLaunchCooperativeKernel() with user created stream
+    DefaultPT2_LaunchCooperativeKernel(0);
   }
 
   SECTION("Testing_StrmWaitEvent()") { DefaultPT2_StrmWaitEvent(); }

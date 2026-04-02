@@ -37,7 +37,7 @@ behaviour
   hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;                \
   HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
   if (value == 0) {                                                                              \
-    printf("Machine does not support VMM. Skipping this test..");                                \
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                                  \
     return;                                                                                      \
   }                                                                                              \
 }

@@ -479,29 +479,45 @@ inline constexpr char const kPageableMemoryAccessUnsupported[] =
 inline constexpr char const kNoGpuDevice[] = "Skipped: no GPU device available.";
 inline constexpr char const kCoherentHostAllocFailed[] =
     "Skipped: coherent host allocation failed (SVM may be unsupported).";
-inline constexpr char const kNotEnoughGpusMaskedTests[] =
-    "Skipped: not enough GPUs for masked GPU tests.";
 inline constexpr char const kMipmappedArraysUnsupported[] =
     "Skipped: mipmapped arrays are not supported on this device or configuration.";
-inline constexpr char const kAssemblyFileMissing[] = "Skipped: expected assembly file not found.";
 inline constexpr char const kCooperativeLaunchUnsupported[] =
     "Skipped: cooperative launch is not supported.";
 inline constexpr char const kPcieAtomicUnsupported[] =
     "Skipped: PCIe atomics are not supported on this device.";
 inline constexpr char const kStreamWaitValueUnsupported[] =
     "Skipped: hipStreamWaitValue is not supported on this device.";
+inline constexpr char const kStreamPriorityRangeUnsupported[] =
+    "Skipped: stream priority range is not supported on this device.";
 inline constexpr char const kWarpShuffleUnsupported[] =
     "Skipped: warp shuffle is not supported on this device.";
 inline constexpr char const kWarpVoteUnsupported[] =
     "Skipped: warp vote is not supported on this device.";
-inline constexpr char const kWarpBallotUnsupported[] =
-    "Skipped: warp ballot is not supported on this device.";
 inline constexpr char const kVmmUnsupported[] =
     "Skipped: virtual memory management (VMM) is not supported.";
-inline constexpr char const kLargeBarUnsupported[] =
-    "Skipped: large BAR (resizable BAR) is not supported on this device.";
 inline constexpr char const kFineGrainHwUnsupported[] =
     "Skipped: fine-grained memory / atomic hardware support is not available on this device.";
+inline constexpr char const kTextureImageUnsupported[] =
+    "Skipped: texture/image is not supported on this device.";
+inline constexpr char const kApiUnsupportedOnNvidia[] =
+    "Skipped: API is not supported on NVIDIA; test skipped.";
+inline constexpr char const kTextureGatherUnsupportedAmd[] =
+    "Skipped: texture gather arrays are not supported on AMD backend.";
+inline constexpr char const kGlewInitFailed[] = "Skipped: GLEW initialization failed.";
+inline constexpr char const kAssertionsDisabled[] =
+    "Skipped: assertions are disabled in this build.";
+inline constexpr char const kConcurrentKernelExecutionUnsupported[] =
+    "Skipped: concurrent kernel execution is not supported.";
+inline constexpr char const kManagedNoConcurrentAccess[] =
+    "Skipped: test targets devices without concurrent managed access.";
+inline constexpr char const kHostNumaUnavailable[] =
+    "Skipped: host NUMA is not available.";
+inline constexpr char const kGpuXnackNotEnabled[] =
+    "Skipped: GPU is not XNACK-enabled.";
+inline constexpr char const kMemcpyPeerSameSrcDstDevice[] =
+    "Skipped: source and destination device are the same.";
+inline constexpr char const kRequiredDeviceCountNotMet[] =
+    "Skipped: required number of devices is not available.";
 }  // namespace SkipReason
 
 /**
@@ -672,7 +688,7 @@ class BlockingContext {
 // is supported on the current device.
 #define CHECK_IMAGE_SUPPORT                                                                        \
   if (!HipTest::isImageSupported()) {                                                              \
-    HipTest::HIP_SKIP_TEST("Texture is not supported on the device. Skipped.");                    \
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);                         \
     return;                                                                                        \
   }
 
@@ -694,7 +710,7 @@ class BlockingContext {
 // skip the current test if they are not available.
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
   if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
-    HipTest::HIP_SKIP_TEST("Warp Match Functions are not supported on the device. Skipped.");      \
+    HipTest::HIP_SKIP_TEST("Skipped: warp match functions are not supported on this device.");      \
     return;                                                                                        \
   }
 
