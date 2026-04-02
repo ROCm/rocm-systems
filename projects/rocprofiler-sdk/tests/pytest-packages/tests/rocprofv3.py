@@ -522,8 +522,6 @@ def test_perfetto_arg_annotations(pftrace_reader):
     """
     Test that function argument annotations are available in perfetto with --annotate-args.
     """
-    import pytest
-
     # Query for API function argument annotations from --annotate-args
     # Filter for hip_api/hsa_api/marker_api (KFD/kernel have args from other sources)
     # Exclude metadata fields (always present, even without --annotate-args)
@@ -557,8 +555,6 @@ def test_perfetto_event_id_annotations(pftrace_reader):
     """
     Test that hipEvent operations have properly annotated event IDs.
     """
-    import pytest
-
     # Query for all hipEvent operations with their event annotations
     event_ops_query = """
     SELECT
