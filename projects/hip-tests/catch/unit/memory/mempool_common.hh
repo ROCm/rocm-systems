@@ -12,30 +12,6 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-#if HT_WIN
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#else
-#include <unistd.h>
-#include <sys/types.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <errno.h>
-#include <sys/socket.h>
-#include <memory.h>
-#include <sys/un.h>
-#endif
-
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-
 namespace {
 constexpr auto wait_ms = 500;
 }  // anonymous namespace
@@ -548,19 +524,21 @@ public:
   T* as() { return reinterpret_cast<T*>(addr_); }
 };
 
-inline void barrierWait(volatile int *barrier, volatile int *sense, unsigned int n) {
-  int count;
-#if HT_WIN
-  count = InterlockedIncrement(reinterpret_cast<volatile LONG *>(barrier));
-#else
-  count = __sync_add_and_fetch(reinterpret_cast<int *>(barrier), 1);
-#endif
+inline void barrierWait(std::atomic<int>& barrier, std::atomic<int>& sense, unsigned int n) {
+  // fetch_add returns the value BEFORE the add, so add 1 to get the 'count'
+  int count = barrier.fetch_add(1, std::memory_order_acq_rel) + 1;
+
   if (static_cast<unsigned int>(count) == n) {
-    *barrier = 0;
-    *sense = 1 - *sense;
+    // last thread resets the barrier and flips the sense
+    barrier.store(0, std::memory_order_release);
+    // Use a temporary to flip the value (0 -> 1 or 1 -> 0)
+    int current_sense = sense.load(std::memory_order_relaxed);
+    sense.store(1 - current_sense, std::memory_order_release);
   } else {
-    int old_sense = *sense;
-    while (*sense == old_sense) { }
+    // Other threads wait for the sense to change
+    int old_sense = sense.load(std::memory_order_relaxed);
+    // memory_order_acquire ensures we see the updated data after the flip
+    while (sense.load(std::memory_order_acquire) == old_sense) { }
   }
 }
 
@@ -568,8 +546,8 @@ struct mempoolIpcShmStruct {
   hipMemPoolPtrExportData ptrExportData;
   hipMemAllocationHandleType handleType;
   int device;
-  int barrier;
-  int sense;
+  std::atomic<int> barrier{0};
+  std::atomic<int> sense{0};
 };
 
 struct ipcHdl {

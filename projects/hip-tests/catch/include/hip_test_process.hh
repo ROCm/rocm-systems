@@ -38,6 +38,10 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <sys/mman.h>
+#include <errno.h>
+#include <sys/un.h>
+#include <sys/socket.h>
 #endif
 
 #if HT_WIN

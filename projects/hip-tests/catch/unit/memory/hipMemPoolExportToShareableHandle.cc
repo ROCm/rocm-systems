@@ -514,8 +514,6 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   shmData->ptrExportData = ptrExp;
   shmData->handleType = handleType;
   shmData->device = 0;
-  shmData->barrier = 0;
-  shmData->sense = 0;
 
   std::string exePath = getSelfExePath();
   REQUIRE(!exePath.empty());
@@ -523,11 +521,9 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   hip::SpawnProc child(exePath);
   REQUIRE(child.spawn("Unit_hipMemPoolExportToShareableHandle_multiproc_child") == 0);
 
-  barrierWait(&shmData->barrier, &shmData->sense, 2);
-
   ipcSocketCom sockObj(true);
 
-  barrierWait(&shmData->barrier, &shmData->sense, 2);
+  barrierWait(shmData->barrier, shmData->sense, 2);
 
   checkSysCallErrors(sockObj.sendShareableHdl(sharedHandle, child.getProcess()));
 
@@ -593,11 +589,9 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
 
   HIP_CHECK(hipSetDevice(device));
 
-  barrierWait(&shmData->barrier, &shmData->sense, 2);
-
   ipcSocketCom sockObj(false);
 
-  barrierWait(&shmData->barrier, &shmData->sense, 2);
+  barrierWait(shmData->barrier, shmData->sense, 2);
 
   hipShareableHdl shdl;
   checkSysCallErrors(sockObj.recvShareableHdl(&shdl));
