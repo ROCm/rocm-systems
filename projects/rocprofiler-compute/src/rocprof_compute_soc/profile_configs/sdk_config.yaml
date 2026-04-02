@@ -5637,6 +5637,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx950
       block: TA
+      event: 46
   - name: TA_ADDRESSER_STALLED_CYCLES_sum
     description: Total cycles the TA addresser is stalled. Sum over TA instances.
     properties: []
@@ -9654,6 +9655,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx950
       block: TCP
+      event: 56
   - name: TCP_UTCL1_UTCL2_INFLIGHT_sum
     description: The sum of inflight UTCL1 to UTCL2 requests per cycle. Sum over TCP instances.
     properties: []
@@ -10130,6 +10132,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx950
       block: TD
+      event: 11
   - name: TD_OUTPUT_FIFO_FULL_sum
     description: TD output FIFO is full. Sum over TD instances.
     properties: []
@@ -10226,6 +10229,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx950
       block: TD
+      event: 10
   - name: TD_TC_TD_FIFO_FULL_sum
     description: TD input FIFO from TCP is full. Sum over TD instances.
     properties: []
