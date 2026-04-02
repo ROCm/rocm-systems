@@ -29,7 +29,7 @@ extern RocDecLogger logger;
 rocDecStatus ROCDECAPI rocDecCreateBitstreamReader(RocdecBitstreamReader *bs_reader_handle, const char *input_file_path) {
     FunctionEntryLog(logger);
     if (bs_reader_handle == nullptr || input_file_path == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
+        CriticalLog(logger, "Null pointer");
         FunctionExitLog(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
@@ -38,7 +38,7 @@ rocDecStatus ROCDECAPI rocDecCreateBitstreamReader(RocdecBitstreamReader *bs_rea
         handle = new RocBitstreamReaderHandle(input_file_path);
     }
     catch (const std::exception& e) {
-        logger.CriticalLog(MakeMsg("Failed to create RocBitstreamReader handle, ") + STR(e.what()));
+        CriticalLog(logger, "Failed to create RocBitstreamReader handle, " + STR(e.what()));
         FunctionExitLog(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -50,7 +50,7 @@ rocDecStatus ROCDECAPI rocDecCreateBitstreamReader(RocdecBitstreamReader *bs_rea
 rocDecStatus ROCDECAPI rocDecGetBitstreamCodecType(RocdecBitstreamReader bs_reader_handle, rocDecVideoCodec *codec_type) {
     FunctionEntryLog(logger);
     if (bs_reader_handle == nullptr || codec_type == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
+        CriticalLog(logger, "Null pointer");
         FunctionExitLog(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
@@ -61,7 +61,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamCodecType(RocdecBitstreamReader bs_read
     }
     catch (const std::exception& e) {
         roc_bs_reader_handle->CaptureError(e.what());
-        logger.CriticalLog(MakeMsg(e.what()));
+        CriticalLog(logger, e.what());
         FunctionExitLog(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -72,7 +72,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamCodecType(RocdecBitstreamReader bs_read
 rocDecStatus ROCDECAPI rocDecGetBitstreamBitDepth(RocdecBitstreamReader bs_reader_handle, int *bit_depth) {
     FunctionEntryLog(logger);
     if (bs_reader_handle == nullptr || bit_depth == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
+        CriticalLog(logger, "Null pointer");
         FunctionExitLog(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
@@ -83,7 +83,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamBitDepth(RocdecBitstreamReader bs_reade
     }
     catch (const std::exception& e) {
         roc_bs_reader_handle->CaptureError(e.what());
-        logger.CriticalLog(MakeMsg(e.what()));
+        CriticalLog(logger, e.what());
         FunctionExitLog(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -94,7 +94,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamBitDepth(RocdecBitstreamReader bs_reade
 rocDecStatus ROCDECAPI rocDecGetBitstreamPicData(RocdecBitstreamReader bs_reader_handle, uint8_t **pic_data, int *pic_size, int64_t *pts) {
     FunctionEntryLog(logger);
     if (bs_reader_handle == nullptr || pic_data == nullptr || pic_size == nullptr || pts == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
+        CriticalLog(logger, "Null pointer");
         FunctionExitLog(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
@@ -105,7 +105,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamPicData(RocdecBitstreamReader bs_reader
     }
     catch (const std::exception& e) {
         roc_bs_reader_handle->CaptureError(e.what());
-        logger.CriticalLog(MakeMsg(e.what()));
+        CriticalLog(logger, e.what());
         FunctionExitLog(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -116,7 +116,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamPicData(RocdecBitstreamReader bs_reader
 rocDecStatus ROCDECAPI rocDecDestroyBitstreamReader(RocdecBitstreamReader bs_reader_handle) {
     FunctionEntryLog(logger);
     if (bs_reader_handle == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
+        CriticalLog(logger, "Null pointer");
         FunctionExitLog(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
