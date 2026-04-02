@@ -203,7 +203,15 @@ hsa_signal_value_t InterruptSignal::WaitAcquire(
     uint64_t timeout, hsa_wait_state_t wait_hint) {
   hsa_signal_value_t ret =
       WaitRelaxed(condition, compare_value, timeout, wait_hint);
+  
   std::atomic_thread_fence(std::memory_order_acquire);
+#ifdef __linux__ 
+  if (std::getenv("HSA_FORCE_HUGETLB")) {
+  #if defined(__x86_64__) || defined(_M_X64)
+    __builtin_ia32_mfence(); // Pour le Steam Deck (x86)
+  #endif 
+  }
+#endif
   return ret;
 }
 
