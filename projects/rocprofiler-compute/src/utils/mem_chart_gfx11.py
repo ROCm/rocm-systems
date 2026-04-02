@@ -29,10 +29,6 @@ RDNA3.5 MEMORY HIERARCHY (GCEA = Graphics Core Efficiency Arbiter):
          -> LDS (Local Data Share) [stays on CU, no GL1C connection]
 """
 
-import os
-
-os.environ["COLUMNS"] = "200"
-
 import argparse
 import json
 from dataclasses import dataclass, field
