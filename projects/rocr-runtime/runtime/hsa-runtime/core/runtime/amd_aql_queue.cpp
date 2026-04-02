@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <thread>
 #include "core/inc/amd_aql_queue.h"
 
 #ifdef __linux__
@@ -398,6 +399,24 @@ AqlQueue::~AqlQueue() {
 }
 
 void AqlQueue::Destroy() {
+  // Lifecycle state machine: prevent destroy during migration
+  {
+    int spin_count = 0;
+    while (!TryBeginDestroy()) {
+      // State is MIGRATING - wait for migration to complete
+      if (GetLifecycleState() == LifecycleState::MIGRATING) {
+        if (++spin_count > 10000) {
+          fprintf(stderr, "HSA warning: Queue destroy spin-wait exceeded 10000 iterations during migration
+");
+          break;  // Proceed with destroy to avoid deadlock
+        }
+        std::this_thread::yield();
+        continue;
+      }
+      break;  // DESTROYING state - another thread is destroying
+    }
+  }
+
   if (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE) {
     agent_->GWSRelease();
     return;
