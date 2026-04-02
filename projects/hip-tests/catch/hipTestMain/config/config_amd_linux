@@ -116,6 +116,10 @@
         "Unit_Device___hfma2_Accuracy_Positive",
         "=== Test does not reflect a valid use case - SWDEV-569454",
         "Unit_hipStreamPerThread_MultiThread",
+        "============================TheRock_Bump_Linux_Costly===================================",
+        "=== This is newly added test to check ASAN memory errors deduced from rocDecode ===",
+        "=== during ASAN/memleak detection work on Linux. Looks like it takes too much time ===",
+        "Unit_MemcpyToSymbolInParallelWithStreamLaunch",
     #endif
     #if defined ENABLE_ADDRESS_SANITIZER
         "=== These tests are testing for features which throw off the sanitizer like check for values after free===",

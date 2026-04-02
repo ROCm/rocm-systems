@@ -3657,6 +3657,24 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   if (status == AMDSMI_STATUS_SUCCESS &&
       metric_info.num_partition != std::numeric_limits<uint16_t>::max()) {
     profile->num_partitions = metric_info.num_partition;
+  } else {
+    // calculate current partition's number of partitions another way
+    if (profile->profile_type == AMDSMI_ACCELERATOR_PARTITION_SPX) {
+      profile->num_partitions = 1;
+    } else if (profile->profile_type == AMDSMI_ACCELERATOR_PARTITION_DPX) {
+      profile->num_partitions = 2;
+    } else if (profile->profile_type == AMDSMI_ACCELERATOR_PARTITION_TPX) {
+      profile->num_partitions = 3;
+    } else if (profile->profile_type == AMDSMI_ACCELERATOR_PARTITION_QPX) {
+      profile->num_partitions = 4;
+    } else if (profile->profile_type == AMDSMI_ACCELERATOR_PARTITION_CPX) {
+      // Note: # of XCDs is max # of partitions CPX supports
+      uint16_t tmp_xcd_count = 0;
+      amdsmi_status_t xcd_status = amdsmi_get_gpu_xcd_counter(processor_handle, &tmp_xcd_count);
+      if (xcd_status == AMDSMI_STATUS_SUCCESS) {
+        profile->num_partitions = tmp_xcd_count;
+      }
+    }
   }
 
   status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, 0, &tmp_partition_id);
