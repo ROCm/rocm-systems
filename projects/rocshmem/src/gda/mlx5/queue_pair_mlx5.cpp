@@ -182,9 +182,6 @@ __device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe) {
 }
 
 __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots) {
-  uint16_t consumed_slots;
-  uint16_t available_slots;
-
   uint16_t sq_depth = mlx5_sq.depth;
 
   uint64_t sq_post = __hip_atomic_load(&mlx5_sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
@@ -233,8 +230,8 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
      * in some marginal cases it's maybe possible to see consumed_slots > sq_depth,
      * but in that case available_slots will be very large, > requested_available_slots,
      * and the loop will continue for another iteration */
-    consumed_slots  = posted   - completed;
-    available_slots = sq_depth - consumed_slots;
+    uint16_t consumed_slots  = posted   - completed;
+    uint16_t available_slots = sq_depth - consumed_slots;
 
     /* continue until both:
      *   - no additional WQEs have been posted
