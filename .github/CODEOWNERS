@@ -57,7 +57,14 @@
 # rocprof-trace-decoder code owners
 /projects/rocprof-trace-decoder/                                      @ROCm/rocm-devtools-team
 
-# Documentation-specific ownership by project
+# Media Libs
+/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther
+/projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther
+
+# Experimental
+/experimental/rocjitsu                                                @atgutier
+
+# Documentation-specific ownership by project (last to take precedence)
 
 /projects/clr/**/*.md                                                 @ROCm/clr-reviewers @ROCm/lrt-docs-reviewers
 /projects/clr/**/*.rst                                                @ROCm/clr-reviewers @ROCm/lrt-docs-reviewers
@@ -103,7 +110,3 @@
 /projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation
-
-# Media Libs
-/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther
-/projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther
