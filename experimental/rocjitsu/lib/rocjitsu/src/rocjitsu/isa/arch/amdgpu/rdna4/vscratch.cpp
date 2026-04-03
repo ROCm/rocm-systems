@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vscratch.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -37,7 +38,7 @@ void ScratchLoadU8Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -61,7 +62,7 @@ void ScratchLoadI8Vscratch::execute(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -84,7 +85,7 @@ void ScratchLoadU16Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -108,7 +109,7 @@ void ScratchLoadI16Vscratch::execute(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -131,7 +132,7 @@ void ScratchLoadB32Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -154,7 +155,7 @@ void ScratchLoadB64Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -177,7 +178,7 @@ void ScratchLoadB96Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -200,7 +201,7 @@ void ScratchLoadB128Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -222,7 +223,7 @@ void ScratchStoreB8Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -253,7 +254,7 @@ void ScratchStoreB16Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -284,7 +285,7 @@ void ScratchStoreB32Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -315,7 +316,7 @@ void ScratchStoreB64Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -348,7 +349,7 @@ void ScratchStoreB96Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -383,7 +384,7 @@ void ScratchStoreB128Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -421,7 +422,7 @@ void ScratchLoadD16U8Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -445,7 +446,7 @@ void ScratchLoadD16I8Vscratch::execute(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -468,7 +469,7 @@ void ScratchLoadD16B16Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -491,7 +492,7 @@ void ScratchLoadD16HiU8Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -515,7 +516,7 @@ void ScratchLoadD16HiI8Vscratch::execute(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -538,7 +539,7 @@ void ScratchLoadD16HiB16Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -560,7 +561,7 @@ void ScratchStoreD16HiB8Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -591,7 +592,7 @@ void ScratchStoreD16HiB16Vscratch::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.nv, inst_.nv);
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();

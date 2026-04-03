@@ -168,7 +168,7 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
     break;
   case ROCJITSU_CODE_ARCH_CDNA4:
     gpu.gpu_id = 0x9500;
-    gpu.gfx_target_version = 95000;
+    gpu.gfx_target_version = 90500;
     gpu.device_id = 0x7400;
     break;
   case ROCJITSU_CODE_ARCH_RDNA1:
@@ -198,7 +198,7 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
     break;
   default:
     gpu.gpu_id = 0x9500;
-    gpu.gfx_target_version = 95000;
+    gpu.gfx_target_version = 90500;
     gpu.device_id = 0x7400;
     break;
   }
