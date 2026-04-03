@@ -866,11 +866,12 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
     hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
         raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
 
-    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) << fmt::format(
-        "Error: hsa_amd_signal_async_handler (signal={.handle={}) failed with error code {} :: {} ",
-        raw_signal.handle,
-        static_cast<int>(status),
-        hsa::get_hsa_status_string(status));
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << fmt::format("Error: hsa_amd_signal_async_handler (signal={{.handle={}}}) failed with "
+                       "error code {} :: {} ",
+                       raw_signal.handle,
+                       static_cast<int>(status),
+                       hsa::get_hsa_status_string(status));
 }
 
 Queue::pooled_signal_t*

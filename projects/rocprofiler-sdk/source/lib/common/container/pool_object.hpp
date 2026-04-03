@@ -112,7 +112,7 @@ pool_object<Tp>::release()
     bool expected = true;
     auto val      = m_in_use.compare_exchange_strong(expected, false);
 
-    if(m_pool) m_pool->release(m_index);
+    if(val && m_pool) m_pool->release(m_index);
 
     return val;
 }

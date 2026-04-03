@@ -27,6 +27,7 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/mpl.hpp"
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -57,7 +58,6 @@ struct pool
     template <typename FuncT, typename... Args>
     explicit pool(std::piecewise_construct_t, size_type count, FuncT&& ctor, Args&&... args);
 
-    pool()                = default;
     ~pool()               = default;
     pool(const pool&)     = delete;
     pool(pool&&) noexcept = delete;
@@ -72,8 +72,8 @@ struct pool
     template <typename FuncT, typename... Args>
     pool_object<Tp>& acquire(FuncT&& ctor, Args&&... args);
 
-    template <typename FuncT = void (*)(Tp&)>
-    void clear(FuncT&& func = [](Tp&) {});
+    template <typename FuncT = void (*)(pool_object<Tp>&)>
+    void clear(FuncT&& func = [](pool_object<Tp>&) {});
 
     std::string get_usage_report() const;
 
@@ -202,7 +202,19 @@ pool<Tp>::clear(FuncT&& func)
             "Pool object at index {} is still in use during pool clear", itr.index());
         itr.release();
         // run cleanup lambda
-        func(itr);
+        if constexpr(std::is_invocable_v<FuncT, pool_object<Tp>&>)
+        {
+            func(itr);
+        }
+        else if constexpr(std::is_invocable_v<FuncT, Tp&>)
+        {
+            func(itr.get());
+        }
+        else
+        {
+            static_assert(mpl::assert_false<FuncT>::value,
+                          "Invalid function type for pool<Tp>::clear");
+        }
     }
 
     auto _write_avail_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
