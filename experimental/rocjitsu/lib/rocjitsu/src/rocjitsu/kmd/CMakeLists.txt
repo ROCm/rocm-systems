@@ -15,7 +15,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${GENERATED_DIR})
     target_link_libraries(rocjitsu_kmd_shim PRIVATE
         rocjitsu_kmd
-        rocjitsu_code rocjitsu_isa rocjitsu_isa_cdna3 rocjitsu_isa_cdna4 rocjitsu_isa_risc_v
+        rocjitsu_code rocjitsu_isa
+        rocjitsu_isa_cdna1 rocjitsu_isa_cdna2 rocjitsu_isa_cdna3 rocjitsu_isa_cdna4
+        rocjitsu_isa_rdna1 rocjitsu_isa_rdna2 rocjitsu_isa_rdna3 rocjitsu_isa_rdna3_5 rocjitsu_isa_rdna4
+        rocjitsu_isa_risc_v
         simdojo rocjitsu_vm rocjitsu_vm_amdgpu rocjitsu_vm_risc_v rocjitsu_config
         util flatbuffers Threads::Threads dl)
     target_compile_definitions(rocjitsu_kmd_shim PRIVATE _GNU_SOURCE)
