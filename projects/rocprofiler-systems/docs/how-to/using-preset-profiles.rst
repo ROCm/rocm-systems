@@ -14,6 +14,9 @@ combine domain flags for composable configuration.
 Quick start
 ===========
 
+The following example runs are using the `rocprof-sys-run` tool.
+All of the examples should and will produce the same output when running with `rocprof-sys-sample` tool also.
+
 .. code-block:: shell
 
    # Use a preset for balanced profiling

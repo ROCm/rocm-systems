@@ -93,6 +93,10 @@ resolve_schema_config(const nlohmann::json& j)
         resolve_value(result, tracing, "buffer_size_kb",
                       env_vars::PERFETTO_BUFFER_SIZE_KB);
         resolve_value(result, tracing, "fill_policy", env_vars::PERFETTO_FILL_POLICY);
+        resolve_value(result, tracing, "backend", env_vars::PERFETTO_BACKEND);
+        resolve_value(result, tracing, "flush_period_ms",
+                      env_vars::PERFETTO_FLUSH_PERIOD);
+        resolve_value(result, tracing, "region", env_vars::TRACE_REGION);
     }
 
     // --- Profiling section ---
@@ -119,6 +123,8 @@ resolve_schema_config(const nlohmann::json& j)
         resolve_value(result, sampling, "cpus", env_vars::SAMPLING_CPUS);
         resolve_value(result, sampling, "gpus", env_vars::SAMPLING_GPUS);
         resolve_value(result, sampling, "ainics", env_vars::SAMPLING_AINICS);
+        resolve_value(result, sampling, "overflow_event",
+                      env_vars::SAMPLING_OVERFLOW_EVENT);
     }
 
     // --- Domains section ---
@@ -163,6 +169,8 @@ resolve_schema_config(const nlohmann::json& j)
                 resolve_value(result, gpu, "sampling_rate_hz", env_vars::AMD_SMI_FREQ);
                 resolve_value(result, gpu, "process_sampling_freq",
                               env_vars::PROCESS_SAMPLING_FREQ);
+                resolve_value(result, gpu, "process_sampling_duration",
+                              env_vars::PROCESS_SAMPLING_DURATION);
                 if(gpu.contains("ainic"))
                     resolve_enabled(result, gpu["ainic"], "enabled", env_vars::USE_AINIC);
             }
@@ -212,6 +220,9 @@ resolve_schema_config(const nlohmann::json& j)
         if(domains.contains("cpu"))
         {
             const auto& cpu = domains["cpu"];
+            if(cpu.contains("cpu_freq_enabled"))
+                resolve_enabled(result, cpu["cpu_freq_enabled"], "enabled",
+                                env_vars::CPU_FREQ_ENABLED);
             if(cpu.contains("enabled") && cpu["enabled"].get<bool>())
             {
                 result[std::string{ env_vars::USE_PROCESS_SAMPLING }] = "true";
@@ -284,6 +295,8 @@ resolve_schema_config(const nlohmann::json& j)
         if(output.contains("rocpd_output"))
             resolve_enabled(result, output["rocpd_output"], "enabled",
                             env_vars::USE_ROCPD);
+        if(output.contains("use_pid"))
+            resolve_enabled(result, output["use_pid"], "enabled", env_vars::USE_PID);
     }
 
     // --- Causal profiling section ---
@@ -675,6 +688,10 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
                      "buffer_size_kb");
     export_string_value(j, env_map, env_vars::PERFETTO_FILL_POLICY, "tracing",
                         "fill_policy");
+    export_string_value(j, env_map, env_vars::PERFETTO_BACKEND, "tracing", "backend");
+    export_int_value(j, env_map, env_vars::PERFETTO_FLUSH_PERIOD, "tracing",
+                     "flush_period_ms");
+    export_string_value(j, env_map, env_vars::TRACE_REGION, "tracing", "region");
 
     // --- Profiling ---
     export_section_enabled(j, env_map, env_vars::PROFILE, "profiling");
@@ -690,8 +707,12 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_string_value(j, env_map, env_vars::SAMPLING_CPUS, "sampling", "cpus");
     export_string_value(j, env_map, env_vars::SAMPLING_GPUS, "sampling", "gpus");
     export_string_value(j, env_map, env_vars::SAMPLING_AINICS, "sampling", "ainics");
+    export_string_value(j, env_map, env_vars::SAMPLING_OVERFLOW_EVENT, "sampling",
+                        "overflow_event");
 
     // --- Domains: GPU ---
+    if(auto v = get_val(env_vars::USE_PROCESS_SAMPLING))
+        j["domains"]["gpu"]["process_sampling"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_AMD_SMI))
     {
         j["domains"]["gpu"]["enabled"] = is_truthy(*v);
@@ -714,6 +735,9 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
             set_json_int(j["domains"]["gpu"]["sampling_rate_hz"]["value"], *freq);
         if(auto freq = get_val(env_vars::PROCESS_SAMPLING_FREQ))
             set_json_double(j["domains"]["gpu"]["process_sampling_freq"]["value"], *freq);
+        if(auto dur = get_val(env_vars::PROCESS_SAMPLING_DURATION))
+            set_json_double(j["domains"]["gpu"]["process_sampling_duration"]["value"],
+                            *dur);
         if(auto v = get_val(env_vars::USE_AINIC))
             j["domains"]["gpu"]["ainic"]["enabled"] = is_truthy(*v);
     }
@@ -740,6 +764,8 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
         j["domains"]["rocm"]["group_by_queue"]["enabled"] = is_truthy(*v);
 
     // --- Domains: CPU ---
+    if(auto v = get_val(env_vars::CPU_FREQ_ENABLED))
+        j["domains"]["cpu"]["cpu_freq_enabled"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_PROCESS_SAMPLING))
     {
         if(is_truthy(*v))
@@ -774,6 +800,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_enabled(j, env_map, env_vars::TIME_OUTPUT, "output", "time_output");
     export_enabled(j, env_map, env_vars::FILE_OUTPUT, "output", "file_output");
     export_enabled(j, env_map, env_vars::USE_ROCPD, "output", "rocpd_output");
+    export_enabled(j, env_map, env_vars::USE_PID, "output", "use_pid");
 
     // --- Hardware counters ---
     if(auto v = get_val(env_vars::ROCM_EVENTS))
@@ -834,23 +861,15 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     //
     // The following ROCPROFSYS_* env vars are NOT included in the JSON preset
     // schema. These are internal runtime settings whose values depend on the
-    // specific invocation context, tooling infrastructure, or low-level
-    // implementation details. Including them in presets would be harmful:
-    // a preset should describe *what* to profile, not *how* the profiler
-    // manages its own internals.
-    //
-    // If any of these are later deemed useful as preset configuration, they
-    // should be moved into the appropriate schema section (e.g., tracing,
-    // advanced) on a case-by-case basis — NOT bulk-exposed via an "internal"
-    // domain.
+    // specific invocation context or tooling infrastructure. Including them
+    // in presets would be harmful: a preset should describe *what* to profile,
+    // not *how* the profiler manages its own internals.
     //
     // Session-specific (depend on the invocation, not the profiling intent):
     //   ROCPROFSYS_CONFIG_FILE     - Path to the user's config file; set at
     //                                invocation time, not a profiling choice.
     //   ROCPROFSYS_OUTPUT_PREFIX   - Per-run output prefix (e.g., test name);
     //                                set by test harness or user per-run.
-    //   ROCPROFSYS_TRACE_REGION    - Region filter for selective tracing;
-    //                                depends on the specific application.
     //
     // Internal plumbing (implementation details users should not configure):
     //   ROCPROFSYS_ENABLED                 - Master profiler enable flag.
@@ -864,25 +883,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     //                                        rocprof-sys-avail; setting them
     //                                        in a preset would break config
     //                                        file handling.
-    //   ROCPROFSYS_USE_PID                 - Include PID in output paths.
-    //                                        Managed automatically by the
-    //                                        output subsystem.
-    //   ROCPROFSYS_PERFETTO_BACKEND        - Perfetto backend (inprocess/
-    //                                        system). Low-level transport
-    //                                        choice, not a profiling concern.
-    //   ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS - Perfetto flush interval.
-    //                                        Performance tuning for the trace
-    //                                        writer, not user-facing.
-    //   ROCPROFSYS_PROCESS_SAMPLING_DURATION - Duration of process sampling.
-    //                                        Controlled via SAMPLING_DURATION
-    //                                        in the sampling section instead.
-    //   ROCPROFSYS_SAMPLING_OVERFLOW_EVENT  - Hardware overflow event name
-    //                                        (e.g., PERF_COUNT_HW_CACHE_REFERENCES).
-    //                                        Highly platform-specific; not
-    //                                        portable across machines.
-    //   ROCPROFSYS_CPU_FREQ_ENABLED        - CPU frequency monitoring flag.
-    //                                        Controlled indirectly via the
-    //                                        domains.cpu section instead.
+    //   ROCPROFSYS_CI                      - Internal CI mode flag.
 
     return j;
 }

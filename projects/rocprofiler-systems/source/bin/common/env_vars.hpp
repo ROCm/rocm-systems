@@ -11,12 +11,16 @@ namespace env_vars
 {
 
 // --- General ---
-constexpr std::string_view ROOT        = "ROCPROFSYS_ROOT";
-constexpr std::string_view MODE        = "ROCPROFSYS_MODE";
-constexpr std::string_view SCRIPT_PATH = "ROCPROFSYS_SCRIPT_PATH";
-constexpr std::string_view CONFIG_FILE = "ROCPROFSYS_CONFIG_FILE";
-constexpr std::string_view MONOCHROME  = "ROCPROFSYS_MONOCHROME";
-constexpr std::string_view LOG_LEVEL   = "ROCPROFSYS_LOG_LEVEL";
+constexpr std::string_view ROOT               = "ROCPROFSYS_ROOT";
+constexpr std::string_view MODE               = "ROCPROFSYS_MODE";
+constexpr std::string_view SCRIPT_PATH        = "ROCPROFSYS_SCRIPT_PATH";
+constexpr std::string_view CONFIG_FILE        = "ROCPROFSYS_CONFIG_FILE";
+constexpr std::string_view PRESET_DIR         = "ROCPROFSYS_PRESET_DIR";
+constexpr std::string_view MONOCHROME         = "ROCPROFSYS_MONOCHROME";
+constexpr std::string_view LOG_LEVEL          = "ROCPROFSYS_LOG_LEVEL";
+constexpr std::string_view TMPDIR             = "ROCPROFSYS_TMPDIR";
+constexpr std::string_view ENABLE_CATEGORIES  = "ROCPROFSYS_ENABLE_CATEGORIES";
+constexpr std::string_view DISABLE_CATEGORIES = "ROCPROFSYS_DISABLE_CATEGORIES";
 
 // --- Tracing ---
 constexpr std::string_view TRACE                   = "ROCPROFSYS_TRACE";
@@ -24,8 +28,11 @@ constexpr std::string_view TRACE_LEGACY            = "ROCPROFSYS_TRACE_LEGACY";
 constexpr std::string_view PERFETTO_FILE           = "ROCPROFSYS_PERFETTO_FILE";
 constexpr std::string_view PERFETTO_BUFFER_SIZE_KB = "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB";
 constexpr std::string_view PERFETTO_FILL_POLICY    = "ROCPROFSYS_PERFETTO_FILL_POLICY";
-constexpr std::string_view TRACE_THREAD_LOCKS      = "ROCPROFSYS_TRACE_THREAD_LOCKS";
-constexpr std::string_view TRACE_THREAD_RW_LOCKS   = "ROCPROFSYS_TRACE_THREAD_RW_LOCKS";
+constexpr std::string_view PERFETTO_BACKEND        = "ROCPROFSYS_PERFETTO_BACKEND";
+constexpr std::string_view PERFETTO_FLUSH_PERIOD = "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS";
+constexpr std::string_view TRACE_REGION          = "ROCPROFSYS_TRACE_REGION";
+constexpr std::string_view TRACE_THREAD_LOCKS    = "ROCPROFSYS_TRACE_THREAD_LOCKS";
+constexpr std::string_view TRACE_THREAD_RW_LOCKS = "ROCPROFSYS_TRACE_THREAD_RW_LOCKS";
 constexpr std::string_view TRACE_THREAD_SPIN_LOCKS = "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS";
 
 // --- Profiling ---
@@ -44,6 +51,7 @@ constexpr std::string_view SAMPLING_AINICS   = "ROCPROFSYS_SAMPLING_AINICS";
 constexpr std::string_view SAMPLING_TIDS     = "ROCPROFSYS_SAMPLING_TIDS";
 constexpr std::string_view SAMPLING_INCLUDE_INLINES =
     "ROCPROFSYS_SAMPLING_INCLUDE_INLINES";
+constexpr std::string_view SAMPLING_OVERFLOW_EVENT = "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT";
 
 // --- Sampling: cputime timer ---
 constexpr std::string_view SAMPLING_CPUTIME       = "ROCPROFSYS_SAMPLING_CPUTIME";
@@ -83,6 +91,7 @@ constexpr std::string_view USE_UCX     = "ROCPROFSYS_USE_UCX";
 // --- Output ---
 constexpr std::string_view OUTPUT_PATH   = "ROCPROFSYS_OUTPUT_PATH";
 constexpr std::string_view OUTPUT_PREFIX = "ROCPROFSYS_OUTPUT_PREFIX";
+constexpr std::string_view USE_PID       = "ROCPROFSYS_USE_PID";
 constexpr std::string_view TIME_OUTPUT   = "ROCPROFSYS_TIME_OUTPUT";
 constexpr std::string_view FILE_OUTPUT   = "ROCPROFSYS_FILE_OUTPUT";
 constexpr std::string_view TEXT_OUTPUT   = "ROCPROFSYS_TEXT_OUTPUT";
@@ -96,6 +105,8 @@ constexpr std::string_view USE_ROCPD     = "ROCPROFSYS_USE_ROCPD";
 // --- Process sampling ---
 constexpr std::string_view PROCESS_SAMPLING_FREQ  = "ROCPROFSYS_PROCESS_SAMPLING_FREQ";
 constexpr std::string_view PROCESS_SAMPLING_DELAY = "ROCPROFSYS_PROCESS_SAMPLING_DELAY";
+constexpr std::string_view PROCESS_SAMPLING_DURATION =
+    "ROCPROFSYS_PROCESS_SAMPLING_DURATION";
 constexpr std::string_view SAMPLING_PROCESS_DURATION =
     "ROCPROFSYS_SAMPLING_PROCESS_DURATION";
 

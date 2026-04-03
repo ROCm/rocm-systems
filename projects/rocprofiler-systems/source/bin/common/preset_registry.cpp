@@ -3,8 +3,10 @@
 
 #include "common/preset_registry.hpp"
 
+#include "common/env_vars.hpp"
 #include "embedded_presets.hpp"
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
@@ -19,7 +21,7 @@ namespace
 std::string
 find_preset_directory()
 {
-    const auto* preset_dir_env = std::getenv("ROCPROFSYS_PRESET_DIR");
+    const auto* preset_dir_env = std::getenv(std::string{ env_vars::PRESET_DIR }.c_str());
     if(preset_dir_env && std::strlen(preset_dir_env) > 0)
     {
         auto dir = std::string{ preset_dir_env };
@@ -152,7 +154,7 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
     // If it looks like a path, return as-is
     if(name_or_path.find('/') != std::string::npos ||
        (name_or_path.size() > 5 &&
-        name_or_path.substr(name_or_path.size() - 5) == ".json"))
+        name_or_path.compare(name_or_path.size() - 5, 5, ".json") == 0))
     {
         return name_or_path;
     }
@@ -210,6 +212,7 @@ preset_registry::ensure_all_loaded()
     auto* dir = opendir(m_directory.c_str());
     if(!dir) return;
 
+    errno = 0;
     while(auto* entry = readdir(dir))
     {
         std::string_view filename{ entry->d_name };
@@ -224,11 +227,19 @@ preset_registry::ensure_all_loaded()
         auto preset_name =
             std::string{ filename.substr(0, filename.size() - json_ext.size()) };
 
-        // Skip if preset is already cached
+        // Skip if preset is already cached (e.g. from embedded presets)
         if(m_presets.count(preset_name) > 0) continue;
 
         auto filepath = common::join('/', m_directory, std::string{ filename });
         if(auto info = load_file(filepath)) m_presets[preset_name] = std::move(*info);
+
+        errno = 0;
+    }
+
+    if(errno != 0)
+    {
+        std::cerr << "[rocprof-sys] WARNING: Error reading preset directory '"
+                  << m_directory << "': " << std::strerror(errno) << '\n';
     }
 
     closedir(dir);

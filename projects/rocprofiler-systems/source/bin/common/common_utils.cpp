@@ -3,6 +3,7 @@
 
 #include "common/common_utils.hpp"
 
+#include "common/env_vars.hpp"
 #include "common/json_config.hpp"
 
 #include <cctype>
@@ -156,26 +157,31 @@ void
 validate_configuration()
 {
     // Check for conflicting ENABLE/DISABLE categories (causes std::abort() at runtime)
-    const char* enable_cats  = std::getenv("ROCPROFSYS_ENABLE_CATEGORIES");
-    const char* disable_cats = std::getenv("ROCPROFSYS_DISABLE_CATEGORIES");
+    const char* enable_cats =
+        std::getenv(std::string{ rocprofsys::env_vars::ENABLE_CATEGORIES }.c_str());
+    const char* disable_cats =
+        std::getenv(std::string{ rocprofsys::env_vars::DISABLE_CATEGORIES }.c_str());
     if(enable_cats && std::strlen(enable_cats) > 0 && disable_cats &&
        std::strlen(disable_cats) > 0)
     {
-        std::cerr << "[rocprof-sys][warning] Both ROCPROFSYS_ENABLE_CATEGORIES and "
-                     "ROCPROFSYS_DISABLE_CATEGORIES are set.\n"
+        std::cerr << "[rocprof-sys][warning] Both "
+                  << rocprofsys::env_vars::ENABLE_CATEGORIES << " and "
+                  << rocprofsys::env_vars::DISABLE_CATEGORIES << " are set.\n"
                   << "  This will cause an abort at runtime. Use only one.\n"
-                  << "  ROCPROFSYS_ENABLE_CATEGORIES=" << enable_cats << "\n"
-                  << "  ROCPROFSYS_DISABLE_CATEGORIES=" << disable_cats << "\n";
+                  << "  " << rocprofsys::env_vars::ENABLE_CATEGORIES << "=" << enable_cats
+                  << "\n"
+                  << "  " << rocprofsys::env_vars::DISABLE_CATEGORIES << "="
+                  << disable_cats << "\n";
     }
 
     // Check ROCPROFSYS_TMPDIR writability
-    const char* tmpdir     = std::getenv("ROCPROFSYS_TMPDIR");
+    const char* tmpdir = std::getenv(std::string{ rocprofsys::env_vars::TMPDIR }.c_str());
     auto        tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
     if(!check_directory_writable(tmpdir_str))
     {
         std::cerr << "[rocprof-sys][WARNING] Temp directory '" << tmpdir_str
                   << "' is not writable!\n"
-                  << "  Try: export ROCPROFSYS_TMPDIR=/tmp\n";
+                  << "  Try: export " << rocprofsys::env_vars::TMPDIR << "=/tmp\n";
     }
 }
 

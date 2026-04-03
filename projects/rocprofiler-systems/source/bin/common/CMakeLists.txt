@@ -15,7 +15,7 @@
 # in cmake/Packages.cmake for SQL schema embedding.
 # ------------------------------------------------------------------------------#
 
-set(PRESET_SOURCE_DIR "${PROJECT_SOURCE_DIR}/share/rocprofiler-systems/presets")
+set(PRESET_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/presets")
 set(EMBEDDED_PRESET_ENTRIES "constexpr entry presets[] = {\n")
 
 file(GLOB PRESET_JSON_FILES "${PRESET_SOURCE_DIR}/*.json")

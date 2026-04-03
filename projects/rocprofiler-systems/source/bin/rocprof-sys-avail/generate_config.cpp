@@ -311,8 +311,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             const auto& env_name = itr.second->get_env_name();
             if(env_name.find("ROCPROFSYS_") != 0) continue;
 
-            auto val = itr.second->as_string();
-            if(!val.empty()) env_map[env_name] = val;
+            // Include all vars, even empty ones — the schema function
+            // handles empty values appropriately (e.g., empty string fields
+            // are still valid and indicate the setting exists).
+            env_map[env_name] = itr.second->as_string();
         }
 
         // Convert to hierarchical preset JSON schema (compatible with --preset)

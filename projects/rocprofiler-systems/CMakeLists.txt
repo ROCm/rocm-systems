@@ -534,8 +534,14 @@ install(
 # source/bin/common/CMakeLists.txt). The source files in
 # share/rocprofiler-systems/presets/ remain as the source of truth.
 # Schema.json is installed for documentation/validation purposes only.
+configure_file(
+    ${PROJECT_SOURCE_DIR}/source/bin/common/presets/schema.json
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets/schema.json
+    COPYONLY
+)
+
 install(
-    FILES "${PROJECT_SOURCE_DIR}/share/rocprofiler-systems/presets/schema.json"
+    FILES "${PROJECT_SOURCE_DIR}/source/bin/common/presets/schema.json"
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets
     COMPONENT setup
 )
