@@ -38,7 +38,7 @@ std::string
 compose_tmp_file_name(const output_config& cfg, domain_type buffer_type)
 {
     auto tmp_directory = fs::path{rocprofiler::tool::format_path(cfg.tmp_directory)};
-    auto filename      =
+    auto filename =
         tmp_directory / ".rocprofv3" /
         fmt::format("{}-{}.dat", "%ppid%-%pid%", get_domain_trace_file_name(buffer_type));
 
