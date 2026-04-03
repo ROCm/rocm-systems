@@ -67,8 +67,15 @@ bool debug_user = tim::get_env("ROCPROFSYS_DEBUG_USER_REGIONS", false) || get_de
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids()
 {
-    static thread_local auto _v = std::unordered_map<hash_value_t, std::string>{};
+    static auto _v = std::unordered_map<hash_value_t, std::string>{};
     return _v;
+}
+
+std::mutex&
+get_perfetto_track_uuids_mutex()
+{
+    static auto _mtx = std::mutex{};
+    return _mtx;
 }
 
 void

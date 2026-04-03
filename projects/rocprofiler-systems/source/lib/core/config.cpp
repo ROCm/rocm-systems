@@ -2762,7 +2762,17 @@ get_tmp_file(std::string _basename, std::string _ext)
     _cfg.use_suffix    = true;
     _cfg.suffix        = "%pid%";
     _cfg.explicit_path = get_tmpdir();
-    _cfg.subdirectory  = fmt::format("{}/{}", settings::output_path(), "%ppid%");
+
+    // Use only basename of output_path to avoid embedding absolute paths in subdirectory.
+    // E.g. output_path="/home/user/rocprofsys-output" ->
+    // subdirectory="rocprofsys-output/%ppid%" (not
+    // "/home/user/rocprofsys-output/%ppid%"), so files go under
+    // get_tmpdir()/rocprofsys-output/.
+    auto _output_path = settings::output_path();
+    auto _pos         = _output_path.rfind('/');
+    if(_pos != std::string::npos) _output_path = _output_path.substr(_pos + 1);
+    if(_output_path.empty()) _output_path = "rocprofsys";
+    _cfg.subdirectory = fmt::format("{}/{}", _output_path, "%ppid%");
     auto _fname =
         settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
 

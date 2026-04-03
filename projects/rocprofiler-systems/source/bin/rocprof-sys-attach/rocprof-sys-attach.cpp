@@ -50,12 +50,24 @@ print_usage(const char* prog_name)
 void
 setup_tool_library_env()
 {
-    const auto* env_name = "ROCPROF_ATTACH_TOOL_LIBRARY";
+    const auto* time_format_env_name             = "ROCPROFSYS_TIME_FORMAT";
+    const auto* attach_tool_library_env_name     = "ROCPROF_ATTACH_TOOL_LIBRARY";
+    const auto* rocp_tool_libraries_env_name     = "ROCP_TOOL_LIBRARIES";
+    const auto* output_use_current_time_env_name = "ROCPROFSYS_OUTPUT_USE_CURRENT_TIME";
 
-    const auto* existing = std::getenv(env_name);
+    // set the time format to %F_%H.%M.%S for the current session, because we want to
+    // avoid overlapping output files created in the same minute (the PID is not changed
+    // because of the re-attach)
+    setenv(time_format_env_name, "%F_%H.%M.%S", 1);
+
+    // enable the use of the current time for the output path
+    setenv(output_use_current_time_env_name, "true", 1);
+
+    const auto* existing = std::getenv(attach_tool_library_env_name);
     if(existing != nullptr)
     {
-        std::cout << "[rocprof-sys-attach] Using tool library: " << existing << std::endl;
+        setenv(rocp_tool_libraries_env_name, existing, 0);
+        std::cout << "[rocprof-sys-attach] Using tool library: " << existing << "\n";
         return;
     }
 
@@ -63,8 +75,9 @@ setup_tool_library_env()
         rocprofsys::common::path::get_internal_libpath("librocprof-sys-dl.so");
     if(!path.empty())
     {
-        setenv(env_name, path.c_str(), 0);
-        std::cout << "[rocprof-sys-attach] Using tool library: " << path << std::endl;
+        setenv(attach_tool_library_env_name, path.c_str(), 0);
+        setenv(rocp_tool_libraries_env_name, path.c_str(), 0);
+        std::cout << "[rocprof-sys-attach] Using tool library: " << path << "\n";
     }
 }
 
@@ -74,7 +87,7 @@ setup_output_env(const std::string& output_path)
     if(output_path.empty()) return;
 
     setenv("ROCPROFSYS_OUTPUT_PATH", output_path.c_str(), 1);
-    std::cout << "[rocprof-sys-attach] Output path: " << output_path << std::endl;
+    std::cout << "[rocprof-sys-attach] Output path: " << output_path << "\n";
 }
 
 void
@@ -99,7 +112,7 @@ setup_output_format_env(const std::vector<std::string>& formats)
     std::cout << "[rocprof-sys-attach] Output format:";
     for(const auto& fmt : formats)
         std::cout << " " << fmt;
-    std::cout << std::endl;
+    std::cout << "\n";
 }
 
 bool
@@ -172,7 +185,7 @@ parse_args(int argc, char* argv[])
             std::exit(EXIT_SUCCESS);
         }
 
-        if(is_option(arg, "-p", "-p"))
+        if(is_option(arg, "-p", "--pid"))
         {
             parse_pid(opts, consume_arg(i, argc, argv, "-p"));
             continue;
@@ -223,49 +236,46 @@ main(int argc, char* argv[])
 
     const auto pid = opts.pid;
 
-    std::cout << "[rocprof-sys-attach] Trying to attach to process " << pid << std::endl;
+    std::cout << "[rocprof-sys-attach] Trying to attach to process " << pid << "\n";
 
     auto result = rocattach_attach(pid);
     if(result != ROCATTACH_STATUS_SUCCESS)
     {
-        std::cerr << "[rocprof-sys-attach] Failed to attach to process " << pid
-                  << std::endl;
+        std::cerr << "[rocprof-sys-attach] Failed to attach to process " << pid << "\n";
         return EXIT_FAILURE;
     }
 
     std::cout << "[rocprof-sys-attach] Attached to process " << pid
-              << ". Press ENTER to detach." << std::endl;
+              << ". Press ENTER to detach." << "\n";
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
     result = rocattach_detach(pid);
     if(result != ROCATTACH_STATUS_SUCCESS)
     {
-        std::cerr << "[rocprof-sys-attach] Failed to detach from process " << pid
-                  << std::endl;
+        std::cerr << "[rocprof-sys-attach] Failed to detach from process " << pid << "\n";
         return EXIT_FAILURE;
     }
 
-    std::cout << "[rocprof-sys-attach] Detached from process " << pid << std::endl;
+    std::cout << "[rocprof-sys-attach] Detached from process " << pid << "\n";
 
     // Print output location info
     if(!opts.profile_format.empty())
     {
         std::string output_dir =
             opts.output_path.empty() ? "rocprof-sys-output/" : opts.output_path;
-        std::cout << "[rocprof-sys-attach] Output written to: " << output_dir
-                  << std::endl;
+        std::cout << "[rocprof-sys-attach] Output written to: " << output_dir << "\n";
 
         for(const auto& fmt : opts.profile_format)
         {
             if(fmt == "perfetto")
             {
                 std::cout << "[rocprof-sys-attach]   - Perfetto trace: perfetto-trace-"
-                          << pid << ".proto" << std::endl;
+                          << pid << ".proto" << "\n";
             }
             else if(fmt == "rocpd")
             {
                 std::cout << "[rocprof-sys-attach]   - RocPD database: rocpd-" << pid
-                          << ".db" << std::endl;
+                          << ".db" << "\n";
             }
         }
     }
