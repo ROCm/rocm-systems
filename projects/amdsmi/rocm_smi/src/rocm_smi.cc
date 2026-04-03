@@ -7573,8 +7573,7 @@ rsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
     return RSMI_STATUS_BUSY;
   }
 
-  amd::smi::sleep_interruptible(seconds);
-
+  sleep(seconds);
   return RSMI_STATUS_SUCCESS;
 }
 
