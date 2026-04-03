@@ -609,33 +609,17 @@ def get_gpuid_dict(data: dict[str, Any]) -> dict[Any, int]:
     return gpu_map
 
 
-def parse_text(text_file: str) -> list[str]:
+def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     """
-    Parse the text file to get the pmc counters.
+    Parse the YAML file to get the pmc counters.
+    Assumes only one job per file.
     """
-
-    def process_line(line: str) -> list[str]:
-        if "pmc:" not in line:
-            return []
-        line = line.strip()
-        pos = line.find("#")
-        if pos >= 0:
-            line = line[0:pos]
-
-        def _dedup(_line: str, _sep: list[str]) -> str:
-            for itr in _sep:
-                _line = " ".join(_line.split(itr))
-            return _line.strip()
-
-        # remove tabs and duplicate spaces
-        return _dedup(line.replace("pmc:", ""), ["\n", "\t", " "]).split(" ")
-
-    with open(text_file) as file:
-        return [
-            counter
-            for litr in [process_line(itr) for itr in file.readlines()]
-            for counter in litr
-        ]
+    with open(pmc_perf_file) as file:
+        data = yaml.safe_load(file) or {}
+    jobs = data.get("jobs", [])
+    if not jobs:
+        return []
+    return jobs[0].get("pmc") or []
 
 
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:

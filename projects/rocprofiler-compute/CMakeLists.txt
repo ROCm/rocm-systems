@@ -550,8 +550,17 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_pc_sampling_analysis
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s
+        --junitxml=tests/test_pc_sampling_analysis.xml ${COV_OPTION}
+        tests/test_pc_sampling_analysis.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_pc_sampling
+    test_pc_sampling_analysis
     PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
