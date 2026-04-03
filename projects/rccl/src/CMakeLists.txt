@@ -464,10 +464,36 @@ add_custom_target(update_git_version
 
 list(APPEND HIP_SOURCES ${PROJECT_BINARY_DIR}/git_version.cpp)
 
+# LDS pointer transform: convert LDS-derived pointers to address_space(3)
+#==================================================================================================
+option(ENABLE_LDS_TRANSFORM "Enable LDS pointer transform for address_space(3) optimization" OFF)
+if(ENABLE_LDS_TRANSFORM)
+  set(LDS_TRANSFORM_STAMP "${PROJECT_BINARY_DIR}/lds_transform.stamp")
+  set(LDS_TRANSFORM_SCRIPT "${PROJECT_SOURCE_DIR}/cmake/scripts/lds_pointer_transform.py")
+
+  add_custom_command(
+    OUTPUT  ${LDS_TRANSFORM_STAMP}
+    COMMAND ${Python3_EXECUTABLE} ${LDS_TRANSFORM_SCRIPT}
+      --dir ${HIPIFY_DIR}/src/device
+      --dir ${HIPIFY_DIR}/src/device/network/unpack
+      --gendir ${GEN_DIR}
+    COMMAND ${CMAKE_COMMAND} -E touch ${LDS_TRANSFORM_STAMP}
+    DEPENDS ${LDS_TRANSFORM_SCRIPT}
+    COMMENT "LDS pointer transform on hipified device headers"
+    VERBATIM
+  )
+  add_custom_target(lds_transform DEPENDS ${LDS_TRANSFORM_STAMP})
+  add_dependencies(lds_transform hipify_all)
+endif()
+
 # Set up RCCL library
 #==================================================================================================
 ## Set RCCL source files
 add_library(rccl ${HIP_SOURCES})
+
+if(ENABLE_LDS_TRANSFORM)
+  add_dependencies(rccl lds_transform)
+endif()
 
 # Keep librccl outputs in the top-level build dir
 # existing packaging/tests scripts that link via ${PROJECT_BINARY_DIR}.
