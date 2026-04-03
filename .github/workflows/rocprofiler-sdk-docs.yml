@@ -189,7 +189,7 @@ jobs:
             -DHIP_PLATFORM=amd \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
-            -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/lib/llvm \
+            -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/llvm \
             -DHIP_CATCH_TEST=0 \
             -DCLR_BUILD_HIP=ON \
             -DCLR_BUILD_OCL=ON \
