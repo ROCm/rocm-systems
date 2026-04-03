@@ -41,7 +41,6 @@
 #include "functional/memory_read_write.h"
 #include "functional/memorypartition_read_write.h"
 #include "functional/metrics_counter_read.h"
-#include "functional/mutual_exclusion.h"
 #include "functional/overdrive_read.h"
 #include "functional/overdrive_read_write.h"
 #include "functional/pci_read_write.h"
