@@ -550,9 +550,15 @@ static ncclResult_t csvTunerGetCollInfo(void* context, ncclFunc_t collType, size
         if (table[config->algorithm][config->protocol] != NCCL_ALGO_PROTO_IGNORE) {
           table[config->algorithm][config->protocol] = 0.0; // Set low cost to prefer this configuration
 
-          // Only override channels if not set to -1 (keep default)
-          if (config->nChannels != -1) {
+          // Only override channels for valid explicit values; -1 keeps the default.
+          if (config->nChannels >= 1) {
             *nChannels = config->nChannels;
+          } else if (config->nChannels != -1) {
+            if (ctx->logFunction) {
+              ctx->logFunction(NCCL_LOG_WARN, NCCL_TUNING, __FILE__, __LINE__,
+                               "TUNER/CsvTuner: Ignoring invalid channel count %d for %s, bytes=%zu",
+                               config->nChannels, collTypeToString(config->collType), nBytes);
+            }
           }
 
           if (ctx->logFunction) {
