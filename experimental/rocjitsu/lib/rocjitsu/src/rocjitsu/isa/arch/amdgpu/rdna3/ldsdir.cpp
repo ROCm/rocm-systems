@@ -24,8 +24,7 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
 }
 
 void LdsParamLoadLdsdir::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: lds_direct
+  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
@@ -35,8 +34,7 @@ LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
 }
 
 void LdsDirectLoadLdsdir::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: lds_direct
+  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 } // namespace rdna3

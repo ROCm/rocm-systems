@@ -945,12 +945,12 @@ void BufferStoreD16HiFormatXMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
 BufferGl0InvMubuf::BufferGl0InvMubuf(const MachineInst *inst)
     : Mubuf("buffer_gl0_inv", reinterpret_cast<const OpEncoding *>(inst)) {}
 
-void BufferGl0InvMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferGl0InvMubuf::execute(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
 BufferGl1InvMubuf::BufferGl1InvMubuf(const MachineInst *inst)
     : Mubuf("buffer_gl1_inv", reinterpret_cast<const OpEncoding *>(inst)) {}
 
-void BufferGl1InvMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferGl1InvMubuf::execute(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
 BufferAtomicSwapB32Mubuf::BufferAtomicSwapB32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst)),

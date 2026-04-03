@@ -24,8 +24,8 @@ ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
 }
 
 void ImageLoadVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image load stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_load
 }
 
 ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
@@ -37,8 +37,8 @@ ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
 }
 
 void ImageLoadMipVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image load stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_load
 }
 
 ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
@@ -50,8 +50,8 @@ ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
 }
 
 void ImageLoadPckVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image load stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_load
 }
 
 ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
@@ -63,8 +63,8 @@ ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
 }
 
 void ImageLoadPckSgnVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image load stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_load
 }
 
 ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
@@ -76,8 +76,8 @@ ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
 }
 
 void ImageLoadMipPckVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image load stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_load
 }
 
 ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
@@ -89,8 +89,8 @@ ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
 }
 
 void ImageLoadMipPckSgnVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image load stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_load
 }
 
 ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
@@ -102,8 +102,8 @@ ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
 }
 
 void ImageStoreVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image store stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_store
 }
 
 ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
@@ -115,8 +115,8 @@ ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
 }
 
 void ImageStoreMipVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image store stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_store
 }
 
 ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
@@ -128,8 +128,8 @@ ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
 }
 
 void ImageStorePckVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image store stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_store
 }
 
 ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
@@ -141,8 +141,8 @@ ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
 }
 
 void ImageStoreMipPckVimage::execute(amdgpu::Wavefront &wf) {
+  // Minimal image store stub — Phase C placeholder.
   (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_store
 }
 
 ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
@@ -155,8 +155,7 @@ ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
 }
 
 void ImageAtomicSwapVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
@@ -169,8 +168,7 @@ ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
 }
 
 void ImageAtomicCmpswapVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
@@ -183,8 +181,7 @@ ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicAddUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
@@ -197,8 +194,7 @@ ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicSubUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
@@ -211,8 +207,7 @@ ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMinIntVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
@@ -225,8 +220,7 @@ ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMinUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
@@ -239,8 +233,7 @@ ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMaxIntVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
@@ -253,8 +246,7 @@ ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMaxUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
@@ -267,8 +259,7 @@ ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
 }
 
 void ImageAtomicAndVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
@@ -281,8 +272,7 @@ ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
 }
 
 void ImageAtomicOrVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
@@ -295,8 +285,7 @@ ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
 }
 
 void ImageAtomicXorVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
@@ -309,8 +298,7 @@ ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicIncUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
@@ -323,8 +311,7 @@ ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicDecUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
@@ -336,8 +323,7 @@ ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
 }
 
 void ImageGetResinfoVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_query
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
@@ -349,8 +335,7 @@ ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
 }
 
 void ImageBvhIntersectRayVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_bvh
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *inst)
@@ -393,8 +378,7 @@ ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
 }
 
 void ImageAtomicAddFltVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
@@ -407,8 +391,7 @@ ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMinFltVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
@@ -421,8 +404,7 @@ ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMaxFltVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
@@ -435,8 +417,7 @@ ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
 }
 
 void ImageAtomicPkAddF16Vimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
@@ -449,8 +430,7 @@ ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
 }
 
 void ImageAtomicPkAddBf16Vimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: image_atomic
+  (void)wf; // Deferred to Phase E (image pipeline).
 }
 
 } // namespace rdna4

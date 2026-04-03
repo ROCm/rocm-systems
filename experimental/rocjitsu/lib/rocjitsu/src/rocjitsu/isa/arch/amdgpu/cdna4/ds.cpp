@@ -1293,7 +1293,9 @@ DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
   src_operands_.emplace_back(&addr);
 }
 
-void DsSwizzleB32Ds::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void DsSwizzleB32Ds::execute(amdgpu::Wavefront &wf) {
+  (void)wf; // DS swizzle: Phase C placeholder.
+}
 
 DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
     : Ds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1306,7 +1308,9 @@ DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
   src_operands_.emplace_back(&data0);
 }
 
-void DsPermuteB32Ds::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void DsPermuteB32Ds::execute(amdgpu::Wavefront &wf) {
+  (void)wf; // DS permute: Phase C placeholder.
+}
 
 DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
     : Ds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1319,7 +1323,9 @@ DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
   src_operands_.emplace_back(&data0);
 }
 
-void DsBpermuteB32Ds::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void DsBpermuteB32Ds::execute(amdgpu::Wavefront &wf) {
+  (void)wf; // DS permute: Phase C placeholder.
+}
 
 DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
     : Ds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst)),
