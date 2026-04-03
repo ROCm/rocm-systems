@@ -294,6 +294,9 @@ class RocProfCompute_Base:
         native_tool_path = None
         # Native counter collection tool is only compatible with
         # rocprofiler-sdk public API for ROCm version >= 7.x.x
+
+        # PC sampling only profile does not need native tool
+
         # Do not use native tool in attach
         # mode until we figure out how multiple tools can attach
         # TODO: Figure out how multiple tools can attach
@@ -302,6 +305,7 @@ class RocProfCompute_Base:
             and not args.no_native_tool
             and int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
             and not args.attach_pid
+            and not is_only_pc_sampling(args.filter_blocks)
         ):
             # Use native counter collection tool
             # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations

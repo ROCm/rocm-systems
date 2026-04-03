@@ -210,6 +210,71 @@ def create_df_kernel_top_stats(
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
 
+def build_agent_to_gpu_map(
+    agent_info_path: Path,
+) -> dict[str, int]:
+    """
+    Map ``"Agent N"`` strings to 0-indexed GPU IDs.
+
+    GPU agents are identified by ``Agent_Type == "GPU"`` in the
+    agent info CSV.  They are sorted by ``Node_Id`` so that the
+    first GPU agent maps to GPU 0, the second to GPU 1, etc.
+
+    Returns an empty dict when *agent_info_path* does not exist.
+    """
+    if not agent_info_path.exists():
+        return {}
+
+    agent_df = pd.read_csv(agent_info_path)
+    gpu_agents = (
+        agent_df[agent_df["Agent_Type"] == "GPU"]
+        .sort_values("Node_Id")
+        .reset_index(drop=True)
+    )
+    return {f"Agent {row.Node_Id}": row.Index for row in gpu_agents.itertuples()}
+
+
+@demarcate
+def process_pc_sampling_kernel_trace(
+    workload_path: str,
+) -> pd.DataFrame:
+    """
+    Build kernel and dispatch info from a kernel trace.
+
+    Used for PC-sampling-only runs where ``pmc_perf`` data is not
+    available.  Reads ``ps_file_kernel_trace.csv`` (and optionally
+    ``ps_file_agent_info.csv`` for GPU ID mapping)
+    """
+    trace_path = Path(workload_path) / "ps_file_kernel_trace.csv"
+    if not trace_path.exists():
+        console_warning(
+            f"Kernel trace not found at {trace_path}. Cannot build dispatch data."
+        )
+        return pd.DataFrame(
+            columns=[
+                "Dispatch_Id",
+                "Kernel_Name",
+                "Start_Timestamp",
+                "End_Timestamp",
+                "GPU_ID",
+            ]
+        )
+
+    trace_df = pd.read_csv(trace_path)
+
+    # Map agent IDs to GPU IDs
+    agent_to_gpu = build_agent_to_gpu_map(
+        Path(workload_path) / "ps_file_agent_info.csv"
+    )
+    trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu).fillna(0).astype(int)
+
+    trace_df = trace_df[
+        ["Dispatch_Id", "Kernel_Name", "Start_Timestamp", "End_Timestamp", "GPU_ID"]
+    ]
+
+    return trace_df
+
+
 @demarcate
 def create_df_pmc(
     raw_data_root_dir: str,
