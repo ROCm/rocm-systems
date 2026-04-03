@@ -7,10 +7,10 @@
 #    - The data source of panel support only: raw_csv_table and metric_table for now.
 #    - For raw_csv_table, data will be loaded from the specified csv file directly,
 #      and may be sorted.
-#    - For metric_table, the number of entries of each metric must match of
-#      the number of entries of table header. The metric can be raw pmc counters
-#      or an expression derived from them. The key keyword of the metric has to be
-#      one defined in parser.supported_field, i.e. "Value", "Min", "Max", "Avg" etc.
+#    - For metric_table, each metric has a single "expr:" with the raw equation.
+#      Statistics (avg/min/max) are computed as aggregations on the evaluated
+#      result.  "pop:" is omitted -- Pct of Peak is derived in Python from the
+#      evaluated avg and peak values.
 #
 
 Metric Description:
@@ -21,27 +21,29 @@ Panel Config:
   id: 800
   title: # define panel title to display
   data source:
-    # Metric table sample
+    # Metric table sample (single expr per metric)
     - metric_table:
         id: 801
         title: # subtitle for this table(optional)
         header:
           metric: Metric
-          value: Value
+          value: Avg
           unit: Unit
           peak: Peak
           pop: Pct of Peak
         metric:
           METRIC01:
-            value: AVG(100 * SQ_ACTIVE_INST_SCA / ( $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu ))
+            expr: >-
+              (100 * SQ_ACTIVE_INST_SCA
+              / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
             unit: Percent
             peak: 100
-            pop: AVG(100* SQ_ACTIVE_INST_SCA/($GRBM_GUI_ACTIVE_PER_XCD*$cu_per_gpu))
           METRIC02:
-            value: AVG(100 * SQ_ACTIVE_INST_VALU / ( $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            expr: >-
+              (100 * SQ_ACTIVE_INST_VALU
+              / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
             unit: Percent
             peak: 100
-            pop: AVG(100* SQ_ACTIVE_INST_VALU/($GRBM_GUI_ACTIVE_PER_XCD*$cu_per_gpu))
     # CSV table sample
     - raw_csv_table:
         id: 802
