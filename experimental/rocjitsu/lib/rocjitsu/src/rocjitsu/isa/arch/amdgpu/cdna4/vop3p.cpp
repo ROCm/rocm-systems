@@ -711,8 +711,32 @@ VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
 }
 
 void VDot2F32Bf16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0));
+    float a1 = util::f16_to_f32(static_cast<uint16_t>(raw0 >> 16));
+    float b0 = util::f16_to_f32(static_cast<uint16_t>(raw1));
+    float b1 = util::f16_to_f32(static_cast<uint16_t>(raw1 >> 16));
+    if (inst_.neg & 1) {
+      a0 = -a0;
+      a1 = -a1;
+    }
+    if (inst_.neg & 2) {
+      b0 = -b0;
+      b1 = -b1;
+    }
+    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.neg & 4)
+      acc = -acc;
+    float result = a0 * b0 + a1 * b1 + acc;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)

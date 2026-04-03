@@ -939,8 +939,37 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
 }
 
 void VFmaMixF32Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    uint32_t raw2 = src2.read_lane(wf, lane);
+    float a, b, c;
+    if (inst_.op_sel_hi & 1)
+      a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
+    else
+      a = std::bit_cast<float>(raw0);
+    if (inst_.op_sel_hi & 2)
+      b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
+    else
+      b = std::bit_cast<float>(raw1);
+    if (inst_.op_sel_hi_2)
+      c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
+    else
+      c = std::bit_cast<float>(raw2);
+    if (inst_.neg & 1)
+      a = -a;
+    if (inst_.neg & 2)
+      b = -b;
+    if (inst_.neg & 4)
+      c = -c;
+    float result = a * b + c;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
@@ -949,6 +978,7 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_.emplace_back(&vdst);
   dst_operands_.emplace_back(&vdst);
   src_operands_.emplace_back(&src0);
   src_operands_.emplace_back(&src1);
@@ -956,8 +986,39 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
 }
 
 void VFmaMixloF16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    uint32_t raw2 = src2.read_lane(wf, lane);
+    float a, b, c;
+    if (inst_.op_sel_hi & 1)
+      a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
+    else
+      a = std::bit_cast<float>(raw0);
+    if (inst_.op_sel_hi & 2)
+      b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
+    else
+      b = std::bit_cast<float>(raw1);
+    if (inst_.op_sel_hi_2)
+      c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
+    else
+      c = std::bit_cast<float>(raw2);
+    if (inst_.neg & 1)
+      a = -a;
+    if (inst_.neg & 2)
+      b = -b;
+    if (inst_.neg & 4)
+      c = -c;
+    float result = a * b + c;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    uint16_t h = util::f32_to_f16(result);
+    uint32_t prev = vdst.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, (prev & 0xFFFF0000u) | h);
+  }
 }
 
 VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
@@ -966,6 +1027,7 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_.emplace_back(&vdst);
   dst_operands_.emplace_back(&vdst);
   src_operands_.emplace_back(&src0);
   src_operands_.emplace_back(&src1);
@@ -973,8 +1035,39 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
 }
 
 void VFmaMixhiF16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    uint32_t raw2 = src2.read_lane(wf, lane);
+    float a, b, c;
+    if (inst_.op_sel_hi & 1)
+      a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
+    else
+      a = std::bit_cast<float>(raw0);
+    if (inst_.op_sel_hi & 2)
+      b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
+    else
+      b = std::bit_cast<float>(raw1);
+    if (inst_.op_sel_hi_2)
+      c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
+    else
+      c = std::bit_cast<float>(raw2);
+    if (inst_.neg & 1)
+      a = -a;
+    if (inst_.neg & 2)
+      b = -b;
+    if (inst_.neg & 4)
+      c = -c;
+    float result = a * b + c;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    uint16_t h = util::f32_to_f16(result);
+    uint32_t prev = vdst.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, (prev & 0x0000FFFFu) | (static_cast<uint32_t>(h) << 16));
+  }
 }
 
 } // namespace rdna1

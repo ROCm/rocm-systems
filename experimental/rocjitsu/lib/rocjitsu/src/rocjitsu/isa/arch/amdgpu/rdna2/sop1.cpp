@@ -558,7 +558,7 @@ SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
   dst_operands_.emplace_back(&sdst);
 }
 
-void SGetpcB64Sop1::execute(amdgpu::Wavefront &wf) { sdst.write_scalar64(wf, wf.pc); }
+void SGetpcB64Sop1::execute(amdgpu::Wavefront &wf) { sdst.write_scalar64(wf, wf.pc + size_); }
 
 SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
     : Sop1("s_setpc_b64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -585,9 +585,9 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
 }
 
 void SSwappcB64Sop1::execute(amdgpu::Wavefront &wf) {
-  uint64_t old_pc = wf.pc;
+  uint64_t next_pc = wf.pc + size_;
   wf.pc = ssrc0.read_scalar64(wf) - size_;
-  sdst.write_scalar64(wf, old_pc);
+  sdst.write_scalar64(wf, next_pc);
 }
 
 SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)

@@ -884,8 +884,36 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     if name == 'V_ACCVGPR_WRITE':
         return InstructionSemantics(name, 'accvgpr_write')
 
+    # Additional dot product variants (RDNA3/4 naming)
+    if name == 'V_DOT2_F32_BF16':
+        return InstructionSemantics(name, 'dot2_f32_f16')  # BF16 uses same dot2 pattern
+    if name == 'V_DOT4_I32_IU8':
+        return InstructionSemantics(name, 'dot4_i32_i8')   # IU8 = signed/unsigned mixed
+    if name == 'V_DOT8_I32_IU4':
+        return InstructionSemantics(name, 'dot8_i32_i4')   # IU4 = signed/unsigned mixed
+
+    # FMA_MIX variants (RDNA3/4 renamed from MAD_MIX)
+    if name == 'V_FMA_MIX_F32':
+        return InstructionSemantics(name, 'mad_mix_f32')
+    if name == 'V_FMA_MIXLO_F16':
+        return InstructionSemantics(name, 'mad_mixlo_f16')
+    if name == 'V_FMA_MIXHI_F16':
+        return InstructionSemantics(name, 'mad_mixhi_f16')
+
     # MFMA / SMFMAC - all map to 'mfma' semantic class
     if name.startswith('V_MFMA_') or name.startswith('V_SMFMAC_'):
+        return InstructionSemantics(name, 'mfma')
+
+    # WMMA (Wave Matrix Multiply-Accumulate) — RDNA3/3.5/4
+    import re
+    m = re.match(r'V_(?:S?WMMA[C]?)_(F32|F16|BF16|I32|FP8|BF8)_'
+                 r'(\d+)X(\d+)X(\d+)_?(F16|BF16|IU8|IU4|FP8|BF8|F16_FP8|F16_BF8'
+                 r'|BF16_FP8|BF16_BF8)?$', name)
+    if m:
+        return InstructionSemantics(name, 'mfma')  # Reuse MFMA semantic class — same matrix pattern
+
+    # SWMMAC variants
+    if name.startswith('V_SWMMAC_'):
         return InstructionSemantics(name, 'mfma')
 
     return None

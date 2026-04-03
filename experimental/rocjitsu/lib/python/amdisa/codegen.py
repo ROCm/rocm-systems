@@ -786,7 +786,11 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_getpc':
-            L.append(f'  {dst_ops[0]}.write_scalar64(wf, wf.pc);')
+            # S_GETPC_B64: returns PC of the instruction FOLLOWING the S_GETPC.
+            # At execute() time, wf.pc points to the S_GETPC itself; step() will
+            # add size_ afterwards. Write wf.pc + size_ so the net result after
+            # post-execute advance is correct (caller sees PC of next instruction).
+            L.append(f'  {dst_ops[0]}.write_scalar64(wf, wf.pc + size_);')
             return '\n'.join(L)
 
         if cls == 'scalar_setpc':
@@ -794,13 +798,15 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_swappc':
-            L.append('  uint64_t old_pc = wf.pc;')
+            # S_SWAPPC_B64: dst = PC of next inst, then jump to src.
+            L.append(f'  uint64_t next_pc = wf.pc + size_;')
             L.append(f'  wf.pc = {src_ops[0]}.read_scalar64(wf) - size_;')
-            L.append(f'  {dst_ops[0]}.write_scalar64(wf, old_pc);')
+            L.append(f'  {dst_ops[0]}.write_scalar64(wf, next_pc);')
             return '\n'.join(L)
 
         if cls == 'scalar_call':
-            L.append(f'  {dst_ops[0]}.write_scalar64(wf, wf.pc);')
+            # S_CALL_B64: dst = PC of next instruction (return address), then branch.
+            L.append(f'  {dst_ops[0]}.write_scalar64(wf, wf.pc + size_);')
             L.append(f'  int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);')
             L.append('  wf.pc = wf.pc + static_cast<int64_t>(offset) * 4 - size_;')
             return '\n'.join(L)
@@ -3267,8 +3273,10 @@ class CodeGenerator:
 
         import re
         m = re.match(
-            r'V_(?:S?MFMA[C]?)_(F32|I32|F64)_(\d+)X(\d+)X(\d+)'
-            r'(?:_\d+B)?_?(F32|XF32|F16|BF16|I8|F64|BF8_BF8|BF8_FP8|FP8_BF8|FP8_FP8)$',
+            r'V_(?:S?MFMA[C]?|S?WMMA[C]?)_(F32|I32|F64|F16|BF16|BF8|FP8)_(\d+)X(\d+)X(\d+)'
+            r'(?:_\d+B)?_?(F32|XF32|F16|BF16|I8|IU8|IU4|F64|FP8|BF8'
+            r'|BF8_BF8|BF8_FP8|FP8_BF8|FP8_FP8'
+            r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8)?$',
             name)
 
         if not m:
@@ -3341,8 +3349,10 @@ class CodeGenerator:
         # Determine input element size in bits and extract functions.
         _INPUT_BITS = {
             'F32': 32, 'XF32': 32, 'F16': 16, 'BF16': 16,
-            'I8': 8, 'F64': 64,
+            'I8': 8, 'IU8': 8, 'IU4': 4, 'F64': 64,
+            'FP8': 8, 'BF8': 8,
             'FP8_FP8': 8, 'FP8_BF8': 8, 'BF8_FP8': 8, 'BF8_BF8': 8,
+            'F16_FP8': 8, 'F16_BF8': 8, 'BF16_FP8': 8, 'BF16_BF8': 8,
         }
         in_bits = _INPUT_BITS.get(input_type, 32)
 
@@ -3380,6 +3390,9 @@ class CodeGenerator:
             L.append(f'                     mfma::src_base(vb, {s1}.encoding_value_),')
             L.append(f'                     s2, const_acc);')
         else:
+            # F32, F16, BF16 result types all use exec_f32 (accumulate in f32,
+            # WMMA F16/BF16 results are truncated at writeback — handled by the
+            # register layout, not by separate exec functions).
             ea = _EXTRACT_A.get(input_type, 'mfma::extract_f32')
             eb = _EXTRACT_B.get(input_type, 'mfma::extract_f32')
             L.append(f'  mfma::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,')
