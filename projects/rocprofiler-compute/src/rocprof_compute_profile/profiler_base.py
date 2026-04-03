@@ -152,7 +152,7 @@ class RocProfCompute_Base:
         # verify not accessing parent directories
         if ".." in str(args.output_directory):
             console_error(
-                "Access denied. Cannot access parent directories in path (i.e. ../)"
+                "Access denied. Cannot access parent directories in --output-directory (i.e. ../)"
             )
 
         if args.no_native_tool and args.iteration_multiplexing is not None:
