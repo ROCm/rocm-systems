@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          path: "t"
+          path: "r/t"
           ref: 3272cd77d15e7972b26f68a477a3d61fe4a93591 # 2026-03-26 commit
 
       - name: Set up Python
@@ -50,13 +50,12 @@ jobs:
 
       - name: Install python deps
         run: |
-          ls
-          pip install -r t/requirements.txt
+          pip install -r r/t/requirements.txt
 
       - name: Patch rocm-systems
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          # rm ./t/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
+          # rm ./r/t/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
 
       - name: Install requirements
         run: |
@@ -83,14 +82,14 @@ jobs:
       - name: Runner health status
         run: |
           ccache --zero-stats
-          python ./t/build_tools/health_status.py
+          python ./r/t/build_tools/health_status.py
 
       - name: Fetch sources
         timeout-minutes: 30
         run: |
           git config --global core.longpaths true
-          cd t
-          python ./build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+          cd r
+          python ./t/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
           dvc pull
 
       - name: Configure Projects
@@ -98,10 +97,11 @@ jobs:
           cmake_preset: windows-release
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=r ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=r  ${{ inputs.cmake_options }}"
         run: |
           # clear cache before build and after download
           ccache -z
+          cd r
           python t/build_tools/github_actions/build_configure.py
 
       - name: Build therock-archives and therock-dist
@@ -143,7 +143,7 @@ jobs:
       - name: Post Build Upload
         if: always()
         run: |
-          python t/build_tools/github_actions/post_build_upload.py \
+          python r/t/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir ${{ env.BUILD_DIR }} \
