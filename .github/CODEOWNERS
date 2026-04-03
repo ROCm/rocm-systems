@@ -107,3 +107,7 @@
 # Media Libs
 /projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther
 /projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther
+
+# Experimental
+/experimental/rocjitsu                                                @atgutier
+
