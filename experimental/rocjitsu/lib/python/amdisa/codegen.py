@@ -3268,7 +3268,7 @@ class CodeGenerator:
         import re
         m = re.match(
             r'V_(?:S?MFMA[C]?)_(F32|I32|F64)_(\d+)X(\d+)X(\d+)'
-            r'(?:_\d+B)?_(F32|XF32|F16|BF16|I8|F64|BF8_BF8|BF8_FP8|FP8_BF8|FP8_FP8)$',
+            r'(?:_\d+B)?_?(F32|XF32|F16|BF16|I8|F64|BF8_BF8|BF8_FP8|FP8_BF8|FP8_FP8)$',
             name)
 
         if not m:

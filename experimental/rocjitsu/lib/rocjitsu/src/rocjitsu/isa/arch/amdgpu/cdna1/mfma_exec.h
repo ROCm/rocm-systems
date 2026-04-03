@@ -4,39 +4,27 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA1_MFMA_EXEC_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_CDNA1_MFMA_EXEC_H_
 
-/// @file MFMA execution stubs for CDNA1 (GFX908, MI100).
+/// @file CDNA1 MFMA — thin wrapper around the shared MFMA implementation.
 ///
-/// Phase A stub — all MFMA execute() bodies in the generated vop3p.cpp
-/// throw util::UnimplementedInst, so the functions declared here are never
-/// called. Phase B will provide correct CDNA1 MFMA layouts (AccVGPR
-/// encoding base 256, same register-dimension math as CDNA3 but different
-/// accumulator encoding).
+/// CDNA1 (GFX908) uses AccMode::VgprOnly — there is no dedicated AccVGPR
+/// register file. MFMA outputs go to regular VGPRs. The src2 accumulator
+/// can be a VGPR (encoding 256-511) or an inline constant (0-255).
 
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "util/data_types.h"
-
-#include <bit>
-#include <cstdint>
-#include <vector>
+#include "rocjitsu/isa/arch/amdgpu/shared/mfma_exec.h"
 
 namespace rocjitsu {
 namespace cdna1 {
 namespace mfma {
 
-struct InputLoc {
-  uint32_t vgpr_offset;
-  uint32_t lane;
-  uint32_t sub_element;
-};
+using namespace amdgpu::mfma; // NOLINT(google-build-using-namespace)
 
-struct OutputLoc {
-  uint32_t reg;
-  uint32_t lane;
-};
-
-inline uint32_t dst_base(uint32_t vb, int ev) { return vb + static_cast<uint32_t>(ev); }
-inline uint32_t src_base(uint32_t vb, int ev) { return vb + static_cast<uint32_t>(ev); }
-inline uint32_t resolve_acc(uint32_t, uint32_t dst, int, bool, uint32_t) { return dst; }
+/// CDNA1 resolve_acc defaults to VgprOnly mode (no AccVGPR file).
+template <typename F>
+inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc,
+                            F &&get_const) {
+  return amdgpu::mfma::resolve_acc<amdgpu::mfma::AccMode::VgprOnly>(vb, dst, src2_ev, const_acc,
+                                                                    std::forward<F>(get_const));
+}
 
 } // namespace mfma
 } // namespace cdna1

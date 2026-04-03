@@ -688,8 +688,14 @@ VAddNcU32Vop2::VAddNcU32Vop2(const MachineInst *inst)
 }
 
 void VAddNcU32Vop2::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t sv0 = src0.read_lane(wf, lane);
+    uint32_t sv1 = vsrc1.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, sv0 + sv1);
+  }
 }
 
 VSubNcU32Vop2::VSubNcU32Vop2(const MachineInst *inst)
@@ -707,8 +713,14 @@ VSubNcU32Vop2::VSubNcU32Vop2(const MachineInst *inst)
 }
 
 void VSubNcU32Vop2::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t sv0 = src0.read_lane(wf, lane);
+    uint32_t sv1 = vsrc1.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, sv0 - sv1);
+  }
 }
 
 VSubrevNcU32Vop2::VSubrevNcU32Vop2(const MachineInst *inst)
@@ -726,8 +738,14 @@ VSubrevNcU32Vop2::VSubrevNcU32Vop2(const MachineInst *inst)
 }
 
 void VSubrevNcU32Vop2::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t sv0 = src0.read_lane(wf, lane);
+    uint32_t sv1 = vsrc1.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, sv1 - sv0);
+  }
 }
 
 VAddCoCiU32Vop2::VAddCoCiU32Vop2(const MachineInst *inst)

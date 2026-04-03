@@ -620,10 +620,7 @@ void VFloorF64Vop1::execute(amdgpu::Wavefront &wf) {
 VPipeflushVop1::VPipeflushVop1(const MachineInst *inst)
     : Vop1("v_pipeflush", reinterpret_cast<const OpEncoding *>(inst)) {}
 
-void VPipeflushVop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPipeflushVop1::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
     : Vop1("v_fract_f32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1233,10 +1230,7 @@ VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMovreldB32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovreldB32Vop1::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
     : Vop1("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1250,10 +1244,7 @@ VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMovrelsB32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovrelsB32Vop1::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
     : Vop1("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1267,10 +1258,7 @@ VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMovrelsdB32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovrelsdB32Vop1::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
     : Vop1("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst)),
