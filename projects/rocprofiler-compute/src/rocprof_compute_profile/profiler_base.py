@@ -150,7 +150,7 @@ class RocProfCompute_Base:
             )
 
         # verify not accessing parent directories
-        if ".." in str(args.path):
+        if ".." in str(args.output_directory):
             console_error(
                 "Access denied. Cannot access parent directories in path (i.e. ../)"
             )
@@ -231,7 +231,7 @@ class RocProfCompute_Base:
         self._filter_blocks = self._soc.profiling_setup()
 
         # Write profiling configuration as yaml file
-        with open(f"{self.__args.path}/profiling_config.yaml", "w") as f:
+        with open(f"{self.__args.output_directory}/profiling_config.yaml", "w") as f:
             args_dict = vars(self.__args)
             # Override filter_blocks when writing profiling config yaml
             args_dict["filter_blocks"] = self._filter_blocks
@@ -246,7 +246,7 @@ class RocProfCompute_Base:
             )
 
         gen_sysinfo(
-            workload_dir=args.path,
+            workload_dir=args.output_directory,
             app_cmd=args.remaining,
             skip_roof=args.no_roof,
             mspec=self._soc._mspec,
@@ -292,7 +292,7 @@ class RocProfCompute_Base:
             run_prof(
                 fnames=str_fnames,
                 profiler_options=options,
-                workload_dir=args.path,
+                workload_dir=args.output_directory,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
                 torch_trace_enabled=getattr(args, "torch_trace", False),
@@ -322,7 +322,7 @@ class RocProfCompute_Base:
         # log basic info
         console_log(f"{str(prog).title()} version: {version}")
         console_log(f"Profiler choice: {self.__profiler}")
-        console_log(f"Path: {Path(self.__args.path).absolute().resolve()}")
+        console_log(f"Path: {Path(self.__args.output_directory).absolute().resolve()}")
         console_log(f"Target: {self._soc._mspec.gpu_model}")
         console_log(f"Command: {args.remaining}")
         console_log(f"Kernel Selection: {args.kernel}")
@@ -333,7 +333,9 @@ class RocProfCompute_Base:
             console_log("Filtered sections: All")
 
         # Run profiling on each input file
-        input_files = sorted(Path(args.path).glob("perfmon/pmc_perf_*.yaml"))
+        input_files = sorted(
+            Path(args.output_directory).glob("perfmon/pmc_perf_*.yaml")
+        )
         total_runs = len(input_files)
 
         if total_runs == 0 and is_only_pc_sampling(args.filter_blocks):
@@ -523,7 +525,9 @@ class RocProfCompute_Base:
             )
             return
 
-        total_runs = len(list(Path(args.path).glob("perfmon/pmc_perf_*.yaml")))
+        total_runs = len(
+            list(Path(args.output_directory).glob("perfmon/pmc_perf_*.yaml"))
+        )
 
         console_log(f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
 
@@ -548,7 +552,7 @@ class RocProfCompute_Base:
             profiler_options=options,
             method=args.pc_sampling_method,
             interval=args.pc_sampling_interval,
-            workload_dir=args.path,
+            workload_dir=args.output_directory,
         )
         end_time = time.time()
 

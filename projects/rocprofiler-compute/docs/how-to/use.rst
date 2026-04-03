@@ -39,12 +39,6 @@ the gpu model. Use ``--output-directory`` to override the output location.
 
 .. note::
 
-   ``--path`` and ``--subpath`` are deprecated for profile mode and will be
-   removed in a future release. Use ``--output-directory`` with parameterized
-   placeholders instead.
-
-.. note::
-
    To collect all requested profile information, ROCm Compute Profiler might replay kernels
    multiple times.
 

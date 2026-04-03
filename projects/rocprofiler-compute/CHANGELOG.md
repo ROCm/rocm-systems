@@ -49,6 +49,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed HIP API tracing since it's out-of-scope for ROCm Compute Profiler and the trace files were not being analyzed.
 
+* ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
+
 ### Optimized
 
 * Filtering for block 21 (`-b 21`) in profile mode, now only performs pc sampling and skips unnecessary counter collection
@@ -158,10 +160,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed redundant warnings for compute/memory partition not found for AMD Instinct MI300 series and later GPUs by skipping the partition checks.
 
 * Corrected the formula for metrics related to reads from L2 cache to HBM for AMD Instinct MI350 Series GPUs.
-
-### Upcoming changes
-
-* ``--path`` and ``--subpath`` options have been deprecated in favor of ``--output-directory`` and will be removed in a future release.
 
 ### Upcoming changes
 
