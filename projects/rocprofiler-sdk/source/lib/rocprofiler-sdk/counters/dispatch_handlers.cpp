@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
@@ -46,7 +47,7 @@ namespace counters
  *
  * We return an AQLPacket containing the start/stop/read packets for injection.
  */
-hsa::Queue::pkt_and_serialize_t
+hsa::write_packet_t
 queue_cb(const context::context*                                  ctx,
          const std::shared_ptr<counter_callback_info>&            info,
          const hsa::Queue&                                        queue,
@@ -70,11 +71,11 @@ queue_cb(const context::context*                                  ctx,
         return ret_pkt;
     };
 
-    if(!ctx || !ctx->counter_collection) return {nullptr, false};
+    if(!ctx || !ctx->dispatch_counter_collection) return {nullptr, false};
 
     bool is_enabled = false;
 
-    ctx->counter_collection->enabled.rlock(
+    ctx->dispatch_counter_collection->enabled.rlock(
         [&](const auto& collect_ctx) { is_enabled = collect_ctx; });
 
     if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};

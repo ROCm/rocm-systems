@@ -184,14 +184,14 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         // Calls our internal callbacks to callers who need to be notified post
         // kernel execution.
         queue_info_session.queue.signal_callback([&](const auto& map) {
-            for(const auto& [client_id, cb_pair] : map)
+            for(const auto& [client_id, cb_data] : map)
             {
-                cb_pair.second(queue_info_session.queue,
-                               packet.kernel_packet,
-                               _session,
-                               packet,
-                               packet.instrumentation_packets,
-                               dispatch_time);
+                cb_data.signal_completion(queue_info_session.queue,
+                                          packet.kernel_packet,
+                                          _session,
+                                          packet,
+                                          packet.instrumentation_packets,
+                                          dispatch_time);
             }
         });
 
@@ -314,9 +314,10 @@ WriteInterceptor(const void* packets,
     // unique sequence id for the dispatch
     static auto sequence_counter = std::atomic<rocprofiler_dispatch_id_t>{0};
 
-    auto&& CreateBarrierPacket = [](hsa_signal_t*    dependency_signal,
-                                    hsa_signal_t*    completion_signal,
-                                    packet_vector_t& _packets) {
+    // cannot capture since static
+    static auto CreateBarrierPacket = [](hsa_signal_t*    dependency_signal,
+                                         hsa_signal_t*    completion_signal,
+                                         packet_vector_t& _packets) -> void {
         hsa_barrier_and_packet_t barrier{};
         barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
         barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
@@ -360,7 +361,7 @@ WriteInterceptor(const void* packets,
     // these are for the services (dispatch counter collection, pc sampling, ATT) which use
     // the queue/queue_controller callback mechanism
     const auto queue_callback_context_filter = [](const context::context* ctx) {
-        return (ctx->counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace);
+        return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace);
     };
 
     auto tracing_data_v = tracing::tracing_data{};
@@ -371,16 +372,14 @@ WriteInterceptor(const void* packets,
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
         tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
 
-    auto transformed_packets = packet_vector_t{};
-
-    // all packets should have the same correlation id so we can just look at the first one to get
-    // the correlation id for the entire batch of packets
+    // all packets should have the same correlation id so we can just look at the first one to
+    // get the correlation id for the entire batch of packets
     auto*                    corr_id      = context::get_latest_correlation_id();
     context::correlation_id* _corr_id_pop = nullptr;
 
     // Allocate a correlation id if we have at least one dispatch packet and we don't have a
-    // correlation id already. There will not be a correlation id if there is no API tracing but it
-    // was requested by tools to always provide one.
+    // correlation id already. There will not be a correlation id if there is no API tracing but
+    // it was requested by tools to always provide one.
     if(!corr_id)
     {
         constexpr auto ref_count = 1;
@@ -388,8 +387,8 @@ WriteInterceptor(const void* packets,
         _corr_id_pop             = corr_id;
     }
 
-    // During finalization, correlation tracing service will not construct a correlation id so just
-    // write packet through without tracing
+    // During finalization, correlation tracing service will not construct a correlation id so
+    // just write packet through without tracing
     if(!corr_id)
     {
         writer(packets, pkt_count);
@@ -406,249 +405,305 @@ WriteInterceptor(const void* packets,
         }
     }};
 
-    auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
-    auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
-    auto ancestor_corr_id = (corr_id) ? corr_id->ancestor : 0;
+    using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
-    using packet_data_array_t = queue_info_session_t::packet_data_array_t;
+    auto process_packet_batch = [&queue, &corr_id, tracing_data_v](
+                                    const rocprofiler_packet* _packets,
+                                    uint64_t                  _num_packets,
+                                    const packet_writer_fn_t& _writer) {
+        auto transformed_packets = packet_vector_t{};
 
-    auto _info_session = queue_info_session_t{.queue          = queue,
-                                              .tid            = thr_id,
-                                              .enqueue_ts     = common::timestamp_ns(),
-                                              .correlation_id = corr_id,
-                                              .packet_data    = packet_data_array_t{}};
+        auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
+        auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
+        auto ancestor_corr_id = (corr_id) ? corr_id->ancestor : 0;
 
-    // mark the queue as having at least one packet which will be assigned a callback to
-    // AsyncSignalHandler. This is used to determine whether we need to wait for the signal handler
-    // to complete during finalization.
-    queue.async_started();
+        using packet_data_array_t = queue_info_session_t::packet_data_array_t;
 
-    // Searching accross all the packets given during this write
-    for(size_t i = 0; i < pkt_count; ++i)
-    {
-        const auto& original_packet = packets_arr[i].kernel_dispatch;
-        auto        packet_type     = bit_extract(original_packet.header,
-                                       HSA_PACKET_HEADER_TYPE,
-                                       HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
-        if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        auto _info_session = queue_info_session_t{.queue          = queue,
+                                                  .tid            = thr_id,
+                                                  .enqueue_ts     = common::timestamp_ns(),
+                                                  .correlation_id = corr_id,
+                                                  .packet_data    = packet_data_array_t{}};
+
+        // mark the queue as having at least one packet which will be assigned a callback to
+        // AsyncSignalHandler. This is used to determine whether we need to wait for the signal
+        // handler to complete during finalization.
+        queue.async_started();
+
+        // Searching accross all the packets given during this write
+        for(size_t i = 0; i < _num_packets; ++i)
         {
-            transformed_packets.emplace_back(packets_arr[i]);
-            continue;
-        }
-
-        // increase the reference count to denote that this correlation id is being used in a kernel
-        corr_id->add_ref_count();
-        corr_id->add_kern_count();
-
-        auto _packet_data = packet_data_t{};
-
-        // make a copy of the tracing data
-        _packet_data.tracing_data = tracing_data_v;
-
-        tracing::populate_external_correlation_ids(
-            _packet_data.tracing_data.external_correlation_ids,
-            thr_id,
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
-            ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-            internal_corr_id);
-
-        const auto     original_completion_signal = original_packet.completion_signal;
-        const bool     existing_completion_signal = (original_completion_signal.handle != 0);
-        const uint64_t kernel_id = code_object::get_kernel_id(original_packet.kernel_object);
-
-        // Copy kernel pkt, copy is to allow for signal to be modified
-        _packet_data.kernel_packet = packets_arr[i];
-        // create a reference for short hand access
-        auto& kernel_packet = _packet_data.kernel_packet;
-
-        // create our own signal that we can get a callback on. if there is an original completion
-        // signal we will create a barrier packet, assign the original completion signal that that
-        // barrier packet, and add it right after the kernel packet
-        _packet_data.pooled_signal =
-            queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
-
-        // computes the "size" based on the offset of reserved_padding field
-        constexpr auto kernel_dispatch_info_rt_size =
-            common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
-
-        static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
-                      "failed to compute size field based on offset of reserved_padding field");
-
-        auto dispatch_id             = ++sequence_counter;
-        _packet_data.callback_record = callback_record_t{
-            sizeof(callback_record_t),
-            rocprofiler_timestamp_t{0},
-            rocprofiler_timestamp_t{0},
-            rocprofiler_kernel_dispatch_info_t{
-                .size                 = kernel_dispatch_info_rt_size,
-                .agent_id             = queue.get_agent().get_rocp_agent()->id,
-                .queue_id             = queue.get_id(),
-                .kernel_id            = kernel_id,
-                .dispatch_id          = dispatch_id,
-                .private_segment_size = kernel_packet.kernel_dispatch.private_segment_size,
-                .group_segment_size   = kernel_packet.kernel_dispatch.group_segment_size,
-                .workgroup_size =
-                    rocprofiler_dim3_t{kernel_packet.kernel_dispatch.workgroup_size_x,
-                                       kernel_packet.kernel_dispatch.workgroup_size_y,
-                                       kernel_packet.kernel_dispatch.workgroup_size_z},
-                .grid_size        = rocprofiler_dim3_t{kernel_packet.kernel_dispatch.grid_size_x,
-                                                kernel_packet.kernel_dispatch.grid_size_y,
-                                                kernel_packet.kernel_dispatch.grid_size_z},
-                .reserved_padding = {0}}};
-
-        {
-            auto tracer_data = _packet_data.callback_record;
-            tracing::execute_phase_enter_callbacks(
-                _packet_data.tracing_data.callback_contexts,
-                thr_id,
-                internal_corr_id,
-                _packet_data.tracing_data.external_correlation_ids,
-                ancestor_corr_id,
-                ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-                tracer_data);
-        }
-
-        // map all the external correlation ids (after enqueue enter phase) for all the contexts
-        // captured by the info session
-        tracing::update_external_correlation_ids(
-            _packet_data.tracing_data.external_correlation_ids,
-            thr_id,
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
-
-        // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
-        // along with an ID of the client we got the packet from (this will be returned via
-        // completed_cb_t)
-
-        // Signal callbacks that a kernel_packet is being enqueued
-        queue.signal_callback([&](const auto& map) {
-            for(const auto& [client_id, cb_pair] : map)
+            const auto& original_packet = _packets[i].kernel_dispatch;
+            auto        packet_type =
+                bit_extract(original_packet.header,
+                            HSA_PACKET_HEADER_TYPE,
+                            HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+            if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
             {
-                // NOTE: if map.size() > 1, multiple callbacks will be sharing the same user data.
-                // This needs to be fixed. (bewelton)
-                auto [packet, bSerial] =
-                    cb_pair.first(queue,
-                                  kernel_packet,
-                                  kernel_id,
-                                  dispatch_id,
-                                  &_packet_data.user_data,
-                                  _packet_data.tracing_data.external_correlation_ids,
-                                  corr_id);
-                _packet_data.is_serialized |= bSerial;
-                if(packet)
-                    _packet_data.instrumentation_packets.push_back(
-                        std::make_pair(std::move(packet), client_id));
+                transformed_packets.emplace_back(_packets[i]);
+                continue;
             }
-        });
 
-        bool inserted_before = false;
-        if(_packet_data.is_serialized)
-        {
-            inserted_before = true;
-            CHECK_NOTNULL(hsa::get_queue_controller())
-                ->serializer(&queue)
-                .rlock([&](const auto& serializer) {
-                    for(auto& s_pkt : serializer.kernel_dispatch(queue))
-                        transformed_packets.emplace_back(s_pkt.kernel_dispatch);
-                });
-        }
+            // increase the reference count to denote that this correlation id is being used in a
+            // kernel
+            corr_id->add_ref_count();
+            corr_id->add_kern_count();
 
-        for(const auto& pkt_injection : _packet_data.instrumentation_packets)
-        {
-            for(const auto& pkt : pkt_injection.first->before_krn_pkt)
+            auto _packet_data = packet_data_t{};
+
+            // make a copy of the tracing data
+            _packet_data.tracing_data = tracing_data_v;
+
+            tracing::populate_external_correlation_ids(
+                _packet_data.tracing_data.external_correlation_ids,
+                thr_id,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+                ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                internal_corr_id);
+
+            const auto     original_completion_signal = original_packet.completion_signal;
+            const bool     existing_completion_signal = (original_completion_signal.handle != 0);
+            const uint64_t kernel_id = code_object::get_kernel_id(original_packet.kernel_object);
+
+            // Copy kernel pkt, copy is to allow for signal to be modified
+            _packet_data.kernel_packet = _packets[i];
+            // create a reference for short hand access
+            auto& kernel_packet = _packet_data.kernel_packet;
+
+            // create our own signal that we can get a callback on. if there is an original
+            // completion signal we will create a barrier packet, assign the original completion
+            // signal that that barrier packet, and add it right after the kernel packet
+            _packet_data.pooled_signal =
+                queue.create_signal(0, &kernel_packet.kernel_dispatch.completion_signal, true);
+
+            // computes the "size" based on the offset of reserved_padding field
+            constexpr auto kernel_dispatch_info_rt_size =
+                common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
+
+            static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
+                          "failed to compute size field based on offset of reserved_padding field");
+
+            auto dispatch_id             = ++sequence_counter;
+            _packet_data.callback_record = callback_record_t{
+                sizeof(callback_record_t),
+                rocprofiler_timestamp_t{0},
+                rocprofiler_timestamp_t{0},
+                rocprofiler_kernel_dispatch_info_t{
+                    .size                 = kernel_dispatch_info_rt_size,
+                    .agent_id             = queue.get_agent().get_rocp_agent()->id,
+                    .queue_id             = queue.get_id(),
+                    .kernel_id            = kernel_id,
+                    .dispatch_id          = dispatch_id,
+                    .private_segment_size = kernel_packet.kernel_dispatch.private_segment_size,
+                    .group_segment_size   = kernel_packet.kernel_dispatch.group_segment_size,
+                    .workgroup_size =
+                        rocprofiler_dim3_t{kernel_packet.kernel_dispatch.workgroup_size_x,
+                                           kernel_packet.kernel_dispatch.workgroup_size_y,
+                                           kernel_packet.kernel_dispatch.workgroup_size_z},
+                    .grid_size = rocprofiler_dim3_t{kernel_packet.kernel_dispatch.grid_size_x,
+                                                    kernel_packet.kernel_dispatch.grid_size_y,
+                                                    kernel_packet.kernel_dispatch.grid_size_z},
+                    .reserved_padding = {0}}};
+
+            {
+                auto tracer_data = _packet_data.callback_record;
+                tracing::execute_phase_enter_callbacks(
+                    _packet_data.tracing_data.callback_contexts,
+                    thr_id,
+                    internal_corr_id,
+                    _packet_data.tracing_data.external_correlation_ids,
+                    ancestor_corr_id,
+                    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                    tracer_data);
+            }
+
+            // map all the external correlation ids (after enqueue enter phase) for all the contexts
+            // captured by the info session
+            tracing::update_external_correlation_ids(
+                _packet_data.tracing_data.external_correlation_ids,
+                thr_id,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
+
+            // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
+            // along with an ID of the client we got the packet from (this will be returned via
+            // completed_cb_t)
+
+            // Signal callbacks that a kernel_packet is being enqueued
+            queue.signal_callback([&](const auto& map) {
+                for(const auto& [client_id, cb_data] : map)
+                {
+                    // NOTE: if map.size() > 1, multiple callbacks will be sharing the same user
+                    // data. This needs to be fixed. (bewelton)
+                    auto [packet, bSerial] = cb_data.write_interceptor(
+                        queue,
+                        kernel_packet,
+                        kernel_id,
+                        dispatch_id,
+                        &_packet_data.user_data,
+                        _packet_data.tracing_data.external_correlation_ids,
+                        corr_id);
+                    _packet_data.is_serialized |= bSerial;
+                    if(packet)
+                        _packet_data.instrumentation_packets.push_back(
+                            std::make_pair(std::move(packet), client_id));
+                }
+            });
+
+            bool inserted_before = false;
+            if(_packet_data.is_serialized)
             {
                 inserted_before = true;
-                transformed_packets.emplace_back(pkt);
+                CHECK_NOTNULL(hsa::get_queue_controller())
+                    ->serializer(&queue)
+                    .rlock([&](const auto& serializer) {
+                        for(auto& s_pkt : serializer.kernel_dispatch(queue))
+                            transformed_packets.emplace_back(s_pkt.kernel_dispatch);
+                    });
             }
-        }
+
+            for(const auto& pkt_injection : _packet_data.instrumentation_packets)
+            {
+                for(const auto& pkt : pkt_injection.first->before_krn_pkt)
+                {
+                    inserted_before = true;
+                    transformed_packets.emplace_back(pkt);
+                }
+            }
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-        if(pc_sampling::is_pc_sample_service_configured(queue.get_agent().get_rocp_agent()->id))
-        {
-            transformed_packets.emplace_back(pc_sampling::hsa::generate_marker_packet_for_kernel(
-                corr_id, _packet_data.tracing_data.external_correlation_ids, dispatch_id));
-        }
+            if(pc_sampling::is_pc_sample_service_configured(queue.get_agent().get_rocp_agent()->id))
+            {
+                transformed_packets.emplace_back(
+                    pc_sampling::hsa::generate_marker_packet_for_kernel(
+                        corr_id, _packet_data.tracing_data.external_correlation_ids, dispatch_id));
+            }
 #endif
 
-        // emplace the kernel packet
-        transformed_packets.emplace_back(kernel_packet);
+            // emplace the kernel packet
+            transformed_packets.emplace_back(kernel_packet);
 
-        // If a profiling packet was inserted, wait for completion before executing the dispatch
-        if(inserted_before)
-            transformed_packets.back().kernel_dispatch.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+            // If a profiling packet was inserted, wait for completion before executing the dispatch
+            if(inserted_before)
+                transformed_packets.back().kernel_dispatch.header |= 1 << HSA_PACKET_HEADER_BARRIER;
 
-        // if the original completion signal exists, trigger it via a barrier packet
-        if(existing_completion_signal)
-        {
-            auto barrier   = hsa_barrier_and_packet_t{};
-            barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-            barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
-            barrier.completion_signal = original_completion_signal;
-            transformed_packets.emplace_back(barrier);
+            // if the original completion signal exists, trigger it via a barrier packet
+            if(existing_completion_signal)
+            {
+                auto barrier   = hsa_barrier_and_packet_t{};
+                barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+                barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
+                barrier.completion_signal = original_completion_signal;
+                transformed_packets.emplace_back(barrier);
+            }
+
+            bool injected_end_pkt = false;
+            for(const auto& pkt_injection : _packet_data.instrumentation_packets)
+            {
+                for(const auto& pkt : pkt_injection.first->after_krn_pkt)
+                {
+                    transformed_packets.emplace_back(pkt);
+                    injected_end_pkt = true;
+                }
+            }
+
+            auto& completion_signal = _packet_data.completion_signal;
+            auto& interrupt_signal  = _packet_data.interrupt_signal;
+            if(injected_end_pkt)
+            {
+                // Adding a barrier packet with the original packet's completion signal.
+                queue.create_signal(0, &interrupt_signal, false);
+                completion_signal                                            = interrupt_signal;
+                transformed_packets.back().kernel_dispatch.completion_signal = interrupt_signal;
+                CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
+            }
+            else
+            {
+                completion_signal = kernel_packet.kernel_dispatch.completion_signal;
+                get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
+            }
+
+            ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+                << "get_kernel_id below might need to be updated";
+
+            {
+                auto tracer_data = _packet_data.callback_record;
+                tracing::execute_phase_exit_callbacks(
+                    _packet_data.tracing_data.callback_contexts,
+                    _packet_data.tracing_data.external_correlation_ids,
+                    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+                    tracer_data);
+            }
+
+            _info_session.packet_data.emplace_back(std::move(_packet_data));
         }
 
-        bool injected_end_pkt = false;
-        for(const auto& pkt_injection : _packet_data.instrumentation_packets)
+        using info_session_t = queue_info_session_t;
+
+        if(!_info_session.packet_data.empty())
         {
-            for(const auto& pkt : pkt_injection.first->after_krn_pkt)
+            auto* last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
+            auto  last_completion_signal = _info_session.packet_data.back().completion_signal;
+
+            auto shared = std::make_shared<info_session_t>(std::move(_info_session));
+
+            // Enqueue the signal into the handler. Will call completed_cb when signal completes.
+            queue.signal_async_handler(last_pooled_signal,
+                                       last_completion_signal,
+                                       new std::shared_ptr<info_session_t>(shared));
+        }
+
+        // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
+        ROCP_TRACE << fmt::format("QueueID {}: {}",
+                                  queue.get_id().handle,
+                                  fmt::join(transformed_packets, fmt::format(" ")));
+
+        _writer(std::move(transformed_packets));
+    };
+
+    bool should_batch_packets = true;
+    queue.signal_callback([&should_batch_packets](const auto& map) {
+        for(const auto& [_, cb_data] : map)
+        {
+            if(!cb_data.batch_packets())
             {
-                transformed_packets.emplace_back(pkt);
-                injected_end_pkt = true;
+                should_batch_packets = false;
+                break;
             }
         }
+    });
 
-        auto& completion_signal = _packet_data.completion_signal;
-        auto& interrupt_signal  = _packet_data.interrupt_signal;
-        if(injected_end_pkt)
-        {
-            // Adding a barrier packet with the original packet's completion signal.
-            queue.create_signal(0, &interrupt_signal, false);
-            completion_signal                                            = interrupt_signal;
-            transformed_packets.back().kernel_dispatch.completion_signal = interrupt_signal;
-            CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
-        }
-        else
-        {
-            completion_signal = kernel_packet.kernel_dispatch.completion_signal;
-            get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
-        }
-
-        ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
-            << "get_kernel_id below might need to be updated";
-
-        {
-            auto tracer_data = _packet_data.callback_record;
-            tracing::execute_phase_exit_callbacks(
-                _packet_data.tracing_data.callback_contexts,
-                _packet_data.tracing_data.external_correlation_ids,
-                ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-                tracer_data);
-        }
-
-        _info_session.packet_data.emplace_back(std::move(_packet_data));
-    }
-
-    using info_session_t = queue_info_session_t;
-
-    if(!_info_session.packet_data.empty())
+    if(should_batch_packets)
     {
-        auto* last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
-        auto  last_completion_signal = _info_session.packet_data.back().completion_signal;
+        ROCP_TRACE_IF(pkt_count > 1) << fmt::format(
+            "[{}] Batching packets. Number of packets = {}", __FUNCTION__, pkt_count);
 
-        auto shared = std::make_shared<info_session_t>(std::move(_info_session));
-
-        // Enqueue the signal into the handler. Will call completed_cb when signal completes.
-        queue.signal_async_handler(last_pooled_signal,
-                                   last_completion_signal,
-                                   new std::shared_ptr<info_session_t>(shared));
+        process_packet_batch(packets_arr, pkt_count, [&writer](packet_vector_t&& _packets) {
+            writer(_packets.data(), _packets.size());
+        });
     }
+    else
+    {
+        ROCP_TRACE_IF(pkt_count > 1)
+            << fmt::format("[{}] Not batching packets due service which does not support batching. "
+                           "Number of packets = {}",
+                           __FUNCTION__,
+                           pkt_count);
 
-    // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
-    ROCP_TRACE << fmt::format(
-        "QueueID {}: {}", queue.get_id().handle, fmt::join(transformed_packets, fmt::format(" ")));
+        auto transformed_packets = packet_vector_t{};
 
-    writer(transformed_packets.data(), transformed_packets.size());
+        for(size_t i = 0; i < pkt_count; ++i)
+        {
+            process_packet_batch(
+                &packets_arr[i], 1, [&transformed_packets](packet_vector_t&& _packets) {
+                    transformed_packets.insert(transformed_packets.end(),
+                                               std::make_move_iterator(_packets.begin()),
+                                               std::make_move_iterator(_packets.end()));
+                });
+        }
+        writer(transformed_packets.data(), transformed_packets.size());
+    }
 }
 }  // namespace
 
@@ -689,7 +744,7 @@ Queue::Queue(const AgentCache&  agent,
         << "Could not setup intercept profiler";
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
-            return (ctx->counter_collection || ctx->device_counter_collection ||
+            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
                     ctx->dispatch_thread_trace || ctx->device_thread_trace);
         }).empty())
     {
@@ -750,7 +805,7 @@ Queue::Queue(
 , _intercept_queue(queue)
 {
     if(!context::get_registered_contexts([](const context::context* ctx) {
-            return (ctx->counter_collection || ctx->device_counter_collection ||
+            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
                     ctx->dispatch_thread_trace || ctx->device_thread_trace);
         }).empty())
     {
@@ -885,12 +940,12 @@ Queue::sync() const
 }
 
 void
-Queue::register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb)
+Queue::register_callback(ClientID id, queue_callbacks_t callbacks)
 {
     _callbacks.wlock([&](auto& map) {
         ROCP_FATAL_IF(rocprofiler::common::get_val(map, id)) << "ID already exists!";
         _notifiers++;
-        map[id] = std::make_pair(enqueue_cb, complete_cb);
+        map[id] = std::move(callbacks);
     });
 }
 

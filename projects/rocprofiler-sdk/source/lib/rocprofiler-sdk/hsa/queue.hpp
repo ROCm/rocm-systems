@@ -65,6 +65,39 @@ enum class queue_state
     done_destroy = 2
 };
 
+struct write_packet_t
+{
+    std::unique_ptr<AQLPacket> packet    = nullptr;
+    bool                       serialize = false;
+};
+
+class Queue;
+
+using queue_batch_packets_callback_t = std::function<bool()>;
+
+using queue_write_callback_t =
+    std::function<write_packet_t(const Queue&,
+                                 const rocprofiler_packet&,
+                                 rocprofiler_kernel_id_t,
+                                 rocprofiler_dispatch_id_t,
+                                 rocprofiler_user_data_t*,
+                                 const queue_info_session_t::external_corr_id_map_t&,
+                                 const context::correlation_id*)>;
+
+using queue_completion_callback_t = std::function<void(const Queue&,
+                                                       const rocprofiler_packet&,
+                                                       std::shared_ptr<queue_info_session_t>&,
+                                                       packet_data_t&,
+                                                       inst_pkt_t&,
+                                                       kernel_dispatch::profiling_time)>;
+
+struct queue_callbacks_t
+{
+    queue_batch_packets_callback_t batch_packets     = {};
+    queue_write_callback_t         write_interceptor = {};
+    queue_completion_callback_t    signal_completion = {};
+};
+
 // Interceptor for a single specific queue
 class Queue
 {
@@ -73,33 +106,16 @@ public:
     using context_array_t = common::container::small_vector<const context_t*>;
     using callback_t      = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
 
-    struct pkt_and_serialize_t
-    {
-        std::unique_ptr<AQLPacket> pkt{nullptr};
-        bool                       request_serialize{false};
-    };
-
     using pooled_signal_t = common::container::pool_object<signal_t>;
 
     // Function prototype used to notify consumers that a kernel has been enqueued.
     // Pair first: An AQL packet can be returned that will be injected into the queue.
     // Pair second: Boolean flag indicating the dispatch needs to be serialized.
-    using queue_cb_t =
-        std::function<pkt_and_serialize_t(const Queue&,
-                                          const rocprofiler_packet&,
-                                          rocprofiler_kernel_id_t,
-                                          rocprofiler_dispatch_id_t,
-                                          rocprofiler_user_data_t*,
-                                          const queue_info_session_t::external_corr_id_map_t&,
-                                          const context::correlation_id*)>;
-    // Signals the completion of the kernel packet.
-    using completed_cb_t = std::function<void(const Queue&,
-                                              const rocprofiler_packet&,
-                                              std::shared_ptr<queue_info_session_t>&,
-                                              packet_data_t&,
-                                              inst_pkt_t&,
-                                              kernel_dispatch::profiling_time)>;
-    using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;
+    using should_serialize_cb_t = std::function<bool(const Queue&)>;
+
+    using write_cb_t     = queue_write_callback_t;
+    using completed_cb_t = queue_completion_callback_t;
+    using callback_map_t = std::unordered_map<ClientID, queue_callbacks_t>;
 
     // Used when creating a Queue from a previously created intercept queue.
     // When the constructor with this parameter type is called, the provided function will be called
@@ -156,7 +172,7 @@ public:
     }
     void sync() const;
 
-    void register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb);
+    void register_callback(ClientID id, queue_callbacks_t callbacks);
     void remove_callback(ClientID id);
 
     const CoreApiTable& core_api() const { return _core_api; }
@@ -192,6 +208,8 @@ template <typename FuncT>
 inline void
 Queue::signal_callback(FuncT&& func) const
 {
+    static_assert(std::is_invocable<FuncT, const callback_map_t&>::value,
+                  "FuncT must be invocable with const callback_map_t&");
     _callbacks.rlock([&func](const auto& data) { func(data); });
 }
 
