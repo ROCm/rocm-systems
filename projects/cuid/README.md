@@ -124,6 +124,13 @@ make install
 
 Both static and shared libraries are built.
 
+Documentation can be built using the following instructions:
+
+```sh
+pip install -r docs/sphinx/requirements.txt
+sphinx-build docs docs/_build/html
+```
+
 ## License
 
 Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
