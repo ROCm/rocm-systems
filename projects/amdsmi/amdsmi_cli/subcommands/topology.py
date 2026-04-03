@@ -1,4 +1,4 @@
-#!/usr/bin/envpython3
+#!/usr/bin/env python3
 #
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 #
@@ -19,7 +19,6 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import json
 import logging
 
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -122,7 +121,7 @@ class TopologyCommands:
                     gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu_dest)
                     try:
                         status = amdsmi_interface.amdsmi_get_nic_gpu_topo_info(dest_nic, gpu_dest)
-                    except amdsmi_exception.AmdSmiLibraryException as e:
+                    except amdsmi_exception.AmdSmiLibraryException:
                         status = "N/A"
                     gpu_statuses_for_nic.append((gpu_bdf, status))  # Store BDF and status as tuple
 

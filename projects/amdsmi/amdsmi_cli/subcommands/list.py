@@ -1,4 +1,4 @@
-#!/usr/bin/envpython3
+#!/usr/bin/env python3
 #
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 #
@@ -72,7 +72,7 @@ class ListCommands:
         # Always try to get BDF regardless of group check
         try:
             bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
-        except amdsmi_exception.AmdSmiLibraryException as e:
+        except amdsmi_exception.AmdSmiLibraryException:
             bdf = "N/A"
 
         try:

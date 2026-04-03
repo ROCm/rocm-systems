@@ -1,4 +1,4 @@
-#!/usr/bin/envpython3
+#!/usr/bin/env python3
 #
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 #
@@ -376,7 +376,7 @@ class PartitionCommands:
                                 }
                             resource_index += 1
                             tabular_output.append(tabular_output_dict)
-                except amdsmi_exception.AmdSmiLibraryException as e:
+                except amdsmi_exception.AmdSmiLibraryException:
                     tabular_output.append(tabular_output_dict)
 
             self.logger.multiple_device_output = tabular_output
@@ -453,7 +453,7 @@ class PartitionCommands:
                             }
                             resource_index += 1
                             tabular_output.append(tabular_output_dict)
-                except amdsmi_exception.AmdSmiLibraryException as e:
+                except amdsmi_exception.AmdSmiLibraryException:
                     tabular_output.append(tabular_output_dict)
 
             self.logger.multiple_device_output = tabular_output

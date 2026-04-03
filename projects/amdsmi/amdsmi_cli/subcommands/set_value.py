@@ -1,4 +1,4 @@
-#!/usr/bin/envpython3
+#!/usr/bin/env python3
 #
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 #
@@ -22,11 +22,11 @@
 import json
 import logging
 import sys
-import time
 
 from amdsmi_cli_exceptions import AmdSmiRequiredCommandException
+
 from amdsmi import amdsmi_exception, amdsmi_interface
-from amdsmi.amdsmi_interface import AMDSMI_MAX_UTIL, AMDSMI_MAX_PPT_LIMIT
+from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_UTIL
 
 
 class SetValueCommands:
@@ -452,7 +452,7 @@ class SetValueCommands:
                     # For modes 0-3, util and ppt_limit are not displayed
                     pass
                 static_dict["pwr_eff_mode"]["response"] = (
-                    f"Set power efficiency mode operation successful"
+                    "Set power efficiency mode operation successful"
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["pwr_eff_mode"]["response"] = (
@@ -1179,7 +1179,7 @@ class SetValueCommands:
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     out = f"[{e.get_error_info(detailed=False)}] Unable to set memory partition to {args.memory_partition}"
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                        out = f"[AMDSMI_STATUS_NO_PERM] Command requires elevation"
+                        out = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
                         self.logger.store_output(args.gpu, "memory_partition", out)
                         self.logger.print_output()
                         self.logger.clear_multiple_devices_output()
@@ -1283,7 +1283,7 @@ class SetValueCommands:
                     "socclk": amdsmi_interface.AmdSmiClkType.SOC,
                 }
                 results_clk_lvl = {
-                    "perf_level": f"Unable to set performance level to MANUAL",
+                    "perf_level": "Unable to set performance level to MANUAL",
                     "get_clock_freq": f"Unable to retrieve {clk_type} frequency levels",
                     "set_clock": f"Unable to set {clk_type} perf level(s) to {perf_levels_str}",
                 }
@@ -1297,7 +1297,7 @@ class SetValueCommands:
                     amdsmi_interface.amdsmi_set_gpu_perf_level(
                         args.gpu, amdsmi_interface.AmdSmiDevPerfLevel.MANUAL
                     )
-                    results_clk_lvl["perf_level"] = f"Successfully set performance level to MANUAL"
+                    results_clk_lvl["perf_level"] = "Successfully set performance level to MANUAL"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
@@ -1515,7 +1515,7 @@ class SetValueCommands:
                 elif clk_type == "mclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.MEM
                 else:
-                    print(f"Valid clock types are: sclk, mclk\n")
+                    print("Valid clock types are: sclk, mclk\n")
                     self.logger.store_output(
                         args.gpu, "clk_limit", f"Invalid clock type {args.clk_limit.clk_type}"
                     )
@@ -1561,7 +1561,7 @@ class SetValueCommands:
                 ):
                     logging.debug("Setting mclk min is not supported")
                     self.logger.store_output(
-                        args.gpu, "clk_limit", f"Setting mclk min is not supported"
+                        args.gpu, "clk_limit", "Setting mclk min is not supported"
                     )
                 else:
                     logging.debug(
@@ -1593,7 +1593,7 @@ class SetValueCommands:
                 ):
                     logging.debug("Setting mclk min is not supported")
                     self.logger.store_output(
-                        args.gpu, "clk_limit", f"Setting mclk min is not supported"
+                        args.gpu, "clk_limit", "Setting mclk min is not supported"
                     )
                 else:
                     self.logger.store_output(

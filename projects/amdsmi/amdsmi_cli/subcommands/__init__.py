@@ -19,23 +19,23 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-from subcommands.version import VersionCommands
-from subcommands.list import ListCommands
-from subcommands.static import StaticCommands
-from subcommands.firmware import FirmwareCommands
 from subcommands.bad_pages import BadPagesCommands
-from subcommands.metric import MetricCommands
-from subcommands.process import ProcessCommands
-from subcommands.event import EventCommands
-from subcommands.topology import TopologyCommands
-from subcommands.set_value import SetValueCommands
-from subcommands.reset import ResetCommands
-from subcommands.monitor import MonitorCommands
-from subcommands.xgmi import XgmiCommands
-from subcommands.partition import PartitionCommands
-from subcommands.ras import RasCommands
-from subcommands.node import NodeCommands
 from subcommands.default import DefaultCommands
+from subcommands.event import EventCommands
+from subcommands.firmware import FirmwareCommands
+from subcommands.list import ListCommands
+from subcommands.metric import MetricCommands
+from subcommands.monitor import MonitorCommands
+from subcommands.node import NodeCommands
+from subcommands.partition import PartitionCommands
+from subcommands.process import ProcessCommands
+from subcommands.ras import RasCommands
+from subcommands.reset import ResetCommands
+from subcommands.set_value import SetValueCommands
+from subcommands.static import StaticCommands
+from subcommands.topology import TopologyCommands
+from subcommands.version import VersionCommands
+from subcommands.xgmi import XgmiCommands
 
 __all__ = [
     "VersionCommands",
