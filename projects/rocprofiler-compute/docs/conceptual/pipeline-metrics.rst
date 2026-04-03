@@ -199,7 +199,7 @@ instructions.
 
 .. _matrix-instruction-mix:
 
-MFMA instruction mix
+Matrix instruction mix
 --------------------
 
 .. warning::
