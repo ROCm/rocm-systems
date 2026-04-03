@@ -81,7 +81,7 @@ class ActiveWFInfo {
   // True if this thread is the leader of the group of threads with the same PE.
   bool         is_pe_group_leader{false};
   // Physical lane id of the leader of the group of threads with the same PE.
-  uint64_t     pe_group_leader_phys_lane_id{0};
+  int          pe_group_leader_phys_lane_id{0};
 
   __device__ explicit ActiveWFInfo(int pe, ThreadScope scope = ThreadScope::thread)
       : pe(pe), scope(scope) {
@@ -127,13 +127,13 @@ class ActiveWFInfo {
            "pe_group_mask: %llx, num_pe_group_lanes: %d, "
            "thread_id: %u, "
            "pe_group_logical_lane_id: %d, is_pe_group_leader: %d, "
-           "pe_group_leader_phys_lane_id: %llx\n",
+           "pe_group_leader_phys_lane_id: %x\n",
            pe, static_cast<int>(scope),
            static_cast<unsigned long long>(activemask),
            static_cast<unsigned long long>(pe_group_mask),
            num_pe_group_lanes, threadIdx.x, (int)pe_group_logical_lane_id,
            is_pe_group_leader,
-           static_cast<unsigned long long>(pe_group_leader_phys_lane_id));
+           pe_group_leader_phys_lane_id);
   }
 };
 
