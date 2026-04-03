@@ -2,47 +2,39 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/cdna2/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/except.h"
 
-#include <array>
+#include <cassert>
 #include <cstdint>
 
 namespace rocjitsu {
 namespace cdna2 {
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
-  (void)inst;
-  (void)wf;
-  throw util::UnimplementedInst("cdna2 smem_calculate_address not yet implemented");
-  return 0;
+  return amdgpu::addr_calc::smem_calculate_address(inst, wf);
 }
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
-  (void)inst;
-  (void)wf;
-  (void)addrs;
-  (void)lane_mask;
-  throw util::UnimplementedInst("cdna2 flat_calculate_addresses not yet implemented");
+  amdgpu::addr_calc::flat_calculate_addresses(inst, wf, addrs, lane_mask);
 }
 
 void mubuf_calculate_addresses(const MubufMachineInst &inst, amdgpu::Wavefront &wf,
                                std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
-  (void)inst;
-  (void)wf;
-  (void)addrs;
-  (void)lane_mask;
-  throw util::UnimplementedInst("cdna2 mubuf_calculate_addresses not yet implemented");
+  amdgpu::addr_calc::mubuf_calculate_addresses(inst, wf, addrs, lane_mask);
+}
+
+void mtbuf_calculate_addresses(const MtbufMachineInst &inst, amdgpu::Wavefront &wf,
+                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
+  amdgpu::addr_calc::mtbuf_calculate_addresses(inst, wf, addrs, lane_mask);
 }
 
 void ds_calculate_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,
                             std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
-  (void)inst;
-  (void)wf;
-  (void)addrs;
-  (void)lane_mask;
-  throw util::UnimplementedInst("cdna2 ds_calculate_addresses not yet implemented");
+  amdgpu::addr_calc::ds_calculate_addresses(inst, wf, addrs, lane_mask);
 }
 
 } // namespace cdna2

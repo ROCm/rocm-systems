@@ -22,10 +22,15 @@ class Wavefront;
 
 namespace rdna3_5 {
 
+uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask);
 
 void mubuf_calculate_addresses(const MubufMachineInst &inst, amdgpu::Wavefront &wf,
+                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask);
+
+void mtbuf_calculate_addresses(const MtbufMachineInst &inst, amdgpu::Wavefront &wf,
                                std::array<uint64_t, 64> &addrs, uint64_t &lane_mask);
 
 void ds_calculate_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,

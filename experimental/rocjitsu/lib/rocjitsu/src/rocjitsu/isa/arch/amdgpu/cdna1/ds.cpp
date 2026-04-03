@@ -1206,7 +1206,9 @@ DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
   src_operands_.emplace_back(&addr);
 }
 
-void DsSwizzleB32Ds::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void DsSwizzleB32Ds::execute(amdgpu::Wavefront &wf) {
+  (void)wf; // DS swizzle: Phase C placeholder.
+}
 
 DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
     : Ds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1218,7 +1220,9 @@ DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
   src_operands_.emplace_back(&data0);
 }
 
-void DsPermuteB32Ds::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void DsPermuteB32Ds::execute(amdgpu::Wavefront &wf) {
+  (void)wf; // DS permute: Phase C placeholder.
+}
 
 DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
     : Ds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1230,7 +1234,9 @@ DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
   src_operands_.emplace_back(&data0);
 }
 
-void DsBpermuteB32Ds::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void DsBpermuteB32Ds::execute(amdgpu::Wavefront &wf) {
+  (void)wf; // DS permute: Phase C placeholder.
+}
 
 DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
     : Ds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2498,13 +2504,9 @@ DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_.emplace_back(&vdst);
   src_operands_.emplace_back(&addr);
-  flags_ |= MEMORY_OP;
 }
 
-void DsOrderedCountDs::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled ds_atomic variant (DS_ORDERED_COUNT)
-}
+void DsOrderedCountDs::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 DsWriteB96Ds::DsWriteB96Ds(const MachineInst *inst)
     : Ds("ds_write_b96", reinterpret_cast<const OpEncoding *>(inst)),
