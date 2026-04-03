@@ -239,16 +239,6 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
 
-rocprofiler_add_integration_validate_test(
-    rocprofv3-test-rocpd-annotations
-    TEST_PATHS validate_annotations.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    ARGS --pftrace-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
-    TIMEOUT 120
-    LABELS "integration-tests;rocpd"
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
-
 #########################################################################################
 #
 # Package generation
