@@ -90,7 +90,7 @@ jobs:
         run: |
           git config --global core.longpaths true
           cd t
-          python ./t/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+          python ./build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
           dvc pull
 
       - name: Configure Projects
