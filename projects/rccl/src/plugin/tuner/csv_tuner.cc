@@ -167,14 +167,16 @@ static int countConfigLines(const char* filename) {
   int count = 0;
 
   while (fgets(line, sizeof(line), file)) {
-    // Skip comments and empty lines
-    if (line[0] == '#' || line[0] == '\n') continue;
+    const char* trimmed = line + strspn(line, " \t\r\n\v\f");
+
+    // Skip comments and empty/whitespace-only lines
+    if (*trimmed == '#' || *trimmed == '\0') continue;
 
     // Remove trailing newline
     line[strcspn(line, "\n")] = 0;
 
     // Check if line has content
-    if (strlen(line) > 0) {
+    if (strlen(trimmed) > 0) {
       count++;
     }
   }
