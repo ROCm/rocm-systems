@@ -140,8 +140,9 @@ struct rocpd_db
     using batch_stats_t       = statistics<uint64_t, double>;
     using batch_stats_map_t   = std::unordered_map<std::string, batch_stats_t>;
     using pending_batch_map_t = std::unordered_map<std::string, pending_insert_batch>;
+    using fk_parent_map_t     = std::unordered_map<std::string, std::vector<std::string>>;
 
-    static constexpr size_t max_pending_batches = 2;
+    static constexpr size_t max_pending_batches = 6;
 
     rocpd_db() = default;
     ~rocpd_db();
@@ -158,6 +159,7 @@ struct rocpd_db
     size_t              event_id_counter    = 0;
     statement_cache_t   statements          = {};
     pending_batch_map_t pending_batches     = {};
+    fk_parent_map_t     fk_parent_tables    = {};
     uint64_t            pending_touch_count = 0;
     batch_stats_map_t   batch_stats         = {};
 
@@ -537,30 +539,97 @@ get_bucketed_rows_per_exec(size_t remaining_rows, size_t max_rows)
     return bucket;
 }
 
+const std::vector<std::string>&
+get_fk_parent_tables(rocpd_db& db, const std::string& table)
+{
+    if(auto itr = db.fk_parent_tables.find(table); itr != db.fk_parent_tables.end())
+        return itr->second;
+
+    auto parents = std::vector<std::string>{};
+
+    auto escaped_table = replace_all(table, '\'', "''");
+    auto pragma_query  = fmt::format("PRAGMA foreign_key_list('{}');", escaped_table);
+
+    sqlite3_stmt* stmt = nullptr;
+    SQLITE3_CHECK(sqlite3_prepare_v2(db.conn, pragma_query.c_str(), -1, &stmt, nullptr));
+
+    while(true)
+    {
+        auto step_rc = sqlite3_step(stmt);
+        if(step_rc == SQLITE_DONE) break;
+        ROCP_FATAL_IF(step_rc != SQLITE_ROW) << "sqlite3_step failed with error code " << step_rc
+                                             << ", sqlite3_errmsg: " << sqlite3_errmsg(db.conn)
+                                             << ", pragma_query: " << pragma_query;
+
+        const auto* parent_table = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        if(parent_table == nullptr || parent_table[0] == '\0') continue;
+        if(std::find(parents.begin(), parents.end(), parent_table) == parents.end())
+            parents.emplace_back(parent_table);
+    }
+
+    auto finalize_rc = sqlite3_finalize(stmt);
+    ROCP_FATAL_IF(finalize_rc != SQLITE_OK)
+        << "sqlite3_finalize failed with error code " << finalize_rc
+        << ", sqlite3_errmsg: " << sqlite3_errmsg(db.conn) << ", pragma_query: " << pragma_query;
+
+    auto [itr, inserted] = db.fk_parent_tables.emplace(table, std::move(parents));
+    common::consume_args(inserted);
+    return itr->second;
+}
+
+rocpd_db::pending_batch_map_t::iterator
+select_pending_batch_victim(rocpd_db& db)
+{
+    auto best_itr             = db.pending_batches.end();
+    auto best_parent_pressure = std::numeric_limits<size_t>::max();
+    auto best_touch           = std::numeric_limits<uint64_t>::max();
+
+    for(auto itr = db.pending_batches.begin(); itr != db.pending_batches.end(); ++itr)
+    {
+        if(itr->second.rows.empty()) continue;
+
+        auto parent_pressure = size_t{0};
+        for(const auto& parent_table : get_fk_parent_tables(db, itr->first))
+        {
+            if(auto pitr = db.pending_batches.find(parent_table);
+               pitr != db.pending_batches.end() && !pitr->second.rows.empty())
+            {
+                ++parent_pressure;
+            }
+        }
+
+        if(best_itr == db.pending_batches.end() || parent_pressure < best_parent_pressure ||
+           (parent_pressure == best_parent_pressure && itr->second.last_touched < best_touch))
+        {
+            best_itr             = itr;
+            best_parent_pressure = parent_pressure;
+            best_touch           = itr->second.last_touched;
+        }
+    }
+
+    return best_itr;
+}
+
 void
 flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending)
 {
     if(pending.rows.empty()) return;
 
-    // Some tables reference rocpd_event.id; flush rocpd_event first so FK-like
-    // relationships are satisfied before dependent rows are inserted.
-    const auto pending_table = normalize_batch_table_name(db, pending.table);
-    if(pending_table != "rocpd_event")
+    ROCP_FATAL_IF(db.conn == nullptr) << "Pending insert batch missing sqlite connection";
+
+    // Flush direct FK parents first so references are always materialized before child rows.
+    // Parent flushes recurse, so transitive dependencies are naturally ordered as well.
+    for(const auto& parent_table : get_fk_parent_tables(db, pending.table))
     {
-        for(auto& [_, event_pending] : db.pending_batches)
+        if(parent_table == pending.table) continue;
+        if(auto pitr = db.pending_batches.find(parent_table);
+           pitr != db.pending_batches.end() && !pitr->second.rows.empty())
         {
-            if(normalize_batch_table_name(db, event_pending.table) == "rocpd_event" &&
-               !event_pending.rows.empty())
-            {
-                // Recursively drain only the event batch first, then continue with the
-                // current table's batch in this same flush call.
-                flush_pending_insert_batch(db, event_pending);
-                break;
-            }
+            flush_pending_insert_batch(db, pitr->second);
         }
     }
 
-    ROCP_FATAL_IF(db.conn == nullptr) << "Pending insert batch missing sqlite connection";
+    const auto pending_table = normalize_batch_table_name(db, pending.table);
 
     const auto batch_size = pending.rows.size();
     const auto field_size = pending.fields.size();
@@ -662,11 +731,7 @@ get_insert_statement(rocpd_db& db, std::string_view _table, std::vector<sql_inse
 
     if(db.pending_batches.size() >= rocpd_db::max_pending_batches)
     {
-        auto victim = std::min_element(db.pending_batches.begin(),
-                                       db.pending_batches.end(),
-                                       [](const auto& lhs, const auto& rhs) {
-                                           return lhs.second.last_touched < rhs.second.last_touched;
-                                       });
+        auto victim = select_pending_batch_victim(db);
 
         if(victim != db.pending_batches.end())
         {
