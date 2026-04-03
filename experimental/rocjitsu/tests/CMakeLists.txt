@@ -42,6 +42,8 @@ add_executable(rocjitsu_tests
     decode_smoke_test.cpp
     shared_infra_test.cpp
     transcendental_test.cpp
+    mtype_flags_test.cpp
+    waitcnt_counter_test.cpp
 )
 target_link_libraries(rocjitsu_tests PRIVATE
     ${RJ_OBJECT_LIBS} rocjitsu_kmd util flatbuffers Threads::Threads GTest::gtest_main)

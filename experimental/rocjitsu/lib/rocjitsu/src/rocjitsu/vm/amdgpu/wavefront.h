@@ -144,42 +144,103 @@ public:
 
   /// @brief Set the s_waitcnt target thresholds and stall if not yet satisfied.
   ///
-  /// @details Sets the per-wavefront wait targets and transitions to WAITCNT
-  /// if any counter currently exceeds its target. The memory pipeline resumes
-  /// the wavefront (sets state back to RUNNING) once all counters are satisfied.
+  /// @details Used by GFX9 (CDNA1-4), GFX10 (RDNA1/2), and GFX11 (RDNA3/3.5)
+  /// for the monolithic S_WAITCNT instruction.  Sets vmcnt, lgkmcnt, expcnt
+  /// thresholds and transitions to WAITCNT if any counter currently exceeds
+  /// its target.
   /// @param vmcnt VM counter threshold.
   /// @param lgkmcnt LGKM counter threshold.
   /// @param expcnt Export counter threshold.
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
-    wait_target_ = {vmcnt, lgkmcnt, expcnt};
+    wait_target_.vmcnt = vmcnt;
+    wait_target_.lgkmcnt = lgkmcnt;
+    wait_target_.expcnt = expcnt;
     if (!wait_satisfied())
       state_ = WfState::WAITCNT;
   }
 
-  /// @brief Set a single RDNA4 split-wait counter threshold (S_WAIT_LOADCNT etc.).
+  /// @brief Set the VSCNT target (GFX10 S_WAITCNT_VSCNT).
+  void set_wait_target_vscnt(uint8_t threshold) {
+    wait_target_.vscnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the LOADCNT target (GFX11+ S_WAITCNT_VMCNT / S_WAIT_LOADCNT).
+  void set_wait_target_loadcnt(uint8_t threshold) {
+    wait_target_.vmcnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the STORECNT target (GFX11+ S_WAITCNT_VSCNT / S_WAIT_STORECNT).
+  void set_wait_target_storecnt(uint8_t threshold) {
+    wait_target_.vscnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the DSCNT target (GFX11+ S_WAITCNT_LGKMCNT / S_WAIT_DSCNT).
+  void set_wait_target_dscnt(uint8_t threshold) {
+    wait_target_.dscnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the KMCNT target (GFX11+ S_WAIT_KMCNT).
+  void set_wait_target_kmcnt(uint8_t threshold) {
+    wait_target_.kmcnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set combined STORECNT + DSCNT targets (GFX12 S_WAIT_STORECNT_DSCNT).
+  void set_wait_target_storecnt_dscnt(uint8_t storecnt, uint8_t dscnt) {
+    wait_target_.vscnt = storecnt;
+    wait_target_.dscnt = dscnt;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set combined LOADCNT + DSCNT targets (GFX12 S_WAIT_LOADCNT_DSCNT).
+  void set_wait_target_loadcnt_dscnt(uint8_t loadcnt, uint8_t dscnt) {
+    wait_target_.vmcnt = loadcnt;
+    wait_target_.dscnt = dscnt;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set a single split-wait counter threshold by name.
   ///
-  /// Maps the RDNA4 per-type wait instruction to the unified WaitTarget model:
-  ///   load/store/sample/bvh → vmcnt,  ds/km → lgkmcnt,  exp → expcnt.
-  /// Combined forms (e.g. wait_loadcnt_dscnt) update both counters.
+  /// Used by the generated S_WAIT_* / S_WAITCNT_* instruction execute()
+  /// bodies.  Maps the instruction's semantic name to the correct target.
   void set_wait_counter(const char *counter_name, uint16_t threshold) {
     using namespace std::string_view_literals;
     std::string_view name{counter_name};
-    auto vm = static_cast<uint8_t>(threshold & 0x3F);
-    auto lgkm = static_cast<uint8_t>(threshold & 0x1F);
-    auto exp = static_cast<uint8_t>(threshold & 0x07);
-    if (name == "wait_loadcnt" || name == "wait_storecnt" || name == "wait_samplecnt" ||
-        name == "wait_bvhcnt") {
-      wait_target_.vmcnt = vm;
-    } else if (name == "wait_dscnt" || name == "wait_kmcnt") {
-      wait_target_.lgkmcnt = lgkm;
-    } else if (name == "wait_expcnt") {
-      wait_target_.expcnt = exp;
+    auto t = static_cast<uint8_t>(threshold);
+    if (name == "wait_loadcnt")
+      set_wait_target_loadcnt(t);
+    else if (name == "wait_storecnt")
+      set_wait_target_storecnt(t);
+    else if (name == "wait_dscnt")
+      set_wait_target_dscnt(t);
+    else if (name == "wait_kmcnt")
+      set_wait_target_kmcnt(t);
+    else if (name == "wait_expcnt") {
+      wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
+      if (!wait_satisfied())
+        state_ = WfState::WAITCNT;
+    } else if (name == "wait_samplecnt" || name == "wait_bvhcnt") {
+      wait_target_.vmcnt = t; // map to vmcnt
+      if (!wait_satisfied())
+        state_ = WfState::WAITCNT;
     } else if (name == "wait_loadcnt_dscnt") {
-      wait_target_.vmcnt = vm;
-      wait_target_.lgkmcnt = lgkm;
+      set_wait_target_loadcnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
+                                    static_cast<uint8_t>(threshold & 0x3F));
+    } else if (name == "wait_storecnt_dscnt") {
+      set_wait_target_storecnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
+                                     static_cast<uint8_t>(threshold & 0x3F));
     }
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
   }
 
   /// @brief Check whether all wait counter thresholds are satisfied.
