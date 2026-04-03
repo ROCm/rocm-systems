@@ -281,8 +281,22 @@ VCvtNearestI32F32Vop1::VCvtNearestI32F32Vop1(const MachineInst *inst)
 }
 
 void VCvtNearestI32F32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
+    int32_t r;
+    if (std::isnan(s))
+      r = 0;
+    else if (s >= 2147483648.0f)
+      r = INT32_MAX;
+    else if (s < -2147483648.0f)
+      r = INT32_MIN;
+    else
+      r = static_cast<int32_t>(s);
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+  }
 }
 
 VCvtFloorI32F32Vop1::VCvtFloorI32F32Vop1(const MachineInst *inst)
@@ -298,8 +312,22 @@ VCvtFloorI32F32Vop1::VCvtFloorI32F32Vop1(const MachineInst *inst)
 }
 
 void VCvtFloorI32F32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
+    int32_t r;
+    if (std::isnan(s))
+      r = 0;
+    else if (s >= 2147483648.0f)
+      r = INT32_MAX;
+    else if (s < -2147483648.0f)
+      r = INT32_MIN;
+    else
+      r = static_cast<int32_t>(s);
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(r));
+  }
 }
 
 VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
@@ -590,10 +618,7 @@ void VFloorF64Vop1::execute(amdgpu::Wavefront &wf) {
 VPipeflushVop1::VPipeflushVop1(const MachineInst *inst)
     : Vop1("v_pipeflush", reinterpret_cast<const OpEncoding *>(inst)) {}
 
-void VPipeflushVop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPipeflushVop1::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovB16Vop1::VMovB16Vop1(const MachineInst *inst)
     : Vop1("v_mov_b16", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1028,8 +1053,14 @@ VClzI32U32Vop1::VClzI32U32Vop1(const MachineInst *inst)
 }
 
 void VClzI32U32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t s = src0.read_lane(wf, lane);
+    vdst.write_lane(
+        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(s)));
+  }
 }
 
 VCtzI32B32Vop1::VCtzI32B32Vop1(const MachineInst *inst)
@@ -1045,8 +1076,14 @@ VCtzI32B32Vop1::VCtzI32B32Vop1(const MachineInst *inst)
 }
 
 void VCtzI32B32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t s = src0.read_lane(wf, lane);
+    vdst.write_lane(
+        wf, lane, s == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(s)));
+  }
 }
 
 VClsI32Vop1::VClsI32Vop1(const MachineInst *inst)
@@ -1062,8 +1099,17 @@ VClsI32Vop1::VClsI32Vop1(const MachineInst *inst)
 }
 
 void VClsI32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t s = src0.read_lane(wf, lane);
+    int32_t sv = static_cast<int32_t>(s);
+    uint32_t abs_val = sv < 0 ? ~s : s;
+    vdst.write_lane(wf, lane,
+                    abs_val == 0 ? static_cast<uint32_t>(-1)
+                                 : static_cast<uint32_t>(std::countl_zero(abs_val)));
+  }
 }
 
 VFrexpExpI32F64Vop1::VFrexpExpI32F64Vop1(const MachineInst *inst)
@@ -1198,10 +1244,7 @@ VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMovreldB32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovreldB32Vop1::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
     : Vop1("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1215,10 +1258,7 @@ VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMovrelsB32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovrelsB32Vop1::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
     : Vop1("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1232,10 +1272,7 @@ VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMovrelsdB32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovrelsdB32Vop1::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
     : Vop1("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1775,10 +1812,7 @@ VPermlane64B32Vop1::VPermlane64B32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VPermlane64B32Vop1::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPermlane64B32Vop1::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
     : Vop1("v_swaprel_b32", reinterpret_cast<const OpEncoding *>(inst)),

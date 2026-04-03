@@ -40,9 +40,9 @@ using namespace rocjitsu;
 // s_nop is op=0 on all 9 ISAs.
 // s_endpgm is op=1 on CDNA1-4 and RDNA1/2 (GFX9/GFX10).
 // s_endpgm is op=48 on RDNA3/3.5/4 (GFX11/GFX12) — op=1 is s_setkill there.
-constexpr uint32_t kSNop = 0xBF800000u;         ///< s_nop    (SOPP op=0,  simm16=0)
-constexpr uint32_t kSEndpgmGfx9 = 0xBF810000u;  ///< s_endpgm (SOPP op=1,  simm16=0): CDNA/RDNA1/2
-constexpr uint32_t kSEndpgmGfx11 = 0xBFB00000u; ///< s_endpgm (SOPP op=48, simm16=0): RDNA3/3.5/4
+constexpr uint32_t S_NOP = 0xBF800000u;           ///< s_nop    (SOPP op=0,  simm16=0)
+constexpr uint32_t S_ENDPGM_GFX9 = 0xBF810000u;  ///< s_endpgm (SOPP op=1,  simm16=0): CDNA/RDNA1/2
+constexpr uint32_t S_ENDPGM_GFX11 = 0xBFB00000u; ///< s_endpgm (SOPP op=48, simm16=0): RDNA3/3.5/4
 
 struct DecodeCase {
   rj_code_arch_t arch;
@@ -73,25 +73,25 @@ TEST_P(DecoderSmokeTest, DecodesCorrectly) {
 // RDNA3/3.5/4 use the GFX11/GFX12 encoding where s_endpgm moved to op=48.
 INSTANTIATE_TEST_SUITE_P(
     AllIsas, DecoderSmokeTest,
-    ::testing::Values(DecodeCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1", kSNop, "s_nop", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1", kSEndpgmGfx9, "s_endpgm", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA2, "cdna2", kSNop, "s_nop", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA2, "cdna2", kSEndpgmGfx9, "s_endpgm", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA3, "cdna3", kSNop, "s_nop", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA3, "cdna3", kSEndpgmGfx9, "s_endpgm", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", kSNop, "s_nop", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", kSEndpgmGfx9, "s_endpgm", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA1, "rdna1", kSNop, "s_nop", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA1, "rdna1", kSEndpgmGfx9, "s_endpgm", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA2, "rdna2", kSNop, "s_nop", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA2, "rdna2", kSEndpgmGfx9, "s_endpgm", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", kSNop, "s_nop", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", kSEndpgmGfx11, "s_endpgm", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", kSNop, "s_nop", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", kSEndpgmGfx11, "s_endpgm",
+    ::testing::Values(DecodeCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1", S_NOP, "s_nop", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA1, "cdna1", S_ENDPGM_GFX9, "s_endpgm", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA2, "cdna2", S_NOP, "s_nop", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA2, "cdna2", S_ENDPGM_GFX9, "s_endpgm", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA3, "cdna3", S_NOP, "s_nop", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA3, "cdna3", S_ENDPGM_GFX9, "s_endpgm", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", S_NOP, "s_nop", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4", S_ENDPGM_GFX9, "s_endpgm", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA1, "rdna1", S_NOP, "s_nop", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA1, "rdna1", S_ENDPGM_GFX9, "s_endpgm", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA2, "rdna2", S_NOP, "s_nop", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA2, "rdna2", S_ENDPGM_GFX9, "s_endpgm", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", S_NOP, "s_nop", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", S_ENDPGM_GFX11, "s_endpgm", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", S_NOP, "s_nop", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", S_ENDPGM_GFX11, "s_endpgm",
                                  4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", kSNop, "s_nop", 4},
-                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", kSEndpgmGfx11, "s_endpgm", 4}),
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", S_NOP, "s_nop", 4},
+                      DecodeCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", S_ENDPGM_GFX11, "s_endpgm", 4}),
     [](const ::testing::TestParamInfo<DecodeCase> &info) {
       std::string name = info.param.arch_name;
       name += "_";
