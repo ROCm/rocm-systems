@@ -26,8 +26,6 @@ RCCL will automatically detect and load the config file at runtime.
 
 ## Auto-Discovery Order
 
-## Auto-Discovery Order
-
 The built-in CSV tuner searches for config files in this order:
 
 1. `NCCL_TUNER_CONFIG_FILE` environment variable (if set)
