@@ -99,6 +99,8 @@ jobs:
           git config --global core.longpaths true
           cd t
           python ./build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+          ls X:
+          ls X:/r
 
       - name: Configure Projects
         env:
