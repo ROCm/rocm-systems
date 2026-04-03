@@ -232,8 +232,10 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
   char line[RCCL_CSV_TUNER_MAX_LINE_LENGTH];
 
   while (fgets(line, sizeof(line), file) && ctx->numConfigs < ctx->maxConfigs) {
-    // Skip comments and empty lines
-    if (line[0] == '#' || line[0] == '\n') continue;
+    // Skip comments and empty lines, allowing for leading whitespace
+    char* trimmedLine = line;
+    while (*trimmedLine == ' ' || *trimmedLine == '\t') trimmedLine++;
+    if (trimmedLine[0] == '#' || trimmedLine[0] == '\n' || trimmedLine[0] == '\0') continue;
 
     // Remove trailing newline
     line[strcspn(line, "\n")] = 0;
