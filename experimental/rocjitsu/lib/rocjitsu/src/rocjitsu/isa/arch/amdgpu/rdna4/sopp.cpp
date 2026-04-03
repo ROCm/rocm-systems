@@ -1,0 +1,386 @@
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// This file was automatically generated. Do not modify.
+
+#include "rocjitsu/isa/arch/amdgpu/rdna4/sopp.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/data_types.h"
+#include "util/except.h"
+#include <algorithm>
+#include <bit>
+#include <cmath>
+#include <limits>
+
+namespace rocjitsu {
+namespace rdna4 {
+
+SNopSopp::SNopSopp(const MachineInst *inst)
+    : Sopp("s_nop", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SNopSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SSetkillSopp::SSetkillSopp(const MachineInst *inst)
+    : Sopp("s_setkill", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SSetkillSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SSethaltSopp::SSethaltSopp(const MachineInst *inst)
+    : Sopp("s_sethalt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SSethaltSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SSleepSopp::SSleepSopp(const MachineInst *inst)
+    : Sopp("s_sleep", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SLEEP, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SSleepSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SClauseSopp::SClauseSopp(const MachineInst *inst)
+    : Sopp("s_clause", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_CLAUSE, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SClauseSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SDelayAluSopp::SDelayAluSopp(const MachineInst *inst)
+    : Sopp("s_delay_alu", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_DELAY, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SDelayAluSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SWaitAluSopp::SWaitAluSopp(const MachineInst *inst)
+    : Sopp("s_wait_alu", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_WAIT_ALU, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitAluSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SWaitIdleSopp::SWaitIdleSopp(const MachineInst *inst)
+    : Sopp("s_wait_idle", reinterpret_cast<const OpEncoding *>(inst)) {}
+
+void SWaitIdleSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SWaitEventSopp::SWaitEventSopp(const MachineInst *inst)
+    : Sopp("s_wait_event", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_WAIT_EVENT, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitEventSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+STrapSopp::STrapSopp(const MachineInst *inst)
+    : Sopp("s_trap", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void STrapSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SRoundModeSopp::SRoundModeSopp(const MachineInst *inst)
+    : Sopp("s_round_mode", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SRoundModeSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SDenormModeSopp::SDenormModeSopp(const MachineInst *inst)
+    : Sopp("s_denorm_mode", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SDenormModeSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SBarrierWaitSopp::SBarrierWaitSopp(const MachineInst *inst)
+    : Sopp("s_barrier_wait", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SBarrierWaitSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
+    : Sopp("s_code_end", reinterpret_cast<const OpEncoding *>(inst)) {}
+
+void SCodeEndSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SBranchSopp::SBranchSopp(const MachineInst *inst)
+    : Sopp("s_branch", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SBranchSopp::execute(amdgpu::Wavefront &wf) {
+  int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+  wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+}
+
+SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
+    : Sopp("s_cbranch_scc0", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SCbranchScc0Sopp::execute(amdgpu::Wavefront &wf) {
+  if (!wf.read_scc()) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
+}
+
+SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
+    : Sopp("s_cbranch_scc1", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SCbranchScc1Sopp::execute(amdgpu::Wavefront &wf) {
+  if (wf.read_scc()) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
+}
+
+SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
+    : Sopp("s_cbranch_vccz", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SCbranchVcczSopp::execute(amdgpu::Wavefront &wf) {
+  if (wf.vcc() == 0) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
+}
+
+SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
+    : Sopp("s_cbranch_vccnz", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SCbranchVccnzSopp::execute(amdgpu::Wavefront &wf) {
+  if (wf.vcc() != 0) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
+}
+
+SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
+    : Sopp("s_cbranch_execz", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SCbranchExeczSopp::execute(amdgpu::Wavefront &wf) {
+  if (wf.exec() == 0) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
+}
+
+SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
+    : Sopp("s_cbranch_execnz", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SCbranchExecnzSopp::execute(amdgpu::Wavefront &wf) {
+  if (wf.exec() != 0) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
+}
+
+SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
+    : Sopp("s_endpgm", reinterpret_cast<const OpEncoding *>(inst)) {}
+
+void SEndpgmSopp::execute(amdgpu::Wavefront &wf) { wf.halt(); }
+
+SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
+    : Sopp("s_endpgm_saved", reinterpret_cast<const OpEncoding *>(inst)) {}
+
+void SEndpgmSavedSopp::execute(amdgpu::Wavefront &wf) { wf.halt(); }
+
+SWakeupSopp::SWakeupSopp(const MachineInst *inst)
+    : Sopp("s_wakeup", reinterpret_cast<const OpEncoding *>(inst)) {}
+
+void SWakeupSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SSetprioSopp::SSetprioSopp(const MachineInst *inst)
+    : Sopp("s_setprio", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SSetprioSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
+    : Sopp("s_sendmsg", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SSendmsgSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
+    : Sopp("s_sendmsghalt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SSendmsghaltSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
+    : Sopp("s_incperflevel", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SIncperflevelSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
+    : Sopp("s_decperflevel", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SDecperflevelSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+STtracedataSopp::STtracedataSopp(const MachineInst *inst)
+    : Sopp("s_ttracedata", reinterpret_cast<const OpEncoding *>(inst)) {}
+
+void STtracedataSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst)
+    : Sopp("s_ttracedata_imm", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void STtracedataImmSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
+    : Sopp("s_icache_inv", reinterpret_cast<const OpEncoding *>(inst)) {}
+
+void SIcacheInvSopp::execute(amdgpu::Wavefront &wf) { (void)wf; }
+
+SWaitLoadcntSopp::SWaitLoadcntSopp(const MachineInst *inst)
+    : Sopp("s_wait_loadcnt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitLoadcntSopp::execute(amdgpu::Wavefront &wf) {
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_loadcnt", cnt);
+}
+
+SWaitStorecntSopp::SWaitStorecntSopp(const MachineInst *inst)
+    : Sopp("s_wait_storecnt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitStorecntSopp::execute(amdgpu::Wavefront &wf) {
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_storecnt", cnt);
+}
+
+SWaitSamplecntSopp::SWaitSamplecntSopp(const MachineInst *inst)
+    : Sopp("s_wait_samplecnt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitSamplecntSopp::execute(amdgpu::Wavefront &wf) {
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_samplecnt", cnt);
+}
+
+SWaitBvhcntSopp::SWaitBvhcntSopp(const MachineInst *inst)
+    : Sopp("s_wait_bvhcnt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitBvhcntSopp::execute(amdgpu::Wavefront &wf) {
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_bvhcnt", cnt);
+}
+
+SWaitExpcntSopp::SWaitExpcntSopp(const MachineInst *inst)
+    : Sopp("s_wait_expcnt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitExpcntSopp::execute(amdgpu::Wavefront &wf) {
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_expcnt", cnt);
+}
+
+SWaitDscntSopp::SWaitDscntSopp(const MachineInst *inst)
+    : Sopp("s_wait_dscnt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitDscntSopp::execute(amdgpu::Wavefront &wf) {
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_dscnt", cnt);
+}
+
+SWaitKmcntSopp::SWaitKmcntSopp(const MachineInst *inst)
+    : Sopp("s_wait_kmcnt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitKmcntSopp::execute(amdgpu::Wavefront &wf) {
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_kmcnt", cnt);
+}
+
+SWaitLoadcntDscntSopp::SWaitLoadcntDscntSopp(const MachineInst *inst)
+    : Sopp("s_wait_loadcnt_dscnt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_WAIT_MEM_DS, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitLoadcntDscntSopp::execute(amdgpu::Wavefront &wf) {
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_loadcnt_dscnt", cnt);
+}
+
+SWaitStorecntDscntSopp::SWaitStorecntDscntSopp(const MachineInst *inst)
+    : Sopp("s_wait_storecnt_dscnt", reinterpret_cast<const OpEncoding *>(inst)),
+      simm16(16, OperandType::OPR_WAIT_MEM_DS, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+  src_operands_.emplace_back(&simm16);
+}
+
+void SWaitStorecntDscntSopp::execute(amdgpu::Wavefront &wf) {
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_storecnt_dscnt", cnt);
+}
+
+} // namespace rdna4
+} // namespace rocjitsu

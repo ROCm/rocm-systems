@@ -14,7 +14,9 @@ from amdisa import (
     CodeGenerator,
     Parser,
     Rdna1Profile,
+    Rdna2Profile,
     Rdna3Profile,
+    Rdna3_5Profile,
     Rdna4Profile,
 )
 from amdisa import xml_schema as xs
@@ -27,9 +29,9 @@ _PROFILES = {
     'cdna3': CdnaProfile,
     'cdna4': CdnaProfile,
     'rdna1': Rdna1Profile,
-    'rdna2': Rdna1Profile,
+    'rdna2': Rdna2Profile,
     'rdna3': Rdna3Profile,
-    'rdna3.5': Rdna3Profile,
+    'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
 }
 
