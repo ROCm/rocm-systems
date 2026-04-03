@@ -876,7 +876,7 @@ bool is_immediate_type(OperandType t) {
 }
 
 uint32_t vgpr_index(OperandType opr_type, int ev) {
-  if (opr_type == OperandType::OPR_VGPR || opr_type == OperandType::OPR_VGPR_OR_ACCVGPR)
+  if ((opr_type == OperandType::OPR_VGPR || opr_type == OperandType::OPR_VGPR_OR_ACCVGPR))
     return static_cast<uint32_t>(ev);
   return static_cast<uint32_t>(ev - 256);
 }
