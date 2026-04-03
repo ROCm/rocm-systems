@@ -759,7 +759,12 @@ def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
 
     Expression fields are identified by matching the header display name against
     SUPPORTED_FIELD, excluding Peak-prefixed fields which are empirical values.
+    Metrics using the single-expr format (``expr:`` key) are also recognized.
     """
+    if "expr" in entries:
+        expr_value = entries["expr"]
+        return expr_value is not None and expr_value != "None"
+
     for header_key, header_display in data_config["header"].items():
         if header_display in SUPPORTED_FIELD and not header_display.startswith("Peak"):
             expr_value = entries.get(header_key)

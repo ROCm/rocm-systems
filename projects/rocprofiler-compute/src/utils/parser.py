@@ -371,6 +371,22 @@ def print_noise_clamp_summary() -> None:
     _noise_clamper.print_summary()
 
 
+STAT_AGGREGATION_MAP = {
+    "Avg": to_avg,
+    "Value": to_avg,
+    "Average": to_avg,
+    "Mean": to_avg,
+    "Percent": to_avg,
+    "Min": to_min,
+    "Minimum": to_min,
+    "Max": to_max,
+    "Maximum": to_max,
+    "Median": to_median,
+    "Std Dev": to_std,
+    "Count": to_sum,
+}
+
+
 class CodeTransformer(ast.NodeTransformer):
     """
     Python AST visitor to transform user defined equation string to df format
@@ -761,6 +777,13 @@ def build_dfs(
                     headers = ["Metric_ID"]
                     data_source_idx = str(data_config["id"] // 100)
 
+                    table_uses_expr = any(
+                        isinstance(v, dict) and "expr" in v
+                        for v in data_config.get(
+                            "metric", {}
+                        ).values()
+                    )
+
                     if (
                         "cli_style" in data_config
                         and data_config["cli_style"] == "simple_box"
@@ -777,6 +800,9 @@ def build_dfs(
                         for key, tile in data_config["header"].items():
                             if key != "metric":
                                 headers.append(tile)
+
+                        if table_uses_expr:
+                            headers.append("_expr")
 
                     headers.append("coll_level")
 
@@ -818,6 +844,20 @@ def build_dfs(
                                     else:
                                         if k not in {"coll_level", "alias"}:
                                             values.append(v)
+                            elif "expr" in entries:
+                                for hk in data_config["header"]:
+                                    if hk in ("metric", "alias"):
+                                        continue
+                                    if hk in entries:
+                                        values.append(
+                                            entries[hk]
+                                        )
+                                    else:
+                                        values.append("")
+                                values.append(entries["expr"])
+                                eqn_content.append(
+                                    entries["expr"]
+                                )
                             else:
                                 for k, v in entries.items():
                                     if k not in {"coll_level", "alias"}:
@@ -891,32 +931,61 @@ def build_metric_value_string(
 ) -> None:
     """
     Apply the real eval string to its field in the metric_table df.
+
+    For tables using ``expr:`` format, only the ``_expr`` and ``Peak``
+    columns are transformed.  Stat columns (Avg, Min, Max, ...) are
+    left empty -- they are filled at eval time.
     """
 
     for id, df in dfs.items():
         if dfs_type[id] == "metric_table":
+            has_expr_col = "_expr" in df.columns
+
             for expr in df.columns:
-                if expr in SUPPORTED_FIELD:
-                    # NB: apply all build-in before building the whole string
-                    df[expr] = df[expr].apply(
-                        update_denominator_string, normal_unit=normal_unit
+                if expr == "_expr":
+                    _transform_expression_column(
+                        df, expr, normal_unit, profiling_config
                     )
 
-                    # NB: there should be a faster way to do with single apply
-                    if not df.empty:
-                        for i in range(df.shape[0]):
-                            row_idx_label = df.index.to_list()[i]
-                            if expr.lower() != "alias":
-                                df.at[row_idx_label, expr] = build_eval_string(
-                                    df.at[row_idx_label, expr],
-                                    df.at[row_idx_label, "coll_level"],
-                                    profiling_config,
-                                )
+                elif expr in SUPPORTED_FIELD:
+                    if has_expr_col and not expr.startswith(
+                        "Peak"
+                    ):
+                        continue
 
-                elif expr.lower() == "unit" or expr.lower() == "units":
-                    df[expr] = df[expr].apply(
-                        update_normal_unit_string, normal_unit=normal_unit
+                    _transform_expression_column(
+                        df, expr, normal_unit, profiling_config
                     )
+
+                elif expr.lower() in ("unit", "units"):
+                    df[expr] = df[expr].apply(
+                        update_normal_unit_string,
+                        normal_unit=normal_unit,
+                    )
+
+
+def _transform_expression_column(
+    df: pd.DataFrame,
+    column: str,
+    normal_unit: str,
+    profiling_config: dict,
+) -> None:
+    """Transform counter names in *column* into eval-ready strings."""
+    df[column] = df[column].apply(
+        update_denominator_string, normal_unit=normal_unit
+    )
+
+    if df.empty:
+        return
+
+    for i in range(df.shape[0]):
+        row_idx_label = df.index.to_list()[i]
+        if column.lower() != "alias":
+            df.at[row_idx_label, column] = build_eval_string(
+                df.at[row_idx_label, column],
+                df.at[row_idx_label, "coll_level"],
+                profiling_config,
+            )
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
@@ -1047,6 +1116,69 @@ def calc_builtin_vars(
     return builtin_vars_collection
 
 
+def _eval_expr_based_table(
+    df: pd.DataFrame,
+    evaluator: MetricEvaluator,
+) -> None:
+    """Evaluate-once-then-aggregate for tables using ``expr:`` format.
+
+    For each row: evaluate ``_expr`` once, then apply the stat
+    aggregation function that corresponds to each stat column present
+    in the DataFrame.  Peak columns are evaluated independently.
+    The ``_expr`` column is dropped after all rows are processed.
+    """
+    stat_columns = [
+        col
+        for col in df.columns
+        if col in STAT_AGGREGATION_MAP
+    ]
+    peak_columns = [
+        col
+        for col in df.columns
+        if col.startswith("Peak")
+    ]
+
+    for row_id, row in df.iterrows():
+        expr_str = row.get("_expr", "")
+        if not expr_str:
+            for col in stat_columns:
+                df.loc[row_id, col] = ""
+            continue
+
+        prev_count = get_noise_clamp_warnings()["count"]
+        eval_result = evaluator.eval_expression(expr_str)
+        new_count = get_noise_clamp_warnings()["count"]
+
+        if new_count > prev_count and "Metric" in df.columns:
+            metric_name = df.loc[row_id, "Metric"]
+            console_warning(
+                "Variance corrected for metric: "
+                f"{row_id} {metric_name}"
+            )
+
+        if eval_result == "N/A":
+            for col in stat_columns:
+                df.loc[row_id, col] = eval_result
+            continue
+
+        for col in stat_columns:
+            df.loc[row_id, col] = STAT_AGGREGATION_MAP[col](
+                eval_result
+            )
+
+        for peak_col in peak_columns:
+            peak_expr = row.get(peak_col, "")
+            if not peak_expr:
+                continue
+            if str(peak_expr) in ("", "None"):
+                continue
+            df.loc[row_id, peak_col] = (
+                evaluator.eval_expression(str(peak_expr))
+            )
+
+    df.drop(columns=["_expr"], inplace=True)
+
+
 @demarcate
 def eval_metric(
     dfs: dict,
@@ -1085,34 +1217,34 @@ def eval_metric(
     exprs_to_eval = []
     debug_tracker = DebugRowTracker() if debug else None
 
-    # Hmmm... apply + lambda should just work
-    # df['Value'] = df['Value'].apply(
-    #     lambda s: eval(
-    #         compile(str(s), '<string>', 'eval')
-    #     )
-    # )
     for df_id, df in dfs.items():
-        if dfs_type[df_id] == "metric_table":
-            for row_id, row in df.iterrows():
-                for expr in df.columns:
-                    if expr in SUPPORTED_FIELD and expr.lower() != "alias":
-                        if row[expr]:
-                            exprs_to_eval.append((df_id, row_id, expr, row[expr]))
+        if dfs_type[df_id] != "metric_table":
+            continue
 
-                            if debug:
-                                debug_row_tracker(
-                                    expr,
-                                    row[expr],
-                                    metric_evaluator,
-                                    raw_pmc_df,
-                                    show_inputs=debug_tracker.should_show_inputs(
-                                        df_id, row_id
-                                    ),
-                                )
-                        else:
-                            # If not insert nan, the whole col might be treated
-                            # as string but not nubmer if there is NONE
-                            row[expr] = ""
+        if "_expr" in df.columns:
+            _eval_expr_based_table(df, metric_evaluator)
+            continue
+
+        for row_id, row in df.iterrows():
+            for expr in df.columns:
+                if expr in SUPPORTED_FIELD and expr.lower() != "alias":
+                    if row[expr]:
+                        exprs_to_eval.append(
+                            (df_id, row_id, expr, row[expr])
+                        )
+
+                        if debug:
+                            debug_row_tracker(
+                                expr,
+                                row[expr],
+                                metric_evaluator,
+                                raw_pmc_df,
+                                show_inputs=debug_tracker.should_show_inputs(
+                                    df_id, row_id
+                                ),
+                            )
+                    else:
+                        row[expr] = ""
 
     for df_id, row_id, col, expr in exprs_to_eval:
         noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
