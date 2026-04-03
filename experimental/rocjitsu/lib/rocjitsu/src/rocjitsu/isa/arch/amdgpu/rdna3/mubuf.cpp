@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -280,7 +281,7 @@ void BufferLoadU8Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -307,7 +308,7 @@ void BufferLoadI8Mubuf::execute(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -333,7 +334,7 @@ void BufferLoadU16Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -360,7 +361,7 @@ void BufferLoadI16Mubuf::execute(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -386,7 +387,7 @@ void BufferLoadB32Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -412,7 +413,7 @@ void BufferLoadB64Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -438,7 +439,7 @@ void BufferLoadB96Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -464,7 +465,7 @@ void BufferLoadB128Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -489,7 +490,7 @@ void BufferStoreB8Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -523,7 +524,7 @@ void BufferStoreB16Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -557,7 +558,7 @@ void BufferStoreB32Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -591,7 +592,7 @@ void BufferStoreB64Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -627,7 +628,7 @@ void BufferStoreB96Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -665,7 +666,7 @@ void BufferStoreB128Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -706,7 +707,7 @@ void BufferLoadD16U8Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -733,7 +734,7 @@ void BufferLoadD16I8Mubuf::execute(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -759,7 +760,7 @@ void BufferLoadD16B16Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -785,7 +786,7 @@ void BufferLoadD16HiU8Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -812,7 +813,7 @@ void BufferLoadD16HiI8Mubuf::execute(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -838,7 +839,7 @@ void BufferLoadD16HiB16Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   set_data(std::move(d));
@@ -863,7 +864,7 @@ void BufferStoreD16HiB8Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -897,7 +898,7 @@ void BufferStoreD16HiB16Mubuf::execute(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
@@ -1604,7 +1605,7 @@ void BufferAtomicAddF32Mubuf::execute(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();

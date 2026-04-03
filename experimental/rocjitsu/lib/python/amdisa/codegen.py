@@ -3423,7 +3423,9 @@ class CodeGenerator:
         L.append(f'  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;')
         L.append(f'  d->num_dwords = {nd};')
         L.append('  d->is_load = true;')
+        L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
         L.append('  d->addr = smem_calculate_address(inst_, wf);')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3433,11 +3435,13 @@ class CodeGenerator:
         L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
         L.append(f'  d->num_dwords = {nd};')
         L.append('  d->is_load = false;')
+        L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;')
         L.append(f'  for (uint32_t i = 0; i < {nd}; ++i)')
         L.append('    d->store_data[i] = cu.read_sgpr(sdata_base + i);')
         L.append('  d->addr = smem_calculate_address(inst_, wf);')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3460,6 +3464,117 @@ class CodeGenerator:
         nt_expr = f'inst_.{nt}' if nt else '0'
         return sc0_expr, sc1_expr, nt_expr
 
+    def _mtype_expr(self, is_smem: bool = False) -> str:
+        """Return the correct ``mtype_from_flags_*()`` call for this ISA.
+
+        For SMEM instructions, the available coherency fields differ from
+        vector memory:
+        - CDNA1/2: SMEM has only ``glc`` (same as vector).
+        - CDNA3/4: SMEM retains ``glc``-only even though vector uses SC0/SC1/NT.
+        - RDNA1/2: SMEM has ``glc`` + ``dlc`` but NOT ``slc``.
+        - RDNA3/3.5: SMEM has ``glc`` + ``dlc`` but NOT ``slc``.
+        - RDNA4: SMEM has ``scope`` + ``th``.
+
+        Args:
+            is_smem: True if this is a scalar memory (SMEM) instruction.
+        """
+        from amdisa.isa_profile import MemoryCoherencyModel
+        model = self.isa_spec.profile.coherency_model
+        if is_smem:
+            # SMEM has limited coherency fields compared to vector memory.
+            if model in (MemoryCoherencyModel.GFX9_GLC,
+                         MemoryCoherencyModel.GFX940_SC0_SC1_NT):
+                return 'amdgpu::mtype_from_flags_gfx9(inst_.glc)'
+            if model == MemoryCoherencyModel.GFX10_GLC_DLC_SLC:
+                # SMEM on GFX10 has glc+dlc but no slc.
+                return 'amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, false)'
+            if model == MemoryCoherencyModel.GFX11_SC0_SC1_TH:
+                # SMEM on GFX11 has glc+dlc but no slc.
+                return 'amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false)'
+            if model == MemoryCoherencyModel.GFX12_SCOPE_TH:
+                return 'amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th)'
+        if model == MemoryCoherencyModel.GFX9_GLC:
+            return 'amdgpu::mtype_from_flags_gfx9(inst_.glc)'
+        if model == MemoryCoherencyModel.GFX940_SC0_SC1_NT:
+            return 'amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt)'
+        if model == MemoryCoherencyModel.GFX10_GLC_DLC_SLC:
+            return 'amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc)'
+        if model == MemoryCoherencyModel.GFX11_SC0_SC1_TH:
+            return 'amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc)'
+        if model == MemoryCoherencyModel.GFX12_SCOPE_TH:
+            return 'amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th)'
+        return 'amdgpu::Mtype::RW'
+
+    def _cache_flags_includes(self) -> list[str]:
+        """Return cache_flags header path(s) for this ISA's coherency model.
+
+        GFX940 (CDNA3/4) needs both gfx940 (vector memory) and gfx9 (SMEM).
+        """
+        from amdisa.isa_profile import MemoryCoherencyModel
+        model = self.isa_spec.profile.coherency_model
+        base = 'rocjitsu/isa/arch/amdgpu/shared'
+        if model == MemoryCoherencyModel.GFX940_SC0_SC1_NT:
+            return [f'{base}/gfx940_cache_flags.h', f'{base}/gfx9_cache_flags.h']
+        _MAP = {
+            MemoryCoherencyModel.GFX9_GLC: 'gfx9_cache_flags.h',
+            MemoryCoherencyModel.GFX10_GLC_DLC_SLC: 'gfx10_cache_flags.h',
+            MemoryCoherencyModel.GFX11_SC0_SC1_TH: 'gfx11_cache_flags.h',
+            MemoryCoherencyModel.GFX12_SCOPE_TH: 'gfx12_cache_flags.h',
+        }
+        return [f'{base}/{_MAP[model]}']
+
+    def _wait_counter_type(self, sem_class: str) -> str | None:
+        """Return the WaitCounterType enum for a given memory semantic class.
+
+        Returns None for non-memory instructions. Maps semantic classes to the
+        correct counter that must be incremented when the instruction issues.
+        """
+        from amdisa.isa_profile import MemoryCoherencyModel
+        model = self.isa_spec.profile.coherency_model
+        is_gfx11_plus = model in (
+            MemoryCoherencyModel.GFX11_SC0_SC1_TH,
+            MemoryCoherencyModel.GFX12_SCOPE_TH,
+        )
+        _MAP = {
+            'smem_load': 'amdgpu::WaitCounterType::KMCNT' if is_gfx11_plus
+                         else 'amdgpu::WaitCounterType::LGKMCNT',
+            'smem_store': 'amdgpu::WaitCounterType::KMCNT' if is_gfx11_plus
+                          else 'amdgpu::WaitCounterType::LGKMCNT',
+            'flat_load': 'amdgpu::WaitCounterType::LOADCNT' if is_gfx11_plus
+                         else 'amdgpu::WaitCounterType::VMCNT',
+            'flat_store': 'amdgpu::WaitCounterType::STORECNT' if is_gfx11_plus
+                          else ('amdgpu::WaitCounterType::VSCNT'
+                                if model == MemoryCoherencyModel.GFX10_GLC_DLC_SLC
+                                else 'amdgpu::WaitCounterType::VMCNT'),
+            'flat_atomic': 'amdgpu::WaitCounterType::LOADCNT' if is_gfx11_plus
+                           else 'amdgpu::WaitCounterType::VMCNT',
+            'buffer_load': 'amdgpu::WaitCounterType::LOADCNT' if is_gfx11_plus
+                           else 'amdgpu::WaitCounterType::VMCNT',
+            'buffer_store': 'amdgpu::WaitCounterType::STORECNT' if is_gfx11_plus
+                            else ('amdgpu::WaitCounterType::VSCNT'
+                                  if model == MemoryCoherencyModel.GFX10_GLC_DLC_SLC
+                                  else 'amdgpu::WaitCounterType::VMCNT'),
+            'tbuffer_load': 'amdgpu::WaitCounterType::LOADCNT' if is_gfx11_plus
+                            else 'amdgpu::WaitCounterType::VMCNT',
+            'tbuffer_store': 'amdgpu::WaitCounterType::STORECNT' if is_gfx11_plus
+                             else ('amdgpu::WaitCounterType::VSCNT'
+                                   if model == MemoryCoherencyModel.GFX10_GLC_DLC_SLC
+                                   else 'amdgpu::WaitCounterType::VMCNT'),
+            'global_load': 'amdgpu::WaitCounterType::LOADCNT' if is_gfx11_plus
+                           else 'amdgpu::WaitCounterType::VMCNT',
+            'global_store': 'amdgpu::WaitCounterType::STORECNT' if is_gfx11_plus
+                            else ('amdgpu::WaitCounterType::VSCNT'
+                                  if model == MemoryCoherencyModel.GFX10_GLC_DLC_SLC
+                                  else 'amdgpu::WaitCounterType::VMCNT'),
+            'ds_read': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                       else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_write': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                        else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_atomic': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                         else 'amdgpu::WaitCounterType::LGKMCNT',
+        }
+        return _MAP.get(sem_class)
+
     def _gen_flat_load(self, dst: list[str], src: list[str], sem: InstructionSemantics) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
@@ -3471,9 +3586,10 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
-        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3486,7 +3602,7 @@ class CodeGenerator:
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = false;')
-        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
         L.append('  auto &cu = wf.cu();')
@@ -3506,6 +3622,7 @@ class CodeGenerator:
                 L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field}, lane);')
                 L.append(f'    d->store_data[lane * {stride} + {i}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3551,7 +3668,7 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = ({sc0} != 0);')
         L.append(f'  d->atomic_op = {op_enum};')
-        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         data_field = self.isa_spec.profile.flat_store_src_field
         L.append('  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
@@ -3565,6 +3682,7 @@ class CodeGenerator:
             L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field} + {i}, lane);')
             L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);')
         L.append('  }')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3586,7 +3704,7 @@ class CodeGenerator:
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = ({sc0} != 0);')
         L.append(f'  d->atomic_op = {op_enum};')
-        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
         L.append('  auto &cu = wf.cu();')
@@ -3599,6 +3717,7 @@ class CodeGenerator:
             L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + {i}, lane);')
             L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);')
         L.append('  }')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3631,6 +3750,7 @@ class CodeGenerator:
             L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + {i}, lane);')
             L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);')
         L.append('  }')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3646,9 +3766,10 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
-        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append(f'  {addr_fn}(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3661,7 +3782,7 @@ class CodeGenerator:
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = false;')
-        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append(f'  {addr_fn}(inst_, wf, d->per_lane_addr, d->lane_mask);')
         L.append('  auto &cu = wf.cu();')
@@ -3681,6 +3802,7 @@ class CodeGenerator:
                 L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata, lane);')
                 L.append(f'    d->store_data[lane * {stride} + {i}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3695,6 +3817,7 @@ class CodeGenerator:
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
         L.append('  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3730,6 +3853,7 @@ class CodeGenerator:
                 L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0, lane);')
                 L.append(f'    d->store_data[lane * {stride} + {off}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
+        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -3937,6 +4061,10 @@ class CodeGenerator:
                 if is_mem_enc:
                     cpp_includes.extend([
                         (f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/addr_calc.h', False),
+                    ])
+                    for cf_inc in self._cache_flags_includes():
+                        cpp_includes.append((cf_inc, False))
+                    cpp_includes.extend([
                         ('rocjitsu/vm/amdgpu/compute_unit.h', False),
                         ('rocjitsu/vm/amdgpu/mem_state.h', False),
                         ('cstring', True),
