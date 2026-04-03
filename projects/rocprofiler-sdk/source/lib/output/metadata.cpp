@@ -122,11 +122,10 @@ process_agent_counters(rocprofiler_agent_id_t    agent_id,
                 auto status = rocprofiler_query_counter_info(
                     counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, &_info);
 
-                // Skip invalid counters instead of aborting
                 if(status != ROCPROFILER_STATUS_SUCCESS)
                 {
-                    // Silently skip - the root cause warning was already logged in dimensions.cpp
-                    // when the counter failed dimension generation. No need to log again here.
+                    // Silently skip instead of aborting - the root cause warning was already logged
+                    // in dimensions.cpp
                     continue;
                 }
 

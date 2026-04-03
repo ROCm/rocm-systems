@@ -48,8 +48,6 @@
 #include <cstdlib>
 #include <memory>
 #include <system_error>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -94,6 +92,203 @@ get_constants(uint64_t starting_id)
     }
     return constants;
 }
+
+// ============================================================================
+// YAML Parsing Helper Functions
+// ============================================================================
+static void
+print_counter_yaml_schema_hint()
+{
+    ROCP_ERROR << "Expected structure:\n"
+               << "rocprofiler-sdk:\n"
+               << "  counters-schema-version: 1\n"
+               << "  counters:\n"
+               << "  - name: COUNTER_NAME\n"
+               << "    description: 'Counter description'\n"
+               << "    properties: []\n"
+               << "    definitions:\n"
+               << "    - architectures:\n"
+               << "      - gfx942\n"
+               << "      block: BLOCK_NAME\n"
+               << "      event: EVENT_ID\n";
+}
+
+/**
+ * @brief Safely load YAML with exception handling
+ */
+YAML::Node
+safe_load_yaml(const std::string& data, const std::string& source_name)
+{
+    try
+    {
+        return YAML::Load(data);
+    } catch(const YAML::ParserException& e)
+    {
+        ROCP_ERROR << "Failed to parse " << source_name << ": " << e.what();
+    } catch(const YAML::Exception& e)
+    {
+        ROCP_ERROR << "YAML error while loading " << source_name << ": " << e.what();
+    } catch(const std::exception& e)
+    {
+        ROCP_ERROR << "Unexpected error while loading " << source_name << ": " << e.what();
+    }
+
+    return {};
+}
+
+/**
+ * @brief Extract the counters node from YAML with validation
+ */
+YAML::Node
+get_counters_node(const YAML::Node& root, const std::string& source_name, bool print_schema_hint)
+{
+    if(!root || !root.IsMap())
+    {
+        ROCP_ERROR << "Invalid " << source_name << ": root must be a map";
+        if(print_schema_hint) print_counter_yaml_schema_hint();
+        return {};
+    }
+
+    auto sdk = root["rocprofiler-sdk"];
+    if(!sdk || !sdk.IsMap())
+    {
+        ROCP_ERROR << "Invalid " << source_name << ": missing or invalid 'rocprofiler-sdk'";
+        if(print_schema_hint) print_counter_yaml_schema_hint();
+        return {};
+    }
+
+    auto counters = sdk["counters"];
+    if(!counters || !counters.IsSequence())
+    {
+        ROCP_ERROR << "Invalid " << source_name
+                   << ": missing or invalid 'rocprofiler-sdk.counters'";
+        if(print_schema_hint) print_counter_yaml_schema_hint();
+        return {};
+    }
+
+    return counters;
+}
+
+/**
+ * @brief Safely extract a required string field from YAML node
+ * Returns std::nullopt if field missing, has wrong type, or is empty
+ * Logs appropriate warning on failure
+ */
+std::optional<std::string>
+get_required_scalar(const YAML::Node& parent, const char* key, const std::string& context)
+{
+    auto node = parent[key];
+    if(!node || !node.IsScalar())
+    {
+        ROCP_WARNING << "Skipping " << context << ": missing or invalid '" << key << "'";
+        return std::nullopt;
+    }
+
+    try
+    {
+        return node.as<std::string>();
+    } catch(const YAML::Exception& e)
+    {
+        ROCP_WARNING << "Skipping " << context << ": invalid '" << key << "': " << e.what();
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Safely extract an optional string field from YAML node
+ * Returns empty string if field missing or wrong type
+ */
+std::string
+get_optional_scalar(const YAML::Node& parent, const char* key)
+{
+    auto node = parent[key];
+    if(!node) return {};
+    if(!node.IsScalar()) return {};
+
+    try
+    {
+        return node.as<std::string>();
+    } catch(const YAML::Exception&)
+    {
+        return {};
+    }
+}
+
+bool
+validate_definitions_node(const YAML::Node& counter, const std::string& counter_name)
+{
+    auto definitions = counter["definitions"];
+    if(!definitions || !definitions.IsSequence())
+    {
+        ROCP_WARNING << "Skipping counter '" << counter_name
+                     << "': missing or invalid 'definitions'";
+        return false;
+    }
+
+    return true;
+}
+bool
+validate_definition_node(const YAML::Node& definition, const std::string& counter_name)
+{
+    if(!definition || !definition.IsMap())
+    {
+        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                     << "': definition must be a map";
+        return false;
+    }
+
+    if(!definition["architectures"] || !definition["architectures"].IsSequence())
+    {
+        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                     << "': missing or invalid 'architectures'";
+        return false;
+    }
+
+    if(definition["block"] && !definition["block"].IsScalar())
+    {
+        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                     << "': 'block' must be a scalar";
+        return false;
+    }
+
+    if(definition["event"] && !definition["event"].IsScalar())
+    {
+        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                     << "': 'event' must be a scalar";
+        return false;
+    }
+
+    if(definition["expression"] && !definition["expression"].IsScalar())
+    {
+        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                     << "': 'expression' must be a scalar";
+        return false;
+    }
+
+    return true;
+}
+
+bool
+should_skip_duplicate(
+    std::unordered_map<std::string, std::unordered_set<std::string>>& arch_counter_names,
+    std::unordered_set<std::string>&                                  warned_duplicates,
+    const std::string&                                                arch_name,
+    const std::string&                                                counter_name)
+{
+    if(arch_counter_names[arch_name].insert(counter_name).second) return false;
+
+    auto dup_key = arch_name + ":" + counter_name;
+    if(warned_duplicates.insert(dup_key).second)
+    {
+        ROCP_WARNING << fmt::format("Duplicate counter '{}' found in YAML for architecture {}. "
+                                    "Using first definition, ignoring duplicate.",
+                                    counter_name,
+                                    arch_name);
+    }
+
+    return true;
+}
+
 /**
  * Expected YAML Format:
  * COUNTER_NAME:
@@ -120,7 +315,6 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         return data;
     });
 
-    // Helper lambda to return empty counter_metrics_t on error
     auto return_empty = []() {
         return counter_metrics_t{
             .arch_to_metric = MetricMap{}, .id_to_metric = {}, .arch_to_id = {}};
@@ -131,22 +325,13 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
     {
         ROCP_INFO << "Loading Counter Config: " << filename;
         std::ifstream file(filename);
-
-        // Validate file was opened successfully
-        if(!file.is_open() || !file.good())
+        if(!file)
         {
             ROCP_ERROR << "Failed to open counter configuration file: " << filename;
             return return_empty();
         }
 
         counter_data << file.rdbuf();
-
-        // Check if file was empty or read failed
-        if(counter_data.str().empty())
-        {
-            ROCP_ERROR << "Counter configuration file is empty or unreadable: " << filename;
-            return return_empty();
-        }
     }
     else
     {
@@ -154,229 +339,103 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         counter_data << override.data;
     }
 
-    // Wrap YAML parsing in exception handling
-    YAML::Node yaml;
-    try
+    auto yaml = safe_load_yaml(counter_data.str(), "counter config YAML");
+    if(!yaml)
     {
-        yaml = YAML::Load(counter_data.str());
-    } catch(const YAML::ParserException& e)
-    {
-        ROCP_ERROR << "YAML parsing error in counter configuration: " << e.what();
-        return return_empty();
-    } catch(const YAML::Exception& e)
-    {
-        ROCP_ERROR << "YAML error in counter configuration: " << e.what();
-        return return_empty();
-    } catch(const std::exception& e)
-    {
-        ROCP_ERROR << "Unexpected error parsing counter configuration: " << e.what();
         return return_empty();
     }
 
-    // Validate required YAML structure
-    if(!yaml["rocprofiler-sdk"])
+    // Extract and validate the counters node
+    auto header = get_counters_node(yaml, "counter config YAML", false);
+    if(!header)
     {
-        ROCP_ERROR << "YAML missing required top-level key 'rocprofiler-sdk'";
         return return_empty();
     }
 
-    if(!yaml["rocprofiler-sdk"]["counters"])
-    {
-        ROCP_ERROR << "YAML missing required key 'rocprofiler-sdk.counters'";
-        return return_empty();
-    }
-
-    auto     header     = yaml["rocprofiler-sdk"]["counters"];
     uint64_t current_id = 0;
     if(!override.data.empty() && override.append)
     {
-        try
+        append_yaml        = safe_load_yaml(override.data, "extra counters YAML");
+        auto append_header = get_counters_node(append_yaml, "extra counters YAML", true);
+
+        if(append_header)
         {
-            append_yaml = YAML::Load(override.data);
-            if(append_yaml["rocprofiler-sdk"] && append_yaml["rocprofiler-sdk"]["counters"])
+            for(const auto& counter : append_header)
             {
-                for(const auto& counter : append_yaml["rocprofiler-sdk"]["counters"])
-                {
-                    header.push_back(counter);
-                }
+                header.push_back(counter);
             }
-            else
-            {
-                ROCP_ERROR << "Invalid extra counters YAML format. Expected structure:\n"
-                           << "rocprofiler-sdk:\n"
-                           << "  counters-schema-version: 1\n"
-                           << "  counters:\n"
-                           << "  - name: COUNTER_NAME\n"
-                           << "    description: 'Counter description'\n"
-                           << "    properties: []\n"
-                           << "    definitions:\n"
-                           << "    - architectures:\n"
-                           << "      - gfx942\n"
-                           << "      block: BLOCK_NAME\n"
-                           << "      event: EVENT_ID\n"
-                           << "Got:\n"
-                           << override.data;
-            }
-        } catch(const YAML::Exception& e)
-        {
-            ROCP_ERROR << "YAML error in override data: " << e.what();
-        } catch(const std::exception& e)
-        {
-            ROCP_ERROR << "Unexpected error parsing override data: " << e.what();
         }
+        else
+        {
+            ROCP_ERROR << "Ignoring invalid extra counters YAML";
+        }
+        // Note: Continue with main counters even if append fails
     }
 
     // Track counter names per architecture to detect duplicates
     std::unordered_map<std::string, std::unordered_set<std::string>> arch_counter_names;
-    // Track which duplicates we've already warned about (static to persist across calls)
-    static std::unordered_set<std::string> warned_duplicates;
+    static std::unordered_set<std::string>                           warned_duplicates;
 
     for(const auto& counter : header)
     {
-        // Validate required counter fields exist and have correct types
-        if(!counter["name"])
+        // Extract and validate required counter fields
+        if(!counter || !counter.IsMap())
         {
-            ROCP_WARNING << "Counter entry missing required 'name' field. Skipping counter.";
+            ROCP_WARNING << "Skipping invalid counter entry: counter must be a map";
             continue;
         }
 
-        if(!counter["description"])
-        {
-            ROCP_WARNING << "Counter entry missing required 'description' field. Skipping counter.";
-            continue;
-        }
+        auto counter_name_opt = get_required_scalar(counter, "name", "counter entry");
+        if(!counter_name_opt) continue;
+        const auto& counter_name = *counter_name_opt;
 
-        if(!counter["definitions"])
-        {
-            ROCP_WARNING << "Counter entry missing required 'definitions' field. Skipping counter.";
-            continue;
-        }
+        auto description_opt =
+            get_required_scalar(counter, "description", "counter '" + counter_name + "'");
+        if(!description_opt) continue;
+        const auto& description = *description_opt;
 
-        std::string counter_name;
-        std::string description;
-
-        // Safely extract counter name and description with type checking
-        try
-        {
-            counter_name = counter["name"].as<std::string>();
-            description  = counter["description"].as<std::string>();
-
-            // Validate name is not empty (description can be empty)
-            if(counter_name.empty())
-            {
-                ROCP_WARNING << "Counter has empty name field. Skipping counter.";
-                continue;
-            }
-        } catch(const YAML::BadConversion& e)
-        {
-            ROCP_WARNING << "Counter has invalid type for 'name' or 'description' field "
-                         << "(expected string). Skipping counter.";
-            continue;
-        }
+        if(!validate_definitions_node(counter, counter_name)) continue;
 
         for(const auto& definition : counter["definitions"])
         {
-            if(!definition["architectures"])
-            {
-                ROCP_WARNING << fmt::format(
-                    "Counter '{}' definition missing 'architectures' field. Skipping definition.",
-                    counter_name);
-                continue;
-            }
+            if(!validate_definition_node(definition, counter_name)) continue;
 
-            if(!definition["architectures"].IsSequence() || definition["architectures"].size() == 0)
+            auto block      = get_optional_scalar(definition, "block");
+            auto event      = get_optional_scalar(definition, "event");
+            auto expression = get_optional_scalar(definition, "expression");
+
+            if(event.empty() && expression.empty())
             {
-                ROCP_WARNING << fmt::format(
-                    "Counter '{}' has empty or invalid 'architectures' list. Skipping definition.",
-                    counter_name);
+                ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                             << "': definition must contain 'event' or 'expression'";
                 continue;
             }
 
             for(const auto& arch : definition["architectures"])
             {
-                std::string arch_str;
+                if(!arch || !arch.IsScalar())
+                {
+                    ROCP_WARNING << "Skipping invalid architecture entry for counter '"
+                                 << counter_name << "': architecture must be a scalar";
+                    continue;
+                }
+
+                std::string arch_name;
                 try
                 {
-                    arch_str = arch.as<std::string>();
-
-                    if(arch_str.empty())
-                    {
-                        ROCP_WARNING << fmt::format(
-                            "Counter '{}' has empty architecture string. Skipping.", counter_name);
-                        continue;
-                    }
-                } catch(const YAML::BadConversion& e)
+                    arch_name = arch.as<std::string>();
+                } catch(const YAML::Exception& e)
                 {
-                    ROCP_WARNING << fmt::format(
-                        "Counter '{}' has invalid architecture type (expected string). Skipping.",
-                        counter_name);
+                    ROCP_WARNING << "Skipping invalid architecture entry for counter '"
+                                 << counter_name << "': " << e.what();
                     continue;
                 }
 
-                // Check for duplicate counter name in this architecture
-                if(!arch_counter_names[arch_str].insert(counter_name).second)
-                {
-                    // Only warn once per unique counter+arch combination
-                    auto dup_key = arch_str + ":" + counter_name;
-                    if(warned_duplicates.insert(dup_key).second)
-                    {
-                        ROCP_WARNING << fmt::format(
-                            "Duplicate counter '{}' found in YAML for architecture {}. "
-                            "Using first definition, ignoring duplicate.",
-                            counter_name,
-                            arch_str);
-                    }
-                    continue;  // Skip this duplicate definition
-                }
-
-                // Extract and validate block, event, and expression fields
-                std::string block_str;
-                std::string event_str;
-                std::string expression_str;
-
-                try
-                {
-                    block_str = (definition["block"] ? definition["block"].as<std::string>() : "");
-                    event_str = (definition["event"] ? definition["event"].as<std::string>() : "");
-                    expression_str =
-                        (definition["expression"] ? definition["expression"].as<std::string>()
-                                                  : "");
-                } catch(const YAML::BadConversion& e)
-                {
-                    ROCP_WARNING << fmt::format(
-                        "Counter '{}' has invalid type for block/event/expression field. "
-                        "Expected string. Skipping definition.",
-                        counter_name);
+                if(should_skip_duplicate(
+                       arch_counter_names, warned_duplicates, arch_name, counter_name))
                     continue;
-                }
 
-                // Validate counter definition is complete
-                // Counter must have either: (block AND event) OR expression
-                bool has_block      = !block_str.empty();
-                bool has_event      = !event_str.empty();
-                bool has_expression = !expression_str.empty();
-
-                // Validate: must have expression OR both block+event
-                if(!has_expression && !(has_block && has_event))
-                {
-                    std::string issue;
-                    if(has_block && !has_event)
-                        issue = fmt::format("has block '{}' but missing event", block_str);
-                    else if(!has_block && has_event)
-                        issue = fmt::format("has event '{}' but missing block", event_str);
-                    else
-                        issue = "missing both block/event and expression";
-
-                    ROCP_WARNING << fmt::format(
-                        "Counter '{}' for architecture {} {}. "
-                        "Hardware counters need both block AND event, OR an expression. Skipping.",
-                        counter_name,
-                        arch_str,
-                        issue);
-                    continue;
-                }
-
-                auto& metricVec = ret.emplace(arch_str, std::vector<Metric>()).first->second;
+                auto& metricVec = ret.emplace(arch_name, std::vector<Metric>()).first->second;
                 if(metricVec.empty())
                 {
                     const auto constants = get_constants(current_id);
@@ -384,14 +443,8 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                     current_id += constants.size();
                 }
 
-                metricVec.emplace_back(arch_str,
-                                       counter_name,
-                                       block_str,
-                                       event_str,
-                                       description,
-                                       expression_str,
-                                       "",
-                                       current_id);
+                metricVec.emplace_back(
+                    arch_name, counter_name, block, event, description, expression, "", current_id);
                 current_id++;
             }
         }

@@ -22,7 +22,6 @@
 
 #include "dimensions.hpp"
 
-#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
