@@ -36,6 +36,11 @@ if(RJ_SANITIZER)
     if(RJ_SANITIZER STREQUAL "asan")
       add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
       add_link_options(-fsanitize=address)
+      # GCC 13+ emits false-positive -Wmaybe-uninitialized in std_function.h
+      # when ASAN is enabled. Suppress to avoid -Werror failures.
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-Wno-maybe-uninitialized)
+      endif()
     elseif(RJ_SANITIZER STREQUAL "ubsan")
       add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
       add_link_options(-fsanitize=undefined)
@@ -64,6 +69,7 @@ if(RJ_CLANG_TIDY)
   endif()
 endif()
 
+# Third-party dependencies (fetched into third_party/).
 # Third-party dependencies (fetched into third_party/).
 set(FETCHCONTENT_BASE_DIR ${PROJECT_SOURCE_DIR}/third_party)
 include(FetchContent)

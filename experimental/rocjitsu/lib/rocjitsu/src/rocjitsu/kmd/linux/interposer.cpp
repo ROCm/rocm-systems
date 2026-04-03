@@ -8,6 +8,7 @@
 /// /dev/kfd operations and sysfs topology reads through SimulatedDriver.
 /// All global state is managed by SimulatedDriver's static singleton interface.
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
 
 #include <cerrno>
@@ -273,10 +274,13 @@ FILE *fopen64(const char *path, const char *mode) { return fopen(path, mode); }
 FILE *freopen(const char *path, const char *mode, FILE *stream) {
   if (!path || !mode)
     return nullptr;
-  // Close the old stream if provided. Cast to void* first to suppress the
-  // nonnull attribute warning: the C standard allows stream to be null.
-  if (static_cast<void *>(stream))
+  // Close the old stream if provided. The C standard allows stream to be
+  // null, but GCC's nonnull attribute on fclose triggers a warning.
+  RJ_DIAGNOSTIC_PUSH
+  RJ_DIAGNOSTIC_IGNORE_NONNULL_COMPARE
+  if (stream)
     ::fclose(stream);
+  RJ_DIAGNOSTIC_POP
   return fopen(path, mode);
 }
 

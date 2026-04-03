@@ -285,6 +285,7 @@ class CodeGenerator:
         self.gen_operand()
         self.gen_insts()
         self.gen_decoder()
+        self.gen_test_encodings()
 
     def _shared_baseline(self) -> dict[str, tuple[str, list[tuple[str, int]]]]:
         """Build the shared-struct baseline for the current ISA.
@@ -4855,6 +4856,76 @@ class CodeGenerator:
         )
         class_def_file.gen_code()
         class_impl_file.gen_code()
+
+    def gen_test_encodings(self) -> None:
+        """Generate a C++ header with one sample encoding word per instruction.
+
+        Produces ``test_encodings.h`` containing a constexpr array of
+        ``{mnemonic, {word0, word1}}`` entries.  The test harness decodes
+        each entry and calls ``execute()`` to verify no ``UnimplementedInst``
+        is thrown.
+        """
+        entries: list[str] = []
+        for enc in self.isa_spec.inst_encodings:
+            if enc.is_alt:
+                continue
+            op_field = next(
+                (f for f in enc.ucode_fields if f.name == 'op'), None
+            )
+            enc_field = next(
+                (f for f in enc.ucode_fields if f.name == 'encoding'), None
+            )
+            ptrs = enc.primary_dt_ptrs
+            if not op_field or not enc_field or not ptrs:
+                continue
+            enc_val = ptrs[0]
+            for inst in enc.insts:
+                word = (enc_val << enc_field.bit_offset) | (
+                    inst.opcode << op_field.bit_offset
+                )
+                w0 = word & 0xFFFFFFFF
+                w1 = (word >> 32) & 0xFFFFFFFF
+                entries.append(
+                    f'  {{"{inst.mnemonic}", {{0x{w0:08X}U, 0x{w1:08X}U}}}},'
+                )
+
+        arch = self.isa_spec.arch_name
+        ns = arch
+        guard = f'ROCJITSU_ISA_AMDGPU_{arch.upper()}_TEST_ENCODINGS_H_'
+        lines = [
+            f'// Automatically generated test data for {arch}. Do not modify.',
+            f'#ifndef {guard}',
+            f'#define {guard}',
+            '',
+            '#include <array>',
+            '#include <cstdint>',
+            '#include <string_view>',
+            '',
+            f'namespace rocjitsu::{ns}::test_data {{',
+            '',
+            'struct TestEncoding {',
+            '  std::string_view mnemonic;',
+            '  std::array<uint32_t, 2> words;',
+            '};',
+            '',
+            f'inline constexpr TestEncoding ENCODINGS[] = {{',
+        ]
+        lines.extend(entries)
+        lines.append('};')
+        lines.append('')
+        lines.append(f'inline constexpr size_t NUM_ENCODINGS = {len(entries)};')
+        lines.append('')
+        lines.append(f'}} // namespace rocjitsu::{ns}::test_data')
+        lines.append('')
+        lines.append(f'#endif // {guard}')
+        lines.append('')
+
+        import os
+        out_path = os.path.join(
+            self.out_path, self.isa_spec.arch_name, 'test_encodings.h'
+        )
+        with open(out_path, 'w') as f:
+            f.write('\n'.join(lines))
 
     def gen_isa_types(self) -> None:
         """Generate an ISA struct wrapping type definitions."""
