@@ -15,7 +15,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
+from utils import file_io, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -23,6 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.parser import parser
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,

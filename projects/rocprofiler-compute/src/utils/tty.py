@@ -12,11 +12,12 @@ import pandas as pd
 from tabulate import tabulate
 
 import config
-from utils import mem_chart, parser, schema
+from utils import mem_chart, schema
 from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
 from utils.logger import console_error, console_log, console_warning
+from utils.parser import parser
 from utils.utils_analysis import NS_TO_MS, CallTreeNode, simplify_kernel_name
 from utils.utils_common import (
     METRIC_ID_RE,

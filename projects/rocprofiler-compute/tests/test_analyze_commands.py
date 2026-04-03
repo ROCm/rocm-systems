@@ -1233,7 +1233,7 @@ def test_parser_utility_functions():
     import numpy as np
     import pandas as pd
 
-    from utils.parser import (
+    from utils.parser.parser import (
         to_concat,
         to_int,
         to_max,
@@ -1339,7 +1339,7 @@ def test_parser_error_handling():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import (
+    from utils.parser.parser import (
         build_eval_string,
         update_denominator_string,
     )
@@ -1383,7 +1383,7 @@ def test_ast_transformer_edge_cases():
 
     import ast
 
-    from utils.parser import CodeTransformer
+    from utils.parser.parser import CodeTransformer
 
     transformer = CodeTransformer()
 
@@ -1425,7 +1425,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
 
     import pandas as pd
 
-    from utils.parser import eval_metric
+    from utils.parser.parser import eval_metric
 
     mock_dfs = {
         1: pd.DataFrame({
@@ -1513,7 +1513,7 @@ def test_apply_filters_direct():
 
     import pandas as pd
 
-    from utils.parser import apply_filters
+    from utils.parser.parser import apply_filters
 
     class MockWorkload:
         def __init__(self):
@@ -1601,7 +1601,7 @@ def test_pc_sampling_basic_coverage():
 
     import tempfile
 
-    from utils.parser import load_pc_sampling_data, search_pc_sampling_record
+    from utils.parser.parser import load_pc_sampling_data, search_pc_sampling_record
 
     class MockWorkload:
         filter_kernel_ids = []
@@ -1631,7 +1631,7 @@ def test_build_dfs_edge_cases():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import gen_counter_list
+    from utils.parser.parser import gen_counter_list
 
     visited, counters = gen_counter_list(None)
     assert not visited
@@ -1661,7 +1661,7 @@ def test_update_functions_coverage():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import update_denominator_string, update_normal_unit_string
+    from utils.parser.parser import update_denominator_string, update_normal_unit_string
 
     result = update_denominator_string("AVG(SQ_WAVES / $denom)", "per_wave")
     assert "$denom" not in result
@@ -1686,7 +1686,7 @@ def test_metric_evaluation_no_valid_data():
     """Test emetric evaluation with no valid data"""
     import numpy as np
 
-    from utils.parser import MetricEvaluator
+    from utils.parser.parser import MetricEvaluator
 
     metric_evaluator = MetricEvaluator({}, {}, {})
     with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
@@ -2304,7 +2304,7 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils import schema
-    from utils.parser import apply_kernel_filter
+    from utils.parser.parser import apply_kernel_filter
 
     # Create multi-indexed DataFrame similar to real raw_pmc
     raw_df = pd.DataFrame({
@@ -2358,7 +2358,7 @@ def test_apply_kernel_filter_string_names(mock_workload_for_filter):
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     from utils import schema
-    from utils.parser import apply_kernel_filter
+    from utils.parser.parser import apply_kernel_filter
 
     # Create multi-indexed DataFrame
     raw_df = pd.DataFrame({
@@ -2409,7 +2409,7 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import load_pc_sampling_data
+    from utils.parser.parser import load_pc_sampling_data
 
     # Create mock workload with dfs populated
     workload = Mock()

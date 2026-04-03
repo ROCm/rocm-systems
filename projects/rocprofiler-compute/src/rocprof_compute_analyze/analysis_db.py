@@ -23,7 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.parser import (
+from utils.parser.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
     CodeTransformer,
     to_avg,

@@ -15,8 +15,9 @@ from rocprof_compute_tui.utils.tui_utils import (
     get_top_kernels,
     process_panels_to_dataframes,
 )
-from utils import file_io, parser, schema
+from utils import file_io, schema
 from utils.logger import console_error, console_log, demarcate
+from utils.parser import parser
 
 
 class tui_analysis(OmniAnalyze_Base):

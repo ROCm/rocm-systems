@@ -2050,7 +2050,7 @@ def test_comprehensive_error_paths():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import (
+    from utils.parser.parser import (
         build_comparable_columns,
         build_eval_string,
     )

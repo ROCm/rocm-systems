@@ -6484,7 +6484,7 @@ def test_noise_clamp_clamping_behavior():
     """Core behavior: positives unchanged, negatives clamped to 0."""
     import numpy as np
 
-    from utils.parser import to_noise_clamp
+    from utils.parser.parser import to_noise_clamp
 
     # Scalar: positive unchanged
     assert to_noise_clamp(1000.0, 100000.0) == 1000.0
@@ -6508,7 +6508,7 @@ def test_noise_clamp_clamping_behavior():
 @pytest.mark.noise_clamp
 def test_noise_clamp_zero_reference():
     """Edge case: zero reference should not cause division by zero."""
-    from utils.parser import to_noise_clamp
+    from utils.parser.parser import to_noise_clamp
 
     assert to_noise_clamp(-100.0, 0.0) == 0.0
     result = to_noise_clamp(pd.Series([-100.0]), pd.Series([0.0]))
@@ -6519,7 +6519,7 @@ def test_noise_clamp_zero_reference():
 @pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
     """Warning recorded when relative error >= 1%."""
-    from utils.parser import (
+    from utils.parser.parser import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6539,7 +6539,7 @@ def test_noise_clamp_warning_above_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
     """No warning when relative error < 1%."""
-    from utils.parser import (
+    from utils.parser.parser import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6557,7 +6557,7 @@ def test_noise_clamp_no_warning_below_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_empty_input():
     """Empty inputs should return empty without error."""
-    from utils.parser import to_noise_clamp
+    from utils.parser.parser import to_noise_clamp
 
     result = to_noise_clamp(pd.Series([], dtype=float), pd.Series([], dtype=float))
     assert len(result) == 0
@@ -6567,7 +6567,7 @@ def test_noise_clamp_empty_input():
 @pytest.mark.noise_clamp
 def test_noise_clamp_threshold_boundary():
     """Exactly 1% error should trigger warning (>= not >)."""
-    from utils.parser import (
+    from utils.parser.parser import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6586,7 +6586,7 @@ def test_noise_clamper_instance_isolation():
     """Separate NoiseClamper instances should have independent state."""
     import numpy as np
 
-    from utils.parser import NoiseClamper
+    from utils.parser.parser import NoiseClamper
 
     clamper1 = NoiseClamper()
     clamper2 = NoiseClamper()
@@ -7522,7 +7522,7 @@ H1 = "torch.relu"
 @pytest.mark.torch_ops
 def test_all_keyword():
     """'all' maps to '**' and matches every hierarchy."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("all", H3)
     assert m("all", H2)
@@ -7534,7 +7534,7 @@ def test_all_keyword():
 @pytest.mark.torch_ops
 def test_bare_pattern_matches_last_component():
     """Bare token is matched via PurePosixPath.match() against the full hierarchy."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("torch.relu", H3)
     assert m("torch.nn.functional.conv2d", H2)
@@ -7547,7 +7547,7 @@ def test_bare_pattern_matches_last_component():
 @pytest.mark.torch_ops
 def test_bare_wildcard_pattern():
     """Wildcard bare token matched via PurePosixPath.match()."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("torch.*", H3)
     assert m("*relu", H3)
@@ -7560,7 +7560,7 @@ def test_bare_wildcard_pattern():
 @pytest.mark.torch_ops
 def test_hierarchy_glob():
     """Patterns with '/' match across multiple hierarchy components."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("nn.Module.Net.forward/*/torch.relu", H3)
     assert m("*/torch.nn.functional.conv2d", H2)
@@ -7571,7 +7571,7 @@ def test_hierarchy_glob():
 @pytest.mark.torch_ops
 def test_leading_slash_is_cosmetic():
     """Leading '/' is stripped during pattern normalization."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("/nn.Module.Net.forward/*/torch.relu", H3)
     assert m("/torch.relu", H3)
@@ -7581,7 +7581,7 @@ def test_leading_slash_is_cosmetic():
 @pytest.mark.torch_ops
 def test_trailing_slash_stripped_by_posixpath():
     """PurePosixPath strips trailing slashes, so they are cosmetic."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert not m("nn.Module.Net.forward/", H3)
     assert m("torch.relu/", H3)
@@ -7591,7 +7591,7 @@ def test_trailing_slash_stripped_by_posixpath():
 @pytest.mark.torch_ops
 def test_regex_not_supported():
     """Regex syntax has no special meaning; treated as literal glob text."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert not m("relu|conv2d", H3)
     assert not m("^torch\\.relu$", H3)
@@ -7603,7 +7603,7 @@ def test_regex_not_supported():
 @pytest.mark.torch_ops
 def test_empty_inputs():
     """Empty pattern or operator_name returns False."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert not m("", H3)
     assert not m("relu", "")
@@ -7614,7 +7614,7 @@ def test_empty_inputs():
 @pytest.mark.torch_ops
 def test_slash_only_markers():
     """Scope-marker-only tokens should not match any hierarchy."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert not m("/", H3)
     assert not m("//", H3)
@@ -7632,7 +7632,7 @@ def get_matched_torch_operators_for_display(
     Test-only helper: iterates every unique Operator_Name across all torch trace
     DataFrames and checks each against the supplied glob patterns.
     """
-    from utils.parser import torch_operator_pattern_matches
+    from utils.parser.parser import torch_operator_pattern_matches
 
     if not torch_operators or not pattern_list:
         return []
@@ -7790,7 +7790,7 @@ def test_engine_invalid_mode():
 @pytest.mark.torch_ops
 def test_double_star_explicit():
     """'**' matches any hierarchy depth."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("**", H3)
     assert m("**", H2)
@@ -7803,7 +7803,7 @@ def test_double_star_explicit():
 @pytest.mark.torch_ops
 def test_single_char_wildcard():
     """'?' matches exactly one character in a component."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("torch.rel?", H3)
     assert m("torch.?elu", H3)
@@ -7816,7 +7816,7 @@ def test_single_char_wildcard():
 @pytest.mark.torch_ops
 def test_long_hierarchy():
     """Deeply nested hierarchies match correctly."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     deep = "/".join([f"level{i}" for i in range(20)])
     assert m("level19", deep)
@@ -7830,7 +7830,7 @@ def test_long_hierarchy():
 @pytest.mark.torch_ops
 def test_long_component_names():
     """Components with very long names are handled correctly."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     long_name = "a" * 500
     hierarchy = f"root/{long_name}"
@@ -7843,7 +7843,7 @@ def test_long_component_names():
 @pytest.mark.torch_ops
 def test_special_characters_in_names():
     """Dots, underscores, and other non-glob chars are treated literally."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     h = "nn.Module._internal/torch.nn.functional.conv2d"
     assert m("torch.nn.functional.conv2d", h)
@@ -7856,7 +7856,7 @@ def test_special_characters_in_names():
 @pytest.mark.torch_ops
 def test_bracket_glob_pattern():
     """Character classes [abc] work in glob patterns."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("torch.rel[uv]", H3)
     assert not m("torch.rel[ab]", H3)
@@ -7866,7 +7866,7 @@ def test_bracket_glob_pattern():
 @pytest.mark.torch_ops
 def test_single_component_hierarchy():
     """Single-component hierarchy (no slashes) matches bare patterns."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("torch.relu", "torch.relu")
     assert m("*relu", "torch.relu")
@@ -7878,7 +7878,7 @@ def test_single_component_hierarchy():
 @pytest.mark.torch_ops
 def test_whitespace_only_pattern():
     """Whitespace-only patterns normalize to empty and return False."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert not m("   ", H3)
     assert not m("\t", H3)
@@ -7888,7 +7888,7 @@ def test_whitespace_only_pattern():
 @pytest.mark.torch_ops
 def test_star_pattern_matches_all():
     """Bare '*' is normalized to '**' and matches every hierarchy."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("*", H3)
     assert m("*", H2)
@@ -7911,7 +7911,7 @@ def test_star_normalize_equivalence():
 @pytest.mark.torch_ops
 def test_case_sensitivity():
     """Pattern matching is case-sensitive."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert not m("Torch.Relu", H3)
     assert not m("TORCH.RELU", H3)
@@ -7935,7 +7935,7 @@ def test_all_keyword_case_sensitive():
 @pytest.mark.torch_ops
 def test_consecutive_slashes_in_target():
     """Consecutive slashes in the target are collapsed by PurePosixPath."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     h = "a//b///torch.relu"
     assert m("torch.relu", h)
@@ -7946,7 +7946,7 @@ def test_consecutive_slashes_in_target():
 @pytest.mark.torch_ops
 def test_dots_in_patterns():
     """Dots are literal characters in glob patterns, not regex wildcards."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     assert m("torch.relu", H3)
     assert not m("torchXrelu", H3)
@@ -7959,7 +7959,7 @@ def test_dots_in_patterns():
 @pytest.mark.torch_ops
 def test_pattern_with_spaces():
     """Spaces in patterns and targets are treated literally."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     h = "module/ spaced op /torch.relu"
     assert m("torch.relu", h)
@@ -7971,7 +7971,7 @@ def test_pattern_with_spaces():
 @pytest.mark.torch_ops
 def test_colons_in_operator_names():
     """Colons (e.g. aten::relu) are literal characters in glob matching."""
-    from utils.parser import torch_operator_pattern_matches as m
+    from utils.parser.parser import torch_operator_pattern_matches as m
 
     h = "nn.Module/aten::relu_"
     assert m("aten::relu_", h)

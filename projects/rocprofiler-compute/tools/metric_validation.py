@@ -14,13 +14,15 @@ from pathlib import Path
 
 import pandas as pd
 
+from utils.parser import parser
+
 current_path = Path(__file__).resolve().parent
 additional_path = current_path / ".." / "src"
 sys.path.insert(0, str(additional_path.resolve()))
 
 from argparser import omniarg_parser  # noqa: E402
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base  # noqa: E402
-from utils import file_io, parser  # noqa: E402
+from utils import file_io  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_analysis import impute_counters_iteration_multiplex  # noqa: E402
 

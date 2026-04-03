@@ -14,7 +14,7 @@ from utils.file_io import (
     build_agent_to_gpu_map,
     process_pc_sampling_kernel_trace,
 )
-from utils.parser import (
+from utils.parser.parser import (
     PMC_KERNEL_TOP_TABLE_ID,
     load_pc_sampling_data,
     load_pc_sampling_data_per_kernel,

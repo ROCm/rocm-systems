@@ -16,7 +16,7 @@ from dash.dependencies import Input, Output, State
 from config import HIDDEN_COLUMNS, PROJECT_NAME
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline import Roofline
-from utils import file_io, parser, schema
+from utils import file_io, schema
 from utils.gui import build_bar_chart, build_table_chart
 from utils.gui_components.memchart import get_memchart
 from utils.logger import (
@@ -26,6 +26,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.parser import parser
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_common import validate_roofline_csv
 

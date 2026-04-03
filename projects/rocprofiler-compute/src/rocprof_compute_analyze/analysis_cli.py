@@ -9,8 +9,9 @@ import pandas as pd
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline import Roofline
-from utils import file_io, parser, schema, tty
+from utils import file_io, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
+from utils.parser import parser
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     build_call_trees,
