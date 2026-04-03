@@ -2287,15 +2287,15 @@ static ncclResult_t topoGetAlgoInfo(
     }
   } else {
     rcclUpdateThreadThreshold(comm, nBytes, info, threadThreshold);
-    INFO(NCCL_INIT, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
+    INFO(NCCL_TUNING, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
 
     int minNChannels = ncclParamMinNchannels();
     // Ring/Tree channel tuning
-    INFO(NCCL_INIT, "minNChannels:%i", minNChannels);
+    INFO(NCCL_TUNING, "minNChannels:%i", minNChannels);
     if(nBytes < nc * nt * threadThreshold && nc > minNChannels){
       nc = std::max(1,std::max(minNChannels,(int)(nBytes/std::max(1,nt * threadThreshold))));
     }
-    INFO(NCCL_INIT, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
+    INFO(NCCL_TUNING, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
   }
 
