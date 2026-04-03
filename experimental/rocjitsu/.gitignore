@@ -26,3 +26,5 @@ __pycache__
 build
 third_party
 Testing
+
+*.egg-info

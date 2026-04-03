@@ -10,8 +10,15 @@ add_subdirectory(kernels)
 set(RJ_OBJECT_LIBS
     rocjitsu_code
     rocjitsu_isa
+    rocjitsu_isa_cdna1
+    rocjitsu_isa_cdna2
     rocjitsu_isa_cdna3
     rocjitsu_isa_cdna4
+    rocjitsu_isa_rdna1
+    rocjitsu_isa_rdna2
+    rocjitsu_isa_rdna3
+    rocjitsu_isa_rdna3_5
+    rocjitsu_isa_rdna4
     rocjitsu_isa_risc_v
     simdojo
     rocjitsu_vm
