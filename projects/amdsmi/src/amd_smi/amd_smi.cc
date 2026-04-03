@@ -2207,6 +2207,7 @@ amdsmi_status_t amdsmi_get_fw_info(amdsmi_processor_handle processor_handle,
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
+  (void)gpu_device;  // Only used for handle validation
 
   if (info == nullptr) {
     return AMDSMI_STATUS_INVAL;
@@ -2558,6 +2559,7 @@ amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
+  (void)gpu_device;  // Only used for handle validation
   info->kfd_id = std::numeric_limits<uint64_t>::max();
   auto tmp_kfd_id = uint64_t(0);
   status = rsmi_wrapper(rsmi_dev_guid_get, processor_handle, 0, &(tmp_kfd_id));
