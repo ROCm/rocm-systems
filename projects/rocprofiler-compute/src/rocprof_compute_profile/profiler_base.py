@@ -322,7 +322,9 @@ class RocProfCompute_Base:
         # log basic info
         console_log(f"{str(prog).title()} version: {version}")
         console_log(f"Profiler choice: {self.__profiler}")
-        console_log(f"Path: {Path(self.__args.output_directory).absolute().resolve()}")
+        console_log(
+            f"Output directory: {Path(self.__args.output_directory).absolute().resolve()}"
+        )
         console_log(f"Target: {self._soc._mspec.gpu_model}")
         console_log(f"Command: {args.remaining}")
         console_log(f"Kernel Selection: {args.kernel}")
