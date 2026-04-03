@@ -1125,6 +1125,7 @@ def _eval_expr_based_table(
     For each row: evaluate ``_expr`` once, then apply the stat
     aggregation function that corresponds to each stat column present
     in the DataFrame.  Peak columns are evaluated independently.
+    Pop (Pct of Peak) is derived from the avg result and peak value.
     The ``_expr`` column is dropped after all rows are processed.
     """
     stat_columns = [
@@ -1137,6 +1138,8 @@ def _eval_expr_based_table(
         for col in df.columns
         if col.startswith("Peak")
     ]
+    has_pop = "Pct of Peak" in df.columns
+    avg_col = _find_avg_column(stat_columns)
 
     for row_id, row in df.iterrows():
         expr_str = row.get("_expr", "")
@@ -1176,7 +1179,84 @@ def _eval_expr_based_table(
                 evaluator.eval_expression(str(peak_expr))
             )
 
+        if has_pop and avg_col:
+            _compute_pop(df, row_id, avg_col, peak_columns)
+
     df.drop(columns=["_expr"], inplace=True)
+
+
+def _find_avg_column(stat_columns: list[str]) -> Optional[str]:
+    """Return the first stat column that maps to ``to_avg``."""
+    avg_names = {"Avg", "Value", "Average", "Mean", "Percent"}
+    for col in stat_columns:
+        if col in avg_names:
+            return col
+    return None
+
+
+def _compute_pop(
+    df: pd.DataFrame,
+    row_id: str,
+    avg_col: str,
+    peak_columns: list[str],
+) -> None:
+    """Derive Pct of Peak from the avg result and peak value.
+
+    For percentage metrics (``unit == Percent``): pop equals the avg
+    value directly.  For non-percentage metrics with a valid peak:
+    ``pop = (100 * avg) / peak``.
+    """
+    avg_value = df.loc[row_id, avg_col]
+    if avg_value == "N/A" or avg_value == "":
+        return
+
+    unit_col = _find_unit_column(df)
+    unit = df.loc[row_id, unit_col] if unit_col else ""
+
+    if str(unit).lower() == "percent":
+        df.loc[row_id, "Pct of Peak"] = avg_value
+        return
+
+    peak_value = _get_evaluated_peak(df, row_id, peak_columns)
+    if peak_value is None:
+        return
+
+    try:
+        peak_float = float(peak_value)
+        if peak_float == 0:
+            return
+        df.loc[row_id, "Pct of Peak"] = (
+            (100 * float(avg_value)) / peak_float
+        )
+    except (ValueError, TypeError):
+        return
+
+
+def _find_unit_column(df: pd.DataFrame) -> Optional[str]:
+    """Return the Unit column name if present."""
+    for col in df.columns:
+        if col.lower() in ("unit", "units"):
+            return col
+    return None
+
+
+def _get_evaluated_peak(
+    df: pd.DataFrame,
+    row_id: str,
+    peak_columns: list[str],
+) -> Optional[float]:
+    """Return the evaluated peak value, or None if unavailable."""
+    for peak_col in peak_columns:
+        peak_val = df.loc[row_id, peak_col]
+        if peak_val == "N/A" or peak_val == "" or peak_val is None:
+            continue
+        if str(peak_val) == "None":
+            continue
+        try:
+            return float(peak_val)
+        except (ValueError, TypeError):
+            continue
+    return None
 
 
 @demarcate
