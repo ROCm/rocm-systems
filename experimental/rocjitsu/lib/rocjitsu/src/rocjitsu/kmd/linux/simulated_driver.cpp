@@ -137,20 +137,72 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
   auto driver = std::make_unique<SimulatedDriver>(*state->engine, *soc);
 
   // Set up sysfs topology for ROCR discovery.
-  // These defaults match gfx950; other ISAs override via config.
+  // Populate GpuInfo based on the configured architecture so ROCR correctly
+  // identifies the simulated GPU regardless of ISA.
   Sysfs::GpuInfo gpu{};
-  gpu.gpu_id = 0x9500;
-  gpu.gfx_target_version = 90500;
   gpu.simd_count = soc->num_xcds() * 32 * 4; // CUs * SIMDs/CU
   gpu.max_waves_per_simd = 8;
   gpu.num_shader_engines = 4;
   gpu.num_cu_per_sh = 8;
   gpu.num_shader_arrays_per_engine = 1;
   gpu.local_mem_size = 64ULL * 1024 * 1024 * 1024; // 64GB
-  gpu.device_id = 0x7400;
   gpu.num_cp_queues = 8;
   gpu.l1_size_kb = 32;
   gpu.l2_size_kb = 4096;
+
+  switch (soc->arch()) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    gpu.gpu_id = 0x908;
+    gpu.gfx_target_version = 90800;
+    gpu.device_id = 0x738C;
+    break;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    gpu.gpu_id = 0x910;
+    gpu.gfx_target_version = 91000;
+    gpu.device_id = 0x7408;
+    break;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    gpu.gpu_id = 0x940;
+    gpu.gfx_target_version = 94000;
+    gpu.device_id = 0x7400;
+    break;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    gpu.gpu_id = 0x9500;
+    gpu.gfx_target_version = 90500;
+    gpu.device_id = 0x7400;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    gpu.gpu_id = 0x1010;
+    gpu.gfx_target_version = 100100;
+    gpu.device_id = 0x731F;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    gpu.gpu_id = 0x1030;
+    gpu.gfx_target_version = 100300;
+    gpu.device_id = 0x73BF;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    gpu.gpu_id = 0x1100;
+    gpu.gfx_target_version = 110000;
+    gpu.device_id = 0x744C;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    gpu.gpu_id = 0x1150;
+    gpu.gfx_target_version = 110500;
+    gpu.device_id = 0x1506;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    gpu.gpu_id = 0x1200;
+    gpu.gfx_target_version = 120000;
+    gpu.device_id = 0x15BF;
+    break;
+  default:
+    gpu.gpu_id = 0x9500;
+    gpu.gfx_target_version = 90500;
+    gpu.device_id = 0x7400;
+    break;
+  }
+
   driver->setup_topology(gpu);
 
   g_default_state = state.release(); // Intentionally leaked — see declaration.

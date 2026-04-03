@@ -648,6 +648,16 @@ rj_code_arch_t parse_arch(const std::string &arch_str) {
     return ROCJITSU_CODE_ARCH_CDNA3;
   if (arch_str == "cdna4")
     return ROCJITSU_CODE_ARCH_CDNA4;
+  if (arch_str == "rdna1")
+    return ROCJITSU_CODE_ARCH_RDNA1;
+  if (arch_str == "rdna2")
+    return ROCJITSU_CODE_ARCH_RDNA2;
+  if (arch_str == "rdna3")
+    return ROCJITSU_CODE_ARCH_RDNA3;
+  if (arch_str == "rdna3_5" || arch_str == "rdna3.5")
+    return ROCJITSU_CODE_ARCH_RDNA3_5;
+  if (arch_str == "rdna4")
+    return ROCJITSU_CODE_ARCH_RDNA4;
   if (arch_str == "rv32i")
     return ROCJITSU_CODE_ARCH_RV32I;
   if (arch_str == "rv64i")
@@ -665,6 +675,16 @@ const char *arch_to_string(rj_code_arch_t arch) {
     return "cdna3";
   case ROCJITSU_CODE_ARCH_CDNA4:
     return "cdna4";
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return "rdna1";
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return "rdna2";
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return "rdna3";
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return "rdna3_5";
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return "rdna4";
   case ROCJITSU_CODE_ARCH_RV32I:
     return "rv32i";
   case ROCJITSU_CODE_ARCH_RV64I:
