@@ -220,7 +220,7 @@ soc = test_utils.gpu_soc()
 
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
-Baseline_dir = str(Path("tests/workloads/vcopy/" + soc).resolve())
+Baseline_dir = str(Path("tests/workloads/vcopy/" + str(soc)).resolve())
 
 
 def baseline_compare_metric(test_name, workload_dir, args=[]):
