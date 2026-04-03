@@ -41,6 +41,7 @@ rocprofiler-compute/
     ├── verify_against_config_template.py
     ├── generate_config_deltas.py
     ├── apply_config_deltas.py
+    ├── convert_to_single_expr.py
     ├── hash_manager.py
     ├── TESTING.md
     └── README.md
@@ -249,12 +250,47 @@ This test:
   - stale hash DB
 Semantic correctness is enforced separately by `hash_checker.py`.
 
+## Metric Format: Single `expr:` Per Metric
+
+All metric definitions use a single `expr:` key with the raw equation.
+Statistics (avg/min/max) are computed as aggregations on the evaluated
+result at runtime.  `pop:` (Pct of Peak) is computed in Python from the
+evaluated avg and peak values.
+
+```yaml
+# Multi-stat table (avg/min/max computed from expr)
+Read BW:
+  expr: >-
+    (((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) +
+    (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp))
+  unit: Gbps
+
+# Speed-of-Light table (pop derived from avg and peak)
+VALU FLOPs:
+  expr: >-
+    ((((64 * (...)) + (64 * (...))) + (64 * (...)))
+    / (End_Timestamp - Start_Timestamp))
+  unit: GFLOP/s
+  peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+```
+
+### Converting old-format YAMLs
+
+If you encounter YAMLs using the old per-stat format (`avg:`/`min:`/`max:`
+or `value:`/`pop:`), run the conversion script:
+
+```bash
+python tools/config_management/convert_to_single_expr.py <arch_dir>
+```
+
 ## Contributor Rules (Strict)
 
 - Do **not** edit `.config_hashes.json` manually
 - Do **not** create multiple delta files per arch
 - Do **not** rename delta files arbitrarily
 - Do **not** regenerate full YAMLs unnecessarily
+- Use `expr:` for all metric definitions (not `avg:`/`min:`/`max:`)
+- Do **not** add `pop:` entries — they are computed at eval time
 - Use in-place edits (ruamel round-trip)
 - Use the master script for promotions
 - Expect CI to reject inconsistent states
