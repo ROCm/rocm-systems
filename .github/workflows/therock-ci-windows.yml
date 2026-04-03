@@ -24,20 +24,13 @@ jobs:
       run:
         shell: bash
     env:
-      BUILD_DIR: X:\b
+      BUILD_DIR: B:\build
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
       # TODO(geomin12): Add matrix of families
       # To get a fast signal of windows building for TheRock, adding gfx1151
       AMDGPU_FAMILIES: "gfx1151"
     steps:
-      - name: Shorten paths
-        shell: powershell
-        run: |
-          mkdir C:\w
-          robocopy $env:GITHUB_WORKSPACE C:\w /E
-          subst X: C:\w
-          
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -57,8 +50,7 @@ jobs:
 
       - name: Install python deps
         run: |
-          cd t
-          pip install -r requirements.txt
+          pip install -r t/requirements.txt
 
       - name: Patch rocm-systems
         run: |
@@ -90,29 +82,25 @@ jobs:
       - name: Runner health status
         run: |
           ccache --zero-stats
-          cd t
-          python ./build_tools/health_status.py
+          python ./t/build_tools/health_status.py
 
       - name: Fetch sources
         timeout-minutes: 30
         run: |
           git config --global core.longpaths true
-          cd t
-          python ./build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
-          ls X:
-          ls X:/r
+          python ./t/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+          dvc pull
 
       - name: Configure Projects
         env:
           cmake_preset: windows-release
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=X:/r/rocm-systems  ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_ML_LIBS=OFF ${{ inputs.cmake_options }}"
         run: |
           # clear cache before build and after download
           ccache -z
-          cd t
-          python build_tools/github_actions/build_configure.py
+          python t/build_tools/github_actions/build_configure.py
 
       - name: Build therock-archives and therock-dist
         run: cmake --build "${{ env.BUILD_DIR }}" --target therock-archives therock-dist -- -k 0
@@ -153,8 +141,7 @@ jobs:
       - name: Post Build Upload
         if: always()
         run: |
-          cd t
-          python build_tools/github_actions/post_build_upload.py \
+          python t/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir ${{ env.BUILD_DIR }} \
