@@ -956,12 +956,12 @@ void BufferStoreLdsDwordMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
 BufferWbinvl1Mubuf::BufferWbinvl1Mubuf(const MachineInst *inst)
     : Mubuf("buffer_wbinvl1", reinterpret_cast<const OpEncoding *>(inst)) {}
 
-void BufferWbinvl1Mubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferWbinvl1Mubuf::execute(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
 BufferWbinvl1VolMubuf::BufferWbinvl1VolMubuf(const MachineInst *inst)
     : Mubuf("buffer_wbinvl1_vol", reinterpret_cast<const OpEncoding *>(inst)) {}
 
-void BufferWbinvl1VolMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferWbinvl1VolMubuf::execute(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
 BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst)),

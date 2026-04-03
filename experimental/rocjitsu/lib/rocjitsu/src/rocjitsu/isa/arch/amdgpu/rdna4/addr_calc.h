@@ -30,6 +30,8 @@ class Wavefront;
 
 namespace rdna4 {
 
+uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask);
 

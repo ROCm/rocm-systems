@@ -186,8 +186,19 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'endpgm')
     if name == 'S_WAITCNT':
         return InstructionSemantics(name, 'waitcnt')
-    # RDNA4 split-wait instructions: each waits on a single counter whose
-    # threshold is the immediate operand directly (no bit-packing).
+    # RDNA3/3.5 named per-counter wait instructions (GFX11 — these coexist with
+    # S_WAITCNT; each waits on a single counter via its immediate operand).
+    _NAMED_WAIT = {
+        'S_WAITCNT_VSCNT': 'waitcnt_vscnt',
+        'S_WAITCNT_VMCNT': 'waitcnt_vmcnt',
+        'S_WAITCNT_LGKMCNT': 'waitcnt_lgkmcnt',
+        'S_WAITCNT_EXPCNT': 'waitcnt_expcnt',
+    }
+    if name in _NAMED_WAIT:
+        return InstructionSemantics(name, 'wait_counter',
+                                   operation=_NAMED_WAIT[name])
+    # RDNA4 split-wait instructions (GFX12 — no S_WAITCNT; each waits on a
+    # single counter whose threshold is the immediate operand directly).
     _SPLIT_WAIT = {
         'S_WAIT_LOADCNT', 'S_WAIT_STORECNT', 'S_WAIT_KMCNT',
         'S_WAIT_DSCNT', 'S_WAIT_EXPCNT', 'S_WAIT_SAMPLECNT',
@@ -197,7 +208,11 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     if name in _SPLIT_WAIT:
         return InstructionSemantics(name, 'wait_counter',
                                    operation=name[2:].lower())
-    # Everything else in SOPP is a nop (system, debug, sync instructions).
+    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_BARRIER, S_ICACHE_INV,
+    # S_INCPERFLEVEL, S_DECPERFLEVEL — all are either no-ops or system/debug
+    # instructions that don't affect compute simulation correctness.
+    # Explicitly classifying them as 'nop' rather than falling through avoids
+    # accidental stub generation if new SOPP ops are added.
     return InstructionSemantics(name, 'nop')
 
 # Mnemonic stems (after stripping dtype) → (semantic_class, operation).
@@ -841,6 +856,8 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
 
 _SMEM_DWORD_MAP = {
     'DWORD': 1, 'DWORDX2': 2, 'DWORDX4': 4, 'DWORDX8': 8, 'DWORDX16': 16,
+    # RDNA4 (GFX12) byte-width naming:
+    'B32': 1, 'B64': 2, 'B128': 4, 'B256': 8, 'B512': 16,
 }
 
 def _derive_smem(name: str) -> InstructionSemantics | None:
@@ -859,11 +876,19 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
                                        'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
+    # S_ATOMIC_* are scalar atomics — not currently simulated.
+    if '_ATOMIC_' in upper:
+        return InstructionSemantics(name, 'nop')
+
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
     for suffix, ndw in _SMEM_DWORD_MAP.items():
         if upper.endswith(suffix):
             cls = 'smem_store' if is_store else 'smem_load'
             return InstructionSemantics(name, cls, num_elems=ndw)
+    # BUFFER_WBL2, BUFFER_INV, etc. — cache control for SMEM buffer paths.
+    if upper in ('BUFFER_WBL2', 'BUFFER_INV', 'BUFFER_GL0_INV', 'BUFFER_GL1_INV',
+                 'S_BUFFER_GL0_INV', 'S_BUFFER_GL1_INV'):
+        return InstructionSemantics(name, 'dcache_inv')
     return InstructionSemantics(name, 'nop')
 
 _FLAT_DATA_MAP: dict[str, tuple[int, int, bool]] = {
@@ -959,9 +984,20 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                                             num_elems=ne, sign_extend=se)
     return InstructionSemantics(name, 'nop')
 
+_BUFFER_FORMAT_MAP: dict[str, tuple[int, int]] = {
+    'FORMAT_X': (4, 1), 'FORMAT_XY': (4, 2),
+    'FORMAT_XYZ': (4, 3), 'FORMAT_XYZW': (4, 4),
+    'FORMAT_D16_X': (2, 1), 'FORMAT_D16_XY': (2, 2),
+    'FORMAT_D16_XYZ': (2, 3), 'FORMAT_D16_XYZW': (2, 4),
+}
+
 def _derive_mubuf(name: str) -> InstructionSemantics | None:
     """Derive semantics for a MUBUF (Untyped Buffer memory) instruction."""
     upper = name.upper()
+    # Buffer cache control instructions.
+    if upper in ('BUFFER_WBINVL1', 'BUFFER_WBINVL1_SC', 'BUFFER_WBINVL1_VOL',
+                 'BUFFER_GL0_INV', 'BUFFER_GL1_INV'):
+        return InstructionSemantics(name, 'dcache_inv')
     if '_ATOMIC_' in upper:
         for prefix in ('BUFFER_ATOMIC_',):
             if upper.startswith(prefix):
@@ -1082,6 +1118,29 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         if suffix in upper:
             return InstructionSemantics(name, 'ds_atomic', operation=op,
                                         elem_size=esz, num_elems=dw)
+    # ── Lane permutation / swizzle ──────────────────────────────────────
+    if upper in ('DS_PERMUTE_B32', 'DS_BPERMUTE_B32'):
+        return InstructionSemantics(name, 'ds_permute')
+    if upper == 'DS_SWIZZLE_B32':
+        return InstructionSemantics(name, 'ds_swizzle')
+    # ── Explicitly classified as nop (not simulated) ────────────────────
+    # GS register operations — must precede the atomic fallback because
+    # DS_ADD_GS_REG_RTN / DS_SUB_GS_REG_RTN contain _ADD / _SUB.
+    if upper in ('DS_ADD_GS_REG_RTN', 'DS_SUB_GS_REG_RTN'):
+        return InstructionSemantics(name, 'nop')
+    # GWS (Global Wave Sync) — hardware scheduling primitive, not needed
+    # for compute simulation.
+    if upper.startswith('DS_GWS_'):
+        return InstructionSemantics(name, 'nop')
+    # GDS append/consume counters — GDS not simulated.
+    if upper in ('DS_CONSUME', 'DS_APPEND'):
+        return InstructionSemantics(name, 'nop')
+    # GDS ordered count.
+    if upper == 'DS_ORDERED_COUNT':
+        return InstructionSemantics(name, 'nop')
+    # Explicit DS no-op.
+    if upper == 'DS_NOP':
+        return InstructionSemantics(name, 'nop')
     # Fallback for unrecognized DS atomics.
     if '_ADD' in upper or '_SUB' in upper or '_RSUB' in upper or \
        '_MIN' in upper or '_MAX' in upper or '_AND' in upper or \
@@ -1090,6 +1149,7 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
        '_CONDXCHG' in upper or '_WRXCHG' in upper or \
        '_STOREXCHG' in upper or '_CMPSTORE' in upper:
         return InstructionSemantics(name, 'ds_atomic')
+    # Unrecognized DS instruction — fallthrough to nop.
     return InstructionSemantics(name, 'nop')
 
 def _derive_mimg(name: str) -> InstructionSemantics | None:

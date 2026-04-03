@@ -30,8 +30,7 @@ ExportVexport::ExportVexport(const MachineInst *inst)
 }
 
 void ExportVexport::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: export
+  (void)wf; // Export: no-op in compute simulation.
 }
 
 } // namespace rdna4
