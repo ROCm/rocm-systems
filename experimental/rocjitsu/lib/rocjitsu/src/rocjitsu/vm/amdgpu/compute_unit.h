@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
@@ -24,6 +25,7 @@
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/simulation.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <functional>
@@ -198,6 +200,42 @@ public:
     l1_scalar_.set_l2(l2);
     l1_vector_.set_l2(l2);
   }
+
+  // -----------------------------------------------------------------------
+  // Memory issue stubs for Phase C execute() bodies.
+  //
+  // These provide the public interface through which instruction execute()
+  // methods issue memory operations.  In FUNCTIONAL mode they perform
+  // the memory access synchronously through the appropriate cache level.
+  // -----------------------------------------------------------------------
+
+  /// @brief Issue a scalar memory load through the L1 scalar cache.
+  ///
+  /// @param addr Dword-aligned scalar address (computed by smem_calculate_address).
+  /// @param dst_sgpr Physical SGPR index to write the first loaded dword.
+  /// @param dword_count Number of dwords to load (1, 2, 4, 8, or 16).
+  /// @param mtype Memory type (default RW — Phase D fills in correct value).
+  void issue_scalar_mem(uint64_t addr, uint32_t dst_sgpr, uint32_t dword_count,
+                        Mtype mtype = Mtype::RW);
+
+  /// @brief Issue a per-lane global/buffer memory load through the L1 vector cache.
+  ///
+  /// @param addrs Per-lane byte addresses (only active lanes are accessed).
+  /// @param lane_mask Bitmask of active lanes.
+  /// @param dst_vgpr Physical VGPR index to write the first loaded dword.
+  /// @param dword_count Dwords per lane (1, 2, 3, or 4).
+  /// @param mtype Memory type (default RW — Phase D fills in correct value).
+  void issue_global_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask,
+                        uint32_t dst_vgpr, uint32_t dword_count, Mtype mtype = Mtype::RW);
+
+  /// @brief Issue a per-lane local (LDS) memory load.
+  ///
+  /// @param addrs Per-lane byte addresses into the LDS.
+  /// @param lane_mask Bitmask of active lanes.
+  /// @param dst_vgpr Physical VGPR index to write the first loaded dword.
+  /// @param dword_count Dwords per lane (1 or 2).
+  void issue_local_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask, uint32_t dst_vgpr,
+                       uint32_t dword_count);
 
   /// @brief Return the ISA architecture.
   /// @returns Architecture enum value.
