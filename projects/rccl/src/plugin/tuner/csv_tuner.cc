@@ -90,14 +90,16 @@ struct CsvTunerContext {
   ncclNvlDomainInfo_t nvlDomainInfo;
 };
 
-// Parse collective type from string
-static ncclFunc_t parseCollType(const char* str) {
+// Parse collective type from string; sets *valid=false and returns a placeholder if unknown
+static ncclFunc_t parseCollType(const char* str, bool* valid) {
+  *valid = true;
   if (strcmp(str, "broadcast") == 0) return ncclFuncBroadcast;
   if (strcmp(str, "reduce") == 0) return ncclFuncReduce;
   if (strcmp(str, "allgather") == 0) return ncclFuncAllGather;
   if (strcmp(str, "reducescatter") == 0) return ncclFuncReduceScatter;
   if (strcmp(str, "allreduce") == 0) return ncclFuncAllReduce;
-  return ncclFuncAllReduce; // default
+  *valid = false;
+  return ncclFuncAllReduce; // placeholder, caller must check *valid
 }
 
 // Convert collective type to string (for logging)
@@ -112,8 +114,9 @@ static const char* collTypeToString(ncclFunc_t collType) {
   }
 }
 
-// Parse algorithm from string
-static int parseAlgorithm(const char* str) {
+// Parse algorithm from string; sets *valid=false and returns a placeholder if unknown
+static int parseAlgorithm(const char* str, bool* valid) {
+  *valid = true;
   if (strcmp(str, "tree") == 0) return NCCL_ALGO_TREE;
   if (strcmp(str, "ring") == 0) return NCCL_ALGO_RING;
   if (strcmp(str, "collnet_direct") == 0) return NCCL_ALGO_COLLNET_DIRECT;
@@ -121,7 +124,8 @@ static int parseAlgorithm(const char* str) {
   if (strcmp(str, "nvls") == 0) return NCCL_ALGO_NVLS;
   if (strcmp(str, "nvls_tree") == 0) return NCCL_ALGO_NVLS_TREE;
   if (strcmp(str, "pat") == 0) return NCCL_ALGO_PAT;
-  return NCCL_ALGO_RING; // default
+  *valid = false;
+  return NCCL_ALGO_RING; // placeholder, caller must check *valid
 }
 
 // Convert algorithm to string (for logging)
@@ -138,12 +142,14 @@ static const char* algorithmToString(int algorithm) {
   }
 }
 
-// Parse protocol from string
-static int parseProtocol(const char* str) {
+// Parse protocol from string; sets *valid=false and returns a placeholder if unknown
+static int parseProtocol(const char* str, bool* valid) {
+  *valid = true;
   if (strcmp(str, "ll") == 0) return NCCL_PROTO_LL;
   if (strcmp(str, "ll128") == 0) return NCCL_PROTO_LL128;
   if (strcmp(str, "simple") == 0) return NCCL_PROTO_SIMPLE;
-  return NCCL_PROTO_SIMPLE; // default
+  *valid = false;
+  return NCCL_PROTO_SIMPLE; // placeholder, caller must check *valid
 }
 
 // Convert protocol to string (for logging)
@@ -230,8 +236,11 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
   fseek(file, 0, SEEK_SET);
 
   char line[RCCL_CSV_TUNER_MAX_LINE_LENGTH];
+  int lineNum = 0;
 
   while (fgets(line, sizeof(line), file) && ctx->numConfigs < ctx->maxConfigs) {
+    lineNum++;
+
     // Skip comments and empty lines, allowing for leading whitespace
     char* trimmedLine = line;
     while (*trimmedLine == ' ' || *trimmedLine == '\t') trimmedLine++;
@@ -244,6 +253,7 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
     char* token;
     char* tokens[CONFIG_FIELDS_MAX];
     int tokenCount = 0;
+    bool lineValid = true;
 
     // Make a copy of the line for tokenizing
     char lineCopy[RCCL_CSV_TUNER_MAX_LINE_LENGTH];
@@ -253,28 +263,59 @@ static ncclResult_t loadConfig(CsvTunerContext* ctx, const char* filename) {
     // Tokenize by comma
     token = strtok(lineCopy, ",");
     while (token != NULL && tokenCount < CONFIG_FIELDS_MAX) {
-      // Trim whitespace
+      // Trim leading whitespace
       while (*token == ' ' || *token == '\t') token++;
-      char* end = token + strlen(token) - 1;
-      while (end > token && (*end == ' ' || *end == '\t')) {
-        *end = '\0';
-        end--;
+      // Trim trailing whitespace (safe for empty tokens)
+      size_t tlen = strlen(token);
+      if (tlen > 0) {
+        char* end = token + tlen - 1;
+        while (end > token && (*end == ' ' || *end == '\t')) {
+          *end = '\0';
+          end--;
+        }
+      }
+      // Reject lines with empty fields after trimming
+      if (*token == '\0') {
+        if (ctx->logFunction) {
+          ctx->logFunction(NCCL_LOG_WARN, NCCL_TUNING, __FILE__, __LINE__,
+                           "TUNER/CsvTuner: Skipping malformed line %d with empty field: %s",
+                           lineNum, line);
+        }
+        lineValid = false;
+        break;
       }
       tokens[tokenCount++] = token;
       token = strtok(NULL, ",");
     }
 
+    if (!lineValid) continue;
+
     // Validate field count: support required fields (8), with pipeOps (9), or with regBuff (10)
     if (tokenCount >= CONFIG_FIELDS_REQUIRED && tokenCount <= CONFIG_FIELDS_MAX) {
+      bool collTypeValid, algoValid, protoValid;
       CsvTuningConfig* config = &ctx->configs[ctx->numConfigs];
-      config->collType = parseCollType(tokens[CONFIG_FIELD_COLLTYPE]);
+      config->collType = parseCollType(tokens[CONFIG_FIELD_COLLTYPE], &collTypeValid);
       config->minBytes = (size_t)strtoull(tokens[CONFIG_FIELD_MINBYTES], NULL, 10);
       config->maxBytes = (size_t)strtoull(tokens[CONFIG_FIELD_MAXBYTES], NULL, 10);
-      config->algorithm = parseAlgorithm(tokens[CONFIG_FIELD_ALGORITHM]);
-      config->protocol = parseProtocol(tokens[CONFIG_FIELD_PROTOCOL]);
+      config->algorithm = parseAlgorithm(tokens[CONFIG_FIELD_ALGORITHM], &algoValid);
+      config->protocol = parseProtocol(tokens[CONFIG_FIELD_PROTOCOL], &protoValid);
       config->nChannels = atoi(tokens[CONFIG_FIELD_CHANNELS]);
       config->nNodes = atoi(tokens[CONFIG_FIELD_NNODES]);
       config->nRanks = atoi(tokens[CONFIG_FIELD_NRANKS]);
+
+      // Log and skip lines with unknown colltype, algorithm, or protocol
+      if (!collTypeValid || !algoValid || !protoValid) {
+        if (ctx->logFunction) {
+          ctx->logFunction(NCCL_LOG_WARN, NCCL_TUNING, __FILE__, __LINE__,
+                           "TUNER/CsvTuner: Skipping line %d with unknown %s%s%s value: %s",
+                           lineNum,
+                           !collTypeValid ? "colltype " : "",
+                           !algoValid ? "algorithm " : "",
+                           !protoValid ? "protocol" : "",
+                           line);
+        }
+        continue;
+      }
 
       // numPipeOps is optional (9th field, index 8)
       if (tokenCount >= CONFIG_FIELDS_WITH_PIPEOPS) {
@@ -394,9 +435,11 @@ const char* rcclCsvTunerFindConfig(const char* gpuArch) {
     if (fileExists(csvTunerConfigPath)) {
       return csvTunerConfigPath;
     }
-    // Fallback: scan directory for any rccl_tuner*.csv file
-    if (findTunerFileInDir(tunerDir.c_str(), csvTunerConfigPath, sizeof(csvTunerConfigPath))) {
-      return csvTunerConfigPath;
+    // Only scan directory when gpuArch is unknown/empty (avoids nondeterministic cross-arch selection)
+    if (!gpuArch || !gpuArch[0]) {
+      if (findTunerFileInDir(tunerDir.c_str(), csvTunerConfigPath, sizeof(csvTunerConfigPath))) {
+        return csvTunerConfigPath;
+      }
     }
 
     // 3. Check relative share path: <libdir>/../share/rccl/tuner/ (for installed RCCL)
@@ -413,9 +456,11 @@ const char* rcclCsvTunerFindConfig(const char* gpuArch) {
     if (fileExists(csvTunerConfigPath)) {
       return csvTunerConfigPath;
     }
-    // Fallback: scan relative share directory for any rccl_tuner*.csv file
-    if (findTunerFileInDir(tunerShareDir.c_str(), csvTunerConfigPath, sizeof(csvTunerConfigPath))) {
-      return csvTunerConfigPath;
+    // Only scan directory when gpuArch is unknown/empty (avoids nondeterministic cross-arch selection)
+    if (!gpuArch || !gpuArch[0]) {
+      if (findTunerFileInDir(tunerShareDir.c_str(), csvTunerConfigPath, sizeof(csvTunerConfigPath))) {
+        return csvTunerConfigPath;
+      }
     }
   }
 
@@ -441,11 +486,13 @@ const char* rcclCsvTunerFindConfig(const char* gpuArch) {
     return csvTunerConfigPath;
   }
 
-  // 6. Fallback: scan ROCM_PATH tuner directory for any rccl_tuner*.csv file
-  char tunerShareDir[512];
-  snprintf(tunerShareDir, sizeof(tunerShareDir), "%s/share/rccl/tuner", rocmPath);
-  if (findTunerFileInDir(tunerShareDir, csvTunerConfigPath, sizeof(csvTunerConfigPath))) {
-    return csvTunerConfigPath;
+  // 6. Only scan ROCM_PATH tuner directory when gpuArch is unknown/empty
+  if (!gpuArch || !gpuArch[0]) {
+    char tunerShareDir[512];
+    snprintf(tunerShareDir, sizeof(tunerShareDir), "%s/share/rccl/tuner", rocmPath);
+    if (findTunerFileInDir(tunerShareDir, csvTunerConfigPath, sizeof(csvTunerConfigPath))) {
+      return csvTunerConfigPath;
+    }
   }
 
   // No config file found
