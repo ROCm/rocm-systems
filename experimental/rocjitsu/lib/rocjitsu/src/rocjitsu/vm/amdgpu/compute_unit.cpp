@@ -143,6 +143,16 @@ size_t ComputeUnitCore::num_wfs() const {
   return count;
 }
 
+void ComputeUnitCore::reset_all_wf() {
+  for (auto &w : wfs_) {
+    if (w->sgpr_alloc().count > 0) {
+      sgpr_file_.free(w->sgpr_alloc().base);
+      free_vgprs(w->vgpr_alloc().base);
+    }
+    w->reset();
+  }
+}
+
 void ComputeUnitCore::retire_halted_wfs() {
   for (auto &w : wfs_) {
     if (w->is_halted() && w->sgpr_alloc().count > 0) {
