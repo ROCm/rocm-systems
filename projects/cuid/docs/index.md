@@ -17,7 +17,7 @@ upgrades.
 :gutter: 3
 
 :::{grid-item-card} Install
-* [Build from source](./install/build.md)
+* [Build and install from source](./install/install.md)
 :::
 
 :::{grid-item-card} Reference

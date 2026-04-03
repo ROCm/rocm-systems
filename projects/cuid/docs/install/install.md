@@ -14,7 +14,7 @@ This section describes the prerequisites to build and install CUID from the sour
 
 To build CUID, the following components are required:
 
-* Cmake (v3.14 or later)
+* CMake (v3.14 or later)
 * G++ (v5.0 or later)
 * OpenSSL (v1.1 or later) (For Ubuntu or Debian)
 * Bcrypt (Windows Native crypto library for Windows)
@@ -37,7 +37,7 @@ Furthermore, to build the documentation, the following are required:
     cd rocm-systems/projects/cuid
     ```
 
-2. Build the project by by following the typical CMake build sequence (run as root or use `sudo` before `make install`). Note that the default install directory is `/opt/rocm/core`, but users can choose a different directory useing the `-DCMAKE_INSTALL_PREFIX` option:
+2. Build the project by following the typical CMake build sequence (run as root or use `sudo` before `make install`). Note that the default install directory is `/opt/rocm/core`, but users can choose a different directory using the `-DCMAKE_INSTALL_PREFIX` option:
 
     ```sh
     mkdir build

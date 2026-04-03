@@ -4,8 +4,8 @@ root: index
 subtrees:
 - caption: Install
   entries:
-  - file: install/build.md
-    title: Build from source
+  - file: install/install.md
+    title: Build and install from source
 
 - caption: Reference
   entries:

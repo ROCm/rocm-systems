@@ -11,11 +11,11 @@ This tool is a command line interface for generating CUIDs and querying devices 
 
 ## Install the CUID Project
 
-Refer to the [install instructions] (../install/install.md)
+Refer to the [install instructions](../install/install.md)
 
 ## Get Started
 
-The CUID CLI Tool allows users to quickly generate and find CUIDs for their devices. When runnning the tool without any options, or using the `-h` option, the following help text is displayed:
+The CUID CLI Tool allows users to quickly generate and find CUIDs for their devices. When running the tool without any options, or using the `-h` option, the following help text is displayed:
 
 ```shell-session
 Usage: /opt/rocm/core/bin/amdcuid_tool [OPTIONS]
@@ -67,7 +67,7 @@ Examples:
   /opt/rocm/core/bin/amdcuid_tool --query-device 0000:03:00.0 --type gpu
 ```
 
-When running the tool for the first time, there may not be any CUIDs known on the system. This would especially be the case if the `daemonize` setting in teh amdcuid_daemon.conf file is left as `false`. Users can instead detect and generate CUIDs on their own by using the --generate-cuid option like below:
+When running the tool for the first time, there may not be any CUIDs known on the system. This would especially be the case if the `daemonize` setting in the amdcuid_daemon.conf file is left as `false`. Users can instead detect and generate CUIDs on their own by using the --generate-cuid option like below:
 
 ```shell-session
 $ sudo amdcuid_tool --generate-cuid
@@ -112,7 +112,7 @@ Discovered 290 device(s)
 CUID registry refreshed successfully!
 ```
 
-Users should note that a new key will necessarily create new **derived CUIDs** for all the devices. The **primary CUIDs** for devices will always remain the same however. For more information about **primary** and **derived** ids, refer to [What is CUID] (../conceptual/what_is_cuid.md).
+Users should note that a new key will necessarily create new **derived CUIDs** for all the devices. The **primary CUIDs** for devices will always remain the same however. For more information about **primary** and **derived** ids, refer to [What is CUID](../conceptual/what_is_cuid.md).
 
 ## Getting CUIDs
 
@@ -162,13 +162,13 @@ Found 290 device(s):
 
 ---- PLATFORM Devices ----
 PLATFORM
-  Primary CUID:   afb393c6-042a-41ef-821f-ca54add23fb8
-  CUID:           6d2c0883-a788-80b5-ac00-c09c4d8140f0
+  Primary CUID:   YYYYYYYY-YYYY-YYYY-YYYY-YYYYYYYYYYYY
+  CUID:           XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
 
 ---- CPU Devices ----
 CPU #0
-  Primary CUID:   54000000-3900-8000-80e4-223c1a1a0002
-  CUID:           00bb9a02-d7a4-8fa3-8402-0c25e240ea60
+  Primary CUID:   YYYYYYYY-YYYY-YYYY-YYYY-YYYYYYYYYYYY
+  CUID:           XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
   Device Path:    /sys/devices/system/cpu/cpu140
 ...
 ```
