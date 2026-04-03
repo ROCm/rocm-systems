@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.unit
 def test_import_guard_allows_stdlib_and_project():
     """Verify ProfileModeImportGuard allows stdlib and project imports."""
     from conftest import ProfileModeImportGuard
@@ -54,6 +55,7 @@ def test_import_guard_allows_stdlib_and_project():
         assert config is not None
 
 
+@pytest.mark.unit
 def test_import_guard_allows_rocm_modules():
     """Verify ProfileModeImportGuard allows ROCm system libraries."""
     from conftest import ProfileModeImportGuard
@@ -82,6 +84,7 @@ def test_import_guard_allows_rocm_modules():
         assert amdsmi is not None
 
 
+@pytest.mark.unit
 def test_import_guard_blocks_non_stdlib():
     """Verify ProfileModeImportGuard blocks non-stdlib imports."""
     from conftest import ProfileModeImportGuard

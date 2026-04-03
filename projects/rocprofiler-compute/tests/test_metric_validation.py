@@ -58,6 +58,7 @@ VALIDATE_METRICS = {
 }
 
 
+@pytest.mark.unit
 @pytest.mark.path
 def test_validate_metrics(
     binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute

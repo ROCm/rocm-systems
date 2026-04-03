@@ -716,6 +716,7 @@ def test_output_directory_hostname(binary_handler_profile_rocprof_compute, monke
     test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.path
 def test_output_directory_gpumodel(binary_handler_profile_rocprof_compute, monkeypatch):
     """Test that %gpumodel% placeholder is replaced with the GPU model name."""
@@ -828,6 +829,7 @@ def test_output_directory_env_variable_unset(
     test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.path
 def test_output_directory_all_placeholders_combined(
     binary_handler_profile_rocprof_compute, monkeypatch
@@ -869,6 +871,7 @@ def test_output_directory_all_placeholders_combined(
     monkeypatch.delenv("ENV_1", raising=False)
 
 
+@pytest.mark.unit
 @pytest.mark.path
 def test_output_directory_default_with_rank(
     binary_handler_profile_rocprof_compute, monkeypatch
@@ -914,6 +917,7 @@ def test_output_directory_default_with_rank(
     monkeypatch.delenv("PMI_RANK", raising=False)
 
 
+@pytest.mark.unit
 @pytest.mark.path
 def test_output_directory_default_without_rank(
     binary_handler_profile_rocprof_compute, monkeypatch
@@ -953,6 +957,7 @@ def test_output_directory_default_without_rank(
     test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.path
 def test_output_directory_no_name_with_output_dir(
     binary_handler_profile_rocprof_compute, monkeypatch
@@ -977,6 +982,7 @@ def test_output_directory_no_name_with_output_dir(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.path
 def test_output_directory_no_name_no_output_dir(
     binary_handler_profile_rocprof_compute, monkeypatch
@@ -1973,6 +1979,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.section
 def test_list_metrics(binary_handler_profile_rocprof_compute):
     options = ["--list-metrics", "gfx90a"]
@@ -1985,6 +1992,7 @@ def test_list_metrics(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.section
 def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
     options = ["--list-metrics", "gfx90a", "--block", "10"]
@@ -2016,6 +2024,7 @@ def test_list_available_metrics(binary_handler_profile_rocprof_compute, capsys):
     assert "1 -> System Info" in output
 
 
+@pytest.mark.unit
 @pytest.mark.section
 def test_list_available_metrics_with_block(
     binary_handler_profile_rocprof_compute, capsys
@@ -2032,6 +2041,7 @@ def test_list_available_metrics_with_block(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.path
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
@@ -2319,6 +2329,7 @@ class TestSetsIntegration:
 
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
+    @pytest.mark.unit
     def test_invalid_set_error_handling(self, binary_handler_profile_rocprof_compute):
         options = ["--set", "nonexistent_set"]
         workload_dir = test_utils.get_output_dir()
@@ -2334,6 +2345,7 @@ class TestSetsIntegration:
         assert returncode == 1
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
+    @pytest.mark.unit
     def test_set_and_block_mutual_exclusion(
         self, binary_handler_profile_rocprof_compute
     ):
@@ -2347,6 +2359,7 @@ class TestSetsIntegration:
         assert returncode == 1
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
+    @pytest.mark.unit
     def test_list_sets_functionality(self, binary_handler_profile_rocprof_compute):
         options = ["--list-sets"]
         workload_dir = test_utils.get_output_dir()
@@ -2363,6 +2376,7 @@ class TestSetsIntegration:
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.iteration_multiplexing_1
 def test_profiler_options(binary_handler_profile_rocprof_compute):
     options = ["--no-native-tool", "--iteration-multiplexing"]
@@ -3306,6 +3320,7 @@ def test_multi_rank_profiling_mpi_comm(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.multi_rank
 def test_wrapped_mpi(binary_handler_profile_rocprof_compute):
     """
@@ -3362,6 +3377,7 @@ def test_multi_rank_warning_application_replay(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.multi_rank
 def test_multi_rank_no_warning_with_iteration_multiplexing(
     binary_handler_profile_rocprof_compute, monkeypatch

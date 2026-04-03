@@ -30,6 +30,7 @@ pytestmark = pytest.mark.tui
 class TestInstantButton:
     """Test suite for InstantButton widget."""
 
+    @pytest.mark.unit
     def test_instant_button_posts_message_exactly_once(self):
         """Test that InstantButton posts message exactly once per press."""
         button = InstantButton("Test Button")
@@ -48,6 +49,7 @@ class TestInstantButton:
         assert isinstance(posted_message, InstantButton.InstantPressed)
         assert posted_message.button is button
 
+    @pytest.mark.unit
     def test_instant_button_ignores_other_button_events(self):
         """Test that InstantButton ignores events from other buttons."""
         button = InstantButton("Test Button")
@@ -63,6 +65,7 @@ class TestInstantButton:
         # Should not have posted any message
         assert not button.post_message.called
 
+    @pytest.mark.unit
     def test_trigger_posts_instant_pressed(self):
         """Test that trigger() method posts InstantPressed message."""
         button = InstantButton("Test Button")
@@ -85,6 +88,7 @@ class TestInstantButton:
 class TestDropdownMenu:
     """Test suite for DropdownMenu widget."""
 
+    @pytest.mark.unit
     def test_is_visible_false_sets_hidden_state(self):
         """Test that is_visible=False sets correct hidden styles."""
         menu = DropdownMenu()
@@ -101,6 +105,7 @@ class TestDropdownMenu:
         assert menu.display is False
         menu.refresh.assert_called_with(repaint=True, layout=False)
 
+    @pytest.mark.unit
     def test_is_visible_true_sets_visible_state(self):
         """Test that is_visible=True sets correct visible styles."""
         menu = DropdownMenu()
@@ -117,6 +122,7 @@ class TestDropdownMenu:
         assert menu.styles.opacity == 1.0
         menu.refresh.assert_called_with(repaint=True, layout=False)
 
+    @pytest.mark.unit
     def test_check_focus_closes_when_sequence_matches(self):
         """Test that _check_focus_and_close closes menu when no focus after blur."""
         menu = DropdownMenu()
@@ -136,6 +142,7 @@ class TestDropdownMenu:
             # Should have called hide
             menu.hide.assert_called_once()
 
+    @pytest.mark.unit
     def test_check_focus_ignores_old_blur_events(self):
         """Test that _check_focus_and_close ignores old blur events."""
         menu = DropdownMenu()
@@ -151,6 +158,7 @@ class TestDropdownMenu:
         # Should not have called hide (focus event at seq 10 > blur seq 5)
         assert not menu.hide.called
 
+    @pytest.mark.unit
     def test_check_focus_stays_open_when_refocused(self):
         """Test that _check_focus_and_close stays open if focus was regained."""
         menu = DropdownMenu()
@@ -167,6 +175,7 @@ class TestDropdownMenu:
         # Should not close because focus was regained (6 > 5)
         assert not menu.hide.called
 
+    @pytest.mark.unit
     def test_show_sets_visible_and_focuses(self):
         """Test that show() sets is_visible=True and focuses menu."""
         menu = DropdownMenu()
@@ -177,6 +186,7 @@ class TestDropdownMenu:
         assert menu.is_visible is True
         menu.focus.assert_called_once()
 
+    @pytest.mark.unit
     def test_hide_sets_not_visible_and_posts_closed(self):
         """Test that hide() sets is_visible=False and posts Closed message."""
         menu = DropdownMenu()
@@ -190,6 +200,7 @@ class TestDropdownMenu:
         posted_message = menu.post_message.call_args[0][0]
         assert isinstance(posted_message, DropdownMenu.Closed)
 
+    @pytest.mark.unit
     def test_hide_is_idempotent(self):
         """Test that hide() does nothing when menu is already hidden."""
         menu = DropdownMenu()
@@ -211,6 +222,7 @@ class TestDropdownMenu:
 class TestMenuButton:
     """Test suite for MenuButton widget."""
 
+    @pytest.mark.unit
     def test_is_open_true_shows_dropdown(self):
         """Test that is_open=True calls dropdown.show()."""
         button = MenuButton("File", "test-dropdown")
@@ -224,6 +236,7 @@ class TestMenuButton:
         dropdown.show.assert_called_once()
         button.add_class.assert_called_with("-active")
 
+    @pytest.mark.unit
     def test_is_open_false_hides_dropdown(self):
         """Test that is_open=False calls dropdown.hide()."""
         button = MenuButton("File", "test-dropdown")
@@ -237,6 +250,7 @@ class TestMenuButton:
         dropdown.hide.assert_called_once()
         button.remove_class.assert_called_with("-active")
 
+    @pytest.mark.unit
     def test_button_pressed_toggles_is_open(self):
         """Test that button press toggles is_open state."""
         button = MenuButton("File", "test-dropdown")
@@ -254,6 +268,7 @@ class TestMenuButton:
 
         assert button.is_open is False
 
+    @pytest.mark.unit
     def test_dropdown_closed_sets_is_open_false(self):
         """Test that dropdown closed event sets is_open to False."""
         button = MenuButton("File", "test-dropdown")
@@ -291,6 +306,7 @@ def sample_top_kernel_df() -> pd.DataFrame:
 class TestGetTopKernels:
     """Tests for the get_top_kernels function (aggregated kernel stats)."""
 
+    @pytest.mark.unit
     def test_returns_none_for_invalid_input(self) -> None:
         """Test that function returns None for invalid inputs."""
         from rocprof_compute_tui.utils.tui_utils import get_top_kernels
@@ -307,6 +323,7 @@ class TestGetTopKernels:
         mock_workload.dfs = {}
         assert get_top_kernels({"path": mock_workload}) is None
 
+    @pytest.mark.unit
     def test_returns_empty_list_when_dataframe_empty(self) -> None:
         """Test that function returns empty list when dfs[1] is empty."""
         from rocprof_compute_tui.utils.tui_utils import get_top_kernels
@@ -318,6 +335,7 @@ class TestGetTopKernels:
 
         assert get_top_kernels({"path": mock_workload}) == []
 
+    @pytest.mark.unit
     def test_returns_sorted_kernel_records(
         self,
         sample_top_kernel_df: pd.DataFrame,
@@ -338,6 +356,7 @@ class TestGetTopKernels:
         # Verify all expected columns preserved
         assert all("Kernel_Name" in r and "Percent" in r for r in result)
 
+    @pytest.mark.unit
     def test_handles_missing_pct_column(self) -> None:
         """Test that function returns unsorted records when Pct column is missing."""
         from rocprof_compute_tui.utils.tui_utils import get_top_kernels
@@ -363,6 +382,7 @@ class TestGetTopKernels:
 class TestProcessPanelsToDataframes:
     """Tests for the process_panels_to_dataframes function."""
 
+    @pytest.mark.unit
     def test_returns_dict_structure(self) -> None:
         """Test that function returns proper nested dict structure."""
         from rocprof_compute_tui.utils.tui_utils import process_panels_to_dataframes
@@ -383,6 +403,7 @@ class TestProcessPanelsToDataframes:
 
         assert isinstance(result, dict)
 
+    @pytest.mark.unit
     def test_skips_hidden_sections(self) -> None:
         """Test that hidden sections are skipped."""
         import config
@@ -413,6 +434,7 @@ class TestProcessPanelsToDataframes:
         for section_name in result.keys():
             assert "Hidden Panel" not in section_name
 
+    @pytest.mark.unit
     def test_applies_rounding_logic(self) -> None:
         """Test that decimal rounding is applied to dataframes."""
         from rocprof_compute_tui.utils.tui_utils import apply_rounding_logic
@@ -437,6 +459,7 @@ class TestProcessPanelsToDataframes:
 class TestCollapsiblesWidgetCreation:
     """Tests for widget creation in collapsibles.py."""
 
+    @pytest.mark.unit
     def test_create_table_with_empty_dataframe(self) -> None:
         """Test that create_table returns Label for empty dataframe."""
         from textual.widgets import Label
@@ -448,6 +471,7 @@ class TestCollapsiblesWidgetCreation:
 
         assert isinstance(result, Label)
 
+    @pytest.mark.unit
     def test_create_widget_from_data_with_none(self) -> None:
         """Test that create_widget_from_data handles None correctly."""
         from textual.widgets import Label
@@ -458,6 +482,7 @@ class TestCollapsiblesWidgetCreation:
 
         assert isinstance(result, Label)
 
+    @pytest.mark.unit
     def test_create_widget_with_unknown_style(self) -> None:
         """Test that unknown tui_style returns Label with error message."""
         from textual.widgets import Label
@@ -478,6 +503,7 @@ class TestCollapsiblesWidgetCreation:
 class TestTuiLogger:
     """Tests for the Logger class in tui_utils.py."""
 
+    @pytest.mark.unit
     def test_logger_initialization(self) -> None:
         """Test that Logger initializes correctly."""
         from rocprof_compute_tui.utils.tui_utils import Logger
@@ -502,6 +528,7 @@ class TestTuiLogger:
 class TestConfigLoading:
     """Tests for configuration loading in collapsibles.py."""
 
+    @pytest.mark.unit
     def test_load_config_with_valid_yaml(self, tmp_path: Path) -> None:
         """Test that load_config correctly parses valid YAML."""
         from rocprof_compute_tui.widgets.collapsibles import load_config
@@ -521,6 +548,7 @@ sections:
         assert len(result["sections"]) == 1
         assert result["sections"][0]["title"] == "Test Section"
 
+    @pytest.mark.unit
     def test_load_config_raises_on_invalid_file(self, tmp_path: Path) -> None:
         """Test that load_config raises error for non-existent file."""
         from rocprof_compute_tui.widgets.collapsibles import load_config
@@ -537,6 +565,7 @@ sections:
 class TestDataStructureIntegration:
     """Validate expected data structures flow correctly between components."""
 
+    @pytest.mark.unit
     def test_kernel_selection_data_lookup(self) -> None:
         """Test that kernel selection via Kernel_Name correctly looks up analysis data.
 

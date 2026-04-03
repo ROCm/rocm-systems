@@ -119,4 +119,5 @@ markers = [
     "time_unit_edge_cases",
     "time_unit_integration",
     "tui",
+    "unit",
 ]

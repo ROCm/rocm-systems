@@ -154,6 +154,7 @@ def test_analyze_roofline_idempotent(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 def test_analyze_corrupted_roofline_csv_graceful(
     binary_handler_analyze_rocprof_compute,
 ):
@@ -1221,6 +1222,7 @@ def test_dependency_MI100(binary_handler_analyze_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_parser_utility_functions():
     """Test parser utility functions edge cases"""
@@ -1329,6 +1331,7 @@ def test_parser_utility_functions():
     assert result == 1, "to_mod should return modulo for scalars"
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_parser_error_handling():
     """Test parser error handling paths"""
@@ -1359,6 +1362,7 @@ def test_parser_error_handling():
         pass
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
     """Test handling of missing files"""
@@ -1369,6 +1373,7 @@ def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
         assert code != 0
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_ast_transformer_edge_cases():
     """Simplified test focusing on the actual code paths"""
@@ -1410,6 +1415,7 @@ def test_ast_transformer_edge_cases():
         assert False, f"Supported function call should not raise exception: {e}"
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
     """Test analyze to cover debug paths in eval_metric - using direct function call"""
@@ -1469,6 +1475,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
         pass
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
     """Test basic filters that should work"""
@@ -1496,6 +1503,7 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
             break
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_apply_filters_direct():
     """Test apply_filters function directly to cover filter branches"""
@@ -1556,6 +1564,7 @@ def test_apply_filters_direct():
     assert len(result) == 4
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
     """Test scenarios with missing files to cover error paths"""
@@ -1582,6 +1591,7 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
             break
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_pc_sampling_basic_coverage():
     """Test PC sampling functions with minimal data"""
@@ -1613,6 +1623,7 @@ def test_pc_sampling_basic_coverage():
         assert result is None
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_build_dfs_edge_cases():
     """Test build_dfs and gen_counter_list with various configurations"""
@@ -1642,6 +1653,7 @@ def test_build_dfs_edge_cases():
     assert not visited
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_update_functions_coverage():
     """Test update_denominator_string and update_norm_unit_string branches"""
@@ -1669,6 +1681,7 @@ def test_update_functions_coverage():
     assert result[0].isupper()
 
 
+@pytest.mark.unit
 def test_metric_evaluation_no_valid_data():
     """Test emetric evaluation with no valid data"""
     import numpy as np
@@ -1726,6 +1739,7 @@ def original_ns_values():
     return {"Avg": 3446.64, "Min": 1769.25, "Max": 12532.12}
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_has_time_data_detection(sample_time_data):
     from utils.tty import has_time_data
@@ -1743,6 +1757,7 @@ def test_has_time_data_detection(sample_time_data):
     assert not has_time_data(no_unit_column)
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_default_unit_is_nanoseconds(sample_time_data):
     time_rows = sample_time_data["Unit"].str.lower().str.contains("ns", na=False)
@@ -1750,6 +1765,7 @@ def test_default_unit_is_nanoseconds(sample_time_data):
     assert sample_time_data.loc[0, "Unit"] == "ns"
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_time_unit_conversion_to_seconds(sample_time_data, original_ns_values):
     from utils.tty import convert_time_columns
@@ -1770,6 +1786,7 @@ def test_time_unit_conversion_to_seconds(sample_time_data, original_ns_values):
     assert converted_df.loc[2, "Unit"] == "Count"
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_time_unit_conversion_to_milliseconds(sample_time_data, original_ns_values):
     from utils.tty import convert_time_columns
@@ -1787,6 +1804,7 @@ def test_time_unit_conversion_to_milliseconds(sample_time_data, original_ns_valu
     assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-6
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_time_unit_conversion_to_microseconds(sample_time_data, original_ns_values):
     from utils.tty import convert_time_columns
@@ -1804,6 +1822,7 @@ def test_time_unit_conversion_to_microseconds(sample_time_data, original_ns_valu
     assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-3
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_time_unit_conversion_to_nanoseconds(sample_time_data, original_ns_values):
     from utils.tty import convert_time_columns
@@ -1817,6 +1836,7 @@ def test_time_unit_conversion_to_nanoseconds(sample_time_data, original_ns_value
     assert abs(converted_df.loc[0, "Max"] - original_ns_values["Max"]) < 1e-10
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_non_time_rows_unchanged(sample_time_data):
     from utils.tty import convert_time_columns
@@ -1829,6 +1849,7 @@ def test_non_time_rows_unchanged(sample_time_data):
     assert converted_df.loc[2, "Avg"] == 1000.0
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_invalid_time_unit_handling(sample_time_data):
     from utils.tty import convert_time_columns
@@ -1839,6 +1860,7 @@ def test_invalid_time_unit_handling(sample_time_data):
     pd.testing.assert_frame_equal(converted_df, original_df)
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_missing_unit_column():
     from utils.tty import convert_time_columns
@@ -1849,6 +1871,7 @@ def test_missing_unit_column():
     pd.testing.assert_frame_equal(converted_df, df_no_unit)
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_conversion_with_missing_columns(sample_time_data, original_ns_values):
     from utils.tty import convert_time_columns
@@ -1861,6 +1884,7 @@ def test_conversion_with_missing_columns(sample_time_data, original_ns_values):
     assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-6
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_conversion
 def test_mathematical_correctness_all_units(sample_time_data, original_ns_values):
     from utils.tty import convert_time_columns
@@ -1886,6 +1910,7 @@ def test_mathematical_correctness_all_units(sample_time_data, original_ns_values
 
 
 # Integration tests with show_all functionality
+@pytest.mark.unit
 @pytest.mark.time_unit_integration
 def test_integration_conversion_flow():
     from utils.tty import convert_time_columns, has_time_data
@@ -1914,6 +1939,7 @@ def test_integration_conversion_flow():
     assert abs(converted_df.loc[0, "Max"] - 12.53212) < 1e-5
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_integration
 def test_show_all_with_time_unit_conversion():
     from utils.tty import convert_time_columns
@@ -1936,6 +1962,7 @@ def test_show_all_with_time_unit_conversion():
         assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
 
 
+@pytest.mark.unit
 @pytest.mark.time_unit_edge_cases
 def test_edge_cases_and_error_handling():
     from utils.tty import convert_time_columns
@@ -1980,6 +2007,7 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_trace
 def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, capsys):
     """Test --list-torch-operators fails gracefully without --path"""
@@ -2061,6 +2089,7 @@ def mock_workload_for_filter():
     return workload
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_create_df_kernel_top_stats_returns_valid_dataframes(
     mock_raw_pmc_for_kernel_top,
@@ -2113,6 +2142,7 @@ def test_create_df_kernel_top_stats_returns_valid_dataframes(
         assert abs(kernel_top_df["Percent"].sum() - 100.0) < 0.01
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_create_df_kernel_top_stats_grouping_and_aggregation(
     mock_raw_pmc_for_kernel_top,
@@ -2164,6 +2194,7 @@ def test_create_df_kernel_top_stats_grouping_and_aggregation(
         assert kernel_names == sorted(kernel_names)
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_create_df_kernel_top_stats_filters():
     """Test GPU ID, dispatch ID (including '> n' syntax),
@@ -2263,6 +2294,7 @@ def test_create_df_kernel_top_stats_filters():
         assert len(dispatch_df) == 0
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
     """Test integer kernel ID filtering, Selected marker,
@@ -2317,6 +2349,7 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
         assert "99" in str(mock_error.call_args)
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_apply_kernel_filter_string_names(mock_workload_for_filter):
     """Test string kernel name filtering and partial match."""
@@ -2366,6 +2399,7 @@ def test_apply_kernel_filter_string_names(mock_workload_for_filter):
     assert len(result_df) == 2
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_pc_sampling_single_kernel_uses_workload_dfs():
     """Test single kernel filter reads from workload.dfs[1],

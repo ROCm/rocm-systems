@@ -295,6 +295,7 @@ def gpu_soc():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_get_version_finds_version_in_home(tmp_path, monkeypatch):
     """Test that get_version correctly reads version and SHA from a VERSION file in the
     given directory.
@@ -324,6 +325,7 @@ def test_get_version_finds_version_in_home(tmp_path, monkeypatch):
     assert result["mode"] == "dev"
 
 
+@pytest.mark.unit
 def test_get_version_finds_version_in_parent(tmp_path, monkeypatch):
     """
     Test that get_version finds VERSION file in a parent directory when not present
@@ -358,6 +360,7 @@ def test_get_version_finds_version_in_parent(tmp_path, monkeypatch):
     assert result["mode"] == "dev"
 
 
+@pytest.mark.unit
 def test_get_version_console_error_when_no_version(monkeypatch):
     """
     Test that get_version calls console_error when no VERSION file is found in any
@@ -388,6 +391,7 @@ def test_get_version_console_error_when_no_version(monkeypatch):
     assert "Cannot find VERSION file" in called["msg"]
 
 
+@pytest.mark.unit
 def test_get_version_git_success(tmp_path, monkeypatch):
     """
     Test get_version returns correct version info when git command succeeds.
@@ -415,6 +419,7 @@ def test_get_version_git_success(tmp_path, monkeypatch):
     assert result["mode"] == "dev"
 
 
+@pytest.mark.unit
 def test_get_version_git_fails_sha_file(tmp_path, monkeypatch):
     """
     Test get_version returns correct version info when git fails but VERSION.sha exists.
@@ -447,6 +452,7 @@ def test_get_version_git_fails_sha_file(tmp_path, monkeypatch):
     assert result["mode"] == "release"
 
 
+@pytest.mark.unit
 def test_get_version_git_and_sha_fail(tmp_path, monkeypatch):
     """
     Test get_version returns unknown sha and mode when both git and VERSION.sha fail.
@@ -482,6 +488,7 @@ def test_get_version_git_and_sha_fail(tmp_path, monkeypatch):
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_detect_rocprof_env_rocprof_not_found(monkeypatch):
     """
     Test detect_rocprof when ROCPROF is set to 'rocprof' but the binary cannot be
@@ -517,6 +524,7 @@ def test_detect_rocprof_env_rocprof_not_found(monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_detect_rocprof_env_rocprof_found(monkeypatch):
     """
     Test detect_rocprof when ROCPROF is set to 'rocprof' and the binary is found.
@@ -548,6 +556,7 @@ def test_detect_rocprof_env_rocprof_found(monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_detect_rocprof_env_not_set(monkeypatch):
     """
     Test detect_rocprof when ROCPROF is not set in the environment.
@@ -573,6 +582,7 @@ def test_detect_rocprof_env_not_set(monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_detect_rocprof_sdk(monkeypatch):
     """
     Test detect_rocprof when ROCPROF is set
@@ -595,6 +605,7 @@ def test_detect_rocprof_sdk(monkeypatch):
     assert any("rocprof_cmd is rocprofiler-sdk" in log_entry for log_entry in logs)
 
 
+@pytest.mark.unit
 def test_capture_subprocess_output_with_new_env(monkeypatch):
     """
     Test capture_subprocess_output with custom environment variables.
@@ -648,6 +659,7 @@ def test_capture_subprocess_output_with_new_env(monkeypatch):
     assert popen_calls[0]["env"] == custom_env
 
 
+@pytest.mark.unit
 def test_capture_subprocess_output_profile_mode(monkeypatch):
     """
     Test capture_subprocess_output with profileMode flag enabled.
@@ -690,6 +702,7 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
     assert isinstance(output, str)
 
 
+@pytest.mark.unit
 def test_capture_subprocess_output_failure(monkeypatch):
     """
     Test capture_subprocess_output returns
@@ -763,6 +776,7 @@ def test_capture_subprocess_output_failure(monkeypatch):
     assert "fail" in output
 
 
+@pytest.mark.unit
 def test_capture_subprocess_output_unicode_decode(monkeypatch):
     """
     Test capture_subprocess_output handles
@@ -838,6 +852,7 @@ def test_capture_subprocess_output_unicode_decode(monkeypatch):
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_get_agent_dict_basic():
     """
     Test get_agent_dict correctly maps agent IDs to agent objects.
@@ -863,6 +878,7 @@ def test_get_agent_dict_basic():
     assert result[2]["type"] == 2
 
 
+@pytest.mark.unit
 def test_get_agent_dict_empty_agents():
     """
     Test get_agent_dict with an empty agents list.
@@ -874,6 +890,7 @@ def test_get_agent_dict_empty_agents():
     assert result == {}
 
 
+@pytest.mark.unit
 def test_get_agent_dict_missing_keys(monkeypatch):
     """
     Test get_agent_dict behavior when expected keys are missing.
@@ -897,6 +914,7 @@ def test_get_agent_dict_missing_keys(monkeypatch):
         utils_common.get_agent_dict(data3)
 
 
+@pytest.mark.unit
 def test_get_agent_dict_duplicate_agent_ids():
     """
     Test get_agent_dict behavior with duplicate agent IDs.
@@ -920,6 +938,7 @@ def test_get_agent_dict_duplicate_agent_ids():
     assert result[1]["name"] == "second"
 
 
+@pytest.mark.unit
 def test_get_agent_dict_non_integer_handles():
     """
     Test get_agent_dict with non-integer handle values.
@@ -945,6 +964,7 @@ def test_get_agent_dict_non_integer_handles():
 # =========================================================================
 # Tests for get_gpuid_dict function
 # =========================================================================
+@pytest.mark.unit
 def test_get_gpuid_dict_basic():
     """Test that get_gpuid_dict correctly maps agent IDs to GPU IDs for a basic case.
     Args:
@@ -971,6 +991,7 @@ def test_get_gpuid_dict_basic():
     assert result == expected
 
 
+@pytest.mark.unit
 def test_get_gpuid_dict_no_gpu_agents():
     """Test that get_gpuid_dict returns an empty dictionary
     when no GPU agents are present.
@@ -996,6 +1017,7 @@ def test_get_gpuid_dict_no_gpu_agents():
     assert result == {}
 
 
+@pytest.mark.unit
 def test_get_gpuid_dict_mixed_agents():
     """Test that get_gpuid_dict correctly ignores non-GPU agents
     and only maps GPU agents.
@@ -1025,6 +1047,7 @@ def test_get_gpuid_dict_mixed_agents():
     assert result == expected
 
 
+@pytest.mark.unit
 def test_get_gpuid_dict_sorting():
     """Test that get_gpuid_dict correctly sorts GPU agents by node_id
     to determine GPU ID ordering.
@@ -1053,6 +1076,7 @@ def test_get_gpuid_dict_sorting():
     assert result == expected
 
 
+@pytest.mark.unit
 def test_get_gpuid_dict_empty_agents():
     """Test that get_gpuid_dict handles an empty agents list correctly.
     Args:
@@ -1068,6 +1092,7 @@ def test_get_gpuid_dict_empty_agents():
     assert result == {}
 
 
+@pytest.mark.unit
 def test_check_resource_allocation_no_ctest(monkeypatch):
     """
     Test check_resource_allocation when CTEST_RESOURCE_GROUP_COUNT is not set.
@@ -1087,6 +1112,7 @@ def test_check_resource_allocation_no_ctest(monkeypatch):
     assert "HIP_VISIBLE_DEVICES" not in os.environ
 
 
+@pytest.mark.unit
 def test_check_resource_allocation_with_gpu_resource(monkeypatch):
     """
     Test check_resource_allocation when CTEST resource allocation is
@@ -1106,6 +1132,7 @@ def test_check_resource_allocation_with_gpu_resource(monkeypatch):
     assert os.environ["HIP_VISIBLE_DEVICES"] == "2"
 
 
+@pytest.mark.unit
 def test_check_resource_allocation_no_gpu_resource(monkeypatch):
     """
     Test check_resource_allocation when CTEST is enabled but no GPU
@@ -1126,6 +1153,7 @@ def test_check_resource_allocation_no_gpu_resource(monkeypatch):
     assert "HIP_VISIBLE_DEVICES" not in os.environ
 
 
+@pytest.mark.unit
 def test_check_resource_allocation_malformed_resource(monkeypatch):
     """
     Test check_resource_allocation with malformed CTEST_RESOURCE_GROUP_0_GPUS format.
@@ -1152,6 +1180,7 @@ def test_check_resource_allocation_malformed_resource(monkeypatch):
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_check_file_pattern_match_found():
     """
     Test check_file_pattern when the pattern is found in the file.
@@ -1173,6 +1202,7 @@ def test_check_file_pattern_match_found():
         os.unlink(temp_file_path)
 
 
+@pytest.mark.unit
 def test_check_file_pattern_file_not_found():
     """
     Test check_file_pattern when the file doesn't exist.
@@ -1187,6 +1217,7 @@ def test_check_file_pattern_file_not_found():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_parse_pmc_perf_basic(tmp_path):
     """Test parse_pmc_perf with a simple valid YAML input file.
 
@@ -1205,6 +1236,7 @@ def test_parse_pmc_perf_basic(tmp_path):
     assert result == ["counter1", "counter2", "counter3"]
 
 
+@pytest.mark.unit
 def test_parse_pmc_perf_empty_file(tmp_path):
     """Test parse_pmc_perf with an empty file.
 
@@ -1221,6 +1253,7 @@ def test_parse_pmc_perf_empty_file(tmp_path):
     assert result == []
 
 
+@pytest.mark.unit
 def test_parse_pmc_perf_no_pmc_entries(tmp_path):
     """Test parse_pmc_perf with a YAML file that doesn't contain any 'pmc' entries.
 
@@ -1237,6 +1270,7 @@ def test_parse_pmc_perf_no_pmc_entries(tmp_path):
     assert result == []
 
 
+@pytest.mark.unit
 def test_parse_pmc_perf_no_jobs_key(tmp_path):
     """Test parse_pmc_perf with missing jobs key.
 
@@ -1253,6 +1287,7 @@ def test_parse_pmc_perf_no_jobs_key(tmp_path):
     assert result == []
 
 
+@pytest.mark.unit
 def test_parse_pmc_perf_empty_pmc(tmp_path):
     """Test parse_pmc_perf with empty pmc list.
 
@@ -1269,6 +1304,7 @@ def test_parse_pmc_perf_empty_pmc(tmp_path):
     assert result == []
 
 
+@pytest.mark.unit
 def test_parse_pmc_perf_file_not_found():
     """Test parse_pmc_perf with a nonexistent file.
 
@@ -1284,6 +1320,7 @@ def test_parse_pmc_perf_file_not_found():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_run_prof_success_v3(tmp_path, monkeypatch):
     """
     Test run_prof with rocprofv3 successful execution.
@@ -1326,6 +1363,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     assert Path(workload_dir + "/pmc_perf_test.csv").exists()
 
 
+@pytest.mark.unit
 def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     """
     Test run_prof with rocprofv3 using CSV format.
@@ -1392,6 +1430,7 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
+@pytest.mark.unit
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     """
     Test run_prof with rocprofiler-sdk execution.
@@ -1433,6 +1472,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.unit
 def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     """
     Test run_prof with additional YAML configuration file.
@@ -1465,6 +1505,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
+@pytest.mark.unit
 def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     """
     Test run_prof when subprocess execution fails.
@@ -1498,6 +1539,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
         utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
+@pytest.mark.unit
 def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     """
     Test run_prof sets proper environment variables for MI300 series GPUs.
@@ -1534,6 +1576,7 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
+@pytest.mark.unit
 def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     """
     Test run_prof handles timestamps.txt special case correctly.
@@ -1590,6 +1633,7 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
+@pytest.mark.unit
 def test_run_prof_no_results_files(tmp_path, monkeypatch):
     """
     Test run_prof when no results files are generated.
@@ -1617,6 +1661,7 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
+@pytest.mark.unit
 def test_run_prof_header_standardization(tmp_path, monkeypatch):
     """
     Test run_prof properly standardizes CSV headers.
@@ -1706,6 +1751,7 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     assert mapping.get("EndNs") == "End_Timestamp"
 
 
+@pytest.mark.unit
 def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     """
     Test run_prof applies TCC flattening for MI300 series GPUs.
@@ -1744,6 +1790,7 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
 
+@pytest.mark.unit
 def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     """
     Covers: new_env = os.environ.copy()
@@ -1939,6 +1986,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     assert "APP_CMD" not in capture_subprocess_called_with_env
 
 
+@pytest.mark.unit
 def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
     """
     Covers:
@@ -2032,6 +2080,7 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkeypatch):
     """
     Test process_rocprofv3_output with csv format processes counter collection files.
@@ -2076,6 +2125,7 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
     assert str(converted_file) in result
 
 
+@pytest.mark.unit
 def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypatch):
     """
     Test process_rocprofv3_output handles conversion errors gracefully.
@@ -2123,6 +2173,7 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
     assert "Error converting" in warnings[0]
 
 
+@pytest.mark.unit
 def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkeypatch):
     """
     Test process_rocprofv3_output raises error when agent info file is missing.
@@ -2152,6 +2203,7 @@ def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkey
         utils_profile.process_rocprofv3_output(workload_dir, False)
 
 
+@pytest.mark.unit
 def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
     tmp_path, monkeypatch
 ):
@@ -2175,6 +2227,7 @@ def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
     assert result == []
 
 
+@pytest.mark.unit
 def test_process_rocprofv3_output_csv_format_multiple_counter_files(
     tmp_path, monkeypatch
 ):
@@ -2228,6 +2281,7 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
     assert str(converted_file2) in result
 
 
+@pytest.mark.unit
 def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
     """
     Test capture_subprocess_output with enable_logging=False doesn't call console_log.
@@ -2268,6 +2322,7 @@ def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output with a single CSV file.
@@ -2312,6 +2367,7 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
     assert copied_file.exists()
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output with multiple valid CSV files.
@@ -2355,6 +2411,7 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     assert "kokkos_parallel_reduce" in df["marker_name"].values
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output when no marker API trace files are found.
@@ -2385,6 +2442,7 @@ def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
         utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output with a mix of valid, empty, and corrupted files.
@@ -2441,6 +2499,7 @@ def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
     assert len(df) >= 0
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output when output directory doesn't exist.
@@ -2502,6 +2561,7 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
         )
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_csv_with_only_headers(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output with CSV files that contain
@@ -2539,6 +2599,7 @@ def test_process_kokkos_trace_output_csv_with_only_headers(tmp_path, monkeypatch
         utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output with larger CSV files to ensure memory handling.
@@ -2588,6 +2649,7 @@ def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
     assert "kokkos_parallel_reduce" in df["marker_name"].values
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_unicode_content(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output with CSV files containing unicode characters.
@@ -2627,6 +2689,7 @@ def test_process_kokkos_trace_output_unicode_content(tmp_path, monkeypatch):
     assert "kokkos_β_operation" in df["marker_name"].values
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output with CSV files having different column schemas.
@@ -2688,6 +2751,7 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
     assert all("marker_name" in row for row in written_rows)
 
 
+@pytest.mark.unit
 def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output when there are permission
@@ -2770,6 +2834,7 @@ mock_submodules = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules)
 def test_get_submodules_basic_functionality(mock_walk, mock_import):
@@ -2788,6 +2853,7 @@ def test_get_submodules_basic_functionality(mock_walk, mock_import):
     assert result == expected
 
 
+@pytest.mark.unit
 def test_get_submodules_empty_package():
     """
     Test with a package that has no submodules.
@@ -2808,6 +2874,7 @@ def test_get_submodules_empty_package():
             assert len(result) == 0
 
 
+@pytest.mark.unit
 def test_get_submodules_package_not_found():
     """
     Test behavior when package doesn't exist.
@@ -2829,6 +2896,7 @@ mock_submodules_single = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_single)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_single)
 def test_get_submodules_name_processing_single_underscore(mock_walk, mock_import):
@@ -2853,6 +2921,7 @@ mock_submodules_multiple = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_multiple)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_multiple)
 def test_get_submodules_name_processing_multiple_underscores(mock_walk, mock_import):
@@ -2877,6 +2946,7 @@ mock_submodules_base = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_base)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_base)
 def test_get_submodules_base_module_filtered(mock_walk, mock_import):
@@ -2901,6 +2971,7 @@ mock_submodules_no_underscore = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_no_underscore)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_no_underscore)
 def test_get_submodules_no_underscore_in_name(mock_walk, mock_import):
@@ -2924,6 +2995,7 @@ mock_submodules_empty_parts = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_empty_parts)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_empty_parts)
 def test_get_submodules_empty_name_parts(mock_walk, mock_import):
@@ -2942,6 +3014,7 @@ def test_get_submodules_empty_name_parts(mock_walk, mock_import):
         pytest.skip("Function doesn't handle edge case module names gracefully")
 
 
+@pytest.mark.unit
 def test_get_submodules_package_without_path_attribute():
     """
     Test behavior when package doesn't have __path__ attribute.
@@ -2963,6 +3036,7 @@ mock_package_exception = mock.MagicMock()
 mock_package_exception.__path__ = ["/fake/path"]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_exception)
 @mock.patch("pkgutil.walk_packages", side_effect=ImportError("Mock error"))
 def test_get_submodules_pkgutil_walk_packages_exception(mock_walk, mock_import):
@@ -2988,6 +3062,7 @@ mock_submodules_mixed = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_mixed)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_mixed)
 def test_get_submodules_mixed_module_types(mock_walk, mock_import):
@@ -3014,6 +3089,7 @@ for i in range(100):
     expected_results_large.append(f"test{i}")
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_large)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_large)
 def test_get_submodules_large_number_of_submodules(mock_walk, mock_import):
@@ -3029,6 +3105,7 @@ def test_get_submodules_large_number_of_submodules(mock_walk, mock_import):
     assert result == expected_results_large
 
 
+@pytest.mark.unit
 def test_get_submodules_string_input_validation():
     """
     Test input validation for package_name parameter.
@@ -3048,6 +3125,7 @@ def test_get_submodules_string_input_validation():
         utils_profile.get_submodules(["list", "input"])
 
 
+@pytest.mark.unit
 def test_get_submodules_return_type_consistency():
     """
     Test that function always returns a list, even in edge cases.
@@ -3083,6 +3161,7 @@ mock_submodules_special = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_special)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_special)
 def test_get_submodules_special_characters_in_names(mock_walk, mock_import):
@@ -3103,6 +3182,7 @@ mock_package_isolation.__path__ = ["/fake/path"]
 mock_submodules_isolation = [(None, "module_test", False)]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_isolation)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_isolation)
 def test_get_submodules_imports_isolation(mock_walk, mock_import):
@@ -3134,6 +3214,7 @@ mock_submodules_unicode = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_unicode)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_unicode)
 def test_get_submodules_unicode_names(mock_walk, mock_import):
@@ -3157,6 +3238,7 @@ mock_submodules_docstring = [
 ]
 
 
+@pytest.mark.unit
 @mock.patch("importlib.import_module", return_value=mock_package_docstring)
 @mock.patch("pkgutil.walk_packages", return_value=mock_submodules_docstring)
 def test_get_submodules_docstring_verification(mock_walk, mock_import):
@@ -3217,6 +3299,7 @@ def test_get_submodules_docstring_verification(mock_walk, mock_import):
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_is_workload_empty_valid_data_file(tmp_path):
     """
     Test is_workload_empty with a valid pmc_perf.csv file containing data.
@@ -3250,6 +3333,7 @@ kernel3,0,120,220"""
     assert len(console_error_calls) == 0
 
 
+@pytest.mark.unit
 def test_is_workload_empty_file_with_nan_values(tmp_path):
     """
     Test is_workload_empty with pmc_perf.csv containing NaN values.
@@ -3288,6 +3372,7 @@ NaN,,,"""
     assert "Profiling data could be corrupt" in error_args[1]
 
 
+@pytest.mark.unit
 def test_is_workload_empty_completely_empty_csv(tmp_path):
     """
     Test is_workload_empty with completely empty pmc_perf.csv file.
@@ -3318,6 +3403,7 @@ def test_is_workload_empty_completely_empty_csv(tmp_path):
             pass
 
 
+@pytest.mark.unit
 def test_is_workload_empty_headers_only_csv(tmp_path):
     """
     Test is_workload_empty with CSV containing only headers.
@@ -3351,6 +3437,7 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
     assert "Found empty cells" in error_args[1]
 
 
+@pytest.mark.unit
 def test_is_workload_empty_no_pmc_perf_file(tmp_path):
     """
     Test is_workload_empty when pmc_perf.csv file doesn't exist.
@@ -3380,6 +3467,7 @@ def test_is_workload_empty_no_pmc_perf_file(tmp_path):
     assert error_args[1] == "No profiling data found."
 
 
+@pytest.mark.unit
 def test_is_workload_empty_nonexistent_directory():
     """
     Test is_workload_empty with nonexistent directory path.
@@ -3403,6 +3491,7 @@ def test_is_workload_empty_nonexistent_directory():
     assert error_args[1] == "No profiling data found."
 
 
+@pytest.mark.unit
 def test_is_workload_empty_malformed_csv(tmp_path):
     """
     Test is_workload_empty with malformed CSV that causes pandas read error.
@@ -3437,6 +3526,7 @@ incomplete_row"""
             pass
 
 
+@pytest.mark.unit
 def test_is_workload_empty_mixed_valid_invalid_data(tmp_path):
     """
     Test is_workload_empty with CSV containing mix of valid and invalid (NaN) data.
@@ -3471,6 +3561,7 @@ kernel3,1,120,
     assert len(console_error_calls) == 0
 
 
+@pytest.mark.unit
 def test_is_workload_empty_large_dataset_with_nans(tmp_path):
     """
     Test is_workload_empty with large dataset that becomes empty after dropping NaNs.
@@ -3508,6 +3599,7 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
     assert "Found empty cells" in error_args[1]
 
 
+@pytest.mark.unit
 def test_is_workload_empty_unicode_content(tmp_path):
     """
     Test is_workload_empty with CSV containing Unicode characters.
@@ -3541,6 +3633,7 @@ kernel_tëst,0,120,220"""
     assert len(console_error_calls) == 0
 
 
+@pytest.mark.unit
 def test_is_workload_empty_special_path_characters(tmp_path):
     """
     Test is_workload_empty with directory paths containing special characters.
@@ -3572,6 +3665,7 @@ kernel1,0,100,200"""
     assert len(console_error_calls) == 0
 
 
+@pytest.mark.unit
 def test_is_workload_empty_csv_read_permission_error(tmp_path):
     """
     Test is_workload_empty when CSV file exists but cannot be read due to permissions.
@@ -3611,6 +3705,7 @@ def test_is_workload_empty_csv_read_permission_error(tmp_path):
         pmc_perf_file.chmod(0o644)
 
 
+@pytest.mark.unit
 def test_is_workload_empty_string_path_input():
     """
     Test is_workload_empty with string path input vs Path.
@@ -3634,6 +3729,7 @@ def test_is_workload_empty_string_path_input():
     assert error_args[1] == "No profiling data found."
 
 
+@pytest.mark.unit
 def test_is_workload_empty_console_error_string_formatting(tmp_path):
     """
     Test is_workload_empty string formatting in console_error messages.
@@ -3669,6 +3765,7 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
     assert "Profiling data could be corrupt" in error_args[1]
 
 
+@pytest.mark.unit
 def test_is_workload_empty_function_return_value(tmp_path):
     """
     Test that is_workload_empty function return behavior (implicitly returns None).
@@ -3701,6 +3798,7 @@ def test_is_workload_empty_function_return_value(tmp_path):
     assert result2 is None
 
 
+@pytest.mark.unit
 def test_is_workload_empty_pandas_import_dependency():
     """
     Test is_workload_empty dependency on pandas module.
@@ -3761,6 +3859,7 @@ def test_is_workload_empty_pandas_import_dependency():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_successful_c_utf8():
     """
     Test set_locale_encoding when C.UTF-8 locale is
@@ -3786,6 +3885,7 @@ def test_set_locale_encoding_successful_c_utf8():
             assert len(console_error_calls) == 0
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_c_utf8_fails_fallback_to_current_utf8():
     """
     Test set_locale_encoding when C.UTF-8 fails but current locale is UTF-8 based.
@@ -3820,6 +3920,7 @@ def test_set_locale_encoding_c_utf8_fails_fallback_to_current_utf8():
                 assert len(console_error_calls) == 0
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
     """
     Test set_locale_encoding when both C.UTF-8 and fallback locale fail.
@@ -3857,6 +3958,7 @@ def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
                 assert "Fallback locale failed" in console_error_calls[0][0][0]
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_no_utf8_locale_available():
     """
     Test set_locale_encoding when no UTF-8 locale is available.
@@ -3891,6 +3993,7 @@ def test_set_locale_encoding_no_utf8_locale_available():
                 assert console_error_calls[0][1]["exit"] == False  # noqa
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_getdefaultlocale_returns_none():
     """
     Test set_locale_encoding when getdefaultlocale returns None.
@@ -3924,6 +4027,7 @@ def test_set_locale_encoding_getdefaultlocale_returns_none():
                 )
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_getdefaultlocale_partial_none():
     """
     Test set_locale_encoding when getdefaultlocale returns partial None values.
@@ -3966,6 +4070,7 @@ def test_set_locale_encoding_getdefaultlocale_partial_none():
                 )
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_utf8_case_variations():
     """
     Test set_locale_encoding with various UTF-8 case variations in encoding.
@@ -4004,6 +4109,7 @@ def test_set_locale_encoding_utf8_case_variations():
                         assert len(console_error_calls) == 1
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_empty_encoding():
     """
     Test set_locale_encoding when getdefaultlocale returns empty encoding.
@@ -4036,6 +4142,7 @@ def test_set_locale_encoding_empty_encoding():
                 )
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_locale_with_utf8_substring():
     """
     Test set_locale_encoding with encoding that contains UTF-8 as substring.
@@ -4071,6 +4178,7 @@ def test_set_locale_encoding_locale_with_utf8_substring():
                 assert mock_setlocale.call_count == 2
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_different_locale_error_types():
     """
     Test set_locale_encoding with different types of locale.Error exceptions.
@@ -4112,6 +4220,7 @@ def test_set_locale_encoding_different_locale_error_types():
                     assert str(fallback_error) in console_error_calls[0][0][0]
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_unusual_locale_names():
     """
     Test set_locale_encoding with unusual but valid locale names.
@@ -4154,6 +4263,7 @@ def test_set_locale_encoding_unusual_locale_names():
                     mock_setlocale.assert_any_call(locale.LC_ALL, locale_name)
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_getdefaultlocale_exception():
     """
     Test set_locale_encoding when getdefaultlocale raises an exception.
@@ -4183,6 +4293,7 @@ def test_set_locale_encoding_getdefaultlocale_exception():
                     pass
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_console_error_parameters():
     """
     Test set_locale_encoding console_error call parameters are correct.
@@ -4215,6 +4326,7 @@ def test_set_locale_encoding_console_error_parameters():
                 assert kwargs["exit"] == False  # noqa
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_return_value():
     """
     Test that set_locale_encoding returns None (implicit return).
@@ -4242,6 +4354,7 @@ def test_set_locale_encoding_return_value():
                 assert result is None
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_locale_module_import():
     """
     Test set_locale_encoding dependency on locale module.
@@ -4304,6 +4417,7 @@ def test_set_locale_encoding_locale_module_import():
     assert len(console_error_calls) == 0
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_multiple_calls():
     """
     Test set_locale_encoding behavior when called multiple times.
@@ -4330,6 +4444,7 @@ def test_set_locale_encoding_multiple_calls():
             assert len(console_error_calls) == 0
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_thread_safety_simulation():
     """
     Test set_locale_encoding behavior in simulated concurrent scenarios.
@@ -4367,6 +4482,7 @@ def test_set_locale_encoding_thread_safety_simulation():
                 assert len(console_error_calls) == 0
 
 
+@pytest.mark.unit
 def test_set_locale_encoding_comprehensive_error_handling():
     """
     Test set_locale_encoding comprehensive error handling across all code paths.
@@ -4473,6 +4589,7 @@ def test_set_locale_encoding_comprehensive_error_handling():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_basic_functionality():
     """
     Test reverse_multi_index_df_pmc with a basic multi-index DataFrame.
@@ -4507,6 +4624,7 @@ def test_reverse_multi_index_df_pmc_basic_functionality():
     assert list(dfs[1]["col3"]) == [10, 11, 12]
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_empty_dataframe():
     """
     Test reverse_multi_index_df_pmc with empty multi-index DataFrame.
@@ -4528,6 +4646,7 @@ def test_reverse_multi_index_df_pmc_empty_dataframe():
     assert list(dfs[0].columns) == ["col1", "col2"]
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_single_column_per_level():
     """
     Test reverse_multi_index_df_pmc with single column per level.
@@ -4557,6 +4676,7 @@ def test_reverse_multi_index_df_pmc_single_column_per_level():
         assert len(df_result) == 3
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_uneven_column_distribution():
     """
     Test reverse_multi_index_df_pmc with uneven column distribution across levels.
@@ -4593,6 +4713,7 @@ def test_reverse_multi_index_df_pmc_uneven_column_distribution():
     assert len(file3_df.columns) == 2
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_duplicate_level_names():
     """
     Test reverse_multi_index_df_pmc with duplicate
@@ -4620,6 +4741,7 @@ def test_reverse_multi_index_df_pmc_duplicate_level_names():
     assert list(dfs[0].columns) == ["col1", "col2", "col3"]
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_mixed_data_types():
     """
     Test reverse_multi_index_df_pmc with mixed data types in columns.
@@ -4654,6 +4776,7 @@ def test_reverse_multi_index_df_pmc_mixed_data_types():
     assert file2_df["mixed"].dtype == "object"
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_nan_values():
     """
     Test reverse_multi_index_df_pmc with NaN values in data.
@@ -4684,6 +4807,7 @@ def test_reverse_multi_index_df_pmc_nan_values():
     assert pd.isna(file2_df.iloc[2, 0])
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_special_column_names():
     """
     Test reverse_multi_index_df_pmc with special characters in column names.
@@ -4717,6 +4841,7 @@ def test_reverse_multi_index_df_pmc_special_column_names():
     assert "col#4" in file2_df.columns
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_numeric_level_names():
     """
     Test reverse_multi_index_df_pmc with numeric level names.
@@ -4746,6 +4871,7 @@ def test_reverse_multi_index_df_pmc_numeric_level_names():
         assert "col1" in level_df.columns
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_large_dataframe():
     """
     Test reverse_multi_index_df_pmc with large DataFrame.
@@ -4778,6 +4904,7 @@ def test_reverse_multi_index_df_pmc_large_dataframe():
         assert len(df_result.columns) == num_cols_per_level
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_three_level_index():
     """
     Test reverse_multi_index_df_pmc with three-level MultiIndex (should still work).
@@ -4805,6 +4932,7 @@ def test_reverse_multi_index_df_pmc_three_level_index():
     assert len(file1_df.columns.levels) == 2
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_return_type_validation():
     """
     Test reverse_multi_index_df_pmc return types are correct.
@@ -4829,6 +4957,7 @@ def test_reverse_multi_index_df_pmc_return_type_validation():
     assert len(dfs) == len(coll_levels)
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_column_order_preservation():
     """
     Test reverse_multi_index_df_pmc preserves column order within levels.
@@ -4857,6 +4986,7 @@ def test_reverse_multi_index_df_pmc_column_order_preservation():
     assert list(file2_df.columns) == ["b_col", "y_col"]
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_index_preservation():
     """
     Test reverse_multi_index_df_pmc preserves DataFrame index.
@@ -4880,6 +5010,7 @@ def test_reverse_multi_index_df_pmc_index_preservation():
         assert list(df_result.index) == ["row_a", "row_b", "row_c"]
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_memory_efficiency():
     """
     Test reverse_multi_index_df_pmc memory usage patterns.
@@ -4905,6 +5036,7 @@ def test_reverse_multi_index_df_pmc_memory_efficiency():
     assert total_result_memory < original_memory * 3
 
 
+@pytest.mark.unit
 def test_reverse_multi_index_df_pmc_edge_case_single_row():
     """
     Test reverse_multi_index_df_pmc with single row DataFrame.
@@ -4943,6 +5075,7 @@ def test_reverse_multi_index_df_pmc_edge_case_single_row():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_merge_counters_spatial_multiplex_basic_functionality():
     """
     Test merge_counters_spatial_multiplex with basic multi-index DataFrame.
@@ -5045,6 +5178,7 @@ def test_merge_counters_spatial_multiplex_kernel_name_fallback():
             raise
 
 
+@pytest.mark.unit
 def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
     """
     Test merge_counters_spatial_multiplex with kernels that appear only once.
@@ -5081,6 +5215,7 @@ def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
     assert len(result) == 3
 
 
+@pytest.mark.unit
 def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
     """
     Test merge_counters_spatial_multiplex with multiple kernels having duplicates.
@@ -5124,6 +5259,7 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
     assert len(result) == 3
 
 
+@pytest.mark.unit
 def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
     """
     Test merge_counters_spatial_multiplex timestamp median calculations.
@@ -5165,6 +5301,7 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
 # ============================================================================
 
 
+@pytest.mark.unit
 def test_convert_metric_id_to_panel_info_zero_values():
     """Test convert_metric_id_to_panel_info with zero values in different positions.
 
@@ -5179,6 +5316,7 @@ def test_convert_metric_id_to_panel_info_zero_values():
     assert utils_common.convert_metric_id_to_panel_info("0.5") == ("0000", 5, None)
 
 
+@pytest.mark.unit
 def test_convert_metric_id_to_panel_info_leading_zeros():
     """Test convert_metric_id_to_panel_info with leading zeros in metric IDs.
 
@@ -5192,6 +5330,7 @@ def test_convert_metric_id_to_panel_info_leading_zeros():
     assert utils_common.convert_metric_id_to_panel_info("01.05") == ("0100", 105, None)
 
 
+@pytest.mark.unit
 def test_convert_metric_id_to_panel_info_invalid_empty_string():
     """Test convert_metric_id_to_panel_info with empty string raises exception.
 
@@ -5204,6 +5343,7 @@ def test_convert_metric_id_to_panel_info_invalid_empty_string():
         utils_common.convert_metric_id_to_panel_info("")
 
 
+@pytest.mark.unit
 def test_convert_metric_id_to_panel_info_invalid_too_many_parts():
     """Test convert_metric_id_to_panel_info with more than two parts raises exception.
 
@@ -5222,6 +5362,7 @@ def test_convert_metric_id_to_panel_info_invalid_too_many_parts():
         utils_common.convert_metric_id_to_panel_info("4.02.1.5")
 
 
+@pytest.mark.unit
 def test_convert_metric_id_to_panel_info_invalid_non_numeric():
     """Test convert_metric_id_to_panel_info with non-numeric values raises exception.
 
@@ -5243,6 +5384,7 @@ def test_convert_metric_id_to_panel_info_invalid_non_numeric():
         utils_common.convert_metric_id_to_panel_info("4.02abc")
 
 
+@pytest.mark.unit
 def test_convert_metric_id_to_panel_info_three_floating_point():
     """Test convert_metric_id_to_panel_info with floating
     point numbers in unexpected format.
@@ -5257,6 +5399,7 @@ def test_convert_metric_id_to_panel_info_three_floating_point():
     assert utils_common.convert_metric_id_to_panel_info("4.0.3") == ("0400", 400, 3)
 
 
+@pytest.mark.unit
 def test_convert_metric_id_to_panel_info_edge_case_whitespace():
     """Test convert_metric_id_to_panel_info with whitespace in metric IDs.
 
@@ -5270,6 +5413,7 @@ def test_convert_metric_id_to_panel_info_edge_case_whitespace():
     assert utils_common.convert_metric_id_to_panel_info("4 . 02") == ("0400", 402, None)
 
 
+@pytest.mark.unit
 def test_convert_metric_id_to_panel_info_edge_case_dot_only():
     """Test convert_metric_id_to_panel_info with only dot character raises exception.
 
@@ -5296,6 +5440,7 @@ def test_convert_metric_id_to_panel_info_edge_case_dot_only():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_add_counter_invalid_architectures_type():
     """
     Test that add_counter_extra_config_input_yaml raises TypeError
@@ -5322,6 +5467,7 @@ def test_add_counter_invalid_architectures_type():
         )
 
 
+@pytest.mark.unit
 def test_add_counter_invalid_properties_type():
     """
     Test that add_counter_extra_config_input_yaml raises TypeError
@@ -5348,6 +5494,7 @@ def test_add_counter_invalid_properties_type():
         )
 
 
+@pytest.mark.unit
 def test_add_counter_overwrite_existing():
     """
     Test that add_counter_extra_config_input_yaml overwrites an existing counter
@@ -5389,6 +5536,7 @@ def test_add_counter_overwrite_existing():
 # =============================================================================
 
 
+@pytest.mark.unit
 @mock.patch.dict(os.environ, {"ROCPROF": "rocprofiler-sdk"}, clear=True)
 @mock.patch("utils.utils_common.console_error")
 @mock.patch("utils.utils_common.Path")
@@ -5428,6 +5576,7 @@ def create_csv_string(data_dict):
     return pd.DataFrame(data_dict).to_csv(index=False)
 
 
+@pytest.mark.unit
 @mock.patch("utils.utils_profile.console_error")
 @mock.patch("utils.utils_profile.console_debug")
 def test_v3_to_v2_agent_id_parsing_success_and_error(
@@ -5537,6 +5686,7 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     assert "GPU_ID" in rows[0]
 
 
+@pytest.mark.unit
 @mock.patch("utils.utils_profile.console_debug")  # To suppress debug output
 def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     """
@@ -5589,6 +5739,7 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     assert result_df["CYCLES"].iloc[0] == 5000
 
 
+@pytest.mark.unit
 @mock.patch("utils.utils_profile.console_debug")
 def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     """
@@ -5641,6 +5792,7 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
 # ===================================================================
 
 
+@pytest.mark.unit
 @mock.patch("utils.utils_profile.capture_subprocess_output")
 @mock.patch("utils.utils_profile.console_error")
 @mock.patch("utils.utils_profile.console_debug")
@@ -5685,6 +5837,7 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
         mock_console_error.assert_not_called()
 
 
+@pytest.mark.unit
 @mock.patch("utils.utils_profile.capture_subprocess_output")
 @mock.patch("utils.utils_profile.console_error")
 @mock.patch("utils.utils_profile.console_debug")
@@ -5733,6 +5886,7 @@ def test_pc_sampling_prof_subprocess_fails(
         mock_console_error.assert_called_once_with("PC sampling failed.")
 
 
+@pytest.mark.unit
 @mock.patch("utils.utils_profile.capture_subprocess_output")
 @mock.patch("utils.utils_profile.console_error")
 @mock.patch("utils.utils_profile.console_debug")
@@ -5781,6 +5935,7 @@ def test_pc_sampling_prof_empty_appcmd(
         mock_console_error.assert_not_called()
 
 
+@pytest.mark.unit
 def test_set_parser():
     from utils.utils_common import parse_sets_yaml
 
@@ -5790,6 +5945,7 @@ def test_set_parser():
     assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
 
 
+@pytest.mark.unit
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_below_lower_bound():
     value = 0.0001
@@ -5797,6 +5953,7 @@ def test_scientific_notation_trigger_below_lower_bound():
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
+@pytest.mark.unit
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_at_lower_bound():
     value = 0.01
@@ -5804,6 +5961,7 @@ def test_scientific_notation_trigger_at_lower_bound():
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
+@pytest.mark.unit
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_just_below_upper_bound():
     value = 999999
@@ -5811,6 +5969,7 @@ def test_scientific_notation_trigger_just_below_upper_bound():
     assert pytest.approx(float(result.strip()), rel=1e-6) == value
 
 
+@pytest.mark.unit
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_zero():
     value = 0
@@ -5818,6 +5977,7 @@ def test_scientific_notation_trigger_zero():
     assert float(result.strip()) == value  # Exact match for zero
 
 
+@pytest.mark.unit
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_slightly_below_lower_bound():
     value = 0.009
@@ -5825,6 +5985,7 @@ def test_scientific_notation_trigger_slightly_below_lower_bound():
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
+@pytest.mark.unit
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_well_below_lower_bound():
     value = 1e-5
@@ -5832,6 +5993,7 @@ def test_scientific_notation_trigger_well_below_lower_bound():
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
+@pytest.mark.unit
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_well_above_upper_bound():
     value = 1e10
@@ -5839,6 +6001,7 @@ def test_scientific_notation_trigger_well_above_upper_bound():
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
+@pytest.mark.unit
 @pytest.mark.sci_notion
 def test_alignment_and_width():
     value = 1e10
@@ -5858,6 +6021,7 @@ def test_alignment_and_width():
 # =============================================================================
 
 
+@pytest.mark.unit
 @pytest.mark.list_metrics
 def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     return_code = binary_handler_analyze_rocprof_compute(["--list-metrics", "gfx90a"])
@@ -5869,6 +6033,7 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     assert "5.2 -> Command processor packet processor (CPC)" in output
 
 
+@pytest.mark.unit
 def test_list_blocks(binary_handler_analyze_rocprof_compute, capsys):
     return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", "gfx90a"])
     assert return_code == 0
@@ -5900,6 +6065,7 @@ def test_list_blocks(binary_handler_analyze_rocprof_compute, capsys):
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_amdsmi_ctx():
     from utils.amdsmi_interface import amdsmi_ctx, import_amdsmi_module
 
@@ -5912,6 +6078,7 @@ def test_amdsmi_ctx():
             amdsmi_shutdown_mock.assert_called_once()
 
 
+@pytest.mark.unit
 def test_amdsmi_get_device_handles():
     from utils.amdsmi_interface import get_device_handles, import_amdsmi_module
 
@@ -5930,6 +6097,7 @@ def test_amdsmi_get_device_handles():
         assert len(handle) == 0
 
 
+@pytest.mark.unit
 def test_amdsmi_get_mem_max_clock():
     from utils.amdsmi_interface import get_mem_max_clock, import_amdsmi_module
 
@@ -5950,6 +6118,7 @@ def test_amdsmi_get_mem_max_clock():
             assert clk == 100
 
 
+@pytest.mark.unit
 def test_amdsmi_get_gpu_model():
     from utils.amdsmi_interface import get_gpu_model, import_amdsmi_module
 
@@ -5974,6 +6143,7 @@ def test_amdsmi_get_gpu_model():
             assert model == ("N/A", "N/A", "N/A")
 
 
+@pytest.mark.unit
 def test_amdsmi_get_gpu_vbios_part_number():
     from utils.amdsmi_interface import get_gpu_vbios_part_number, import_amdsmi_module
 
@@ -5996,6 +6166,7 @@ def test_amdsmi_get_gpu_vbios_part_number():
             assert part_number == "N/A"
 
 
+@pytest.mark.unit
 def test_amdsmi_get_gpu_compute_partition():
     from utils.amdsmi_interface import get_gpu_compute_partition, import_amdsmi_module
 
@@ -6019,6 +6190,7 @@ def test_amdsmi_get_gpu_compute_partition():
             assert partition == "N/A"
 
 
+@pytest.mark.unit
 def test_amdsmi_get_gpu_memory_partition():
     from utils.amdsmi_interface import get_gpu_memory_partition, import_amdsmi_module
 
@@ -6047,6 +6219,7 @@ def test_amdsmi_get_gpu_memory_partition():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_impute_counters_iteration_multiplex():
     """Test impute_counters_iteration_multiplex with sample DataFrame."""
     import pandas as pd
@@ -6259,6 +6432,7 @@ def test_impute_counters_iteration_multiplex():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_validate_roofline_csv_valid():
     """
     Test validate_roofline_csv returns True for a valid roofline.csv file.
@@ -6279,6 +6453,7 @@ def test_validate_roofline_csv_valid():
         assert error_msg == ""
 
 
+@pytest.mark.unit
 def test_validate_roofline_csv_invalid_inconsistent_columns():
     """
     Test validate_roofline_csv returns False for a CSV with inconsistent row lengths.
@@ -6329,6 +6504,7 @@ def test_noise_clamp_clamping_behavior():
     np.testing.assert_array_equal(result_np, np.array([100.0, 0.0]))
 
 
+@pytest.mark.unit
 @pytest.mark.noise_clamp
 def test_noise_clamp_zero_reference():
     """Edge case: zero reference should not cause division by zero."""
@@ -6339,6 +6515,7 @@ def test_noise_clamp_zero_reference():
     assert result.iloc[0] == 0.0
 
 
+@pytest.mark.unit
 @pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
     """Warning recorded when relative error >= 1%."""
@@ -6358,6 +6535,7 @@ def test_noise_clamp_warning_above_threshold():
     assert stats["max_rel"] >= 0.01
 
 
+@pytest.mark.unit
 @pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
     """No warning when relative error < 1%."""
@@ -6375,6 +6553,7 @@ def test_noise_clamp_no_warning_below_threshold():
     assert get_noise_clamp_warnings()["count"] == 0
 
 
+@pytest.mark.unit
 @pytest.mark.noise_clamp
 def test_noise_clamp_empty_input():
     """Empty inputs should return empty without error."""
@@ -6384,6 +6563,7 @@ def test_noise_clamp_empty_input():
     assert len(result) == 0
 
 
+@pytest.mark.unit
 @pytest.mark.noise_clamp
 def test_noise_clamp_threshold_boundary():
     """Exactly 1% error should trigger warning (>= not >)."""
@@ -6400,6 +6580,7 @@ def test_noise_clamp_threshold_boundary():
     assert get_noise_clamp_warnings()["count"] == 1
 
 
+@pytest.mark.unit
 @pytest.mark.noise_clamp
 def test_noise_clamper_instance_isolation():
     """Separate NoiseClamper instances should have independent state."""
@@ -6431,6 +6612,7 @@ def test_noise_clamper_instance_isolation():
 # =============================================================================
 
 
+@pytest.mark.unit
 @pytest.mark.experimental_feature
 def test_experimental_feature_without_flag_errors(monkeypatch, capsys):
     """Test that using experimental feature without --experimental flag raises error."""
@@ -6465,6 +6647,7 @@ def test_experimental_feature_without_flag_errors(monkeypatch, capsys):
     assert "--experimental" in captured.err.lower()
 
 
+@pytest.mark.unit
 @pytest.mark.experimental_feature
 def test_experimental_feature_with_flag_succeeds(monkeypatch, caplog):
     """Test that using experimental feature with --experimental flag succeeds."""
@@ -6498,6 +6681,7 @@ def test_experimental_feature_with_flag_succeeds(monkeypatch, caplog):
     assert "may change in future releases" in caplog.text.lower()
 
 
+@pytest.mark.unit
 @pytest.mark.experimental_feature
 def test_experimental_flag_parsing_before_separator(monkeypatch, caplog):
     """Test that prelim parser correctly detects --experimental
@@ -6539,6 +6723,7 @@ def test_experimental_flag_parsing_before_separator(monkeypatch, caplog):
     assert "experimental" in caplog.text.lower()
 
 
+@pytest.mark.unit
 @pytest.mark.experimental_feature
 def test_experimental_flag_parsing_after_separator(monkeypatch, capsys):
     """Test that prelim parser ignores --experimental after '--' separator."""
@@ -6578,6 +6763,7 @@ def test_experimental_flag_parsing_after_separator(monkeypatch, capsys):
     assert "use --experimental" not in captured.err.lower()
 
 
+@pytest.mark.unit
 @pytest.mark.experimental_feature
 def test_experimental_flag_without_features(monkeypatch, capsys):
     """Test that --experimental flag is parsed correctly even without
@@ -6603,6 +6789,7 @@ def test_experimental_flag_without_features(monkeypatch, capsys):
     assert captured.err == "", f"{captured.err}"
 
 
+@pytest.mark.unit
 @pytest.mark.experimental_feature
 def test_experimental_action_help_suppression():
     """Test that ExperimentalAction suppresses help when experimental_enabled=False."""
@@ -6636,6 +6823,7 @@ def test_experimental_action_help_suppression():
 # =============================================================================
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_version_to_numeric():
     """Test version_to_numeric helper function."""
@@ -6665,6 +6853,7 @@ def test_version_to_numeric():
     assert version_to_numeric([999, 999, 999], max_len) == 999_999_999
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_resolve_rocm_library_path(tmp_path):
     """Test resolve_rocm_library_path with various scenarios."""
@@ -6732,6 +6921,7 @@ def test_resolve_rocm_library_path(tmp_path):
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     """Test calc_roofline_data exits early when roofline data is empty.
 
@@ -6802,6 +6992,7 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
 # =============================================================================
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     """Test GPU benchmark locking functions."""
@@ -6866,53 +7057,65 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_parse_location_normal():
     assert parse_top_level_location("10@main.py:60/#10@main.py:21") == "main.py:60"
 
 
+@pytest.mark.unit
 def test_parse_location_single_entry():
     assert parse_top_level_location("5@train.py:42") == "train.py:42"
 
 
+@pytest.mark.unit
 def test_parse_location_nan():
     assert parse_top_level_location(float("nan")) == "unknown:0"
 
 
+@pytest.mark.unit
 def test_parse_location_none():
     assert parse_top_level_location(None) == "unknown:0"
 
 
+@pytest.mark.unit
 def test_parse_location_empty():
     assert parse_top_level_location("") == "unknown:0"
     assert parse_top_level_location("   ") == "unknown:0"
 
 
+@pytest.mark.unit
 def test_parse_location_no_at_sign():
     assert parse_top_level_location("no_at_sign") == "unknown:0"
 
 
+@pytest.mark.unit
 def test_parse_location_no_colon():
     assert parse_top_level_location("10@mainpy") == "unknown:0"
 
 
+@pytest.mark.unit
 def test_format_stats_microseconds():
     assert "us" in format_stats(1, 0.005)
 
 
+@pytest.mark.unit
 def test_format_stats_milliseconds():
     assert "1.50 ms" in format_stats(1, 1.5)
 
 
+@pytest.mark.unit
 def test_format_stats_boundary():
     assert "ms" in format_stats(1, 0.01)
 
 
+@pytest.mark.unit
 def test_format_stats_basic():
     result = format_stats(3, 1.5)
     assert "kernel_launches: 3" in result
     assert "total_duration: 1.50 ms" in result
 
 
+@pytest.mark.unit
 def test_rollup_leaf_node():
     node = CallTreeNode(name="leaf")
     node.kernels["kern_a"] = KernelStats(launches=2, total_duration_ns=1000.0)
@@ -6922,6 +7125,7 @@ def test_rollup_leaf_node():
     assert node.kernel_launches == 2
 
 
+@pytest.mark.unit
 def test_rollup_parent_rolls_up_children():
     child = CallTreeNode(name="child")
     child.kernels["kern_a"] = KernelStats(launches=3, total_duration_ns=3000.0)
@@ -6933,6 +7137,7 @@ def test_rollup_parent_rolls_up_children():
     assert child.kernel_launches == 3
 
 
+@pytest.mark.unit
 def test_rollup_deep_hierarchy():
     grandchild = CallTreeNode(name="grandchild")
     grandchild.kernels["k"] = KernelStats(launches=1, total_duration_ns=100.0)
@@ -6947,14 +7152,17 @@ def test_rollup_deep_hierarchy():
     assert root.kernel_launches == 3
 
 
+@pytest.mark.unit
 def test_build_call_trees_empty_df():
     assert build_call_trees(pd.DataFrame()) == {}
 
 
+@pytest.mark.unit
 def test_build_call_trees_missing_columns():
     assert build_call_trees(pd.DataFrame([{"Operator_Name": "a"}])) == {}
 
 
+@pytest.mark.unit
 def test_build_call_trees_single_dispatch():
     df = pd.DataFrame([
         {
@@ -6971,6 +7179,7 @@ def test_build_call_trees_single_dispatch():
     assert "torch.nn.Linear" in call_trees["train.py:42"].children
 
 
+@pytest.mark.unit
 def test_build_call_trees_hierarchy_split():
     df = pd.DataFrame([
         {
@@ -6988,6 +7197,7 @@ def test_build_call_trees_hierarchy_split():
     assert "addmm" in root.children["aten"].children["linear"].children
 
 
+@pytest.mark.unit
 def test_build_call_trees_multiple_dispatches_same_kernel():
     rows = [
         {
@@ -7004,6 +7214,7 @@ def test_build_call_trees_multiple_dispatches_same_kernel():
     assert call_trees["f.py:1"].children["op_a"].kernels["kern"].launches == 3
 
 
+@pytest.mark.unit
 def test_build_call_trees_dedup_identical_timestamps():
     row = {
         "Operator_Name": "op",
@@ -7015,6 +7226,7 @@ def test_build_call_trees_dedup_identical_timestamps():
     assert build_call_trees(pd.DataFrame([row, row]))["f.py:1"].kernel_launches == 1
 
 
+@pytest.mark.unit
 def test_build_call_trees_no_context_id():
     df = pd.DataFrame([
         {
@@ -7027,6 +7239,7 @@ def test_build_call_trees_no_context_id():
     assert "unknown:0" in build_call_trees(df)
 
 
+@pytest.mark.unit
 def test_build_call_trees_duration_rollup():
     df = pd.DataFrame([
         {
@@ -7051,6 +7264,7 @@ def test_build_call_trees_duration_rollup():
     assert root.children["parent"].children["child"].kernel_launches == 1
 
 
+@pytest.mark.unit
 def test_build_call_trees_multiple_source_locations():
     df = pd.DataFrame([
         {
@@ -7073,6 +7287,7 @@ def test_build_call_trees_multiple_source_locations():
     assert "b.py:2" in call_trees
 
 
+@pytest.mark.unit
 def test_show_call_tree_prints_location_and_stats(capsys):
     root = CallTreeNode(name="main.py:10")
     root.kernel_launches = 1
@@ -7089,6 +7304,7 @@ def test_show_call_tree_prints_location_and_stats(capsys):
     assert "kern" in output
 
 
+@pytest.mark.unit
 def test_show_call_tree_sorted_by_duration(capsys):
     root_a = CallTreeNode(name="a.py:1")
     root_a.total_duration_ms = 10.0
@@ -7101,6 +7317,7 @@ def test_show_call_tree_sorted_by_duration(capsys):
     assert output.index("b.py:1") < output.index("a.py:1")
 
 
+@pytest.mark.unit
 def test_show_call_tree_kernel_id_printed(capsys):
     root = CallTreeNode(name="f.py:1")
     root.kernel_launches = 1
@@ -7117,6 +7334,7 @@ def test_show_call_tree_kernel_id_printed(capsys):
     assert "(id 42)" in output
 
 
+@pytest.mark.unit
 def test_print_operator_node_branching_shows_stats(capsys):
     node = CallTreeNode(name="branch")
     node.kernel_launches = 2
@@ -7130,6 +7348,7 @@ def test_print_operator_node_branching_shows_stats(capsys):
     assert "k2" in output
 
 
+@pytest.mark.unit
 def test_print_operator_node_non_branching_omits_stats(capsys):
     node = CallTreeNode(name="single")
     node.kernel_launches = 1
@@ -7142,6 +7361,7 @@ def test_print_operator_node_non_branching_omits_stats(capsys):
     assert "kernel_launches" not in lines[0]
 
 
+@pytest.mark.unit
 def test_print_operator_node_long_kernel_wraps(capsys):
     node = CallTreeNode(name="single")
     node.kernel_launches = 1
@@ -7232,6 +7452,7 @@ class TestBuildMetricList:
         """Return only leaf metric entries whose ID has format 'panel.table.index'."""
         return {k: v for k, v in metric_list.items() if k.count(".") == 2}
 
+    @pytest.mark.unit
     def test_given_metric_with_valid_value__it_presents_in_metric_list(self):
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Valid Metric A", {"value": "AVG(COUNTER_A)"}
@@ -7240,6 +7461,7 @@ class TestBuildMetricList:
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Valid Metric A" in leaf_entries.values()
 
+    @pytest.mark.unit
     def test_given_metric_with_python_none__it_doesnt_present_in_metric_list(self):
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Unsupported Metric B", {"value": None}
@@ -7248,6 +7470,7 @@ class TestBuildMetricList:
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Unsupported Metric B" not in leaf_entries.values()
 
+    @pytest.mark.unit
     def test_given_metric_with_string_none__it_doesnt_present_in_metric_list(self):
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Unsupported Metric C", {"value": "None"}
@@ -7256,6 +7479,7 @@ class TestBuildMetricList:
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Unsupported Metric C" not in leaf_entries.values()
 
+    @pytest.mark.unit
     def test_given_expr_metric__it_presents_in_metric_list(self):
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Expr Metric", {"expr": "(100 * COUNTER_B / COUNTER_C)"}
@@ -7264,6 +7488,7 @@ class TestBuildMetricList:
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Expr Metric" in leaf_entries.values()
 
+    @pytest.mark.unit
     def test_given_metric_with_partial_avg_min_max__it_presents_in_metric_list(self):
         panel_configs = self._build_test_panel_configs_for_single_metric(
             "Partial Metric", {"avg": "AVG(COUNTER_E)", "min": None, "max": None}
@@ -7272,6 +7497,7 @@ class TestBuildMetricList:
         leaf_entries = self._extract_leaf_metric_entries(metric_list)
         assert "Partial Metric" in leaf_entries.values()
 
+    @pytest.mark.unit
     def test_given_metric_with_all_none_avg_min_max__it_doesnt_present_in_metric_list(
         self,
     ):
@@ -7292,6 +7518,7 @@ H2 = "nn.Module.Net.forward/torch.nn.functional.conv2d"
 H1 = "torch.relu"
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_all_keyword():
     """'all' maps to '**' and matches every hierarchy."""
@@ -7303,6 +7530,7 @@ def test_all_keyword():
     assert not m("all", "")
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_bare_pattern_matches_last_component():
     """Bare token is matched via PurePosixPath.match() against the full hierarchy."""
@@ -7315,6 +7543,7 @@ def test_bare_pattern_matches_last_component():
     assert not m("sigmoid", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_bare_wildcard_pattern():
     """Wildcard bare token matched via PurePosixPath.match()."""
@@ -7327,6 +7556,7 @@ def test_bare_wildcard_pattern():
     assert not m("sigm*", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_hierarchy_glob():
     """Patterns with '/' match across multiple hierarchy components."""
@@ -7337,6 +7567,7 @@ def test_hierarchy_glob():
     assert not m("nn.Module.Net.forward/torch.relu", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_leading_slash_is_cosmetic():
     """Leading '/' is stripped during pattern normalization."""
@@ -7346,6 +7577,7 @@ def test_leading_slash_is_cosmetic():
     assert m("/torch.relu", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_trailing_slash_stripped_by_posixpath():
     """PurePosixPath strips trailing slashes, so they are cosmetic."""
@@ -7355,6 +7587,7 @@ def test_trailing_slash_stripped_by_posixpath():
     assert m("torch.relu/", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_regex_not_supported():
     """Regex syntax has no special meaning; treated as literal glob text."""
@@ -7366,6 +7599,7 @@ def test_regex_not_supported():
     assert not m("2:functional", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_empty_inputs():
     """Empty pattern or operator_name returns False."""
@@ -7376,6 +7610,7 @@ def test_empty_inputs():
     assert not m("", "")
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_slash_only_markers():
     """Scope-marker-only tokens should not match any hierarchy."""
@@ -7418,6 +7653,7 @@ def get_matched_torch_operators_for_display(
     return result
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_display_match_hierarchy_glob():
     """Full hierarchy globs are honored by display helper."""
@@ -7432,6 +7668,7 @@ def test_display_match_hierarchy_glob():
     assert matched[0][0] == H3
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_display_match_multi_patterns():
     """Multiple glob patterns match their respective operators."""
@@ -7447,6 +7684,7 @@ def test_display_match_multi_patterns():
     assert len(matched) == 2
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_display_no_match():
     """No matches returns empty list."""
@@ -7457,6 +7695,7 @@ def test_display_no_match():
     assert get_matched_torch_operators_for_display({"t": df}, ["sigmoid"]) == []
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_display_empty_inputs():
     """Empty torch_operators or pattern_list returns []."""
@@ -7467,6 +7706,7 @@ def test_display_empty_inputs():
 # -- parse_torch_operator_patterns ------------------------------------------
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_parse_patterns_basic():
     """Single and multiple patterns are parsed correctly."""
@@ -7481,6 +7721,7 @@ def test_parse_patterns_basic():
     assert parse_torch_operator_patterns(args) == ["relu", "conv2d"]
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_parse_patterns_comma_split():
     """Comma-separated patterns in a single arg are split."""
@@ -7492,6 +7733,7 @@ def test_parse_patterns_comma_split():
     assert parse_torch_operator_patterns(args) == ["relu", "conv2d"]
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_parse_patterns_whitespace():
     """Leading/trailing whitespace is stripped."""
@@ -7503,6 +7745,7 @@ def test_parse_patterns_whitespace():
     assert parse_torch_operator_patterns(args) == ["relu", "conv2d", "linear"]
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_parse_patterns_empty():
     """Flag given with no args defaults to '**'; absent flag returns empty."""
@@ -7518,6 +7761,7 @@ def test_parse_patterns_empty():
 # -- PatternMatcherEngine ---------------------------------------------------
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_engine_glob_hierarchy_mode():
     """Facade delegates matching to glob-hierarchy implementation."""
@@ -7529,6 +7773,7 @@ def test_engine_glob_hierarchy_mode():
     assert not matcher.matches("sigmoid", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_engine_invalid_mode():
     """Unsupported strategy names should raise ValueError."""
@@ -7541,6 +7786,7 @@ def test_engine_invalid_mode():
 # -- Additional coverage (xuchen #26) ----------------------------------------
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_double_star_explicit():
     """'**' matches any hierarchy depth."""
@@ -7553,6 +7799,7 @@ def test_double_star_explicit():
     assert not m("**", "")
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_single_char_wildcard():
     """'?' matches exactly one character in a component."""
@@ -7565,6 +7812,7 @@ def test_single_char_wildcard():
     assert m("torch.nn.functional.conv?d", H2)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_long_hierarchy():
     """Deeply nested hierarchies match correctly."""
@@ -7578,6 +7826,7 @@ def test_long_hierarchy():
     assert not m("level0", deep)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_long_component_names():
     """Components with very long names are handled correctly."""
@@ -7590,6 +7839,7 @@ def test_long_component_names():
     assert not m("b*", hierarchy)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_special_characters_in_names():
     """Dots, underscores, and other non-glob chars are treated literally."""
@@ -7602,6 +7852,7 @@ def test_special_characters_in_names():
     assert not m("nn_Module._internal/*", h)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_bracket_glob_pattern():
     """Character classes [abc] work in glob patterns."""
@@ -7611,6 +7862,7 @@ def test_bracket_glob_pattern():
     assert not m("torch.rel[ab]", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_single_component_hierarchy():
     """Single-component hierarchy (no slashes) matches bare patterns."""
@@ -7622,6 +7874,7 @@ def test_single_component_hierarchy():
     assert not m("*/torch.relu", "torch.relu")
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_whitespace_only_pattern():
     """Whitespace-only patterns normalize to empty and return False."""
@@ -7631,6 +7884,7 @@ def test_whitespace_only_pattern():
     assert not m("\t", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_star_pattern_matches_all():
     """Bare '*' is normalized to '**' and matches every hierarchy."""
@@ -7643,6 +7897,7 @@ def test_star_pattern_matches_all():
     assert not m("*", "")
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_star_normalize_equivalence():
     """'*' and 'all' produce the same normalization."""
@@ -7652,6 +7907,7 @@ def test_star_normalize_equivalence():
     assert norm("*") == norm("all") == "**"
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_case_sensitivity():
     """Pattern matching is case-sensitive."""
@@ -7663,6 +7919,7 @@ def test_case_sensitivity():
     assert m("all", H3)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_all_keyword_case_sensitive():
     """Only lowercase 'all' is the special keyword; mixed case is a literal."""
@@ -7674,6 +7931,7 @@ def test_all_keyword_case_sensitive():
     assert norm("All") == "All"
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_consecutive_slashes_in_target():
     """Consecutive slashes in the target are collapsed by PurePosixPath."""
@@ -7684,6 +7942,7 @@ def test_consecutive_slashes_in_target():
     assert m("*relu", h)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_dots_in_patterns():
     """Dots are literal characters in glob patterns, not regex wildcards."""
@@ -7696,6 +7955,7 @@ def test_dots_in_patterns():
     assert m("torchXrelu", h)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_pattern_with_spaces():
     """Spaces in patterns and targets are treated literally."""
@@ -7707,6 +7967,7 @@ def test_pattern_with_spaces():
     assert m("* spaced op */*", h)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_colons_in_operator_names():
     """Colons (e.g. aten::relu) are literal characters in glob matching."""
@@ -7720,6 +7981,7 @@ def test_colons_in_operator_names():
     assert not m("torch.relu", h)
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_display_star_matches_all_operators():
     """'*' pattern matches all operators in display helper."""
@@ -7733,6 +7995,7 @@ def test_display_star_matches_all_operators():
     assert len(matched) == 2
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_display_dedup_across_dataframes():
     """Same operator in multiple DataFrames is matched only once."""
@@ -7745,6 +8008,7 @@ def test_display_dedup_across_dataframes():
     assert op_names.count(H3) == 1
 
 
+@pytest.mark.unit
 @pytest.mark.torch_ops
 def test_parse_patterns_star():
     """'*' is passed through as-is by the pattern parser."""
@@ -7764,6 +8028,7 @@ def test_parse_patterns_star():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_format_table_ascii_basic():
     """Test format_table_ascii produces correct ASCII table output."""
     from utils.utils_common import format_table_ascii
@@ -7785,6 +8050,7 @@ def test_format_table_ascii_basic():
     assert "| 2100" in result  # Has second row value
 
 
+@pytest.mark.unit
 def test_format_table_ascii_text_wrapping():
     """Test that long Description text is wrapped at 40 characters."""
     from utils.utils_common import format_table_ascii

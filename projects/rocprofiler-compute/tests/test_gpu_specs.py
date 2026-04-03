@@ -174,6 +174,7 @@ def test_num_xcds_cli_output():
     assert int(num_xcd_actual) == num_xcds.get(compute_partition_actual.lower(), -1)
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_load_yaml_file_not_found():
     """Test _load_yaml with non-existent file - covers lines 104-105"""
@@ -199,6 +200,7 @@ def test_load_yaml_invalid_yaml():
         MIGPUSpecs._load_yaml(str(temp_path))
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_load_yaml_generic_exception():
     """Test _load_yaml generic exception handling - covers lines 108-111"""
@@ -209,6 +211,7 @@ def test_load_yaml_generic_exception():
             MIGPUSpecs._load_yaml("some_file.yaml")
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_gpu_series_dict_uninitialized():
     """Test get_gpu_series_dict when dict not populated - covers lines 182-185"""
@@ -218,6 +221,7 @@ def test_get_gpu_series_dict_uninitialized():
         assert MIGPUSpecs.get_gpu_series_dict() == {}
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_gpu_series_uninitialized():
     """Test get_gpu_series when dict not populated - covers lines 191-194"""
@@ -227,6 +231,7 @@ def test_get_gpu_series_uninitialized():
         assert MIGPUSpecs.get_gpu_series_dict() == {}
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_perfmon_config_uninitialized():
     """Test get_perfmon_config when dict not populated - covers lines 210-213"""
@@ -237,6 +242,7 @@ def test_get_perfmon_config_uninitialized():
             MIGPUSpecs.get_perfmon_config("gfx942")
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_gpu_model_uninitialized():
     """Test get_gpu_model when dict not populated - covers lines 223-226"""
@@ -247,6 +253,7 @@ def test_get_gpu_model_uninitialized():
             MIGPUSpecs.get_gpu_model("gfx942", "29857")
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_gpu_model_invalid_chip_id():
     """Test get_gpu_model with invalid chip_id - covers lines 235-236"""
@@ -256,6 +263,7 @@ def test_get_gpu_model_invalid_chip_id():
     assert result is None
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_gpu_model_invalid_arch():
     """Test get_gpu_model with invalid architecture - covers lines 243-244"""
@@ -265,6 +273,7 @@ def test_get_gpu_model_invalid_arch():
     assert result is None
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_gpu_model_none_result():
     """Test get_gpu_model when result is None - covers lines 246-248"""
@@ -275,6 +284,7 @@ def test_get_gpu_model_none_result():
         assert result is None
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_num_xcds_no_compute_partition_data():
     """Test get_num_xcds when no compute partition data found - covers lines 307-309"""
@@ -285,6 +295,7 @@ def test_get_num_xcds_no_compute_partition_data():
         result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx942")  # noqa: F841
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_num_xcds_uninitialized_dict():
     """Test get_num_xcds when XCD dict not populated - covers lines 315-317"""
@@ -295,6 +306,7 @@ def test_get_num_xcds_uninitialized_dict():
             MIGPUSpecs.get_num_xcds(gpu_arch="gfx950", gpu_model="MI350")
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_num_xcds_unknown_gpu_model():
     """Test get_num_xcds with unknown gpu model - covers lines 319-321"""
@@ -305,6 +317,7 @@ def test_get_num_xcds_unknown_gpu_model():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_num_xcds_no_compute_partition():
     """Test get_num_xcds with no compute partition - covers lines 325-327"""
@@ -315,6 +328,7 @@ def test_get_num_xcds_no_compute_partition():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_num_xcds_unknown_compute_partition():
     """Test get_num_xcds with unknown compute partition - covers lines 329-332"""
@@ -325,6 +339,7 @@ def test_get_num_xcds_unknown_compute_partition():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_num_xcds_none_partition_value():
     """Test get_num_xcds when partition value is None - covers lines 338-340"""
@@ -337,6 +352,7 @@ def test_get_num_xcds_none_partition_value():
         )
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_num_xcds_no_gpu_model():
     """Test get_num_xcds with no gpu model - covers line 342"""
@@ -347,6 +363,7 @@ def test_get_num_xcds_no_gpu_model():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_chip_id_dict_empty():
     """Test get_chip_id_dict when dict is empty - covers line 352"""
@@ -356,6 +373,7 @@ def test_get_chip_id_dict_empty():
         assert MIGPUSpecs.get_chip_id_dict() == {}
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_get_num_xcds_dict_empty():
     """Test get_num_xcds_dict when dict is empty - covers line 359"""
@@ -365,6 +383,7 @@ def test_get_num_xcds_dict_empty():
         assert MIGPUSpecs.get_num_xcds_dict() == {}
 
 
+@pytest.mark.unit
 @pytest.mark.misc
 def test_normal_functionality_still_works():
     """Ensure that normal paths still work after adding error handling tests"""

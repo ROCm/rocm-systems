@@ -115,11 +115,13 @@ def _write_stochastic_csv(
 # ═══════════════════════════════════════════════════════════════
 
 
+@pytest.mark.unit
 def test_search_pc_sampling_record_empty_list_returns_none() -> None:
     """Return None when the input record list is empty."""
     assert search_pc_sampling_record([]) is None
 
 
+@pytest.mark.unit
 def test_search_pc_sampling_record_single_dict_input_issued() -> None:
     """Accept a single dict (not a list) and count it as one issued sample."""
     record = _make_record(
@@ -139,6 +141,7 @@ def test_search_pc_sampling_record_single_dict_input_issued() -> None:
     assert stalled == 0
 
 
+@pytest.mark.unit
 def test_search_pc_sampling_record_groups_by_key() -> None:
     """
     Group records by (code_object_id, offset, inst_index)
@@ -156,6 +159,7 @@ def test_search_pc_sampling_record_groups_by_key() -> None:
     assert result[1][3] == 1
 
 
+@pytest.mark.unit
 def test_search_pc_sampling_record_stall_reason_aggregation() -> None:
     """Aggregate distinct stall reasons and track stalled vs issued counts."""
     records = [
@@ -186,6 +190,7 @@ def test_search_pc_sampling_record_stall_reason_aggregation() -> None:
     assert result[0][5] == 2  # count_stalled
 
 
+@pytest.mark.unit
 def test_search_pc_sampling_record_dispatch_id_collection() -> None:
     """Collect unique dispatch IDs across duplicate records for the same key."""
     records = [
@@ -199,6 +204,7 @@ def test_search_pc_sampling_record_dispatch_id_collection() -> None:
     assert dispatch_ids == [0, 1]
 
 
+@pytest.mark.unit
 def test_search_pc_sampling_record_skips_none_fields() -> None:
     """Skip records whose code_object_id or offset is None."""
     valid = _make_record(1, 0x10, 0, dispatch_id=0)
@@ -277,6 +283,7 @@ def _setup_per_kernel_files(
     return json_path, kernel_trace
 
 
+@pytest.mark.unit
 def test_load_per_kernel_host_trap_offset_sort(
     tmp_path: Path,
 ) -> None:
@@ -306,6 +313,7 @@ def test_load_per_kernel_host_trap_offset_sort(
         assert row["code_object_id"] == 100
 
 
+@pytest.mark.unit
 def test_load_per_kernel_stochastic_count_sort(
     tmp_path: Path,
 ) -> None:
@@ -334,6 +342,7 @@ def test_load_per_kernel_stochastic_count_sort(
     assert counts == sorted(counts, reverse=True)
 
 
+@pytest.mark.unit
 def test_load_per_kernel_kernel_not_in_trace(
     tmp_path: Path,
 ) -> None:
@@ -352,6 +361,7 @@ def test_load_per_kernel_kernel_not_in_trace(
     assert df.empty
 
 
+@pytest.mark.unit
 def test_load_per_kernel_no_pc_sample_key(
     tmp_path: Path,
 ) -> None:
@@ -372,6 +382,7 @@ def test_load_per_kernel_no_pc_sample_key(
         )
 
 
+@pytest.mark.unit
 def test_load_per_kernel_invalid_sorting_type(
     tmp_path: Path,
 ) -> None:
@@ -393,6 +404,7 @@ def test_load_per_kernel_invalid_sorting_type(
 # ═══════════════════════════════════════════════════════════════
 
 
+@pytest.mark.unit
 def test_load_pc_sampling_data_empty_prefix(
     tmp_path: Path,
 ) -> None:
@@ -402,6 +414,7 @@ def test_load_pc_sampling_data_empty_prefix(
     assert df.empty
 
 
+@pytest.mark.unit
 def test_load_pc_sampling_data_none_prefix(
     tmp_path: Path,
 ) -> None:
@@ -411,6 +424,7 @@ def test_load_pc_sampling_data_none_prefix(
     assert df.empty
 
 
+@pytest.mark.unit
 def test_load_pc_sampling_data_missing_kernel_trace(
     tmp_path: Path,
 ) -> None:
@@ -420,6 +434,7 @@ def test_load_pc_sampling_data_missing_kernel_trace(
     assert df.empty
 
 
+@pytest.mark.unit
 def test_load_pc_sampling_data_no_filter_stochastic_csv(
     tmp_path: Path,
 ) -> None:
@@ -446,6 +461,7 @@ def test_load_pc_sampling_data_no_filter_stochastic_csv(
     assert df.iloc[0]["source_line"].startswith("...")
 
 
+@pytest.mark.unit
 def test_load_pc_sampling_data_multiple_kernels_error(
     tmp_path: Path,
 ) -> None:
@@ -470,6 +486,7 @@ def test_load_pc_sampling_data_multiple_kernels_error(
     assert df.empty
 
 
+@pytest.mark.unit
 def test_load_pc_sampling_data_single_kernel_valid(
     tmp_path: Path,
 ) -> None:
@@ -502,6 +519,7 @@ def test_load_pc_sampling_data_single_kernel_valid(
     assert not df.empty
 
 
+@pytest.mark.unit
 def test_load_pc_sampling_data_single_kernel_out_of_bounds(
     tmp_path: Path,
 ) -> None:
@@ -533,6 +551,7 @@ def test_load_pc_sampling_data_single_kernel_out_of_bounds(
 # ═══════════════════════════════════════════════════════════════
 
 
+@pytest.mark.unit
 def test_nullify_unevaluated_metrics_metric_table_nullified() -> None:
     """
     Replace Value/Avg/Min/Max with 'N/A' in metric tables
@@ -560,6 +579,7 @@ def test_nullify_unevaluated_metrics_metric_table_nullified() -> None:
     assert workload.dfs[10]["Metric"].iloc[0] == "Wavefronts"
 
 
+@pytest.mark.unit
 def test_nullify_unevaluated_metrics_non_metric_table_untouched() -> None:
     """Leave non-metric-table DataFrames unchanged."""
     df = pd.DataFrame({"Value": [42, 99]})
@@ -571,6 +591,7 @@ def test_nullify_unevaluated_metrics_non_metric_table_untouched() -> None:
     assert workload.dfs[20]["Value"].tolist() == [42, 99]
 
 
+@pytest.mark.unit
 def test_nullify_unevaluated_metrics_empty_df_skipped() -> None:
     """Skip empty DataFrames without error even when typed as metric_table."""
     df = pd.DataFrame()
@@ -602,6 +623,7 @@ def _write_pc_kernel_trace(path: Path, rows: list[tuple]) -> Path:
     return path
 
 
+@pytest.mark.unit
 def test_process_pc_sampling_missing_trace_returns_empty(
     tmp_path: Path,
 ) -> None:
@@ -617,6 +639,7 @@ def test_process_pc_sampling_missing_trace_returns_empty(
     ]
 
 
+@pytest.mark.unit
 def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
     """Verify column selection, GPU mapping, timestamps, and extra column dropping."""
     _write_pc_kernel_trace(
@@ -651,6 +674,7 @@ def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
     assert df["End_Timestamp"].iloc[0] == 1981199662835032
 
 
+@pytest.mark.unit
 def test_process_pc_sampling_no_agent_info(tmp_path: Path) -> None:
     """Default GPU_ID to 0 when ps_file_agent_info.csv is missing."""
     _write_pc_kernel_trace(
@@ -667,6 +691,7 @@ def test_process_pc_sampling_no_agent_info(tmp_path: Path) -> None:
 # ═══════════════════════════════════════════════════════════════
 
 
+@pytest.mark.unit
 def test_build_agent_to_gpu_map_single_gpu(
     tmp_path: Path,
 ) -> None:
@@ -677,6 +702,7 @@ def test_build_agent_to_gpu_map_single_gpu(
     assert result == {"Agent 2": 0}
 
 
+@pytest.mark.unit
 def test_build_agent_to_gpu_map_two_gpus(
     tmp_path: Path,
 ) -> None:
@@ -687,6 +713,7 @@ def test_build_agent_to_gpu_map_two_gpus(
     assert result == {"Agent 2": 0, "Agent 3": 1}
 
 
+@pytest.mark.unit
 def test_build_agent_to_gpu_map_no_gpu_agents(
     tmp_path: Path,
 ) -> None:
@@ -697,6 +724,7 @@ def test_build_agent_to_gpu_map_no_gpu_agents(
     assert result == {}
 
 
+@pytest.mark.unit
 def test_build_agent_to_gpu_map_missing_file(
     tmp_path: Path,
 ) -> None:

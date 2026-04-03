@@ -22,6 +22,7 @@ def make_multilevel_df(data: dict) -> "pd.DataFrame":
     return df
 
 
+@pytest.mark.unit
 def test_impute_multiplex_kernel_policy():
     """Test imputation with kernel policy on a single kernel."""
 
@@ -57,6 +58,7 @@ def test_impute_multiplex_kernel_policy():
     assert result[("file1", "Counter1")].iloc[1] == 100
 
 
+@pytest.mark.unit
 def test_impute_multiplex_kernel_launch_params_policy():
     """Test imputation with kernel_launch_params policy on a single kernel."""
 
@@ -93,6 +95,7 @@ def test_impute_multiplex_kernel_launch_params_policy():
     assert len(result) == 3
 
 
+@pytest.mark.unit
 def test_impute_multiplex_kernel_launch_params_no_imputation():
     """Test imputation with kernel_launch_params when no imputation is possible."""
 
@@ -130,6 +133,7 @@ def test_impute_multiplex_kernel_launch_params_no_imputation():
     assert pd.isna(result[("file1", "Counter2")].iloc[2])
 
 
+@pytest.mark.unit
 def test_impute_multiplex_multi_kernel_kernel_policy():
     """Test imputation with kernel policy on multiple kernels."""
 
@@ -166,6 +170,7 @@ def test_impute_multiplex_multi_kernel_kernel_policy():
     assert len(result) == 3  # Ensure same number of rows
 
 
+@pytest.mark.unit
 def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation():
     """Test imputation with kernel_launch_params when no imputation is possible."""
 
@@ -203,6 +208,7 @@ def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation():
     assert pd.isna(result[("file1", "Counter1")].iloc[2])
 
 
+@pytest.mark.unit
 def test_fewer_dispatches_single_kernel():
     """
     Test imputation with kernel policy on a single kernel with
@@ -249,6 +255,7 @@ def test_fewer_dispatches_single_kernel():
     assert pd.isna(result[("file1", "C3")].iloc[1])
 
 
+@pytest.mark.unit
 def test_fewer_dispatches_multiple_kernels_both_incomplete():
     """
     Test imputation with kernel policy on multiple kernels, both incomplete.
@@ -300,6 +307,7 @@ def test_fewer_dispatches_multiple_kernels_both_incomplete():
     assert pd.isna(result[("file1", "C3")].iloc[3])
 
 
+@pytest.mark.unit
 def test_fewer_dispatches_one_incomplete_one_complete():
     """
     Test imputation with kernel policy on one kernel incomplete, second complete.
@@ -360,6 +368,7 @@ def test_fewer_dispatches_one_incomplete_one_complete():
     assert result[("file1", "C3")].iloc[4] == 70
 
 
+@pytest.mark.unit
 def test_fewer_dispatches_same_kernel_different_launch_params():
     """
     Test imputation with kernel_launch_params on the same kernel
@@ -418,6 +427,7 @@ def test_fewer_dispatches_same_kernel_different_launch_params():
     assert pd.isna(result[("file1", "C3")].iloc[3])
 
 
+@pytest.mark.unit
 def test_fewer_dispatches_same_kernel_one_incomplete_one_complete():
     """
     Test imputation with kernel_launch_params on one config incomplete, other complete.
@@ -479,6 +489,7 @@ def test_fewer_dispatches_same_kernel_one_incomplete_one_complete():
     assert result[("file1", "C3")].iloc[4] == 70
 
 
+@pytest.mark.unit
 def test_incomplete_last_group_single_kernel():
     """
     Test imputation with kernel policy on a single kernel with incomplete last group.
@@ -523,6 +534,7 @@ def test_incomplete_last_group_single_kernel():
     assert result[("file1", "C2")].iloc[2] == 20
 
 
+@pytest.mark.unit
 def test_incomplete_last_group_multiple_kernels_both_incomplete():
     """
     Test imputation with kernel policy on multiple kernels,
@@ -624,6 +636,7 @@ def test_incomplete_last_group_multiple_kernels_both_incomplete():
     assert result[("file1", "C3")].iloc[8] == 70
 
 
+@pytest.mark.unit
 def test_incomplete_last_group_one_incomplete_other_complete():
     """
     Test imputation with kernel policy on one kernel incomplete, second kernel complete.
@@ -741,6 +754,7 @@ def test_incomplete_last_group_one_incomplete_other_complete():
     assert result[("file1", "C3")].iloc[9] == 100
 
 
+@pytest.mark.unit
 def test_incomplete_last_group_same_kernel_different_launch_params():
     """
     Test imputation with kernel_launch_params on the same kernel
@@ -800,6 +814,7 @@ def test_incomplete_last_group_same_kernel_different_launch_params():
     assert result[("file1", "C2")].iloc[5] == 60
 
 
+@pytest.mark.unit
 def test_incomplete_last_group_same_kernel_one_incomplete_one_complete():
     """
     Test imputation with kernel_launch_params on the same kernel
@@ -862,6 +877,7 @@ def test_incomplete_last_group_same_kernel_one_incomplete_one_complete():
     assert result[("file1", "C2")].iloc[6] == 80
 
 
+@pytest.mark.unit
 def test_complete_last_group_single_kernel():
     """
     Test imputation with kernel policy on a single kernel with complete last group.
@@ -909,6 +925,7 @@ def test_complete_last_group_single_kernel():
     assert result[("file1", "C2")].iloc[3] == 40
 
 
+@pytest.mark.unit
 def test_complete_last_group_multiple_kernels_both_complete():
     """
     Test imputation with kernel policy on multiple kernels, both complete.
@@ -1092,6 +1109,7 @@ def test_complete_last_group_multiple_kernels_both_complete():
     assert result[("file1", "C3")].iloc[11] == 120
 
 
+@pytest.mark.unit
 def test_complete_last_group_same_kernel_different_launch_params():
     """
     Test imputation with kernel_launch_params on the same kernel
@@ -1161,6 +1179,7 @@ def test_complete_last_group_same_kernel_different_launch_params():
     assert result[("file1", "C2")].iloc[7] == 80
 
 
+@pytest.mark.unit
 def test_impute_counters_iteration_multiplex_incorrect_structure():
     """Test imputation when the DataFrame is not a MultiIndex."""
 
@@ -1173,6 +1192,7 @@ def test_impute_counters_iteration_multiplex_incorrect_structure():
         utils.impute_counters_iteration_multiplex(flat_df, "kernel")
 
 
+@pytest.mark.unit
 def test_impute_counters_iteration_multiplex_single_level_multiindex():
     """Test imputation when the DataFrame is a Single-level MultiIndex."""
 
@@ -1188,6 +1208,7 @@ def test_impute_counters_iteration_multiplex_single_level_multiindex():
         utils.impute_counters_iteration_multiplex(single_level_df, "kernel")
 
 
+@pytest.mark.unit
 def test_impute_counters_iteration_multiplex_missing_kernel_name():
     """
     Test imputation when the DataFrame is a valid 2-level MultiIndex
@@ -1215,6 +1236,7 @@ def test_impute_counters_iteration_multiplex_missing_kernel_name():
         utils.impute_counters_iteration_multiplex(df_no_kn, "kernel")
 
 
+@pytest.mark.unit
 def test_impute_counters_iteration_multiplex_empty_dataframe():
     """Test imputation when the DataFrame is a valid MultiIndex but has no data rows."""
 
@@ -1247,6 +1269,7 @@ def test_impute_counters_iteration_multiplex_empty_dataframe():
     assert "C1" in result[("file1", 0)].values
 
 
+@pytest.mark.unit
 def test_impute_counters_iteration_multiplex_all_counters_nan():
     """
     Test imputation when all counter values are NaN.
@@ -1286,6 +1309,7 @@ def test_impute_counters_iteration_multiplex_all_counters_nan():
     assert 3 not in result[("file1", 0)].values
 
 
+@pytest.mark.unit
 def test_impute_counters_iteration_multiplex_no_counter_columns():
     """
     Test imputation when the DataFrame contains only the 13 non-counter columns.
@@ -1322,6 +1346,7 @@ def test_impute_counters_iteration_multiplex_no_counter_columns():
     assert "C2" not in result[("file1", 0)].values
 
 
+@pytest.mark.unit
 def test_impute_counters_iteration_multiplex_unrecognized_policy():
     """
     Test imputation when the policy is unrecognized.
@@ -1360,6 +1385,7 @@ def test_impute_counters_iteration_multiplex_unrecognized_policy():
     )
 
 
+@pytest.mark.unit
 def test_impute_counters_iteration_multiplex_multi_file():
     """
     Test imputation when the DataFrame has multiple collection levels (multi-file).

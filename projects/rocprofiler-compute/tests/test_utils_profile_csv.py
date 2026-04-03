@@ -48,6 +48,7 @@ def sample_csv_data():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_read_csv_as_dicts(temp_csv_file):
     """Test reading CSV file."""
     # Write test data
@@ -66,6 +67,7 @@ def test_read_csv_as_dicts(temp_csv_file):
     assert rows[1] == {"a": "4", "b": "5", "c": "6"}
 
 
+@pytest.mark.unit
 def test_read_csv_empty_file(temp_csv_file):
     """Test reading empty CSV file raises error."""
     # Create empty file
@@ -75,12 +77,14 @@ def test_read_csv_empty_file(temp_csv_file):
         csv_ops.read_csv_as_dicts(temp_csv_file)
 
 
+@pytest.mark.unit
 def test_read_csv_nonexistent_file():
     """Test reading nonexistent file raises error."""
     with pytest.raises(FileNotFoundError):
         csv_ops.read_csv_as_dicts("/nonexistent/file.csv")
 
 
+@pytest.mark.unit
 def test_write_csv_from_dicts(temp_csv_file, sample_csv_data):
     """Test writing CSV from list of dicts."""
     csv_ops.write_csv_from_dicts(temp_csv_file, sample_csv_data)
@@ -93,6 +97,7 @@ def test_write_csv_from_dicts(temp_csv_file, sample_csv_data):
     assert rows[0] == sample_csv_data[0]
 
 
+@pytest.mark.unit
 def test_write_csv_with_fieldnames(temp_csv_file):
     """Test writing CSV with explicit fieldnames."""
     rows = [{"a": 1, "b": 2, "c": 3}]
@@ -105,6 +110,7 @@ def test_write_csv_with_fieldnames(temp_csv_file):
     assert result_fieldnames == fieldnames
 
 
+@pytest.mark.unit
 def test_write_csv_empty_rows(temp_csv_file):
     """Test writing empty rows does nothing."""
     csv_ops.write_csv_from_dicts(temp_csv_file, [])
@@ -113,6 +119,7 @@ def test_write_csv_empty_rows(temp_csv_file):
     assert not Path(temp_csv_file).exists() or Path(temp_csv_file).stat().st_size == 0
 
 
+@pytest.mark.unit
 def test_concat_csv_files(sample_csv_data):
     """Test concatenating multiple CSV files."""
     # Create two temp files
@@ -149,6 +156,7 @@ def test_concat_csv_files(sample_csv_data):
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_add_column_to_rows():
     """Test adding a column to rows."""
     rows = [{"a": 1}, {"a": 2}, {"a": 3}]
@@ -161,6 +169,7 @@ def test_add_column_to_rows():
     assert rows[2] == {"a": 3, "b": 30}
 
 
+@pytest.mark.unit
 def test_add_column_length_mismatch():
     """Test add_column raises error on length mismatch."""
     rows = [{"a": 1}, {"a": 2}]
@@ -170,6 +179,7 @@ def test_add_column_length_mismatch():
         csv_ops.add_column_to_rows(rows, "b", values)
 
 
+@pytest.mark.unit
 def test_drop_column_from_rows():
     """Test dropping a column from rows."""
     rows = [{"a": 1, "b": 2, "c": 3}, {"a": 4, "b": 5, "c": 6}]
@@ -180,6 +190,7 @@ def test_drop_column_from_rows():
     assert rows[1] == {"a": 4, "c": 6}
 
 
+@pytest.mark.unit
 def test_drop_nonexistent_column():
     """Test dropping nonexistent column does nothing."""
     rows = [{"a": 1}]
@@ -189,6 +200,7 @@ def test_drop_nonexistent_column():
     assert rows[0] == {"a": 1}
 
 
+@pytest.mark.unit
 def test_rename_columns():
     """Test renaming columns."""
     rows = [{"old1": 1, "old2": 2, "keep": 3}]
@@ -204,6 +216,7 @@ def test_rename_columns():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_assign_group_ids_single_column():
     """Test assigning group IDs based on single column."""
     rows = [
@@ -223,6 +236,7 @@ def test_assign_group_ids_single_column():
     assert rows[4]["group_id"] == 1  # Second B (same as first)
 
 
+@pytest.mark.unit
 def test_assign_group_ids_multiple_columns():
     """Test assigning group IDs based on multiple columns."""
     rows = [
@@ -240,6 +254,7 @@ def test_assign_group_ids_multiple_columns():
     assert rows[3]["group_id"] == 2  # A,2 (different)
 
 
+@pytest.mark.unit
 def test_groupby_aggregate_sum():
     """Test groupby with sum aggregation."""
     rows = [
@@ -260,6 +275,7 @@ def test_groupby_aggregate_sum():
     assert b_result["value"] == 40
 
 
+@pytest.mark.unit
 def test_groupby_aggregate_first_last():
     """Test groupby with first/last aggregation."""
     rows = [
@@ -275,6 +291,7 @@ def test_groupby_aggregate_first_last():
     assert result_last[0]["value"] == 30
 
 
+@pytest.mark.unit
 def test_groupby_aggregate_mean():
     """Test groupby with mean aggregation."""
     rows = [
@@ -288,6 +305,7 @@ def test_groupby_aggregate_mean():
     assert result[0]["value"] == 20.0
 
 
+@pytest.mark.unit
 def test_groupby_aggregate_min_max():
     """Test groupby with min/max aggregation."""
     rows = [
@@ -303,6 +321,7 @@ def test_groupby_aggregate_min_max():
     assert result[0]["value"] == 30
 
 
+@pytest.mark.unit
 def test_groupby_aggregate_invalid_function():
     """Test groupby with invalid aggregation function."""
     rows = [{"category": "A", "value": 10}]
@@ -316,6 +335,7 @@ def test_groupby_aggregate_invalid_function():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_pivot_table_basic():
     """Test basic pivot table operation."""
     rows = [
@@ -338,6 +358,7 @@ def test_pivot_table_basic():
     assert id2["B"] is None  # Missing value filled with None
 
 
+@pytest.mark.unit
 def test_pivot_table_with_fill_value():
     """Test pivot table fills missing values with None."""
     rows = [
@@ -356,6 +377,7 @@ def test_pivot_table_with_fill_value():
     assert id2["B"] == 20
 
 
+@pytest.mark.unit
 def test_pivot_table_multiple_index_columns():
     """Test pivot table with multiple index columns."""
     rows = [
@@ -374,6 +396,7 @@ def test_pivot_table_multiple_index_columns():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_merge_rows_inner():
     """Test inner merge."""
     left = [
@@ -393,6 +416,7 @@ def test_merge_rows_inner():
     assert result[1] == {"id": 2, "name": "B", "value": 20}
 
 
+@pytest.mark.unit
 def test_merge_rows_left():
     """Test left merge."""
     left = [
@@ -412,6 +436,7 @@ def test_merge_rows_left():
     assert result[2] == {"id": 3, "name": "C"}
 
 
+@pytest.mark.unit
 def test_merge_rows_cartesian_product():
     """Test merge with duplicate keys creates cartesian product."""
     left = [
@@ -428,6 +453,7 @@ def test_merge_rows_cartesian_product():
     assert len(result) == 4  # 2 x 2 = 4
 
 
+@pytest.mark.unit
 def test_merge_rows_invalid_how():
     """Test merge with invalid join type."""
     with pytest.raises(ValueError, match="Unsupported join type"):
@@ -444,6 +470,7 @@ def test_merge_rows_invalid_how():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_write_csv_extra_keys(temp_csv_file):
     """Test writing CSV with rows that have extra keys."""
     rows = [
@@ -461,6 +488,7 @@ def test_write_csv_extra_keys(temp_csv_file):
     assert result[0] == {"a": "1", "b": "2", "c": "3"}
 
 
+@pytest.mark.unit
 def test_groupby_aggregate_non_numeric():
     """Test groupby with non-numeric values in sum/mean."""
     rows = [
@@ -477,6 +505,7 @@ def test_groupby_aggregate_non_numeric():
     assert result[0]["value"] is None
 
 
+@pytest.mark.unit
 def test_groupby_aggregate_mixed_numeric():
     """Test groupby with mixed numeric and non-numeric values."""
     rows = [
@@ -489,6 +518,7 @@ def test_groupby_aggregate_mixed_numeric():
     csv_ops.groupby_aggregate(rows, ["category"], {"value": "sum"})
 
 
+@pytest.mark.unit
 def test_pivot_table_duplicate_combinations():
     """Test pivot table with duplicate (index + pivot) combinations."""
     rows = [
@@ -503,6 +533,7 @@ def test_pivot_table_duplicate_combinations():
     assert result[0]["A"] == 15.0  # Mean of [10, 20]
 
 
+@pytest.mark.unit
 def test_merge_rows_none_keys():
     """Test merge with None as join keys."""
     left = [
@@ -523,6 +554,7 @@ def test_merge_rows_none_keys():
     assert any(r["name"] == "B" and r["value"] == 20 for r in result)
 
 
+@pytest.mark.unit
 def test_assign_group_ids_empty_rows():
     """Test assign_group_ids with empty rows list."""
     rows = []
@@ -531,6 +563,7 @@ def test_assign_group_ids_empty_rows():
     assert rows == []
 
 
+@pytest.mark.unit
 def test_assign_group_ids_missing_columns():
     """Test assign_group_ids with missing columns in some rows."""
     rows = [
@@ -547,6 +580,7 @@ def test_assign_group_ids_missing_columns():
     assert rows[2]["group_id"] == 2  # (None, 2)
 
 
+@pytest.mark.unit
 def test_full_workflow(temp_csv_file):
     """Test complete workflow: read, transform, write."""
     # Create source data

@@ -4,6 +4,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from utils import schema
 from utils.roofline_calc import calc_ai_analyze, sanitize_ai_value
@@ -76,6 +77,7 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     )
 
 
+@pytest.mark.unit
 def test_calc_ai_analyze_replaces_inf_with_zero(monkeypatch):
     """np.inf / -np.inf metric values are replaced with 0."""
     result = run_calc_ai_analyze_with_values(
@@ -97,6 +99,7 @@ def test_calc_ai_analyze_replaces_inf_with_zero(monkeypatch):
     assert result["ai_l1"][1] == [100.0]
 
 
+@pytest.mark.unit
 def test_calc_ai_analyze_replaces_none_with_zero(monkeypatch):
     """None metric values are replaced with 0 and still included in plot points."""
     result = run_calc_ai_analyze_with_values(
@@ -115,6 +118,7 @@ def test_calc_ai_analyze_replaces_none_with_zero(monkeypatch):
     assert result["ai_l1"][0] == [0], "None should be replaced with 0"
 
 
+@pytest.mark.unit
 def test_calc_ai_analyze_valid_values_pass_through(monkeypatch):
     """Normal positive floats pass through unchanged."""
     result = run_calc_ai_analyze_with_values(
@@ -136,6 +140,7 @@ def test_calc_ai_analyze_valid_values_pass_through(monkeypatch):
     assert result["ai_l1"][1] == [100.0]
 
 
+@pytest.mark.unit
 def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
     """Sentinel values 'N/A' and '' are replaced with 0."""
     result = run_calc_ai_analyze_with_values(
@@ -154,6 +159,7 @@ def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
     assert result["ai_l1"][0] == [0], "'N/A' should be replaced with 0"
 
 
+@pytest.mark.unit
 def test_sanitize_ai_value_replaces_invalid_values_with_zero():
     """Invalid values are replaced with 0."""
     assert sanitize_ai_value(np.inf) == 0

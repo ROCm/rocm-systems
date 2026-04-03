@@ -23,6 +23,7 @@ def md5(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
+@pytest.mark.unit
 def test_config_hashes_match_files() -> None:
     assert HASH_DB.exists(), f"Missing hash DB: {HASH_DB}"
     assert ANALYSIS_CONFIGS.exists(), (

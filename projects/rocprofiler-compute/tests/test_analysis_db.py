@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from rocprof_compute_analyze.analysis_db import db_analysis
 
@@ -15,6 +16,7 @@ from rocprof_compute_analyze.analysis_db import db_analysis
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_evaluate_parse_false_basic_expressions():
     """Test parse=False mode with basic expressions and substitutions."""
     pmc_df = pd.DataFrame({
@@ -55,6 +57,7 @@ def test_evaluate_parse_false_basic_expressions():
     assert result == 60
 
 
+@pytest.mark.unit
 def test_evaluate_parse_true_basic_expressions():
     """Test parse=True mode with $ substitution and AST transformation."""
     pmc_df = pd.DataFrame({
@@ -95,6 +98,7 @@ def test_evaluate_parse_true_basic_expressions():
     assert result == 84  # avg(10,20,30)=20 + 64
 
 
+@pytest.mark.unit
 def test_evaluate_none_and_na_handling():
     """Test evaluate() handling of None and NA values."""
     pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})
@@ -146,6 +150,7 @@ def test_evaluate_none_and_na_handling():
     assert result is None
 
 
+@pytest.mark.unit
 def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
     """
     Test that expressions containing 'None' in formula string
@@ -192,6 +197,7 @@ def test_evaluate_with_none_in_formula_does_not_nullify_valid_result():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_calc_builtin_vars_processes_per_xcd_first():
     """
     Test that PER_XCD variables are processed before non-PER_XCD variables,
@@ -223,6 +229,7 @@ def test_calc_builtin_vars_processes_per_xcd_first():
     pd.testing.assert_frame_equal(result, pmc_df)
 
 
+@pytest.mark.unit
 def test_calc_builtin_vars_with_dataframe_expressions():
     """Test builtin vars that operate on DataFrame columns."""
     pmc_df = pd.DataFrame({
@@ -248,6 +255,7 @@ def test_calc_builtin_vars_with_dataframe_expressions():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_calc_dataframe_expressions_applies_evaluate_to_rows():
     """Test that expressions are evaluated for each row of expression_df."""
     pmc_df = pd.DataFrame({
@@ -274,6 +282,7 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
     assert result.iloc[1] == 200  # 100 * 2
 
 
+@pytest.mark.unit
 def test_calc_dataframe_expressions_with_builtin_vars():
     """Test that calc_dataframe_expressions calls calc_builtin_vars first."""
     pmc_df = pd.DataFrame({"Counter1": [10, 20, 30]})

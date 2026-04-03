@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+import pytest
 import test_utils
 
 from utils.rocpd_data import (
@@ -112,6 +113,7 @@ COUNTER_ROWS = [
 # ---- SQL query constants reference stack_id ----
 
 
+@pytest.mark.unit
 def test_counters_query_uses_stack_id():
     """Test that the counters query uses stack_id as Correlation_Id."""
     assert "stack_id as Correlation_Id" in COUNTERS_COLLECTION_QUERY
@@ -121,6 +123,7 @@ def test_counters_query_uses_stack_id():
     assert "\n    correlation_id" not in query_lower
 
 
+@pytest.mark.unit
 def test_marker_query_uses_stack_id():
     """Test that the marker query uses stack_id as Correlation_Id."""
     assert "stack_id AS Correlation_Id" in MARKER_API_TRACE_QUERY
@@ -173,6 +176,7 @@ def create_rocpd_test_db(workload_dir):
     return db_path
 
 
+@pytest.mark.unit
 def test_counter_csv_has_correlation_id_from_stack_id():
     """Test that the counter CSV has correlation_id from stack_id."""
     workload_dir = test_utils.get_output_dir()
@@ -193,6 +197,7 @@ def test_counter_csv_has_correlation_id_from_stack_id():
     test_utils.clean_output_dir(True, workload_dir)
 
 
+@pytest.mark.unit
 def test_marker_csv_has_correlation_id_from_stack_id():
     """Test that the marker CSV has correlation_id from stack_id."""
     workload_dir = test_utils.get_output_dir()
@@ -360,6 +365,7 @@ def build_kernel_top_df():
     })
 
 
+@pytest.mark.unit
 def test_torch_trace_output_same_for_rocpd_and_csv():
     """Test that the torch trace output is the same for rocpd and csv files."""
     rocpd_dir = test_utils.get_output_dir(suffix="_rocpd")
