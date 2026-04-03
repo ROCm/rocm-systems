@@ -3,8 +3,15 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 
+#include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/except.h"
@@ -43,30 +50,33 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
                                                          GpuMemory *memory, L2Cache *l2,
                                                          simdojo::ExecMode exec_mode) {
+  // Helper: instantiate the ISA-specific CU for the given execution mode.
+#define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
+  case ARCH_ENUM:                                                                                  \
+    switch (exec_mode) {                                                                           \
+    case simdojo::ExecMode::FUNCTIONAL:                                                            \
+      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, ISA_TYPE>>(        \
+          std::move(name), config, memory, l2);                                                    \
+    case simdojo::ExecMode::CLOCKED:                                                               \
+      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, ISA_TYPE>>(           \
+          std::move(name), config, memory, l2);                                                    \
+    }                                                                                              \
+    break
+
   switch (config.arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    switch (exec_mode) {
-    case simdojo::ExecMode::FUNCTIONAL:
-      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna3::Isa>>(
-          std::move(name), config, memory, l2);
-    case simdojo::ExecMode::CLOCKED:
-      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna3::Isa>>(
-          std::move(name), config, memory, l2);
-    }
-    break;
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    switch (exec_mode) {
-    case simdojo::ExecMode::FUNCTIONAL:
-      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa>>(
-          std::move(name), config, memory, l2);
-    case simdojo::ExecMode::CLOCKED:
-      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna4::Isa>>(
-          std::move(name), config, memory, l2);
-    }
-    break;
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA1, cdna1::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA2, cdna2::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA3, cdna3::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA4, cdna4::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA1, rdna1::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA2, rdna2::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
   default:
     break;
   }
+#undef ROCJITSU_CU_CASE
   throw std::runtime_error("Unsupported architecture for ComputeUnit");
 }
 
@@ -165,6 +175,32 @@ void ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> inst, Wavef
   }
 }
 
+void ComputeUnitCore::issue_scalar_mem(uint64_t addr, uint32_t dst_sgpr, uint32_t dword_count,
+                                       Mtype /*mtype*/) {
+  // Functional mode: synchronous read through L1 scalar cache.
+  // Phase D will use mtype to select the correct cache path.
+  l1_scalar_.load(addr, dword_count, &sgpr_file_[dst_sgpr]);
+}
+
+void ComputeUnitCore::issue_global_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask,
+                                       uint32_t dst_vgpr, uint32_t dword_count, Mtype mtype) {
+  // Functional mode: synchronous per-lane read through L1 vector cache.
+  auto *dst = vgpr_data(dst_vgpr);
+  l1_vector_.load(addrs.data(), lane_mask, /*elem_size=*/4, dword_count, dst, mtype,
+                  /*non_temporal=*/false);
+}
+
+void ComputeUnitCore::issue_local_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask,
+                                      uint32_t dst_vgpr, uint32_t dword_count) {
+  // Functional mode: synchronous per-lane read from LDS.
+  for (uint32_t lane = 0; lane < wf_size_; ++lane) {
+    if (!(lane_mask & (1ULL << lane)))
+      continue;
+    for (uint32_t d = 0; d < dword_count; ++d)
+      write_vgpr(dst_vgpr + d, lane, lds_.read32(static_cast<uint32_t>(addrs[lane] + d * 4)));
+  }
+}
+
 bool ComputeUnitCore::step() {
   tick_pipelines();
 
@@ -226,10 +262,22 @@ bool ComputeUnitCore::step() {
   return has_active_wfs();
 }
 
-template class IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna3::Isa>;
-template class IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna3::Isa>;
-template class IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa>;
-template class IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, cdna4::Isa>;
+// Explicit template instantiations for all 9 ISAs × 2 execution modes.
+#define ROCJITSU_CU_INSTANTIATE(ISA_TYPE)                                                          \
+  template class IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, ISA_TYPE>;                      \
+  template class IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, ISA_TYPE>
+
+ROCJITSU_CU_INSTANTIATE(cdna1::Isa);
+ROCJITSU_CU_INSTANTIATE(cdna2::Isa);
+ROCJITSU_CU_INSTANTIATE(cdna3::Isa);
+ROCJITSU_CU_INSTANTIATE(cdna4::Isa);
+ROCJITSU_CU_INSTANTIATE(rdna1::Isa);
+ROCJITSU_CU_INSTANTIATE(rdna2::Isa);
+ROCJITSU_CU_INSTANTIATE(rdna3::Isa);
+ROCJITSU_CU_INSTANTIATE(rdna3_5::Isa);
+ROCJITSU_CU_INSTANTIATE(rdna4::Isa);
+
+#undef ROCJITSU_CU_INSTANTIATE
 
 } // namespace amdgpu
 } // namespace rocjitsu

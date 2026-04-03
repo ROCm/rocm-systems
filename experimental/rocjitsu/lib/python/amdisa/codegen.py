@@ -47,6 +47,7 @@ class CodegenConfig:
 
     namespace: str = 'rocjitsu'
     include_base: str = 'rocjitsu/isa/arch/amdgpu'
+    use_shared: bool = False
 
 
 class CppFile:
@@ -185,6 +186,62 @@ class _SemanticEmitter:
         self._semantics = semantics
 
 
+# ---------------------------------------------------------------------------
+# Shared struct baselines for --use-shared mode.
+#
+# Maps struct name -> (include_path_relative_to_shared, [(field_name, bit_cnt), ...]).
+# When --use-shared is active, gen_machine_inst_encodings() checks each
+# generated struct against these baselines.  If the name matches AND every
+# field (name + width) matches, it emits a ``using`` alias referencing the
+# ``amdgpu::`` shared struct instead of re-emitting the struct definition.
+# ---------------------------------------------------------------------------
+
+_SCALAR_SHARED_INCLUDE = 'rocjitsu/isa/arch/amdgpu/shared/machine_insts_scalar.h'
+_CDNA_SHARED_INCLUDE = 'rocjitsu/isa/arch/amdgpu/shared/machine_insts_cdna.h'
+
+# Scalars — identical across all 9 ISAs.
+_SCALAR_BASELINE: dict[str, list[tuple[str, int]]] = {
+    'Sop1MachineInst': [('ssrc0', 8), ('op', 8), ('sdst', 7), ('encoding', 9)],
+    'SopcMachineInst': [('ssrc0', 8), ('ssrc1', 8), ('op', 7), ('encoding', 9)],
+    'SoppMachineInst': [('simm16', 16), ('op', 7), ('encoding', 9)],
+    'SopkMachineInst': [('simm16', 16), ('sdst', 7), ('op', 5), ('encoding', 4)],
+    'Sop2MachineInst': [('ssrc0', 8), ('ssrc1', 8), ('sdst', 7), ('op', 7), ('encoding', 2)],
+    'Sop1InstLiteralMachineInst': [
+        ('ssrc0', 8), ('op', 8), ('sdst', 7), ('encoding', 9), ('simm32', 32)],
+    'Sop2InstLiteralMachineInst': [
+        ('ssrc0', 8), ('ssrc1', 8), ('sdst', 7), ('op', 7), ('encoding', 2), ('simm32', 32)],
+    'SopcInstLiteralMachineInst': [
+        ('ssrc0', 8), ('ssrc1', 8), ('op', 7), ('encoding', 9), ('simm32', 32)],
+    'SopkInstLiteralMachineInst': [
+        ('simm16', 16), ('sdst', 7), ('op', 5), ('encoding', 4), ('simm32', 32)],
+}
+
+# CDNA vector/memory — identical across CDNA1-4.
+_CDNA_BASELINE: dict[str, list[tuple[str, int]]] = {
+    'SmemMachineInst': [
+        ('sbase', 6), ('sdata', 7), ('pad_13', 1), ('soffset_en', 1),
+        ('nv', 1), ('glc', 1), ('imm', 1), ('op', 8), ('encoding', 6),
+        ('offset', 21), ('pad_53_56', 4), ('soffset', 7)],
+    'Vop1MachineInst': [('src0', 9), ('op', 8), ('vdst', 8), ('encoding', 7)],
+    'VopcMachineInst': [('src0', 9), ('vsrc1', 8), ('op', 8), ('encoding', 7)],
+    'Vop2MachineInst': [('src0', 9), ('vsrc1', 8), ('vdst', 8), ('op', 6), ('encoding', 1)],
+    'Vop3MachineInst': [
+        ('vdst', 8), ('abs', 3), ('op_sel', 4), ('clamp', 1), ('op', 10), ('encoding', 6),
+        ('src0', 9), ('src1', 9), ('src2', 9), ('omod', 2), ('neg', 3)],
+    'Vop3SdstEncMachineInst': [
+        ('vdst', 8), ('sdst', 7), ('clamp', 1), ('op', 10), ('encoding', 6),
+        ('src0', 9), ('src1', 9), ('src2', 9), ('omod', 2), ('neg', 3)],
+    'Vop1InstLiteralMachineInst': [
+        ('src0', 9), ('op', 8), ('vdst', 8), ('encoding', 7), ('simm32', 32)],
+    'Vop2InstLiteralMachineInst': [
+        ('src0', 9), ('vsrc1', 8), ('vdst', 8), ('op', 6), ('encoding', 1), ('simm32', 32)],
+    'VopcInstLiteralMachineInst': [
+        ('src0', 9), ('vsrc1', 8), ('op', 8), ('encoding', 7), ('simm32', 32)],
+}
+
+_CDNA_ARCHES = {'cdna1', 'cdna2', 'cdna3', 'cdna4'}
+
+
 class CodeGenerator:
     """Generates C++ code from a parsed machine-readable ISA specification.
 
@@ -229,23 +286,67 @@ class CodeGenerator:
         self.gen_insts()
         self.gen_decoder()
 
+    def _shared_baseline(self) -> dict[str, tuple[str, list[tuple[str, int]]]]:
+        """Build the shared-struct baseline for the current ISA.
+
+        Returns a dict mapping struct name -> (include_path, expected_fields)
+        that ``gen_machine_inst_encodings`` uses when ``config.use_shared``
+        is True.
+        """
+        baseline: dict[str, tuple[str, list[tuple[str, int]]]] = {}
+        for name, fields in _SCALAR_BASELINE.items():
+            baseline[name] = (_SCALAR_SHARED_INCLUDE, fields)
+        if self.isa_spec.arch_name in _CDNA_ARCHES:
+            for name, fields in _CDNA_BASELINE.items():
+                baseline[name] = (_CDNA_SHARED_INCLUDE, fields)
+        return baseline
+
     def gen_machine_inst_encodings(self) -> None:
-        """Generate machine instruction encoding structs as bitfields."""
+        """Generate machine instruction encoding structs as bitfields.
+
+        When ``config.use_shared`` is True, structs whose name and field
+        layout match a shared baseline are emitted as ``using`` aliases
+        referencing the ``amdgpu::`` namespace version from the
+        corresponding shared header.  Non-matching structs are emitted
+        inline as before.
+        """
+        baseline = self._shared_baseline() if self.config.use_shared else {}
+        shared_includes: set[str] = set()
+
         enc_structs = [cgen.Statement('using MachineInst = uint32_t')]
         for inst_enc in self.isa_spec.inst_encodings:
+            struct_name = f'{inst_enc.fmt_enc_name}MachineInst'
+            fields = [(x.name, x.bit_cnt) for x in inst_enc.ucode_fields]
+
+            if struct_name in baseline:
+                inc_path, expected_fields = baseline[struct_name]
+                if fields == expected_fields:
+                    shared_includes.add(inc_path)
+                    enc_structs.append(
+                        cgen.Statement(
+                            f'using {struct_name} = amdgpu::{struct_name}'
+                        )
+                    )
+                    continue
+
             s = cgen.Struct(
-                f'{inst_enc.fmt_enc_name}MachineInst',
+                struct_name,
                 [
                     cgen.Value('uint32_t', f'{x.name} : {x.bit_cnt}')
                     for x in inst_enc.ucode_fields
                 ],
             )
             enc_structs.append(s)
+
+        includes: list[tuple[str, bool]] = [('cstdint', True)]
+        for inc in sorted(shared_includes):
+            includes.append((inc, False))
+
         cpp_file = CppFile(
             'machine_insts',
             self.out_path,
             True,
-            [('cstdint', True)],
+            includes,
             [],
             enc_structs,
             self.isa_spec.arch_name,

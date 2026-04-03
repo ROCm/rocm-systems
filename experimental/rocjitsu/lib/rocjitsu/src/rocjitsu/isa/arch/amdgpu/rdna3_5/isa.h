@@ -6,10 +6,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
-
-#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
 
@@ -17,6 +16,9 @@ namespace rocjitsu {
 namespace rdna3_5 {
 
 /// @brief RDNA3.5 STATUS register layout (GFX11.5, one 32-bit scalar register per wavefront).
+///
+/// @details Same layout as RDNA3 (GFX11); no TTRACE_EN, EXPORT_RDY, or
+/// SKIP_EXPORT. Kept per-ISA for consistency with the other RDNA ISAs.
 class StatusReg : public ::util::Bitfield<32> {
 public:
   using Bitfield::Bitfield;
@@ -54,16 +56,15 @@ public:
   auto ALLOW_REPLAY() const { return member<22, 22>(); }
 };
 
-struct Isa {
-  static constexpr uint32_t WF_SIZE = 32;             ///< Default wave size (Wave32).
-  static constexpr uint32_t WF_SIZE_MAX = 64;         ///< Max wave size (Wave64 supported).
-  static constexpr uint32_t MAX_SGPRS_PER_WF = 106;   ///< Max scalar GPRs per wavefront.
-  static constexpr uint32_t MAX_VGPRS_PER_WF = 256;   ///< Max vector GPRs per wavefront.
-  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0; ///< No AccVGPRs in RDNA.
-  static constexpr uint8_t WAITCNT_LGKMCNT_MASK =
-      0x3F; ///< lgkmcnt field mask in S_WAITCNT (6-bit at [9:4] in GFX11 layout).
+/// @brief RDNA3.5 ISA traits (GFX11.5, Wave32 default, Wave64 capable, monolithic + split waits).
+///
+/// @details Same S_WAITCNT model as RDNA3 — retains S_WAITCNT with GFX11
+/// SIMM16 layout (expcnt[2:0], lgkmcnt[9:4], vmcnt[15:10]) plus named
+/// per-counter S_WAITCNT_VMCNT etc.
+/// Overrides `WAITCNT_LGKMCNT_MASK = 0x3F` (6-bit lgkmcnt at bits [9:4]).
+struct Isa : amdgpu::RdnaIsaBase {
+  static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0x3F; ///< lgkmcnt mask in S_WAITCNT [9:4].
 
-  using Context = amdgpu::Wavefront;
   using Decoder = rdna3_5::Decoder;
   using MachineInst = rdna3_5::MachineInst;
   using OperandType = rdna3_5::OperandType;

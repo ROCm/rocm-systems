@@ -6,10 +6,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna2/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
-
-#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
 
@@ -17,6 +16,9 @@ namespace rocjitsu {
 namespace rdna2 {
 
 /// @brief RDNA2 STATUS register layout (GFX10.3, one 32-bit scalar register per wavefront).
+///
+/// @details RDNA1/2 expose TTRACE_EN, EXPORT_RDY, and SKIP_EXPORT bits that
+/// are absent from RDNA3/4; kept per-ISA because of this layout difference.
 class StatusReg : public ::util::Bitfield<32> {
 public:
   using Bitfield::Bitfield;
@@ -62,16 +64,16 @@ public:
   auto ALLOW_REPLAY() const { return member<22, 22>(); }
 };
 
-struct Isa {
-  static constexpr uint32_t WF_SIZE = 32;             ///< Default wave size (Wave32 only).
-  static constexpr uint32_t WF_SIZE_MAX = 32;         ///< RDNA2 does not support Wave64.
-  static constexpr uint32_t MAX_SGPRS_PER_WF = 106;   ///< Max scalar GPRs per wavefront.
-  static constexpr uint32_t MAX_VGPRS_PER_WF = 256;   ///< Max vector GPRs per wavefront.
-  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0; ///< No AccVGPRs in RDNA.
-  static constexpr uint8_t WAITCNT_LGKMCNT_MASK =
-      0x3F; ///< lgkmcnt field mask in S_WAITCNT (6-bit at [13:8]).
+/// @brief RDNA2 ISA traits (GFX10.3, Wave32 default, Wave64 capable, monolithic S_WAITCNT).
+///
+/// @details Overrides `WAITCNT_LGKMCNT_MASK = 0x3F` (6-bit lgkmcnt at
+/// bits [13:8] in S_WAITCNT). WF_SIZE_MAX=64 inherited from RdnaIsaBase
+/// (RDNA2 supports Wave64 via ENABLE_WAVEFRONT_SIZE32=0 in the kernel
+/// descriptor).
+/// All other constants inherit from `amdgpu::RdnaIsaBase`.
+struct Isa : amdgpu::RdnaIsaBase {
+  static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0x3F; ///< lgkmcnt mask in S_WAITCNT [13:8].
 
-  using Context = amdgpu::Wavefront;
   using Decoder = rdna2::Decoder;
   using MachineInst = rdna2::MachineInst;
   using OperandType = rdna2::OperandType;
