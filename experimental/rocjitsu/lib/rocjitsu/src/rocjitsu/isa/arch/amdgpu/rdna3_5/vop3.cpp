@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -762,7 +763,7 @@ void VExpF32Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    float result = std::exp2(s);
+    float result = amdgpu::transcendental::exp_f32(s);
     if (inst_.omod == 1)
       result *= 2.0f;
     else if (inst_.omod == 2)
@@ -793,7 +794,7 @@ void VLogF32Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    float result = std::log2(s);
+    float result = amdgpu::transcendental::log_f32(s);
     if (inst_.omod == 1)
       result *= 2.0f;
     else if (inst_.omod == 2)
@@ -824,7 +825,7 @@ void VRcpF32Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    float result = 1.0f / s;
+    float result = amdgpu::transcendental::rcp_f32(s);
     if (inst_.omod == 1)
       result *= 2.0f;
     else if (inst_.omod == 2)
@@ -855,7 +856,7 @@ void VRcpIflagF32Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    float result = 1.0f / s;
+    float result = amdgpu::transcendental::rcp_f32(s);
     if (inst_.omod == 1)
       result *= 2.0f;
     else if (inst_.omod == 2)
@@ -886,7 +887,7 @@ void VRsqF32Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    float result = 1.0f / std::sqrt(s);
+    float result = amdgpu::transcendental::rsq_f32(s);
     if (inst_.omod == 1)
       result *= 2.0f;
     else if (inst_.omod == 2)
@@ -917,7 +918,7 @@ void VRcpF64Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    double result = 1.0 / s;
+    double result = amdgpu::transcendental::rcp_f64(s);
     if (inst_.omod == 1)
       result *= 2.0;
     else if (inst_.omod == 2)
@@ -948,7 +949,7 @@ void VRsqF64Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    double result = 1.0 / std::sqrt(s);
+    double result = amdgpu::transcendental::rsq_f64(s);
     if (inst_.omod == 1)
       result *= 2.0;
     else if (inst_.omod == 2)
@@ -979,7 +980,7 @@ void VSqrtF32Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    float result = std::sqrt(s);
+    float result = amdgpu::transcendental::sqrt_f32(s);
     if (inst_.omod == 1)
       result *= 2.0f;
     else if (inst_.omod == 2)
@@ -1010,7 +1011,7 @@ void VSqrtF64Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    double result = std::sqrt(s);
+    double result = amdgpu::transcendental::sqrt_f64(s);
     if (inst_.omod == 1)
       result *= 2.0;
     else if (inst_.omod == 2)
@@ -1041,7 +1042,7 @@ void VSinF32Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    float result = std::sin(s * 6.2831853071795864f);
+    float result = amdgpu::transcendental::sin_f32(s);
     if (inst_.omod == 1)
       result *= 2.0f;
     else if (inst_.omod == 2)
@@ -1072,7 +1073,7 @@ void VCosF32Vop3::execute(amdgpu::Wavefront &wf) {
       s = std::fabs(s);
     if (inst_.neg & (1u << 0))
       s = -s;
-    float result = std::cos(s * 6.2831853071795864f);
+    float result = amdgpu::transcendental::cos_f32(s);
     if (inst_.omod == 1)
       result *= 2.0f;
     else if (inst_.omod == 2)

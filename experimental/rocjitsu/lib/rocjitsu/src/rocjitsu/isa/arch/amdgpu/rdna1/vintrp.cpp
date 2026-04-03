@@ -26,8 +26,7 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
 }
 
 void VInterpP1F32Vintrp::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: interp
+  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
@@ -42,8 +41,7 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
 }
 
 void VInterpP2F32Vintrp::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: interp
+  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
@@ -57,8 +55,7 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
 }
 
 void VInterpMovF32Vintrp::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: interp
+  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 } // namespace rdna1

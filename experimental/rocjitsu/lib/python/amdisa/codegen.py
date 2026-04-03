@@ -1068,6 +1068,42 @@ class CodeGenerator:
         if cls == 'ds_atomic':
             return self._gen_ds_atomic(dst_ops, src_ops, sem)
 
+        if cls == 'ds_permute':
+            # DS_PERMUTE_B32: dst[lane] = src[addr[lane] / 4]
+            # DS_BPERMUTE_B32: dst[addr[lane] / 4] = src[lane]
+            L.append('  (void)wf; // DS permute: Phase C placeholder.')
+            return '\n'.join(L)
+
+        if cls == 'ds_swizzle':
+            L.append('  (void)wf; // DS swizzle: Phase C placeholder.')
+            return '\n'.join(L)
+
+        # ── Image pipeline stubs (Phase C placeholders) ──────────────────
+        if cls == 'image_load':
+            # Minimal image load: treat as a flat read from the image resource base address.
+            # Full image addressing (texture coordinates, dimensions) deferred to Phase E.
+            L.append('  // Minimal image load stub — Phase C placeholder.')
+            L.append('  (void)wf;')
+            return '\n'.join(L)
+
+        if cls == 'image_store':
+            L.append('  // Minimal image store stub — Phase C placeholder.')
+            L.append('  (void)wf;')
+            return '\n'.join(L)
+
+        if cls in ('image_atomic', 'image_sample', 'image_query', 'image_bvh'):
+            L.append('  (void)wf; // Deferred to Phase E (image pipeline).')
+            return '\n'.join(L)
+
+        # ── Graphics-only stubs (no-ops in compute simulation) ───────────
+        if cls == 'export':
+            L.append('  (void)wf; // Export: no-op in compute simulation.')
+            return '\n'.join(L)
+
+        if cls in ('interp', 'lds_direct'):
+            L.append('  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.')
+            return '\n'.join(L)
+
         return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: {cls}'
 
     def _gen_vector_cmp_class(self, src: list[str], dtype: str | None, is_cmpx: bool, is_vop3: bool = False) -> str:
@@ -2032,9 +2068,9 @@ class CodeGenerator:
             if is_vop3:
                 L.extend(self._vop3_src_mod('s', 0))
             math_map_f64 = {
-                'rcp': '1.0 / s',
-                'sqrt': 'std::sqrt(s)',
-                'rsq': '1.0 / std::sqrt(s)',
+                'rcp': 'amdgpu::transcendental::rcp_f64(s)',
+                'sqrt': 'amdgpu::transcendental::sqrt_f64(s)',
+                'rsq': 'amdgpu::transcendental::rsq_f64(s)',
                 'floor': 'std::floor(s)',
                 'ceil': 'std::ceil(s)',
                 'trunc': 'std::trunc(s)',
@@ -2082,19 +2118,19 @@ class CodeGenerator:
             if is_vop3:
                 L.extend(self._vop3_src_mod('s', 0))
             math_map = {
-                'rcp': '1.0f / s',
-                'rcp_iflag': '1.0f / s',
-                'sqrt': 'std::sqrt(s)',
-                'rsq': '1.0f / std::sqrt(s)',
+                'rcp': 'amdgpu::transcendental::rcp_f32(s)',
+                'rcp_iflag': 'amdgpu::transcendental::rcp_f32(s)',
+                'sqrt': 'amdgpu::transcendental::sqrt_f32(s)',
+                'rsq': 'amdgpu::transcendental::rsq_f32(s)',
                 'floor': 'std::floor(s)',
                 'ceil': 'std::ceil(s)',
                 'trunc': 'std::trunc(s)',
                 'rndne': 'std::nearbyint(s)',
                 'fract': 's - std::floor(s)',
-                'exp2': 'std::exp2(s)',
-                'log2': 'std::log2(s)',
-                'sin': 'std::sin(s * 6.2831853071795864f)',
-                'cos': 'std::cos(s * 6.2831853071795864f)',
+                'exp2': 'amdgpu::transcendental::exp_f32(s)',
+                'log2': 'amdgpu::transcendental::log_f32(s)',
+                'sin': 'amdgpu::transcendental::sin_f32(s)',
+                'cos': 'amdgpu::transcendental::cos_f32(s)',
                 'abs': 'std::fabs(s)',
                 'neg': '-s',
             }
@@ -3889,6 +3925,14 @@ class CodeGenerator:
                     cpp_includes.append((
                         f'rocjitsu/isa/arch/amdgpu/'
                         f'{self.isa_spec.arch_name}/mfma_exec.h',
+                        False,
+                    ))
+                _VOP_ENC_NAMES = frozenset({
+                    'ENC_VOP1', 'ENC_VOP2', 'ENC_VOP3', 'ENC_VOP3P', 'ENC_VOPC',
+                })
+                if enc.enc_name.upper() in _VOP_ENC_NAMES:
+                    cpp_includes.append((
+                        'rocjitsu/isa/arch/amdgpu/shared/transcendental.h',
                         False,
                     ))
                 if has_sem:

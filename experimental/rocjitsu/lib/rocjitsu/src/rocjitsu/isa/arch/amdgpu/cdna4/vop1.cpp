@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -744,7 +745,7 @@ void VExpF32Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::exp2(s)));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::exp_f32(s)));
   }
 }
 
@@ -766,7 +767,7 @@ void VLogF32Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::log2(s)));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::log_f32(s)));
   }
 }
 
@@ -788,7 +789,7 @@ void VRcpF32Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(1.0f / s));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::rcp_f32(s)));
   }
 }
 
@@ -810,7 +811,7 @@ void VRcpIflagF32Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(1.0f / s));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::rcp_f32(s)));
   }
 }
 
@@ -832,7 +833,7 @@ void VRsqF32Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(1.0f / std::sqrt(s)));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::rsq_f32(s)));
   }
 }
 
@@ -854,7 +855,7 @@ void VRcpF64Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(1.0 / s));
+    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(amdgpu::transcendental::rcp_f64(s)));
   }
 }
 
@@ -876,7 +877,7 @@ void VRsqF64Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(1.0 / std::sqrt(s)));
+    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(amdgpu::transcendental::rsq_f64(s)));
   }
 }
 
@@ -898,7 +899,7 @@ void VSqrtF32Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::sqrt(s)));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::sqrt_f32(s)));
   }
 }
 
@@ -920,7 +921,7 @@ void VSqrtF64Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     double s = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(std::sqrt(s)));
+    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(amdgpu::transcendental::sqrt_f64(s)));
   }
 }
 
@@ -942,7 +943,7 @@ void VSinF32Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::sin(s * 6.2831853071795864f)));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::sin_f32(s)));
   }
 }
 
@@ -964,7 +965,7 @@ void VCosF32Vop1::execute(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s = std::bit_cast<float>(src0.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::cos(s * 6.2831853071795864f)));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::cos_f32(s)));
   }
 }
 
