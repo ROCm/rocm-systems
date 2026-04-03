@@ -50,6 +50,7 @@ jobs:
 
       - name: Install python deps
         run: |
+          pwd
           pip install -r r/t/requirements.txt
 
       - name: Patch rocm-systems
@@ -97,7 +98,7 @@ jobs:
           cmake_preset: windows-release
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=r  ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../  ${{ inputs.cmake_options }}"
         run: |
           # clear cache before build and after download
           ccache -z
