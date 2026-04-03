@@ -7,10 +7,9 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
-
-#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
 
@@ -18,6 +17,9 @@ namespace rocjitsu {
 namespace rdna4 {
 
 /// @brief RDNA4 STATUS register layout (GFX12, one 32-bit scalar register per wavefront).
+///
+/// @details Same layout as RDNA3 (GFX11); no TTRACE_EN, EXPORT_RDY, or
+/// SKIP_EXPORT. Kept per-ISA for consistency with the other RDNA ISAs.
 class StatusReg : public ::util::Bitfield<32> {
 public:
   using Bitfield::Bitfield;
@@ -55,16 +57,12 @@ public:
   auto ALLOW_REPLAY() const { return member<22, 22>(); }
 };
 
-struct Isa {
-  static constexpr uint32_t WF_SIZE = 32;             ///< Default wave size (Wave32).
-  static constexpr uint32_t WF_SIZE_MAX = 64;         ///< Max wave size (Wave64 supported).
-  static constexpr uint32_t MAX_SGPRS_PER_WF = 106;   ///< Max scalar GPRs per wavefront.
-  static constexpr uint32_t MAX_VGPRS_PER_WF = 256;   ///< Max vector GPRs per wavefront.
-  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0; ///< No AccVGPRs in RDNA.
-  static constexpr uint8_t WAITCNT_LGKMCNT_MASK =
-      0x3F; ///< Placeholder: RDNA4 replaces S_WAITCNT with per-counter instructions.
-
-  using Context = amdgpu::Wavefront;
+/// @brief RDNA4 ISA traits (GFX12, Wave32 default, Wave64 capable, split S_WAIT_*).
+///
+/// @details Inherits all defaults from `amdgpu::RdnaIsaBase` including
+/// `WAITCNT_LGKMCNT_MASK = 0` — RDNA4 uses split S_WAIT_LOADCNT /
+/// S_WAIT_DSCNT / S_WAIT_KMCNT instructions; there is no monolithic S_WAITCNT.
+struct Isa : amdgpu::RdnaIsaBase {
   using Decoder = rdna4::Decoder;
   using MachineInst = rdna4::MachineInst;
   using OperandType = rdna4::OperandType;

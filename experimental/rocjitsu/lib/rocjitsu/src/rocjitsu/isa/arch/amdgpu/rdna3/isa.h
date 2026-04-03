@@ -6,10 +6,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
-
-#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
 
@@ -17,6 +16,9 @@ namespace rocjitsu {
 namespace rdna3 {
 
 /// @brief RDNA3 STATUS register layout (GFX11, one 32-bit scalar register per wavefront).
+///
+/// @details RDNA3/4 do not expose TTRACE_EN, EXPORT_RDY, or SKIP_EXPORT
+/// (those bits were RDNA1/2 only); kept per-ISA for consistency with RDNA1/2.
 class StatusReg : public ::util::Bitfield<32> {
 public:
   using Bitfield::Bitfield;
@@ -54,16 +56,14 @@ public:
   auto ALLOW_REPLAY() const { return member<22, 22>(); }
 };
 
-struct Isa {
-  static constexpr uint32_t WF_SIZE = 32;             ///< Default wave size (Wave32).
-  static constexpr uint32_t WF_SIZE_MAX = 64;         ///< Max wave size (Wave64 supported).
-  static constexpr uint32_t MAX_SGPRS_PER_WF = 106;   ///< Max scalar GPRs per wavefront.
-  static constexpr uint32_t MAX_VGPRS_PER_WF = 256;   ///< Max vector GPRs per wavefront.
-  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0; ///< No AccVGPRs in RDNA.
-  static constexpr uint8_t WAITCNT_LGKMCNT_MASK =
-      0x3F; ///< lgkmcnt field mask in S_WAITCNT (6-bit at [9:4] in GFX11 layout).
+/// @brief RDNA3 ISA traits (GFX11, Wave32 default, Wave64 capable, monolithic + split waits).
+///
+/// @details RDNA3 retains S_WAITCNT (with a new SIMM16 bit layout: expcnt[2:0],
+/// lgkmcnt[9:4], vmcnt[15:10]) AND adds named per-counter S_WAITCNT_VMCNT etc.
+/// Overrides `WAITCNT_LGKMCNT_MASK = 0x3F` (6-bit lgkmcnt at bits [9:4]).
+struct Isa : amdgpu::RdnaIsaBase {
+  static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0x3F; ///< lgkmcnt mask in S_WAITCNT [9:4].
 
-  using Context = amdgpu::Wavefront;
   using Decoder = rdna3::Decoder;
   using MachineInst = rdna3::MachineInst;
   using OperandType = rdna3::OperandType;
