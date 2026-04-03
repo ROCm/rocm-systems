@@ -30,11 +30,8 @@
 
 BaseQueue::BaseQueue()
     :m_QueueBuf(NULL),
-    m_SkipWaitConsumption(true)
-#ifdef HSAKMT_CTX
-    ,m_KFDContext(NULL)
-#endif
-{
+    m_SkipWaitConsumption(true),
+    m_KFDContext(NULL) {
 }
 
 BaseQueue::~BaseQueue(void) {
@@ -49,9 +46,7 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
         // Queue already exists, one queue per object
         Destroy();
     }
-#ifdef HSAKMT_CTX
     m_KFDContext = g_baseTest->m_hsakmt_current_ctx;
-#endif
     memset(&m_Resources, 0, sizeof(m_Resources));
 
     m_QueueBuf = new HsaMemoryBuffer(size, NodeId, true/*zero*/, false/*local*/, true/*exec*/,

@@ -28,7 +28,7 @@ def jpeg_decode_env() -> dict[str, str]:
     """Environment variables for JPEG decode tests."""
     return {
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,rocjpeg_api",
-        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,jpeg_activity,mem_usage",
+        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,jpeg_activity,jpeg_busy,mem_usage",
         "ROCPROFSYS_SAMPLING_CPUS": "none",
     }
 
@@ -84,7 +84,7 @@ class TestJPEGDecode(RocprofsysTest):
                 counts=[1],
                 depths=[1],
                 counter_names=(
-                    ["JPEG Activity"] if "instinct" in gpu_info.categories else None
+                    ["JPEG Busy"] if "instinct" in gpu_info.categories else None
                 ),
             )
             self.assert_rocpd(result, rules_files=jpeg_decode_rules)

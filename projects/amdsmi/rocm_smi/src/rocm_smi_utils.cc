@@ -691,7 +691,7 @@ std::tuple<bool, std::string> readTmpFile(uint32_t dv_ind, std::string stateName
 // rsmi_status_t ret - return value of RSMI API function
 // bool fullStatus - defaults to true, set to false to chop off description
 // Returns:
-// string - if fullStatus == true, returns full decription of return value
+// string - if fullStatus == true, returns full description of return value
 //      ex. 'RSMI_STATUS_SUCCESS: The function has been executed successfully.'
 // string - if fullStatus == false, returns a minimalized return value
 //      ex. 'RSMI_STATUS_SUCCESS'

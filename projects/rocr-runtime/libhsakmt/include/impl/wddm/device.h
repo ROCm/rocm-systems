@@ -78,16 +78,18 @@ class WDDMQueue;
 #define IS_OVERLAPPING(start1, size1, start2, size2) \
   ((start1 < (start2 + size2)) && (start2 < (start1 + size1)))
 
+enum class SegmentKind {
+  kUnknown = 0,
+  kAperture,
+  kLocalMemory,
+  kSystemMemory,
+};
+
 struct SegmentInfo {
   uint32_t segment_id;
-  uint32_t segment_type;    // 0=aperture, 1=gpu memory, 2=system memory
-  bool aperture;
-  bool system_memory;
-  uint64_t commit_limit;
+  SegmentKind kind;
 
-  SegmentInfo()
-      : segment_id(0), segment_type(0), aperture(false),
-        system_memory(false), commit_limit(0) {}
+  SegmentInfo() : segment_id(0), kind(SegmentKind::kUnknown) {}
 };
 
 class WDDMDevice {
@@ -158,7 +160,7 @@ public:
   }
   uint32_t GetComputeEngine() { return device_info_.compute_schedid; }
 
-  uint64_t VramAvail();
+  hsa_status_t VramAvail(uint64_t* available_bytes);
 
   void GetClockCounters(uint64_t *gpu, uint64_t *cpu);
   uint32_t GetNumCpQueues() { return device_info_.num_cp_queues; }
@@ -251,7 +253,7 @@ private:
   void InitCmdbufInfo(void);
 
   bool QuerySegmentInfo();
-  bool GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type, uint32_t &segment_id);
+  bool FindSegmentId(SegmentKind segment_kind, uint32_t *segment_id);
 
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;
