@@ -312,6 +312,21 @@ public:
   /// @returns Pointer to the requester port.
   simdojo::Port *req_port() { return req_; }
 
+  /// @brief Execute an instruction on a wavefront (ISA-specific dispatch).
+  ///
+  /// @warning NOT thread-safe. Must be called from the CU's event-loop
+  /// thread or from single-threaded test contexts only.
+  /// @param inst The decoded instruction.
+  /// @param wf The wavefront executing the instruction.
+  virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
+
+  /// @brief Reset all wavefront slots to halted state.
+  ///
+  /// Frees all register allocations and resets every slot.  Used by the
+  /// instruction execution test harness between instructions.
+  /// @warning NOT thread-safe.  Must not be called while step() is running.
+  void reset_all_wf();
+
 protected:
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
                   uint32_t wf_size);
@@ -324,11 +339,6 @@ protected:
   /// @brief Free a VGPR allocation.
   /// @param base Base index returned by allocate_vgprs().
   virtual void free_vgprs(uint32_t base) = 0;
-
-  /// @brief Execute an instruction on a wavefront (ISA-specific dispatch).
-  /// @param inst The decoded instruction.
-  /// @param wf The wavefront executing the instruction.
-  virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
 
   /// @brief Tick all memory pipelines (called at the start of step).
   void tick_pipelines();
