@@ -25,15 +25,15 @@ RJ_DIAGNOSTIC_POP
 
 namespace {
 
-const std::string kSchemaDir = SCHEMA_DIR;
-const std::string kConfigDir = CONFIG_DIR;
-const std::string kSchemaPath = kSchemaDir + "/simulation_config.fbs";
+const std::string SCHEMA_DIR_PATH = SCHEMA_DIR;
+const std::string CONFIG_DIR_PATH = CONFIG_DIR;
+const std::string SCHEMA_PATH = SCHEMA_DIR_PATH + "/simulation_config.fbs";
 
 using namespace rocjitsu;
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
-  std::string json = kConfigDir + "/amdgpu_cdna4.json";
-  auto loaded = config::load_config(json, kSchemaPath);
+  std::string json = CONFIG_DIR_PATH + "/amdgpu_cdna4.json";
+  auto loaded = config::load_config(json, SCHEMA_PATH);
   auto *soc = loaded.soc();
 
   // CDNA4 config: 8 XCDs, 4 SEs per XCD, 8 CUs per SE, 2 IODs.
@@ -104,7 +104,7 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, kSchemaPath);
+  auto loaded = config::load_config_from_string(json, SCHEMA_PATH);
   auto *soc = loaded.soc();
 
   // 1 XCD, 2 SEs, each with 3 CUs.
@@ -145,7 +145,7 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, kSchemaPath);
+  auto loaded = config::load_config_from_string(json, SCHEMA_PATH);
   auto *soc = loaded.soc();
 
   simdojo::SimulationEngine engine(loaded.engine_config);
@@ -210,7 +210,7 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, kSchemaPath);
+  auto loaded = config::load_config_from_string(json, SCHEMA_PATH);
   auto *soc = loaded.soc();
 
   soc->memory()->write32(0x1000, 0xDEADBEEF);
@@ -256,14 +256,14 @@ TEST(CApiTest, CreateAndDestroyFromString) {
     }
   })";
   rj_vm_t *handle = nullptr;
-  EXPECT_EQ(rj_vm_create_from_string(json, kSchemaPath.c_str(), &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(rj_vm_create_from_string(json, SCHEMA_PATH.c_str(), &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
   rj_vm_destroy(handle);
 }
 
 TEST(CApiTest, InvalidArguments) {
   rj_vm_t *handle = nullptr;
-  EXPECT_EQ(rj_vm_create_from_string(nullptr, kSchemaPath.c_str(), &handle),
+  EXPECT_EQ(rj_vm_create_from_string(nullptr, SCHEMA_PATH.c_str(), &handle),
             ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(rj_vm_step(nullptr, nullptr), ROCJITSU_STATUS_INVALID_ARGUMENT);
 }

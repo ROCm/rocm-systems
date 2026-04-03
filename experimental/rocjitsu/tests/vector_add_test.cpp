@@ -43,8 +43,8 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string kSchemaPath = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
-const std::string kConfigPath = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
 
 std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
 
@@ -69,7 +69,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   ASSERT_NE(co, nullptr);
 
   // Build the simulation engine with CDNA4 topology.
-  auto loaded = config::load_config(kConfigPath, kSchemaPath);
+  auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
@@ -148,7 +148,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  auto loaded = config::load_config(kConfigPath, kSchemaPath);
+  auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;
