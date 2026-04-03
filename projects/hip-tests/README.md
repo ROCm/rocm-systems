@@ -43,9 +43,24 @@ Although individual tests will compile with `hipcc`, ideally you should use `amd
 $ cd "$HIP_TESTS_DIR"
 $ mkdir -p build; cd build
 $ cmake ../catch -DHIP_PLATFORM=amd -DCMAKE_PREFIX_PATH=<HIP-Installed-Path> -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=amdclang++ -DCMAKE_C_COMPILER=amdclang -DCMAKE_HIP_COMPILER=amdclang++ -DOFFLOAD_ARCH_STR="--offload-arch=gfxXXXX"
-$ make -j32 build_tests
+$ make -j$(nproc) build_tests
 $ ctest # run tests
 ```
+
+Replace `gfxXXXX` with your GPU architecture. Run `rocminfo` and use the **Name** shown for the GPU agent (for example `gfx1200`):
+
+```bash
+$ /opt/rocm/bin/rocminfo
+...
+*******
+Agent 2
+*******
+  Name:                    gfx1200
+```
+
+Pass that value to `--offload-arch` (for example `--offload-arch=gfx1200`).
+
+`amdclang` and `amdclang++` are installed with ROCm in the same `bin` directory as `hipcc` (commonly `/opt/rocm/bin`). If CMake reports that the compiler is missing, ensure that directory is on `PATH`, or set `-DCMAKE_CXX_COMPILER`, `-DCMAKE_C_COMPILER`, and `-DCMAKE_HIP_COMPILER` to the full paths under your ROCm installation.
 
 HIP catch tests are built under the folder `$HIP_TESTS_DIR/build`.
 
@@ -63,28 +78,30 @@ For developers working on personal machines, installing Catch2 system-wide is st
 - `cd Catch2`
 - `mkdir build && cd build`
 - `cmake .. -DCMAKE_BUILD_TYPE=Release`
-- `make -j8`
+- `make -j$(nproc)`
 
-During installation, you may need superuser privileges to perform a global install. On Linux systems, the default installation path is `/usr/local/`.
+During installation, you may need superuser privileges to perform a global install.
 
-- `make install`
+- `sudo make install`
+
+Note: On Linux systems, the default installation path is `/usr/local/`.
 
 ##### Option 2: FetchContent (build from source)
 
-If you prefer not to install Catch2 system-wide, you can build it via cmake's FetchContent mechanism. The hip-tests cmake will automatically download and build Catch2 if it is not found on the system. To build just the Catch2 library:
+Without a system Catch2, hip-tests’ CMake pulls it in with FetchContent. Set `HIP_PATH` to your ROCm install (for example `/opt/rocm`); an empty value can break configuration. Run `make Catch2WithMain`—that target depends on `Catch2`, so both libraries are built.
 
 ```bash
-export HIP_PATH=<path_where_hip_is_installed>
 cd rocm-systems
 export ROCM_SYSTEMS_DIR=$PWD
-mkdir tests
+export HIP_PATH=/opt/rocm
+mkdir -p tests
 cd tests
 cmake ../projects/hip-tests/catch -DHIP_PLATFORM=amd -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$HIP_PATH
-make -j$(nproc) Catch2
+make -j$(nproc) Catch2WithMain
 export DEPS_PATH=$PWD/_deps
 ```
 
-The Catch2 source and build artifacts will be under `$DEPS_PATH`. You may need to set `LD_LIBRARY_PATH` to point to the Catch2 library location.
+Outputs are under `$DEPS_PATH`; set `LD_LIBRARY_PATH` if the linker cannot find Catch2 at run time.
 
 #### Standalone build commands
 
@@ -96,9 +113,9 @@ export ROCM_SYSTEMS_DIR=<path_to_rocm_systems>
 
 ##### Without hip-tests main
 
-The simplest way to compile a single test. This uses Catch2's own `main` and does not include the hip-tests test context, parameter store, or event listener.
+Compile one test `.cc` with Catch2 supplying `main`. The hip-tests test runner and its shared context are not used.
 
-With a system-wide Catch2 install:
+**System-wide Catch2** — link `Catch2` and `Catch2Main` (Catch2’s `main`):
 
 ```bash
 amdclang++                                                                           \
@@ -108,7 +125,7 @@ amdclang++                                                                      
   -x hip <path_to_test>
 ```
 
-With FetchContent Catch2:
+**FetchContent Catch2** — compile `catch_main.cpp` and link `Catch2` only:
 
 ```bash
 amdclang++                                                                           \
@@ -121,6 +138,8 @@ amdclang++                                                                      
   -lCatch2                                                                           \
   -x hip <path_to_test>
 ```
+
+Note: `<path_to_test>` is the path to a test source file, for example `projects/hip-tests/catch/unit/device/hipRuntimeGetVersion.cc`.
 
 ##### With hip-tests main
 
