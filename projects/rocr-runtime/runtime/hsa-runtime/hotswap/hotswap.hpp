@@ -1,4 +1,4 @@
-//===- hotswap.hpp - HotSwap B0-to-A0 API for ROCR loader ----------------===//
+//===- hotswap.hpp - HotSwap ISA rewriting API for ROCR loader ------------===//
 //
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -13,16 +13,17 @@
 namespace rocr {
 namespace hotswap {
 
-/// Apply GFX1250 B0-to-A0 silicon stepping patches to a code object.
+/// Rewrite a code object from source_isa to target_isa via COMGR.
 ///
-/// Called by the loader when it detects a gfx1250 code object on A0
-/// hardware. Delegates to COMGR's amd_comgr_hotswap_rewrite_b0a0
-/// via dlopen. The caller must free *out_data with free() if it
-/// differs from elf_data.
+/// Called by the loader when the code object's ISA differs from the agent's
+/// ISA, or when stepping patches are needed (e.g., B0-to-A0 on gfx1250).
+/// Delegates to COMGR's amd_comgr_hotswap_rewrite via dlopen.
 ///
+/// The caller must free *out_data with free() if it differs from elf_data.
 /// Returns 0 on success, non-zero on failure.
-int RetargetCodeObjectB0A0Grow(const void *elf_data, size_t elf_size,
-                               void **out_data, size_t *out_size);
+int RetargetCodeObject(const void *elf_data, size_t elf_size,
+                       const char *source_isa, const char *target_isa,
+                       void **out_data, size_t *out_size);
 
 } // namespace hotswap
 } // namespace rocr
