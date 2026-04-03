@@ -2339,7 +2339,7 @@ def test_apply_kernel_filter_integer_ids(mock_workload_for_filter):
     # Test invalid kernel ID (out of bounds) - should call console_error and exit
     mock_workload_for_filter.filter_kernel_ids = [99]  # Invalid ID
     mock_workload_for_filter.dfs[1]["Selected"] = ""  # Reset
-    with patch("utils.parser.console_error") as mock_error:
+    with patch("utils.parser.parser.console_error") as mock_error:
         # console_error calls sys.exit by default, so mock it to raise SystemExit
         mock_error.side_effect = SystemExit(1)
         with pytest.raises(SystemExit):
@@ -2435,7 +2435,7 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
         # Test with single kernel filter - valid index
         workload.filter_kernel_ids = [0]  # kernel_a
         # Since json file is missing, it should return empty and warn
-        with patch("utils.parser.console_warning") as mock_warning:
+        with patch("utils.parser.parser.console_warning") as mock_warning:
             result = load_pc_sampling_data(workload, temp_dir, "test", "count")
             # Should warn about missing json file
             assert result.empty
@@ -2447,7 +2447,7 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
         json_path = Path(temp_dir) / "test_results.json"
         json_path.write_text("{}")
 
-        with patch("utils.parser.console_warning") as mock_warning:
+        with patch("utils.parser.parser.console_warning") as mock_warning:
             result = load_pc_sampling_data(workload, temp_dir, "test", "count")
             # Should warn about index out of bounds
             mock_warning.assert_called()
@@ -2457,7 +2457,9 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
 
         # Test that kernel name is extracted from workload.dfs[1]
         workload.filter_kernel_ids = [1]  # kernel_b
-        with patch("utils.parser.load_pc_sampling_data_per_kernel") as mock_per_kernel:
+        with patch(
+            "utils.parser.parser.load_pc_sampling_data_per_kernel"
+        ) as mock_per_kernel:
             mock_per_kernel.return_value = pd.DataFrame()
             load_pc_sampling_data(workload, temp_dir, "test", "count")
             # Verify the kernel name extracted from dfs[1] is kernel_b

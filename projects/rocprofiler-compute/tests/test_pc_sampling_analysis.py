@@ -388,7 +388,7 @@ def test_load_per_kernel_invalid_sorting_type(
 ) -> None:
     """Return an empty DataFrame and log an error for an unrecognized sorting type."""
     json_path, kt = _setup_per_kernel_files(tmp_path)
-    with patch("utils.parser.console_error"):
+    with patch("utils.parser.parser.console_error"):
         df = load_pc_sampling_data_per_kernel(
             method="host_trap",
             file_name=json_path,
@@ -476,7 +476,7 @@ def test_load_pc_sampling_data_multiple_kernels_error(
         [(0, "v_mov", "/src/v.cpp:1")],
     )
     workload = schema.Workload(filter_kernel_ids=[0, 1])
-    with patch("utils.parser.console_error"):
+    with patch("utils.parser.parser.console_error"):
         df = load_pc_sampling_data(
             workload,
             str(tmp_path),
