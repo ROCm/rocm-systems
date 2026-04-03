@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/smem.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -42,6 +43,7 @@ void SLoadB32Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 1;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -62,6 +64,7 @@ void SLoadB64Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 2;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -82,6 +85,7 @@ void SLoadB128Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 4;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -102,6 +106,7 @@ void SLoadB256Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 8;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -122,6 +127,7 @@ void SLoadB512Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 16;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -202,6 +208,7 @@ void SBufferLoadB32Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 1;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -222,6 +229,7 @@ void SBufferLoadB64Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 2;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -242,6 +250,7 @@ void SBufferLoadB128Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 4;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -262,6 +271,7 @@ void SBufferLoadB256Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 8;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
@@ -282,6 +292,7 @@ void SBufferLoadB512Smem::execute(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 16;
   d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->addr = smem_calculate_address(inst_, wf);
   set_data(std::move(d));
 }
