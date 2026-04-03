@@ -85,6 +85,10 @@ private:
     int log_level_ = kRocDecLogCritical;
 };
 
+// Single global logger instance shared across all components. Log level is
+// controlled via the ROCDEC_LOG_LEVEL environment variable (default: critical).
+inline RocDecLogger g_rocdec_logger;
+
 // RAII helper for function-scope entry/exit logging.
 // Keeps the start timestamp per call-scope (stack variable), making it
 // safe for nested calls and concurrent threads sharing the same logger.
