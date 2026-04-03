@@ -97,6 +97,7 @@ class TestAmdSmiCli(unittest.TestCase):
         cls.PASS = 0
         cls.FAIL = 1
         cls.tab = "    "
+        cls.CMD_TIMEOUT = 30
 
         cls.open_bracket = "["
         cls.close_bracket = "]"
@@ -104,29 +105,20 @@ class TestAmdSmiCli(unittest.TestCase):
         cls.close_curly_brace = "}"
 
         # Record starting values
-        cmd = "amd-smi metric --json"
-        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
-        if rc:
-            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-        cls.metric_data = json.loads(data)
-
-        cmd = "amd-smi static --json"
-        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
-        if rc:
-            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-        cls.static_data = json.loads(data)
-
-        cmd = "amd-smi list --json"
-        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
-        if rc:
-            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-        cls.list_data = json.loads(data)
-
-        cmd = "amd-smi partition --current --json"
-        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
-        if rc:
-            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-        cls.partition_data = json.loads(data)
+        cmds = [
+            ("metric", "amd-smi metric --json"),
+            ("static", "amd-smi static --json"),
+            ("list", "amd-smi list --json"),
+            ("partition", "amd-smi partition --current --json"),
+        ]
+        for name, cmd in cmds:
+            try:
+                (rc, data, std_err) = cls.util.RunCmdSync(cmd, time_out=cls.CMD_TIMEOUT)
+                if rc:
+                    raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+                setattr(cls, f"{name}_data", json.loads(data))
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f'Error decoding JSON output from "{cmd}": {e}') from e
 
         if my_args.verbose >= common.VERBOSITY_VERBOSE:
             # Execute the following to print the asic and board info once per test run
@@ -145,7 +137,7 @@ class TestAmdSmiCli(unittest.TestCase):
         cls.tmp_filename = "_tmp.log"
         cls.tmp_folder = "_tmp"
 
-        # TODO: Need to be able to get automatic answers
+        # TODO: Need to be able to get automatic answers from CLI
         cls.skip_args_require_input = {"reset --gtt", "set --fan", "set --memory-partition"}
 
         cls.gpus = ["all"]
@@ -232,16 +224,16 @@ class TestAmdSmiCli(unittest.TestCase):
 
     @classmethod
     def str_to_number(cls, num_str):
+        """Convert string to appropriate numeric type with logging."""
         rc = 0
         num_str = num_str.strip()
         try:
             value = int(num_str)
         except ValueError:
             try:
-                value = float(num_str)
-                if value.is_integer():
-                    value = int(value)
+                value = int(float(num_str))
             except ValueError:
+                print(f"WARNING: Could not convert '{num_str}' to number, returning string")
                 rc = 1
                 value = num_str
         return (rc, value)
@@ -273,6 +265,16 @@ class TestAmdSmiCli(unittest.TestCase):
             if fail_on_results:
                 self.fail(f"Fail:\n\n{msg}")
         return
+
+    def get_dict_from_json(self, data):
+        failures = []
+        for name, data in data.items():
+            try:
+                data[name] = json.loads(data)
+            except json.JSONDecodeError:
+                msg = f"Failure: {name} contains invalid json"
+                failures.append((f"cmd=amd-smi {name}", msg))
+        return (data, failures)
 
     def get_monitor_metric_data(self, monitor1, monitor2, metric):
         data = []
@@ -364,7 +366,7 @@ class TestAmdSmiCli(unittest.TestCase):
         ):
             return ["pass"]
 
-        (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+        (rc, std_out, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         if rc:
             raise RuntimeError(f'Error executing "{cmd}": {std_err}')
         lines = std_out.split("\n")
@@ -963,7 +965,9 @@ class TestAmdSmiCli(unittest.TestCase):
 
                 # Run an event
                 cmd_trigger = "amd-smi reset --gpureset"
-                (rc_trigger, std_out_trigger, std_err_trigger) = self.util.RunCmdSync(cmd_trigger)
+                (rc_trigger, std_out_trigger, std_err_trigger) = self.util.RunCmdSync(
+                    cmd_trigger, time_out=self.CMD_TIMEOUT
+                )
 
                 # Wait for the event notification to propagate from the driver,
                 # be received by listener.read() and written to the output file
@@ -986,7 +990,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 if proc.stdout:
                     proc.stdout.close()
             else:
-                (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+                (rc, std_out, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
 
             error_code, output_stream = self.get_error_code(std_out, std_err, cond)
 
@@ -1052,7 +1056,7 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print(msg)
 
         cmd = "amd-smi --help"
-        (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+        (rc, std_out, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         if rc:
             raise RuntimeError(f'Error executing "{cmd}": {std_err}')
         lines = std_out.split("\n")
@@ -1570,19 +1574,27 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi monitor"
         self.common.print(msg)
 
-        cmd = "amd-smi monitor --json"
-        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
-        (rc, data2, std_err) = self.util.RunCmdSync(cmd)
-        cmd = "amd-smi metric --json"
-        (rc, data3, std_err) = self.util.RunCmdSync(cmd)
-        monitor1 = json.loads(data1)
-        monitor2 = json.loads(data2)
-        metric3 = json.loads(data3)
+        if my_args.print_cmds_only:
+            print("cmd=amd-smi monitor --json")
+            print("cmd=amd-smi metric --json")
+            return
 
-        data = self.get_monitor_metric_data(monitor1, monitor2, None)
+        cmd = "amd-smi monitor --json"
+        (rc, data1, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
+        (rc, data2, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
+        cmd = "amd-smi metric --json"
+        (rc, data3, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
+
+        data = {"monitor1": data1, "monitor2": data2, "metric3": data3}
+        data, failures = self.get_dict_from_json(data)
+        if len(failures) > 0:
+            self.print_results(failures, fail_on_results=True)
+            return
+
+        data = self.get_monitor_metric_data(data["monitor1"], data["monitor2"], None)
         monitor_fails = self.compare_monitor_metric_data("Monitor", data)
 
-        data = self.get_monitor_metric_data(monitor2, None, metric3)
+        data = self.get_monitor_metric_data(data["monitor2"], None, data["metric3"])
         metric_fails = self.compare_monitor_metric_data("Metric", data)
 
         failures = monitor_fails + metric_fails
@@ -1602,10 +1614,15 @@ class TestAmdSmiCli(unittest.TestCase):
             # Receive timestamp
             time_stamp = q.get()
 
-            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            (rc, data, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
             time_stamp2 = time.monotonic()
             q.put(data)
             q.put(time_stamp2)
+            return
+
+        if my_args.print_cmds_only:
+            print("cmd=amd-smi monitor --json")
+            print("cmd=amd-smi metric --json")
             return
 
         # Setup queue between processes
@@ -1622,7 +1639,7 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Get monitor data
         cmd = "amd-smi monitor --json"
-        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data1, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         time_stamp = time.monotonic()
 
         # Receive process data and time_stamp
@@ -1634,9 +1651,13 @@ class TestAmdSmiCli(unittest.TestCase):
             print(f"Collection TimeStamp: Monitor2={time_stamp_process}  Monitor1={time_stamp}")
             print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
 
-        monitor1 = json.loads(data1)
-        monitor2 = json.loads(data2)
-        data = self.get_monitor_metric_data(monitor1, monitor2, None)
+        data = {"monitor1": data1, "monitor2": data2}
+        data, failures = self.get_dict_from_json(data)
+        if len(failures) > 0:
+            self.print_results(failures, fail_on_results=True)
+            return
+
+        data = self.get_monitor_metric_data(data["monitor1"], data["monitor2"], None)
         monitor_fails = self.compare_monitor_metric_data("Monitor", data)
 
         # Monitor to Metric
@@ -1650,7 +1671,7 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Get metric data
         cmd = "amd-smi metric --json"
-        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data1, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         time_stamp = time.monotonic()
 
         # Receive process data and time_stamp
@@ -1662,9 +1683,13 @@ class TestAmdSmiCli(unittest.TestCase):
             print(f"Collection TimeStamp: Monitor={time_stamp_process}  Metric={time_stamp}")
             print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
 
-        monitor = json.loads(data2)
-        metric3 = json.loads(data1)
-        data = self.get_monitor_metric_data(monitor, None, metric3)
+        data = {"monitor": data2, "metric3": data1}
+        data, failures = self.get_dict_from_json(data)
+        if len(failures) > 0:
+            self.print_results(failures, fail_on_results=True)
+            return
+
+        data = self.get_monitor_metric_data(data["monitor"], None, data["metric3"])
         metric_fails = self.compare_monitor_metric_data("Metric", data)
 
         # Report failures
@@ -1685,7 +1710,7 @@ class TestAmdSmiCli(unittest.TestCase):
             # Receive timestamp
             time_stamp = q.get()
 
-            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            (rc, data, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
             time_stamp2 = time.monotonic()
             q.put(data)
             q.put(time_stamp2)
@@ -1696,7 +1721,7 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Get baseline monitor data
         cmd = "amd-smi monitor --json"
-        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data1, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
 
         # Monitor to Monitor
         cmd = "rvs --json"
@@ -1710,7 +1735,7 @@ class TestAmdSmiCli(unittest.TestCase):
         # Get monitor data under workload
         time.sleep(4)
         cmd = "amd-smi monitor --json"
-        (rc, data2, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data2, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         time_stamp = time.monotonic()
 
         # Receive process data and time_stamp
@@ -1723,9 +1748,13 @@ class TestAmdSmiCli(unittest.TestCase):
             print(f"Collection TimeStamp: Monitor2={time_stamp_process}  Monitor1={time_stamp}")
             print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
 
-        monitor1 = json.loads(data1)
-        monitor2 = json.loads(data2)
-        data = self.get_monitor_metric_data(monitor1, monitor2, None)
+        data = {"monitor1": data1, "monitor2": data2}
+        data, failures = self.get_dict_from_json(data)
+        if len(failures) > 0:
+            self.print_results(failures, fail_on_results=True)
+            return
+
+        data = self.get_monitor_metric_data(data["monitor1"], data["monitor2"], None)
         monitor_fails = self.compare_monitor_metric_data("Workload", data)
 
         # Report failures
@@ -1797,17 +1826,17 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Test mem-carveout display (static subcommand)
         cmd = "amd-smi static --mem-carveout"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
 
         # Test GTT display (node subcommand — GTT is system-wide, not per-GPU)
         cmd = "amd-smi node --gtt"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
 
         # Test mem-carveout with JSON output
         cmd = "amd-smi static --mem-carveout --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
         if data:
             try:
@@ -1818,7 +1847,7 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Test GTT with JSON output (node subcommand)
         cmd = "amd-smi node --gtt --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
         if data:
             try:
@@ -1829,12 +1858,12 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Test mem-carveout with CSV output
         cmd = "amd-smi static --mem-carveout --csv"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
 
         # Test GTT with CSV output (node subcommand)
         cmd = "amd-smi node --gtt --csv"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
         self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
 
         # Note: We do NOT test set/reset operations (--mem-carveout in set, --gtt in set/reset) because:
