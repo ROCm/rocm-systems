@@ -1900,8 +1900,8 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind, uint32_t* nu
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | Issue: could not retrieve kDevPowerODVoltage" << "; returning "
-       << getRSMIStatusString(ret);
+    ss << __PRETTY_FUNCTION__ << " | Issue: could not retrieve kDevPowerODVoltage"
+       << "; returning " << getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
   }
@@ -2921,6 +2921,7 @@ rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char* name, size_t len) 
   assert(len > 0);
 
   DEVICE_MUTEX
+
   ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_VENDOR);
   return ret;
   CATCH
@@ -2965,7 +2966,9 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t*
 
   GET_DEV_AND_KFDNODE_FROM_INDX
   CHK_API_SUPPORT_ONLY((b), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
+
   DEVICE_MUTEX
+
   ret = get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind, &b->transfer_rate,
                         b->lanes);
   if (ret == RSMI_STATUS_SUCCESS) {
@@ -7534,7 +7537,8 @@ rsmi_status_t rsmi_dev_metrics_log_get(uint32_t dv_ind) {
   auto status_code = dev->dev_log_gpu_metrics(ostrstream);
   ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= "
              << " | End Result "
-             << " | Device #:  " << dv_ind << " | Metric Type: " << "All GPU Metrics..."
+             << " | Device #:  " << dv_ind << " | Metric Type: "
+             << "All GPU Metrics..."
              << " | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
 

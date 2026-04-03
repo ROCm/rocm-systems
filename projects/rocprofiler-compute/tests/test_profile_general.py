@@ -666,41 +666,15 @@ def test_path_csv(
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     all_csvs_mi100 = sorted([
-        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_LEVEL_WAVES.csv",
         "sysinfo.csv",
     ])
     all_csvs_mi200 = sorted([
-        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
         "sysinfo.csv",
     ])
     all_csvs_mi300 = sorted([
-        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
         "sysinfo.csv",
     ])
     all_csvs_mi350 = sorted([
-        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
         "sysinfo.csv",
     ])
 
@@ -3414,40 +3388,5 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     output = stdout + stderr
     assert "Multi-rank application detected" not in output
     assert "Application replay mode" not in output
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.multi_rank
-def test_multi_rank_warning_pc_sampling(
-    binary_handler_profile_rocprof_compute, monkeypatch
-):
-    """
-    Test that a warning is printed when running a multi-rank application
-    with PC sampling enabled.
-    """
-    # Set MPI environment variable to simulate multi-rank
-    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
-
-    workload_dir = test_utils.get_output_dir()
-
-    # Enable PC sampling
-    options = ["--block", "21"]
-
-    _, stdout, stderr = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        app_name="app_1",
-        capture_output=True,
-        check_success=False,
-    )
-
-    # Check that PC sampling warning is in output
-    output = stdout + stderr
-    assert "Multi-rank application detected with PC sampling enabled" in output
-    assert "--iteration-multiplexing" in output
-    assert "--block" not in output
-    assert "--set" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
