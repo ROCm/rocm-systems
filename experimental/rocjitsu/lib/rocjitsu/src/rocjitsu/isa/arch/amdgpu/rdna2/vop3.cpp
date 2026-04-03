@@ -628,10 +628,7 @@ void VFloorF64Vop3::execute(amdgpu::Wavefront &wf) {
 VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
     : Vop3("v_pipeflush", reinterpret_cast<const OpEncoding *>(inst)) {}
 
-void VPipeflushVop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPipeflushVop3::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
     : Vop3("v_fract_f32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1386,10 +1383,7 @@ VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
   src_operands_.emplace_back(&src0);
 }
 
-void VMovreldB32Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovreldB32Vop3::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
     : Vop3("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1399,10 +1393,7 @@ VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
   src_operands_.emplace_back(&src0);
 }
 
-void VMovrelsB32Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovrelsB32Vop3::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
     : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1412,10 +1403,7 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
   src_operands_.emplace_back(&src0);
 }
 
-void VMovrelsdB32Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovrelsdB32Vop3::execute(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
     : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2626,8 +2614,14 @@ VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
 }
 
 void VAddNcU32Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t sv0 = src0.read_lane(wf, lane);
+    uint32_t sv1 = src1.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, sv0 + sv1);
+  }
 }
 
 VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
@@ -2641,8 +2635,14 @@ VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
 }
 
 void VSubNcU32Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t sv0 = src0.read_lane(wf, lane);
+    uint32_t sv1 = src1.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, sv0 - sv1);
+  }
 }
 
 VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
@@ -2656,8 +2656,14 @@ VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
 }
 
 void VSubrevNcU32Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t sv0 = src0.read_lane(wf, lane);
+    uint32_t sv1 = src1.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, sv1 - sv0);
+  }
 }
 
 VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
@@ -4893,8 +4899,14 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
 }
 
 void VAddNcU16Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint16_t sv0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
+    uint16_t sv1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 + sv1)));
+  }
 }
 
 VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
@@ -4908,8 +4920,14 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
 }
 
 void VSubNcU16Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint16_t sv0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
+    uint16_t sv1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(sv0 - sv1)));
+  }
 }
 
 VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
@@ -5072,8 +5090,15 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
 }
 
 void VAddNcI16Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    int16_t sv0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
+    int16_t sv1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    vdst.write_lane(wf, lane,
+                    static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 + sv1))));
+  }
 }
 
 VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
@@ -5087,8 +5112,15 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
 }
 
 void VSubNcI16Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    int16_t sv0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
+    int16_t sv1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    vdst.write_lane(wf, lane,
+                    static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(sv0 - sv1))));
+  }
 }
 
 VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
@@ -6257,8 +6289,14 @@ VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
 }
 
 void VSubNcI32Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane));
+    int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 - sv1));
+  }
 }
 
 VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
@@ -6306,8 +6344,14 @@ VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
 }
 
 void VAddNcI32Vop3::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    int32_t sv0 = static_cast<int32_t>(src0.read_lane(wf, lane));
+    int32_t sv1 = static_cast<int32_t>(src1.read_lane(wf, lane));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(sv0 + sv1));
+  }
 }
 
 VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)

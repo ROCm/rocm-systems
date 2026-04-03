@@ -247,21 +247,35 @@ _SOP1_SPECIAL = {
     'S_BITREPLICATE': ('nop', None),
     'S_CBRANCH_JOIN': ('nop', None),
     'S_BITREPL_B64_B32': ('nop', None),
+    # RDNA4-exclusive SOP1 instructions:
+    'S_CTZ_I32': ('scalar_unary', 'ctz'),
+    'S_CLZ_I32_U32': ('scalar_unary', 'clz'),
+    'S_CLZ_I32_U64': ('scalar_unary', 'clz64'),
+    'S_CLS_I32': ('scalar_unary', 'cls'),
+    'S_CLS_I32_I64': ('scalar_unary', 'cls64'),
+    'S_MOVRELSD2': ('nop', None),
+    'S_SENDMSG_RTN': ('nop', None),
+    'S_BARRIER_SIGNAL': ('nop', None),
+    'S_BARRIER_SIGNAL_ISFIRST': ('nop', None),
+    'S_ALLOC_VGPR': ('nop', None),
+    'S_SLEEP_VAR': ('nop', None),
+    'S_CEIL': ('scalar_unary', 'ceil'),
+    'S_FLOOR': ('scalar_unary', 'floor'),
 }
 
 def _derive_sop1(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOP1 (Scalar ALU One-operand) instruction."""
-    # SAVEEXEC / WREXEC patterns
-    m = re.match(r'S_(\w+)_SAVEEXEC_B64', name)
+    # SAVEEXEC / WREXEC patterns (B64 on CDNA/Wave64, B32 on RDNA/Wave32)
+    m = re.match(r'S_(\w+)_SAVEEXEC_(B32|B64)', name)
     if m:
         op = m.group(1).lower()
         return InstructionSemantics(name, 'scalar_saveexec',
-                                   operation=op, data_type='b64')
-    m = re.match(r'S_(\w+)_WREXEC_B64', name)
+                                   operation=op, data_type=m.group(2).lower())
+    m = re.match(r'S_(\w+)_WREXEC_(B32|B64)', name)
     if m:
         op = m.group(1).lower()
         return InstructionSemantics(name, 'scalar_wrexec',
-                                   operation=op, data_type='b64')
+                                   operation=op, data_type=m.group(2).lower())
 
     # S_FLBIT_I32 (the one without further suffix) is a special case
     if name == 'S_FLBIT_I32':
@@ -457,6 +471,22 @@ _VOP1_OP_MAP = {
     'V_CVT_F32_UBYTE1': ('vector_unary', 'cvt'),
     'V_CVT_F32_UBYTE2': ('vector_unary', 'cvt'),
     'V_CVT_F32_UBYTE3': ('vector_unary', 'cvt'),
+    # RDNA4 renamed conversions (same semantics as FLR/RPI):
+    'V_CVT_NEAREST': ('vector_unary', 'cvt'),
+    'V_CVT_FLOOR': ('vector_unary', 'cvt'),
+    # RDNA4 renamed bit-counting ops:
+    'V_CLZ_I32_U32': ('vector_unary', 'ffbh_u32'),
+    'V_CTZ_I32_B32': ('vector_unary', 'ffbl'),
+    'V_CLS_I32': ('vector_unary', 'ffbh_i32'),
+    # Pipeline / system (nop in simulation):
+    'V_PIPEFLUSH': ('nop', None),
+    # Relative addressing (nop — wave-level register indexing):
+    'V_MOVRELD': ('nop', None),
+    'V_MOVRELS': ('nop', None),
+    'V_MOVRELSD': ('nop', None),
+    'V_MOVRELSD2': ('nop', None),
+    'V_SWAP_REL': ('nop', None),
+    'V_PERMLANE64': ('nop', None),
 }
 
 def _derive_vop1(name: str) -> InstructionSemantics | None:
@@ -491,9 +521,15 @@ _VOP2_OP_MAP = {
     'V_AND': 'and', 'V_OR': 'or', 'V_XOR': 'xor', 'V_XNOR': 'xnor',
     'V_LSHLREV': 'shl', 'V_LSHRREV': 'shr', 'V_ASHRREV': 'ashr',
     'V_MIN': 'min', 'V_MAX': 'max',
+    # RDNA4 renamed min/max with IEEE 754 NaN semantics:
+    'V_MIN_NUM': 'min', 'V_MAX_NUM': 'max',
+    # RDNA4 renamed no-carry add/sub:
+    'V_ADD_NC': 'add', 'V_SUB_NC': 'sub', 'V_SUBREV_NC': 'rsub',
     'V_FMAC': 'fmac', 'V_LDEXP': 'ldexp',
     'V_BFM': 'bfm',
     'V_CNDMASK': None,  # special class
+    # RDNA4 V_MUL_DX9_ZERO variant (same as mul_legacy for zero*anything=0):
+    'V_MUL_DX9_ZERO': 'mul_legacy',
 }
 
 def _derive_vop2(name: str) -> InstructionSemantics | None:
