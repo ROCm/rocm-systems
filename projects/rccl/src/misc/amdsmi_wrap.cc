@@ -70,8 +70,11 @@ static int is_wsl2 = -1;
   }                                          \
 } while(0)
 
-// Disabled by default due to critical concurrency issue in amdsmi library init;
-// set RCCL_USE_AMD_SMI_LIB=1 to enable amd_smi_lib
+// Disabled by default due to a critical concurrency issue in amdsmi library init
+// (communicated to the amdsmi team). Once a known ROCm version ships with the fix,
+// re-enable the version-gated default here (e.g. #if ROCM_VERSION >= <fixed_version>)
+// and update this comment with the resolved ROCm version.
+// Users can opt-in in the meantime by setting RCCL_USE_AMD_SMI_LIB=1.
 #define AMDSMI_DEFAULT_ENABLED 0
 
 // Enable use of amd_smi_lib instead of internal ARSMI code by default; set RCCL_USE_AMD_SMI_LIB=1 to enable amd_smi_lib and use the AMD SMI path
