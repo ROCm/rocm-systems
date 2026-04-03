@@ -1573,6 +1573,7 @@ class CodeGenerator:
                 else:
                     L.append(f'  {dst[0]}.write_scalar(wf, result);')
             else:
+                L.append('  (void)s1;')
                 L.append(f'  {utype} result = s0; // TODO: op={op}')
                 if is_64:
                     L.append(f'  {dst[0]}.write_scalar64(wf, result);')
@@ -1694,7 +1695,14 @@ class CodeGenerator:
             'andn2': 'old_exec & ~src',
             'orn1': 'src | ~old_exec',
             'orn2': 'old_exec | ~src',
+            # RDNA3/4 not0/not1 variants
+            'and_not0': 'old_exec & ~src',
+            'or_not0': 'old_exec | ~src',
+            'and_not1': '~src & ~old_exec',
+            'or_not1': '~src | old_exec',
         }
+        if op not in saveexec_map:
+            L.append('  (void)src;')
         expr = saveexec_map.get(op, f'old_exec /* TODO: {op} */')
         L.append(f'  uint64_t result = {expr};')
         L.append('  wf.set_exec(result);')
@@ -2719,10 +2727,11 @@ class CodeGenerator:
 
         # op_sel: which half of each src for LO result
         # op_sel_hi: which half for HI result (default = hi)
-        L.append('    bool sel0_lo = (inst_.op_sel >> 0) & 1;')
-        L.append('    bool sel1_lo = (inst_.op_sel >> 1) & 1;')
-        L.append('    bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;')
-        L.append('    bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;')
+        opsel, opsel_hi = self._vop3p_opsel_exprs()
+        L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
+        L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
+        L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
+        L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
         if dtype == 'f16':
             # FP16: extract as float, operate, pack back
@@ -2796,11 +2805,12 @@ class CodeGenerator:
         L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
         L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
         L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
-        L.append('    bool sel0_lo = (inst_.op_sel >> 0) & 1;')
-        L.append('    bool sel1_lo = (inst_.op_sel >> 1) & 1;')
-        L.append('    bool sel2_lo = (inst_.op_sel >> 2) & 1;')
-        L.append('    bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;')
-        L.append('    bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;')
+        opsel, opsel_hi = self._vop3p_opsel_exprs()
+        L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
+        L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
+        L.append(f'    bool sel2_lo = ({opsel} >> 2) & 1;')
+        L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
+        L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
         L.append(f'    bool sel2_hi = {self._op_sel_hi_2_expr(self._enc_name)};')
 
         if dtype == 'f16':
@@ -2910,8 +2920,9 @@ class CodeGenerator:
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(f'    uint64_t raw0 = {s0}.read_lane64(wf, lane);')
         L.append(f'    uint64_t raw1 = {s1}.read_lane64(wf, lane);')
-        L.append('    uint32_t lo = (inst_.op_sel & 1) ? static_cast<uint32_t>(raw0 >> 32) : static_cast<uint32_t>(raw0);')
-        L.append('    uint32_t hi = (inst_.op_sel & 2) ? static_cast<uint32_t>(raw1 >> 32) : static_cast<uint32_t>(raw1);')
+        opsel, _opsel_hi = self._vop3p_opsel_exprs()
+        L.append(f'    uint32_t lo = ({opsel} & 1) ? static_cast<uint32_t>(raw0 >> 32) : static_cast<uint32_t>(raw0);')
+        L.append(f'    uint32_t hi = ({opsel} & 2) ? static_cast<uint32_t>(raw1 >> 32) : static_cast<uint32_t>(raw1);')
         L.append(f'    {d}.write_lane64(wf, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));')
         L.append('  }')
         return '\n'.join(L)
@@ -2928,12 +2939,13 @@ class CodeGenerator:
         L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
         # op_sel_hi selects f16 vs f32 per source (1=f16, 0=f32)
         # When f16: op_sel[i] selects which half (lo=0, hi=1)
+        opsel, opsel_hi = self._vop3p_opsel_exprs()
         L.append('    float a, b, c;')
-        L.append('    if (inst_.op_sel_hi & 1) a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));')
+        L.append(f'    if ({opsel_hi} & 1) a = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 1) ? (raw0 >> 16) : raw0));')
         L.append('    else a = std::bit_cast<float>(raw0);')
-        L.append('    if (inst_.op_sel_hi & 2) b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));')
+        L.append(f'    if ({opsel_hi} & 2) b = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 2) ? (raw1 >> 16) : raw1));')
         L.append('    else b = std::bit_cast<float>(raw1);')
-        L.append(f'    if ({self._op_sel_hi_2_expr(self._enc_name)}) c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));')
+        L.append(f'    if ({self._op_sel_hi_2_expr(self._enc_name)}) c = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 4) ? (raw2 >> 16) : raw2));')
         L.append('    else c = std::bit_cast<float>(raw2);')
         L.append('    if (inst_.neg & 1) a = -a;')
         L.append('    if (inst_.neg & 2) b = -b;')
@@ -2954,12 +2966,13 @@ class CodeGenerator:
         L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
         L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
         L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
+        opsel, opsel_hi = self._vop3p_opsel_exprs()
         L.append('    float a, b, c;')
-        L.append('    if (inst_.op_sel_hi & 1) a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));')
+        L.append(f'    if ({opsel_hi} & 1) a = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 1) ? (raw0 >> 16) : raw0));')
         L.append('    else a = std::bit_cast<float>(raw0);')
-        L.append('    if (inst_.op_sel_hi & 2) b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));')
+        L.append(f'    if ({opsel_hi} & 2) b = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 2) ? (raw1 >> 16) : raw1));')
         L.append('    else b = std::bit_cast<float>(raw1);')
-        L.append(f'    if ({self._op_sel_hi_2_expr(self._enc_name)}) c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));')
+        L.append(f'    if ({self._op_sel_hi_2_expr(self._enc_name)}) c = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 4) ? (raw2 >> 16) : raw2));')
         L.append('    else c = std::bit_cast<float>(raw2);')
         L.append('    if (inst_.neg & 1) a = -a;')
         L.append('    if (inst_.neg & 2) b = -b;')
@@ -3264,9 +3277,29 @@ class CodeGenerator:
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
+    def _vop3p_opsel_exprs(self) -> tuple[str, str]:
+        """Return ``(op_sel_expr, op_sel_hi_expr)`` for VOP3P execute() bodies."""
+        opsel, opsel_hi = self.isa_spec.profile.vop3p_opsel_fields
+        return f'inst_.{opsel}', f'inst_.{opsel_hi}'
+
+    def _coherency_exprs(self) -> tuple[str, str, str]:
+        """Return ``(sc0_expr, sc1_expr, nt_expr)`` for execute() body templates.
+
+        Consults the ISA profile so that ISAs with GLC/SLC field names (CDNA1/2,
+        RDNA1-3.5) emit ``inst_.glc`` / ``inst_.slc`` instead of the CDNA3/4
+        ``inst_.sc0`` / ``inst_.sc1``.  When the profile has no NT field the
+        nt_expr is the literal ``0``.
+        """
+        sc0, sc1, nt = self.isa_spec.profile.coherency_field_names
+        sc0_expr = f'inst_.{sc0}'
+        sc1_expr = f'inst_.{sc1}'
+        nt_expr = f'inst_.{nt}' if nt else '0'
+        return sc0_expr, sc1_expr, nt_expr
+
     def _gen_flat_load(self, dst: list[str], src: list[str], sem: InstructionSemantics) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        sc0, sc1, nt = self._coherency_exprs()
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
         L.append(f'  d->elem_size = {esz};')
@@ -3274,8 +3307,8 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
-        L.append('  d->mtype = mtype_from_bits(inst_.sc0, inst_.sc1);')
-        L.append('  d->non_temporal = inst_.nt;')
+        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -3283,12 +3316,14 @@ class CodeGenerator:
     def _gen_flat_store(self, dst: list[str], src: list[str], sem: InstructionSemantics) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        sc0, sc1, nt = self._coherency_exprs()
+        data_field = self.isa_spec.profile.flat_store_src_field
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = false;')
-        L.append('  d->mtype = mtype_from_bits(inst_.sc0, inst_.sc1);')
-        L.append('  d->non_temporal = inst_.nt;')
+        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
@@ -3298,13 +3333,13 @@ class CodeGenerator:
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
             if esz == 4:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + {i}, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field} + {i}, lane);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 4);')
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field}, lane);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);')
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field}, lane);')
                 L.append(f'    d->store_data[lane * {stride} + {i}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
         L.append('  set_data(std::move(d));')
@@ -3345,14 +3380,16 @@ class CodeGenerator:
         data_dwords = sem.num_elems or 1  # number of dwords of operand data
 
         L = []
+        sc0, sc1, nt = self._coherency_exprs()
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append('  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
         L.append(f'  d->elem_size = {esz};')
         L.append('  d->num_elems = 1;')
-        L.append('  d->is_load = (inst_.sc0 != 0);')
+        L.append(f'  d->is_load = ({sc0} != 0);')
         L.append(f'  d->atomic_op = {op_enum};')
-        L.append('  d->mtype = mtype_from_bits(inst_.sc0, inst_.sc1);')
-        L.append('  d->non_temporal = inst_.nt;')
+        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->non_temporal = {nt};')
+        data_field = self.isa_spec.profile.flat_store_src_field
         L.append('  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
@@ -3361,7 +3398,7 @@ class CodeGenerator:
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(data_dwords):
-            L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + {i}, lane);')
+            L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field} + {i}, lane);')
             L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);')
         L.append('  }')
         L.append('  set_data(std::move(d));')
@@ -3378,14 +3415,15 @@ class CodeGenerator:
         data_dwords = sem.num_elems or 1
 
         L = []
+        sc0, sc1, nt = self._coherency_exprs()
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append('  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;')
         L.append(f'  d->elem_size = {esz};')
         L.append('  d->num_elems = 1;')
-        L.append('  d->is_load = (inst_.sc0 != 0);')
+        L.append(f'  d->is_load = ({sc0} != 0);')
         L.append(f'  d->atomic_op = {op_enum};')
-        L.append('  d->mtype = mtype_from_bits(inst_.sc0, inst_.sc1);')
-        L.append('  d->non_temporal = inst_.nt;')
+        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->non_temporal = {nt};')
         L.append('  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
@@ -3435,6 +3473,7 @@ class CodeGenerator:
     def _gen_buffer_load(self, dst: list[str], src: list[str], sem: InstructionSemantics, cls: str = 'buffer_load') -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        sc0, sc1, nt = self._coherency_exprs()
         addr_fn = 'mtbuf_calculate_addresses' if cls == 'tbuffer_load' else 'mubuf_calculate_addresses'
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;')
@@ -3443,8 +3482,8 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
-        L.append('  d->mtype = mtype_from_bits(inst_.sc0, inst_.sc1);')
-        L.append('  d->non_temporal = inst_.nt;')
+        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->non_temporal = {nt};')
         L.append(f'  {addr_fn}(inst_, wf, d->per_lane_addr, d->lane_mask);')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -3452,13 +3491,14 @@ class CodeGenerator:
     def _gen_buffer_store(self, dst: list[str], src: list[str], sem: InstructionSemantics, cls: str = 'buffer_store') -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        sc0, sc1, nt = self._coherency_exprs()
         addr_fn = 'mtbuf_calculate_addresses' if cls == 'tbuffer_store' else 'mubuf_calculate_addresses'
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = false;')
-        L.append('  d->mtype = mtype_from_bits(inst_.sc0, inst_.sc1);')
-        L.append('  d->non_temporal = inst_.nt;')
+        L.append(f'  d->mtype = mtype_from_bits({sc0}, {sc1});')
+        L.append(f'  d->non_temporal = {nt};')
         L.append(f'  {addr_fn}(inst_, wf, d->per_lane_addr, d->lane_mask);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
@@ -3725,6 +3765,9 @@ class CodeGenerator:
                 ]
                 _MEM_ENC_NAMES = frozenset({
                     'ENC_SMEM', 'ENC_FLAT', 'ENC_MUBUF', 'ENC_MTBUF', 'ENC_DS',
+                    # RDNA4 renamed/new memory encodings
+                    'ENC_VFLAT', 'ENC_VGLOBAL', 'ENC_VSCRATCH',
+                    'ENC_VDS', 'ENC_VBUFFER',
                 })
                 is_mem_enc = enc.enc_name.upper() in _MEM_ENC_NAMES
                 if is_mem_enc:
@@ -3793,24 +3836,38 @@ class CodeGenerator:
                 # from data_types.h (included via cpp_includes when has_sem).
 
                 if is_smem:
-                    smem_offset_helper = cgen.Line(
-                        'namespace {\n'
-                        'Operand make_smem_offset(const Smem::OpEncoding *enc) {\n'
-                        '  // SOFFSET_EN and IMM are independent: SOFFSET_EN gates the\n'
-                        '  // SGPR field, IMM gates the 21-bit immediate field.\n'
-                        '  // When both are set the hardware adds SGPR + immediate;\n'
-                        '  // we show the SGPR as the operand and the immediate as\n'
-                        '  // an offset modifier.\n'
-                        '  if (enc->soffset_en)\n'
-                        '    return Operand(32, OperandType::OPR_SMEM_OFFSET, '
-                        'static_cast<int>(enc->soffset));\n'
-                        '  if (enc->imm)\n'
-                        '    return Operand(32, OperandType::OPR_SIMM32, '
-                        'static_cast<int>(enc->offset));\n'
-                        '  return Operand(32, OperandType::OPR_SIMM32, 0);\n'
-                        '}\n'
-                        '} // namespace'
-                    )
+                    direct_field = self.isa_spec.profile.smem_direct_offset_field
+                    if direct_field is None:
+                        # CDNA model: soffset_en / imm / soffset three-field logic.
+                        smem_body = (
+                            'namespace {\n'
+                            'Operand make_smem_offset(const Smem::OpEncoding *enc) {\n'
+                            '  // SOFFSET_EN and IMM are independent: SOFFSET_EN gates the\n'
+                            '  // SGPR field, IMM gates the 21-bit immediate field.\n'
+                            '  // When both are set the hardware adds SGPR + immediate;\n'
+                            '  // we show the SGPR as the operand and the immediate as\n'
+                            '  // an offset modifier.\n'
+                            '  if (enc->soffset_en)\n'
+                            '    return Operand(32, OperandType::OPR_SMEM_OFFSET, '
+                            'static_cast<int>(enc->soffset));\n'
+                            '  if (enc->imm)\n'
+                            '    return Operand(32, OperandType::OPR_SIMM32, '
+                            'static_cast<int>(enc->offset));\n'
+                            '  return Operand(32, OperandType::OPR_SIMM32, 0);\n'
+                            '}\n'
+                            '} // namespace'
+                        )
+                    else:
+                        # RDNA model: direct offset field (no soffset_en/imm).
+                        smem_body = (
+                            'namespace {\n'
+                            'Operand make_smem_offset(const Smem::OpEncoding *enc) {\n'
+                            f'  return Operand(32, OperandType::OPR_SIMM32, '
+                            f'static_cast<int>(enc->{direct_field}));\n'
+                            '}\n'
+                            '} // namespace'
+                        )
+                    smem_offset_helper = cgen.Line(smem_body)
                     class_func_impls.insert(0, smem_offset_helper)
 
                 inst_def_file.gen_code()
@@ -3831,8 +3888,11 @@ class CodeGenerator:
                 for x in opnd_sels.operand_type.split('_')[1:]
             )
             opnd_sel_enum = f'enum OpSel{opnd_sel_name} {{'
+            seen_names: set[str] = set()
             for opnd_sel_val in opnd_sels.op_sel_vals:
-                opnd_sel_enum += f'{opnd_sel_val[0]} = {opnd_sel_val[1]},'
+                if opnd_sel_val[0] not in seen_names:
+                    seen_names.add(opnd_sel_val[0])
+                    opnd_sel_enum += f'{opnd_sel_val[0]} = {opnd_sel_val[1]},'
             opnd_sel_enum += '};'
             code_lines.append(cgen.Line(opnd_sel_enum))
 
@@ -3982,6 +4042,45 @@ class CodeGenerator:
         class_impl.insert(0, reg_name_helper)
 
         # Operand value resolution (consolidated from operand_resolve.cpp)
+        # Build ISA-dependent helper function bodies: only reference OperandType
+        # values that actually exist in this ISA's generated enum.
+        _opr = set(self.isa_spec.operand_types)
+        _vgpr_only_parts = ['t == OperandType::OPR_VGPR']
+        for _opt in ('OPR_VGPR_OR_ACCVGPR', 'OPR_VGPR_OR_LDS', 'OPR_SRC_VGPR'):
+            if _opt in _opr:
+                _vgpr_only_parts.append(f't == OperandType::{_opt}')
+        _is_vgpr_only_body = (
+            'bool is_vgpr_only_type(OperandType t) {\n'
+            '  return ' + ' ||\n         '.join(_vgpr_only_parts) + ';\n'
+            '}'
+        )
+        _imm_parts = ['t == OperandType::OPR_SIMM16', 't == OperandType::OPR_SIMM32']
+        for _opt in ('OPR_SIMM4', 'OPR_SIMM8'):
+            if _opt in _opr:
+                _imm_parts.append(f't == OperandType::{_opt}')
+        for _opt in ('OPR_LABEL', 'OPR_WAITCNT'):
+            if _opt in _opr:
+                _imm_parts.append(f't == OperandType::{_opt}')
+        _is_immediate_body = (
+            'bool is_immediate_type(OperandType t) {\n'
+            '  return ' + ' ||\n         '.join(_imm_parts) + ';\n'
+            '}'
+        )
+        _has_accvgpr = 'OPR_VGPR_OR_ACCVGPR' in _opr
+        _vgpr_index_cond = (
+            '(opr_type == OperandType::OPR_VGPR || '
+            'opr_type == OperandType::OPR_VGPR_OR_ACCVGPR)'
+            if _has_accvgpr else
+            'opr_type == OperandType::OPR_VGPR'
+        )
+        _vgpr_index_body = (
+            'uint32_t vgpr_index(OperandType opr_type, int ev) {\n'
+            f'  if ({_vgpr_index_cond})\n'
+            '    return static_cast<uint32_t>(ev);\n'
+            '  return static_cast<uint32_t>(ev - 256);\n'
+            '}'
+        )
+
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
@@ -4109,22 +4208,10 @@ class CodeGenerator:
             '  throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));\n'
             '}\n'
             '\n'
-            'bool is_vgpr_only_type(OperandType t) {\n'
-            '  return t == OperandType::OPR_VGPR || t == OperandType::OPR_VGPR_OR_ACCVGPR ||\n'
-            '         t == OperandType::OPR_VGPR_OR_LDS || t == OperandType::OPR_SRC_VGPR;\n'
-            '}\n'
-            '\n'
-            'bool is_immediate_type(OperandType t) {\n'
-            '  return t == OperandType::OPR_SIMM16 || t == OperandType::OPR_SIMM32 ||\n'
-            '         t == OperandType::OPR_SIMM4 || t == OperandType::OPR_SIMM8 ||\n'
-            '         t == OperandType::OPR_LABEL || t == OperandType::OPR_WAITCNT;\n'
-            '}\n'
-            '\n'
-            'uint32_t vgpr_index(OperandType opr_type, int ev) {\n'
-            '  if (opr_type == OperandType::OPR_VGPR || opr_type == OperandType::OPR_VGPR_OR_ACCVGPR)\n'
-            '    return static_cast<uint32_t>(ev);\n'
-            '  return static_cast<uint32_t>(ev - 256);\n'
-            '}\n'
+            + _is_vgpr_only_body + '\n\n'
+            + _is_immediate_body + '\n\n'
+            + _vgpr_index_body + '\n\n'
+            +
             '\n'
             '} // namespace\n'
             '\n'

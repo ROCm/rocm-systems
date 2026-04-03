@@ -346,6 +346,7 @@ class IsaProfile(ABC):
 
 _VOP_E32_RULE = MnemonicRule(suffix='_e32')
 
+# GFX940 (CDNA3/4): SC0+SC1+NT coherency model.
 _SMEM_MODIFIERS = [
     EncodingModifier(
         'offset', is_offset=True,
@@ -383,6 +384,80 @@ _FLAT_MODIFIERS = [
     EncodingModifier('sc0'),
     EncodingModifier('sc1'),
     EncodingModifier('nt'),
+]
+
+# GFX9 (CDNA1/2): GLC+SLC coherency model; SMEM unchanged (soffset_en/imm present).
+_MUBUF_MODIFIERS_GLC = [
+    EncodingModifier('offen'),
+    EncodingModifier('idxen'),
+    EncodingModifier('offset', is_offset=True),
+    EncodingModifier('glc'),
+    EncodingModifier('slc'),
+]
+
+_MTBUF_MODIFIERS_GLC = [
+    EncodingModifier('offen'),
+    EncodingModifier('offset', is_offset=True),
+    EncodingModifier('glc'),
+    EncodingModifier('slc'),
+]
+
+_FLAT_MODIFIERS_GLC = [
+    EncodingModifier(
+        'flat_offset', is_offset=True,
+        preamble=(
+            'int flat_offset = (inst->seg != 0) ?'
+            ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
+        ),
+    ),
+    EncodingModifier('glc'),
+    EncodingModifier('slc'),
+]
+
+# GFX10/GFX11 (RDNA1/2/3/3.5): GLC+DLC+SLC; SMEM has no soffset_en/imm.
+_SMEM_MODIFIERS_GLC_DLC = [
+    EncodingModifier('glc'),
+    EncodingModifier('dlc'),
+]
+
+_MUBUF_MODIFIERS_GLC_DLC = [
+    EncodingModifier('offen'),
+    EncodingModifier('idxen'),
+    EncodingModifier('offset', is_offset=True),
+    EncodingModifier('glc'),
+    EncodingModifier('dlc'),
+    EncodingModifier('slc'),
+]
+
+_MTBUF_MODIFIERS_GLC_DLC = [
+    EncodingModifier('offen'),
+    EncodingModifier('offset', is_offset=True),
+    EncodingModifier('glc'),
+    EncodingModifier('dlc'),
+    EncodingModifier('slc'),
+]
+
+_FLAT_MODIFIERS_GLC_DLC = [
+    EncodingModifier('offset', is_offset=True),
+    EncodingModifier('glc'),
+    EncodingModifier('dlc'),
+    EncodingModifier('slc'),
+]
+
+# GFX12 (RDNA4): SCOPE+TH model; flag modifier is NV only.
+_SMEM_MODIFIERS_RDNA4 = [
+    EncodingModifier('nv'),
+]
+
+_VBUFFER_MODIFIERS_RDNA4 = [
+    EncodingModifier('offen'),
+    EncodingModifier('idxen'),
+    EncodingModifier('ioffset', is_offset=True),
+    EncodingModifier('nv'),
+]
+
+_VFLAT_MODIFIERS_RDNA4 = [
+    EncodingModifier('nv'),
 ]
 
 
@@ -573,6 +648,53 @@ class _AmdgpuProfileBase(IsaProfile):
         """Memory coherency encoding model for this ISA family."""
         return MemoryCoherencyModel.GFX9_GLC
 
+    @property
+    def coherency_field_names(self) -> tuple[str, str, str | None]:
+        """Return ``(sc0_field, sc1_field, nt_field_or_None)`` for execute() bodies.
+
+        These names index into the machine-instruction struct fields that
+        carry the two cache-scope bits and the non-temporal hint.  On ISAs
+        that lack a dedicated NT field, ``nt_field`` is ``None`` and the
+        code generator substitutes the literal ``0``.
+
+        Default (CDNA3/4): ``('sc0', 'sc1', 'nt')``.
+        """
+        return ('sc0', 'sc1', 'nt')
+
+    @property
+    def vop3p_opsel_fields(self) -> tuple[str, str]:
+        """Return ``(op_sel_field, op_sel_hi_field)`` for VOP3P execute() bodies.
+
+        Default: ``('op_sel', 'op_sel_hi')``.
+        RDNA4 renames these to ``('opsel', 'opsel_hi')`` (no underscores).
+        """
+        return ('op_sel', 'op_sel_hi')
+
+    @property
+    def smem_direct_offset_field(self) -> str | None:
+        """Field name of the direct SMEM immediate offset, or ``None``.
+
+        When ``None``, the ISA uses the three-field CDNA model:
+        ``soffset_en``, ``imm``, and ``offset``/``soffset``.  When a
+        string (e.g. ``'offset'`` or ``'ioffset'``), the generated
+        ``make_smem_offset`` helper always returns
+        ``enc-><field>`` directly with no conditional logic.
+
+        CDNA1/2/3/4 → ``None`` (three-field model).
+        RDNA1/2/3/3.5 → ``'offset'``.
+        RDNA4 → ``'ioffset'``.
+        """
+        return None
+
+    @property
+    def flat_store_src_field(self) -> str:
+        """Field name in the flat/global/scratch machine inst for store source data.
+
+        CDNA3/4 and older flat: ``'data'``.
+        RDNA4 vflat/vglobal/vscratch: ``'vsrc'``.
+        """
+        return 'data'
+
 
 class CdnaProfile(_AmdgpuProfileBase):
     """ISA profile for the CDNA family (CDNA1 through CDNA4).
@@ -704,6 +826,22 @@ class Cdna1Profile(CdnaProfile):
         return MemoryCoherencyModel.GFX9_GLC
 
     @property
+    def coherency_field_names(self) -> tuple[str, str, str | None]:
+        return ('glc', 'slc', None)
+
+    def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
+        upper = enc_name.upper()
+        if upper == 'ENC_SMEM':
+            return _SMEM_MODIFIERS  # soffset_en/imm/glc/nv present in CDNA1
+        if upper == 'ENC_MUBUF':
+            return _MUBUF_MODIFIERS_GLC
+        if upper == 'ENC_MTBUF':
+            return _MTBUF_MODIFIERS_GLC
+        if upper == 'ENC_FLAT':
+            return _FLAT_MODIFIERS_GLC
+        return []
+
+    @property
     def skip_encodings(self) -> frozenset[str]:
         return frozenset()
 
@@ -731,12 +869,28 @@ class Cdna2Profile(CdnaProfile):
         return MemoryCoherencyModel.GFX9_GLC
 
     @property
+    def coherency_field_names(self) -> tuple[str, str, str | None]:
+        return ('glc', 'slc', None)
+
+    def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
+        upper = enc_name.upper()
+        if upper == 'ENC_SMEM':
+            return _SMEM_MODIFIERS  # soffset_en/imm/glc/nv present in CDNA2
+        if upper == 'ENC_MUBUF':
+            return _MUBUF_MODIFIERS_GLC
+        if upper == 'ENC_MTBUF':
+            return _MTBUF_MODIFIERS_GLC
+        if upper == 'ENC_FLAT':
+            return _FLAT_MODIFIERS_GLC
+        return []
+
+    @property
     def skip_encodings(self) -> frozenset[str]:
         return frozenset()
 
 
 class Rdna1Profile(_AmdgpuProfileBase):
-    """ISA profile for RDNA1 and RDNA2.
+    """ISA profile for RDNA1 (GFX10.1, Navi1x).
 
     Encoding name conventions follow the same pattern as CDNA:
 
@@ -792,9 +946,43 @@ class Rdna1Profile(_AmdgpuProfileBase):
     def coherency_model(self) -> MemoryCoherencyModel:
         return MemoryCoherencyModel.GFX10_GLC_DLC_SLC
 
+    @property
+    def coherency_field_names(self) -> tuple[str, str, str | None]:
+        return ('glc', 'slc', None)
+
+    @property
+    def smem_direct_offset_field(self) -> str | None:
+        return 'offset'
+
+    def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
+        upper = enc_name.upper()
+        if upper == 'ENC_SMEM':
+            return _SMEM_MODIFIERS_GLC_DLC
+        if upper == 'ENC_MUBUF':
+            return _MUBUF_MODIFIERS_GLC_DLC
+        if upper == 'ENC_MTBUF':
+            return _MTBUF_MODIFIERS_GLC_DLC
+        if upper == 'ENC_FLAT':
+            return _FLAT_MODIFIERS_GLC_DLC
+        return []
+
+
+class Rdna2Profile(Rdna1Profile):
+    """ISA profile for RDNA2 (GFX10.3, Navi2x).
+
+    Inherits all properties from ``Rdna1Profile`` except:
+
+    - Wave64 is not supported: ``wave_size_max == 32``.
+    - DPP/SDWA variants still skipped (``_SKIP_DPP_SDWA = True``).
+    """
+
+    @property
+    def wave_size_max(self) -> int:
+        return 32
+
 
 class Rdna3Profile(_AmdgpuProfileBase):
-    """ISA profile for RDNA3 and RDNA3.5.
+    """ISA profile for RDNA3 (GFX11, Navi3x).
 
     Key differences from RDNA1/2:
 
@@ -863,6 +1051,36 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def coherency_model(self) -> MemoryCoherencyModel:
         return MemoryCoherencyModel.GFX11_SC0_SC1_TH
+
+    @property
+    def coherency_field_names(self) -> tuple[str, str, str | None]:
+        # RDNA3/3.5 MubufMachineInst uses glc+slc (not sc0+sc1).
+        return ('glc', 'slc', None)
+
+    @property
+    def smem_direct_offset_field(self) -> str | None:
+        return 'offset'
+
+    def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
+        upper = enc_name.upper()
+        if upper == 'ENC_SMEM':
+            return _SMEM_MODIFIERS_GLC_DLC
+        if upper == 'ENC_MUBUF':
+            return _MUBUF_MODIFIERS_GLC_DLC
+        if upper == 'ENC_MTBUF':
+            return _MTBUF_MODIFIERS_GLC_DLC
+        if upper == 'ENC_FLAT':
+            return _FLAT_MODIFIERS_GLC_DLC
+        return []
+
+
+class Rdna3_5Profile(Rdna3Profile):
+    """ISA profile for RDNA3.5 (GFX11.5, Navi3.5x).
+
+    Inherits all properties from ``Rdna3Profile``.  Provided as a distinct
+    class so the codegen pipeline can auto-detect RDNA3.5 XML files
+    separately from RDNA3.
+    """
 
 
 class Rdna4Profile(_AmdgpuProfileBase):
@@ -950,18 +1168,34 @@ class Rdna4Profile(_AmdgpuProfileBase):
             return _VOP_E32_RULE
         return MnemonicRule()
 
+    @property
+    def coherency_field_names(self) -> tuple[str, str, str | None]:
+        # RDNA4 VbufferMachineInst/VflatMachineInst use nv (no sc0/sc1).
+        # mtype_from_bits is called with (nv, 0) as a placeholder.
+        return ('nv', 'nv', None)
+
+    @property
+    def vop3p_opsel_fields(self) -> tuple[str, str]:
+        return ('opsel', 'opsel_hi')
+
+    @property
+    def smem_direct_offset_field(self) -> str | None:
+        return 'ioffset'
+
+    @property
+    def flat_store_src_field(self) -> str:
+        return 'vsrc'
+
     def encoding_modifiers(self, enc_name: str) -> list[EncodingModifier]:
         """RDNA4 encoding modifiers.
 
-        Inherits SMEM/MUBUF/MTBUF from the base, but does not emit FLAT
-        modifiers (RDNA4 VFLAT/VGLOBAL/VSCRATCH do not use the ``seg``
-        field trick).
+        Uses GFX12 SCOPE+TH model: SMEM/VBUFFER/VFLAT show only NV.
         """
         upper = enc_name.upper()
         if upper == 'ENC_SMEM':
-            return _SMEM_MODIFIERS
+            return _SMEM_MODIFIERS_RDNA4
         if upper in ('ENC_VBUFFER', 'ENC_MUBUF'):
-            return _MUBUF_MODIFIERS
-        if upper == 'ENC_MTBUF':
-            return _MTBUF_MODIFIERS
+            return _VBUFFER_MODIFIERS_RDNA4
+        if upper in ('ENC_VFLAT', 'ENC_VGLOBAL', 'ENC_VSCRATCH'):
+            return _VFLAT_MODIFIERS_RDNA4
         return []

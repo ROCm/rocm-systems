@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -151,6 +152,32 @@ public:
   /// @param expcnt Export counter threshold.
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
     wait_target_ = {vmcnt, lgkmcnt, expcnt};
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set a single RDNA4 split-wait counter threshold (S_WAIT_LOADCNT etc.).
+  ///
+  /// Maps the RDNA4 per-type wait instruction to the unified WaitTarget model:
+  ///   load/store/sample/bvh → vmcnt,  ds/km → lgkmcnt,  exp → expcnt.
+  /// Combined forms (e.g. wait_loadcnt_dscnt) update both counters.
+  void set_wait_counter(const char *counter_name, uint16_t threshold) {
+    using namespace std::string_view_literals;
+    std::string_view name{counter_name};
+    auto vm = static_cast<uint8_t>(threshold & 0x3F);
+    auto lgkm = static_cast<uint8_t>(threshold & 0x1F);
+    auto exp = static_cast<uint8_t>(threshold & 0x07);
+    if (name == "wait_loadcnt" || name == "wait_storecnt" || name == "wait_samplecnt" ||
+        name == "wait_bvhcnt") {
+      wait_target_.vmcnt = vm;
+    } else if (name == "wait_dscnt" || name == "wait_kmcnt") {
+      wait_target_.lgkmcnt = lgkm;
+    } else if (name == "wait_expcnt") {
+      wait_target_.expcnt = exp;
+    } else if (name == "wait_loadcnt_dscnt") {
+      wait_target_.vmcnt = vm;
+      wait_target_.lgkmcnt = lgkm;
+    }
     if (!wait_satisfied())
       state_ = WfState::WAITCNT;
   }

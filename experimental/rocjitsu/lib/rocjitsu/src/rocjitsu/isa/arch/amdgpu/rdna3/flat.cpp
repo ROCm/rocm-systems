@@ -1,0 +1,1092 @@
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// This file was automatically generated. Do not modify.
+
+#include "rocjitsu/isa/arch/amdgpu/rdna3/flat.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/data_types.h"
+#include "util/except.h"
+#include <algorithm>
+#include <bit>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <memory>
+
+namespace rocjitsu {
+namespace rdna3 {
+
+FlatLoadU8Flat::FlatLoadU8Flat(const MachineInst *inst)
+    : Flat("flat_load_u8", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadU8Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadI8Flat::FlatLoadI8Flat(const MachineInst *inst)
+    : Flat("flat_load_i8", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadI8Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->sign_extend = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadU16Flat::FlatLoadU16Flat(const MachineInst *inst)
+    : Flat("flat_load_u16", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadU16Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadI16Flat::FlatLoadI16Flat(const MachineInst *inst)
+    : Flat("flat_load_i16", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadI16Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->sign_extend = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadB32Flat::FlatLoadB32Flat(const MachineInst *inst)
+    : Flat("flat_load_b32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadB32Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadB64Flat::FlatLoadB64Flat(const MachineInst *inst)
+    : Flat("flat_load_b64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadB64Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 2;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadB96Flat::FlatLoadB96Flat(const MachineInst *inst)
+    : Flat("flat_load_b96", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadB96Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 3;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadB128Flat::FlatLoadB128Flat(const MachineInst *inst)
+    : Flat("flat_load_b128", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadB128Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 4;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatStoreB8Flat::FlatStoreB8Flat(const MachineInst *inst)
+    : Flat("flat_store_b8", reinterpret_cast<const OpEncoding *>(inst)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatStoreB8Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 1);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);
+    d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
+  }
+  set_data(std::move(d));
+}
+
+FlatStoreB16Flat::FlatStoreB16Flat(const MachineInst *inst)
+    : Flat("flat_store_b16", reinterpret_cast<const OpEncoding *>(inst)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatStoreB16Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 2);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);
+    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
+  }
+  set_data(std::move(d));
+}
+
+FlatStoreB32Flat::FlatStoreB32Flat(const MachineInst *inst)
+    : Flat("flat_store_b32", reinterpret_cast<const OpEncoding *>(inst)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatStoreB32Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
+}
+
+FlatStoreB64Flat::FlatStoreB64Flat(const MachineInst *inst)
+    : Flat("flat_store_b64", reinterpret_cast<const OpEncoding *>(inst)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatStoreB64Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 2;
+  d->is_load = false;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
+}
+
+FlatStoreB96Flat::FlatStoreB96Flat(const MachineInst *inst)
+    : Flat("flat_store_b96", reinterpret_cast<const OpEncoding *>(inst)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatStoreB96Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 3;
+  d->is_load = false;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 12);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 2, lane);
+    std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
+  }
+  set_data(std::move(d));
+}
+
+FlatStoreB128Flat::FlatStoreB128Flat(const MachineInst *inst)
+    : Flat("flat_store_b128", reinterpret_cast<const OpEncoding *>(inst)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatStoreB128Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 4;
+  d->is_load = false;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 16);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 2, lane);
+    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
+    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 3, lane);
+    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
+  }
+  set_data(std::move(d));
+}
+
+FlatLoadD16U8Flat::FlatLoadD16U8Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16U8Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadD16I8Flat::FlatLoadD16I8Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16I8Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->sign_extend = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadD16B16Flat::FlatLoadD16B16Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16B16Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadD16HiU8Flat::FlatLoadD16HiU8Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16HiU8Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadD16HiI8Flat::FlatLoadD16HiI8Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16HiI8Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->sign_extend = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatLoadD16HiB16Flat::FlatLoadD16HiB16Flat(const MachineInst *inst)
+    : Flat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatLoadD16HiB16Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
+
+FlatStoreD16HiB8Flat::FlatStoreD16HiB8Flat(const MachineInst *inst)
+    : Flat("flat_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatStoreD16HiB8Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 1);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);
+    d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
+  }
+  set_data(std::move(d));
+}
+
+FlatStoreD16HiB16Flat::FlatStoreD16HiB16Flat(const MachineInst *inst)
+    : Flat("flat_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst)),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatStoreD16HiB16Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 2);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);
+    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
+  }
+  set_data(std::move(d));
+}
+
+FlatAtomicSwapB32Flat::FlatAtomicSwapB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicSwapB32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_SWAP_B32)
+}
+
+FlatAtomicCmpswapB32Flat::FlatAtomicCmpswapB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicCmpswapB32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_CMPSWAP_B32)
+}
+
+FlatAtomicAddU32Flat::FlatAtomicAddU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicAddU32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_ADD_U32)
+}
+
+FlatAtomicSubU32Flat::FlatAtomicSubU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicSubU32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_SUB_U32)
+}
+
+FlatAtomicMinI32Flat::FlatAtomicMinI32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMinI32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_I32)
+}
+
+FlatAtomicMinU32Flat::FlatAtomicMinU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMinU32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_U32)
+}
+
+FlatAtomicMaxI32Flat::FlatAtomicMaxI32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMaxI32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_I32)
+}
+
+FlatAtomicMaxU32Flat::FlatAtomicMaxU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMaxU32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_U32)
+}
+
+FlatAtomicAndB32Flat::FlatAtomicAndB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicAndB32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_AND_B32)
+}
+
+FlatAtomicOrB32Flat::FlatAtomicOrB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicOrB32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_OR_B32)
+}
+
+FlatAtomicXorB32Flat::FlatAtomicXorB32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicXorB32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_XOR_B32)
+}
+
+FlatAtomicIncU32Flat::FlatAtomicIncU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicIncU32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_INC_U32)
+}
+
+FlatAtomicDecU32Flat::FlatAtomicDecU32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicDecU32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_DEC_U32)
+}
+
+FlatAtomicSwapB64Flat::FlatAtomicSwapB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicSwapB64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_SWAP_B64)
+}
+
+FlatAtomicCmpswapB64Flat::FlatAtomicCmpswapB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicCmpswapB64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_CMPSWAP_B64)
+}
+
+FlatAtomicAddU64Flat::FlatAtomicAddU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicAddU64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_ADD_U64)
+}
+
+FlatAtomicSubU64Flat::FlatAtomicSubU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicSubU64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_SUB_U64)
+}
+
+FlatAtomicMinI64Flat::FlatAtomicMinI64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMinI64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_I64)
+}
+
+FlatAtomicMinU64Flat::FlatAtomicMinU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMinU64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_U64)
+}
+
+FlatAtomicMaxI64Flat::FlatAtomicMaxI64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMaxI64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_I64)
+}
+
+FlatAtomicMaxU64Flat::FlatAtomicMaxU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMaxU64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_U64)
+}
+
+FlatAtomicAndB64Flat::FlatAtomicAndB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicAndB64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_AND_B64)
+}
+
+FlatAtomicOrB64Flat::FlatAtomicOrB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicOrB64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_OR_B64)
+}
+
+FlatAtomicXorB64Flat::FlatAtomicXorB64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicXorB64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_XOR_B64)
+}
+
+FlatAtomicIncU64Flat::FlatAtomicIncU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicIncU64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_INC_U64)
+}
+
+FlatAtomicDecU64Flat::FlatAtomicDecU64Flat(const MachineInst *inst)
+    : Flat("flat_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicDecU64Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_DEC_U64)
+}
+
+FlatAtomicCmpswapF32Flat::FlatAtomicCmpswapF32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_cmpswap_f32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicCmpswapF32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_CMPSWAP_F32)
+}
+
+FlatAtomicMinF32Flat::FlatAtomicMinF32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_min_f32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMinF32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_F32)
+}
+
+FlatAtomicMaxF32Flat::FlatAtomicMaxF32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_max_f32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicMaxF32Flat::execute(amdgpu::Wavefront &wf) {
+  (void)wf;
+  throw util::UnimplementedInst(
+      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_F32)
+}
+
+FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst)
+    : Flat("flat_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data) {
+  dst_operands_.emplace_back(&vdst);
+  src_operands_.emplace_back(&addr);
+  src_operands_.emplace_back(&data);
+  flags_ |= MEMORY_OP;
+}
+
+void FlatAtomicAddF32Flat::execute(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->mtype = mtype_from_bits(inst_.glc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
+}
+
+} // namespace rdna3
+} // namespace rocjitsu

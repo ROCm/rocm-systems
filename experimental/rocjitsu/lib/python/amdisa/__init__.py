@@ -19,7 +19,9 @@ from amdisa.isa_profile import (
     MemoryCoherencyModel,
     MnemonicRule,
     Rdna1Profile,
+    Rdna2Profile,
     Rdna3Profile,
+    Rdna3_5Profile,
     Rdna4Profile,
 )
 from amdisa.parser import Parser
@@ -44,7 +46,9 @@ __all__ = [
     'MemoryCoherencyModel',
     'MnemonicRule',
     'Rdna1Profile',
+    'Rdna2Profile',
     'Rdna3Profile',
+    'Rdna3_5Profile',
     'Rdna4Profile',
     'IsaSpec',
     'Operand',

@@ -1,0 +1,227 @@
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// This file was automatically generated. Do not modify.
+
+#ifndef ROCJITSU_ISA_ARCH_AMDGPU_RDNA1_SMEM_H_
+#define ROCJITSU_ISA_ARCH_AMDGPU_RDNA1_SMEM_H_
+
+#include "rocjitsu/isa/arch/amdgpu/rdna1/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna1/operand.h"
+
+namespace rocjitsu {
+namespace rdna1 {
+
+class SLoadDwordSmem : public Smem {
+public:
+  SLoadDwordSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SLoadDwordx2Smem : public Smem {
+public:
+  SLoadDwordx2Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SLoadDwordx4Smem : public Smem {
+public:
+  SLoadDwordx4Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SLoadDwordx8Smem : public Smem {
+public:
+  SLoadDwordx8Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SLoadDwordx16Smem : public Smem {
+public:
+  SLoadDwordx16Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SScratchLoadDwordSmem : public Smem {
+public:
+  SScratchLoadDwordSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SScratchLoadDwordx2Smem : public Smem {
+public:
+  SScratchLoadDwordx2Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SScratchLoadDwordx4Smem : public Smem {
+public:
+  SScratchLoadDwordx4Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SBufferLoadDwordSmem : public Smem {
+public:
+  SBufferLoadDwordSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SBufferLoadDwordx2Smem : public Smem {
+public:
+  SBufferLoadDwordx2Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SBufferLoadDwordx4Smem : public Smem {
+public:
+  SBufferLoadDwordx4Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SBufferLoadDwordx8Smem : public Smem {
+public:
+  SBufferLoadDwordx8Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SBufferLoadDwordx16Smem : public Smem {
+public:
+  SBufferLoadDwordx16Smem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SGl1InvSmem : public Smem {
+public:
+  SGl1InvSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SDcacheInvSmem : public Smem {
+public:
+  SDcacheInvSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SMemtimeSmem : public Smem {
+public:
+  SMemtimeSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+};
+
+class SMemrealtimeSmem : public Smem {
+public:
+  SMemrealtimeSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+};
+
+class SAtcProbeSmem : public Smem {
+public:
+  SAtcProbeSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SAtcProbeBufferSmem : public Smem {
+public:
+  SAtcProbeBufferSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+  Operand sbase;
+  Operand soffset;
+};
+
+class SGetWaveidInWorkgroupSmem : public Smem {
+public:
+  SGetWaveidInWorkgroupSmem(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand sdata;
+};
+
+} // namespace rdna1
+} // namespace rocjitsu
+
+#endif // ROCJITSU_ISA_ARCH_AMDGPU_RDNA1_SMEM_H_
