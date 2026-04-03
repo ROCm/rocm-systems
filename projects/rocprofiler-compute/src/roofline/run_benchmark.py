@@ -21,11 +21,11 @@
 
 import importlib
 
-from utils.hip_interface import hipGetDeviceProperties
-
 
 def load_bench(device_ids: list[str]) -> object:
     try:
+        from utils.hip_interface import hipGetDeviceProperties
+
         # Get exact LLVM target name of the device
         gfx_device = (hipGetDeviceProperties(int(device_ids[0])).gcnArchName).split(
             ":", 1
