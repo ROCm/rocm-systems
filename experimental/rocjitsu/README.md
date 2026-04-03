@@ -5,10 +5,17 @@ applications.
 
 ## Supported architectures
 
-| Architecture | ISA | Status |
+| Architecture | ISA Family | Status |
 |---|---|---|
+| CDNA1&trade; (gfx908) | GFX9 | Experimental |
+| CDNA2&trade; (gfx90a) | GFX9 | Experimental |
 | CDNA3&trade; (gfx94x) | GFX9 | Experimental |
 | CDNA4&trade; (gfx950) | GFX9 | Experimental |
+| RDNA1&trade; (gfx1010) | GFX10 | Experimental |
+| RDNA2&trade; (gfx1030) | GFX10 | Experimental |
+| RDNA3&trade; (gfx1100) | GFX11 | Experimental |
+| RDNA3.5&trade; (gfx1150) | GFX11 | Experimental |
+| RDNA4&trade; (gfx1200) | GFX12 | Experimental |
 | RISC-V RV32I/RV64I | RV32IMAFDC | Experimental |
 
 ## Features
