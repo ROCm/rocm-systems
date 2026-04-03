@@ -304,16 +304,22 @@ std::string LocateKernelFile(std::string filename, hsa_agent_t agent) {
   hsa_status_t err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name);
   RET_IF_HSA_UTILS_ERR_RET(err, obj_file);
 
-  // Try current directory
-  obj_file = "./" + filename;
-  int file_handle = open(obj_file.c_str(), O_RDONLY);
+  // Get base from ENV if defined, otherwise use current directory
+  const char* env_path = getenv("ROCRTST_KERNELS_PATH");
+  std::string base = (env_path && env_path[0] != '\0') ? env_path : ".";
+
+  int file_handle;
+
+  // Try <base>/<filename>
+  obj_file = base + "/" + filename;
+  file_handle = open(obj_file.c_str(), O_RDONLY);
   if (file_handle >= 0) {
     close(file_handle);
     return obj_file;
   }
 
-  // Try ./<agent_name>/<filename>
-  obj_file = "./" + std::string(agent_name) + "/" + filename;
+  // Try <base>/<agent_name>/<filename>
+  obj_file = base + "/" + std::string(agent_name) + "/" + filename;
   file_handle = open(obj_file.c_str(), O_RDONLY);
   if (file_handle >= 0) {
     close(file_handle);
