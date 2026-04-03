@@ -897,8 +897,13 @@ static hsa_status_t GetAgentInfo(hsa_agent_t agent, void* data) {
 void MemoryAsyncCopy::FindTopology() {
   hsa_status_t err;
 
+#if HWLOC_API_VERSION >= 0x00020000
   hwloc_topology_set_flags(topology_, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM);
   hwloc_topology_set_io_types_filter(topology_, HWLOC_TYPE_FILTER_KEEP_ALL);
+#else
+  hwloc_topology_set_flags(topology_, HWLOC_TOPOLOGY_FLAG_WHOLE_SYSTEM |
+                                         HWLOC_TOPOLOGY_FLAG_IO_DEVICES);
+#endif
 
   hwloc_topology_load(topology_);
 
