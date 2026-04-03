@@ -57,7 +57,8 @@ jobs:
 
       - name: Install python deps
         run: |
-          pip install -r t/requirements.txt
+          cd t
+          pip install -r requirements.txt
 
       - name: Patch rocm-systems
         run: |
@@ -89,15 +90,15 @@ jobs:
       - name: Runner health status
         run: |
           ccache --zero-stats
-          python ./t/build_tools/health_status.py
+          cd t
+          python ./build_tools/health_status.py
 
       - name: Fetch sources
         timeout-minutes: 30
         run: |
           git config --global core.longpaths true
-          python ./t/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
           cd t
-          dvc pull
+          python ./build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
 
       - name: Configure Projects
         env:
@@ -108,7 +109,8 @@ jobs:
         run: |
           # clear cache before build and after download
           ccache -z
-          python t/build_tools/github_actions/build_configure.py
+          cd t
+          python build_tools/github_actions/build_configure.py
 
       - name: Build therock-archives and therock-dist
         run: cmake --build "${{ env.BUILD_DIR }}" --target therock-archives therock-dist -- -k 0
@@ -149,7 +151,8 @@ jobs:
       - name: Post Build Upload
         if: always()
         run: |
-          python t/build_tools/github_actions/post_build_upload.py \
+          cd t
+          python build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir ${{ env.BUILD_DIR }} \
