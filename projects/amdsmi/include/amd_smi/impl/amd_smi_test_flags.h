@@ -20,40 +20,17 @@
  * THE SOFTWARE.
  */
 
-#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
-#define TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
+#ifndef AMD_SMI_INCLUDE_AMD_SMI_TEST_FLAGS_H_
+#define AMD_SMI_INCLUDE_AMD_SMI_TEST_FLAGS_H_
 
-#include <string>
+#include <cstdint>
 
-#include "../test_base.h"
+// Reserved test-only init flag. Passed to amdsmi_init() / rsmi_init() to
+// switch GPU device mutexes from blocking to non-blocking (trylock) mode,
+// making AMDSMI_STATUS_BUSY / RSMI_STATUS_BUSY observable by tests.
+//
+// MUST NOT overlap with any public AMDSMI_INIT_* flag defined in amdsmi.h.
+// Current public flags occupy bits [0:3]; this flag uses bit 59 (0x800_0000_0000_0000).
+static constexpr uint64_t AMD_SMI_INIT_FLAG_RESRV_TEST1 = 0x800000000000000ULL;
 
-class TestMutualExclusion : public TestBase {
- public:
-  TestMutualExclusion();
-
-  // @Brief: Destructor for test case of TestMutualExclusion
-  virtual ~TestMutualExclusion();
-
-  // @Brief: Setup the environment for measurement
-  virtual void SetUp();
-
-  // @Brief: Core measurement execution
-  virtual void Run();
-
-  // @Brief: Clean up and retrieve the resource
-  virtual void Close();
-
-  // @Brief: Display  results
-  virtual void DisplayResults() const;
-
-  // @Brief: Display information about what this test does
-  virtual void DisplayTestInfo(void);
-
- private:
-  bool sleeper_process_;
-  int child_;
-  std::string orig_cross_process_env_;
-  bool orig_cross_process_env_was_set_;
-};
-
-#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
+#endif  // AMD_SMI_INCLUDE_AMD_SMI_TEST_FLAGS_H_
