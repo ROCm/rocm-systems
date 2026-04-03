@@ -110,12 +110,16 @@ struct cache_policy
     /**
      * @brief Store a CPU PMC sample to the trace cache.
      *
-     * @param device_id Device identifier (always 0 for CPU)
-     * @param device_name Device name (unused for CPU)
-     * @param enabled_metrics_cfg Metrics enabled by configuration
-     * @param supported_metrics Metrics supported by the device
-     * @param metric_values Collected metric values
-     * @param timestamp Sample timestamp in nanoseconds
+     * Thread-safety: store_sample is called only from the sampler thread,
+     * serialized by type_mutex<category::amd_smi> in pmc::sample/pause.
+     * The static s_zero_entries is safe under this single-writer invariant.
+     *
+     * @param device_id Device identifier (always 0 for CPU).
+     * @param device_name Device name (unused for CPU).
+     * @param enabled_metrics_cfg Metrics enabled by configuration.
+     * @param supported_metrics Metrics supported by the device.
+     * @param metric_values Collected metric values.
+     * @param timestamp Sample timestamp in nanoseconds.
      */
     static void store_sample(size_t /*device_id*/, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_metrics_cfg,
@@ -126,12 +130,10 @@ struct cache_policy
         effective.value = enabled_metrics_cfg.value & supported_metrics.value;
 
         const auto& cpu_data = get_effective_cpu_data(metric_values);
-        auto        freqs    = serialize_frequencies(cpu_data);
-        auto        loads    = serialize_loads(cpu_data);
 
-        trace_cache::get_buffer_storage().store(
-            trace_cache::cpu_pmc_sample{ effective, timestamp, metric_values.process_data,
-                                         std::move(freqs), std::move(loads) });
+        trace_cache::get_buffer_storage().store(trace_cache::cpu_pmc_sample{
+            effective, timestamp, metric_values.process_data,
+            serialize_frequencies(cpu_data), serialize_loads(cpu_data) });
     }
 
 private:
@@ -150,58 +152,13 @@ private:
 
         if(!metric_values.cpu_data.empty())
         {
-            // Cache the CPU IDs for pause use
             s_zero_entries.clear();
             s_zero_entries.reserve(metric_values.cpu_data.size());
             for(const auto& cpu : metric_values.cpu_data)
-            {
                 s_zero_entries.push_back({ cpu.cpu_id, 0.0f, 0.0 });
-            }
             return metric_values.cpu_data;
         }
-
-        // Pause path: return cached zero entries
         return s_zero_entries;
-    }
-
-    static std::vector<uint8_t> serialize_frequencies(
-        const std::vector<per_cpu_metrics>& cpu_data)
-    {
-        constexpr size_t idx_size   = sizeof(size_t);
-        constexpr size_t value_size = sizeof(float);
-
-        std::vector<uint8_t> result;
-        result.resize(cpu_data.size() * (idx_size + value_size));
-
-        size_t offset = 0;
-        for(const auto& cpu : cpu_data)
-        {
-            std::memcpy(result.data() + offset, &cpu.cpu_id, idx_size);
-            offset += idx_size;
-            std::memcpy(result.data() + offset, &cpu.frequency, value_size);
-            offset += value_size;
-        }
-        return result;
-    }
-
-    static std::vector<uint8_t> serialize_loads(
-        const std::vector<per_cpu_metrics>& cpu_data)
-    {
-        constexpr size_t idx_size   = sizeof(size_t);
-        constexpr size_t value_size = sizeof(double);
-
-        std::vector<uint8_t> result;
-        result.resize(cpu_data.size() * (idx_size + value_size));
-
-        size_t offset = 0;
-        for(const auto& cpu : cpu_data)
-        {
-            std::memcpy(result.data() + offset, &cpu.cpu_id, idx_size);
-            offset += idx_size;
-            std::memcpy(result.data() + offset, &cpu.load, value_size);
-            offset += value_size;
-        }
-        return result;
     }
 };
 

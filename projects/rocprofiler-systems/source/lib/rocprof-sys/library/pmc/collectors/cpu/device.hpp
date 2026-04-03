@@ -150,8 +150,17 @@ private:
             const auto& prev = prev_it->second;
             const auto& curr = curr_it->second;
 
-            uint64_t total_delta  = curr.total() - prev.total();
-            uint64_t active_delta = curr.active() - prev.active();
+            // Guard against counter reset (e.g., CPU went offline/online)
+            if(curr.total() < prev.total())
+            {
+                m_prev_jiffies[cpu_id] = curr_it->second;
+                auto* entry            = find_or_create_cpu_entry(result, cpu_id);
+                entry->load            = 0.0;
+                continue;
+            }
+
+            const uint64_t total_delta  = curr.total() - prev.total();
+            const uint64_t active_delta = curr.active() - prev.active();
 
             double load_pct = 0.0;
             if(total_delta > 0)

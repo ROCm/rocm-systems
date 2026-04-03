@@ -5,8 +5,10 @@
 
 #include "library/pmc/device_providers/procfs/drivers/driver.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <unistd.h>
 
 namespace rocprofsys::pmc::device_providers::procfs
 {
@@ -26,8 +28,8 @@ public:
     using driver_t = typename DriverFactory::driver_t;
 
     provider()
-    : m_driver(DriverFactory::create_driver())
-    , m_cpu_count(m_driver->get_cpu_count())
+    : m_cpu_count(static_cast<size_t>(std::max(0L, sysconf(_SC_NPROCESSORS_ONLN))))
+    , m_driver(DriverFactory::create_driver(m_cpu_count))
     {}
 
     ~provider() = default;
@@ -37,7 +39,7 @@ public:
     provider(provider&&)                 = default;
     provider& operator=(provider&&)      = default;
 
-    [[nodiscard]] std::shared_ptr<driver_t> get_driver() const noexcept
+    [[nodiscard]] const std::shared_ptr<driver_t>& get_driver() const noexcept
     {
         return m_driver;
     }
@@ -48,8 +50,8 @@ public:
     void shutdown() {}
 
 private:
-    std::shared_ptr<driver_t> m_driver;
     size_t                    m_cpu_count = 0;
+    std::shared_ptr<driver_t> m_driver;
 };
 
 /**

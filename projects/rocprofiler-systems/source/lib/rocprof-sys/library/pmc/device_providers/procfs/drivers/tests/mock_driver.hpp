@@ -82,7 +82,10 @@ struct mock_driver_factory
 
     static std::shared_ptr<driver_t> s_mock_driver;
 
-    static std::shared_ptr<driver_t> create_driver() { return s_mock_driver; }
+    static std::shared_ptr<driver_t> create_driver([[maybe_unused]] size_t cpu_count = 0)
+    {
+        return s_mock_driver;
+    }
 
     static void set_mock_driver(std::shared_ptr<driver_t> driver)
     {

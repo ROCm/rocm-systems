@@ -7,6 +7,7 @@
 #include "library/pmc/collectors/cpu/types.hpp"
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::cpu
@@ -25,8 +26,9 @@ struct sample : trace_cache::cacheable_t
     };
 
     sample() = default;
-    sample(enabled_metrics _settings, uint64_t _timestamp, process_metrics _process_data,
-           std::vector<uint8_t> _freqs, std::vector<uint8_t> _loads)
+    sample(enabled_metrics _settings, uint64_t _timestamp,
+           const process_metrics& _process_data, std::vector<uint8_t> _freqs,
+           std::vector<uint8_t> _loads)
     : enabled_metric(_settings)
     , timestamp(_timestamp)
     , process_data(_process_data)
@@ -40,6 +42,46 @@ struct sample : trace_cache::cacheable_t
     std::vector<uint8_t> freqs;  // serialized cpu_id+freq pairs
     std::vector<uint8_t> loads;  // serialized cpu_id+load pairs
 };
+
+inline std::vector<uint8_t>
+serialize_frequencies(const std::vector<per_cpu_metrics>& cpu_data)
+{
+    constexpr size_t idx_size   = sizeof(size_t);
+    constexpr size_t value_size = sizeof(float);
+
+    std::vector<uint8_t> result;
+    result.resize(cpu_data.size() * (idx_size + value_size));
+
+    size_t offset = 0;
+    for(const auto& cpu : cpu_data)
+    {
+        std::memcpy(result.data() + offset, &cpu.cpu_id, idx_size);
+        offset += idx_size;
+        std::memcpy(result.data() + offset, &cpu.frequency, value_size);
+        offset += value_size;
+    }
+    return result;
+}
+
+inline std::vector<uint8_t>
+serialize_loads(const std::vector<per_cpu_metrics>& cpu_data)
+{
+    constexpr size_t idx_size   = sizeof(size_t);
+    constexpr size_t value_size = sizeof(double);
+
+    std::vector<uint8_t> result;
+    result.resize(cpu_data.size() * (idx_size + value_size));
+
+    size_t offset = 0;
+    for(const auto& cpu : cpu_data)
+    {
+        std::memcpy(result.data() + offset, &cpu.cpu_id, idx_size);
+        offset += idx_size;
+        std::memcpy(result.data() + offset, &cpu.load, value_size);
+        offset += value_size;
+    }
+    return result;
+}
 
 }  // namespace rocprofsys::pmc::collectors::cpu
 

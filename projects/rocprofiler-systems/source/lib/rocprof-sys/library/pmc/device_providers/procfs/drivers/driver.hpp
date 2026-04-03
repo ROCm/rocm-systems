@@ -3,28 +3,109 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <cstdint>
-#include <cstring>
+#include <cstdlib>
 #include <fcntl.h>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <sys/resource.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::pmc::drivers::procfs
 {
+// /proc/stat: ~120 bytes per CPU line. Default 16 KB covers ~128 CPUs.
+static constexpr size_t DEFAULT_STAT_BUFFER_SIZE = 16384;
+// /proc/self/statm: 7 space-separated numbers, always < 256 bytes.
+static constexpr size_t STATM_BUFFER_SIZE = 256;
+// Approximate bytes per /proc/stat CPU line (for dynamic sizing).
+static constexpr size_t BYTES_PER_STAT_LINE = 120;
+// sysfs frequency file: value in kHz, always < 32 bytes.
+static constexpr size_t SYSFS_FREQ_BUFFER_SIZE = 32;
+// ru_maxrss is in KB on Linux.
+static constexpr int64_t KB_TO_BYTES = 1024;
+// Microseconds per second (for timeval conversion).
+static constexpr int64_t US_PER_SECOND = 1'000'000;
+// kHz to MHz conversion for sysfs scaling_cur_freq.
+static constexpr float KHZ_TO_MHZ = 0.001f;
 
-/**
- * @brief CPU time counters from /proc/stat for a single CPU core.
- *
- * Values are in jiffies (clock ticks). Use total() and active() to compute
- * CPU load percentage from the delta between two snapshots.
- */
+class unique_fd
+{
+public:
+    unique_fd() noexcept = default;
+    explicit unique_fd(int fd) noexcept
+    : m_fd(fd)
+    {}
+    ~unique_fd() noexcept
+    {
+        if(m_fd >= 0) ::close(m_fd);
+    }
+
+    unique_fd(unique_fd&& other) noexcept
+    : m_fd(std::exchange(other.m_fd, -1))
+    {}
+
+    unique_fd& operator=(unique_fd&& other) noexcept
+    {
+        if(this != &other)
+        {
+            if(m_fd >= 0) ::close(m_fd);
+            m_fd = std::exchange(other.m_fd, -1);
+        }
+        return *this;
+    }
+
+    unique_fd(const unique_fd&)            = delete;
+    unique_fd& operator=(const unique_fd&) = delete;
+
+    [[nodiscard]] int      get() const noexcept { return m_fd; }
+    [[nodiscard]] explicit operator bool() const noexcept { return m_fd >= 0; }
+
+    void reset(int fd = -1) noexcept
+    {
+        if(m_fd >= 0) ::close(m_fd);
+        m_fd = fd;
+    }
+
+private:
+    int m_fd = -1;
+};
+
+constexpr bool
+starts_with(std::string_view str, std::string_view prefix) noexcept
+{
+    return str.size() >= prefix.size() && str.substr(0, prefix.size()) == prefix;
+}
+
+inline std::string_view
+ltrim(std::string_view str) noexcept
+{
+    const auto* const it = std::find_if_not(
+        str.begin(), str.end(), [](unsigned char c) { return std::isspace(c); });
+    return str.substr(static_cast<size_t>(it - str.begin()));
+}
+
+template <typename Fn>
+void
+for_each_line(std::string_view content, Fn&& fn)
+{
+    size_t line_start = 0;
+    while(line_start < content.size())
+    {
+        auto line_end = content.find('\n', line_start);
+        if(line_end == std::string_view::npos) line_end = content.size();
+        fn(content.substr(line_start, line_end - line_start));
+        line_start = line_end + 1;
+    }
+}
+
 struct cpu_jiffies
 {
     uint64_t user    = 0;
@@ -35,344 +116,214 @@ struct cpu_jiffies
     uint64_t irq     = 0;
     uint64_t softirq = 0;
 
-    [[nodiscard]] uint64_t total() const noexcept
+    [[nodiscard]] constexpr uint64_t total() const noexcept
     {
         return user + nice + system + idle + iowait + irq + softirq;
     }
 
-    [[nodiscard]] uint64_t active() const noexcept
+    [[nodiscard]] constexpr uint64_t active() const noexcept
     {
         return user + nice + system + irq + softirq;
     }
 };
 
-/**
- * @brief Process-level resource usage snapshot.
- *
- * Collected via getrusage(RUSAGE_SELF) and /proc/self/statm.
- */
 struct rusage_snapshot
 {
-    int64_t page_rss         = 0;  // bytes
-    int64_t virt_mem         = 0;  // bytes
-    int64_t peak_rss         = 0;  // bytes
-    int64_t context_switches = 0;  // count (voluntary + involuntary)
-    int64_t page_faults      = 0;  // count (major + minor)
-    int64_t user_mode_time   = 0;  // microseconds
-    int64_t kernel_mode_time = 0;  // microseconds
+    int64_t page_rss         = 0;
+    int64_t virt_mem         = 0;
+    int64_t peak_rss         = 0;
+    int64_t context_switches = 0;
+    int64_t page_faults      = 0;
+    int64_t user_mode_time   = 0;
+    int64_t kernel_mode_time = 0;
 };
 
+// virt_mem (first) and page_rss (second) from /proc/self/statm, in bytes.
+using statm_data = std::pair<int64_t, int64_t>;
+
 /**
- * @brief Driver wrapping Linux procfs and getrusage for CPU metrics.
+ * @brief Driver wrapping Linux procfs/sysfs and getrusage for CPU metrics.
  *
- * Performance-optimized: persistent file descriptors, lseek+read,
+ * Persistent file descriptors via unique_fd (RAII), lseek+read,
  * pre-allocated buffers, zero-copy string_view parsing.
+ * CPU frequency read from sysfs scaling_cur_freq (per-CPU FDs).
  */
 class driver
 {
 public:
-    driver()
-    : m_proc_stat_fd(-1)
-    , m_proc_cpuinfo_fd(-1)
-    , m_proc_statm_fd(-1)
-    , m_cpu_count(0)
-    {
-        m_stat_buffer.resize(16384);
-        m_cpuinfo_buffer.resize(32768);
-        m_statm_buffer.resize(256);
-    }
-
-    ~driver() noexcept { close_fds(); }
-
-    driver(const driver&)            = delete;
-    driver& operator=(const driver&) = delete;
-
-    driver(driver&& other) noexcept
-    : m_proc_stat_fd(other.m_proc_stat_fd)
-    , m_proc_cpuinfo_fd(other.m_proc_cpuinfo_fd)
-    , m_proc_statm_fd(other.m_proc_statm_fd)
-    , m_cpu_count(other.m_cpu_count)
-    , m_stat_buffer(std::move(other.m_stat_buffer))
-    , m_cpuinfo_buffer(std::move(other.m_cpuinfo_buffer))
-    , m_statm_buffer(std::move(other.m_statm_buffer))
-    {
-        other.m_proc_stat_fd    = -1;
-        other.m_proc_cpuinfo_fd = -1;
-        other.m_proc_statm_fd   = -1;
-    }
-
-    driver& operator=(driver&& other) noexcept
-    {
-        if(this != &other)
-        {
-            close_fds();
-            m_proc_stat_fd    = other.m_proc_stat_fd;
-            m_proc_cpuinfo_fd = other.m_proc_cpuinfo_fd;
-            m_proc_statm_fd   = other.m_proc_statm_fd;
-            m_cpu_count       = other.m_cpu_count;
-            m_stat_buffer     = std::move(other.m_stat_buffer);
-            m_cpuinfo_buffer  = std::move(other.m_cpuinfo_buffer);
-            m_statm_buffer    = std::move(other.m_statm_buffer);
-
-            other.m_proc_stat_fd    = -1;
-            other.m_proc_cpuinfo_fd = -1;
-            other.m_proc_statm_fd   = -1;
-        }
-        return *this;
-    }
-
     /**
-     * @brief Read per-CPU jiffies from /proc/stat.
-     * @return Map of CPU ID to cpu_jiffies. Empty map on failure.
+     * @param cpu_count Number of online CPUs. Sizes buffers and opens
+     *        per-CPU sysfs FDs for frequency reading.
      */
-    std::map<size_t, cpu_jiffies> read_proc_stat()
+    explicit driver(size_t cpu_count)
+    : m_stat_buffer(
+          std::max(DEFAULT_STAT_BUFFER_SIZE, (cpu_count * BYTES_PER_STAT_LINE) + 256))
+    , m_statm_buffer(STATM_BUFFER_SIZE)
+    , m_freq_buffer(SYSFS_FREQ_BUFFER_SIZE)
     {
-        std::map<size_t, cpu_jiffies> result;
-
-        if(m_proc_stat_fd < 0)
+        for(size_t i = 0; i < cpu_count; ++i)
         {
-            m_proc_stat_fd = ::open("/proc/stat", O_RDONLY);
-            if(m_proc_stat_fd < 0) return result;
+            const auto path = "/sys/devices/system/cpu/cpu" + std::to_string(i) +
+                              "/cpufreq/scaling_cur_freq";
+            unique_fd fd{ ::open(path.c_str(), O_RDONLY) };
+            if(fd) m_sysfs_freq_fds.emplace(i, std::move(fd));
         }
-
-        ::lseek(m_proc_stat_fd, 0, SEEK_SET);
-        auto bytes =
-            ::read(m_proc_stat_fd, m_stat_buffer.data(), m_stat_buffer.size() - 1);
-        if(bytes <= 0) return result;
-
-        m_stat_buffer[static_cast<size_t>(bytes)] = '\0';
-        parse_proc_stat(
-            std::string_view(m_stat_buffer.data(), static_cast<size_t>(bytes)), result);
-        return result;
+        m_use_sysfs_freq = !m_sysfs_freq_fds.empty();
     }
 
-    /**
-     * @brief Read per-CPU frequencies from /proc/cpuinfo.
-     * @return Map of CPU ID to frequency in MHz. Empty map on failure.
-     */
-    std::map<size_t, float> read_cpu_frequencies()
+    // Rule of Zero: unique_fd and map<.., unique_fd> handle cleanup.
+
+    [[nodiscard]] std::map<size_t, cpu_jiffies> read_proc_stat()
     {
-        std::map<size_t, float> result;
-
-        if(m_proc_cpuinfo_fd < 0)
-        {
-            m_proc_cpuinfo_fd = ::open("/proc/cpuinfo", O_RDONLY);
-            if(m_proc_cpuinfo_fd < 0) return result;
-        }
-
-        ::lseek(m_proc_cpuinfo_fd, 0, SEEK_SET);
-        auto bytes = ::read(m_proc_cpuinfo_fd, m_cpuinfo_buffer.data(),
-                            m_cpuinfo_buffer.size() - 1);
-        if(bytes <= 0) return result;
-
-        m_cpuinfo_buffer[static_cast<size_t>(bytes)] = '\0';
-        parse_cpuinfo(
-            std::string_view(m_cpuinfo_buffer.data(), static_cast<size_t>(bytes)),
-            result);
-        return result;
+        const auto content = read_file(m_proc_stat_fd, "/proc/stat", m_stat_buffer);
+        if(content.empty()) return {};
+        return parse_proc_stat(content);
     }
 
-    /**
-     * @brief Read process-level resource usage via getrusage and /proc/self/statm.
-     * @return rusage_snapshot with current process metrics.
-     */
-    rusage_snapshot read_rusage()
+    [[nodiscard]] std::map<size_t, float> read_cpu_frequencies()
+    {
+        if(m_use_sysfs_freq) return read_sysfs_frequencies();
+        return {};
+    }
+
+    [[nodiscard]] rusage_snapshot read_rusage()
     {
         rusage_snapshot snap;
 
-        struct rusage usage;
-        std::memset(&usage, 0, sizeof(usage));
+        struct rusage usage = {};
         if(getrusage(RUSAGE_SELF, &usage) == 0)
         {
-            // ru_maxrss is in KB on Linux
-            snap.peak_rss = static_cast<int64_t>(usage.ru_maxrss) * 1024;
+            snap.peak_rss = static_cast<int64_t>(usage.ru_maxrss) * KB_TO_BYTES;
             snap.context_switches =
                 static_cast<int64_t>(usage.ru_nvcsw + usage.ru_nivcsw);
-            snap.page_faults    = static_cast<int64_t>(usage.ru_majflt + usage.ru_minflt);
-            snap.user_mode_time = static_cast<int64_t>(usage.ru_utime.tv_sec) * 1000000 +
-                                  static_cast<int64_t>(usage.ru_utime.tv_usec);
+            snap.page_faults = static_cast<int64_t>(usage.ru_majflt + usage.ru_minflt);
+            snap.user_mode_time =
+                static_cast<int64_t>(usage.ru_utime.tv_sec) * US_PER_SECOND +
+                static_cast<int64_t>(usage.ru_utime.tv_usec);
             snap.kernel_mode_time =
-                static_cast<int64_t>(usage.ru_stime.tv_sec) * 1000000 +
+                static_cast<int64_t>(usage.ru_stime.tv_sec) * US_PER_SECOND +
                 static_cast<int64_t>(usage.ru_stime.tv_usec);
         }
 
-        if(m_proc_statm_fd < 0)
+        const auto content =
+            read_file(m_proc_statm_fd, "/proc/self/statm", m_statm_buffer);
+        if(!content.empty())
         {
-            m_proc_statm_fd = ::open("/proc/self/statm", O_RDONLY);
-            if(m_proc_statm_fd < 0) return snap;
-        }
-
-        ::lseek(m_proc_statm_fd, 0, SEEK_SET);
-        auto bytes =
-            ::read(m_proc_statm_fd, m_statm_buffer.data(), m_statm_buffer.size() - 1);
-        if(bytes > 0)
-        {
-            m_statm_buffer[static_cast<size_t>(bytes)] = '\0';
-            parse_statm(
-                std::string_view(m_statm_buffer.data(), static_cast<size_t>(bytes)),
-                snap);
+            if(const auto data = parse_statm(content))
+            {
+                snap.virt_mem = data->first;
+                snap.page_rss = data->second;
+            }
         }
 
         return snap;
     }
 
-    /**
-     * @brief Get the number of online CPUs (cached after first call).
-     */
-    size_t get_cpu_count()
-    {
-        if(m_cpu_count == 0)
-        {
-            long n      = sysconf(_SC_NPROCESSORS_ONLN);
-            m_cpu_count = (n > 0) ? static_cast<size_t>(n) : 0;
-        }
-        return m_cpu_count;
-    }
+    [[nodiscard]] size_t get_cpu_count() const noexcept { return m_cpu_count; }
 
 private:
-    void close_fds() noexcept
+    [[nodiscard]] static std::string_view read_file(unique_fd& fd, const char* path,
+                                                    std::vector<char>& buffer)
     {
-        if(m_proc_stat_fd >= 0)
+        if(!fd)
         {
-            ::close(m_proc_stat_fd);
-            m_proc_stat_fd = -1;
+            fd.reset(::open(path, O_RDONLY));
+            if(!fd) return {};
         }
-        if(m_proc_cpuinfo_fd >= 0)
-        {
-            ::close(m_proc_cpuinfo_fd);
-            m_proc_cpuinfo_fd = -1;
-        }
-        if(m_proc_statm_fd >= 0)
-        {
-            ::close(m_proc_statm_fd);
-            m_proc_statm_fd = -1;
-        }
+        if(::lseek(fd.get(), 0, SEEK_SET) == static_cast<off_t>(-1)) return {};
+
+        const auto bytes = ::read(fd.get(), buffer.data(), buffer.size());
+        if(bytes <= 0) return {};
+
+        return { buffer.data(), static_cast<size_t>(bytes) };
     }
 
-    static void parse_proc_stat(std::string_view               content,
-                                std::map<size_t, cpu_jiffies>& result)
+    [[nodiscard]] std::map<size_t, float> read_sysfs_frequencies()
     {
-        size_t line_start = 0;
-        while(line_start < content.size())
+        std::map<size_t, float> result;
+        for(auto& [cpu_id, fd] : m_sysfs_freq_fds)
         {
-            size_t line_end = content.find('\n', line_start);
-            if(line_end == std::string_view::npos) line_end = content.size();
-            auto line = content.substr(line_start, line_end - line_start);
+            if(::lseek(fd.get(), 0, SEEK_SET) == static_cast<off_t>(-1)) continue;
+            const auto bytes =
+                ::read(fd.get(), m_freq_buffer.data(), m_freq_buffer.size());
+            if(bytes <= 0) continue;
 
-            if(line.size() >= 4 && line.substr(0, 3) == "cpu" && std::isdigit(line[3]))
+            unsigned long khz = 0;
+            const auto [p, e] =
+                std::from_chars(m_freq_buffer.data(), m_freq_buffer.data() + bytes, khz);
+            if(e == std::errc()) result[cpu_id] = static_cast<float>(khz) * KHZ_TO_MHZ;
+        }
+        return result;
+    }
+
+    [[nodiscard]] static std::map<size_t, cpu_jiffies> parse_proc_stat(
+        std::string_view content)
+    {
+        std::map<size_t, cpu_jiffies> result;
+
+        for_each_line(content, [&](std::string_view line) {
+            if(!starts_with(line, "cpu") || line.size() < 4 ||
+               !std::isdigit(static_cast<unsigned char>(line[3])))
+                return;
+
+            const auto space = line.find(' ');
+            if(space == std::string_view::npos) return;
+
+            size_t cpu_id = 0;
+            const auto [ptr, ec] =
+                std::from_chars(line.data() + 3, line.data() + space, cpu_id);
+            if(ec != std::errc()) return;
+
+            cpu_jiffies j;
+            uint64_t*   fields[]  = { &j.user,   &j.nice, &j.system, &j.idle,
+                                      &j.iowait, &j.irq,  &j.softirq };
+            auto        remaining = ltrim(line.substr(space));
+
+            for(size_t i = 0; i < 7 && !remaining.empty(); ++i)
             {
-                size_t space = line.find(' ');
-                if(space == std::string_view::npos)
-                {
-                    line_start = line_end + 1;
-                    continue;
-                }
-
-                size_t cpu_id = 0;
-                auto [ptr, ec] =
-                    std::from_chars(line.data() + 3, line.data() + space, cpu_id);
-                if(ec != std::errc())
-                {
-                    line_start = line_end + 1;
-                    continue;
-                }
-
-                cpu_jiffies j;
-                uint64_t*   fields[] = { &j.user,   &j.nice, &j.system, &j.idle,
-                                         &j.iowait, &j.irq,  &j.softirq };
-                size_t      pos      = space + 1;
-
-                for(size_t i = 0; i < 7 && pos < line.size(); ++i)
-                {
-                    while(pos < line.size() && std::isspace(line[pos]))
-                        ++pos;
-                    auto [p, e] = std::from_chars(line.data() + pos,
-                                                  line.data() + line.size(), *fields[i]);
-                    if(e != std::errc()) break;
-                    pos = static_cast<size_t>(p - line.data());
-                }
-                result[cpu_id] = j;
+                const auto [p, e] = std::from_chars(
+                    remaining.data(), remaining.data() + remaining.size(), *fields[i]);
+                if(e != std::errc()) break;
+                remaining = ltrim(
+                    { p, static_cast<size_t>(remaining.data() + remaining.size() - p) });
             }
-            line_start = line_end + 1;
-        }
+            result[cpu_id] = j;
+        });
+
+        return result;
     }
 
-    static void parse_cpuinfo(std::string_view content, std::map<size_t, float>& result)
+    [[nodiscard]] static std::optional<statm_data> parse_statm(std::string_view content)
     {
-        size_t current_cpu = 0;
-        bool   has_cpu     = false;
-        size_t line_start  = 0;
+        static const long page_size = sysconf(_SC_PAGESIZE);
 
-        while(line_start < content.size())
-        {
-            size_t line_end = content.find('\n', line_start);
-            if(line_end == std::string_view::npos) line_end = content.size();
-            auto line = content.substr(line_start, line_end - line_start);
+        auto remaining = ltrim(content);
 
-            if(line.size() > 9 && line.substr(0, 9) == "processor")
-            {
-                size_t colon = line.find(':');
-                if(colon != std::string_view::npos)
-                {
-                    size_t pos = colon + 1;
-                    while(pos < line.size() && std::isspace(line[pos]))
-                        ++pos;
-                    auto [p, e] = std::from_chars(line.data() + pos,
-                                                  line.data() + line.size(), current_cpu);
-                    if(e == std::errc()) has_cpu = true;
-                }
-            }
-            else if(has_cpu && line.size() > 7 && line.substr(0, 7) == "cpu MHz")
-            {
-                size_t colon = line.find(':');
-                if(colon != std::string_view::npos)
-                {
-                    size_t pos = colon + 1;
-                    while(pos < line.size() && std::isspace(line[pos]))
-                        ++pos;
-                    size_t end_pos = line.find_first_of(" \t\r\n", pos);
-                    if(end_pos == std::string_view::npos) end_pos = line.size();
-                    std::string temp(line.data() + pos, end_pos - pos);
-                    char*       end  = nullptr;
-                    float       freq = std::strtof(temp.c_str(), &end);
-                    if(end != temp.c_str()) result[current_cpu] = freq;
-                }
-            }
-            line_start = line_end + 1;
-        }
+        size_t virt_pages   = 0;
+        const auto [p1, e1] = std::from_chars(
+            remaining.data(), remaining.data() + remaining.size(), virt_pages);
+        if(e1 != std::errc()) return std::nullopt;
+
+        remaining =
+            ltrim({ p1, static_cast<size_t>(remaining.data() + remaining.size() - p1) });
+
+        size_t rss_pages    = 0;
+        const auto [p2, e2] = std::from_chars(
+            remaining.data(), remaining.data() + remaining.size(), rss_pages);
+        if(e2 != std::errc()) return std::nullopt;
+
+        return statm_data{ static_cast<int64_t>(virt_pages) * page_size,
+                           static_cast<int64_t>(rss_pages) * page_size };
     }
 
-    static void parse_statm(std::string_view content, rusage_snapshot& snap)
-    {
-        size_t virt_pages = 0;
-        size_t rss_pages  = 0;
-        size_t pos        = 0;
-        while(pos < content.size() && std::isspace(content[pos]))
-            ++pos;
-
-        auto [p1, e1] = std::from_chars(content.data() + pos,
-                                        content.data() + content.size(), virt_pages);
-        if(e1 != std::errc()) return;
-        pos = static_cast<size_t>(p1 - content.data());
-        while(pos < content.size() && std::isspace(content[pos]))
-            ++pos;
-
-        auto [p2, e2] = std::from_chars(content.data() + pos,
-                                        content.data() + content.size(), rss_pages);
-        if(e2 != std::errc()) return;
-
-        long page_size = sysconf(_SC_PAGESIZE);
-        snap.page_rss  = static_cast<int64_t>(rss_pages) * page_size;
-        snap.virt_mem  = static_cast<int64_t>(virt_pages) * page_size;
-    }
-
-    int               m_proc_stat_fd;
-    int               m_proc_cpuinfo_fd;
-    int               m_proc_statm_fd;
-    size_t            m_cpu_count;
-    std::vector<char> m_stat_buffer;
-    std::vector<char> m_cpuinfo_buffer;
-    std::vector<char> m_statm_buffer;
+    unique_fd                   m_proc_stat_fd;
+    unique_fd                   m_proc_statm_fd;
+    std::map<size_t, unique_fd> m_sysfs_freq_fds;
+    bool                        m_use_sysfs_freq = false;
+    size_t                      m_cpu_count      = 0;
+    std::vector<char>           m_stat_buffer;
+    std::vector<char>           m_statm_buffer;
+    std::vector<char>           m_freq_buffer;
 };
 
 /**
@@ -382,9 +333,9 @@ struct driver_factory
 {
     using driver_t = driver;
 
-    static std::shared_ptr<driver_t> create_driver()
+    static std::shared_ptr<driver_t> create_driver(size_t cpu_count)
     {
-        return std::make_shared<driver_t>();
+        return std::make_shared<driver_t>(cpu_count);
     }
 };
 

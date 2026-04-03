@@ -13,8 +13,11 @@ namespace rocprofsys::pmc::collectors::cpu
 /**
  * @brief Bitfield union for selecting which CPU metrics to collect.
  *
+ * Required by base::collector (Traits::enabled_metrics_t) and stored in the
+ * serialized cpu_pmc_sample. Configurable via ROCPROFSYS_CPU_METRICS env var.
+ *
  * Bit positions (for value access):
- *   - frequency     = 0   (per-CPU, from /proc/cpuinfo, MHz)
+ *   - frequency     = 0   (per-CPU, from sysfs scaling_cur_freq, MHz)
  *   - load          = 1   (per-CPU, from /proc/stat, %)
  *   - page_rss      = 2   (process-level, physical memory RSS, bytes)
  *   - virt_mem      = 3   (process-level, virtual memory, bytes)
@@ -41,8 +44,8 @@ union enabled_metrics
     uint32_t value = 0;
 };
 
-/// All 9 CPU metrics enabled (bits 0-8)
-static constexpr uint32_t ALL_CPU_METRICS = 0x1FF;
+/// All 9 CPU metrics enabled (bits 0-8).
+inline constexpr uint32_t ALL_CPU_METRICS = 0x1FF;
 
 /**
  * @brief Per-CPU metric snapshot for a single CPU core.

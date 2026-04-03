@@ -515,6 +515,14 @@ configure_settings(bool _init)
         "'none' suppresses all CPU frequency sampling",
         std::string{ "none" }, "process_sampling");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_CPU_METRICS",
+        "CPU metrics to collect. Comma-separated tokens: frequency, load, memory "
+        "(page_rss+virt_mem+peak_rss), ctx_switches, page_faults, cpu_time "
+        "(user_time+kernel_time). Fine-grained: page_rss, virt_mem, peak_rss, "
+        "user_time, kernel_time. Special: all, none",
+        std::string{ "all" }, "process_sampling");
+
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_SAMPLING_AINICS",
                               "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC "
                               "names should be separated by "
@@ -2308,6 +2316,14 @@ std::string
 get_sampling_cpus()
 {
     auto _v = get_config()->find("ROCPROFSYS_SAMPLING_CPUS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::string
+get_cpu_metrics()
+{
+    auto _v = get_config()->find("ROCPROFSYS_CPU_METRICS");
+    if(_v == get_config()->end()) return "all";
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 

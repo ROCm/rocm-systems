@@ -3,13 +3,14 @@
 
 #pragma once
 
+#include "core/config.hpp"
 #include "library/pmc/collectors/cpu/device.hpp"
+#include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <set>
 #include <vector>
@@ -50,7 +51,7 @@ struct cpu_traits
     template <typename Settings>
     [[nodiscard]] static device_filter get_device_filter()
     {
-        return Settings::get_cpu_device_filter();
+        return Settings::get_device_filter(rocprofsys::get_sampling_cpus());
     }
 
     template <typename Settings>
@@ -132,7 +133,7 @@ struct cpu_traits
                     {
                         monitored_cpus.insert(idx);
                     }
-                    else
+                    else if(cpu_count > 0)
                     {
                         LOG_WARNING("CPU index {} out of range (max: {})", idx,
                                     cpu_count - 1);
@@ -160,44 +161,6 @@ struct cpu_traits
         LOG_INFO("Enabled {} CPUs for PMC sampling", monitored_cpus.size());
 
         return entries;
-    }
-
-    static std::vector<uint8_t> serialize_frequencies(const metrics_t& m)
-    {
-        constexpr size_t idx_size   = sizeof(size_t);
-        constexpr size_t value_size = sizeof(float);
-
-        std::vector<uint8_t> result;
-        result.resize(m.cpu_data.size() * (idx_size + value_size));
-
-        size_t offset = 0;
-        for(const auto& cpu : m.cpu_data)
-        {
-            std::memcpy(result.data() + offset, &cpu.cpu_id, idx_size);
-            offset += idx_size;
-            std::memcpy(result.data() + offset, &cpu.frequency, value_size);
-            offset += value_size;
-        }
-        return result;
-    }
-
-    static std::vector<uint8_t> serialize_loads(const metrics_t& m)
-    {
-        constexpr size_t idx_size   = sizeof(size_t);
-        constexpr size_t value_size = sizeof(double);
-
-        std::vector<uint8_t> result;
-        result.resize(m.cpu_data.size() * (idx_size + value_size));
-
-        size_t offset = 0;
-        for(const auto& cpu : m.cpu_data)
-        {
-            std::memcpy(result.data() + offset, &cpu.cpu_id, idx_size);
-            offset += idx_size;
-            std::memcpy(result.data() + offset, &cpu.load, value_size);
-            offset += value_size;
-        }
-        return result;
     }
 };
 
