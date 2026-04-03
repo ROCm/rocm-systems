@@ -88,9 +88,9 @@ SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
 
 void SWaitcntSopp::execute(amdgpu::Wavefront &wf) {
   uint16_t imm = static_cast<uint16_t>(simm16.encoding_value_);
-  uint8_t vm = (imm & 0xF) | ((imm >> 10) & 0x30);
-  uint8_t exp = (imm >> 4) & 0x7;
-  uint8_t lgkm = (imm >> 8) & Isa::WAITCNT_LGKMCNT_MASK;
+  uint8_t exp = imm & 0x7;
+  uint8_t lgkm = (imm >> 4) & 0x3F;
+  uint8_t vm = (imm >> 10) & 0x3F;
   wf.set_wait_target(vm, lgkm, exp);
 }
 
