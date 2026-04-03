@@ -898,6 +898,9 @@ void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
                                   MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS, 0, 0);
     if (mem == MAP_FAILED) {
       //fallback to default behavior
+      LogPrint(HSA_AMD_LOG_FLAG_INFO,"HUGETLB allocation failed, fallback to default behavior");
+      huge_tlb = false;
+
       mem = (address)::mmap(start, requested, MemProtToOsProt(prot),
                                   MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS, 0, 0);
       // check for out of memory
