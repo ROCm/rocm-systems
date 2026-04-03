@@ -349,9 +349,18 @@ endif()
 # bundled TBB isn't installed in standard locations. Creating this target causes
 # Dyninst to skip find_package(TBB) and use the bundled dependency instead.
 
-if(ROCPROFSYS_BUILD_TBB AND NOT TARGET Dyninst::TBB)
+if(NOT TARGET Dyninst::TBB)
     add_library(Dyninst::TBB INTERFACE IMPORTED)
-    target_link_libraries(Dyninst::TBB INTERFACE ${TBB_LIBRARIES})
+
+    if(TARGET TBB::tbb)
+        target_link_libraries(
+            Dyninst::TBB
+            INTERFACE TBB::tbb TBB::tbbmalloc TBB::tbbmalloc_proxy
+        )
+    else()
+        target_link_libraries(Dyninst::TBB INTERFACE ${TBB_LIBRARIES})
+    endif()
+
     target_include_directories(Dyninst::TBB SYSTEM INTERFACE ${TBB_INCLUDE_DIRS})
     if(TBB_LIBRARY_DIRS)
         target_link_directories(Dyninst::TBB INTERFACE ${TBB_LIBRARY_DIRS})
