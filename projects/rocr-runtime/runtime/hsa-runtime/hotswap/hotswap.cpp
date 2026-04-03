@@ -1,4 +1,4 @@
-//===- hotswap.cpp - HotSwap B0-to-A0 ROCR integration (stub) ------------===//
+//===- hotswap.cpp - HotSwap ISA rewriting ROCR integration (stub) --------===//
 //
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -12,10 +12,11 @@
 namespace rocr {
 namespace hotswap {
 
-int RetargetCodeObjectB0A0Grow(const void *elf_data, size_t elf_size,
-                               void **out_data, size_t *out_size) {
+int RetargetCodeObject(const void *elf_data, size_t elf_size,
+                       const char *source_isa, const char *target_isa,
+                       void **out_data, size_t *out_size) {
   if (!out_data || !out_size) {
-    fprintf(stderr, "hotswap: invalid null output pointer(s) in B0->A0 grow\n");
+    fprintf(stderr, "hotswap: invalid null output pointer(s)\n");
     return -1;
   }
 
@@ -23,16 +24,21 @@ int RetargetCodeObjectB0A0Grow(const void *elf_data, size_t elf_size,
   *out_size = elf_size;
 
   if (!ComgrHotswapAvailable()) {
-    fprintf(stderr, "hotswap: COMGR not available for B0->A0\n");
+    fprintf(stderr, "hotswap: COMGR not available for %s -> %s\n",
+            source_isa ? source_isa : "(null)",
+            target_isa ? target_isa : "(null)");
     return -1;
   }
 
   void *out_elf = nullptr;
   size_t out_elf_size = 0;
-  int rc = ComgrHotswapRewriteB0A0(elf_data, elf_size,
-                                   &out_elf, &out_elf_size);
+  int rc = ComgrHotswapRewrite(elf_data, elf_size,
+                               source_isa, target_isa,
+                               &out_elf, &out_elf_size);
   if (rc != 0) {
-    fprintf(stderr, "hotswap: COMGR B0->A0 rewrite failed (rc=%d)\n", rc);
+    fprintf(stderr, "hotswap: COMGR rewrite failed for %s -> %s (rc=%d)\n",
+            source_isa ? source_isa : "(null)",
+            target_isa ? target_isa : "(null)", rc);
     if (out_elf)
       std::free(out_elf);
     return rc;
