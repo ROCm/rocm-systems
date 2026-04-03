@@ -13,14 +13,14 @@
 
 namespace {
 
-const std::string kConfigPath = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-const std::string kSchemaPath = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
 
 class SimulatedDriverTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    setenv("RJ_CONFIG", kConfigPath.c_str(), 1);
-    setenv("RJ_SCHEMA", kSchemaPath.c_str(), 1);
+    setenv("RJ_CONFIG", CONFIG_PATH.c_str(), 1);
+    setenv("RJ_SCHEMA", SCHEMA_PATH.c_str(), 1);
   }
 };
 
