@@ -1,4 +1,4 @@
-#!/usr/bin/envpython3
+#!/usr/bin/env python3
 #
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 #
@@ -25,6 +25,7 @@ import logging
 import time
 
 from amdsmi_helpers import AMDSMIHelpers
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 

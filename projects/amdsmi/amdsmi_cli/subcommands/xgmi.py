@@ -1,4 +1,4 @@
-#!/usr/bin/envpython3
+#!/usr/bin/env python3
 #
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 #

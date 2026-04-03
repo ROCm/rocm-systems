@@ -1,4 +1,4 @@
-#!/usr/bin/envpython3
+#!/usr/bin/env python3
 #
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 #
@@ -19,15 +19,13 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import copy
 import functools
-import json
 import logging
 import os
-import sys
 
 from amdsmi_cli_exceptions import AmdSmiInvalidParameterException
 from amdsmi_helpers import AMDSMIHelpers
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 

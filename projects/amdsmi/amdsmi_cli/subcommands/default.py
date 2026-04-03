@@ -1,4 +1,4 @@
-#!/usr/bin/envpython3
+#!/usr/bin/env python3
 #
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 #
@@ -24,6 +24,7 @@ import os
 
 from _version import __version__
 from amdsmi_helpers import AMDSMIHelpers
+
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
@@ -96,17 +97,17 @@ class DefaultCommands:
             # get common gpu_metrics first
             try:
                 gpu_metrics = amdsmi_interface.amdsmi_get_gpu_metrics_info(processor)
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiLibraryException:
                 gpu_metrics = amdsmi_interface._NA_amdsmi_get_gpu_metrics_info()
 
             # partition info
             try:
                 current_mem = amdsmi_interface.amdsmi_get_gpu_memory_partition(processor)
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiLibraryException:
                 current_mem = "N/A"
             try:
                 current_comp = amdsmi_interface.amdsmi_get_gpu_compute_partition(processor)
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiLibraryException:
                 current_comp = "N/A"
             if current_comp == "N/A" or current_mem == "N/A":
                 partition_mode = "N/A"
@@ -121,7 +122,7 @@ class DefaultCommands:
                 oam_id = asic_info["oam_id"]
                 # get num_cu now for use later
                 total_num_cu = float(asic_info["num_compute_units"])
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiLibraryException:
                 market_name = "N/A"
                 oam_id = "N/A"
                 total_num_cu = "N/A"
@@ -134,7 +135,7 @@ class DefaultCommands:
                 # if the len of the bdf is not 12, then invalid values are being populated.
                 if len(bdf) != 12:
                     bdf = "N/A"
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiLibraryException:
                 bdf = "N/A"
             gpu_info_dict.update({"bdf": bdf})
 
@@ -142,7 +143,7 @@ class DefaultCommands:
             try:
                 enum_info = amdsmi_interface.amdsmi_get_gpu_enumeration_info(processor)
                 hip_id = enum_info["hip_id"]
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiLibraryException:
                 hip_id = "N/A"
             gpu_info_dict.update({"hip_id": hip_id})
 
@@ -177,7 +178,7 @@ class DefaultCommands:
                     power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
                 )
                 power_usage = {"current_power": current_power, "power_limit": socket_power_limit}
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiLibraryException:
                 power_usage = "N/A"
             gpu_info_dict.update({"power_usage": power_usage})
 
@@ -201,7 +202,7 @@ class DefaultCommands:
                     mem_usage = {"used_gtt": used_mem, "total_gtt": total_mem}
                 else:
                     mem_usage = {"used_vram": used_mem, "total_vram": total_mem}
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiLibraryException:
                 mem_usage = "N/A"
             gpu_info_dict.update({"mem_usage": mem_usage})
 
@@ -209,7 +210,7 @@ class DefaultCommands:
             try:
                 ecc_count = amdsmi_interface.amdsmi_get_gpu_total_ecc_count(processor)
                 uncorrectable = ecc_count.pop("uncorrectable_count")
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except amdsmi_exception.AmdSmiLibraryException:
                 uncorrectable = "N/A"
             gpu_info_dict.update({"uncorr_ecc": uncorrectable})
 
@@ -289,7 +290,7 @@ class DefaultCommands:
                     "Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info()
                 )
 
-        default_table_info_dict.update({f"gpu_info_list": gpu_info_list})
+        default_table_info_dict.update({"gpu_info_list": gpu_info_list})
         default_table_info_dict.update({"processes": all_process_list})
 
         if self.logger.is_json_format():
