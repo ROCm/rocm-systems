@@ -115,17 +115,13 @@ generate_dimensions(rocprofiler_agent_id_t agent_id)
             dims.emplace(ast.out_id().handle, ast_copy.set_dimensions(agent_id));
         } catch(const std::runtime_error& e)
         {
-            ROCP_WARNING << fmt::format(
-                "Invalid counter '{}' in YAML configuration - {}. Counter will be skipped.",
-                metric,
-                e.what());
+            ROCP_WARNING << "Invalid counter '" << metric << "' in YAML configuration - "
+                         << e.what() << ". Counter will be skipped.";
             continue;
         } catch(const std::exception& e)
         {
-            ROCP_WARNING << fmt::format(
-                "Unexpected error processing counter '{}': {}. Counter will be skipped.",
-                metric,
-                e.what());
+            ROCP_WARNING << "Unexpected error processing counter '" << metric << "': " << e.what()
+                         << ". Counter will be skipped.";
             continue;
         }
     }

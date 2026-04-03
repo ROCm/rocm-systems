@@ -280,10 +280,8 @@ should_skip_duplicate(
     auto dup_key = arch_name + ":" + counter_name;
     if(warned_duplicates.insert(dup_key).second)
     {
-        ROCP_WARNING << fmt::format("Duplicate counter '{}' found in YAML for architecture {}. "
-                                    "Using first definition, ignoring duplicate.",
-                                    counter_name,
-                                    arch_name);
+        ROCP_WARNING << "Duplicate counter '" << counter_name << "' found in YAML for architecture "
+                     << arch_name << ". Using first definition, ignoring duplicate.";
     }
 
     return true;
