@@ -288,7 +288,7 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
 }
 
 void SCallB64Sopk::execute(amdgpu::Wavefront &wf) {
-  sdst.write_scalar64(wf, wf.pc);
+  sdst.write_scalar64(wf, wf.pc + size_);
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
   wf.pc = wf.pc + static_cast<int64_t>(offset) * 4 - size_;
 }

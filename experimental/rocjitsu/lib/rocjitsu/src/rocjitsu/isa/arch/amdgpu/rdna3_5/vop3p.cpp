@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/mfma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -751,8 +752,23 @@ VDot4I32Iu8Vop3p::VDot4I32Iu8Vop3p(const MachineInst *inst)
 }
 
 void VDot4I32Iu8Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    int32_t acc = static_cast<int32_t>(src2.read_lane(wf, lane));
+    int32_t sum = acc;
+    for (int i = 0; i < 4; ++i) {
+      int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
+      int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
+      sum += static_cast<int32_t>(a) * b;
+    }
+    if (inst_.clamp)
+      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+  }
 }
 
 VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
@@ -798,8 +814,27 @@ VDot8I32Iu4Vop3p::VDot8I32Iu4Vop3p(const MachineInst *inst)
 }
 
 void VDot8I32Iu4Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    int32_t acc = static_cast<int32_t>(src2.read_lane(wf, lane));
+    int32_t sum = acc;
+    for (int i = 0; i < 8; ++i) {
+      int32_t a = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
+      if (a & 0x8)
+        a |= ~0xF;
+      int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
+      if (b & 0x8)
+        b |= ~0xF;
+      sum += a * b;
+    }
+    if (inst_.clamp)
+      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
+  }
 }
 
 VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
@@ -845,8 +880,32 @@ VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
 }
 
 void VDot2F32Bf16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    float a0 = util::f16_to_f32(static_cast<uint16_t>(raw0));
+    float a1 = util::f16_to_f32(static_cast<uint16_t>(raw0 >> 16));
+    float b0 = util::f16_to_f32(static_cast<uint16_t>(raw1));
+    float b1 = util::f16_to_f32(static_cast<uint16_t>(raw1 >> 16));
+    if (inst_.neg & 1) {
+      a0 = -a0;
+      a1 = -a1;
+    }
+    if (inst_.neg & 2) {
+      b0 = -b0;
+      b1 = -b1;
+    }
+    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.neg & 4)
+      acc = -acc;
+    float result = a0 * b0 + a1 * b1 + acc;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
@@ -862,8 +921,37 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
 }
 
 void VFmaMixF32Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    uint32_t raw2 = src2.read_lane(wf, lane);
+    float a, b, c;
+    if (inst_.op_sel_hi & 1)
+      a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
+    else
+      a = std::bit_cast<float>(raw0);
+    if (inst_.op_sel_hi & 2)
+      b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
+    else
+      b = std::bit_cast<float>(raw1);
+    if (inst_.op_sel_hi_2)
+      c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
+    else
+      c = std::bit_cast<float>(raw2);
+    if (inst_.neg & 1)
+      a = -a;
+    if (inst_.neg & 2)
+      b = -b;
+    if (inst_.neg & 4)
+      c = -c;
+    float result = a * b + c;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
@@ -872,6 +960,7 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_.emplace_back(&vdst);
   dst_operands_.emplace_back(&vdst);
   src_operands_.emplace_back(&src0);
   src_operands_.emplace_back(&src1);
@@ -879,8 +968,39 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
 }
 
 void VFmaMixloF16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    uint32_t raw2 = src2.read_lane(wf, lane);
+    float a, b, c;
+    if (inst_.op_sel_hi & 1)
+      a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
+    else
+      a = std::bit_cast<float>(raw0);
+    if (inst_.op_sel_hi & 2)
+      b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
+    else
+      b = std::bit_cast<float>(raw1);
+    if (inst_.op_sel_hi_2)
+      c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
+    else
+      c = std::bit_cast<float>(raw2);
+    if (inst_.neg & 1)
+      a = -a;
+    if (inst_.neg & 2)
+      b = -b;
+    if (inst_.neg & 4)
+      c = -c;
+    float result = a * b + c;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    uint16_t h = util::f32_to_f16(result);
+    uint32_t prev = vdst.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, (prev & 0xFFFF0000u) | h);
+  }
 }
 
 VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
@@ -889,6 +1009,7 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+  src_operands_.emplace_back(&vdst);
   dst_operands_.emplace_back(&vdst);
   src_operands_.emplace_back(&src0);
   src_operands_.emplace_back(&src1);
@@ -896,8 +1017,39 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
 }
 
 void VFmaMixhiF16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    uint32_t raw2 = src2.read_lane(wf, lane);
+    float a, b, c;
+    if (inst_.op_sel_hi & 1)
+      a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
+    else
+      a = std::bit_cast<float>(raw0);
+    if (inst_.op_sel_hi & 2)
+      b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
+    else
+      b = std::bit_cast<float>(raw1);
+    if (inst_.op_sel_hi_2)
+      c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
+    else
+      c = std::bit_cast<float>(raw2);
+    if (inst_.neg & 1)
+      a = -a;
+    if (inst_.neg & 2)
+      b = -b;
+    if (inst_.neg & 4)
+      c = -c;
+    float result = a * b + c;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    uint16_t h = util::f32_to_f16(result);
+    uint32_t prev = vdst.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, (prev & 0x0000FFFFu) | (static_cast<uint32_t>(h) << 16));
+  }
 }
 
 VWmmaF3216x16x16F16Vop3p::VWmmaF3216x16x16F16Vop3p(const MachineInst *inst)
@@ -914,8 +1066,15 @@ VWmmaF3216x16x16F16Vop3p::VWmmaF3216x16x16F16Vop3p(const MachineInst *inst)
 }
 
 void VWmmaF3216x16x16F16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = mfma::dst_base(vb, vdst.encoding_value_);
+  uint32_t const_acc;
+  uint32_t s2 = mfma::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                  [&] { return src2.read_scalar(wf); });
+  mfma::exec_f32(cu, 16, 16, 16, 2, 16, dst, mfma::src_base(vb, src0.encoding_value_),
+                 mfma::src_base(vb, src1.encoding_value_), s2, mfma::extract_f16, mfma::extract_f16,
+                 const_acc);
 }
 
 VWmmaF3216x16x16Bf16Vop3p::VWmmaF3216x16x16Bf16Vop3p(const MachineInst *inst)
@@ -932,8 +1091,15 @@ VWmmaF3216x16x16Bf16Vop3p::VWmmaF3216x16x16Bf16Vop3p(const MachineInst *inst)
 }
 
 void VWmmaF3216x16x16Bf16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = mfma::dst_base(vb, vdst.encoding_value_);
+  uint32_t const_acc;
+  uint32_t s2 = mfma::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                  [&] { return src2.read_scalar(wf); });
+  mfma::exec_f32(cu, 16, 16, 16, 2, 16, dst, mfma::src_base(vb, src0.encoding_value_),
+                 mfma::src_base(vb, src1.encoding_value_), s2, mfma::extract_bf16,
+                 mfma::extract_bf16, const_acc);
 }
 
 VWmmaF1616x16x16F16Vop3p::VWmmaF1616x16x16F16Vop3p(const MachineInst *inst)
@@ -950,8 +1116,15 @@ VWmmaF1616x16x16F16Vop3p::VWmmaF1616x16x16F16Vop3p(const MachineInst *inst)
 }
 
 void VWmmaF1616x16x16F16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = mfma::dst_base(vb, vdst.encoding_value_);
+  uint32_t const_acc;
+  uint32_t s2 = mfma::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                  [&] { return src2.read_scalar(wf); });
+  mfma::exec_f32(cu, 16, 16, 16, 2, 16, dst, mfma::src_base(vb, src0.encoding_value_),
+                 mfma::src_base(vb, src1.encoding_value_), s2, mfma::extract_f16, mfma::extract_f16,
+                 const_acc);
 }
 
 VWmmaBf1616x16x16Bf16Vop3p::VWmmaBf1616x16x16Bf16Vop3p(const MachineInst *inst)
@@ -968,8 +1141,15 @@ VWmmaBf1616x16x16Bf16Vop3p::VWmmaBf1616x16x16Bf16Vop3p(const MachineInst *inst)
 }
 
 void VWmmaBf1616x16x16Bf16Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = mfma::dst_base(vb, vdst.encoding_value_);
+  uint32_t const_acc;
+  uint32_t s2 = mfma::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                  [&] { return src2.read_scalar(wf); });
+  mfma::exec_f32(cu, 16, 16, 16, 2, 16, dst, mfma::src_base(vb, src0.encoding_value_),
+                 mfma::src_base(vb, src1.encoding_value_), s2, mfma::extract_bf16,
+                 mfma::extract_bf16, const_acc);
 }
 
 VWmmaI3216x16x16Iu8Vop3p::VWmmaI3216x16x16Iu8Vop3p(const MachineInst *inst)
@@ -986,8 +1166,14 @@ VWmmaI3216x16x16Iu8Vop3p::VWmmaI3216x16x16Iu8Vop3p(const MachineInst *inst)
 }
 
 void VWmmaI3216x16x16Iu8Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = mfma::dst_base(vb, vdst.encoding_value_);
+  uint32_t const_acc;
+  uint32_t s2 = mfma::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                  [&] { return src2.read_scalar(wf); });
+  mfma::exec_i32_i8(cu, 16, 16, 16, 2, dst, mfma::src_base(vb, src0.encoding_value_),
+                    mfma::src_base(vb, src1.encoding_value_), s2, const_acc);
 }
 
 VWmmaI3216x16x16Iu4Vop3p::VWmmaI3216x16x16Iu4Vop3p(const MachineInst *inst)
@@ -1004,8 +1190,14 @@ VWmmaI3216x16x16Iu4Vop3p::VWmmaI3216x16x16Iu4Vop3p(const MachineInst *inst)
 }
 
 void VWmmaI3216x16x16Iu4Vop3p::execute(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = mfma::dst_base(vb, vdst.encoding_value_);
+  uint32_t const_acc;
+  uint32_t s2 = mfma::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                  [&] { return src2.read_scalar(wf); });
+  mfma::exec_i32_i8(cu, 16, 16, 16, 2, dst, mfma::src_base(vb, src0.encoding_value_),
+                    mfma::src_base(vb, src1.encoding_value_), s2, const_acc);
 }
 
 } // namespace rdna3_5
