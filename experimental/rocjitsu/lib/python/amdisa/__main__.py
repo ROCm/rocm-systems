@@ -11,6 +11,7 @@ from amdisa import (
     Cdna1Profile,
     Cdna2Profile,
     CdnaProfile,
+    CodegenConfig,
     CodeGenerator,
     Parser,
     Rdna1Profile,
@@ -112,6 +113,12 @@ def main() -> None:
     arg_parser.add_argument(
         "-o", "--output", help="Output path for generated C++ files"
     )
+    arg_parser.add_argument(
+        "--use-shared",
+        action="store_true",
+        help="Emit using-aliases for structs that match the shared baseline "
+             "headers (machine_insts_scalar.h, machine_insts_cdna.h)",
+    )
     args = arg_parser.parse_args()
 
     gen_flags = [
@@ -127,7 +134,8 @@ def main() -> None:
     profile = _PROFILES[profile_key]()
     isa = Parser(args.isafile, profile).parse()
     semantics = derive_all_semantics(isa)
-    code_gen = CodeGenerator(isa, args.output, semantics)
+    config = CodegenConfig(use_shared=args.use_shared)
+    code_gen = CodeGenerator(isa, args.output, semantics, config=config)
 
     if args.gen_all:
         code_gen.gen_all()
