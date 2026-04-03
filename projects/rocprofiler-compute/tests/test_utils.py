@@ -198,9 +198,9 @@ def check_csv_files(output_dir, num_devices, num_kernels):
         f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
     )
 
-    assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
-    )
+    assert (
+        has_separate or has_results
+    ), "Expected pmc_perf_*.csv or results_*.csv from profile mode"
 
     # Validate row counts for PMC files (but don't add to return dict)
     for file in files_in_workload:
@@ -260,11 +260,13 @@ def get_num_pmc_file(output_dir):
     """
 
     perfmon_path = Path(output_dir) / "perfmon"
-    return len([
-        f
-        for f in perfmon_path.iterdir()
-        if f.is_file() and f.name.startswith("pmc_perf_") and f.suffix == ".yaml"
-    ])
+    return len(
+        [
+            f
+            for f in perfmon_path.iterdir()
+            if f.is_file() and f.name.startswith("pmc_perf_") and f.suffix == ".yaml"
+        ]
+    )
 
 
 def gpu_soc():
@@ -1618,15 +1620,17 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    mock_df = pd.DataFrame({
-        "Dispatch_ID": [0],
-        "Start_Timestamp": [100],
-        "End_Timestamp": [200],
-        "Grid_Size": [1024],
-        "Workgroup_Size": [64],
-        "Kernel_Name": ["test_kernel"],
-        "LDS_Per_Workgroup": [1024],
-    })
+    mock_df = pd.DataFrame(
+        {
+            "Dispatch_ID": [0],
+            "Start_Timestamp": [100],
+            "End_Timestamp": [200],
+            "Grid_Size": [1024],
+            "Workgroup_Size": [64],
+            "Kernel_Name": ["test_kernel"],
+            "LDS_Per_Workgroup": [1024],
+        }
+    )
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
@@ -1918,26 +1922,26 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             format_rocprof_output,
         )
 
-    assert capture_subprocess_called_with_env is not None, (
-        "new_env should have been created"
-    )
-    assert "EXISTING_VAR" in capture_subprocess_called_with_env, (
-        "new_env should be a copy of os.environ"
-    )
+    assert (
+        capture_subprocess_called_with_env is not None
+    ), "new_env should have been created"
+    assert (
+        "EXISTING_VAR" in capture_subprocess_called_with_env
+    ), "new_env should be a copy of os.environ"
     # Ensure existing env. vars. are preserved
     assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
     # Ensure LD_LIBRARY_PATH is not touched
     assert capture_subprocess_called_with_env["LD_LIBRARY_PATH"] == original_env_var
     # Ensure LD_PRELOAD is preserved and our tools are appended
-    assert original_env_var in capture_subprocess_called_with_env["LD_PRELOAD"], (
-        f"User's LD_PRELOAD '{original_env_var}' should be preserved"
-    )
-    assert "sdk_tool" in capture_subprocess_called_with_env["LD_PRELOAD"], (
-        "Profiler sdk_tool should be in LD_PRELOAD"
-    )
-    assert "native_tool" in capture_subprocess_called_with_env["LD_PRELOAD"], (
-        "Native tool should be in LD_PRELOAD"
-    )
+    assert (
+        original_env_var in capture_subprocess_called_with_env["LD_PRELOAD"]
+    ), f"User's LD_PRELOAD '{original_env_var}' should be preserved"
+    assert (
+        "sdk_tool" in capture_subprocess_called_with_env["LD_PRELOAD"]
+    ), "Profiler sdk_tool should be in LD_PRELOAD"
+    assert (
+        "native_tool" in capture_subprocess_called_with_env["LD_PRELOAD"]
+    ), "Native tool should be in LD_PRELOAD"
     # Verify the order: user's LD_PRELOAD comes first, then our tools appended
     expected_ld_preload = f"{original_env_var}:sdk_tool:native_tool"
     assert capture_subprocess_called_with_env["LD_PRELOAD"] == expected_ld_preload, (
@@ -1962,9 +1966,9 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             format_rocprof_output,
         )
 
-    assert capture_subprocess_called_with_env is not None, (
-        "new_env should have been created"
-    )
+    assert (
+        capture_subprocess_called_with_env is not None
+    ), "new_env should have been created"
     # When LD_PRELOAD is unset, should only contain our profiler tools
     expected_ld_preload_unset = "sdk_tool:native_tool"
     actual_ld_preload = capture_subprocess_called_with_env["LD_PRELOAD"]
@@ -2403,9 +2407,9 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert len(df) == 4, (
-        "The final DataFrame does not contain the correct number of rows."
-    )
+    assert (
+        len(df) == 4
+    ), "The final DataFrame does not contain the correct number of rows."
     assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "kokkos_malloc" in df["marker_name"].values
     assert "kokkos_parallel_reduce" in df["marker_name"].values
@@ -4543,9 +4547,9 @@ def test_set_locale_encoding_comprehensive_error_handling():
 
                     utils_common.set_locale_encoding()
 
-                    assert len(console_error_calls) == scenario["expected_errors"], (
-                        f"Failed scenario: {scenario['name']}"
-                    )
+                    assert (
+                        len(console_error_calls) == scenario["expected_errors"]
+                    ), f"Failed scenario: {scenario['name']}"
 
 
 # =============================================================================
@@ -5592,35 +5596,39 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     """
     import utils.utils_profile_csv as csv_ops
 
-    agent_info_content = create_csv_string({
-        "Node_Id": [0, 1],
-        "Agent_Type": ["CPU", "GPU"],
-        "Wave_Front_Size": [0, 64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0, 1],
+            "Agent_Type": ["CPU", "GPU"],
+            "Wave_Front_Size": [0, 64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted.csv"
-    counter_content_success = create_csv_string({
-        "Correlation_Id": [1],
-        "Dispatch_Id": [10],
-        "Agent_Id": ["Agent 1"],
-        "Queue_Id": [100],
-        "Process_Id": [1000],
-        "Thread_Id": [10000],
-        "Grid_Size": [256],
-        "Kernel_Id": [1],
-        "Kernel_Name": ["kernelA"],
-        "Workgroup_Size": [64],
-        "LDS_Block_Size": [32],
-        "Scratch_Size": [0],
-        "VGPR_Count": [16],
-        "Accum_VGPR_Count": [0],
-        "SGPR_Count": [32],
-        "Start_Timestamp": [100000],
-        "End_Timestamp": [100100],
-        "Counter_Name": ["Cycles"],
-        "Counter_Value": [5000],
-    })
+    counter_content_success = create_csv_string(
+        {
+            "Correlation_Id": [1],
+            "Dispatch_Id": [10],
+            "Agent_Id": ["Agent 1"],
+            "Queue_Id": [100],
+            "Process_Id": [1000],
+            "Thread_Id": [10000],
+            "Grid_Size": [256],
+            "Kernel_Id": [1],
+            "Kernel_Name": ["kernelA"],
+            "Workgroup_Size": [64],
+            "LDS_Block_Size": [32],
+            "Scratch_Size": [0],
+            "VGPR_Count": [16],
+            "Accum_VGPR_Count": [0],
+            "SGPR_Count": [32],
+            "Start_Timestamp": [100000],
+            "End_Timestamp": [100100],
+            "Counter_Name": ["Cycles"],
+            "Counter_Value": [5000],
+        }
+    )
     counter_filepath_success = tmp_path / "counter_success.csv"
     counter_filepath_success.write_text(counter_content_success)
 
@@ -5642,27 +5650,29 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
 
     # Test with malformed Agent_Id - the new implementation gracefully handles
     # this by keeping the original value unchanged (regex simply doesn't match)
-    counter_content_malformed = create_csv_string({
-        "Correlation_Id": [2],
-        "Dispatch_Id": [20],
-        "Agent_Id": ["Malformed Agent X"],
-        "Queue_Id": [200],
-        "Process_Id": [2000],
-        "Thread_Id": [20000],
-        "Grid_Size": [512],
-        "Kernel_Id": [2],
-        "Kernel_Name": ["kernelB"],
-        "Workgroup_Size": [128],
-        "LDS_Block_Size": [64],
-        "Scratch_Size": [0],
-        "VGPR_Count": [32],
-        "Accum_VGPR_Count": [0],
-        "SGPR_Count": [64],
-        "Start_Timestamp": [200000],
-        "End_Timestamp": [200200],
-        "Counter_Name": ["Instructions"],
-        "Counter_Value": [10000],
-    })
+    counter_content_malformed = create_csv_string(
+        {
+            "Correlation_Id": [2],
+            "Dispatch_Id": [20],
+            "Agent_Id": ["Malformed Agent X"],
+            "Queue_Id": [200],
+            "Process_Id": [2000],
+            "Thread_Id": [20000],
+            "Grid_Size": [512],
+            "Kernel_Id": [2],
+            "Kernel_Name": ["kernelB"],
+            "Workgroup_Size": [128],
+            "LDS_Block_Size": [64],
+            "Scratch_Size": [0],
+            "VGPR_Count": [32],
+            "Accum_VGPR_Count": [0],
+            "SGPR_Count": [64],
+            "Start_Timestamp": [200000],
+            "End_Timestamp": [200200],
+            "Counter_Name": ["Instructions"],
+            "Counter_Value": [10000],
+        }
+    )
     counter_filepath_malformed = tmp_path / "counter_malformed.csv"
     counter_filepath_malformed.write_text(counter_content_malformed)
     converted_malformed_filepath = tmp_path / "converted_malformed.csv"
@@ -5693,11 +5703,13 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     Tests Line 3: Renaming of a column ending with '_ACCUM' to 'SQ_ACCUM_PREV_HIRES'.
     """
     # --- Setup ---
-    agent_info_content = create_csv_string({
-        "Node_Id": [0],
-        "Agent_Type": ["GPU"],
-        "Wave_Front_Size": [64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_accum.csv"
@@ -5745,35 +5757,39 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     """
     Tests Line 4: 'Accum_VGPR_Count' is added and set to 0 if not present in input.
     """
-    agent_info_content = create_csv_string({
-        "Node_Id": [0],
-        "Agent_Type": ["GPU"],
-        "Wave_Front_Size": [64],
-    })
+    agent_info_content = create_csv_string(
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
+    )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_no_accum_vgpr.csv"
 
-    counter_content = create_csv_string({
-        "Correlation_Id": [1],
-        "Dispatch_Id": [10],
-        "Agent_Id": [0],
-        "Queue_Id": [100],
-        "Process_Id": [1000],
-        "Thread_Id": [10000],
-        "Grid_Size": [256],
-        "Kernel_Id": [1],
-        "Kernel_Name": ["kernelA"],
-        "Workgroup_Size": [64],
-        "LDS_Block_Size": [32],
-        "Scratch_Size": [0],
-        "VGPR_Count": [16],
-        "SGPR_Count": [32],
-        "Start_Timestamp": [100000],
-        "End_Timestamp": [100100],
-        "Counter_Name": ["Cycles"],
-        "Counter_Value": [5000],
-    })
+    counter_content = create_csv_string(
+        {
+            "Correlation_Id": [1],
+            "Dispatch_Id": [10],
+            "Agent_Id": [0],
+            "Queue_Id": [100],
+            "Process_Id": [1000],
+            "Thread_Id": [10000],
+            "Grid_Size": [256],
+            "Kernel_Id": [1],
+            "Kernel_Name": ["kernelA"],
+            "Workgroup_Size": [64],
+            "LDS_Block_Size": [32],
+            "Scratch_Size": [0],
+            "VGPR_Count": [16],
+            "SGPR_Count": [32],
+            "Start_Timestamp": [100000],
+            "End_Timestamp": [100100],
+            "Counter_Name": ["Cycles"],
+            "Counter_Value": [5000],
+        }
+    )
     counter_filepath = tmp_path / "counter_no_accum_vgpr.csv"
     counter_filepath.write_text(counter_content)
 
@@ -6508,7 +6524,7 @@ def test_noise_clamp_clamping_behavior():
 @pytest.mark.noise_clamp
 def test_noise_clamp_zero_reference():
     """Edge case: zero reference should not cause division by zero."""
-    from utils.parser.parser import to_noise_clamp
+    from utils.parser.noise_clamper import to_noise_clamp
 
     assert to_noise_clamp(-100.0, 0.0) == 0.0
     result = to_noise_clamp(pd.Series([-100.0]), pd.Series([0.0]))
@@ -6519,7 +6535,7 @@ def test_noise_clamp_zero_reference():
 @pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
     """Warning recorded when relative error >= 1%."""
-    from utils.parser.parser import (
+    from utils.parser.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6539,7 +6555,7 @@ def test_noise_clamp_warning_above_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
     """No warning when relative error < 1%."""
-    from utils.parser.parser import (
+    from utils.parser.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6557,7 +6573,7 @@ def test_noise_clamp_no_warning_below_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_empty_input():
     """Empty inputs should return empty without error."""
-    from utils.parser.parser import to_noise_clamp
+    from utils.parser.noise_clamper import to_noise_clamp
 
     result = to_noise_clamp(pd.Series([], dtype=float), pd.Series([], dtype=float))
     assert len(result) == 0
@@ -6567,7 +6583,7 @@ def test_noise_clamp_empty_input():
 @pytest.mark.noise_clamp
 def test_noise_clamp_threshold_boundary():
     """Exactly 1% error should trigger warning (>= not >)."""
-    from utils.parser.parser import (
+    from utils.parser.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6586,7 +6602,7 @@ def test_noise_clamper_instance_isolation():
     """Separate NoiseClamper instances should have independent state."""
     import numpy as np
 
-    from utils.parser.parser import NoiseClamper
+    from utils.parser.noise_clamper import NoiseClamper
 
     clamper1 = NoiseClamper()
     clamper2 = NoiseClamper()
@@ -6941,11 +6957,13 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     }
 
     # Mock PMC dataframe with kernel data
-    mock_pmc_df = pd.DataFrame({
-        "Kernel_Name": ["kernel1", "kernel2"],
-        "Start_Timestamp": [100, 200],
-        "End_Timestamp": [150, 300],
-    })
+    mock_pmc_df = pd.DataFrame(
+        {
+            "Kernel_Name": ["kernel1", "kernel2"],
+            "Start_Timestamp": [100, 200],
+            "End_Timestamp": [150, 300],
+        }
+    )
 
     # Mock architecture config with EMPTY roofline dataframe (ID 402)
     mock_arch_config = mock.MagicMock()
@@ -6976,12 +6994,12 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     result = db_analysis.calc_roofline_data(analyzer)
 
     # Verify early exit behavior
-    assert len(result[0]) == 0, (
-        "Should return empty kernel level dict when roofline data is empty"
-    )
-    assert len(result[1]) == 0, (
-        "Should return empty workload level dict when roofline data is empty"
-    )
+    assert (
+        len(result[0]) == 0
+    ), "Should return empty kernel level dict when roofline data is empty"
+    assert (
+        len(result[1]) == 0
+    ), "Should return empty workload level dict when roofline data is empty"
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]
@@ -7164,15 +7182,17 @@ def test_build_call_trees_missing_columns():
 
 @pytest.mark.unit
 def test_build_call_trees_single_dispatch():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "torch.nn.Linear",
-            "Kernel_Name": "gemm_kernel",
-            "Context_Id": "10@train.py:42",
-            "Start_Timestamp_kernel": 1000,
-            "End_Timestamp_kernel": 2000,
-        }
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "Operator_Name": "torch.nn.Linear",
+                "Kernel_Name": "gemm_kernel",
+                "Context_Id": "10@train.py:42",
+                "Start_Timestamp_kernel": 1000,
+                "End_Timestamp_kernel": 2000,
+            }
+        ]
+    )
     call_trees = build_call_trees(df)
     assert "train.py:42" in call_trees
     assert call_trees["train.py:42"].kernel_launches == 1
@@ -7181,15 +7201,17 @@ def test_build_call_trees_single_dispatch():
 
 @pytest.mark.unit
 def test_build_call_trees_hierarchy_split():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "aten/linear/addmm",
-            "Kernel_Name": "gemm_kernel",
-            "Context_Id": "10@file.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        }
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "Operator_Name": "aten/linear/addmm",
+                "Kernel_Name": "gemm_kernel",
+                "Context_Id": "10@file.py:1",
+                "Start_Timestamp_kernel": 0,
+                "End_Timestamp_kernel": 1000,
+            }
+        ]
+    )
     call_trees = build_call_trees(df)
     root = call_trees["file.py:1"]
     assert "aten" in root.children
@@ -7228,35 +7250,39 @@ def test_build_call_trees_dedup_identical_timestamps():
 
 @pytest.mark.unit
 def test_build_call_trees_no_context_id():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "op",
-            "Kernel_Name": "kern",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        }
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "Operator_Name": "op",
+                "Kernel_Name": "kern",
+                "Start_Timestamp_kernel": 0,
+                "End_Timestamp_kernel": 1000,
+            }
+        ]
+    )
     assert "unknown:0" in build_call_trees(df)
 
 
 @pytest.mark.unit
 def test_build_call_trees_duration_rollup():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "parent/child",
-            "Kernel_Name": "kern_a",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1_000_000,
-        },
-        {
-            "Operator_Name": "parent",
-            "Kernel_Name": "kern_b",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 2_000_000,
-            "End_Timestamp_kernel": 3_000_000,
-        },
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "Operator_Name": "parent/child",
+                "Kernel_Name": "kern_a",
+                "Context_Id": "10@f.py:1",
+                "Start_Timestamp_kernel": 0,
+                "End_Timestamp_kernel": 1_000_000,
+            },
+            {
+                "Operator_Name": "parent",
+                "Kernel_Name": "kern_b",
+                "Context_Id": "10@f.py:1",
+                "Start_Timestamp_kernel": 2_000_000,
+                "End_Timestamp_kernel": 3_000_000,
+            },
+        ]
+    )
     call_trees = build_call_trees(df)
     root = call_trees["f.py:1"]
     assert root.kernel_launches == 2
@@ -7266,22 +7292,24 @@ def test_build_call_trees_duration_rollup():
 
 @pytest.mark.unit
 def test_build_call_trees_multiple_source_locations():
-    df = pd.DataFrame([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@a.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        },
-        {
-            "Operator_Name": "op_b",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@b.py:2",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 1000,
-        },
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "Operator_Name": "op_a",
+                "Kernel_Name": "kern",
+                "Context_Id": "10@a.py:1",
+                "Start_Timestamp_kernel": 0,
+                "End_Timestamp_kernel": 1000,
+            },
+            {
+                "Operator_Name": "op_b",
+                "Kernel_Name": "kern",
+                "Context_Id": "10@b.py:2",
+                "Start_Timestamp_kernel": 0,
+                "End_Timestamp_kernel": 1000,
+            },
+        ]
+    )
     call_trees = build_call_trees(df)
     assert "a.py:1" in call_trees
     assert "b.py:2" in call_trees
@@ -7657,10 +7685,12 @@ def get_matched_torch_operators_for_display(
 @pytest.mark.torch_ops
 def test_display_match_hierarchy_glob():
     """Full hierarchy globs are honored by display helper."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3, H3, H2],
-        "Kernel_Name": ["k1", "k2", "k3"],
-    })
+    df = pd.DataFrame(
+        {
+            "Operator_Name": [H3, H3, H2],
+            "Kernel_Name": ["k1", "k2", "k3"],
+        }
+    )
     torch_operators = {"trace_0": df}
 
     matched = get_matched_torch_operators_for_display(torch_operators, ["*/torch.relu"])
@@ -7672,10 +7702,12 @@ def test_display_match_hierarchy_glob():
 @pytest.mark.torch_ops
 def test_display_match_multi_patterns():
     """Multiple glob patterns match their respective operators."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3, H2],
-        "Kernel_Name": ["k1", "k2"],
-    })
+    df = pd.DataFrame(
+        {
+            "Operator_Name": [H3, H2],
+            "Kernel_Name": ["k1", "k2"],
+        }
+    )
     torch_operators = {"trace_0": df}
 
     matched = get_matched_torch_operators_for_display(
@@ -7688,10 +7720,12 @@ def test_display_match_multi_patterns():
 @pytest.mark.torch_ops
 def test_display_no_match():
     """No matches returns empty list."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3],
-        "Kernel_Name": ["k1"],
-    })
+    df = pd.DataFrame(
+        {
+            "Operator_Name": [H3],
+            "Kernel_Name": ["k1"],
+        }
+    )
     assert get_matched_torch_operators_for_display({"t": df}, ["sigmoid"]) == []
 
 
@@ -7985,10 +8019,12 @@ def test_colons_in_operator_names():
 @pytest.mark.torch_ops
 def test_display_star_matches_all_operators():
     """'*' pattern matches all operators in display helper."""
-    df = pd.DataFrame({
-        "Operator_Name": [H3, H2],
-        "Kernel_Name": ["k1", "k2"],
-    })
+    df = pd.DataFrame(
+        {
+            "Operator_Name": [H3, H2],
+            "Kernel_Name": ["k1", "k2"],
+        }
+    )
     torch_operators = {"trace_0": df}
 
     matched = get_matched_torch_operators_for_display(torch_operators, ["*"])
