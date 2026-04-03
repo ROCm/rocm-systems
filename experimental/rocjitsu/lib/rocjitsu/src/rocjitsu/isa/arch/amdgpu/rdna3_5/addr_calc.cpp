@@ -5,7 +5,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/except.h"
 
 #include <cassert>
 #include <cstdint>
@@ -14,21 +13,42 @@ namespace rocjitsu {
 namespace rdna3_5 {
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
-  (void)inst;
-  (void)wf;
-  // RDNA3.5 SmemMachineInst lacks soffset_en/imm fields required by shared template.
-  throw util::UnimplementedInst("rdna3_5 smem_calculate_address not yet implemented");
-  return 0;
+  // GFX11 SMEM: sbase is an aligned SGPR pair, offset is a 21-bit signed immediate,
+  // soffset is an SGPR index (0x7F = no SGPR offset).
+  auto &cu = wf.cu();
+  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
+  uint64_t base = (static_cast<uint64_t>(cu.read_sgpr(sbase + 1)) << 32) | cu.read_sgpr(sbase);
+  int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
+  if (inst.soffset != 0x7F)
+    off += cu.read_sgpr(wf.sgpr_alloc().base + inst.soffset);
+  return (base + off) & ~0x3ULL;
 }
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
-  (void)inst;
-  (void)wf;
-  (void)addrs;
-  (void)lane_mask;
-  // RDNA3.5 FlatMachineInst lacks pad_12 field required by shared flat template.
-  throw util::UnimplementedInst("rdna3_5 flat_calculate_addresses not yet implemented");
+  // GFX11 FLAT: 13-bit signed offset, optional SGPR base via saddr.
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  lane_mask = exec;
+  int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 19) >> 19);
+  uint64_t saddr_val = 0;
+  if (inst.saddr != 0x7F) {
+    uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
+    saddr_val = (static_cast<uint64_t>(cu.read_sgpr(sb + 1)) << 32) | cu.read_sgpr(sb);
+  }
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+    uint64_t vaddr;
+    if (inst.saddr != 0x7F) {
+      vaddr = cu.read_vgpr(vbase, lane);
+    } else {
+      vaddr =
+          (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
+    }
+    addrs[lane] = saddr_val + vaddr + offset;
+  }
 }
 
 void mubuf_calculate_addresses(const MubufMachineInst &inst, amdgpu::Wavefront &wf,

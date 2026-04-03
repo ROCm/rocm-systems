@@ -40,7 +40,7 @@ using namespace rocjitsu;
 // s_nop is op=0 on all 9 ISAs.
 // s_endpgm is op=1 on CDNA1-4 and RDNA1/2 (GFX9/GFX10).
 // s_endpgm is op=48 on RDNA3/3.5/4 (GFX11/GFX12) — op=1 is s_setkill there.
-constexpr uint32_t S_NOP = 0xBF800000u;           ///< s_nop    (SOPP op=0,  simm16=0)
+constexpr uint32_t S_NOP = 0xBF800000u;          ///< s_nop    (SOPP op=0,  simm16=0)
 constexpr uint32_t S_ENDPGM_GFX9 = 0xBF810000u;  ///< s_endpgm (SOPP op=1,  simm16=0): CDNA/RDNA1/2
 constexpr uint32_t S_ENDPGM_GFX11 = 0xBFB00000u; ///< s_endpgm (SOPP op=48, simm16=0): RDNA3/3.5/4
 
