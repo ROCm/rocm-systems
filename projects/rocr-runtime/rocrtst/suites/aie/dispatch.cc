@@ -95,8 +95,7 @@ hsa_status_t discover_agents(hsa_agent_t agent, void* data) {
 // ---------------------------------------------------------------------------
 
 struct find_pool_data {
-  hsa_amd_memory_pool_global_flag_t expected_flags =
-      HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  hsa_amd_memory_pool_global_flag_t expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
   bool expected_allocatable = true;
   hsa_amd_memory_pool_t pool{};
 };
@@ -197,9 +196,9 @@ void submit_aie_ert_packet(hsa_queue_t* queue, hsa_amd_aie_ert_start_kernel_data
 // ---------------------------------------------------------------------------
 
 void fill_vector_scalar_add_payload(hsa_amd_aie_ert_start_kernel_data_t* payload, void* pdi_buf,
-                                    void* insts_buf, std::uint32_t insts_dwords,
-                                    void* input, void* output,
-                                    std::uint32_t input_size, std::uint32_t output_size) {
+                                    void* insts_buf, std::uint32_t insts_dwords, void* input,
+                                    void* output, std::uint32_t input_size,
+                                    std::uint32_t output_size) {
   payload->pdi_addr = pdi_buf;
 
   // Transaction opcode
@@ -453,9 +452,8 @@ TEST(Dispatch, VectorScalarAdd) {
 
   // --- Allocate I/O buffers ---
   std::uint32_t* input = nullptr;
-  ASSERT_EQ(
-      hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&input)),
-      HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&input)),
+            HSA_STATUS_SUCCESS);
 
   std::uint32_t* output = nullptr;
   ASSERT_EQ(
@@ -470,9 +468,8 @@ TEST(Dispatch, VectorScalarAdd) {
   constexpr std::uint32_t PACKET_DWORDS = 3 + (NUM_SRC + 1) * 3;  // = 9
 
   hsa_amd_aie_ert_start_kernel_data_t* payload = nullptr;
-  ASSERT_EQ(
-      hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, reinterpret_cast<void**>(&payload)),
-      HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, reinterpret_cast<void**>(&payload)),
+            HSA_STATUS_SUCCESS);
 
   fill_vector_scalar_add_payload(payload, pdi_buf, insts_buf, insts_dwords, input, output,
                                  static_cast<std::uint32_t>(DATA_SIZE),
@@ -485,12 +482,127 @@ TEST(Dispatch, VectorScalarAdd) {
   // --- Submit and wait ---
   submit_aie_ert_packet(queue, payload, PACKET_DWORDS, signal);
 
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
-                            HSA_WAIT_STATE_BLOCKED);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
   // --- Verify output: output[i] == input[i] + 1 ---
   for (std::size_t i = 0; i < N; ++i) {
     EXPECT_EQ(output[i], static_cast<std::uint32_t>(i + 1)) << "mismatch at index " << i;
+  }
+
+  // --- Cleanup ---
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(payload), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
+}
+
+TEST(Dispatch, VectorScalarAdd100) {
+  static constexpr int NUM_DISPATCHES = 100;
+
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+  // --- Discover AIE agent ---
+  std::vector<hsa_agent_t> aie_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(aie_agents.empty());
+
+  // --- Discover memory pools ---
+  find_pool_data dev_pool_data{};
+  dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  dev_pool_data.expected_allocatable = false;
+  ASSERT_EQ(
+      hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &dev_pool_data),
+      HSA_STATUS_INFO_BREAK);
+
+  find_pool_data data_pool_data{};
+  data_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  data_pool_data.expected_allocatable = true;
+  ASSERT_EQ(
+      hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &data_pool_data),
+      HSA_STATUS_INFO_BREAK);
+
+  find_pool_data kernarg_pool_data{};
+  kernarg_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+  kernarg_pool_data.expected_allocatable = true;
+  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool,
+                                         &kernarg_pool_data) != HSA_STATUS_INFO_BREAK) {
+    kernarg_pool_data.pool = data_pool_data.pool;
+  }
+
+  auto dev_pool = dev_pool_data.pool;
+  auto data_pool = data_pool_data.pool;
+  auto kernarg_pool = kernarg_pool_data.pool;
+
+  // --- Create queue ---
+  std::uint32_t min_queue_size = 0;
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
+            HSA_STATUS_SUCCESS);
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  // --- Load PDI and instructions ---
+  void* pdi_buf = nullptr;
+  std::size_t pdi_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, kPdiPath, &pdi_buf, pdi_size));
+
+  void* insts_buf = nullptr;
+  std::size_t insts_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, kInstsPath, &insts_buf, insts_size));
+  const auto insts_dwords = static_cast<std::uint32_t>(insts_size / sizeof(std::uint32_t));
+
+  // --- Allocate I/O buffers ---
+  std::uint32_t* input = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&input)),
+            HSA_STATUS_SUCCESS);
+
+  std::uint32_t* output = nullptr;
+  ASSERT_EQ(
+      hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&output)),
+      HSA_STATUS_SUCCESS);
+
+  // --- Build payload ---
+  constexpr std::uint32_t NUM_SRC = 1;
+  constexpr std::uint32_t PACKET_DWORDS = 3 + (NUM_SRC + 1) * 3;
+
+  hsa_amd_aie_ert_start_kernel_data_t* payload = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, reinterpret_cast<void**>(&payload)),
+            HSA_STATUS_SUCCESS);
+
+  // --- Create completion signal ---
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+
+  // --- Dispatch loop ---
+  for (int iter = 0; iter < NUM_DISPATCHES; ++iter) {
+    SCOPED_TRACE(iter);
+
+    // Reset I/O buffers
+    std::iota(input, input + N, static_cast<std::uint32_t>(iter));
+    std::memset(output, 0, DATA_SIZE);
+
+    fill_vector_scalar_add_payload(payload, pdi_buf, insts_buf, insts_dwords, input, output,
+                                   static_cast<std::uint32_t>(DATA_SIZE),
+                                   static_cast<std::uint32_t>(DATA_SIZE));
+
+    // Submit
+    submit_aie_ert_packet(queue, payload, PACKET_DWORDS, signal);
+  }
+
+  // Wait for completion of all dispatches
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  // Verify output: output[i] == iter + input[i] + 1
+  for (std::size_t i = 0; i < N; ++i) {
+    EXPECT_EQ(output[i], static_cast<std::uint32_t>((NUM_DISPATCHES - 1) + i + 1))
+        << "mismatch at index " << i;
   }
 
   // --- Cleanup ---
