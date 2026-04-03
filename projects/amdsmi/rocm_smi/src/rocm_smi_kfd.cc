@@ -36,6 +36,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -171,7 +172,6 @@ static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated
 }
 
 static const char* kKFDContextPrefix = "context_";  // Prefix for secondary KFD contexts
-static const char* kKFDVramPrefix = "vram_";
 
 // KFD Node Property strings
 // static const char *kKFDNodePropCPU_CORES_COUNTStr =    "cpu_cores_count";
@@ -707,7 +707,7 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
   // processes share the same GPU set (valid for typical container deployments).
   // This assumption may not hold in multi-tenant GPU partitioning scenarios.
   if (gpu_set->empty() && IsKfdPidNamespaced()) {
-    std::stringstream ss;
+    std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << " | PID namespace detected, falling back to "
        << "KFD vram_* files for GPU discovery (pid=" << pid << ")";
     LOG_DEBUG(ss);
