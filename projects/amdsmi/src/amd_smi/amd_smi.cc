@@ -2202,6 +2202,7 @@ amdsmi_status_t amdsmi_get_fw_info(amdsmi_processor_handle processor_handle,
 
   AMDSMI_CHECK_INIT();
 
+  // Fail-fast: validate handle before work; rsmi_wrapper also validates internally
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
@@ -2554,6 +2555,7 @@ amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle
   }
 
   // default to 0xffffffffffffffff as not supported
+  // Fail-fast: validate handle before work; rsmi_wrapper also validates internally
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
