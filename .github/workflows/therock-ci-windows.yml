@@ -105,7 +105,7 @@ jobs:
           cmake_preset: windows-release
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=X:/r  ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=X:/r/rocm-systems  ${{ inputs.cmake_options }}"
         run: |
           # clear cache before build and after download
           ccache -z
