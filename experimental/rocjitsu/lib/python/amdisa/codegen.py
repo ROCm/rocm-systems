@@ -683,9 +683,23 @@ class CodeGenerator:
 
         if cls == 'waitcnt':
             L.append(f'  uint16_t imm = static_cast<uint16_t>({src_ops[0]}.encoding_value_);')
-            L.append('  uint8_t vm = (imm & 0xF) | ((imm >> 10) & 0x30);')
-            L.append('  uint8_t exp = (imm >> 4) & 0x7;')
-            L.append('  uint8_t lgkm = (imm >> 8) & Isa::WAITCNT_LGKMCNT_MASK;')
+            wf = self.isa_spec.profile.waitcnt_family
+            if wf == 'gfx11':
+                # GFX11 (RDNA3/3.5) SIMM16 layout:
+                #   expcnt[2:0] = bits [2:0]
+                #   lgkmcnt[5:0] = bits [9:4]
+                #   vmcnt[5:0] = bits [15:10]
+                L.append('  uint8_t exp = imm & 0x7;')
+                L.append('  uint8_t lgkm = (imm >> 4) & 0x3F;')
+                L.append('  uint8_t vm = (imm >> 10) & 0x3F;')
+            else:
+                # GFX9 (CDNA1-4) / GFX10 (RDNA1/2) SIMM16 layout:
+                #   vmcnt[3:0] = bits [3:0], vmcnt[5:4] = bits [15:14]
+                #   expcnt[2:0] = bits [6:4]
+                #   lgkmcnt = bits [12:8] (GFX9) or [13:8] (GFX10)
+                L.append('  uint8_t vm = (imm & 0xF) | ((imm >> 10) & 0x30);')
+                L.append('  uint8_t exp = (imm >> 4) & 0x7;')
+                L.append('  uint8_t lgkm = (imm >> 8) & Isa::WAITCNT_LGKMCNT_MASK;')
             L.append('  wf.set_wait_target(vm, lgkm, exp);')
             return '\n'.join(L)
 

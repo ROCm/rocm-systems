@@ -1013,6 +1013,20 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return '0x3F'
 
     @property
+    def waitcnt_decode(self) -> str:
+        """GFX11 (RDNA3/3.5) S_WAITCNT SIMM16 layout:
+
+        expcnt[2:0]  = bits [2:0]
+        lgkmcnt[5:0] = bits [9:4]
+        vmcnt[5:0]   = bits [15:10]
+        """
+        return (
+            'uint32_t expcnt = encoding_value_ & 0x7;\n'
+            'uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;\n'
+            'uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;\n'
+        )
+
+    @property
     def supported_versions(self) -> list[str]:
         return ['1.0.0', '1.1.0']
 
