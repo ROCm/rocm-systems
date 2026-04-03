@@ -118,8 +118,6 @@ cooperativeGrps:
   Unit_Multi_Grid_Group_Positive_Sync:
     <<: *level_2
     tags: [cooperative, groups, multigpu]
-    # SWDEV-443630 : Below test failed in stress test on 19/01/24
-    disabled: [gfx90a, gfx942, gfx950]
   Unit_coalesced_groups_shfl_down:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
