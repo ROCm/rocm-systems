@@ -1,13 +1,5 @@
 ---
 virtualMemoryManagement:
-  Unit_hipMemGetAllocationGranularity_MinGranularity:
-    <<: *level_2
-    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
-    disabled: [amd_wsl]
-  Unit_hipMemGetAllocationGranularity_RecommendedGranularity:
-    <<: *level_2
-    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
-    disabled: [amd_wsl]
   Unit_hipMemGetAllocationGranularity_AllGPUs:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
@@ -58,7 +50,10 @@ virtualMemoryManagement:
     # (amd_windows) NOTE: The following test is disabled due to defect - EXSWHTEC-245
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
-  Unit_hipMemAddressReserve_Negative: *level_2
+  Unit_hipMemAddressReserve_Negative:
+    <<: *level_2
+    # === Patch which removes the typetraits implementation from std namespace in hiprtc is reverted ===
+    disabled: [amd_wsl]
   Unit_hipMemAddressReserve_Capture: *level_2
   Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity:
     <<: *level_2

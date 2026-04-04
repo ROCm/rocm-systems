@@ -70,15 +70,14 @@ static int is_wsl2 = -1;
   }                                          \
 } while(0)
 
-// By default, enable use of amd_smi_lib for ROCm 7.0 and above, and disable for older versions where it doesn't seem necessary as amdsmi is only needed for UALoE scale-up support
-// which is less likely to be backported to older ROCm versions;
-#if ROCM_VERSION >= 70000
-#define AMDSMI_DEFAULT_ENABLED 1
-#else
+// Disabled by default due to a critical concurrency issue in amdsmi library init
+// (communicated to the amdsmi team). Once a known ROCm version ships with the fix,
+// re-enable the version-gated default here (e.g. #if ROCM_VERSION >= <fixed_version>)
+// and update this comment with the resolved ROCm version.
+// Users can opt-in in the meantime by setting RCCL_USE_AMD_SMI_LIB=1.
 #define AMDSMI_DEFAULT_ENABLED 0
-#endif
 
-// Enable use of amd_smi_lib instead of internal ARSMI code by default; set RCCL_USE_AMD_SMI_LIB=0 to disable amd_smi_lib and use the internal path
+// Enable use of amd_smi_lib instead of internal ARSMI code by default; set RCCL_USE_AMD_SMI_LIB=1 to enable amd_smi_lib and use the AMD SMI path
 RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", AMDSMI_DEFAULT_ENABLED);
 #include <dlfcn.h>
 #define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name)arglist = nullptr;
