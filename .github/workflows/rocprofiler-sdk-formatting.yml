@@ -48,7 +48,7 @@ jobs:
     - name: Run cmake-format
       working-directory: projects/rocprofiler-sdk
       run: |
-        FORMAT_FILES=$(find . -type f | egrep 'CMakeLists.txt|\.cmake$')
+        FORMAT_FILES=$(find . -type f -not -path '*/aqlprofile/*' | egrep 'CMakeLists.txt|\.cmake$')
         command -v cmake-format
         cmake-format --version
         set +e
@@ -89,7 +89,7 @@ jobs:
     - name: Run clang-format
       working-directory: projects/rocprofiler-sdk
       run: |
-        FORMAT_FILES=$(find samples source tests benchmark -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
+        FORMAT_FILES=$(find samples source tests benchmark -type f -not -path '*/aqlprofile/*' | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
         command -v git
         command -v clang-format
         git --version
@@ -168,7 +168,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         OUTFILE=missing_newline.txt
-        for i in $(find source tests samples benchmark docker cmake -type f | egrep -v '\.(bin|png|csv)$|source/docs/_(build|doxygen)'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
+        for i in $(find source tests samples benchmark docker cmake -type f -not -path '*/aqlprofile/*' | egrep -v '\.(bin|png|csv)$|source/docs/_(build|doxygen)'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
         if [[ -f ${OUTFILE} && $(cat ${OUTFILE} | wc -l) -gt 0 ]]; then
           echo -e "\nError! Source code missing new line at end of file...\n"
           echo -e "\nFiles:\n"

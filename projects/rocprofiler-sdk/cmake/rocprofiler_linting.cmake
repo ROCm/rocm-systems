@@ -80,7 +80,7 @@ macro(ROCPROFILER_ACTIVATE_CLANG_TIDY)
         set(CMAKE_CXX_CLANG_TIDY
             ${ROCPROFILER_CLANG_TIDY_EXE}
             -header-filter=${PROJECT_SOURCE_DIR}/source/.*
-            --exclude-header-filter=${PROJECT_SOURCE_DIR}/source/include/rocprofiler-sdk/rccl/details/.*
+            --exclude-header-filter=${PROJECT_SOURCE_DIR}/source/include/rocprofiler-sdk/rccl/details/.*|${PROJECT_SOURCE_DIR}/source/lib/aqlprofile/.*
             --warnings-as-errors=*,-misc-header-include-cycle)
 
         # Create a preprocessor definition that depends on .clang-tidy content so the
