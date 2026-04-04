@@ -208,20 +208,25 @@ target_link_libraries(
     INTERFACE $<BUILD_INTERFACE:rocprofiler-sdk-perfetto-static-library>)
 
 # ELFIO
-rocprofiler_checkout_git_submodule(
-    RECURSIVE
-    RELATIVE_PATH external/elfio
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    REPO_URL https://github.com/serge1/ELFIO.git
-    REPO_BRANCH "Release_3.12")
+if(ROCPROFILER_BUILD_ELFIO)
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/elfio
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/serge1/ELFIO.git
+        REPO_BRANCH "Release_3.12")
 
-set(ELFIO_BUILD_EXAMPLES OFF)
-set(ELFIO_BUILD_TESTS OFF)
-add_subdirectory(elfio EXCLUDE_FROM_ALL)
-if(TARGET rocprofiler-sdk-elfio)
-    get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
-    target_include_directories(rocprofiler-sdk-elfio SYSTEM
-                               INTERFACE ${ELFIO_INCLUDE_DIR})
+    set(ELFIO_BUILD_EXAMPLES OFF)
+    set(ELFIO_BUILD_TESTS OFF)
+    add_subdirectory(elfio EXCLUDE_FROM_ALL)
+    if(TARGET rocprofiler-sdk-elfio)
+        get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
+        target_include_directories(rocprofiler-sdk-elfio SYSTEM
+                                   INTERFACE ${ELFIO_INCLUDE_DIR})
+    endif()
+else()
+    find_package(elfio REQUIRED GLOBAL)
+    target_link_libraries(rocprofiler-sdk-elfio INTERFACE elfio::elfio)
 endif()
 
 #
