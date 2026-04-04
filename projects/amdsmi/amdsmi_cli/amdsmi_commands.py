@@ -8315,29 +8315,7 @@ class AMDSMICommands:
                 input_value, is_percentage = args.fan
 
                 # Check if gpu_od interface is available
-                # Get the correct DRM device path using BDF
-                has_gpu_od = False
-                gpu_od_path = None
-                try:
-                    # BDF format is "XXXX:XX:XX.X", matches PCI device path
-                    drm_base = "/sys/class/drm"
-                    # Find card* that matches this BDF
-                    for card_dir in sorted(os.listdir(drm_base)):
-                        if not card_dir.startswith("card") or "-" in card_dir:
-                            continue
-                        device_link = os.path.join(drm_base, card_dir, "device")
-                        try:
-                            device_path = os.readlink(device_link)
-                            # device_path is like "../../../0000:44:00.0"
-                            if gpu_bdf in device_path:
-                                gpu_od_path = os.path.join(drm_base, card_dir, "device", "gpu_od")
-                                has_gpu_od = os.path.isdir(gpu_od_path)
-                                break
-                        except (OSError, IOError):
-                            continue
-                except (OSError, IOError):
-                    # If we can't determine the interface, fall back to legacy
-                    has_gpu_od = False
+                has_gpu_od, gpu_od_path = self.helpers.detect_gpu_od(gpu_bdf)
 
                 # Helper function for consistent error formatting
                 def format_fan_error(message, include_driver_note=False):
@@ -8368,8 +8346,14 @@ class AMDSMICommands:
                                 if len(parts) >= 3:
                                     od_min = int(parts[1])
                                     od_max = int(parts[2])
-                    except (OSError, IOError, ValueError):
-                        pass  # Use defaults if parsing fails
+                    except (OSError, IOError, ValueError) as e:
+                        logging.warning(
+                            "Failed to parse gpu_od OD_RANGE from %s: %s. Using defaults od_min=%d od_max=%d",
+                            fan_pwm_path,
+                            e,
+                            od_min,
+                            od_max,
+                        )
 
                     od_range = od_max - od_min
                     if is_percentage:

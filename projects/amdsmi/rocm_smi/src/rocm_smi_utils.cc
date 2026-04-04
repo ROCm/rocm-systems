@@ -440,6 +440,20 @@ int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
   if (current_pwm) *current_pwm = val;
   return 0;
 }
+
+rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value) {
+  int write_ret = WriteSysfsStr(path, value);
+  if (write_ret != 0) {
+    return SysfsWriteErrnoToRsmiStatus(write_ret);
+  }
+
+  // Commit by writing 'c'
+  write_ret = WriteSysfsStr(path, "c");
+  if (write_ret != 0) {
+    return SysfsWriteErrnoToRsmiStatus(write_ret);
+  }
+  return RSMI_STATUS_SUCCESS;
+}
 rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err) {
   // Map KFD ioctl errno to RSMI status
   // See rocm_smi_kfd_data_manager.cc for error sources

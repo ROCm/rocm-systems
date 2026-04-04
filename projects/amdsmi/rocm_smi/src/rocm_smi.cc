@@ -3546,26 +3546,12 @@ rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
   // Check if gpu_od interface is available
   if (amd::smi::FileExists(gpu_od_path.c_str())) {
     // Use gpu_od interface for fan reset - set fan_minimum_pwm to OD_RANGE minimum
-    // Read the OD_RANGE to get the hardware minimum PWM value
     uint64_t od_min_pwm = 0;
     int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, nullptr);
     if (parse_ret != 0) {
       return amd::smi::SysfsWriteErrnoToRsmiStatus(parse_ret);
     }
-
-    // Write the OD minimum value to reset to lowest fan floor
-    std::string min_str = std::to_string(od_min_pwm);
-    int write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, min_str);
-    if (write_ret != 0) {
-      return amd::smi::SysfsWriteErrnoToRsmiStatus(write_ret);
-    }
-
-    // Commit the change
-    write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, "c");
-    if (write_ret != 0) {
-      return amd::smi::SysfsWriteErrnoToRsmiStatus(write_ret);
-    }
-    return RSMI_STATUS_SUCCESS;
+    return amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(od_min_pwm));
 
   } else {
     // Fallback to legacy hwmon interface
@@ -3608,26 +3594,13 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
       return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
     }
 
-    // Step 1: Write the fan speed value
-    std::string speed_str = std::to_string(speed);
-    int write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, speed_str);
-    if (write_ret != 0) {
-      return amd::smi::SysfsWriteErrnoToRsmiStatus(write_ret);
+    // Write fan speed value and commit
+    rsmi_status_t od_ret = amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(speed));
+    if (od_ret != RSMI_STATUS_SUCCESS) {
+      // If write/commit fails, attempt to reset to automatic control
+      amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(od_min_pwm));
     }
-
-    // Step 2: Commit the change by writing 'c'
-    write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, "c");
-    if (write_ret != 0) {
-      // If commit fails, attempt to reset to automatic control to avoid
-      // leaving the interface in an inconsistent state
-      std::string reset_str = std::to_string(od_min_pwm);
-      amd::smi::WriteSysfsStr(fan_ctrl_path, reset_str);
-      amd::smi::WriteSysfsStr(fan_ctrl_path, "c");
-
-      return amd::smi::SysfsWriteErrnoToRsmiStatus(write_ret);
-    }
-
-    return RSMI_STATUS_SUCCESS;
+    return od_ret;
 
   } else {
     // Fallback to legacy hwmon interface (range: 0-255)

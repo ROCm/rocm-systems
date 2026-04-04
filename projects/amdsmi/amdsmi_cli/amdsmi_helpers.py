@@ -1456,6 +1456,32 @@ class AMDSMIHelpers:
             return f"{converted} W"
         return value
 
+    @staticmethod
+    def detect_gpu_od(bdf):
+        """Detect if a GPU has the gpu_od sysfs interface.
+
+        Args:
+            bdf: PCI Bus/Device/Function string (e.g. '0000:26:00.0')
+
+        Returns:
+            tuple: (has_gpu_od: bool, gpu_od_path: str or None)
+        """
+        drm_base = "/sys/class/drm"
+        try:
+            for card_dir in sorted(os.listdir(drm_base)):
+                if not card_dir.startswith("card") or "-" in card_dir:
+                    continue
+                device_link = os.path.join(drm_base, card_dir, "device")
+                try:
+                    if bdf in os.readlink(device_link):
+                        gpu_od_path = os.path.join(drm_base, card_dir, "device", "gpu_od")
+                        return os.path.isdir(gpu_od_path), gpu_od_path
+                except OSError:
+                    continue
+        except OSError:
+            pass
+        return False, None
+
     def get_fan_support(self):
         """Check if fan control is supported on the first device.
 

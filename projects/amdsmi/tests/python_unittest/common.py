@@ -138,6 +138,31 @@ def expand_glob_k_arg(caller_globals):
         break
 
 
+def has_gpu_od_interface(bdf):
+    """Check if a GPU has the gpu_od sysfs interface.
+
+    Args:
+        bdf: PCI Bus/Device/Function string (e.g. '0000:26:00.0')
+
+    Returns:
+        bool: True if gpu_od directory exists for this GPU
+    """
+    drm_base = "/sys/class/drm"
+    try:
+        for card_dir in sorted(os.listdir(drm_base)):
+            if not card_dir.startswith("card") or "-" in card_dir:
+                continue
+            device_link = os.path.join(drm_base, card_dir, "device")
+            try:
+                if bdf in os.readlink(device_link):
+                    return os.path.isdir(os.path.join(drm_base, card_dir, "device", "gpu_od"))
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return False
+
+
 class Common:
     VIRTUALIZATION_MODE_MAP = {}
     for member in amdsmi.AmdSmiVirtualizationMode:
