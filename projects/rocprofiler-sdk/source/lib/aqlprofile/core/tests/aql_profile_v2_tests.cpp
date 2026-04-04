@@ -7,7 +7,7 @@
 #include <vector>
 #include <memory>
 
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "aql_profile_v2.h"
 #include "../logger.h"
 #include "../pm4_factory.h"
 // Define static members

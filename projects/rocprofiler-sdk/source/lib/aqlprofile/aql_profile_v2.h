@@ -26,7 +26,7 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
-#include "aqlprofile-sdk/version.h"
+#include "version.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -455,7 +455,7 @@ void aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
  * The caller must pool information by sending a query_status packet, followed by a call
  * to aqlprofile_att_get_buffer_status(). If aqlprofile_att_buffer_status_t.is_full, then
  * a buffer_swap packet must be inserted into the queue.
- * 
+ *
  * @param[out] header If not zero, must be inserted as first 8 bytes.
  * @param[out] query_status To be inserted before calls to aqlprofile_att_get_buffer_status
  * @param[out] buffer_swap array of AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS transition packets

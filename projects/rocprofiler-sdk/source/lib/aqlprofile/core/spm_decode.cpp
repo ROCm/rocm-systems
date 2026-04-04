@@ -13,7 +13,7 @@
 #include <future>
 #include <fstream>
 #include <cstring>
-#include "src/core/include/spm_common.hpp"
+#include "core/spm_common.hpp"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 

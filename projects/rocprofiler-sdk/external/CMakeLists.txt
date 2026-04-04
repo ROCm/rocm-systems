@@ -47,7 +47,7 @@ if(ROCPROFILER_BUILD_TESTS)
             REPO_URL https://github.com/google/googletest.git
             REPO_BRANCH "main")
 
-        set(BUILD_GMOCK OFF)
+        set(BUILD_GMOCK ON)
         set(INSTALL_GTEST OFF)
         add_subdirectory(googletest EXCLUDE_FROM_ALL)
 

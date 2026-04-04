@@ -1,6 +1,6 @@
 #include "hsa/hsa_ext_amd.h"
-#include "include/aqlprofile-sdk/aql_profile_v2.h"
-#include "include/spm_common.hpp"
+#include "aql_profile_v2.h"
+#include "spm_common.hpp"
 #include "memorymanager.hpp"
 #include "core/commandbuffermgr.hpp"
 
@@ -339,7 +339,7 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
         profile.memcpy_cb(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), profile.userdata);
         aql_profile::PopulateAql(cmdbuf, stop_cmd.Size(), cmd_writer, &packets->stop_packet);
     }
-    
+
     s->output_buffer_ptr = memory->GetOutputBuf();
     s->output_buffer_size = memory->GetOutputBufSize();
 

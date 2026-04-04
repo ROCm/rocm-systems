@@ -21,7 +21,8 @@
 // THE SOFTWARE.
 
 #include "core/aql_profile.hpp"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "aql_profile_v2.h"
+#include "version.h"
 
 #include <array>
 #include <cstddef>
