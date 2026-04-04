@@ -41,7 +41,7 @@ rocprofiler_add_integration_execute_test(
             --pc-sampling
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
-    LABELS "integration-tests;pc-sampling;multi-gpu"
+    LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     PASS_REGULAR_EXPRESSION
