@@ -78,7 +78,7 @@ static int data_ready_check[2] = {};
 #endif
 
 inline static hsa_status_t HsaSpmSetDestBuffer(spm_set_dest_buffer_args& args) {
-  return hsa_amd_spm_set_dest_buffer(args.agent, args.buf_size, &args.timeout, &args.size_copied,
+  return rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_set_dest_buffer_fn(args.agent, args.buf_size, &args.timeout, &args.size_copied,
                                      args.dest_buf, &args.is_data_loss);
 }
 
@@ -204,7 +204,7 @@ static void manager(spm_state_t* s) {
 }
 
 hsa_status_t start_spm_threads(spm_state_t& s) {
-  hsa_status_t status = hsa_amd_spm_acquire(s.profile->agent);
+  hsa_status_t status = rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_acquire_fn(s.profile->agent);
   if (status != HSA_STATUS_SUCCESS) {
     ERR_LOGGING << "hsa_amd_spm_acquire() error";
     abort();
@@ -276,7 +276,7 @@ hsa_status_t start_spm_threads(spm_state_t& s) {
   s.manager_thread = new std::thread(manager, &s);
 
   if (!s.manager_thread) {
-    hsa_amd_spm_release(s.profile->agent);
+    rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_release_fn(s.profile->agent);
     return HSA_STATUS_ERROR;
   }
 
@@ -286,7 +286,7 @@ hsa_status_t start_spm_threads(spm_state_t& s) {
 void stop_spm_threads(spm_state_t& s) {
   s.stop_prod_thread = true;
   s.manager_thread->join();
-  hsa_amd_spm_release(s.profile->agent);
+  rocprofiler::aqlprofile::get_amd_ext_table()->hsa_amd_spm_release_fn(s.profile->agent);
   delete s.manager_thread;
   s.manager_thread = nullptr;
 #if DEBUG_SPM >= 2

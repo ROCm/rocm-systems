@@ -367,11 +367,11 @@ inline Pm4Factory* Pm4Factory::Create(const hsa_agent_t agent, bool concurrent) 
   uint32_t device_id = 0;
 
   // Getting GfxIP name
-  status = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name.data());
+  status = rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_NAME, agent_name.data());
   if (status == HSA_STATUS_SUCCESS) {
     // Getting DeviceId
     hsa_agent_info_t attribute = static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID);
-    status = hsa_agent_get_info(agent, attribute, &device_id);
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(agent, attribute, &device_id);
   }
   if (status != HSA_STATUS_SUCCESS) {
     throw aql_profile_exc_msg("Pm4Factory::Create() bad agent");
