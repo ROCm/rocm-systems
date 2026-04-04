@@ -55,11 +55,11 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(att-marker-trace.cpp PROPERTIES LANGUAGE HIP)
 add_executable(att-marker-trace)
 target_sources(att-marker-trace PRIVATE att-marker-trace.cpp)
-target_compile_options(att-marker-trace PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                                -Werror)
+target_compile_options(att-marker-trace PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 target_link_libraries(
-    att-marker-trace PRIVATE Threads::Threads
-                             rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+    att-marker-trace
+    PRIVATE Threads::Threads rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+            rocprofiler-sdk::tests-build-flags)

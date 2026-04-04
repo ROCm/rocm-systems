@@ -35,8 +35,7 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(scratch-memory.cpp PROPERTIES LANGUAGE HIP)
 add_executable(scratch-memory)
 target_sources(scratch-memory PRIVATE scratch-memory.cpp)
-target_compile_options(scratch-memory PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                              -Werror)
+target_compile_options(scratch-memory PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
 target_link_libraries(scratch-memory PRIVATE Threads::Threads hsa-runtime64

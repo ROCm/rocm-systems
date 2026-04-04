@@ -11,8 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(hip-in-libraries)
 target_sources(hip-in-libraries PRIVATE hip-in-libraries.cpp)
-target_compile_options(hip-in-libraries PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                                -Werror)
+target_compile_options(hip-in-libraries PRIVATE -Wpedantic)
 target_link_libraries(hip-in-libraries PRIVATE transpose-shared-library
                                                vector-ops-shared-library)
 
@@ -20,7 +19,8 @@ find_package(hip REQUIRED)
 target_link_libraries(hip-in-libraries PRIVATE hip::host)
 
 find_package(Threads REQUIRED)
-target_link_libraries(hip-in-libraries PRIVATE Threads::Threads)
+target_link_libraries(hip-in-libraries PRIVATE Threads::Threads
+                                               rocprofiler-sdk::tests-build-flags)
 
 if(TRANSPOSE_USE_MPI)
     find_package(MPI REQUIRED)

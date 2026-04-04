@@ -49,7 +49,6 @@ add_custom_target(generate_hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
 
 add_executable(multiqueue_testapp)
 target_sources(multiqueue_testapp PRIVATE multiqueue_app.cpp)
-target_compile_options(multiqueue_testapp PRIVATE -W -Wall -Wextra -Wshadow -Werror)
 
 find_package(Threads REQUIRED)
 target_link_libraries(multiqueue_testapp PRIVATE stdc++fs Threads::Threads)

@@ -35,8 +35,7 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(hsa-memory-allocation.cpp PROPERTIES LANGUAGE HIP)
 add_executable(hsa-memory-allocation)
 target_sources(hsa-memory-allocation PRIVATE hsa-memory-allocation.cpp)
-target_compile_options(hsa-memory-allocation PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                                     -Werror)
+target_compile_options(hsa-memory-allocation PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
 target_link_libraries(hsa-memory-allocation PRIVATE Threads::Threads hsa-runtime64

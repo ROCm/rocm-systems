@@ -35,8 +35,8 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(hip-graph-bubbles.cpp PROPERTIES LANGUAGE HIP)
 add_executable(hip-graph-bubbles)
 target_sources(hip-graph-bubbles PRIVATE hip-graph-bubbles.cpp)
-target_compile_options(hip-graph-bubbles PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                                 -Werror)
+target_compile_options(hip-graph-bubbles PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
-target_link_libraries(hip-graph-bubbles PRIVATE Threads::Threads)
+target_link_libraries(hip-graph-bubbles PRIVATE Threads::Threads
+                                                rocprofiler-sdk::tests-build-flags)

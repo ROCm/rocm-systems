@@ -41,15 +41,15 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(reproducible-runtime.cpp PROPERTIES LANGUAGE HIP)
 add_executable(reproducible-runtime)
 target_sources(reproducible-runtime PRIVATE reproducible-runtime.cpp)
-target_compile_options(reproducible-runtime PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                                    -Werror)
+target_compile_options(reproducible-runtime PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
 target_link_libraries(reproducible-runtime PRIVATE Threads::Threads)
 
 find_package(rocprofiler-sdk-roctx REQUIRED)
-target_link_libraries(reproducible-runtime
-                      PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+target_link_libraries(
+    reproducible-runtime PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+                                 rocprofiler-sdk::tests-build-flags)
 
 if(REPRODUCIBLE_RUNTIME_USE_MPI)
     find_package(MPI REQUIRED)

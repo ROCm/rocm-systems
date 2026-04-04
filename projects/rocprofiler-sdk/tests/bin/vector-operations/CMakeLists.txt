@@ -35,7 +35,7 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(vector-ops.cpp PROPERTIES LANGUAGE HIP)
 add_executable(vector-ops)
 target_sources(vector-ops PRIVATE vector-ops.cpp)
-target_compile_options(vector-ops PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
+target_compile_options(vector-ops PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
 target_link_libraries(vector-ops PRIVATE Threads::Threads

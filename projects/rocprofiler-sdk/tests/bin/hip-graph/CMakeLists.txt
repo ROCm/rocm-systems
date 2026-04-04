@@ -35,10 +35,11 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(hip-graph.cpp PROPERTIES LANGUAGE HIP)
 add_executable(hip-graph)
 target_sources(hip-graph PRIVATE hip-graph.cpp)
-target_compile_options(hip-graph PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
+target_compile_options(hip-graph PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
-target_link_libraries(hip-graph PRIVATE Threads::Threads)
+target_link_libraries(hip-graph PRIVATE Threads::Threads
+                                        rocprofiler-sdk::tests-build-flags)
 
 # find_package(rocprofiler-sdk-roctx REQUIRED) target_link_libraries(hip-graph PRIVATE
 # rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)

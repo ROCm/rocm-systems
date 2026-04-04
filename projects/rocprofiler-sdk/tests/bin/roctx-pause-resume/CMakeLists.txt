@@ -55,11 +55,10 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(roctx-pause-resume.cpp PROPERTIES LANGUAGE HIP)
 add_executable(roctx-pause-resume)
 target_sources(roctx-pause-resume PRIVATE roctx-pause-resume.cpp)
-target_compile_options(roctx-pause-resume PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                                  -Werror)
+target_compile_options(roctx-pause-resume PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 target_link_libraries(
-    roctx-pause-resume PRIVATE Threads::Threads
+    roctx-pause-resume PRIVATE Threads::Threads rocprofiler-sdk::tests-build-flags
                                rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)

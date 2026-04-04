@@ -42,15 +42,15 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(reproducible-dispatch-count.cpp PROPERTIES LANGUAGE HIP)
 add_executable(reproducible-dispatch-count)
 target_sources(reproducible-dispatch-count PRIVATE reproducible-dispatch-count.cpp)
-target_compile_options(reproducible-dispatch-count PRIVATE -W -Wall -Wextra -Wpedantic
-                                                           -Wshadow -Werror)
+target_compile_options(reproducible-dispatch-count PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
 target_link_libraries(reproducible-dispatch-count PRIVATE Threads::Threads)
 
 find_package(rocprofiler-sdk-roctx REQUIRED)
-target_link_libraries(reproducible-dispatch-count
-                      PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+target_link_libraries(
+    reproducible-dispatch-count PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+                                        rocprofiler-sdk::tests-build-flags)
 
 if(REPRODUCIBLE_DISPATCH_COUNT_USE_MPI)
     find_package(MPI REQUIRED)
