@@ -1125,18 +1125,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         return _PromptSpecWarning
 
-    @staticmethod
-    def _custom_ceil(x):
-        """Custom ceiling function to round up float values to the nearest integer.
-        This is used to ensure that fan speed percentages are rounded up correctly.
-        """
-        if x == int(x):  # If x is already an integer
-            return int(x)
-        elif x > 0:  # For positive numbers, floor division + 1
-            return int(x) + 1
-        else:  # For negative numbers, floor division directly gives the ceiling
-            return int(x)
-
     def _validate_fan_speed(self):
         """Validate fan speed input
 
@@ -1165,13 +1153,11 @@ class AMDSMIParser(argparse.ArgumentParser):
                                 setattr(args, self.dest, (percentage_value, True))
                             else:
                                 raise argparse.ArgumentError(
-                                    self,
-                                    f"Invalid argument: '{values}' needs to be 0-100%",
+                                    self, f"Invalid argument: '{values}' needs to be 0-100%"
                                 )
                         except ValueError as e:
                             raise argparse.ArgumentError(
-                                self,
-                                f"Invalid argument: '{values}' needs to be 0-100%",
+                                self, f"Invalid argument: '{values}' needs to be 0-100%"
                             )
                     else:  # Store the direct hardware value
                         values = int(values)

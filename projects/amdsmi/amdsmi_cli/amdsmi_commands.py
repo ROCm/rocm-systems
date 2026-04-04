@@ -8310,7 +8310,7 @@ class AMDSMICommands:
 
         # Handle args
         if self.helpers.is_baremetal():
-            if isinstance(args.fan, int) or isinstance(args.fan, tuple):
+            if isinstance(args.fan, tuple):
                 # Parse input: args.fan is now (value, is_percentage) tuple from parser
                 input_value, is_percentage = args.fan
 
@@ -8319,24 +8319,23 @@ class AMDSMICommands:
                 has_gpu_od = False
                 gpu_od_path = None
                 try:
-                    bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
                     # BDF format is "XXXX:XX:XX.X", matches PCI device path
                     drm_base = "/sys/class/drm"
                     # Find card* that matches this BDF
                     for card_dir in sorted(os.listdir(drm_base)):
-                        if not card_dir.startswith("card"):
+                        if not card_dir.startswith("card") or "-" in card_dir:
                             continue
                         device_link = os.path.join(drm_base, card_dir, "device")
                         try:
                             device_path = os.readlink(device_link)
                             # device_path is like "../../../0000:44:00.0"
-                            if bdf in device_path:
+                            if gpu_bdf in device_path:
                                 gpu_od_path = os.path.join(drm_base, card_dir, "device", "gpu_od")
                                 has_gpu_od = os.path.isdir(gpu_od_path)
                                 break
                         except (OSError, IOError):
                             continue
-                except (amdsmi_exception.AmdSmiLibraryException, OSError, IOError) as e:
+                except (OSError, IOError):
                     # If we can't determine the interface, fall back to legacy
                     has_gpu_od = False
 
@@ -8344,27 +8343,54 @@ class AMDSMICommands:
                 def format_fan_error(message, include_driver_note=False):
                     error_msg = message
                     if include_driver_note:
-                        error_msg += "\nNote: For Navi3x/4x GPUs, load the amdgpu driver with: sudo modprobe amdgpu ppfeaturemask=0xfff7ffff"
+                        error_msg += (
+                            "\nNote: For Navi3x+ GPUs, ensure the amdgpu driver is loaded with"
+                            " gpu_od enabled:\n  sudo modprobe amdgpu ppfeaturemask=0xfff7ffff"
+                            "\nIf fan operations return 'Device or resource busy', disable"
+                            " runtime PM:\n  echo on | sudo tee"
+                            " /sys/class/drm/card<N>/device/power/control"
+                        )
                     return error_msg
 
                 # Convert based on interface type and input format
                 if has_gpu_od:
-                    # For gpu_od interface: range 23-100
+                    # For gpu_od interface: read OD_RANGE dynamically
+                    od_min = 20
+                    od_max = 100
+                    try:
+                        fan_pwm_path = os.path.join(gpu_od_path, "fan_ctrl", "fan_minimum_pwm")
+                        with open(fan_pwm_path, "r") as f:
+                            pwm_content = f.read()
+                        # Parse "OD_RANGE:\nMINIMUM_PWM: <min> <max>"
+                        for line in pwm_content.splitlines():
+                            if line.strip().startswith("MINIMUM_PWM:"):
+                                parts = line.strip().split()
+                                if len(parts) >= 3:
+                                    od_min = int(parts[1])
+                                    od_max = int(parts[2])
+                    except (OSError, IOError, ValueError):
+                        pass  # Use defaults if parsing fails
+
+                    od_range = od_max - od_min
                     if is_percentage:
-                        # Convert percentage (0-100%) to hardware range (23-100)
-                        hw_value = 23 + int((input_value / 100) * 77)
+                        # Convert percentage (0-100%) to hardware range (od_min-od_max)
+                        hw_value = od_min + int((input_value / 100) * od_range)
                         fan_percentage = input_value
                     else:
                         # Direct hardware value
-                        if 23 <= input_value <= 100:
+                        if od_min <= input_value <= od_max:
                             hw_value = input_value
-                            fan_percentage = int(((input_value - 23) / 77) * 100)
+                            fan_percentage = (
+                                int(((input_value - od_min) / od_range) * 100)
+                                if od_range > 0
+                                else 0
+                            )
                         else:
                             result = format_fan_error(
-                                f"Invalid fan speed value {input_value} for gpu_od interface. Valid range: 23-100 or use percentage (0-100%)",
-                                include_driver_note=True
+                                f"Invalid fan speed value {input_value} for gpu_od interface. Valid range: {od_min}-{od_max} or use percentage (0-100%)",
+                                include_driver_note=True,
                             )
-                            self.logger.store_output(args.gpu, 'fan', result)
+                            self.logger.store_output(args.gpu, "fan", result)
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_output()
                             return
@@ -8378,10 +8404,12 @@ class AMDSMICommands:
                         # Direct PWM value
                         if 0 <= input_value <= 255:
                             hw_value = input_value
-                            fan_percentage = int((input_value / 255) * 100 // 1)  # round down (aka floor) to nearest whole number
+                            fan_percentage = int(
+                                (input_value / 255) * 100 // 1
+                            )  # round down (aka floor) to nearest whole number
                         else:
                             result = f"Invalid fan speed value {input_value}. Valid range: 0-255 or use percentage (0-100%)"
-                            self.logger.store_output(args.gpu, 'fan', result)
+                            self.logger.store_output(args.gpu, "fan", result)
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_output()
                             return
@@ -8392,8 +8420,8 @@ class AMDSMICommands:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
                     result = format_fan_error(
-                        f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM ({fan_percentage}%)",
-                        include_driver_note=has_gpu_od
+                        f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
+                        include_driver_note=has_gpu_od,
                     )
                     self.logger.store_output(args.gpu, "fan", result)
                     self.logger.print_output()
@@ -8403,7 +8431,7 @@ class AMDSMICommands:
                 self.logger.store_output(
                     args.gpu,
                     "fan",
-                    f"Successfully set fan speed to {hw_value} RPM ({fan_percentage}%)",
+                    f"Successfully set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
                 )
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
