@@ -3493,6 +3493,22 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
 
   ret = get_dev_mon_value(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
 
+  // On gpu_od GPUs (Navi3x+), hwmon fan files may return EBUSY when the GPU
+  // is in runtime PM suspend (BAMACO). Callers can work around this by setting
+  // runtime PM to "on": echo on > /sys/class/drm/cardN/device/power/control
+  // Fall back to reading the current PWM from fan_minimum_pwm sysfs.
+  if (ret != RSMI_STATUS_SUCCESS) {
+    std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
+    if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
+      uint64_t current_pwm = 0;
+      int parse_ret = amd::smi::ParseGpuOdFanCurrentPwm(fan_ctrl_path, &current_pwm);
+      if (parse_ret == 0) {
+        *speed = static_cast<int64_t>(current_pwm);
+        return RSMI_STATUS_SUCCESS;
+      }
+    }
+  }
+
   return ret;
   CATCH
 }
@@ -3528,30 +3544,36 @@ rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
   // Get device path to check for gpu_od interface availability
   GET_DEV_FROM_INDX
   std::string gpu_od_path = dev->get_gpu_od_path();
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_ctrl_path();
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
 
   // Check if gpu_od interface is available
   if (amd::smi::FileExists(gpu_od_path.c_str())) {
-    // Use gpu_od interface for fan reset - write 'r' to reset to automatic control
-    int write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, "r");
+    // Use gpu_od interface for fan reset - set fan_minimum_pwm to OD_RANGE minimum
+    // Read the OD_RANGE to get the hardware minimum PWM value
+    uint64_t od_min_pwm = 0;
+    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, nullptr);
+    if (parse_ret != 0) {
+      return amd::smi::SysfsWriteErrnoToRsmiStatus(parse_ret);
+    }
+
+    // Write the OD minimum value to reset to lowest fan floor
+    std::string min_str = std::to_string(od_min_pwm);
+    int write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, min_str);
     if (write_ret != 0) {
-      // Map errno to appropriate RSMI status
-      if (write_ret == EACCES || write_ret == EPERM) {
-        return RSMI_STATUS_PERMISSION;
-      } else if (write_ret == ENOENT) {
-        return RSMI_STATUS_NOT_SUPPORTED;
-      } else if (write_ret == EINVAL) {
-        return RSMI_STATUS_INVALID_ARGS;
-      }
-      return RSMI_STATUS_FILE_ERROR;
+      return amd::smi::SysfsWriteErrnoToRsmiStatus(write_ret);
+    }
+
+    // Commit the change
+    write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, "c");
+    if (write_ret != 0) {
+      return amd::smi::SysfsWriteErrnoToRsmiStatus(write_ret);
     }
     return RSMI_STATUS_SUCCESS;
 
   } else {
     // Fallback to legacy hwmon interface
     ++sensor_ind;  // fan sysfs files have 1-based indices
-    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable,
-                                                         dv_ind, sensor_ind, 2);
+    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 2);
     return ret;
   }
 
@@ -3573,13 +3595,19 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
   // Get device path to check for gpu_od interface availability
   GET_DEV_FROM_INDX
   std::string gpu_od_path = dev->get_gpu_od_path();
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_ctrl_path();
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
 
   // Check if gpu_od interface is available
   if (amd::smi::FileExists(gpu_od_path.c_str())) {
     // Use gpu_od interface for fan control
-    // For gpu_od: only accept values in 23-100 range
-    if (speed < 23 || speed > 100) {
+    // Read OD_RANGE to validate the speed against hardware limits
+    uint64_t od_min_pwm = 0;
+    uint64_t od_max_pwm = 0;
+    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
+    if (parse_ret != 0) {
+      return amd::smi::SysfsWriteErrnoToRsmiStatus(parse_ret);
+    }
+    if (speed < od_min_pwm || speed > od_max_pwm) {
       return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
     }
 
@@ -3587,15 +3615,7 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
     std::string speed_str = std::to_string(speed);
     int write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, speed_str);
     if (write_ret != 0) {
-      // Map errno to appropriate RSMI status
-      if (write_ret == EACCES || write_ret == EPERM) {
-        return RSMI_STATUS_PERMISSION;
-      } else if (write_ret == ENOENT) {
-        return RSMI_STATUS_NOT_SUPPORTED;
-      } else if (write_ret == EINVAL) {
-        return RSMI_STATUS_INVALID_ARGS;
-      }
-      return RSMI_STATUS_FILE_ERROR;
+      return amd::smi::SysfsWriteErrnoToRsmiStatus(write_ret);
     }
 
     // Step 2: Commit the change by writing 'c'
@@ -3603,17 +3623,11 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
     if (write_ret != 0) {
       // If commit fails, attempt to reset to automatic control to avoid
       // leaving the interface in an inconsistent state
-      amd::smi::WriteSysfsStr(fan_ctrl_path, "r");
+      std::string reset_str = std::to_string(od_min_pwm);
+      amd::smi::WriteSysfsStr(fan_ctrl_path, reset_str);
+      amd::smi::WriteSysfsStr(fan_ctrl_path, "c");
 
-      // Map errno to appropriate RSMI status
-      if (write_ret == EACCES || write_ret == EPERM) {
-        return RSMI_STATUS_PERMISSION;
-      } else if (write_ret == ENOENT) {
-        return RSMI_STATUS_NOT_SUPPORTED;
-      } else if (write_ret == EINVAL) {
-        return RSMI_STATUS_INVALID_ARGS;
-      }
-      return RSMI_STATUS_FILE_ERROR;
+      return amd::smi::SysfsWriteErrnoToRsmiStatus(write_ret);
     }
 
     return RSMI_STATUS_SUCCESS;
@@ -3632,15 +3646,13 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
     ++sensor_ind;  // fan sysfs files have 1-based indices
 
     // Set fan mode to manual (pwm1_enable = 1)
-    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind,
-                                                                 sensor_ind, 1);
+    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 1);
     if (ret != RSMI_STATUS_SUCCESS) {
       return ret;
     }
 
     // Write fan speed value
-    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanSpeed, dv_ind,
-                                                             sensor_ind, speed);
+    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
     return ret;
   }
 
@@ -3657,6 +3669,20 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   CHK_SUPPORT_SUBVAR_ONLY(max_speed, sensor_ind)
   DEVICE_MUTEX
 
+  // On gpu_od GPUs (Navi3x+), the effective max fan speed is the OD_RANGE
+  // maximum from fan_minimum_pwm, not the hwmon pwm1_max (which is always 255).
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
+  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
+    uint64_t od_min_pwm = 0;
+    uint64_t od_max_pwm = 0;
+    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
+    if (parse_ret == 0) {
+      *max_speed = od_max_pwm;
+      return RSMI_STATUS_SUCCESS;
+    }
+  }
+
+  // Legacy hwmon path
   ret = get_dev_mon_value(amd::smi::kMonMaxFanSpeed, dv_ind, sensor_ind,
                           reinterpret_cast<int64_t*>(max_speed));
 
