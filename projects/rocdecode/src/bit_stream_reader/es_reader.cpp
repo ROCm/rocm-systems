@@ -32,7 +32,7 @@ RocVideoESParser::RocVideoESParser(const char *input_file_path) {
 
     p_stream_file_.open(input_file_path, std::ifstream::in | std::ifstream::binary);
     if (!p_stream_file_) {
-        logger_.CriticalLog(MakeMsg("Failed to open the bitstream file."));
+        CriticalLog(logger_, "Failed to open the bitstream file.");
     }
     end_of_file_ = false;
     end_of_stream_ = false;
@@ -137,7 +137,7 @@ bool RocVideoESParser::ReadBytes(int offset, int size, uint8_t *data) {
             return false;
         }
         if (size > GetDataSizeInRB()) {
-            logger_.CriticalLog(MakeMsg("Could not read the requested bytes from ring buffer. Either ring buffer size is too small or not enough bytes left."));
+            CriticalLog(logger_, "Could not read the requested bytes from ring buffer. Either ring buffer size is too small or not enough bytes left.");
             return false;
         }
     }
@@ -299,7 +299,7 @@ int RocVideoESParser::GetPicDataAvcHevc(uint8_t **p_pic_data, int *pic_size) {
 
     while (!end_of_stream_) {
         if (!FindStartCode()) {
-            logger_.ErrorLog(MakeMsg("No start code in the bitstream."));
+            ErrorLog(logger_, "No start code in the bitstream.");
             break;
         }
         CopyNalUnitFromRing();
