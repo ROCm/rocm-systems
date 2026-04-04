@@ -2,13 +2,14 @@
 # SPDX-License-Identifier:  MIT
 
 """
-gfx1151 SoC Support - RDNA3.5 Architecture
+gfx1151 SoC Support - RDNA 3.5 Architecture
 
-RDNA3.5 architecture APU featuring:
+RDNA 3.5 (Strix / Strix Halo class) APU iGPU featuring:
 - Workgroup Processors (WGPs) with 2 CUs each
 - 2 SIMD32 units per CU (Wave32 primary wavefront size)
-- Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2)
-- Standard VALU operations (no WMMA/XDL matrix units)
+- Cache hierarchy: TCP (L0) → GL1C (L1) → GL2C (L2)
+- VALU (vector ALU) throughput
+- WMMA (wave matrix multiply-accumulate): gfx12-family ops (e.g. FP16/BF16/INT8)
 """
 
 import argparse
