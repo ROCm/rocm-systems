@@ -363,34 +363,6 @@ rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err) {
   }
 }
 
-int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
-  // Read fan_minimum_pwm sysfs file and parse the current PWM value.
-  // File format (newlines stripped by ReadSysfsStr):
-  //   "FAN_MINIMUM_PWM: <value>OD_RANGE:MINIMUM_PWM: <min> <max>"
-  std::string file_content;
-  int ret = ReadSysfsStr(path, &file_content);
-  if (ret != 0) {
-    return ret;
-  }
-
-  auto pos = file_content.find("FAN_MINIMUM_PWM:");
-  if (pos == std::string::npos) {
-    return EINVAL;
-  }
-
-  pos += strlen("FAN_MINIMUM_PWM:");
-  while (pos < file_content.size() && file_content[pos] == ' ') pos++;
-
-  char* end = nullptr;
-  unsigned long val = strtoul(file_content.c_str() + pos, &end, 10);
-  if (end == file_content.c_str() + pos) {
-    return EINVAL;
-  }
-
-  if (current_pwm) *current_pwm = val;
-  return 0;
-}
-
 int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm) {
   // Read fan_minimum_pwm sysfs file and parse OD_RANGE values.
   // File format (newlines stripped by ReadSysfsStr):
@@ -443,6 +415,31 @@ int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max
   return 0;
 }
 
+int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
+  // Read fan_minimum_pwm sysfs file and parse the current FAN_MINIMUM_PWM value.
+  // File format (newlines stripped by ReadSysfsStr):
+  //   "FAN_MINIMUM_PWM:<value>OD_RANGE:MINIMUM_PWM: <min> <max>"
+  std::string content;
+  int ret = ReadSysfsStr(path, &content);
+  if (ret != 0) {
+    return ret;
+  }
+
+  auto pos = content.find("FAN_MINIMUM_PWM:");
+  if (pos == std::string::npos) {
+    return EINVAL;
+  }
+  pos += strlen("FAN_MINIMUM_PWM:");
+
+  char* end = nullptr;
+  unsigned long val = strtoul(content.c_str() + pos, &end, 10);
+  if (end == content.c_str() + pos) {
+    return EINVAL;
+  }
+
+  if (current_pwm) *current_pwm = val;
+  return 0;
+}
 rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err) {
   // Map KFD ioctl errno to RSMI status
   // See rocm_smi_kfd_data_manager.cc for error sources

@@ -83,10 +83,10 @@ void TestFanReadWrite::Run(void) {
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       continue;
     }
-    // On gpu_od GPUs (Navi3x+), hwmon fan read may fail with EBUSY
+    // Fan speed read may not be supported on some GPUs
     if (ret != AMDSMI_STATUS_SUCCESS) {
       IF_VERB(STANDARD) {
-        std::cout << "Fan speed read unavailable (likely gpu_od GPU). "
+        std::cout << "Fan speed read unavailable. "
                   << "Testing set/reset only." << std::endl;
       }
       orig_speed = 0;
@@ -134,7 +134,7 @@ void TestFanReadWrite::Run(void) {
 
     sleep(4);
 
-    // Read back fan speed — may fail on gpu_od GPUs
+    // Read back fan speed
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
     ret = amdsmi_get_gpu_fan_speed(processor_handles_[dv_ind], 0, &cur_speed);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);

@@ -3491,23 +3491,20 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
 
   DEVICE_MUTEX
 
-  ret = get_dev_mon_value(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
-
-  // On gpu_od GPUs (Navi3x+), hwmon fan files may return EBUSY when the GPU
-  // is in runtime PM suspend (BAMACO). Callers can work around this by setting
-  // runtime PM to "on": echo on > /sys/class/drm/cardN/device/power/control
-  // Fall back to reading the current PWM from fan_minimum_pwm sysfs.
-  if (ret != RSMI_STATUS_SUCCESS) {
-    std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-    if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
-      uint64_t current_pwm = 0;
-      int parse_ret = amd::smi::ParseGpuOdFanCurrentPwm(fan_ctrl_path, &current_pwm);
-      if (parse_ret == 0) {
-        *speed = static_cast<int64_t>(current_pwm);
-        return RSMI_STATUS_SUCCESS;
-      }
+  // On gpu_od GPUs (Navi3x+), hwmon pwm1 does not reflect the actual fan speed.
+  // Read the FAN_MINIMUM_PWM value from the gpu_od sysfs instead.
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
+  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
+    uint64_t current_pwm = 0;
+    int parse_ret = amd::smi::ParseGpuOdFanCurrentPwm(fan_ctrl_path, &current_pwm);
+    if (parse_ret == 0) {
+      *speed = static_cast<int64_t>(current_pwm);
+      return RSMI_STATUS_SUCCESS;
     }
   }
+
+  // Legacy hwmon path
+  ret = get_dev_mon_value(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
 
   return ret;
   CATCH
