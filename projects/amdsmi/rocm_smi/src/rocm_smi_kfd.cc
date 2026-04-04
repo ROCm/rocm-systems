@@ -729,7 +729,7 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
               if (!gpu_id_str.empty() &&
                   std::all_of(gpu_id_str.begin(), gpu_id_str.end(),
                               [](unsigned char ch) { return std::isdigit(ch); })) {
-                gpu_set->insert(std::stoull(gpu_id_str));
+                gpu_set->insert(strtoull(gpu_id_str.c_str(), nullptr, 10));
               }
             }
           }
