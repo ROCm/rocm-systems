@@ -1,52 +1,19 @@
 .. meta::
-   :description: ROCm Compute Profiler RDNA3.5 TCP and GL1C metrics
-   :keywords: ROCm Compute Profiler, RDNA, gfx1151, TCP, GL1C
+   :description: ROCm Compute Profiler RDNA3.5 GL1C (L1) metrics
+   :keywords: ROCm Compute Profiler, RDNA, gfx1151, GL1C, GL1
 
 .. _rdna-gl1:
 
-===========================
-GL1 hierarchy: TCP and GL1C
-===========================
+==========
+GL1 (GL1C)
+==========
 
-RDNA3 and RDNA3.5 expose TCP as the vector L0 and GL1C as the L1 layer ahead of GL2C.
-This page lists gfx1151 metric tables for TCP and GL1C panels and Memory Chart rows
-through GL1C. The GL1C to GL2 handoff is documented under :doc:`gl2-cache`.
+**GL1C** is the shared L1 cache layer on **gfx1151**, fed by **TCP** (vector L0).
+For **TCP** panels and Memory Chart rows through the TCP–GL1 boundary, see
+:doc:`tcp-cache`. The GL1C→GL2 path is under :doc:`gl2-cache`.
 
-TCP cache, vector L0
-====================
-
-TCP Utilization
-...............
-
-.. jinja:: rdna1151-tcp-utilization-gfx1151
-   :file: _templates/metrics_table.j2
-
-TCP Request Statistics
-......................
-
-.. jinja:: rdna1151-tcp-request-statistics-gfx1151
-   :file: _templates/metrics_table.j2
-
-TCP Cache Performance
-.....................
-
-.. jinja:: rdna1151-tcp-cache-performance-gfx1151
-   :file: _templates/metrics_table.j2
-
-TCP TCP-GL1 Interface
-.....................
-
-.. jinja:: rdna1151-tcp-tcp-gl1-interface-gfx1151
-   :file: _templates/metrics_table.j2
-
-TCP Stalls
-..........
-
-.. jinja:: rdna1151-tcp-stalls-gfx1151
-   :file: _templates/metrics_table.j2
-
-GL1C (L1) cache
-===============
+GL1C (panel)
+============
 
 GL1C Utilization
 ................
@@ -72,41 +39,8 @@ GL1C Stalls
 .. jinja:: rdna1151-gl1c-stalls-gfx1151
    :file: _templates/metrics_table.j2
 
-Memory Chart: path into and through GL1
-=======================================
-
-The following Memory Chart tables align with the on-screen flow from instruction and
-scalar paths through TCP, LDS, and GL1C.
-
-Memory chart: Instruction Cache
-...............................
-
-.. jinja:: rdna1151-memory-chart-instruction-cache-gfx1151
-   :file: _templates/metrics_table.j2
-
-Memory chart: Scalar Data Cache
-...............................
-
-.. jinja:: rdna1151-memory-chart-scalar-data-cache-gfx1151
-   :file: _templates/metrics_table.j2
-
-Memory chart: TCP Cache (Vector L0)
-...................................
-
-.. jinja:: rdna1151-memory-chart-tcp-cache-vector-l0-gfx1151
-   :file: _templates/metrics_table.j2
-
-Memory chart: LDS (Local Data Share)
-....................................
-
-.. jinja:: rdna1151-memory-chart-lds-local-data-share-gfx1151
-   :file: _templates/metrics_table.j2
-
-Memory chart: TCP-GL1 Interface
-...............................
-
-.. jinja:: rdna1151-memory-chart-tcp-gl1-interface-gfx1151
-   :file: _templates/metrics_table.j2
+Memory Chart: GL1C (L1)
+=======================
 
 Memory chart: GL1C Cache (L1)
 .............................
@@ -115,3 +49,4 @@ Memory chart: GL1C Cache (L1)
    :file: _templates/metrics_table.j2
 
 Return to :doc:`rdna-performance-model` or the top-level :doc:`../performance-model`.
+Previous: :doc:`tcp-cache`. Next: :doc:`gl2-cache`.

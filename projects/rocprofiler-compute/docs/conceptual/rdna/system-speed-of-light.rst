@@ -16,7 +16,7 @@ For **AMD Instinct™** accelerators (CDNA through CDNA4), see
 :doc:`../cdna/system-speed-of-light`.
 
 Other **gfx1151** metric tables grouped by hardware block live under :doc:`wgp`,
-:doc:`gl1-cache`, :doc:`gl2-cache`, :doc:`shader-engine`, and :doc:`command-processor`.
+:doc:`tcp-cache`, :doc:`gl1-cache`, :doc:`gl2-cache`, :doc:`shader-engine`, and :doc:`command-processor`.
 
 .. warning::
 

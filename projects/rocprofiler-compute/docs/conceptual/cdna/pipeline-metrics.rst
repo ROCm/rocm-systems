@@ -116,8 +116,8 @@ Overall instruction mix
 -----------------------
 
 This panel shows the total number of each type of instruction issued to
-the :doc:`various compute pipelines <pipeline-descriptions>` on the
-:doc:`CU <compute-unit>`. These are:
+the :doc:`various compute pipelines </conceptual/cdna/pipeline-descriptions>` on the
+:doc:`CU </conceptual/cdna/compute-unit>`. These are:
 
 .. tab-set::
 
@@ -197,9 +197,9 @@ that were issued. Refer to the
 processor front end of the vL1D cache for descriptions of these VMEM
 instructions.
 
-.. _matrix-instruction-mix:
+.. _mfma-instruction-mix:
 
-Matrix instruction mix
+MFMA instruction mix
 --------------------
 
 .. warning::
@@ -216,18 +216,18 @@ MFMA instructions are classified by the type of input data they operate on, and
 
    .. tab-item:: CDNA 2
 
-      .. jinja:: matrix-instruction-mix-gfx90a
+      .. jinja:: mfma-instruction-mix-gfx90a
          :file: _templates/metrics_table.j2
 
    .. tab-item:: CDNA 3
 
-      .. jinja:: matrix-instruction-mix-gfx942
+      .. jinja:: mfma-instruction-mix-gfx942
          :file: _templates/metrics_table.j2
 
    .. tab-item:: CDNA 4
       :selected:
 
-      .. jinja:: matrix-instruction-mix-gfx950
+      .. jinja:: mfma-instruction-mix-gfx950
          :file: _templates/metrics_table.j2
 
 Compute pipeline
@@ -284,7 +284,7 @@ This section reports the number of floating-point and integer operations
 executed on the :ref:`VALU <desc-valu>` and :ref:`MFMA <desc-mfma>` units in
 various precisions. We note that unlike the
 :ref:`VALU instruction mix <valu-arith-instruction-mix>` and
-:ref:`Matrix instruction mix <matrix-instruction-mix>` sections, the metrics here
+:ref:`MFMA instruction mix <mfma-instruction-mix>` sections, the metrics here
 are reported as FLOPs and IOPs, that is, the total number of operations
 executed.
 

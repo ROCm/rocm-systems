@@ -1,12 +1,12 @@
 .. meta::
-   :description: ROCm Compute Profiler — RDNA3.5 GL2C and memory path metrics
+   :description: ROCm Compute Profiler — RDNA3.5 GL2C and GCEA / DRAM interface metrics
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, GL2C, GL2, GCEA
 
 .. _rdna-gl2:
 
-=======================
-GL2 cache (GL2C) and EA
-=======================
+===============================
+GL2 cache (GL2C) and GCEA
+===============================
 
 On **gfx1151**, the last-level on-chip cache seen by most clients is **GL2C** (RDNA
 naming for what Instinct documentation calls **L2 / TCC**). Traffic that leaves GL2
@@ -68,27 +68,6 @@ Return Interface
 ----------------
 
 .. jinja:: rdna1151-return-interface-gfx1151
-   :file: _templates/metrics_table.j2
-
-Memory Chart — GL2 and system memory
-======================================
-
-Memory chart — GL1C-GL2 Interface
----------------------------------
-
-.. jinja:: rdna1151-memory-chart-gl1c-gl2-interface-gfx1151
-   :file: _templates/metrics_table.j2
-
-Memory chart — GL2C Cache (L2)
-------------------------------
-
-.. jinja:: rdna1151-memory-chart-gl2c-cache-l2-gfx1151
-   :file: _templates/metrics_table.j2
-
-Memory chart — GCEA to System Memory
-------------------------------------
-
-.. jinja:: rdna1151-memory-chart-gcea-to-system-memory-gfx1151
    :file: _templates/metrics_table.j2
 
 Return to :doc:`rdna-performance-model` or the top-level :doc:`../performance-model`.

@@ -1,22 +1,24 @@
 .. meta::
-   :description: ROCm Compute Profiler CDNA / Instinct performance model
-   :keywords: Omniperf, ROCm Compute Profiler, CDNA, Instinct, MI100, MI200, MI300, MI350,
-              performance model, profiler
+   :description: ROCm Compute Profiler CDNA/2/3/4 (Instinct) performance model — architecture tables and conceptual sections
+   :keywords: ROCm Compute Profiler, CDNA, Instinct, performance model, MI-series
 
 .. _cdna-performance-model:
 
-*********************************
-CDNA / Instinct performance model
-*********************************
+************
+CDNA/2/3/4
+************
 
-This chapter focuses on **AMD Instinct™ MI-series** accelerators (CDNA through CDNA4):
-comparison tables, high-level die diagrams, and the conceptual metric sections
-written for that hardware view.
+ROCm Compute Profiler makes available an extensive list of metrics to better understand
+achieved application performance on AMD Instinct™ MI-series accelerators
+including Graphics Core Next™ (GCN) GPUs like the AMD Instinct MI50, CDNA™
+accelerators like the MI100, CDNA2 accelerators such as the AMD Instinct MI250X, MI250,
+and MI210, CDNA3 accelerators such as the AMD Instinct MI300A, MI300X, MI325X, and CDNA4 accelerators such as MI350X and MI355X.
 
-Return to the top-level :doc:`../performance-model` overview for how CDNA and RDNA fit
-together in the same tool.
+For **AMD Radeon™ / RDNA™** client GPUs (e.g. **gfx1151** / RDNA3.5), see
+:doc:`RDNA3 <../rdna/rdna-performance-model>`. The top-level
+:doc:`../performance-model` page summarizes how CDNA and RDNA documentation is organized.
 
-The table provides key details and support available for the different CDNA architectures:
+The table provides key details and support available for the different architectures:
 
 ✅: Supported
 ❌: Unsupported
@@ -170,8 +172,11 @@ to use ROCm Compute Profiler to optimize your code.
    For a comparison of AMD Instinct accelerator specifications, refer to
    :doc:`Hardware specifications <rocm:reference/gpu-arch-specs>`.
 
-In this chapter, the AMD Instinct performance model used by ROCm Compute Profiler is divided into a handful of
-key hardware blocks, each detailed in the following sections:
+.. rubric:: Hardware block chapters
+
+The AMD Instinct performance model is divided into the following blocks:
+
+* :doc:`system-speed-of-light`
 
 * :doc:`compute-unit`
 
@@ -181,6 +186,4 @@ key hardware blocks, each detailed in the following sections:
 
 * :doc:`command-processor`
 
-* :doc:`system-speed-of-light`
-
-For **AMD Radeon™ / RDNA™** client GPUs, see :doc:`../rdna/rdna-performance-model`.
+* :doc:`references`
