@@ -218,7 +218,7 @@ class Device {
 
   // GPU Overdrive (gpu_od) sysfs path helper methods
   std::string get_gpu_od_path(void) const;
-  std::string get_gpu_od_fan_ctrl_path(void) const;
+  std::string get_gpu_od_fan_min_pwm_path(void) const;
 
   int readDevInfo(DevInfoTypes type, uint64_t* val);
   int readDevInfoLine(DevInfoTypes type, std::string* line);

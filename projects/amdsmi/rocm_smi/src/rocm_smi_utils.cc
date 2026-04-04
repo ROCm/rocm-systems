@@ -347,6 +347,102 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
   }
 }
 
+rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err) {
+  switch (err) {
+    case 0:
+      return RSMI_STATUS_SUCCESS;
+    case EACCES:
+    case EPERM:
+      return RSMI_STATUS_PERMISSION;
+    case ENOENT:
+      return RSMI_STATUS_NOT_SUPPORTED;
+    case EINVAL:
+      return RSMI_STATUS_INVALID_ARGS;
+    default:
+      return RSMI_STATUS_FILE_ERROR;
+  }
+}
+
+int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
+  // Read fan_minimum_pwm sysfs file and parse the current PWM value.
+  // File format (newlines stripped by ReadSysfsStr):
+  //   "FAN_MINIMUM_PWM: <value>OD_RANGE:MINIMUM_PWM: <min> <max>"
+  std::string file_content;
+  int ret = ReadSysfsStr(path, &file_content);
+  if (ret != 0) {
+    return ret;
+  }
+
+  auto pos = file_content.find("FAN_MINIMUM_PWM:");
+  if (pos == std::string::npos) {
+    return EINVAL;
+  }
+
+  pos += strlen("FAN_MINIMUM_PWM:");
+  while (pos < file_content.size() && file_content[pos] == ' ') pos++;
+
+  char* end = nullptr;
+  unsigned long val = strtoul(file_content.c_str() + pos, &end, 10);
+  if (end == file_content.c_str() + pos) {
+    return EINVAL;
+  }
+
+  if (current_pwm) *current_pwm = val;
+  return 0;
+}
+
+int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm) {
+  // Read fan_minimum_pwm sysfs file and parse OD_RANGE values.
+  // File format (newlines stripped by ReadSysfsStr):
+  //   "FAN_MINIMUM_PWM:<value>OD_RANGE:MINIMUM_PWM: <min> <max>"
+  std::string content;
+  int ret = ReadSysfsStr(path, &content);
+  if (ret != 0) {
+    return ret;
+  }
+
+  // Find "MINIMUM_PWM:" and parse the two values after it
+  auto pos = content.find("MINIMUM_PWM:");
+  if (pos == std::string::npos) {
+    return EINVAL;
+  }
+
+  // Skip past the "MINIMUM_PWM:" that's part of "FAN_MINIMUM_PWM:"
+  // We want the one after "OD_RANGE:"
+  auto od_pos = content.find("OD_RANGE:");
+  if (od_pos == std::string::npos) {
+    return EINVAL;
+  }
+
+  pos = content.find("MINIMUM_PWM:", od_pos);
+  if (pos == std::string::npos) {
+    return EINVAL;
+  }
+
+  pos += strlen("MINIMUM_PWM:");
+  // Skip whitespace
+  while (pos < content.size() && content[pos] == ' ') pos++;
+
+  char* end = nullptr;
+  unsigned long val1 = strtoul(content.c_str() + pos, &end, 10);
+  if (end == content.c_str() + pos) {
+    return EINVAL;
+  }
+
+  // Skip whitespace
+  while (*end == ' ') end++;
+
+  char* end2 = nullptr;
+  unsigned long val2 = strtoul(end, &end2, 10);
+  if (end2 == end) {
+    return EINVAL;
+  }
+
+  if (min_pwm) *min_pwm = val1;
+  if (max_pwm) *max_pwm = val2;
+  return 0;
+}
+
 rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err) {
   // Map KFD ioctl errno to RSMI status
   // See rocm_smi_kfd_data_manager.cc for error sources

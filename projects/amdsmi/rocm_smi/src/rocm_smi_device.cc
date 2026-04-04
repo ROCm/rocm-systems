@@ -118,7 +118,6 @@ static const char* kDevGpuMetricsFName = "gpu_metrics";
 
 // GPU Overdrive (gpu_od) paths - used internally via Device helper methods
 static const char* kDevGpuOdPath = "gpu_od";
-static const char* kDevGpuOdFanCtrlPath = "gpu_od/fan_ctrl";
 static const char* kDevGpuOdFanMinPwmFName = "gpu_od/fan_ctrl/fan_minimum_pwm";
 
 static const char* kDevGpuPartitionMetricsFName = "xcp/xcp_metrics";
@@ -718,15 +717,14 @@ Device::~Device() { shared_mutex_close(mutex_); }
  * @brief Get the full sysfs path to the gpu_od directory
  * @return Full path to gpu_od directory (e.g., /sys/class/drm/card0/device/gpu_od/)
  */
-std::string Device::get_gpu_od_path(void) const {
-  return path_ + "/device/" + kDevGpuOdPath + "/";
-}
+std::string Device::get_gpu_od_path(void) const { return path_ + "/device/" + kDevGpuOdPath; }
 
 /**
  * @brief Get the full sysfs path to the gpu_od fan_minimum_pwm file
- * @return Full path to fan_minimum_pwm file (e.g., /sys/class/drm/card0/device/gpu_od/fan_ctrl/fan_minimum_pwm)
+ * @return Full path to fan_minimum_pwm file (e.g.,
+ * /sys/class/drm/card0/device/gpu_od/fan_ctrl/fan_minimum_pwm)
  */
-std::string Device::get_gpu_od_fan_ctrl_path(void) const {
+std::string Device::get_gpu_od_fan_min_pwm_path(void) const {
   return path_ + "/device/" + kDevGpuOdFanMinPwmFName;
 }
 
