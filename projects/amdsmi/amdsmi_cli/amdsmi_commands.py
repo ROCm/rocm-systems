@@ -8193,7 +8193,7 @@ class AMDSMICommands:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
-            fan (int, optional): Value override for args.fan. Defaults to None.
+            fan (tuple, optional): Value override for args.fan as (value, is_percentage). Defaults to None.
             perf_level (amdsmi_interface.AmdSmiDevPerfLevel, optional): Value override for args.perf_level. Defaults to None.
             profile (bool, optional): Value override for args.profile. Defaults to None.
             perf_determinism (int, optional): Value override for args.perf_determinism. Defaults to None.
@@ -9240,7 +9240,7 @@ class AMDSMICommands:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
-            fan (int, optional): Value override for args.fan. Defaults to None.
+            fan (tuple, optional): Value override for args.fan as (value, is_percentage). Defaults to None.
             perf_level (amdsmi_interface.AmdSmiDevPerfLevel, optional): Value override for args.perf_level. Defaults to None.
             profile (bool, optional): Value override for args.profile. Defaults to None.
             perf_determinism (int, optional): Value override for args.perf_determinism. Defaults to None.

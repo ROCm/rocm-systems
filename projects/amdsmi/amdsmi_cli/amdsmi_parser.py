@@ -1130,10 +1130,10 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         Accepts:
         - Percentage: 0-100% (converted at command layer based on GPU interface)
-        - Direct value: 0-255 (legacy hwmon) or 23-100 (gpu_od interface)
+        - Direct value: 0-255 (legacy hwmon) or OD_RANGE min-max (gpu_od interface)
 
         Note: For direct values, we accept 0-255 here for backward compatibility.
-        The command layer will validate against the correct range (23-100 for gpu_od,
+        The command layer will validate against the correct range (OD_RANGE for gpu_od,
         0-255 for legacy) after detecting the GPU interface type.
         """
         amdsmi_helpers = self.helpers
