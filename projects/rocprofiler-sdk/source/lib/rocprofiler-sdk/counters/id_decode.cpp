@@ -25,9 +25,9 @@
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <unordered_map>
 
+#include "lib/aqlprofile/aql_profile_v2.h"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/aqlprofile/aql_profile_v2.h"
 
 namespace rocprofiler
 {
