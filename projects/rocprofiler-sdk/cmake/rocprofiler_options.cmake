@@ -73,6 +73,8 @@ rocprofiler_add_option(ROCPROFILER_BUILD_ELFIO "Enable building ELFIO library in
                        ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_OTF2 "Enable building OTF2 library internally"
                        ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_JSON "Enable building JSON library internally"
+                       ON)
 if(ROCPROFILER_BUILD_TESTS)
     rocprofiler_add_option(
         ROCPROFILER_BUILD_GTEST
