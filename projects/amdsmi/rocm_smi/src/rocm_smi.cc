@@ -3538,13 +3538,12 @@ rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
 
-  // Get device path to check for gpu_od interface availability
+  // Get gpu_od fan control path
   GET_DEV_FROM_INDX
-  std::string gpu_od_path = dev->get_gpu_od_path();
   std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
 
-  // Check if gpu_od interface is available
-  if (amd::smi::FileExists(gpu_od_path.c_str())) {
+  // Check if gpu_od fan control attribute is available
+  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
     // Use gpu_od interface for fan reset - set fan_minimum_pwm to OD_RANGE minimum
     uint64_t od_min_pwm = 0;
     int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, nullptr);
@@ -3575,13 +3574,12 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
 
-  // Get device path to check for gpu_od interface availability
+  // Get gpu_od fan control path
   GET_DEV_FROM_INDX
-  std::string gpu_od_path = dev->get_gpu_od_path();
   std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
 
-  // Check if gpu_od interface is available
-  if (amd::smi::FileExists(gpu_od_path.c_str())) {
+  // Check if gpu_od fan control attribute is available
+  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
     // Use gpu_od interface for fan control
     // Read OD_RANGE to validate the speed against hardware limits
     uint64_t od_min_pwm = 0;
