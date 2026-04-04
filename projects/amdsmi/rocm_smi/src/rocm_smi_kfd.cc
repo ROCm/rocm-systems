@@ -782,13 +782,14 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
   std::string proc_str_path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
 
   if (!FileExists(proc_str_path.c_str())) {
-    // PID namespace: no KFD sysfs entry for this PID; return zeroed stats.
+    // PID namespace: no KFD sysfs entry for this PID; return sentinel
+    // values so callers can distinguish "unavailable" from "zero usage".
     if (IsKfdPidNamespaced()) {
       proc->process_id = pid;
-      proc->vram_usage = 0;
-      proc->sdma_usage = 0;
+      proc->vram_usage = std::numeric_limits<uint64_t>::max();
+      proc->sdma_usage = std::numeric_limits<uint64_t>::max();
       proc->cu_occupancy = std::numeric_limits<uint32_t>::max();
-      proc->evicted_time = 0;
+      proc->evicted_time = std::numeric_limits<uint32_t>::max();
       return 0;
     }
     return ESRCH;
