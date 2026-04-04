@@ -22,7 +22,7 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # tcp_perf_sel_gate_en2 / TCP_GATE_EN2: TCP core clocks on (counter_defs: not windowed).
+        # TCP_PERF_SEL_GATE_EN2 / TCP_GATE_EN2: TCP core clocks on (counter_defs: not windowed).
         # Use aggregate TCP_GATE_EN2 (not TCP_GATE_EN2_sum) when pmc_perf merges instances.
         # Denominator: GRBM_GUI_ACTIVE × NUM_TCP with NUM_TCP = max(1, ⌊$cu_per_gpu / 2⌋)
         # (one TCP per WGP, 2 CUs per WGP on RDNA3.x). AVG/MIN/MAX apply per sample.
@@ -84,6 +84,12 @@ Panel Config:
           min: MIN((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           max: MAX((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
+        # NOTE: "Read Hit Rate" was removed because the formula was incorrect.
+        # It subtracted ALL misses (TCP_REQ_MISS) from only read requests (TCP_REQ_READ),
+        # which can produce values > 100% or negative percentages.
+        # To correctly calculate Read Hit Rate, read-specific hit/miss counters are needed
+        # (e.g., TCP_TOTAL_HIT_LRU_READ, TCP_TOTAL_MISS_LRU_READ, TCP_TOTAL_MISS_EVICT_READ)
+        # which are not currently available in the counter definitions.
 
   # =========================================================================
   # TCP-GL1 Interface
@@ -149,8 +155,8 @@ Panel Config:
       NUM_TCP = max(1, ⌊$cu_per_gpu / 2⌋) (one TCP per WGP, 2 CUs per WGP on RDNA3.5).
       Uses aggregate TCP_GATE_EN2 (not TCP_GATE_EN2_sum). GRBM_GUI_ACTIVE is scaled by
       NUM_TCP so the denominator matches multi-TCP capacity. GATE_EN2 is TCP_PERF_SEL_GATE_EN2
-      (core clocks on, not windowed). If only per-instance counter sums (typically ``_sum``
-      columns) are available, align the numerator/denominator with your CSV layout.
+      (core clocks on, not windowed). If only per-instance counters ending in ``_sum`` are
+      available, align the numerator/denominator with your CSV layout.
     Total Requests: |-
       Total number of requests to the TCP cache including reads, writes, and atomics.
     Read Requests: |-
@@ -168,14 +174,3 @@ Panel Config:
       Cycles TCP stalled the Texture Addresser request interface due to backpressure.
     GL1 Back Pressure: |-
       Cycles TCP was stalled due to back pressure from GL1C.
-
-    GL1 Read 128B Requests: |-
-      TCP→GL1 read requests that transferred 128 bytes (TCP_GL1_REQ_READ_128B_sum / $denom).
-      Subset of total GL1 read requests; large-line fills show up here.
-
-    GL1 Write Requests: |-
-      TCP→GL1 write or writeback requests (TCP_GL1_REQ_WRITE_sum / $denom).
-
-    Data FIFO Stall: |-
-      Cycles TCP stalled because the internal data FIFO could not accept progress
-      (TCP_DATA_FIFO_STALL_sum / $denom). Often correlates with downstream backpressure.

@@ -8,7 +8,7 @@
 TCP (GL0)
 =========
 
-On **gfx1151**, **TCP** is the vector **L0** (**GL0**) cache in front of **GL1C**. Panel metrics
+On **gfx1151**, **TCP** is the vector ``L0`` cache (RDNA **GL0**) in front of **GL1C**. Panel metrics
 below come from ``0800_TCP_Cache.yaml``. For **GL1C** (L1) panels and the GL1C Memory
 Chart table, see :doc:`gl1-cache`. The handoff toward **GL2C** is under
 :doc:`gl2-cache`.
@@ -50,7 +50,7 @@ Memory Chart: path up to GL1
 ============================
 
 The following Memory Chart tables align with the on-screen flow through instruction
-and scalar paths, **TCP (vector L0)**, **LDS**, and the **TCP–GL1** interface.
+and scalar paths, **TCP** (vector ``L0``), **LDS**, and the **TCP–GL1** interface.
 
 Memory chart: Instruction Cache
 ...............................
