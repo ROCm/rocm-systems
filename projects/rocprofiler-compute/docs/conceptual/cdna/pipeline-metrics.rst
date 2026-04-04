@@ -116,8 +116,8 @@ Overall instruction mix
 -----------------------
 
 This panel shows the total number of each type of instruction issued to
-the :doc:`various compute pipelines </conceptual/pipeline-descriptions>` on the
-:doc:`CU </conceptual/compute-unit>`. These are:
+the :doc:`various compute pipelines </conceptual/cdna/pipeline-descriptions>` on the
+:doc:`CU </conceptual/cdna/compute-unit>`. These are:
 
 .. tab-set::
 

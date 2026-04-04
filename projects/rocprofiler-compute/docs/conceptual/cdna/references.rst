@@ -6,7 +6,7 @@
 References
 **********
 
-Some sections in :doc:`this chapter </conceptual/performance-model>` cite the
+Some sections in :doc:`CDNA/2/3/4 </conceptual/cdna/cdna-performance-model>` cite the
 following publicly available documentation.
 
 * :hip-training-pdf:`Introduction to AMD GPU Programming with HIP <>`
