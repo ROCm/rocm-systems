@@ -418,3 +418,7 @@ stream:
   Unit_hipStreamValue_Wait_Blocking:
     <<: *level_2
     tags: [synchronization]
+  Unit_hipStream_GracefulExitWithPendingWork:
+    <<: *level_2
+    disabled: [amd_linux, amd_wsl]
+    tags: [lifecycle]
