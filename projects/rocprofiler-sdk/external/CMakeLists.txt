@@ -232,7 +232,15 @@ endif()
 #
 # OTF2
 #
-add_subdirectory(otf2)
+if(ROCPROFILER_BUILD_OTF2)
+    add_subdirectory(otf2)
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(OTF2 REQUIRED IMPORTED_TARGET otf2)
+    add_library(otf2 INTERFACE)
+    add_library(otf2::otf2 ALIAS otf2)
+    target_link_libraries(otf2 INTERFACE PkgConfig::OTF2)
+endif()
 
 rocprofiler_checkout_git_submodule(
     RECURSIVE

@@ -71,6 +71,8 @@ rocprofiler_add_option(ROCPROFILER_BUILD_YAML_CPP
                        "Enable building yaml-cpp library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_ELFIO "Enable building ELFIO library internally"
                        ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_OTF2 "Enable building OTF2 library internally"
+                       ON)
 if(ROCPROFILER_BUILD_TESTS)
     rocprofiler_add_option(
         ROCPROFILER_BUILD_GTEST
