@@ -27,9 +27,9 @@
 
 #include <iostream>
 #include <string>
-#include "aql_profile_v2.h"
+#include "lib/aqlprofile/aql_profile_v2.h"
 
-#include "core/aql_profile_exception.h"
+#include "lib/aqlprofile/core/aql_profile_exception.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 

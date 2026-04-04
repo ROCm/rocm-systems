@@ -21,7 +21,11 @@
 // THE SOFTWARE.
 
 
-#include "util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
+
+#include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -39,6 +43,10 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <string>

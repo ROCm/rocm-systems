@@ -29,6 +29,8 @@
 #include <hsa/hsa_ext_finalize.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <hsa/hsa_ven_amd_loader.h>
+#include <hsa/hsa_api_trace.h>
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

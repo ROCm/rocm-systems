@@ -32,7 +32,7 @@
 #include <iostream>
 #include <sstream>
 
-#include "pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
 
 namespace pm4_builder {
 
@@ -493,7 +493,7 @@ class Gfx9CmdBuilder : public CmdBuilder {
                       PACKET3_COPY_DATA__COUNT_SEL(PACKET3_COPY_DATA__COUNT_SEL__32_BITS_OF_DATA);
     uint32_t dword3 = PACKET3_COPY_DATA__SRC_32B_ADDR_LO(PtrLow32(addr) >> 2);
     uint32_t dword4 = PACKET3_COPY_DATA__SRC_MEMTC_ADDR_HI(PtrHigh32(addr));
-    
+
     return {header, dword2, dword3, dword4, userdata_addr, 0};
   };
 

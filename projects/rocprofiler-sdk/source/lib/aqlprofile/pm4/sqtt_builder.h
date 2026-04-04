@@ -28,8 +28,8 @@
 #include <algorithm>
 #include <unordered_map>
 
-#include "pm4/cmd_config.h"
-#include "trace_decoder_instrument.h"
+#include "lib/aqlprofile/pm4/cmd_config.h"
+#include "lib/aqlprofile/pm4/trace_decoder_instrument.h"
 
 #define SQTT_PERFCOUNTER_TOKEN (1u << 14)
 #define SQTT_PERFCOUNTER_SIMD_MASK 24
@@ -609,7 +609,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, data);
     return HSA_STATUS_SUCCESS;
   }
-  
+
   virtual void InsertTimestampMarker(CmdBuffer* cmd_buffer, uint64_t* addr) override
   {
     rocprof_trace_decoder_packet_header_t header{};

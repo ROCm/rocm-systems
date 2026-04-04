@@ -27,7 +27,7 @@
 
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/aqlprofile/aql_profile_v2.h"
 
 namespace rocprofiler
 {

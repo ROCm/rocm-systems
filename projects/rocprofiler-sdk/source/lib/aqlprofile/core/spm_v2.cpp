@@ -1,19 +1,19 @@
-#include "hsa/hsa_ext_amd.h"
-#include "aql_profile_v2.h"
-#include "spm_common.hpp"
-#include "memorymanager.hpp"
-#include "core/commandbuffermgr.hpp"
+#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/core/spm_common.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
 
 #include <thread>
 #include <condition_variable>
 
-#include "core/logger.h"
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 #include <map>
 #include <array>
 #include <shared_mutex>
 #include <filesystem>
+#include <hsa/hsa_ext_amd.h>
 
 #define PUBLIC_API __attribute__((visibility("default")))
 

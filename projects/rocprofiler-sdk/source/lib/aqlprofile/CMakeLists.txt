@@ -22,8 +22,7 @@ add_library(rocprofiler-sdk::rocprofiler-sdk-aqlprofile ALIAS rocprofiler-sdk-aq
 target_link_libraries(
     rocprofiler-sdk-aqlprofile
         PUBLIC
-        # rocprofiler-sdk-aqlprofile-hsa-util
-        $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
         #    $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-memcheck>
@@ -35,10 +34,6 @@ target_link_libraries(
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsakmt-nolink>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsa-runtime-nolink>)
 set_target_properties(rocprofiler-sdk-aqlprofile PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-# TODO(mkuriche): clean up after migration is merged
-target_include_directories(rocprofiler-sdk-aqlprofile
-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_subdirectory(core)
 add_subdirectory(util)

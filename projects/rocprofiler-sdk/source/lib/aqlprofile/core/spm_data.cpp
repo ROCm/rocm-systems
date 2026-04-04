@@ -25,8 +25,9 @@
 #include <thread>
 #include <condition_variable>
 
-#include "core/logger.h"
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
 // C++11's solution for std::format()
 template <typename... Args>
