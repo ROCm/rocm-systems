@@ -1460,7 +1460,9 @@ class AMDSMIHelpers:
         """Check if fan control is supported on the first device.
 
         Returns:
-            str: "0-255 or 0-100%%" if fan control is supported, "N/A" otherwise
+            str: Range description if fan control is supported, "N/A" otherwise.
+            For gpu_od GPUs the range is from OD_RANGE (e.g. "20-100 or 0-100%").
+            For legacy hwmon GPUs the range is "0-255 or 0-100%".
         """
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
         for dev in device_handles:
@@ -1468,8 +1470,10 @@ class AMDSMIHelpers:
                 # Try to get both fan speed and max fan speed
                 # If both succeed, fan control is supported
                 _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
-                _ = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
-                # Fan control is supported on this device
+                max_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
+                # Return range based on max speed
+                if max_speed <= 100:
+                    return f"0-{max_speed} or 0-100%%"
                 return "0-255 or 0-100%%"
             except amdsmi_interface.AmdSmiLibraryException as e:
                 logging.debug(
