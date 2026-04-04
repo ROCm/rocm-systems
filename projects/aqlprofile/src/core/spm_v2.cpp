@@ -572,5 +572,9 @@ aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pm
 PUBLIC_API hsa_status_t
 aqlprofile_spm_query_agent_capabilities(aqlprofile_agent_handle_t agent, aqlprofile_spm_available_configurations_cb_t cb, void* userdata)
 {
-    return HSA_STATUS_SUCCESS;
+  const aqlprofile_spm_available_configuration_t sample_internel_caps[] = {
+      AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK, 32, (1 << 16) - 32};
+  size_t num_caps = 1;
+  hsa_status_t status = cb(sample_internel_caps, &num_caps, userdata);
+  return status;
 }
