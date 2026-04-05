@@ -55,6 +55,7 @@ namespace amd::smi {
 static bool is_number(const std::string& s);
 static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
+static const char* kKFDVramPrefix = "vram_";
 
 // Check whether a given PID has /dev/kfd open by scanning its fd links.
 static bool PidHasKfdOpen(const std::string& pid_str) {
@@ -171,6 +172,40 @@ static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated
   return 0;
 }
 
+// Collect GPU IDs from KFD vram_* files for any host-PID KFD entry.
+// Used as a namespace fallback when container-local PIDs have no KFD sysfs entry.
+// NOTE: Uses the first host-PID entry found; assumes all container processes
+// share the same GPU set (valid for typical single-container deployments).
+static void CollectGpuIdsFromKfdVram(std::unordered_set<uint64_t>* gpu_set) {
+  DIR* kfd_proc_dir = opendir(kKFDProcPathRoot);
+  if (!kfd_proc_dir) return;
+
+  struct dirent* de;
+  while ((de = readdir(kfd_proc_dir)) != nullptr) {
+    std::string entry(de->d_name);
+    if (!is_number(entry)) continue;
+
+    std::string host_proc = std::string(kKFDProcPathRoot) + "/" + entry;
+    DIR* pd = opendir(host_proc.c_str());
+    if (!pd) continue;
+
+    struct dirent* pe;
+    while ((pe = readdir(pd)) != nullptr) {
+      std::string fname(pe->d_name);
+      if (fname.rfind("vram_", 0) != 0) continue;
+      std::string gpu_id_str = fname.substr(strlen(kKFDVramPrefix));
+      if (!gpu_id_str.empty() && std::all_of(gpu_id_str.begin(), gpu_id_str.end(),
+                                             [](unsigned char ch) { return std::isdigit(ch); })) {
+        gpu_set->insert(strtoull(gpu_id_str.c_str(), nullptr, 10));
+      }
+    }
+    closedir(pd);
+
+    if (!gpu_set->empty()) break;
+  }
+  closedir(kfd_proc_dir);
+}
+
 static const char* kKFDContextPrefix = "context_";  // Prefix for secondary KFD contexts
 
 // KFD Node Property strings
@@ -218,7 +253,6 @@ static const char* kKFDNodePropHIVE_IDStr = "hive_id";
 
 // KFD process file prefixes for extracting GPU IDs
 static const char* kKFDStatsPrefix = "stats_";
-static const char* kKFDVramPrefix = "vram_";
 static const char* kKFDCountersPrefix = "counters_";
 static const char* kKFDSdmaPrefix = "sdma_";
 
@@ -703,42 +737,12 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
   }
 
   // PID namespace: fall back to discovering GPU IDs from KFD vram_* files.
-  // NOTE: Uses the first host-PID KFD entry found; assumes all container
-  // processes share the same GPU set (valid for typical container deployments).
-  // This assumption may not hold in multi-tenant GPU partitioning scenarios.
   if (gpu_set->empty() && IsKfdPidNamespaced()) {
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << " | PID namespace detected, falling back to "
        << "KFD vram_* files for GPU discovery (pid=" << pid << ")";
     LOG_DEBUG(ss);
-    DIR* kfd_proc_dir = opendir(kKFDProcPathRoot);
-    if (kfd_proc_dir) {
-      struct dirent* de;
-      while ((de = readdir(kfd_proc_dir)) != nullptr) {
-        if (de->d_name[0] == '.') continue;
-        std::string entry = de->d_name;
-        if (!is_number(entry)) continue;
-        std::string host_proc = std::string(kKFDProcPathRoot) + "/" + entry;
-        DIR* pd = opendir(host_proc.c_str());
-        if (pd) {
-          struct dirent* pe;
-          while ((pe = readdir(pd)) != nullptr) {
-            std::string fname = pe->d_name;
-            if (fname.rfind("vram_", 0) == 0) {
-              std::string gpu_id_str = fname.substr(strlen(kKFDVramPrefix));
-              if (!gpu_id_str.empty() &&
-                  std::all_of(gpu_id_str.begin(), gpu_id_str.end(),
-                              [](unsigned char ch) { return std::isdigit(ch); })) {
-                gpu_set->insert(strtoull(gpu_id_str.c_str(), nullptr, 10));
-              }
-            }
-          }
-          closedir(pd);
-        }
-        if (!gpu_set->empty()) break;
-      }
-      closedir(kfd_proc_dir);
-    }
+    CollectGpuIdsFromKfdVram(gpu_set);
   }
 
   return 0;
