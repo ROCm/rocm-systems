@@ -6807,7 +6807,7 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     """Test GPU benchmark locking functions."""
     import fcntl
 
-    import utils.benchmark as benchmark
+    import roofline.benchmark.benchmark_base as benchmark_base
 
     # --- Setup: redirect lock directory to temp path ---
     lock_dir = tmp_path / "locks"
@@ -6815,7 +6815,7 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
 
     # Mock GPU UUID
     monkeypatch.setattr(
-        benchmark.hip,
+        benchmark_base.hip,
         "hipGetDeviceProperties",
         lambda d: mock.Mock(uuid=mock.Mock(uuid=bytes([0x01, 0x02, 0x03, 0x04]))),
     )
@@ -6828,16 +6828,21 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
             return lock_dir
         return original_path(p)
 
-    monkeypatch.setattr(benchmark, "Path", mock_path)
+    monkeypatch.setattr(benchmark_base, "Path", mock_path)
+
+    deviceID = 0
+    # Create Bench_base object in order to call gpu benchmark lock method
+    # Device ID list arg doesn't matter since we are just using the base class
+    testClass = benchmark_base.Bench_base([deviceID])
 
     # --- Test lock acquisition and lock file creation ---
-    with benchmark.gpu_benchmark_lock(0):
+    with testClass.gpu_benchmark_lock(deviceID):
         lock_file = lock_dir / "rocprof-compute-benchmark-01020304.lock"
         assert lock_file.exists()
 
     # --- Test no message when lock acquired immediately ---
     capsys.readouterr()  # Clear previous output
-    with benchmark.gpu_benchmark_lock(0):
+    with testClass.gpu_benchmark_lock(deviceID):
         pass
     output = capsys.readouterr().out
     assert "Waiting" not in output
@@ -6850,9 +6855,9 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
         if call_count["count"] == 1 and (op & fcntl.LOCK_NB):
             raise BlockingIOError("Lock held by another process")
 
-    monkeypatch.setattr(benchmark.fcntl, "flock", mock_flock)
+    monkeypatch.setattr(benchmark_base.fcntl, "flock", mock_flock)
 
-    with benchmark.gpu_benchmark_lock(0):
+    with testClass.gpu_benchmark_lock(deviceID):
         pass
 
     output = capsys.readouterr().out

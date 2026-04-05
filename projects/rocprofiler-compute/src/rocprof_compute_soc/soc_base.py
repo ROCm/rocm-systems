@@ -677,15 +677,16 @@ class OmniSoC_Base:
             console_log("roofline", "Skipping roofline")
         else:
             # Dynamic import to isolate hip dependency during profile time only
-            from utils import benchmark
+            from roofline.run_benchmark import load_bench
 
             console_log(
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
                 try:
-                    result = benchmark.run_on_devices([self.get_args().device])
-                    benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                    bench = load_bench([self.get_args().device])
+                    result = bench.run_on_devices([self.get_args().device])
+                    bench.dump_csv(result, f"{self.get_args().path}/roofline.csv")
                 except Exception as e:
                     console_error(
                         "roofline",

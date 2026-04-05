@@ -256,7 +256,7 @@ def test_roofline_missing_file_handling():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from roofline import Roofline
+    from roofline.roofline_main import Roofline
     from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 
@@ -295,7 +295,7 @@ def test_roofline_invalid_datatype_cli():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from roofline import Roofline
+    from roofline.roofline_main import Roofline
     from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 

@@ -20,7 +20,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.roofline_calc import (
-    MFMA_DATATYPES,
+    MATRIX_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
     construct_roof,
@@ -130,8 +130,8 @@ class Roofline:
         min_peak = float("inf")
         if "valu" in ceiling_data and ceiling_data["valu"]:
             min_peak = min(min_peak, ceiling_data["valu"][2])
-        if "mfma" in ceiling_data and ceiling_data["mfma"]:
-            min_peak = min(min_peak, ceiling_data["mfma"][2])
+        if "matrix_ops" in ceiling_data and ceiling_data["matrix_ops"]:
+            min_peak = min(min_peak, ceiling_data["matrix_ops"][2])
 
         if min_peak == float("inf"):
             return "Unknown"
@@ -613,7 +613,9 @@ class Roofline:
         valu_data = (
             self.__ceiling_data.get("valu") if dtype in PEAK_OPS_DATATYPES else None
         )
-        mfma_data = self.__ceiling_data.get("mfma") if dtype in MFMA_DATATYPES else None
+        matrix_data = (
+            self.__ceiling_data.get("matrix_ops") if dtype in MATRIX_DATATYPES else None
+        )
 
         if valu_data:
             legend_name = f"Peak VALU-{dtype}<br>{to_int(valu_data[2])} G{ops_flops}/s"
@@ -628,12 +630,14 @@ class Roofline:
                 **subplot_kwargs,
             )
 
-        if mfma_data:
-            legend_name = f"Peak MFMA-{dtype}<br>{to_int(mfma_data[2])} G{ops_flops}/s"
+        if matrix_data:
+            legend_name = (
+                f"Peak MFMA-{dtype}<br>{to_int(matrix_data[2])} G{ops_flops}/s"
+            )
             fig.add_trace(
                 go.Scatter(
-                    x=mfma_data[0],
-                    y=mfma_data[1],
+                    x=matrix_data[0],
+                    y=matrix_data[1],
                     name=legend_name,
                     mode="lines",
                     hovertemplate=f"<b>{legend_name}</b><extra></extra>",
@@ -1071,7 +1075,7 @@ class Roofline:
             "L1": "red+",
             "LDS": "orange+",
             "VALU": "white",
-            "MFMA": "magenta+",
+            "Matrix": "magenta+",
         }
 
         kernel_markers = {
@@ -1123,7 +1127,7 @@ class Roofline:
                 f"{self.__ceiling_data[cache_key][2]}",
             )
 
-        # Plot VALU and MFMA Peak
+        # Plot VALU and Matrix Ops Peak
         if dtype in PEAK_OPS_DATATYPES and self.__ceiling_data["valu"][0] is not None:
             plt.plot(
                 self.__ceiling_data["valu"][0],
@@ -1154,35 +1158,38 @@ class Roofline:
         else:
             console_warning(f"No PEAK measurement available for {dtype}")
 
-        if dtype in MFMA_DATATYPES and self.__ceiling_data["mfma"][0] is not None:
+        if (
+            dtype in MATRIX_DATATYPES
+            and self.__ceiling_data["matrix_ops"][0] is not None
+        ):
             plt.plot(
-                self.__ceiling_data["mfma"][0],
+                self.__ceiling_data["matrix_ops"][0],
                 [
-                    self.__ceiling_data["mfma"][1][0] - 0.1,
-                    self.__ceiling_data["mfma"][1][1] - 0.1,
+                    self.__ceiling_data["matrix_ops"][1][0] - 0.1,
+                    self.__ceiling_data["matrix_ops"][1][1] - 0.1,
                 ],
                 label=f"Peak MFMA-{dtype}",
                 marker="braille",
-                color=color_scheme["MFMA"],
+                color=color_scheme["Matrix"],
             )
             plt.text(
-                f"{round(self.__ceiling_data['mfma'][2])} G{ops_flops}/s",
-                x=self.__ceiling_data["mfma"][0][1] - 800,
-                y=self.__ceiling_data["mfma"][1][1],
+                f"{round(self.__ceiling_data['matrix_ops'][2])} G{ops_flops}/s",
+                x=self.__ceiling_data["matrix_ops"][0][1] - 800,
+                y=self.__ceiling_data["matrix_ops"][1][1],
                 background="black",
                 color="white",
                 alignment="right",
             )
             console_debug(
                 "roofline",
-                f"MFMA: [{self.__ceiling_data['mfma'][0][0]},"
-                f"{self.__ceiling_data['mfma'][0][1]}], "
-                f"[{self.__ceiling_data['mfma'][1][0]},"
-                f"{self.__ceiling_data['mfma'][1][1]}], "
-                f"{self.__ceiling_data['mfma'][2]}",
+                f"Matrix Ops: [{self.__ceiling_data['matrix_ops'][0][0]},"
+                f"{self.__ceiling_data['matrix_ops'][0][1]}], "
+                f"[{self.__ceiling_data['matrix_ops'][1][0]},"
+                f"{self.__ceiling_data['matrix_ops'][1][1]}], "
+                f"{self.__ceiling_data['matrix_ops'][2]}",
             )
         else:
-            console_warning(f"No MFMA measurement available for {dtype}")
+            console_warning(f"No Matrix Ops measurement available for {dtype}")
 
         # Plot Application AI
         for cache_level in cache_hierarchy:
