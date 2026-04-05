@@ -1361,8 +1361,11 @@ class LimitedSet:
 # block limited according to perfmon config.
 class CounterFile:
     def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
-        self.pmc_filename: str = f"pmc_perf_{name}.yaml"
-        self.counter_def_filename: str = f"counter_def_{name}.yaml"
+        # ``name`` is a logical bucket id, often ``pmc_perf_N.txt`` or ``<LEVEL>.txt``.
+        stem = name.split(".")[0]
+        self.file_name_txt: str = f"{stem}.txt"
+        self.pmc_filename: str = f"{stem}.yaml"
+        self.counter_def_filename: str = f"counter_def_{stem}.yaml"
         self.blocks: dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }
