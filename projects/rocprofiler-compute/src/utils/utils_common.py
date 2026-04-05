@@ -947,30 +947,40 @@ def get_panel_alias() -> dict[str, str]:
     }
 
 
-def get_rank() -> Optional[str]:
-    rank_env_vars = [
-        "SLURM_PROCID",
-        "FLUX_TASK_RANK",
-        "PMI_RANK",
-        "PMIX_RANK",
-        "PALS_RANKID",
-        "OMPI_COMM_WORLD_RANK",
-        "MV2_COMM_WORLD_RANK",
-        "MPI_RANKID",
-        "MPI_LOCALRANKID",
-        "MPI_RANK",
-    ]
-    for env_var in rank_env_vars:
-        value = os.environ.get(env_var)
-        if value is not None:
-            return value
+def get_mpi_rank_info() -> tuple[Optional[str], Optional[str]]:
+    """Detect MPI rank and total ranks.
 
-    return None
+    Returns a (rank, total_ranks) tuple, ensuring both values come from the same
+    MPI implementation.
+    """
+    # Note: PMIX_RANK is intentionally excluded. PMIx has no standard size env var,
+    # and PMIx is never a standalone launcher — it always runs behind SLURM, OpenMPI,
+    # PALS, etc., which set their own paired rank/size vars checked here. If only
+    # PMIX_RANK is set, the launcher also sets generic MPI_RANK/MPI_SIZE caught below.
+    rank_size_env_vars = [
+        ("PBS_NODENUM", "PBS_O_TASKNUM"),  # PBS/Torque
+        ("SLURM_PROCID", "SLURM_NTASKS"),  # SLURM
+        ("FLUX_TASK_RANK", "FLUX_JOB_SIZE"),  # Flux
+        ("PMI_RANK", "PMI_SIZE"),  # PMI
+        ("PALS_RANKID", "PALS_WORLD_SIZE"),  # PALS (HPE Cray)
+        ("OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"),  # OpenMPI
+        ("MV2_COMM_WORLD_RANK", "MV2_COMM_WORLD_SIZE"),  # MVAPICH2
+        ("MPI_RANKID", "MPI_NRANKS"),  # Generic
+        ("MPI_LOCALRANKID", "MPI_LOCALNRANKS"),  # Generic (local)
+        ("MPI_RANK", "MPI_SIZE"),  # Generic
+    ]
+    for rank_var, size_var in rank_size_env_vars:
+        rank_value = os.environ.get(rank_var)
+        if rank_value is not None:
+            size_value = os.environ.get(size_var)
+            return (rank_value, size_value)
+
+    return (None, None)
 
 
 def replace_rank(name: str) -> str:
     def rank(match: re.Match[str]) -> str:
-        value = get_rank()
+        value, _ = get_mpi_rank_info()
         if value is not None:
             return value + match.group(1)  # preserve trailing slash
         else:

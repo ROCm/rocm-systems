@@ -23,7 +23,7 @@ from utils.logger import (
 from utils.utils_common import (
     capture_subprocess_output,
     format_time,
-    get_rank,
+    get_mpi_rank_info,
     is_only_pc_sampling,
     print_status,
 )
@@ -438,9 +438,11 @@ class RocProfCompute_Base:
 
         # Warn about multi-rank profiling when multiple workload runs are needed
         # Skip warning when iteration multiplexing is enabled (single application run)
+        _, total_ranks = get_mpi_rank_info()
         if (
             total_workload_runs > 1
-            and get_rank() is not None
+            and total_ranks is not None
+            and int(total_ranks) >= 2
             and args.iteration_multiplexing is None
         ):
             console_warning(
