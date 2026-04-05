@@ -76,8 +76,9 @@ class LLMoE {
   LLMoE(int num_tokens_, int hidden_, int num_topk_, int num_experts_,
     InitMode init_mode_ = InitMode::Deterministic)
       : num_tokens(num_tokens_), hidden(hidden_), num_topk(num_topk_),
-        num_experts(num_experts_), init_mode(init_mode_),
-        ll_moe_data(num_tokens_, hidden_, num_topk_, num_experts_,init_mode_) {
+        num_experts(num_experts_),
+        ll_moe_data(num_tokens_, hidden_, num_topk_, num_experts_,init_mode_),
+        init_mode(init_mode_) {
 
     // Initialize rocSHMEM
     comm_init();
@@ -153,8 +154,6 @@ class LLMoE {
   }
 
   void ll_dispatch() {
-    int num_local_experts {num_experts / num_ranks};
-
     // Buffer control
     LLMoEBufferLayout<T> ll_layout(rdma_buffer_ptr, num_tokens,
                        hidden, num_ranks, num_experts);
@@ -177,6 +176,7 @@ class LLMoE {
     CHECK_HIP(hipStreamSynchronize(stream));
 
     //--- DEBUG FUNCTIONS ---
+    // int num_local_experts {num_experts / num_ranks};
     // Print rdma_x (buffer.dispatch_send_buffer) for debugging
     // print_rdma_x(buffer.dispatch_send_buffer);
 
@@ -195,7 +195,6 @@ class LLMoE {
   }
 
   void ll_combine() { // hipStream_t stream : TODO: pass stream
-    int num_local_experts {num_experts / num_ranks};
 
     // Buffer control
     LLMoEBufferLayout<T> ll_layout(rdma_buffer_ptr, num_tokens,

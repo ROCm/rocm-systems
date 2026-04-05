@@ -182,13 +182,13 @@ The process must be a standalone exe inside the same folder as other tests.
 Initially, the new tests can be enabled via using ```-DHIP_CATCH_TEST=1```. After porting existing tests, this will be turned on by default.
 
 ## Building a single test
-Generate `hip_tests_config.hh` before compilation
+Generate `hip_test_config.hh` before compilation
 ```bash
-python3 <HIP_SRC_DIR>/catch/config/parse_config.py <HIP_SRC_DIR>/catch/config/configs <PLATFORM> <OS> <ARCH> <CONFIG_TARGET_DIR>/hip_tests_config.hh
+python3 <HIP_SRC_DIR>/catch/config/parse_config.py <HIP_SRC_DIR>/catch/config/configs <PLATFORM> <OS> <ARCH> <CONFIG_TARGET_DIR>/hip_test_config.hh
 ```
 
 ```bash
-hipcc -I <HIP_SRC_DIR>/catch/include -I <HIP_SRC_DIR>/catch/external/picojson -I <CONFIG_TARGET_DIR> <HIP_SRC_DIR>/catch/hipTestMain/main.cc <HIP_SRC_DIR>/catch/hipTestMain/hip_test_context.cc -I <CATCH2_INCLUDE_DIR> -L <CATCH2_LIB_DIR> -lCatch2 -I $HIP_PATH/include -O1 -ggdb <PATH_TO_TEST.cc> -o <OUT_FILE_NAME>
+hipcc -I <HIP_SRC_DIR>/catch/include -I <CONFIG_TARGET_DIR> <HIP_SRC_DIR>/catch/hipTestMain/main.cc <HIP_SRC_DIR>/catch/hipTestMain/hip_test_context.cc -I <CATCH2_INCLUDE_DIR> -L <CATCH2_LIB_DIR> -lCatch2 -I $HIP_PATH/include -O1 -ggdb <PATH_TO_TEST.cc> -o <OUT_FILE_NAME>
 ```
 
 ## Debugging support

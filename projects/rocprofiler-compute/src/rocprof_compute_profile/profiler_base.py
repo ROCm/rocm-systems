@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import shlex
@@ -33,8 +11,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
 
-import yaml
-
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import (
     console_debug,
@@ -43,16 +19,15 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils import (
+from utils.utils_common import (
     capture_subprocess_output,
     format_time,
-    gen_sysinfo,
     get_rank,
     is_only_pc_sampling,
-    pc_sampling_prof,
     print_status,
-    run_prof,
 )
+from utils.utils_profile import gen_sysinfo, pc_sampling_prof, run_prof
+from vendored import yaml
 
 
 class RocProfCompute_Base:
@@ -216,7 +191,6 @@ class RocProfCompute_Base:
             )
 
         gen_sysinfo(
-            workload_name=args.name,
             workload_dir=args.path,
             app_cmd=args.remaining,
             skip_roof=args.no_roof,
@@ -264,7 +238,6 @@ class RocProfCompute_Base:
                 fnames=str_fnames,
                 profiler_options=options,
                 workload_dir=args.path,
-                mspec=self._soc._mspec,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
                 torch_trace_enabled=getattr(args, "torch_trace", False),
@@ -305,7 +278,7 @@ class RocProfCompute_Base:
             console_log("Filtered sections: All")
 
         # Run profiling on each input file
-        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
+        input_files = sorted(Path(args.path).glob("perfmon/pmc_perf_*.yaml"))
         total_runs = len(input_files)
 
         if total_runs == 0 and is_only_pc_sampling(args.filter_blocks):
@@ -321,6 +294,9 @@ class RocProfCompute_Base:
         native_tool_path = None
         # Native counter collection tool is only compatible with
         # rocprofiler-sdk public API for ROCm version >= 7.x.x
+
+        # PC sampling only profile does not need native tool
+
         # Do not use native tool in attach
         # mode until we figure out how multiple tools can attach
         # TODO: Figure out how multiple tools can attach
@@ -329,6 +305,7 @@ class RocProfCompute_Base:
             and not args.no_native_tool
             and int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
             and not args.attach_pid
+            and not is_only_pc_sampling(args.filter_blocks)
         ):
             # Use native counter collection tool
             # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
@@ -424,37 +401,6 @@ class RocProfCompute_Base:
 
         total_profiling_time = 0.0
 
-        for fname in input_files:
-            # Kernel filtering (in-place replacement)
-            if not args.kernel == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                    str(fname),
-                ])
-                # log output from profile filtering
-                if not success:
-                    console_error(output)
-                else:
-                    console_debug(output)
-
-            # Dispatch filtering (inplace replacement)
-            if args.dispatch is not None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                    str(fname),
-                ])
-                # log output from profile filtering
-                if not success:
-                    console_error(output)
-                else:
-                    console_debug(output)
-
         if args.iteration_multiplexing is not None:
             if native_tool_path is None:
                 console_error(
@@ -522,7 +468,7 @@ class RocProfCompute_Base:
             )
             return
 
-        total_runs = len(list(Path(args.path).glob("perfmon/*.txt")))
+        total_runs = len(list(Path(args.path).glob("perfmon/pmc_perf_*.yaml")))
 
         console_log(f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
 

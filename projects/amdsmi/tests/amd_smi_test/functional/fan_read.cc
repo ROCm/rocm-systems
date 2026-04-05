@@ -76,14 +76,16 @@ void TestFanRead::Run(void) {
       err = amdsmi_get_gpu_fan_speed(processor_handles_[i], 0, &val_i64);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+        ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
         // Verify api support checking functionality is working
         DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "gpu=" + std::to_string(i), VERB(STANDARD));
         err = amdsmi_get_gpu_fan_speed(processor_handles_[i], 0, nullptr);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_SUPPORTED);
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-        return;
+        continue;
       } else {
         CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) { std::cout << "\t**Current Fan Speed: " << val_i64 << std::endl; }
       }
 
       // Verify api support checking functionality is working

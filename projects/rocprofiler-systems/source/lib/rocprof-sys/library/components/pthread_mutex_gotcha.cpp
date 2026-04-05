@@ -169,6 +169,22 @@ pthread_mutex_gotcha::shutdown()
     pthread_mutex_gotcha_t::disable();
 }
 
+std::mutex pthread_mutex_gotcha::s_mutex = {};
+
+void
+pthread_mutex_gotcha::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    pthread_mutex_gotcha_t::set_ready(false);
+}
+
+void
+pthread_mutex_gotcha::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    pthread_mutex_gotcha_t::set_ready(true);
+}
+
 pthread_mutex_gotcha::pthread_mutex_gotcha(const gotcha_data_t& _data)
 : m_data{ &_data }
 {}
