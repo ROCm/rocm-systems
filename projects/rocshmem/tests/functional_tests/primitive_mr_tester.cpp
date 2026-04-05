@@ -71,7 +71,7 @@ PrimitiveMRTester::~PrimitiveMRTester() {
   rocshmem_free(r_buf);
 }
 
-void PrimitiveMRTester::resetBuffers(size_t size) {
+void PrimitiveMRTester::resetBuffers([[maybe_unused]] size_t size) {
   memset(s_buf, '0', max_msg_size * args.wg_size);
   memset(r_buf, '1', max_msg_size * args.wg_size);
 }

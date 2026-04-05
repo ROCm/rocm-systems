@@ -7,7 +7,7 @@
 #
 # Directly exports the following CMake variables
 #
-# LibIberty_ROOT_DIR       - Computed base directory the of LibIberty installation
+# LibIberty_ROOT_DIR       - Computed base directory of the LibIberty installation
 # LibIberty_LIBRARY_DIRS   - Link directories for LibIberty libraries LibIberty_LIBRARIES
 # - LibIberty library files LibIberty_INCLUDE - LibIberty include files
 #
@@ -27,8 +27,8 @@ endif()
 
 # -------------- PATHS --------------------------------------------------------
 
-# Base directory the of LibIberty installation
-set(LibIberty_ROOT_DIR "/usr" CACHE PATH "Base directory the of LibIberty installation")
+# Base directory of the LibIberty installation
+set(LibIberty_ROOT_DIR "/usr" CACHE PATH "Base directory of the LibIberty installation")
 
 # Hint directory that contains the LibIberty library files
 set(LibIberty_LIBRARYDIR
@@ -132,7 +132,7 @@ target_link_libraries(rocprofiler-systems-libiberty INTERFACE ${_li_libs})
 set(LibIberty_ROOT_DIR
     ${_li_root}
     CACHE PATH
-    "Base directory the of LibIberty installation"
+    "Base directory of the LibIberty installation"
     FORCE
 )
 set(LibIberty_INCLUDE_DIRS
@@ -150,3 +150,22 @@ set(IBERTY_LIBRARIES ${LibIberty_LIBRARIES})
 rocprofiler_systems_message(STATUS "LibIberty include dirs: ${LibIberty_INCLUDE_DIRS}")
 rocprofiler_systems_message(STATUS "LibIberty library dirs: ${LibIberty_LIBRARY_DIRS}")
 rocprofiler_systems_message(STATUS "LibIberty libraries: ${LibIberty_LIBRARIES}")
+
+# --------------------------------------------------------------------------------------#
+# Create Dyninst::LibIberty target if building from source
+# --------------------------------------------------------------------------------------#
+# When LibIberty is built from source, Dyninst's find_package(LibIberty) would fail
+# because the bundled LibIberty isn't installed in standard locations. Creating this
+# target causes Dyninst to skip find_package(LibIberty) and use the bundled dependency.
+if(ROCPROFSYS_BUILD_LIBIBERTY AND NOT TARGET Dyninst::LibIberty)
+    add_library(Dyninst::LibIberty INTERFACE IMPORTED)
+    target_link_libraries(Dyninst::LibIberty INTERFACE ${LibIberty_LIBRARIES})
+    target_include_directories(
+        Dyninst::LibIberty
+        SYSTEM
+        INTERFACE ${LibIberty_INCLUDE_DIRS}
+    )
+    if(LibIberty_LIBRARY_DIRS)
+        target_link_directories(Dyninst::LibIberty INTERFACE ${LibIberty_LIBRARY_DIRS})
+    endif()
+endif()

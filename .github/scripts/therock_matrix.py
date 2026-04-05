@@ -10,7 +10,7 @@ subtree_to_project_map = {
     "projects/hip-tests": "runtimes",
     "projects/hipother": "runtimes",
     "projects/rdc": "dc_tools",
-    "projects/rocdbgapi": "debug_tools",
+    "projects/rocdbgapi": "debug_tools-dbgapi",
     # "projects/rocdecode": "media-libs",
     # "projects/rocjpeg": "media-libs",
     "projects/rocm-core": "core",
@@ -21,8 +21,7 @@ subtree_to_project_map = {
     "projects/rocprofiler-register": "profiler",
     "projects/rocprofiler-sdk": "profiler",
     "projects/rocprofiler-systems": "profiler",
-    "projects/rocprofiler": "profiler",
-    "projects/rocr-debug-agent": "debug_tools",
+    "projects/rocr-debug-agent": "debug_tools-debug-agent",
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",
@@ -31,37 +30,49 @@ subtree_to_project_map = {
 
 project_map = {
     "core": {
-        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF"],
         "projects_to_test": "",  # will run sanity test to cover rocminfo and amdsmi
     },
     "dc_tools": {
-        "cmake_options": "-DTHEROCK_ENABLE_DC_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_DC_TOOLS=ON"],
         "projects_to_test": "",  # rdc-tests is not built by TheRock build system - TBD
     },
-    "debug_tools": {
-        "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
+    # dbggapi changes need to exercise both ROCgdb and debug agent.
+    "debug_tools-dbgapi": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
+        ],
         "projects_to_test": "rocr-debug-agent, rocgdb",
+    },
+    # debug agent changes don't have to exercise ROCgdb.
+    "debug_tools-debug-agent": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
+        ],
+        "projects_to_test": "rocr-debug-agent",
     },
     # media libs to be enabled in following PR
     # "media-libs": {
-    #     "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_MEDIA_LIBS=ON",
+    #     "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON", "-DTHEROCK_ENABLE_MEDIA_LIBS=ON"],
     #     "projects_to_test": "", # "rocdecode-tests, rocjpeg-tests",
     # },
     "profiler": {
-        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-systems",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
+        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",
     },
     "rocshmem": {
-        "cmake_options": "-DTHEROCK_ENABLE_ROCSHMEM=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_ROCSHMEM=ON"],
         "projects_to_test": "",  # rocshmem testing to be enabled in a future PR
     },
     "runtimes": {
-        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
         "projects_to_test": "hip-tests, rocrtst",
     },
     "all": {
-        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-systems, rocr-debug-agent, rocgdb",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems, rocr-debug-agent, rocgdb",
     },
 }
 

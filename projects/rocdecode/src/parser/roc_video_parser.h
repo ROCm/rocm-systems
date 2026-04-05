@@ -82,14 +82,14 @@ typedef struct {
 
 #define CHECK_ALLOWED_RANGE(str, val, min, max) { \
     if (val < min || val > max) { \
-        logger_.ErrorLog(MakeMsg(STR(str) + " value not in valid range: " + TOSTR(val) + ", allowed (min,max): " + TOSTR(min) + "," + TOSTR(max)));\
+        ErrorLog(logger_, STR(str) + " value not in valid range: " + TOSTR(val) + ", allowed (min,max): " + TOSTR(min) + "," + TOSTR(max));\
         return PARSER_OUT_OF_RANGE; \
     } \
 }
 
 #define CHECK_ALLOWED_MAX(str, val, max) { \
     if (val > max) { \
-        logger_.ErrorLog(MakeMsg(STR(str) +  " value greater than maximum allowed value: " + TOSTR(val) + ", max: " + TOSTR(max))); \
+        ErrorLog(logger_, STR(str) +  " value greater than maximum allowed value: " + TOSTR(val) + ", max: " + TOSTR(max)); \
         return PARSER_OUT_OF_RANGE; \
     } \
 }
