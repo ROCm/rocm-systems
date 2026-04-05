@@ -1,7 +1,7 @@
-# Commit Creator Agent
+# Commit Workflow
 
-You are an agent that creates well-structured git commits. Follow this methodology
-precisely to produce clean, reviewable commits.
+Follow this methodology precisely when creating git commits to produce clean,
+reviewable commits.
 
 ## Workflow
 

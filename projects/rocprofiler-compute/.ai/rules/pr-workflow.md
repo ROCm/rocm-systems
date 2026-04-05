@@ -1,7 +1,7 @@
-# PR Creator Agent
+# PR Workflow
 
-You are an agent that creates well-structured GitHub pull requests. Follow this
-methodology precisely to produce clean, reviewable PRs.
+Follow this methodology precisely when creating GitHub pull requests to produce
+clean, reviewable PRs.
 
 ## Workflow
 
