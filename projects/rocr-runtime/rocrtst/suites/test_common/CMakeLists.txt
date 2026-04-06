@@ -131,8 +131,33 @@ endif()
 #
 
 # Required Defines first:
-find_package(hsa-runtime64 REQUIRED)
-find_package(amd_smi REQUIRED)
+# Handle two cases
+# 1 - rocrtst is being built separately (defailt, BUILD_ROCRTST = OFF)
+# 2 - rocrtst is being built together with runtime and libhsakmt (BUILD_ROCRTST = ON)
+# In case 2, it might be built on other archs than amd64. If that is the case, do not
+# break the entire build, but just skip building rocrtst as it depends amd_smi which is
+# available only for amd64 for the timebeing
+
+if (BUILD_ROCRTST)
+    message("STATUS: using in-tree hsa-runtime64.")
+    set(ROCRTST_LIBS ${ROCRTST_LIBS} hsa-runtime64)
+else()
+  find_package(hsa-runtime64 REQUIRED)
+  message("STATUS: using system hsa-runtime64 library.")
+  set(ROCRTST_LIBS ${ROCRTST_LIBS} hsa-runtime64::hsa-runtime64)
+endif()
+
+if (BUILD_ROCRTST)
+  find_package(amd_smi QUIET)
+  if(NOT amd_smi_FOUND)
+    message("WARNING: amd_smi missing. Tests building will be skipped.")
+    return()
+  else()
+  endif()
+else()
+  find_package(amd_smi REQUIRED)
+endif()
+set(ROCRTST_LIBS ${ROCRTST_LIBS} amd_smi)
 
 set (ONLY64STR "64")
 
@@ -216,6 +241,7 @@ if(NOT AMDDeviceLibs_FOUND)
     HINTS
       "${LLVM_LIBRARY_DIR}/amdgcn/bitcode"
       "${LLVM_LIBRARY_DIR}/../amdgcn/bitcode"
+      "${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}/amdgcn/bitcode"
       "${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode"
       "${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode"
       "${CMAKE_PREFIX_PATH}/amdgcn/bitcode"
@@ -229,6 +255,7 @@ if(NOT AMDDeviceLibs_FOUND)
       "Searched locations:\n"
       "  ${LLVM_LIBRARY_DIR}/amdgcn/bitcode\n"
       "  ${LLVM_LIBRARY_DIR}/../amdgcn/bitcode\n"
+      "  ${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}/amdgcn/bitcode\n"
       "  ${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode\n"
       "  ${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode\n"
       "Please ensure device-libs are built and installed.")
@@ -346,24 +373,26 @@ MESSAGE("ISDEBUG STEP:Done")
 
 set(ROCRTST_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 
+#
+# Try using system GTest. Otherwise
 # Set Name for Google Test Framework and build it as a
 # static library to be linked with user test programs
 #
-set(GOOGLE_TEST_FRWK_NAME "google-test-frwk${ONLY64STR}")
-add_subdirectory(${ROCRTST_ROOT}/gtest "${PROJECT_BINARY_DIR}/gtest" EXCLUDE_FROM_ALL)
-set (ROCRTST_LIBS ${ROCRTST_LIBS} ${GOOGLE_TEST_FRWK_NAME})
+find_package(GTest)
+if(GTest_FOUND)
+  set(ROCRTST_LIBS ${ROCRTST_LIBS} GTest::GTest GTest::Main)
+  message(STATUS "Using system GTest library.")
+else()
+  set(GOOGLE_TEST_FRWK_NAME "google-test-frwk${ONLY64STR}")
+  add_subdirectory(${ROCRTST_ROOT}/gtest "${PROJECT_BINARY_DIR}/gtest" EXCLUDE_FROM_ALL)
+  set (ROCRTST_LIBS ${ROCRTST_LIBS} ${GOOGLE_TEST_FRWK_NAME})
+endif()
 
 MESSAGE("ROCRTST_LIBS SET STEP:Done")
 #
 #
 # Other source directories
 aux_source_directory(${ROCRTST_ROOT}/common common_srcs)
-
-#
-# Extend the list of libraries to be used for linking ROC Perf Apps
-#
-set(ROCRTST_LIBS ${ROCRTST_LIBS} hsa-runtime64::hsa-runtime64)
-set(ROCRTST_LIBS ${ROCRTST_LIBS} amd_smi)
 
 
 # Set Name for rocrtst
@@ -655,6 +684,8 @@ if(NOT HAVE_HWLOC)
       PATH_SUFFIXES lib lib64
       NO_DEFAULT_PATH
     )
+  else()
+    SET(HWLOC_BUNDLED TRUE)
   endif()
 
   if(HWLOC_LIBRARY)
@@ -702,6 +733,8 @@ install(TARGETS ${ROCRTST}
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
-install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib DESTINATION lib/rocrtst )
+if(HWLOC_BUNDLED)
+  install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib DESTINATION lib/rocrtst )
+endif()
 
 include ( CPack )
