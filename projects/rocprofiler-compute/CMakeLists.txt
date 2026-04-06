@@ -674,22 +674,9 @@ install(
 )
 # support files and version info
 install(
-    FILES
-        src/argparser.py
-        src/config.py
-        src/rocprof_compute_base.py
-        src/roofline.py
-        VERSION
-        VERSION.sha
+    FILES src/argparser.py src/config.py src/rocprof_compute_base.py VERSION VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
-)
-# src/hip (local hip python wrapper)
-install(
-    DIRECTORY src/hip
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
 )
 # src/rocprof_compute_analyze
 install(
@@ -707,9 +694,13 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# src/utils/rooflines
-file(GLOB rooflinebins src/utils/rooflines/roofline-*)
-install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT main)
+# src/roofline
+install(
+    DIRECTORY src/roofline
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/rocprof_compute_soc
 install(
     DIRECTORY src/rocprof_compute_soc
