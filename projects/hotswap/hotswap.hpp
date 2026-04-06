@@ -9,8 +9,7 @@
 
 #include <cstddef>
 
-namespace rocr {
-namespace hotswap {
+namespace rocr::hotswap {
 
 /// Rewrite a code object from source_isa to target_isa via COMGR.
 ///
@@ -31,7 +30,6 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
                        const char *source_isa, const char *target_isa,
                        void **out_data, size_t *out_size);
 
-} // namespace hotswap
-} // namespace rocr
+} // namespace rocr::hotswap
 
 #endif // ROCR_HOTSWAP_HPP

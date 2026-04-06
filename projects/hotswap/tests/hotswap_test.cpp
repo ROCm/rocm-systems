@@ -41,15 +41,14 @@ static void test_RetargetWithComgr() {
     return;
   }
   printf("TEST RetargetWithComgr...\n");
-  const unsigned char fake_elf[] = {
-      0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  const unsigned char fake_elf[] = {0x7f, 'E',  'L',  'F',  0x02, 0x01,
+                                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                    0x00, 0x00, 0x00, 0x00};
   void *out_data = nullptr;
   size_t out_size = 0;
   int rc = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf),
-      "amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx1250",
-      &out_data, &out_size);
+      fake_elf, sizeof(fake_elf), "amdgcn-amd-amdhsa--gfx1250",
+      "amdgcn-amd-amdhsa--gfx1250", &out_data, &out_size);
 
   check(rc == 0, "RetargetCodeObject succeeds with COMGR");
   check(out_size == sizeof(fake_elf), "output size matches input");
@@ -64,19 +63,19 @@ static void test_RetargetWithComgr() {
 
 static void test_RetargetReturnsInputWhenComgrUnavailable() {
   if (rocr::hotswap::ComgrHotswapAvailable()) {
-    printf("TEST RetargetReturnsInputWhenComgrUnavailable... SKIPPED (COMGR present)\n");
+    printf("TEST RetargetReturnsInputWhenComgrUnavailable... SKIPPED (COMGR "
+           "present)\n");
     return;
   }
   printf("TEST RetargetReturnsInputWhenComgrUnavailable...\n");
-  const unsigned char fake_elf[] = {
-      0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  const unsigned char fake_elf[] = {0x7f, 'E',  'L',  'F',  0x02, 0x01,
+                                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                    0x00, 0x00, 0x00, 0x00};
   void *out_data = nullptr;
   size_t out_size = 0;
   int rc = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf),
-      "amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx1250",
-      &out_data, &out_size);
+      fake_elf, sizeof(fake_elf), "amdgcn-amd-amdhsa--gfx1250",
+      "amdgcn-amd-amdhsa--gfx1250", &out_data, &out_size);
 
   check(rc != 0, "RetargetCodeObject fails without COMGR");
   check(out_data == fake_elf, "out_data points to original input");
@@ -87,9 +86,8 @@ static void test_RetargetNullOutputPointers() {
   printf("TEST RetargetNullOutputPointers...\n");
   const unsigned char fake_elf[] = {0x7f, 'E', 'L', 'F'};
   int rc = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf),
-      "amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx1250",
-      nullptr, nullptr);
+      fake_elf, sizeof(fake_elf), "amdgcn-amd-amdhsa--gfx1250",
+      "amdgcn-amd-amdhsa--gfx1250", nullptr, nullptr);
   check(rc != 0, "RetargetCodeObject rejects null output pointers");
 }
 

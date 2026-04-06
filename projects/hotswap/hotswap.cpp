@@ -1,4 +1,4 @@
-//===- hotswap.cpp - HotSwap ISA rewriting (stub) -------------------------===//
+//===- hotswap.cpp - HotSwap ISA rewriting --------------------------------===//
 //
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -9,8 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace rocr {
-namespace hotswap {
+namespace rocr::hotswap {
 
 int RetargetCodeObject(const void *elf_data, size_t elf_size,
                        const char *source_isa, const char *target_isa,
@@ -29,23 +28,21 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
   }
 
   if (!ComgrHotswapAvailable()) {
-    fprintf(stderr, "hotswap: COMGR not available for %s -> %s\n",
-            source_isa ? source_isa : "(null)",
-            target_isa ? target_isa : "(null)");
+    fprintf(stderr, "hotswap: COMGR not available for %s -> %s\n", source_isa,
+            target_isa);
     return -1;
   }
 
   void *out_elf = nullptr;
   size_t out_elf_size = 0;
-  int rc = ComgrHotswapRewrite(elf_data, elf_size,
-                               source_isa, target_isa,
-                               &out_elf, &out_elf_size);
+  const int rc = ComgrHotswapRewrite(elf_data, elf_size, source_isa,
+                                     target_isa, &out_elf, &out_elf_size);
   if (rc != 0) {
     fprintf(stderr, "hotswap: COMGR rewrite failed for %s -> %s (rc=%d)\n",
-            source_isa ? source_isa : "(null)",
-            target_isa ? target_isa : "(null)", rc);
-    if (out_elf)
+            source_isa, target_isa, rc);
+    if (out_elf) {
       std::free(out_elf);
+    }
     return rc;
   }
 
@@ -56,5 +53,4 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
   return 0;
 }
 
-} // namespace hotswap
-} // namespace rocr
+} // namespace rocr::hotswap

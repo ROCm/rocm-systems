@@ -14,11 +14,9 @@
 
 extern "C" {
 
-__attribute__((visibility("default")))
-int amd_comgr_hotswap_rewrite(
-    const void *elf_data, size_t elf_size,
-    const char *source_isa_name, const char *target_isa_name,
-    void **out_elf, size_t *out_elf_size) {
+__attribute__((visibility("default"))) int amd_comgr_hotswap_rewrite(
+    const void *elf_data, size_t elf_size, const char *source_isa_name,
+    const char *target_isa_name, void **out_elf, size_t *out_elf_size) {
   (void)source_isa_name;
   (void)target_isa_name;
 
