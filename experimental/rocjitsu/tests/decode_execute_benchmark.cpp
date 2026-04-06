@@ -53,12 +53,10 @@ struct CorpusEntry {
 
 /// @brief Classify a mnemonic into a benchmark category.
 inline InstCategory classify_mnemonic(std::string_view mn) {
-  if (mn.starts_with("s_load") || mn.starts_with("s_store") ||
-      mn.starts_with("s_buffer") || mn.starts_with("s_atomic") ||
-      mn.starts_with("buffer_") || mn.starts_with("tbuffer_") ||
-      mn.starts_with("flat_") || mn.starts_with("global_") ||
-      mn.starts_with("scratch_") || mn.starts_with("ds_") ||
-      mn.starts_with("image_"))
+  if (mn.starts_with("s_load") || mn.starts_with("s_store") || mn.starts_with("s_buffer") ||
+      mn.starts_with("s_atomic") || mn.starts_with("buffer_") || mn.starts_with("tbuffer_") ||
+      mn.starts_with("flat_") || mn.starts_with("global_") || mn.starts_with("scratch_") ||
+      mn.starts_with("ds_") || mn.starts_with("image_"))
     return InstCategory::MEMORY;
   if (mn.starts_with("v_"))
     return InstCategory::VECTOR_ALU;
@@ -69,13 +67,11 @@ inline InstCategory classify_mnemonic(std::string_view mn) {
 /// system instructions that halt/hang on zeroed state).
 inline bool should_skip(std::string_view mn) {
   static constexpr std::string_view SKIP[] = {
-      "s_endpgm",       "s_branch",    "s_cbranch",    "s_setpc",
-      "s_swappc",       "s_call",      "s_waitcnt",    "s_wait_",
-      "s_barrier",      "s_trap",      "s_sleep",      "s_sethalt",
-      "s_sendmsg",      "s_nop",       "s_getpc",      "s_getreg",
-      "s_setreg",       "s_rfe",       "s_icache_inv", "s_sendmsghalt",
-      "v_readlane",     "v_writelane",  "v_readfirstlane",
-      "v_mfma_",        "v_smfma_",     "v_wmma_",     "v_swmmac_",
+      "s_endpgm",     "s_branch",      "s_cbranch",  "s_setpc",     "s_swappc",        "s_call",
+      "s_waitcnt",    "s_wait_",       "s_barrier",  "s_trap",      "s_sleep",         "s_sethalt",
+      "s_sendmsg",    "s_nop",         "s_getpc",    "s_getreg",    "s_setreg",        "s_rfe",
+      "s_icache_inv", "s_sendmsghalt", "v_readlane", "v_writelane", "v_readfirstlane", "v_mfma_",
+      "v_smfma_",     "v_wmma_",       "v_swmmac_",
   };
   for (auto p : SKIP)
     if (mn.substr(0, p.size()) == p)
@@ -85,9 +81,8 @@ inline bool should_skip(std::string_view mn) {
 
 /// @brief Build a corpus of decodable instructions from test data.
 /// Only filters by skip list and decodability — does not try execute.
-std::vector<CorpusEntry>
-build_corpus(const TestEncEntry *encodings, size_t num_encodings,
-             Decoder &decoder) {
+std::vector<CorpusEntry> build_corpus(const TestEncEntry *encodings, size_t num_encodings,
+                                      Decoder &decoder) {
   std::vector<CorpusEntry> corpus;
 
   for (size_t i = 0; i < num_encodings; ++i) {
@@ -117,8 +112,8 @@ struct TimingResult {
 };
 
 /// @brief Run the benchmark for a given ISA.
-void run_benchmark(rj_code_arch_t arch, std::string_view arch_name,
-                   const TestEncEntry *encodings, size_t num_encodings) {
+void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEncEntry *encodings,
+                   size_t num_encodings) {
   // Set up CU + wavefront.
   amdgpu::GpuMemory gpu_mem(std::string(arch_name) + "_bench_mem");
   amdgpu::L2Cache l2(std::string(arch_name) + "_bench_l2");
@@ -128,8 +123,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name,
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create(std::string(arch_name), cfg,
-                                             &gpu_mem, &l2);
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(arch_name), cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
   auto decoder = Decoder::create(arch);
   ASSERT_NE(decoder, nullptr);
@@ -159,8 +153,8 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name,
   }
 
   if (corpus.empty()) {
-    std::printf("  %.*s: empty corpus, skipping\n",
-                static_cast<int>(arch_name.size()), arch_name.data());
+    std::printf("  %.*s: empty corpus, skipping\n", static_cast<int>(arch_name.size()),
+                arch_name.data());
     return;
   }
 
@@ -185,9 +179,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name,
   }
   auto decode_end = Clock::now();
   auto decode_ns =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(decode_end -
-                                                           decode_start)
-          .count();
+      std::chrono::duration_cast<std::chrono::nanoseconds>(decode_end - decode_start).count();
 
   // --- Measure decode + execute (non-memory only) ---
   auto full_start = Clock::now();
@@ -203,39 +195,32 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name,
     }
   }
   auto full_end = Clock::now();
-  auto full_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                     full_end - full_start)
-                     .count();
+  auto full_ns =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(full_end - full_start).count();
 
   // Compute metrics.
-  double decode_ns_per =
-      static_cast<double>(decode_ns) / static_cast<double>(total_instructions);
+  double decode_ns_per = static_cast<double>(decode_ns) / static_cast<double>(total_instructions);
   double full_ns_per =
-      exec_total > 0
-          ? static_cast<double>(full_ns) / static_cast<double>(exec_total)
-          : 0;
+      exec_total > 0 ? static_cast<double>(full_ns) / static_cast<double>(exec_total) : 0;
   double execute_ns_per = full_ns_per - decode_ns_per;
-  double mips_decode = static_cast<double>(total_instructions) /
-                       (static_cast<double>(decode_ns) / 1e9) / 1e6;
+  double mips_decode =
+      static_cast<double>(total_instructions) / (static_cast<double>(decode_ns) / 1e9) / 1e6;
   double mips_full =
-      exec_total > 0 ? static_cast<double>(exec_total) /
-                            (static_cast<double>(full_ns) / 1e9) / 1e6
+      exec_total > 0 ? static_cast<double>(exec_total) / (static_cast<double>(full_ns) / 1e9) / 1e6
                      : 0;
 
-  std::printf(
-      "\n  === %.*s DECODE-EXECUTE BENCHMARK ===\n"
-      "  Corpus: %zu instructions (%zu scalar, %zu vector, %zu memory)\n"
-      "  Iterations: %d (total: %zu decode, %zu decode+execute)\n"
-      "  \n"
-      "  Decode only:  %.1f ns/inst  (%.2f MIPS)\n"
-      "  Decode+Exec:  %.1f ns/inst  (%.2f MIPS)\n"
-      "  Execute only: %.1f ns/inst  (estimated)\n"
-      "  Wall clock:   %.1f ms (decode), %.1f ms (decode+exec)\n",
-      static_cast<int>(arch_name.size()), arch_name.data(), corpus_size,
-      n_scalar, n_vector, n_memory, ITERATIONS, total_instructions, exec_total,
-      decode_ns_per, mips_decode, full_ns_per, mips_full, execute_ns_per,
-      static_cast<double>(decode_ns) / 1e6,
-      static_cast<double>(full_ns) / 1e6);
+  std::printf("\n  === %.*s DECODE-EXECUTE BENCHMARK ===\n"
+              "  Corpus: %zu instructions (%zu scalar, %zu vector, %zu memory)\n"
+              "  Iterations: %d (total: %zu decode, %zu decode+execute)\n"
+              "  \n"
+              "  Decode only:  %.1f ns/inst  (%.2f MIPS)\n"
+              "  Decode+Exec:  %.1f ns/inst  (%.2f MIPS)\n"
+              "  Execute only: %.1f ns/inst  (estimated)\n"
+              "  Wall clock:   %.1f ms (decode), %.1f ms (decode+exec)\n",
+              static_cast<int>(arch_name.size()), arch_name.data(), corpus_size, n_scalar, n_vector,
+              n_memory, ITERATIONS, total_instructions, exec_total, decode_ns_per, mips_decode,
+              full_ns_per, mips_full, execute_ns_per, static_cast<double>(decode_ns) / 1e6,
+              static_cast<double>(full_ns) / 1e6);
 
   EXPECT_GT(mips_decode, 0.1) << "Decode throughput too low for " << arch_name;
 }
@@ -243,17 +228,15 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name,
 // --- Benchmark tests ---
 
 TEST(DecodeExecuteBenchmark, Cdna4) {
-  run_benchmark(
-      ROCJITSU_CODE_ARCH_CDNA4, "cdna4",
-      reinterpret_cast<const TestEncEntry *>(cdna4::test_data::ENCODINGS),
-      cdna4::test_data::NUM_ENCODINGS);
+  run_benchmark(ROCJITSU_CODE_ARCH_CDNA4, "cdna4",
+                reinterpret_cast<const TestEncEntry *>(cdna4::test_data::ENCODINGS),
+                cdna4::test_data::NUM_ENCODINGS);
 }
 
 TEST(DecodeExecuteBenchmark, Rdna4) {
-  run_benchmark(
-      ROCJITSU_CODE_ARCH_RDNA4, "rdna4",
-      reinterpret_cast<const TestEncEntry *>(rdna4::test_data::ENCODINGS),
-      rdna4::test_data::NUM_ENCODINGS);
+  run_benchmark(ROCJITSU_CODE_ARCH_RDNA4, "rdna4",
+                reinterpret_cast<const TestEncEntry *>(rdna4::test_data::ENCODINGS),
+                rdna4::test_data::NUM_ENCODINGS);
 }
 
 } // namespace
