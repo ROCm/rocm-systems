@@ -8,7 +8,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/machine_insts.h"
 #include <array>
-#include <functional>
 #include <memory>
 
 namespace rocjitsu {
@@ -22,7 +21,7 @@ public:
   static std::unique_ptr<Instruction> decode(const MachineInst *opcode);
 
 private:
-  using DecodeFunc = std::function<std::unique_ptr<Instruction>(const MachineInst *)>;
+  using DecodeFunc = std::unique_ptr<Instruction> (*)(const MachineInst *);
   static std::unique_ptr<Instruction> decodeInvalid(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeVCndmaskB32Vop2(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeVDot2accF32F16Vop2(const MachineInst *opcode);
