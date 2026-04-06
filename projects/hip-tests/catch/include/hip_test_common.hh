@@ -8,17 +8,6 @@
 #pragma clang diagnostic ignored "-Wsign-compare"
 #include "hip_test_context.hh"
 
-// build failure as windows tries to use min/max from minwindef.h with args
-#if defined(_WIN32) || defined(_WIN64)
-#ifdef min
-#undef min
-#endif
-#ifdef max
-#undef max
-#endif
-#endif // win check
-
-
 #include <catch2/catch_all.hpp>
 #include <atomic>
 #include <chrono>

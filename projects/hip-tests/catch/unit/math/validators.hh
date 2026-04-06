@@ -6,16 +6,6 @@
 
 #pragma once
 
-// build failure as windows tries to use min/max from minwindef.h with args
-#if defined(_WIN32) || defined(_WIN64)
-#ifdef min
-#undef min
-#endif
-#ifdef max
-#undef max
-#endif
-#endif // win check
-
 #include <catch2/catch_all.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
