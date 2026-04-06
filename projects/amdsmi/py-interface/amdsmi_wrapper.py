@@ -3305,6 +3305,9 @@ amdsmi_get_cpu_hsmp_proto_ver.argtypes = [amdsmi_processor_handle, ctypes.POINTE
 amdsmi_get_cpu_prochot_status = _libraries['libamd_smi.so'].amdsmi_get_cpu_prochot_status
 amdsmi_get_cpu_prochot_status.restype = amdsmi_status_t
 amdsmi_get_cpu_prochot_status.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
+amdsmi_get_cpu_apb_status = _libraries['libamd_smi.so'].amdsmi_get_cpu_apb_status
+amdsmi_get_cpu_apb_status.restype = amdsmi_status_t
+amdsmi_get_cpu_apb_status.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8)]
 amdsmi_get_cpu_fclk_mclk = _libraries['libamd_smi.so'].amdsmi_get_cpu_fclk_mclk
 amdsmi_get_cpu_fclk_mclk.restype = amdsmi_status_t
 amdsmi_get_cpu_fclk_mclk.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
@@ -3407,6 +3410,9 @@ amdsmi_set_cpu_dimm_sb_reg.argtypes = [amdsmi_processor_handle, uint32_t, uint32
 amdsmi_set_cpu_xgmi_width = _libraries['libamd_smi.so'].amdsmi_set_cpu_xgmi_width
 amdsmi_set_cpu_xgmi_width.restype = amdsmi_status_t
 amdsmi_set_cpu_xgmi_width.argtypes = [amdsmi_processor_handle, uint8_t, uint8_t]
+amdsmi_get_cpu_xgmi_width = _libraries['libamd_smi.so'].amdsmi_get_cpu_xgmi_width
+amdsmi_get_cpu_xgmi_width.restype = amdsmi_status_t
+amdsmi_get_cpu_xgmi_width.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8)]
 amdsmi_set_cpu_gmi3_link_width_range = _libraries['libamd_smi.so'].amdsmi_set_cpu_gmi3_link_width_range
 amdsmi_set_cpu_gmi3_link_width_range.restype = amdsmi_status_t
 amdsmi_set_cpu_gmi3_link_width_range.argtypes = [amdsmi_processor_handle, uint8_t, uint8_t]
@@ -3428,6 +3434,9 @@ amdsmi_set_cpu_pcie_link_rate.argtypes = [amdsmi_processor_handle, uint8_t, ctyp
 amdsmi_set_cpu_df_pstate_range = _libraries['libamd_smi.so'].amdsmi_set_cpu_df_pstate_range
 amdsmi_set_cpu_df_pstate_range.restype = amdsmi_status_t
 amdsmi_set_cpu_df_pstate_range.argtypes = [amdsmi_processor_handle, uint8_t, uint8_t]
+amdsmi_get_cpu_df_pstate_range = _libraries['libamd_smi.so'].amdsmi_get_cpu_df_pstate_range
+amdsmi_get_cpu_df_pstate_range.restype = amdsmi_status_t
+amdsmi_get_cpu_df_pstate_range.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte)]
 amdsmi_set_cpu_xgmi_pstate_range = _libraries['libamd_smi.so'].amdsmi_set_cpu_xgmi_pstate_range
 amdsmi_set_cpu_xgmi_pstate_range.restype = amdsmi_status_t
 amdsmi_set_cpu_xgmi_pstate_range.argtypes = [amdsmi_processor_handle, uint8_t, uint8_t]
@@ -3890,7 +3899,10 @@ __all__ = \
     'amdsmi_get_cpu_hsmp_proto_ver', 'amdsmi_get_cpu_model',
     'amdsmi_get_cpu_model_name', 'amdsmi_get_cpu_pc6_enable',
     'amdsmi_get_cpu_prochot_status',
+    'amdsmi_get_cpu_xgmi_width',
+    'amdsmi_get_cpu_apb_status',
     'amdsmi_get_cpu_pwr_efficiency_mode',
+    'amdsmi_set_cpu_df_pstate_range',
     'amdsmi_get_cpu_pwr_svi_telemetry_all_rails',
     'amdsmi_get_cpu_rail_isofreq_policy', 'amdsmi_get_cpu_sdps_limit',
     'amdsmi_get_cpu_smu_fw_version',
