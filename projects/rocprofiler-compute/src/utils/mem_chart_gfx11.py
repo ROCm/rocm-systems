@@ -39,6 +39,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from utils.utils_analysis import format_bw_human_readable
+
 # Keys = ``metric:`` names under each ``metric_table`` in
 # ``analysis_configs/gfx1151/0300_Memory_Chart.yaml`` (tables 301–309), in panel order.
 # Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
@@ -197,23 +199,6 @@ class Edge:
 
 
 @dataclass
-class AlignedEdgesGroup(RectBlock):
-    edges: list[Edge] = field(default_factory=list)
-    top_padding: int = 0
-    compact: bool = False
-
-    def render_text(self) -> Text:
-        lines = []
-        for _ in range(self.top_padding):
-            lines.append("")
-        for edge in self.edges:
-            lines.append(f"[{edge.color}]{edge.label}[/{edge.color}]")
-            lines.append(f"[{edge.color}]{edge.arrow}[/{edge.color}]")
-            lines.append("")
-        return Text.from_markup("\n".join(lines))
-
-
-@dataclass
 class SubBlock:
     label: str
     attributes: list[str] = field(default_factory=list)
@@ -222,61 +207,6 @@ class SubBlock:
     show_border: bool = True
     vertical_position: str = "middle"
     border_color: str = "blue"
-
-
-@dataclass
-class RegularBlock(RectBlock):
-    sub_blocks: list[SubBlock] = field(default_factory=list)
-    content_text: str = ""
-    vertical_position: str = "middle"
-    color: str = "blue"
-
-    def render(self) -> Panel:
-        import re
-
-        temp_content = []
-
-        if self.content_text:
-            temp_content.append(f"[dim]{self.content_text}[/dim]")
-            temp_content.append("")
-
-        for i, sub in enumerate(self.sub_blocks):
-            if sub.show_border and sub.label:
-                box_width = self.width - 6
-                inner_width = box_width - 4
-                bc = sub.border_color
-                top_line = f"[{bc}]┌" + "─" * (box_width - 2) + f"┐[/{bc}]"
-                bottom_line = f"[{bc}]└" + "─" * (box_width - 2) + f"┘[/{bc}]"
-                temp_content.append(top_line)
-                label_clean = sub.label
-                label_pad = " " * max(0, inner_width - len(label_clean))
-                temp_content.append(
-                    f"[{bc}]│[/{bc}] [bold]{sub.label}[/bold]{label_pad} [{bc}]│[/{bc}]"
-                )
-                for attr in sub.attributes:
-                    if not attr:
-                        continue
-                    clean = re.sub(r"\[.*?\]", "", attr)
-                    pad_len = max(0, inner_width - len(clean))
-                    pad = " " * pad_len
-                    temp_content.append(f"[{bc}]│[/{bc}] {attr}{pad} [{bc}]│[/{bc}]")
-                temp_content.append(bottom_line)
-            else:
-                if sub.label:
-                    temp_content.append(f"[bold]{sub.label}[/bold]")
-                for attr in sub.attributes:
-                    temp_content.append(attr)
-            if i < len(self.sub_blocks) - 1:
-                temp_content.append("")
-
-        content = "\n".join(temp_content)
-        return Panel(
-            content,
-            title=f"[bold {self.color}]{self.label}[/bold {self.color}]",
-            border_style=self.color,
-            width=self.width,
-            height=self.height,
-        )
 
 
 def format_value(
@@ -293,49 +223,9 @@ def format_value(
         return f"{value:.{precision}f}%"
     elif unit in ("GB/s", "Bytes/s"):
         # Handle both legacy GB/s and new Bytes/s units
-        return format_bw_human_readable(value, unit)
+        return format_bw_human_readable(value, unit, precision)
     else:
         return f"{value:.{precision}f}{unit}"
-
-
-def format_bw_human_readable(
-    value: Union[int, float, str, None], unit: str = "Bytes/s", precision: int = 1
-) -> str:
-    """
-    Format bandwidth value to human-readable format (TB/s, GB/s, MB/s, KB/s).
-
-    Args:
-        value: Bandwidth value (in Bytes/s if unit='Bytes/s', or in GB/s if unit='GB/s')
-        unit: Input unit - 'Bytes/s' or 'GB/s' (legacy)
-        precision: Number of decimal places
-
-    Returns:
-        Human-readable bandwidth string with appropriate unit
-    """
-    if value is None:
-        return "N/A"
-    try:
-        value = float(value)
-    except (ValueError, TypeError):
-        return "N/A"
-
-    # Convert to Bytes/s first if needed
-    if unit == "GB/s":
-        bytes_per_sec = value * 1e9
-    else:
-        bytes_per_sec = value
-
-    # Convert to appropriate unit
-    if bytes_per_sec >= 1e12:
-        return f"{bytes_per_sec / 1e12:.{precision}f} TB/s"
-    elif bytes_per_sec >= 1e9:
-        return f"{bytes_per_sec / 1e9:.{precision}f} GB/s"
-    elif bytes_per_sec >= 1e6:
-        return f"{bytes_per_sec / 1e6:.{precision}f} MB/s"
-    elif bytes_per_sec >= 1e3:
-        return f"{bytes_per_sec / 1e3:.{precision}f} KB/s"
-    else:
-        return f"{bytes_per_sec:.{precision}f} B/s"
 
 
 def format_sci(value: Union[int, float, str, None], precision: int = 2) -> str:
@@ -363,24 +253,7 @@ def format_bw_gbps(value: Union[int, float, str, None], precision: int = 1) -> s
     Returns:
         Human-readable bandwidth string with appropriate unit
     """
-    if value is None:
-        return "N/A"
-    try:
-        value = float(value)
-    except (ValueError, TypeError):
-        return "N/A"
-
-    # value is in Bytes/s, convert to appropriate unit
-    if value >= 1e12:
-        return f"{value / 1e12:.{precision}f} TB/s"
-    elif value >= 1e9:
-        return f"{value / 1e9:.{precision}f} GB/s"
-    elif value >= 1e6:
-        return f"{value / 1e6:.{precision}f} MB/s"
-    elif value >= 1e3:
-        return f"{value / 1e3:.{precision}f} KB/s"
-    else:
-        return f"{value:.{precision}f} B/s"
+    return format_bw_human_readable(value, precision=precision)
 
 
 def get_metric(d: dict[str, Any], key: str, default: Any = None) -> Any:  # noqa: ANN401

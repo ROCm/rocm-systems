@@ -1220,143 +1220,6 @@ def validate_dual_issue_metrics(
                 continue
 
 
-# ------------------------------------------------------------------------------
-# Debug helper functions for expression evaluation
-# ------------------------------------------------------------------------------
-
-_MAX_DEBUG_ROWS = 5
-
-
-def _print_debug_global_vars(row_expr: str, metric_evaluator: MetricEvaluator) -> None:
-    """Print global $xxx variables used in the expression."""
-    matched_vars = re.findall(r"ammolite__\w+", row_expr)
-    seen_vars: set[str] = set()
-    for var_key in matched_vars:
-        if var_key in seen_vars:
-            continue
-        seen_vars.add(var_key)
-        # Display as $varname (strip ammolite__ prefix) to match config globals
-        dollar_name = f"${var_key.replace('ammolite__', '', 1)}"
-        if var_key in metric_evaluator.sys_vars:
-            print(f"  {dollar_name}: {metric_evaluator.sys_vars[var_key]}")
-        elif var_key in metric_evaluator.empirical_peaks:
-            print(f"  {dollar_name}: {metric_evaluator.empirical_peaks[var_key]}")
-        else:
-            print(f"  {dollar_name}: [not found]")
-
-
-def _extract_column_data(
-    table_key: str, col_name: str, raw_pmc_df: Union[pd.DataFrame, dict]
-) -> Optional[list[Any]]:
-    """Extract column data from raw_pmc_df (dict or DataFrame)."""
-    if isinstance(raw_pmc_df, dict) and table_key in raw_pmc_df:
-        series = raw_pmc_df[table_key][col_name]
-        return series.tolist() if hasattr(series, "tolist") else list(series)
-    elif isinstance(raw_pmc_df, pd.DataFrame):
-        columns = raw_pmc_df.columns
-        # Handle MultiIndex columns by matching on the top-level table key
-        if isinstance(columns, pd.MultiIndex):
-            if table_key in columns.get_level_values(0):
-                series = raw_pmc_df[table_key][col_name]
-                return series.tolist() if hasattr(series, "tolist") else list(series)
-        # Fallback for flat (single-level) columns
-        if col_name in columns:
-            series = raw_pmc_df[col_name]
-            return series.tolist() if hasattr(series, "tolist") else list(series)
-    return None
-
-
-def _collect_debug_column_data(
-    row_expr: str, raw_pmc_df: Union[pd.DataFrame, dict]
-) -> tuple[list[tuple[str, Optional[list[Any]]]], int]:
-    """Collect column data and compute alignment width for debug output."""
-    matched_cols = re.findall(
-        r"raw_pmc_df\[[\"'](\w+)[\"']\]\[[\"'](\w+)[\"']\]", row_expr
-    )
-    seen: set[tuple[str, str]] = set()
-    rows_to_print: list[tuple[str, Optional[list[Any]]]] = []
-    global_width = 0
-
-    for table_key, col_name in matched_cols:
-        if (table_key, col_name) in seen:
-            continue
-        seen.add((table_key, col_name))
-        try:
-            column_data = _extract_column_data(table_key, col_name, raw_pmc_df)
-            label = f"raw_pmc_df['{table_key}']['{col_name}']"
-            rows_to_print.append((label, column_data))
-            if column_data is not None:
-                display = column_data[:_MAX_DEBUG_ROWS]
-                global_width = max(
-                    global_width,
-                    max((len(str(v)) for v in display), default=0),
-                )
-        except (KeyError, TypeError) as e:
-            console_warning(
-                f"Skipping entry for '{table_key}'['{col_name}']. Encountered: {e}"
-            )
-
-    return rows_to_print, global_width
-
-
-def _print_debug_column_data(
-    rows_to_print: list[tuple[str, Optional[list[Any]]]], global_width: int
-) -> None:
-    """Print collected column data with aligned formatting."""
-    for label, column_data in rows_to_print:
-        if column_data is not None:
-            n = len(column_data)
-            display_data = column_data[:_MAX_DEBUG_ROWS]
-            formatted = ", ".join(str(v).rjust(global_width) for v in display_data)
-            if n > _MAX_DEBUG_ROWS:
-                formatted += ", ..."
-            print(f"  {label}: [{formatted}]")
-        else:
-            print(f"  {label}: [unknown type]")
-
-
-def _print_debug_inputs(
-    row_expr: str,
-    metric_evaluator: MetricEvaluator,
-    raw_pmc_df: Union[pd.DataFrame, dict],
-    show_inputs: bool,
-) -> None:
-    """Print input variables and column data for debug output."""
-    print("Inputs:")
-    if show_inputs:
-        _print_debug_global_vars(row_expr, metric_evaluator)
-        rows_to_print, global_width = _collect_debug_column_data(row_expr, raw_pmc_df)
-        _print_debug_column_data(rows_to_print, global_width)
-    else:
-        print("  The same as above.")
-
-
-def _print_debug_output(row_expr: str, metric_evaluator: MetricEvaluator) -> None:
-    """Evaluate and print the expression result."""
-    print("\nOutput:", end=" ")
-    try:
-        eval_result = metric_evaluator.eval_expression(row_expr)
-        print(eval_result)
-    except Exception as e:
-        console_warning(f"Debug evaluation failed: {e}")
-    print("~" * 40)
-
-
-def debug_evaluate_metrics(
-    expr: str,
-    row_expr: str,
-    metric_evaluator: MetricEvaluator,
-    raw_pmc_df: Union[pd.DataFrame, dict],
-    *,
-    show_inputs: bool = True,
-) -> None:
-    """Debug helper for expression evaluation."""
-    print("~" * 40 + "\nExpression:")
-    print(f"{expr} = {row_expr}")
-    _print_debug_inputs(row_expr, metric_evaluator, raw_pmc_df, show_inputs)
-    _print_debug_output(row_expr, metric_evaluator)
-
-
 @demarcate
 def apply_filters(
     workload: schema.Workload, dir_path: str, is_gui: bool, debug: bool
@@ -1960,6 +1823,29 @@ def load_pc_sampling_data(
     else:
         console_warning("PC sampling: No data")
         return pd.DataFrame()
+
+
+def nullify_unevaluated_metric_values(
+    workload: schema.Workload,
+) -> None:
+    """Replace unevaluated formula strings with "N/A" in all metric tables.
+
+    In PC-sampling-only mode ``eval_metric`` is never called, so metric
+    table cells still contain raw formula strings produced by
+    ``build_metric_value_string``.  This helper walks every
+    ``metric_table`` in *workload* and sets each ``SUPPORTED_FIELD``
+    column to ``"N/A"`` so that downstream display code (``tty``,
+    ``webui``, ``tui``) can safely format the values.
+    """
+    for df_id, df_type in workload.dfs_type.items():
+        if df_type != "metric_table":
+            continue
+        df = workload.dfs.get(df_id)
+        if df is None or df.empty:
+            continue
+        for col in df.columns:
+            if col in SUPPORTED_FIELD and col.lower() != "alias":
+                df[col] = "N/A"
 
 
 @demarcate

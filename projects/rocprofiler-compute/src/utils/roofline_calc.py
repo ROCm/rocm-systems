@@ -84,7 +84,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
         "I8",
         "I32",
         "I64",
-    ],  # RDNA 3.5: VALU only, no MFMA
+    ],  # RDNA 3.5 iGPU: roofline dtypes are VALU-class; WMMA not a separate roofline bucket
 }
 
 PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]

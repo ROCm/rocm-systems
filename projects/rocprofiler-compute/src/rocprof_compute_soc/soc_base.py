@@ -299,7 +299,7 @@ class OmniSoC_Base:
             if alias not in panel_alias_dict:
                 raise KeyError(f"Unknown panel alias: {alias!r}")
             block_id = str(panel_alias_dict[alias])
-            print(f"alias: {alias}, block id: {block_id}")
+            console_log(f"alias: {alias}, block id: {block_id}")
 
         file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
 
@@ -712,30 +712,39 @@ class OmniSoC_Base:
 
         return filter_blocks
 
+    def _use_extended_perfmon_allocator(self) -> bool:
+        """
+        When True: run optional CP-SAT (if env + ortools) and metric-aware coalescing
+        (``_metric_aware_coalesce_pass``) before first-fit. Tier-0 / same-bin policy
+        comes from ``profiling_counter_grouping_policy.yaml`` per arch.
+
+        CDNA / MI arches (gfx908, gfx90a, gfx942, gfx950) keep the legacy pass count
+        baseline by using first-fit only after LEVEL buckets. **gfx1151** alone uses
+        the extended allocator.
+        """
+        return self.__arch == "gfx1151"
+
     def _allocate_perfmon_counter_files(
         self, counters: set[str]
     ) -> tuple[list[CounterFile], int, int]:
         """
         Bin-pack counters into perfmon buckets (same layout as perfmon_coalesce).
 
-        **Problem shape (informal).** Let each bucket be a vector-capacity bin (one
-        scalar limit per IP block). Counters consume one unit in their block’s
-        dimension. Each analysis metric induces a hyperedge over the counters it
-        references. Two goals are in tension: minimize the number of buckets, and
-        maximize metrics whose hyperedge is contained in a single bucket. That is a
-        multi-objective combinatorial problem; exact resolution is NP-hard (vector
-        bin packing plus co-location bonuses). This implementation uses a
-        **lexicographic greedy heuristic**: metric-aware whole-metric placement
-        (priority tier from ``_same_bucket_priority_metric_ids``, then larger
-        counter sets first) into existing ``pmc_perf_*`` buckets or a new bucket,
-        then classic first-fit for leftovers.
+        **gfx1151.** Uses a **lexicographic greedy heuristic** (metric-aware
+        whole-metric placement: priority tier from ``_same_bucket_priority_metric_ids``,
+        then larger counter sets first) into existing ``pmc_perf_*`` buckets or a new
+        bucket, then classic first-fit for leftovers. Optional **CP-SAT** when
+        ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and ``ortools`` is installed (see
+        ``_try_cp_sat_pmc_perf_buckets``). LEVEL counters still get dedicated buckets
+        first (same as all arches); that rule is unchanged and does not add passes
+        beyond one file per LEVEL counter on any arch.
 
-        **Optional CP-SAT path** (``ROCPROF_COMPUTE_PERFMON_CP_SAT=1``, ``ortools``):
-        Pure min-bin CP-SAT ignores analysis metrics and often **increases** how
-        many formulas span 2+ passes. By default we add a **metric-spread** term
-        (``ROCPROF_COMPUTE_PERFMON_CP_SAT_METRIC_PENALTY``, default ``100``; set
-        ``0`` for min-bins-only). Skipped when TCC channel PMCs are present or
-        over item limits; otherwise falls back to the heuristic above.
+        **Other supported arches.** After LEVEL buckets, only **per-counter first-fit**
+        runs (legacy behavior), preserving historical application-pass counts.
+
+        **Problem shape (informal).** Each bucket is a vector-capacity bin; each metric
+        induces a hyperedge. Exact multi-objective resolution is NP-hard; gfx1151 uses
+        heuristics + optional CP-SAT as above.
         """
         output_files: list[CounterFile] = []
         accu_file_count = 0
@@ -758,14 +767,15 @@ class OmniSoC_Base:
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
         work_set = set(work)
-        cp_sat_files = self._try_cp_sat_pmc_perf_buckets(work_set, file_count)
-        if cp_sat_files is not None:
-            output_files.extend(cp_sat_files)
-            file_count += len(cp_sat_files)
+        if self._use_extended_perfmon_allocator():
+            cp_sat_files = self._try_cp_sat_pmc_perf_buckets(work_set, file_count)
+            if cp_sat_files is not None:
+                output_files.extend(cp_sat_files)
+                file_count += len(cp_sat_files)
 
-        file_count = self._metric_aware_coalesce_pass(
-            work_set, output_files, file_count
-        )
+            file_count = self._metric_aware_coalesce_pass(
+                work_set, output_files, file_count
+            )
         work = sorted(work_set)
         tcc_channel_counter_file_map = _rebuild_tcc_channel_file_map(output_files)
 
@@ -1212,7 +1222,8 @@ class OmniSoC_Base:
 
             for f_idx in range(groups_per_bucket):
                 file_name = (
-                    Path(workload_perfmon_dir) / f"pmc_perf_node_{node_idx}_{f_idx}.txt"
+                    Path(workload_perfmon_dir)
+                    / f"pmc_perf_node_{node_idx}_{f_idx}.yaml"
                 )
 
                 pmc = []
@@ -1227,12 +1238,12 @@ class OmniSoC_Base:
 
                 # Write counters to file
                 with open(file_name, "w") as fd:
-                    fd.write(f"pmc: {' '.join(pmc)}\n\n")
+                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
         else:
             # Output to files
             for f in output_files:
-                file_name_txt = workload_perfmon_dir / f.file_name_txt
-                file_name_yaml = workload_perfmon_dir / f.file_name_yaml
+                pmc_filename = workload_perfmon_dir / f.pmc_filename
+                counter_def_filename = workload_perfmon_dir / f.counter_def_filename
 
                 pmc = []
                 counter_def: dict[str, Any] = {}
@@ -1267,15 +1278,12 @@ class OmniSoC_Base:
                         )
 
                 # Write counters to file
-                with open(file_name_txt, "w") as fd:
-                    fd.write(f"pmc: {' '.join(pmc)}\n\n")
-                    fd.write("gpu:\n")
-                    fd.write("range:\n")
-                    fd.write("kernel:\n")
+                with open(pmc_filename, "w") as fd:
+                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
 
                 # Write counter definitions to file
                 if counter_def:
-                    with open(file_name_yaml, "w") as fp:
+                    with open(counter_def_filename, "w") as fp:
                         fp.write(yaml.dump(counter_def, sort_keys=False))
 
     # ----------------------------------------------------
@@ -1363,9 +1371,11 @@ class LimitedSet:
 # block limited according to perfmon config.
 class CounterFile:
     def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
-        name_no_extension = name.split(".")[0]
-        self.file_name_txt: str = name_no_extension + ".txt"
-        self.file_name_yaml: str = name_no_extension + ".yaml"
+        # ``name`` is a logical bucket id, often ``pmc_perf_N.txt`` or ``<LEVEL>.txt``.
+        stem = name.split(".")[0]
+        self.file_name_txt: str = f"{stem}.txt"
+        self.pmc_filename: str = f"{stem}.yaml"
+        self.counter_def_filename: str = f"counter_def_{stem}.yaml"
         self.blocks: dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }

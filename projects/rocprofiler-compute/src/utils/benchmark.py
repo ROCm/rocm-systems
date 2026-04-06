@@ -65,7 +65,7 @@ unsupported_data_types = {
         "MFMA-F32",
         "MFMA-F64",
         "MFMA-I8",
-    ],  # RDNA 3.5 APUs (e.g. Strix Halo, Krackan), no MFMA
+    ],  # RDNA 3.5 APUs: MFMA/MALL roofline micro-benchmarks not applicable
 }
 
 cache_kernel_selector = {

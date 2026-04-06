@@ -1,7 +1,8 @@
 # =============================================================================
 # RDNA3.5 (gfx1151) — System Speed-of-Light
 # Layout aligned with gfx950/0200_system_speed_of_light.yaml (throughput first,
-# then core/memory, then cache hierarchy). RDNA3.5: standard VALU FLOPs (no MFMA).
+# then core/memory, then cache hierarchy). RDNA 3.5: FLOP rows use SQ_INSTS_VALU* (generic VALU
+# issue); WMMA is a separate ISA path and is not split out here.
 #
 # Public RDNA 3 context: dual-CU Work Group Processors (WGPs) and dual-issue VALU
 # (e.g. Wikipedia "RDNA 3", AMD public architecture materials). Chip-level FP16
