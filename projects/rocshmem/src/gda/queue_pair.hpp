@@ -369,7 +369,7 @@ class QueuePair {
   gda_mlx5_device_cq mlx5_cq;
   gda_mlx5_device_sq mlx5_sq;
 
-  __device__ void mlx5_poll_cq_until(uint16_t requested_available_slots);
+  __device__ void mlx5_poll_cq_until(uint64_t requested_idx);
   [[maybe_unused]] __device__ __attribute__((noinline)) void mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode);
 
   /* GDAProvider::MLX5 END */
