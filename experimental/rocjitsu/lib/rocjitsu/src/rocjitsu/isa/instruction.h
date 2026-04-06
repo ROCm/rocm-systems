@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -58,8 +59,10 @@ protected:
 class Instruction : public util::IListNode<Instruction, util::IListParent<BasicBlock>> {
 public:
   /// @brief Construct an instruction with the given mnemonic.
-  /// @param[in] mnemonic Human-readable mnemonic string (e.g. "v_add_f32").
-  Instruction(std::string mnemonic) : mnemonic_(std::move(mnemonic)) {}
+  /// @param[in] mnemonic Human-readable mnemonic (must point to static storage
+  ///            or storage that outlives the instruction — typically a string
+  ///            literal or a member of the encoding base class).
+  Instruction(std::string_view mnemonic) : mnemonic_(mnemonic) {}
   virtual ~Instruction() = default;
 
   Instruction(const Instruction &) = delete;
@@ -92,7 +95,7 @@ public:
 
   /// @brief The instruction's human-readable mnemonic.
   /// @returns Reference to the mnemonic string.
-  const std::string &mnemonic() const { return mnemonic_; }
+  std::string_view mnemonic() const { return mnemonic_; }
 
   /// @brief The instruction's total number of operands.
   /// @returns Sum of source and destination operand counts.
@@ -160,8 +163,8 @@ protected:
   uint64_t flags_ = 0;
   std::unique_ptr<DynamicInstState> data_;
 
-private:
-  const std::string mnemonic_;
+protected:
+  std::string_view mnemonic_;
 };
 
 /// @brief Abstract class that holds static ISA state for a specific instruction instance.
@@ -173,7 +176,7 @@ template <typename Isa> class IsaInstruction : public Instruction {
 public:
   /// @brief Construct an ISA instruction with the given mnemonic.
   /// @param[in] mnemonic Human-readable mnemonic string.
-  IsaInstruction(std::string mnemonic) : Instruction(std::move(mnemonic)) {}
+  IsaInstruction(std::string_view mnemonic) : Instruction(mnemonic) {}
 
   /// @brief Execute this instruction in the given ISA context.
   /// @param[in,out] ctx ISA-specific execution context (e.g. wavefront state).

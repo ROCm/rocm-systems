@@ -10,13 +10,14 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
 #include <string>
+#include <string_view>
 
 namespace rocjitsu {
 namespace rdna4 {
 
 class Sop1 : public IsaInstruction<Isa> {
 public:
-  Sop1(const std::string &mnemonic, const Sop1MachineInst *inst);
+  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst);
   using OpEncoding = Sop1MachineInst;
 
 public:
@@ -29,7 +30,7 @@ private:
 
 class Sopc : public IsaInstruction<Isa> {
 public:
-  Sopc(const std::string &mnemonic, const SopcMachineInst *inst);
+  Sopc(std::string_view mnemonic, const SopcMachineInst *inst);
   using OpEncoding = SopcMachineInst;
 
 public:
@@ -44,7 +45,7 @@ private:
 
 class Sopp : public IsaInstruction<Isa> {
 public:
-  Sopp(const std::string &mnemonic, const SoppMachineInst *inst);
+  Sopp(std::string_view mnemonic, const SoppMachineInst *inst);
   using OpEncoding = SoppMachineInst;
 
 public:
@@ -56,7 +57,7 @@ private:
 
 class Sopk : public IsaInstruction<Isa> {
 public:
-  Sopk(const std::string &mnemonic, const SopkMachineInst *inst);
+  Sopk(std::string_view mnemonic, const SopkMachineInst *inst);
   using OpEncoding = SopkMachineInst;
 
 public:
@@ -69,7 +70,7 @@ private:
 
 class Sop2 : public IsaInstruction<Isa> {
 public:
-  Sop2(const std::string &mnemonic, const Sop2MachineInst *inst);
+  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst);
   using OpEncoding = Sop2MachineInst;
 
 public:
@@ -85,7 +86,7 @@ private:
 
 class Smem : public IsaInstruction<Isa> {
 public:
-  Smem(const std::string &mnemonic, const SmemMachineInst *inst);
+  Smem(std::string_view mnemonic, const SmemMachineInst *inst);
   using OpEncoding = SmemMachineInst;
 
 public:
@@ -96,7 +97,7 @@ private:
 
 class Vop1 : public IsaInstruction<Isa> {
 public:
-  Vop1(const std::string &mnemonic, const Vop1MachineInst *inst);
+  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst);
   using OpEncoding = Vop1MachineInst;
 
 public:
@@ -109,7 +110,7 @@ private:
 
 class Vopc : public IsaInstruction<Isa> {
 public:
-  Vopc(const std::string &mnemonic, const VopcMachineInst *inst);
+  Vopc(std::string_view mnemonic, const VopcMachineInst *inst);
   using OpEncoding = VopcMachineInst;
 
 public:
@@ -122,7 +123,7 @@ private:
 
 class Vop2 : public IsaInstruction<Isa> {
 public:
-  Vop2(const std::string &mnemonic, const Vop2MachineInst *inst);
+  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst);
   using OpEncoding = Vop2MachineInst;
 
 public:
@@ -136,7 +137,7 @@ private:
 
 class Vop3 : public IsaInstruction<Isa> {
 public:
-  Vop3(const std::string &mnemonic, const Vop3MachineInst *inst);
+  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst);
   using OpEncoding = Vop3MachineInst;
 
 public:
@@ -154,7 +155,7 @@ private:
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
-  Vop3p(const std::string &mnemonic, const Vop3pMachineInst *inst);
+  Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst);
   using OpEncoding = Vop3pMachineInst;
 
 public:
@@ -172,7 +173,7 @@ private:
 
 class Vinterp : public IsaInstruction<Isa> {
 public:
-  Vinterp(const std::string &mnemonic, const VinterpMachineInst *inst);
+  Vinterp(std::string_view mnemonic, const VinterpMachineInst *inst);
   using OpEncoding = VinterpMachineInst;
 
 public:
@@ -183,7 +184,7 @@ private:
 
 class Vdsdir : public IsaInstruction<Isa> {
 public:
-  Vdsdir(const std::string &mnemonic, const VdsdirMachineInst *inst);
+  Vdsdir(std::string_view mnemonic, const VdsdirMachineInst *inst);
   using OpEncoding = VdsdirMachineInst;
 
 public:
@@ -195,7 +196,7 @@ private:
 
 class Vds : public IsaInstruction<Isa> {
 public:
-  Vds(const std::string &mnemonic, const VdsMachineInst *inst);
+  Vds(std::string_view mnemonic, const VdsMachineInst *inst);
   using OpEncoding = VdsMachineInst;
 
 public:
@@ -206,7 +207,7 @@ private:
 
 class Vbuffer : public IsaInstruction<Isa> {
 public:
-  Vbuffer(const std::string &mnemonic, const VbufferMachineInst *inst);
+  Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst);
   using OpEncoding = VbufferMachineInst;
 
 public:
@@ -217,7 +218,7 @@ private:
 
 class Vimage : public IsaInstruction<Isa> {
 public:
-  Vimage(const std::string &mnemonic, const VimageMachineInst *inst);
+  Vimage(std::string_view mnemonic, const VimageMachineInst *inst);
   using OpEncoding = VimageMachineInst;
 
 public:
@@ -228,7 +229,7 @@ private:
 
 class Vsample : public IsaInstruction<Isa> {
 public:
-  Vsample(const std::string &mnemonic, const VsampleMachineInst *inst);
+  Vsample(std::string_view mnemonic, const VsampleMachineInst *inst);
   using OpEncoding = VsampleMachineInst;
 
 public:
@@ -239,7 +240,7 @@ private:
 
 class Vexport : public IsaInstruction<Isa> {
 public:
-  Vexport(const std::string &mnemonic, const VexportMachineInst *inst);
+  Vexport(std::string_view mnemonic, const VexportMachineInst *inst);
   using OpEncoding = VexportMachineInst;
 
 public:
@@ -250,7 +251,7 @@ private:
 
 class Vflat : public IsaInstruction<Isa> {
 public:
-  Vflat(const std::string &mnemonic, const VflatMachineInst *inst);
+  Vflat(std::string_view mnemonic, const VflatMachineInst *inst);
   using OpEncoding = VflatMachineInst;
 
 public:
@@ -261,7 +262,7 @@ private:
 
 class Vscratch : public IsaInstruction<Isa> {
 public:
-  Vscratch(const std::string &mnemonic, const VscratchMachineInst *inst);
+  Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst);
   using OpEncoding = VscratchMachineInst;
 
 public:
@@ -272,7 +273,7 @@ private:
 
 class Vglobal : public IsaInstruction<Isa> {
 public:
-  Vglobal(const std::string &mnemonic, const VglobalMachineInst *inst);
+  Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst);
   using OpEncoding = VglobalMachineInst;
 
 public:
@@ -283,7 +284,7 @@ private:
 
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
-  Vop3SdstEnc(const std::string &mnemonic, const Vop3SdstEncMachineInst *inst);
+  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst);
   using OpEncoding = Vop3SdstEncMachineInst;
 
 public:
