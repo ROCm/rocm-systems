@@ -40,8 +40,36 @@ pc_sampling_buffer_id_vec_t* buffer_ids = nullptr;
 
 namespace
 {
-constexpr uint64_t host_trap_interval  = 10000;    // 10ms
-constexpr uint64_t stochastic_interval = 1048576;  // 2 ^ 20 cycles
+/**
+ * @brief Helper: query v2 configs for a single record kind + INVALID_SAMPLE
+ * with the given API flags.  Returns the collected configurations.
+ */
+std::vector<rocprofiler_pc_sampling_configuration_v2_t>
+query_v2_configs(rocprofiler_agent_id_t                agent_id,
+                 rocprofiler_pc_sampling_record_kind_t record_kind,
+                 rocprofiler_pc_sampling_api_flags_t   flags)
+{
+    auto configs = std::vector<rocprofiler_pc_sampling_configuration_v2_t>{};
+
+    auto cb = [](const rocprofiler_pc_sampling_configuration_v2_t* cfgs,
+                 size_t                                            num,
+                 void*                                             ud) {
+        auto* out = static_cast<std::vector<rocprofiler_pc_sampling_configuration_v2_t>*>(ud);
+        for(size_t i = 0; i < num; i++)
+            out->emplace_back(cfgs[i]);
+        return ROCPROFILER_STATUS_SUCCESS;
+    };
+
+    rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+        record_kind, ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE};
+
+    auto status = rocprofiler_query_pc_sampling_agent_configurations_v2(
+        agent_id, record_kinds, 2, flags, cb, &configs);
+
+    if(status != ROCPROFILER_STATUS_SUCCESS) configs.clear();
+
+    return configs;
+}
 }  // namespace
 
 void
@@ -77,31 +105,35 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
 
     auto* _out_agents = static_cast<tool_agent_info_vec_t*>(user_data);
     auto* _agents     = reinterpret_cast<const rocprofiler_agent_t**>(agents);
+
+    ss << "Discovered " << num_agents << " agent(s):\n";
+    size_t gpu_index = 0;
     for(size_t i = 0; i < num_agents; i++)
     {
+        ss << "  " << (i + 1) << ". " << _agents[i]->name
+           << " (id=" << _agents[i]->id.handle
+           << ", type=" << _agents[i]->type << ")\n";
+
         if(_agents[i]->type == ROCPROFILER_AGENT_TYPE_GPU)
         {
-            auto tool_gpu_agent           = std::make_unique<tool_agent_info>();
-            tool_gpu_agent->agent_id      = _agents[i]->id;
-            tool_gpu_agent->avail_configs = std::make_unique<avail_configs_vec_t>();
+            auto tool_gpu_agent            = std::make_unique<tool_agent_info>();
+            tool_gpu_agent->agent_id       = _agents[i]->id;
             tool_gpu_agent->arbiter_fields = std::make_unique<arbiter_fields_vec_t>();
-            tool_gpu_agent->agent         = _agents[i];
-            // Check if the GPU agent supports PC sampling. If so, add it to the
-            // output list `_out_agents`.
-            if(query_avail_configs_for_agent(tool_gpu_agent.get()))
+            tool_gpu_agent->agent          = _agents[i];
+
+            ++gpu_index;
+            // Discover the most comprehensive record version via the v2 query API.
+            // If the agent supports PC sampling, memoize the config and add it.
+            if(query_most_comprehensive_config_for_agent(tool_gpu_agent.get()))
             {
                 // Query arbiter state fields supported by this agent and store per-agent.
                 query_arbiter_fields_for_agent(tool_gpu_agent.get());
                 _out_agents->push_back(std::move(tool_gpu_agent));
             }
         }
-
-        ss << "[" << __FUNCTION__ << "] " << _agents[i]->name << " :: "
-           << "id=" << _agents[i]->id.handle << ", "
-           << "type=" << _agents[i]->type << "\n";
     }
 
-    *utils::get_output_stream() << ss.str() << "\n";
+    *utils::get_output_stream() << ss.str() << std::flush;
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -117,59 +149,44 @@ find_all_gpu_agents_supporting_pc_sampling()
 }
 
 bool
-query_avail_configs_for_agent(tool_agent_info* agent_info)
+query_most_comprehensive_config_for_agent(tool_agent_info* agent_info)
 {
-    agent_info->avail_configs->clear();
-
-    auto cb = [](const rocprofiler_pc_sampling_configuration_t* configs,
-                 size_t                                         num_config,
-                 void*                                          user_data) {
-        auto* avail_configs = static_cast<avail_configs_vec_t*>(user_data);
-        for(size_t i = 0; i < num_config; i++)
-        {
-            avail_configs->emplace_back(configs[i]);
-        }
-        return ROCPROFILER_STATUS_SUCCESS;
-    };
-
-    auto status = rocprofiler_query_pc_sampling_agent_configurations(
-        agent_info->agent_id, cb, agent_info->avail_configs.get());
-
     std::stringstream ss;
+    ss << "Agent " << agent_info->agent_id.handle
+       << ": searching for most comprehensive PC sampling record version...\n";
 
-    if(status != ROCPROFILER_STATUS_SUCCESS)
+    // Use PREFER_STOCHASTIC: the runtime will fall back to host-trap
+    // automatically if stochastic is not available on the agent.
+    constexpr auto flags = ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC;
+
+    // Iterate from the most comprehensive record version down to V0.
+    // Unsupported versions (e.g. V3-V5) will be rejected by the library,
+    // so the loop naturally skips them.
+    for(int kind = static_cast<int>(ROCPROFILER_PC_SAMPLING_RECORD_LAST) - 1;
+        kind >= static_cast<int>(ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE);
+        --kind)
     {
-        ss << "Querying PC sampling capabilities failed with status=" << status
-           << " :: " << rocprofiler_get_status_string(status) << "\n";
-        *utils::get_output_stream() << ss.str() << "\n";
-        return false;
-    }
-    else if(agent_info->avail_configs->empty())
-    {
-        return false;
+        auto record_kind = static_cast<rocprofiler_pc_sampling_record_kind_t>(kind);
+        auto configs     = query_v2_configs(agent_info->agent_id, record_kind, flags);
+
+        if(!configs.empty())
+        {
+            agent_info->most_comprehensive_record_kind = record_kind;
+            agent_info->most_comprehensive_api_flags   = flags;
+            agent_info->most_comprehensive_config      = configs[0];
+
+            ss << "  Selected record kind: " << static_cast<int>(record_kind)
+               << ", unit: " << configs[0].unit
+               << ", interval: [" << configs[0].min_interval
+               << ", " << configs[0].max_interval << "]\n";
+            *utils::get_output_stream() << ss.str() << std::flush;
+            return true;
+        }
     }
 
-    ss << "The agent with the id: " << agent_info->agent_id.handle << " supports the "
-       << agent_info->avail_configs->size() << " configurations: "
-       << "\n";
-    size_t ind = 0;
-    for(auto& cfg : *agent_info->avail_configs)
-    {
-        ss << "(" << ++ind << ".) "
-           << "method: " << cfg.method << ", "
-           << "unit: " << cfg.unit << ", "
-           << "min_interval: " << cfg.min_interval << ", "
-           << "max_interval: " << cfg.max_interval << ", "
-           << "flags: " << std::hex << cfg.flags << std::dec
-           << ((cfg.flags == ROCPROFILER_PC_SAMPLING_CONFIGURATION_FLAGS_INTERVAL_POW2)
-                   ? " (an interval value must be power of 2)"
-                   : "")
-           << "\n";
-    }
-
+    ss << "  No PC sampling configuration found.\n";
     *utils::get_output_stream() << ss.str() << std::flush;
-
-    return true;
+    return false;
 }
 
 void
@@ -205,111 +222,79 @@ query_arbiter_fields_for_agent(tool_agent_info* agent_info)
 
     // Build the field-name LUT once so the buffer callback never has to query names.
     ss << "Agent " << agent_info->agent_id.handle << " supports "
-       << agent_info->arbiter_fields->size() << " arbiter state fields:";
+       << agent_info->arbiter_fields->size() << " arbiter state field(s):\n";
+    size_t field_index = 0;
     for(auto field_id : *agent_info->arbiter_fields)
     {
         const char* name     = nullptr;
         uint64_t    name_len = 0;
         auto        name_status =
             rocprofiler_get_pc_sampling_arbiter_state_field_name(field_id, &name, &name_len);
+        ++field_index;
         if(name_status == ROCPROFILER_STATUS_SUCCESS && name != nullptr)
         {
             auto name_str = std::string(name, name_len);
             agent_info->arbiter_field_names.emplace(field_id, name_str);
-            ss << " " << name_str;
+            ss << "  " << field_index << ". " << name_str << "\n";
         }
         else
         {
-            agent_info->arbiter_field_names.emplace(
-                field_id, "field_" + std::to_string(static_cast<int>(field_id)));
-            ss << " UNKNOWN(" << static_cast<int>(field_id) << ")";
+            auto fallback = "field_" + std::to_string(static_cast<int>(field_id));
+            agent_info->arbiter_field_names.emplace(field_id, fallback);
+            ss << "  " << field_index << ". UNKNOWN(" << static_cast<int>(field_id) << ")\n";
         }
     }
-    ss << "\n";
 
     *utils::get_output_stream() << ss.str() << std::flush;
 }
 
 void
-configure_pc_sampling_v2_prefer_stochastic(tool_agent_info*         agent_info,
-                                           rocprofiler_context_id_t context_id,
-                                           rocprofiler_buffer_id_t  buffer_id)
+configure_pc_sampling_for_agent(tool_agent_info*         agent_info,
+                                rocprofiler_context_id_t context_id,
+                                rocprofiler_buffer_id_t  buffer_id)
 {
-    auto   stochastic_picked = false;
-    int    failures          = 10;
-    size_t interval          = 0;
+    if(agent_info->most_comprehensive_record_kind == ROCPROFILER_PC_SAMPLING_RECORD_NONE)
+    {
+        ROCPROFILER_CALL(ROCPROFILER_STATUS_ERROR,
+                         "configure_pc_sampling_for_agent called without previous configuration inquiry");
+    }
+
+    auto& cfg = agent_info->most_comprehensive_config;
+
+    // Cycle-based (stochastic) sampling needs a larger interval due to
+    // hardware constraints; time-based (host-trap) uses a fixed 10ms interval.
+    auto interval = (cfg.unit == ROCPROFILER_PC_SAMPLING_UNIT_CYCLES) ? STOCHASTIC_INTERVAL
+                                                                     : HOST_TRAP_INTERVAL;
+
+    rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
+        agent_info->most_comprehensive_record_kind, ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE};
+
+    int retries = 10;
     do
     {
-        auto success = query_avail_configs_for_agent(agent_info);
-        if(!success)
-        {
-            ROCPROFILER_CHECK(ROCPROFILER_STATUS_ERROR);
-        }
-
-        const rocprofiler_pc_sampling_configuration_t* first_host_trap_config  = nullptr;
-        const rocprofiler_pc_sampling_configuration_t* first_stochastic_config = nullptr;
-        for(auto const& cfg : *agent_info->avail_configs)
-        {
-            if(cfg.method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
-            {
-                first_stochastic_config = &cfg;
-                stochastic_picked       = true;
-                break;
-            }
-            else if(!first_host_trap_config &&
-                    cfg.method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
-            {
-                first_host_trap_config = &cfg;
-            }
-        }
-
-        const rocprofiler_pc_sampling_configuration_t* picked_cfg =
-            (first_stochastic_config != nullptr) ? first_stochastic_config : first_host_trap_config;
-
-        if(picked_cfg->min_interval == picked_cfg->max_interval)
-        {
-            interval = picked_cfg->min_interval;
-        }
-        else
-        {
-            interval = stochastic_picked ? stochastic_interval : host_trap_interval;
-        }
-
-        // Pick record kind based on sampling method:
-        //   - Host-trap -> V1 (has hw_id, workgroup_position, wave_in_group)
-        //   - Stochastic -> V2 (V1 fields + snapshot_information with arbiter_state)
-        // Always include INVALID_SAMPLE to observe any invalid/error samples.
-        auto record_kind = stochastic_picked ? ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE
-                                             : ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE;
-
-        rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
-            record_kind, ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE};
-
         auto status =
             rocprofiler_configure_pc_sampling_service_v2(context_id,
                                                         agent_info->agent_id,
-                                                        picked_cfg->method,
-                                                        picked_cfg->unit,
+                                                        cfg.unit,
                                                         interval,
                                                         buffer_id,
                                                         record_kinds,
                                                         2,
-                                                        0);
+                                                        agent_info->most_comprehensive_api_flags);
         if(status == ROCPROFILER_STATUS_SUCCESS)
         {
             *utils::get_output_stream()
-                << ">>> Configured v2 PC sampling: "
-                << (stochastic_picked ? "stochastic (V2 record)" : "host-trap (V1 record)")
-                << " with interval: " << interval << " "
-                << (stochastic_picked ? "clock-cycles" : "micro seconds")
-                << " on agent: " << agent_info->agent->id.handle << "\n";
+                << ">>> Configured PC sampling (record kind="
+                << static_cast<int>(agent_info->most_comprehensive_record_kind)
+                << ", interval=" << interval
+                << ") on agent " << agent_info->agent->id.handle << "\n";
             return;
         }
         else if(status != ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE)
         {
             ROCPROFILER_CHECK(status);
         }
-    } while(--failures);
+    } while(--retries);
 
     ROCPROFILER_CHECK(ROCPROFILER_STATUS_ERROR);
 }

@@ -173,13 +173,15 @@ get_arbiter_state_field_name(rocprofiler_pc_sampling_arbiter_state_field_id_t fi
 }
 
 /**
- * @brief Helper to check if a record kind is one of the new valid version kinds (V0-V5).
+ * @brief Helper to check if a record kind is one of the currently supported
+ * version kinds (V0, V1, V2).  V3-V5 are reserved for future use.
  */
 bool
 is_valid_version_record_kind(rocprofiler_pc_sampling_record_kind_t kind)
 {
-    return kind >= ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE &&
-           kind <= ROCPROFILER_PC_SAMPLING_RECORD_V5_SAMPLE;
+    return kind == ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE ||
+           kind == ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE ||
+           kind == ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE;
 }
 
 /**
@@ -189,7 +191,7 @@ is_valid_version_record_kind(rocprofiler_pc_sampling_record_kind_t kind)
  * - record_kinds must not be null
  * - num_record_kinds must be > 0
  * - No duplicates
- * - At most one valid version kind (V0-V5)
+ * - At most one valid version kind (V0-V2; V3-V5 are reserved)
  * - INVALID_SAMPLE can appear independently alongside one valid version
  * - NONE, LAST, and old kinds (HOST_TRAP_V0, STOCHASTIC_V0) are not allowed
  */
@@ -295,6 +297,121 @@ is_pc_sampling_explicitly_enabled()
 
     return pc_sampling_enabled;
 }
+
+/**
+ * @brief Validate API flags for conflicting or invalid combinations.
+ */
+rocprofiler_status_t
+validate_api_flags(rocprofiler_pc_sampling_api_flags_t flags)
+{
+    auto f = static_cast<uint32_t>(flags);
+
+    // Check for bits beyond the known flags
+    constexpr uint32_t all_known = ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP |
+                                   ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC |
+                                   ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP |
+                                   ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC;
+    if(f & ~all_known) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    // Conflicting REQUIRE flags
+    if((f & ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP) &&
+       (f & ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC))
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    // Conflicting PREFER flags
+    if((f & ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP) &&
+       (f & ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC))
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    // REQUIRE + opposite PREFER: REQUIRE takes priority, PREFER is ignored.
+    // This is not an error — the hard constraint simply overrides the soft hint.
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+/**
+ * @brief Infer the preferred PC sampling method from record_kinds and flags.
+ *
+ * Returns the method to use and whether it is a hard requirement.
+ * - V1 records -> host-trap
+ * - V2 records -> stochastic
+ * - V0/INVALID_SAMPLE only -> prefer stochastic, fall back to host-trap
+ * - REQUIRE flags override the record-kind heuristic
+ * - PREFER flags act as soft hints
+ *
+ * Note: V3-V5 record kinds are reserved for future use and are not yet
+ * supported.  They are accepted by the enum but not handled here.
+ *
+ * @param[in] record_kinds  - array of record kinds
+ * @param[in] num_record_kinds - size of array
+ * @param[in] flags - API flags
+ * @param[out] out_method - the inferred method
+ * @param[out] is_required - true if REQUIRE flag is active (no fallback)
+ * @return ROCPROFILER_STATUS_SUCCESS or error
+ */
+rocprofiler_status_t
+infer_method_from_record_kinds_and_flags(
+    const rocprofiler_pc_sampling_record_kind_t* record_kinds,
+    size_t                                       num_record_kinds,
+    rocprofiler_pc_sampling_api_flags_t          flags,
+    rocprofiler_pc_sampling_method_t*            out_method,
+    bool*                                        is_required)
+{
+    auto f = static_cast<uint32_t>(flags);
+
+    // Determine method from record kinds (find the valid version, if any).
+    // Currently only V0, V1, and V2 are supported.
+    auto method_from_records = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
+    for(size_t i = 0; i < num_record_kinds; i++)
+    {
+        auto kind = record_kinds[i];
+        if(kind == ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE)
+        {
+            method_from_records = ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
+            break;
+        }
+        else if(kind == ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE)
+        {
+            method_from_records = ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
+            break;
+        }
+        // V0 and INVALID_SAMPLE don't imply a method
+    }
+
+    // Apply flags over the record-kind heuristic
+    *is_required = false;
+
+    if(f & ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP)
+    {
+        *out_method  = ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
+        *is_required = true;
+    }
+    else if(f & ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC)
+    {
+        *out_method  = ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
+        *is_required = true;
+    }
+    else if(f & ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP)
+    {
+        *out_method = ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
+    }
+    else if(f & ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC)
+    {
+        *out_method = ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
+    }
+    else if(method_from_records != ROCPROFILER_PC_SAMPLING_METHOD_NONE)
+    {
+        // Record kind implies a specific method
+        *out_method = method_from_records;
+    }
+    else
+    {
+        // V0 or INVALID_SAMPLE only, no flags: default to prefer stochastic
+        *out_method = ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
 }  // namespace
 
 extern "C" {
@@ -391,22 +508,30 @@ rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service_v2(
     rocprofiler_context_id_t                     context_id,
     rocprofiler_agent_id_t                       agent_id,
-    rocprofiler_pc_sampling_method_t             method,
     rocprofiler_pc_sampling_unit_t               unit,
     uint64_t                                     interval,
     rocprofiler_buffer_id_t                      buffer_id,
     const rocprofiler_pc_sampling_record_kind_t* record_kinds,
     size_t                                       num_record_kinds,
-    uint32_t                                     flags)
+    rocprofiler_pc_sampling_api_flags_t          flags)
 {
     if(!is_pc_sampling_explicitly_enabled()) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
-    // flags must be 0 (reserved for future use)
-    if(flags != 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    // Validate flags
+    auto flags_status = validate_api_flags(flags);
+    if(flags_status != ROCPROFILER_STATUS_SUCCESS) return flags_status;
 
     // Validate the record_kinds array
     auto validate_status = validate_record_kinds(record_kinds, num_record_kinds);
     if(validate_status != ROCPROFILER_STATUS_SUCCESS) return validate_status;
+
+    // Infer the sampling method from record_kinds + flags
+    auto method      = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
+    auto is_required = false;
+    auto infer_status =
+        infer_method_from_record_kinds_and_flags(record_kinds, num_record_kinds, flags,
+                                                 &method, &is_required);
+    if(infer_status != ROCPROFILER_STATUS_SUCCESS) return infer_status;
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     if(rocprofiler::registration::get_init_status() > -1)
@@ -423,12 +548,24 @@ rocprofiler_configure_pc_sampling_service_v2(
     auto const* buff = rocprofiler::buffer::get_buffer(buffer_id);
     if(!buff) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
-    return rocprofiler::pc_sampling::configure_pc_sampling_service_v2(
+    // Try with inferred method first
+    auto status = rocprofiler::pc_sampling::configure_pc_sampling_service_v2(
         ctx, agent, method, unit, interval, buffer_id, record_kinds, num_record_kinds);
+
+    // If the preferred method failed and it's not a hard requirement, try the fallback
+    if(status != ROCPROFILER_STATUS_SUCCESS && !is_required)
+    {
+        auto fallback = (method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+                            ? ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP
+                            : ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
+        status = rocprofiler::pc_sampling::configure_pc_sampling_service_v2(
+            ctx, agent, fallback, unit, interval, buffer_id, record_kinds, num_record_kinds);
+    }
+
+    return status;
 #else
     (void) context_id;
     (void) agent_id;
-    (void) method;
     (void) unit;
     (void) interval;
     (void) buffer_id;
@@ -473,6 +610,110 @@ rocprofiler_get_pc_sampling_instruction_not_issued_reason_name_(
     *name     = n;
     *name_len = std::strlen(n);
     return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_query_pc_sampling_agent_configurations_v2(
+    rocprofiler_agent_id_t                                   agent_id,
+    const rocprofiler_pc_sampling_record_kind_t*             record_kinds,
+    size_t                                                   num_record_kinds,
+    rocprofiler_pc_sampling_api_flags_t                      flags,
+    rocprofiler_available_pc_sampling_configurations_v2_cb_t cb,
+    void*                                                    user_data)
+{
+    if(!is_pc_sampling_explicitly_enabled()) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    // Validate flags
+    auto flags_status = validate_api_flags(flags);
+    if(flags_status != ROCPROFILER_STATUS_SUCCESS) return flags_status;
+
+    // Validate the record_kinds array
+    auto validate_status = validate_record_kinds(record_kinds, num_record_kinds);
+    if(validate_status != ROCPROFILER_STATUS_SUCCESS) return validate_status;
+
+    // Infer preferred method
+    auto method      = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
+    auto is_required = false;
+    auto infer_status =
+        infer_method_from_record_kinds_and_flags(record_kinds, num_record_kinds, flags,
+                                                 &method, &is_required);
+    if(infer_status != ROCPROFILER_STATUS_SUCCESS) return infer_status;
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+    const auto* agent = rocprofiler::agent::get_agent(agent_id);
+    if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+
+    // Query all v1 configs from the ioctl layer
+    std::vector<rocprofiler_pc_sampling_configuration_t> v1_configs;
+    auto status = rocprofiler::pc_sampling::ioctl::ioctl_query_pcs_configs(agent, v1_configs);
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+
+    // Filter v1 configs by the inferred method and convert to v2
+    std::vector<rocprofiler_pc_sampling_configuration_v2_t> v2_configs;
+    for(auto const& cfg : v1_configs)
+    {
+        if(is_required && cfg.method != method) continue;
+
+        if(!is_required)
+        {
+            // For soft preferences, put the preferred method configs first,
+            // but include all
+        }
+
+        auto v2_cfg          = rocprofiler_pc_sampling_configuration_v2_t{};
+        v2_cfg.size          = sizeof(rocprofiler_pc_sampling_configuration_v2_t);
+        v2_cfg.unit          = cfg.unit;
+        v2_cfg.min_interval  = cfg.min_interval;
+        v2_cfg.max_interval  = cfg.max_interval;
+        v2_cfg.flags =
+            (cfg.flags == ROCPROFILER_PC_SAMPLING_CONFIGURATION_FLAGS_INTERVAL_POW2)
+                ? ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_INTERVAL_POW2
+                : ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_NONE;
+        v2_configs.push_back(v2_cfg);
+    }
+
+    // If preferred method is set and not required, sort preferred method configs first
+    if(!is_required && method != ROCPROFILER_PC_SAMPLING_METHOD_NONE)
+    {
+        // Stable partition: configs matching the preferred method come first
+        auto preferred_method = method;
+        size_t preferred_end = 0;
+        // Walk v1_configs in parallel to know which method each v2_config came from
+        std::vector<rocprofiler_pc_sampling_configuration_v2_t> sorted_configs;
+        // First pass: add configs matching preferred method
+        for(size_t i = 0; i < v1_configs.size(); i++)
+        {
+            if(v1_configs[i].method == preferred_method)
+            {
+                sorted_configs.push_back(v2_configs[i]);
+            }
+        }
+        preferred_end = sorted_configs.size();
+        // Second pass: add remaining configs
+        for(size_t i = 0; i < v1_configs.size(); i++)
+        {
+            if(v1_configs[i].method != preferred_method)
+            {
+                sorted_configs.push_back(v2_configs[i]);
+            }
+        }
+        (void) preferred_end;
+        v2_configs = std::move(sorted_configs);
+    }
+
+    return cb(v2_configs.data(), v2_configs.size(), user_data);
+#else
+    (void) agent_id;
+    (void) record_kinds;
+    (void) num_record_kinds;
+    (void) cb;
+    (void) user_data;
+
+    ROCP_INFO << "PC sampling unavailable. The feature depends on the latest HSA runtime.";
+
+    // ROCr runtime is missing PC sampling.
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+#endif
 }
 
 rocprofiler_status_t

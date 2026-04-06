@@ -129,6 +129,40 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
                                           int                              flags) ROCPROFILER_API;
 
 /**
+ * @brief (experimental) Flags for controlling PC sampling method selection in the v2 API.
+ *
+ * These flags allow the caller to express a preference or hard requirement for the
+ * underlying PC sampling method (host-trap vs stochastic) without directly specifying
+ * the method. The runtime selects the best method based on the requested record kinds,
+ * unit, interval, and these flags.
+ *
+ * PREFER flags are soft hints: the runtime tries to honor them but falls back to the
+ * other method if the preferred one is unavailable on the agent.
+ *
+ * REQUIRE flags are hard constraints: the runtime fails the call if the required method
+ * is not available.
+ *
+ * If no flags are set (NONE), the runtime uses internal heuristics:
+ * - V1 records -> host-trap
+ * - V2 records -> stochastic
+ * - V0 records -> prefer stochastic, fall back to host-trap
+ *
+ * Note: V3-V5 record kinds are reserved for future use.
+ *
+ * Conflicting flags (e.g., REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC) are rejected with
+ * ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT.
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_api_flags_t
+{
+    ROCPROFILER_PC_SAMPLING_API_FLAG_NONE              = 0,
+    ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_HOST_TRAP  = (1 << 0),
+    ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC = (1 << 1),
+    ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP  = (1 << 2),
+    ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_STOCHASTIC = (1 << 3),
+    ROCPROFILER_PC_SAMPLING_API_FLAG_LAST
+} rocprofiler_pc_sampling_api_flags_t;
+
+/**
  * @brief (experimental) Function used to configure the PC sampling service on the GPU agent with @p
  * agent_id.
  *
@@ -141,12 +175,22 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  *   please @see rocprofiler_create_buffer and @see rocprofiler_buffer_tracing_cb_t.
  *
  * Before calling this function, we recommend querying PC sampling configurations
- * supported by the GPU agent via the @see rocprofiler_query_pc_sampling_agent_configurations.
- * The client chooses the @p method, @p unit, and @p interval to match one of the
+ * supported by the GPU agent via the @see rocprofiler_query_pc_sampling_agent_configurations
+ * or @see rocprofiler_query_pc_sampling_agent_configurations_v2.
+ * The client chooses the @p unit and @p interval to match one of the
  * available configurations. Note that the @p interval must belong to the range of values
  * [available_config.min_interval, available_config.max_interval],
  * where available_config is the instance of the @see rocprofiler_pc_sampling_configuration_s
  * supported/available at the moment.
+ *
+ * Method Selection:
+ * Unlike the v1 API, this function does NOT take an explicit sampling method parameter.
+ * Instead, the runtime selects the best method (host-trap or stochastic) based on:
+ * - The requested @p record_kinds (V1 -> host-trap, V2 -> stochastic,
+ *   V0 -> prefer stochastic with fallback to host-trap;
+ *   V3-V5 are reserved for future use)
+ * - The @p flags parameter which allows soft preferences (PREFER_*) or hard
+ *   requirements (REQUIRE_*) for a specific method
  *
  * PC Sampling Record Versioning:
  * The client must specify which record formats to receive by providing an array of
@@ -164,87 +208,40 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  *
  * The order of elements in the array does not matter.
  *
- * Example 1 - ALLOWED: Configure only valid samples:
+ * Example 1 - ALLOWED: Configure with stochastic preference:
  * @code
- * // Configure to receive only valid samples in V0 format
- * // Invalid samples will be silently discarded
- * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
- *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE
- * };
- *
- * rocprofiler_configure_pc_sampling_service_v2(
- *     context_id, agent_id, method, unit, interval, buffer_id,
- *     record_kinds, 1, 0);
- * @endcode
- *
- * Example 2 - ALLOWED: Configure ONLY invalid samples:
- * @code
- * // Configure to receive only invalid/error samples
- * // Useful for debugging sampling failures
- * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
- *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE
- * };
- *
- * rocprofiler_configure_pc_sampling_service_v2(
- *     context_id, agent_id, method, unit, interval, buffer_id,
- *     record_kinds, 1, 0);
- * @endcode
- *
- * Example 3 - ALLOWED: Configure valid samples AND invalid samples:
- * @code
- * // Configure to receive both valid samples (V0) and invalid samples
- * // Buffer will receive both record types
  * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
  *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE,
  *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE
  * };
  *
  * rocprofiler_configure_pc_sampling_service_v2(
- *     context_id, agent_id, method, unit, interval, buffer_id,
- *     record_kinds, 2, 0);
- *
- * // Now buffer receives both:
- * // - Valid samples as rocprofiler_pc_sampling_record_v0_t
- * // - Invalid samples as rocprofiler_pc_sampling_record_invalid_t
+ *     context_id, agent_id, unit, interval, buffer_id,
+ *     record_kinds, 2, ROCPROFILER_PC_SAMPLING_API_FLAG_PREFER_STOCHASTIC);
  * @endcode
  *
- * Example 4 - INVALID: Configuring two different valid versions:
+ * Example 2 - ALLOWED: Configure with no flags (runtime picks best method):
  * @code
- * // ERROR: Attempting to configure V0_SAMPLE and V1_SAMPLE together
- * // Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
  * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
- *     ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE,
- *     ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE  // ERROR!
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE
  * };
  *
- * // This will FAIL - only one valid version allowed
+ * // V2 record implies stochastic; no flags needed
  * rocprofiler_configure_pc_sampling_service_v2(
- *     context_id, agent_id, method, unit, interval, buffer_id,
- *     record_kinds, 2, 0);
+ *     context_id, agent_id, unit, interval, buffer_id,
+ *     record_kinds, 1, ROCPROFILER_PC_SAMPLING_API_FLAG_NONE);
  * @endcode
  *
- * Example 5 - INVALID: Duplicate record kind:
+ * Example 3 - ALLOWED: Require host-trap:
  * @code
- * // ERROR: Attempting to configure INVALID_SAMPLE twice
- * // Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
  * rocprofiler_pc_sampling_record_kind_t record_kinds[] = {
- *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,
- *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE  // ERROR!
+ *     ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE
  * };
  *
- * // This will FAIL - duplicate record kinds not allowed
  * rocprofiler_configure_pc_sampling_service_v2(
- *     context_id, agent_id, method, unit, interval, buffer_id,
- *     record_kinds, 2, 0);
- * @endcode
- *
- * Example 6 - INVALID: Empty array:
- * @code
- * // ERROR: Empty array (num_record_kinds = 0)
- * // Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
- * rocprofiler_configure_pc_sampling_service_v2(
- *     context_id, agent_id, method, unit, interval, buffer_id,
- *     NULL, 0, 0);  // ERROR: At least one record kind required
+ *     context_id, agent_id, unit, interval, buffer_id,
+ *     record_kinds, 2, ROCPROFILER_PC_SAMPLING_API_FLAG_REQUIRE_HOST_TRAP);
  * @endcode
  *
  * Rocprofiler-SDK checks whether the requested configuration is actually supported
@@ -287,20 +284,19 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  *
  * @param [in] context_id - id of the context used for starting/stopping PC sampling service
  * @param [in] agent_id   - id of the agent on which caller tries using PC sampling capability
- * @param [in] method     - the type of PC sampling the caller tries to use on the agent.
  * @param [in] unit       - The unit appropriate to the PC sampling type/method.
  * @param [in] interval   - frequency at which PC samples are generated
  * @param [in] buffer_id  - id of the buffer used for delivering PC samples
  * @param [in] record_kinds - array of record kinds defining which record formats to enable
  * @param [in] num_record_kinds - number of elements in the record_kinds array (must be > 0)
- * @param [in] flags      - reserved for future use, must be 0
+ * @param [in] flags      - method selection flags from ::rocprofiler_pc_sampling_api_flags_t
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS PC sampling service configured successfully
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE One of the scenarios is present:
  * 1. PC sampling is already configured with configuration different than requested,
  * 2. PC sampling is requested from a process that runs within the ROCgdb.
  * 3. HSA runtime does not support PC sampling.
- * 4. GPU device does not support requested PC sampling method.
+ * 4. GPU device does not support the inferred PC sampling method.
  * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
  * does not support the PC sampling feature
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
@@ -312,20 +308,19 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
  * - multiple valid versions (V0_SAMPLE-V5_SAMPLE) in the array
  * - duplicate record kinds in the array
  * - invalid record_kind value
- * - flags is not 0
+ * - conflicting flags (e.g. REQUIRE_HOST_TRAP | REQUIRE_STOCHASTIC)
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service_v2(
     rocprofiler_context_id_t                     context_id,
     rocprofiler_agent_id_t                       agent_id,
-    rocprofiler_pc_sampling_method_t             method,
     rocprofiler_pc_sampling_unit_t               unit,
     uint64_t                                     interval,
     rocprofiler_buffer_id_t                      buffer_id,
     const rocprofiler_pc_sampling_record_kind_t* record_kinds,
     size_t                                       num_record_kinds,
-    uint32_t                                     flags) ROCPROFILER_API;
+    rocprofiler_pc_sampling_api_flags_t          flags) ROCPROFILER_API;
 
 /**
  * @brief (experimental) Enumeration describing values of flags of
@@ -340,6 +335,20 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuration_
     /// @var ROCPROFILER_PC_SAMPLING_CONFIGURATION_FLAGS_INTERVAL_POW2
     /// @brief The interval value must be a power of 2.
 } rocprofiler_pc_sampling_configuration_flags_t;
+
+/**
+ * @brief (experimental) Enumeration describing values of flags of
+ * ::rocprofiler_pc_sampling_configuration_v2_t (output-only, bitmask).
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuration_flags_v2_t
+{
+    ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_NONE          = 0,
+    ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_INTERVAL_POW2 = (1 << 0),
+    ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_LAST
+
+    /// @var ROCPROFILER_PC_SAMPLING_CONFIGURATION_V2_FLAG_INTERVAL_POW2
+    /// @brief The interval value must be a power of 2.
+} rocprofiler_pc_sampling_configuration_flags_v2_t;
 
 /**
  * @brief (experimental) PC sampling configuration supported by a GPU agent.
@@ -417,6 +426,85 @@ rocprofiler_query_pc_sampling_agent_configurations(
     rocprofiler_agent_id_t                                agent_id,
     rocprofiler_available_pc_sampling_configurations_cb_t cb,
     void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
+
+/**
+ * @brief (experimental) PC sampling configuration supported by a GPU agent (v2).
+ *
+ * Unlike ::rocprofiler_pc_sampling_configuration_t, this struct does not expose
+ * the sampling method. The method is abstracted away and selected by the runtime
+ * based on the requested record kinds and flags.
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuration_v2_t
+{
+    uint64_t                                         size;  ///< Size of this struct
+    rocprofiler_pc_sampling_unit_t                   unit;
+    size_t                                           min_interval;
+    size_t                                           max_interval;
+    rocprofiler_pc_sampling_configuration_flags_v2_t flags;
+
+    /// @var unit
+    /// @brief A unit used to specify the interval for samples generation.
+    /// @var min_interval
+    /// @brief the highest possible frequency for generating samples.
+    /// @var max_interval
+    /// @brief the lowest possible frequency for generating samples.
+    /// @var flags
+    /// @brief Bit flags describing configuration constraints (e.g., interval must be power of 2).
+} rocprofiler_pc_sampling_configuration_v2_t;
+
+/**
+ * @brief (experimental) Rocprofiler SDK's callback function to deliver the list of available PC
+ * sampling configurations upon the call to the
+ * ::rocprofiler_query_pc_sampling_agent_configurations_v2.
+ *
+ * @param[out] configs - The array of v2 PC sampling configurations supported by the agent.
+ * @param[out] num_config - The number of configurations contained in the array @p configs.
+ * In case the GPU agent does not support PC sampling, the value is 0.
+ * @param[in] user_data - client's private data passed via
+ * ::rocprofiler_query_pc_sampling_agent_configurations_v2
+ * @return ::rocprofiler_status_t
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_v2_cb_t)(
+    const rocprofiler_pc_sampling_configuration_v2_t* configs,
+    size_t                                            num_config,
+    void*                                             user_data);
+
+/**
+ * @brief (experimental) Query PC Sampling Configuration (v2).
+ *
+ * Lists PC sampling configurations a GPU agent with @p agent_id supports at the moment
+ * of invoking the function. Unlike the v1 query, this function accepts @p record_kinds
+ * and @p flags to filter configurations by the caller's requirements.
+ *
+ * The returned configurations do not expose the sampling method (host-trap vs stochastic);
+ * the method is abstracted away.
+ *
+ * @param [in] agent_id  - id of the agent for which available configurations will be listed
+ * @param [in] record_kinds - array of record kinds the caller intends to use
+ * @param [in] num_record_kinds - number of elements in the record_kinds array
+ * @param [in] flags     - method selection flags from ::rocprofiler_pc_sampling_api_flags_t
+ * @param [in] cb        - User callback that delivers the available v2 PC sampling configurations
+ * @param [in] user_data - passed to the @p cb
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS @p cb successfully finished
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE One of the scenarios is present:
+ * 1. PC sampling is requested from a process that runs within the ROCgdb.
+ * 2. HSA runtime does not support PC sampling.
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
+ * does not support the PC sampling feature.
+ * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid record_kinds, flags, or null callback
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+rocprofiler_status_t
+rocprofiler_query_pc_sampling_agent_configurations_v2(
+    rocprofiler_agent_id_t                                   agent_id,
+    const rocprofiler_pc_sampling_record_kind_t*             record_kinds,
+    size_t                                                   num_record_kinds,
+    rocprofiler_pc_sampling_api_flags_t                      flags,
+    rocprofiler_available_pc_sampling_configurations_v2_cb_t cb,
+    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 5);
 
 /**
  * @brief (experimental) Information about the GPU part where wave was executing

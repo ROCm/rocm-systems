@@ -35,11 +35,12 @@ namespace client
 {
 namespace pcs
 {
-constexpr size_t BUFFER_SIZE_BYTES = 4 * 1024 * 1024;  // 4 MB
-constexpr size_t WATERMARK         = (BUFFER_SIZE_BYTES * 3 / 4);
+constexpr size_t   BUFFER_SIZE_BYTES    = 4 * 1024 * 1024;  // 4 MB
+constexpr size_t   WATERMARK            = (BUFFER_SIZE_BYTES * 3 / 4);
+constexpr uint64_t HOST_TRAP_INTERVAL   = 10000;    // 10000 us
+constexpr uint64_t STOCHASTIC_INTERVAL  = 1048576;  // 2^20 cycles
 
 struct tool_agent_info;
-using avail_configs_vec_t         = std::vector<rocprofiler_pc_sampling_configuration_t>;
 using arbiter_fields_vec_t        = std::vector<rocprofiler_pc_sampling_arbiter_state_field_id_t>;
 using arbiter_field_name_map_t    = std::map<rocprofiler_pc_sampling_arbiter_state_field_id_t, std::string>;
 using tool_agent_info_vec_t       = std::vector<std::unique_ptr<tool_agent_info>>;
@@ -47,15 +48,21 @@ using pc_sampling_buffer_id_vec_t = std::vector<rocprofiler_buffer_id_t>;
 
 struct tool_agent_info
 {
-    rocprofiler_agent_id_t               agent_id;
-    std::unique_ptr<avail_configs_vec_t> avail_configs;
-    const rocprofiler_agent_t*           agent;
+    rocprofiler_agent_id_t    agent_id;
+    const rocprofiler_agent_t* agent;
+
     /// Arbiter state fields supported by this GPU agent (queried per-agent).
     std::unique_ptr<arbiter_fields_vec_t> arbiter_fields;
     /// Memoized mapping from arbiter field ID to its name string.
     /// Populated once during query_arbiter_fields_for_agent to avoid
     /// repeated name lookups in the buffer callback hot path.
     arbiter_field_name_map_t arbiter_field_names;
+
+    /// Most comprehensive PC sampling configuration discovered during the query phase.
+    /// Populated by query_most_comprehensive_config_for_agent(); consumed by configure_pc_sampling_for_agent().
+    rocprofiler_pc_sampling_record_kind_t      most_comprehensive_record_kind = ROCPROFILER_PC_SAMPLING_RECORD_NONE;
+    rocprofiler_pc_sampling_api_flags_t        most_comprehensive_api_flags   = ROCPROFILER_PC_SAMPLING_API_FLAG_NONE;
+    rocprofiler_pc_sampling_configuration_v2_t most_comprehensive_config      = {};
 };
 
 // GPU agents supporting some kind of PC sampling.
@@ -77,10 +84,19 @@ void
 find_all_gpu_agents_supporting_pc_sampling();
 
 /**
- * @brief The return value indicates if the agent supports PC sampling.
+ * @brief Discover the most comprehensive PC sampling record version for the agent.
+ *
+ * Iterates record versions from the most comprehensive (LAST-1) down to V0,
+ * querying via the v2 API with PREFER_STOCHASTIC.  The runtime falls back to
+ * host-trap automatically if stochastic is not available on the agent.
+ *
+ * On success the chosen record kind, API flags, and configuration (unit,
+ * min/max interval) are memoized in @p agent_info->most_comprehensive_*.
+ *
+ * @return true if a usable configuration was found.
  */
 bool
-query_avail_configs_for_agent(tool_agent_info* agent_info);
+query_most_comprehensive_config_for_agent(tool_agent_info* agent_info);
 
 /**
  * @brief Query arbiter state fields supported by the agent and store them
@@ -90,15 +106,15 @@ void
 query_arbiter_fields_for_agent(tool_agent_info* agent_info);
 
 /**
- * @brief Configure PC sampling using the v2 API.
+ * @brief Configure PC sampling for the agent using the memoized most comprehensive config.
  *
- * Picks V1 record kind for host-trap, V2 record kind for stochastic,
- * and always includes INVALID_SAMPLE in the record_kinds array.
+ * Must be called after query_most_comprehensive_config_for_agent() has populated the
+ * agent_info->most_comprehensive_* fields.
  */
 void
-configure_pc_sampling_v2_prefer_stochastic(tool_agent_info*         agent_info,
-                                           rocprofiler_context_id_t context_id,
-                                           rocprofiler_buffer_id_t  buffer_id);
+configure_pc_sampling_for_agent(tool_agent_info*         agent_info,
+                                rocprofiler_context_id_t context_id,
+                                rocprofiler_buffer_id_t  buffer_id);
 
 void
 rocprofiler_pc_sampling_callback(rocprofiler_context_id_t      context_id,

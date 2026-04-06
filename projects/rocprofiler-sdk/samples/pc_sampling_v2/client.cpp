@@ -31,8 +31,10 @@
  * @brief Example rocprofiler client (tool) demonstrating the v2 PC sampling API.
  *
  * Key differences from the v1 sample:
- * - Uses rocprofiler_configure_pc_sampling_service_v2 with versioned record kinds
- * - Picks V1 record kind for host-trap, V2 for stochastic
+ * - Uses rocprofiler_query_pc_sampling_agent_configurations_v2 to discover the most
+ *   comprehensive record version, iterating from LAST-1 down to V0
+ * - Prefers stochastic sampling, falling back to host-trap automatically
+ * - Uses rocprofiler_configure_pc_sampling_service_v2 with memoized config
  * - Queries arbiter state fields per GPU agent
  * - Decodes arbiter_state via rocprofiler_pc_sampling_get_arbiter_state_fields
  */
@@ -106,8 +108,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
                                                     static_cast<void*>(gpu_agent.get()),
                                                     &buffer_id));
 
-        // Use the v2 configure API with versioned record kinds
-        client::pcs::configure_pc_sampling_v2_prefer_stochastic(
+        // Configure using the memoized most comprehensive config from the query phase.
+        client::pcs::configure_pc_sampling_for_agent(
             gpu_agent.get(), client_ctx, buffer_id);
 
         auto client_agent_thread = rocprofiler_callback_thread_t{};
