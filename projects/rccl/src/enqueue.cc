@@ -2983,6 +2983,9 @@ static ncclResult_t collTaskAppend(
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
+  t->nChannels = 0; // ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
+                    // scheduleCollTasksToPlan overwrites with the correct value and the
+                    // inspector plugin never sees garbage in eDescr->coll.nChannels.
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
   t->recvbuff = info->recvbuff;
