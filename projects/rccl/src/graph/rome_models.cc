@@ -2463,9 +2463,10 @@ static void applyNetOverride(struct ncclTopoSystem* system, const char* options)
   if (rcclParamDisableNetOverride()) return;
   if (!checkOption(options, "netOverride")) return;
   // This override assumes a fixed layout: each NIC hangs off a PCIe switch that
-  // also connects 1 GPUs, and the non-paired GPUs (usually >= PATH_PHB) are paired by gpu.dev/2. On
-  // systems with different switch fan-out, mixed placement, or
-  // numbering, this can mis-classify paths. Use RCCL_DISABLE_NET_OVERRIDE to opt out.
+  // also connects a single GPU, and the non-paired GPUs (usually >= PATH_PHB)
+  // are paired by gpu.dev/2. On systems with different switch fan-out, mixed
+  // placement, or numbering, this can mis-classify paths. Use
+  // RCCL_DISABLE_NET_OVERRIDE to opt out.
   // Kernel patch https://lkml.org/lkml/2024/6/12/551 is recommended to avoid having to
   // pair GPUs with NICs (check xml.cc:getBcmLinks)
   // Applying kernel patch should pick up rome_model_88 in the 8-GPU/4-NIC that does not
