@@ -69,11 +69,11 @@ struct FieldSummaryStats {
 struct GpuSummaryStats {
   uint64_t energy_consumed;
   uint64_t energy_last_time;
-  uint64_t ecc_correct_init;    // Init counter when job starts
-  uint64_t ecc_uncorrect_init;  // Init counter when job starts
-  uint32_t pcie_lc_perf_other_end_recovery_count_init;   // Init counter when job starts
-  uint32_t pcie_nak_sent_count_acc_init;                 // Init counter when job starts
-  uint32_t pcie_nak_rcvd_count_acc_init;                 // Init counter when job starts
+  uint64_t ecc_correct_init;                            // Init counter when job starts
+  uint64_t ecc_uncorrect_init;                          // Init counter when job starts
+  uint32_t pcie_lc_perf_other_end_recovery_count_init;  // Init counter when job starts
+  uint32_t pcie_nak_sent_count_acc_init;                // Init counter when job starts
+  uint32_t pcie_nak_rcvd_count_acc_init;                // Init counter when job starts
   std::map<uint32_t, FieldSummaryStats> field_summaries;
 };
 

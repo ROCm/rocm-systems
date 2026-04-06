@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 set(OCLTST_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 if (WIN32)

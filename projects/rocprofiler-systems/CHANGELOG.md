@@ -4,6 +4,17 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
+
+### Added
+
+- Support for pause and resume of profiling via `roctxProfilerPause` and `roctxProfilerResume`.
+- Support for selective region tracing via the `ROCPROFSYS_TRACE_REGION` environment variable, limiting tracing to specified regions.
+
+### Changed
+
+- `rocprof-sys-avail` no longer queries GPU devices or hardware counters unless `--hw-counters` or `--all` is requested, reducing startup time and allowing settings/component queries in environments without GPU/ROCm.
+
 ## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
 
 ### Added
@@ -16,10 +27,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-- Simplify categorizing like pmc_info events by removing the _<idx> from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
+- Simplify categorizing like pmc_info events by removing the "_<idx>" from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
 - Added `libhsa-runtime64.so` and `libomp.so` to the internal library exclusion list for runtime instrumentation to prevent instrumenting of runtime library internals.
 - RCCL implementation refactored with `production_pmc_registrar` for improved testability and separation of concerns.
 - Unsupported RCCL datatypes now gracefully return 0 with `LOG_WARNING` instead of aborting profiler, allowing continued profiling with newer RCCL versions.
+- Added AI NIC support.
 
 ### Resolved issues
 

@@ -64,6 +64,7 @@ const unsigned int SDMA_SUBOP_COPY_LINEAR = 0;
 // Broadcast linear copy uses the linear sub-op with the broadcast packet format.
 const unsigned int SDMA_SUBOP_COPY_LINEAR_BROADCAST = SDMA_SUBOP_COPY_LINEAR;
 const unsigned int SDMA_SUBOP_COPY_LINEAR_RECT = 4;
+const unsigned int SDMA_SUBOP_COPY_SWAP = 9;
 const unsigned int SDMA_SUBOP_TIMESTAMP_GET_GLOBAL = 2;
 const unsigned int SDMA_SUBOP_USER_GCR = 1;
 const unsigned int SDMA_ATOMIC_ADD64 = 47;
@@ -221,7 +222,76 @@ typedef struct SDMA_PKT_COPY_LINEAR_BROADCAST_TAG {
   } DST2_ADDR_HI_UNION;
 
   static const size_t kMaxSize_ = 0x3fffe0;
+  static const size_t kDstAlignMask_ = 0x1F;
 } SDMA_PKT_COPY_LINEAR_BROADCAST;
+
+// linear copy (swap) packet (SDMA5.2+)
+// Atomically swaps data between Address A and Address B.
+// Addresses must be 64-byte aligned for gfx94/gfx95X.
+typedef struct SDMA_PKT_COPY_LINEAR_SWAP_TAG {
+  union {
+    struct {
+      unsigned int op : 8;
+      unsigned int sub_op : 8;
+      unsigned int extra_info : 16;
+    };
+    unsigned int DW_0_DATA;
+  } HEADER_UNION;
+
+  union {
+    struct {
+      unsigned int count : 30;
+      unsigned int reserved_0 : 2;
+    };
+    unsigned int DW_1_DATA;
+  } COUNT_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_0 : 16;
+      unsigned int dst_sw : 2;
+      unsigned int dst_cache_policy : 3;
+      unsigned int reserved_1 : 3;
+      unsigned int src_sw : 2;
+      unsigned int src_cache_policy : 3;
+      unsigned int reserved_2 : 3;
+    };
+    unsigned int DW_2_DATA;
+  } PARAMETER_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_0 : 6;
+      unsigned int addr_a_31_6 : 26;
+    };
+    unsigned int DW_3_DATA;
+  } ADDR_A_LO_UNION;
+
+  union {
+    struct {
+      unsigned int addr_a_63_32 : 32;
+    };
+    unsigned int DW_4_DATA;
+  } ADDR_A_HI_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_0 : 6;
+      unsigned int addr_b_31_6 : 26;
+    };
+    unsigned int DW_5_DATA;
+  } ADDR_B_LO_UNION;
+
+  union {
+    struct {
+      unsigned int addr_b_63_32 : 32;
+    };
+    unsigned int DW_6_DATA;
+  } ADDR_B_HI_UNION;
+
+  static const size_t kMaxSize_ = 0x3fffffe0;
+  static const size_t kAlignment_ = 64;
+} SDMA_PKT_COPY_LINEAR_SWAP;
 
 // linear sub-window (pre-GFX12)
 typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG {

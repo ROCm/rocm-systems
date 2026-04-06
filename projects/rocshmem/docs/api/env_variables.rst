@@ -122,6 +122,7 @@ control the behavior of rocSHMEM.
       - ``GET``
       - | ``GET``: GET-based alltoallv algorithm
         | ``COPY``: Copy alltoallv algorithm
+
     * - | ``ROCSHMEM_GDA_OVERRIDE_NIC_FIRMWARE_CHECK``
         | This enviroment variable should be used with caution.
         | It overrides the NIC firmware check if
@@ -130,3 +131,18 @@ control the behavior of rocSHMEM.
       - ``0``
       - | ``0``: Disabled.
         | ``1``: Enabled.
+
+    * - | ``ROCSHMEM_GDA_SQ_SIZE``
+        | This environment variable sets the length of the SQ for GDA.
+      - ``4096``
+      - | Maximum number of Work Queue Entries (WQEs) posted on the Send Queue (SQ)
+
+    * - | ``ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX``
+        | Sets the number of Queue Pairs (QPs) to create per PE for the default context.
+      - ``1``
+      - Number of QPs per PE for the default context.
+
+    * - | ``ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX``
+        | Sets the number of Queue Pairs (QPs) to create per PE for each user context.
+      - ``1``
+      - Number of QPs per PE for each user context.

@@ -224,7 +224,7 @@ service RdcAPI {
 
   // rdc_status_t GetLinkStatus()
   rpc GetLinkStatus(Empty) returns (GetLinkStatusResponse) {}
-  
+
   // Get number of partitions
   rpc GetNumPartition(GetNumPartitionRequest) returns (GetNumPartitionResponse);
 

@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 
 #include "ibv_core.hpp"
+#include "memory/hip_allocator.hpp"
 #include <sys/types.h>
 #include <map>
 
@@ -63,7 +64,7 @@ class IBVWrapper {
                                        struct ibv_parent_domain_init_attr *attr);
     int dealloc_pd(struct ibv_pd *pd);
 
-    struct ibv_mr* reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access);
+    struct ibv_mr* reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access, HIPAllocator *allocator = nullptr);
     int dereg_mr(struct ibv_mr *mr);
 
     struct ibv_cq_ex* create_cq_ex(struct ibv_context *context,
@@ -75,6 +76,10 @@ class IBVWrapper {
                                 struct ibv_qp_init_attr_ex *qp_init_attr);
     int modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
     int destroy_qp(struct ibv_qp *qp);
+
+    int resolve_eth_l2_from_gid(struct ibv_context *context, struct ibv_ah_attr *attr,
+                                uint8_t eth_mac[ETHERNET_LL_SIZE], uint16_t *vid);
+    uint16_t flow_label_to_udp_sport(uint32_t fl);
 
   private:
     struct ibv_funcs_t {
@@ -114,6 +119,9 @@ class IBVWrapper {
       struct ibv_qp* (*create_qp)(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr);
       int (*modify_qp)(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
       int (*destroy_qp)(struct ibv_qp *qp);
+
+      int (*resolve_eth_l2_from_gid)(struct ibv_context *context, struct ibv_ah_attr *attr,
+                                     uint8_t eth_mac[ETHERNET_LL_SIZE], uint16_t *vid);
     };
 
     /**

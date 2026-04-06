@@ -92,7 +92,7 @@ Panel Config:
           pop: N/A
         SIMD Utilization:
           value: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
-          unit: Pct
+          unit: Percent
           peak: 100
           pop: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
         Clock Rate:

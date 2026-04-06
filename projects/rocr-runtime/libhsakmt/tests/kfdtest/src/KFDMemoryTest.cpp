@@ -103,11 +103,11 @@ void KFDMemoryTest::MMapLarge(int gpuNode) {
             }
         }
 
-        if (hsaKmtRegisterMemory(addr + i, s - i))
+        if (HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx, addr + i, s - i))
             break;
-        if (hsaKmtMapMemoryToGPUNodes(addr + i, s - i,
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, addr + i, s - i,
                     &AlternateVAGPU[i], mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode))) {
-            hsaKmtDeregisterMemory(addr + i);
+            HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, addr + i);
             break;
         }
     }
@@ -118,8 +118,8 @@ void KFDMemoryTest::MMapLarge(int gpuNode) {
     RECORD(i * s >> 30) << "Mmap-SysMem-Size";
 
     while (i--) {
-        EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(reinterpret_cast<void*>(AlternateVAGPU[i])), gpuNode);
-        EXPECT_SUCCESS_GPU(hsaKmtDeregisterMemory(reinterpret_cast<void*>(AlternateVAGPU[i])), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, reinterpret_cast<void*>(AlternateVAGPU[i])), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, reinterpret_cast<void*>(AlternateVAGPU[i])), gpuNode);
     }
 
     munmap(addr, s);
@@ -201,7 +201,7 @@ void KFDMemoryTest::MapUnmapToNodes(int gpuNode) {
     memFlags.ui32.HostAccess = 1;
 
     for (unsigned i = 0; i < 1<<14; i ++) {
-        hsaKmtMapMemoryToGPUNodes(srcBuffer.As<void*>(), PAGE_SIZE, NULL, memFlags, (i>>5)&1+1, mapNodes);
+        HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, srcBuffer.As<void*>(), PAGE_SIZE, NULL, memFlags, (i>>5)&1+1, mapNodes);
     }
 
     /* Fill src buffer so shader quits */
@@ -227,14 +227,14 @@ void KFDMemoryTest::MapMemoryToGPU(int gpuNode) {
     unsigned int *nullPtr = NULL;
     unsigned int* pDb = NULL;
 
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode /* system */, PAGE_SIZE, GetHsaMemFlags(),
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode /* system */, PAGE_SIZE, GetHsaMemFlags(),
                    reinterpret_cast<void**>(&pDb)), gpuNode);
     // verify that pDb is not null before it's being used
     ASSERT_NE_GPU(nullPtr, pDb, gpuNode) << "hsaKmtAllocMemory returned a null pointer";
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(pDb, PAGE_SIZE, NULL), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(pDb), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, pDb, PAGE_SIZE, NULL), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, pDb), gpuNode);
     // Release the buffers
-    EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pDb, PAGE_SIZE), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb, PAGE_SIZE), gpuNode);
 }
 
 TEST_F(KFDMemoryTest, MapMemoryToGPU) {
@@ -253,7 +253,7 @@ TEST_F(KFDMemoryTest, InvalidMemoryPointerAlloc) {
     TEST_START(TESTPROFILE_RUNALL)
 
     m_MemoryFlags.ui32.NoNUMABind = 1;
-    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, hsaKmtAllocMemory(0 /* system */, PAGE_SIZE, m_MemoryFlags, NULL));
+    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, 0 /* system */, PAGE_SIZE, m_MemoryFlags, NULL));
 
     TEST_END
 }
@@ -262,7 +262,7 @@ TEST_F(KFDMemoryTest, ZeroMemorySizeAlloc) {
     TEST_START(TESTPROFILE_RUNALL)
 
     unsigned int* pDb = NULL;
-    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, hsaKmtAllocMemory(0 /* system */, 0, m_MemoryFlags,
+    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, 0 /* system */, 0, m_MemoryFlags,
               reinterpret_cast<void**>(&pDb)));
 
     TEST_END
@@ -274,7 +274,7 @@ TEST_F(KFDMemoryTest, MemoryAlloc) {
 
     unsigned int* pDb = NULL;
     m_MemoryFlags.ui32.NoNUMABind = 1;
-    EXPECT_SUCCESS(hsaKmtAllocMemory(0 /* system */, PAGE_SIZE, m_MemoryFlags, reinterpret_cast<void**>(&pDb)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, 0 /* system */, PAGE_SIZE, m_MemoryFlags, reinterpret_cast<void**>(&pDb)));
 
     TEST_END
 }
@@ -293,12 +293,12 @@ void KFDMemoryTest::MemoryAllocAll(int gpuNode) {
 
     void *object = NULL;
     int shrink = 21, success = HSAKMT_STATUS_NO_MEMORY;
-    EXPECT_SUCCESS_GPU(hsaKmtAvailableMemory(gpuNode, &available), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAvailableMemory, m_hsakmt_current_ctx, gpuNode, &available), gpuNode);
     LOG() << "Available: " << available << " bytes" << std::endl;
     HSAuint64 leeway = (10 << shrink), size = available + leeway;
     for (int i = 0; i < available >> shrink; i++) {
-        if (hsaKmtAllocMemory(gpuNode, size, memFlags, &object) == HSAKMT_STATUS_SUCCESS) {
-            success = hsaKmtFreeMemory(object, available);
+        if (HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, size, memFlags, &object) == HSAKMT_STATUS_SUCCESS) {
+            success = HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, object, available);
             break;
         }
         size -= (1 << shrink);
@@ -350,7 +350,7 @@ void KFDMemoryTest::AccessPPRMem(int gpuNode) {
     WaitOnValue(destBuf, 0xABCDEF09);
     WaitOnValue(destBuf + 1, 0x12345678);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
     /* This sleep hides the dmesg PPR message storm on Raven, which happens
@@ -504,16 +504,16 @@ void KFDMemoryTest::MemoryRegisterSamePtr(int gpuNode) {
     HSAuint64 gpuva1, gpuva2;
 
     /* Same address, different size */
-    EXPECT_SUCCESS(hsaKmtRegisterMemory((void *)&mem[0], sizeof(HSAuint32)*2));
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPU((void *)&mem[0], sizeof(HSAuint32)*2,
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx, (void *)&mem[0], sizeof(HSAuint32)*2));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, (void *)&mem[0], sizeof(HSAuint32)*2,
                                         &gpuva1));
-    EXPECT_SUCCESS(hsaKmtRegisterMemory((void *)&mem[0], sizeof(HSAuint32)));
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPU((void *)&mem[0], sizeof(HSAuint32),
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx, (void *)&mem[0], sizeof(HSAuint32)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, (void *)&mem[0], sizeof(HSAuint32),
                                         &gpuva2));
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(reinterpret_cast<void *>(gpuva1)));
-    EXPECT_SUCCESS(hsaKmtDeregisterMemory(reinterpret_cast<void *>(gpuva1)));
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(reinterpret_cast<void *>(gpuva2)));
-    EXPECT_SUCCESS(hsaKmtDeregisterMemory(reinterpret_cast<void *>(gpuva2)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, reinterpret_cast<void *>(gpuva1)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, reinterpret_cast<void *>(gpuva1)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, reinterpret_cast<void *>(gpuva2)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, reinterpret_cast<void *>(gpuva2)));
 
     /* Same address, same size */
     HsaMemMapFlags memFlags = {0};
@@ -523,19 +523,19 @@ void KFDMemoryTest::MemoryRegisterSamePtr(int gpuNode) {
     HSAuint32 nodes[nGPU];
     for (unsigned int i = 0; i < nGPU; i++)
         nodes[i] = gpuNodes.at(i);
-    EXPECT_SUCCESS(hsaKmtRegisterMemoryToNodes((void *)&mem[2],
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryToNodes, m_hsakmt_current_ctx, (void *)&mem[2],
                             sizeof(HSAuint32)*2, nGPU, nodes));
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes((void *)&mem[2],
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, (void *)&mem[2],
                                         sizeof(HSAuint32) * 2,
                                         &gpuva1, memFlags, nGPU, nodes));
-    EXPECT_SUCCESS(hsaKmtRegisterMemoryToNodes((void *)&mem[2],
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemoryToNodes, m_hsakmt_current_ctx, (void *)&mem[2],
                                         sizeof(HSAuint32) * 2, nGPU, nodes));
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes((void *)&mem[2],
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, (void *)&mem[2],
                                         sizeof(HSAuint32) * 2,
                                         &gpuva2, memFlags, nGPU, nodes));
     EXPECT_EQ(gpuva1, gpuva2);
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(reinterpret_cast<void *>(gpuva1)));
-    EXPECT_SUCCESS(hsaKmtDeregisterMemory(reinterpret_cast<void *>(gpuva1)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, reinterpret_cast<void *>(gpuva1)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, reinterpret_cast<void *>(gpuva1)));
     /* Confirm that we still have access to the memory, mem[2] */
     PM4Queue queue;
     ASSERT_SUCCESS(queue.Create(gpuNode));
@@ -546,8 +546,8 @@ void KFDMemoryTest::MemoryRegisterSamePtr(int gpuNode) {
     queue.Wait4PacketConsumption();
     EXPECT_EQ(true, WaitOnValue((unsigned int *)(&mem[2]), 0xdeadbeef));
     EXPECT_SUCCESS(queue.Destroy());
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(reinterpret_cast<void *>(gpuva2)));
-    EXPECT_SUCCESS(hsaKmtDeregisterMemory(reinterpret_cast<void *>(gpuva2)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, reinterpret_cast<void *>(gpuva2)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, reinterpret_cast<void *>(gpuva2)));
 }
 
 TEST_F(KFDMemoryTest, MemoryRegisterSamePtr) {
@@ -585,25 +585,25 @@ void KFDMemoryTest::FlatScratchAccess(int gpuNode) {
 
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
     HsaMemoryBuffer scratchBuffer(SCRATCH_SIZE, gpuNode, false/*zero*/, false/*local*/,
-                                  false/*exec*/, true /*scratch*/);
+                                  false/*exec*/, true/*scratch*/);
 
     // Unmap scratch for sub-allocation mapping tests
-    ASSERT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(scratchBuffer.As<void*>()), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, scratchBuffer.As<void*>()), gpuNode);
 
     // Map and unmap a few slices in different order: 2-0-1, 0-2-1
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(2),
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(2),
                                         SCRATCH_SLICE_SIZE, NULL), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(0),
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(0),
                                         SCRATCH_SLICE_SIZE, NULL), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(1),
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(1),
                                         SCRATCH_SLICE_SIZE, NULL), gpuNode);
 
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(1)), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(2)), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(0)), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(1)), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(2)), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, scratchBuffer.As<char*>() + SCRATCH_SLICE_OFFSET(0)), gpuNode);
 
     // Map everything for test below
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(scratchBuffer.As<char*>(), SCRATCH_SIZE, NULL), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, scratchBuffer.As<char*>(), SCRATCH_SIZE, NULL), gpuNode);
 
     HsaMemoryBuffer srcMemBuffer(PAGE_SIZE, gpuNode);
     HsaMemoryBuffer dstMemBuffer(PAGE_SIZE, gpuNode);
@@ -623,7 +623,7 @@ void KFDMemoryTest::FlatScratchAccess(int gpuNode) {
     if (pNodeProperties != NULL) {
         // Get the aperture of the scratch buffer
         HsaMemoryProperties *memoryProperties = new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-        EXPECT_SUCCESS_GPU(hsaKmtGetNodeMemoryProperties(gpuNode, pNodeProperties->NumMemoryBanks,
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, m_hsakmt_current_ctx, gpuNode, pNodeProperties->NumMemoryBanks,
                        memoryProperties), gpuNode);
 
         for (unsigned int bank = 0; bank < pNodeProperties->NumMemoryBanks; bank++) {
@@ -691,7 +691,7 @@ void KFDMemoryTest::GetTileConfigTest(int gpuNode) {
     config.NumTileConfigs = 32;
     config.NumMacroTileConfigs = 16;
 
-    ASSERT_SUCCESS(hsaKmtGetTileConfig(gpuNode, &config));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtGetTileConfig, g_baseTest->m_hsakmt_current_ctx, gpuNode, &config));
 
     LOG() << "tile_config:" << std::endl;
     for (i = 0; i < config.NumTileConfigs; i++)
@@ -738,7 +738,7 @@ void KFDMemoryTest::SearchLargestBuffer(int allocNode, const HsaMemFlags &memFla
     while (highMB > granularityMB) {
         sizeMB = highMB - granularityMB;
         size = sizeMB * 1024 * 1024;
-        ret = hsaKmtAllocMemory(allocNode, size, memFlags,
+        ret = HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, allocNode, size, memFlags,
                                 reinterpret_cast<void**>(&pDb));
         if (ret) {
             highMB = sizeMB;
@@ -751,15 +751,15 @@ void KFDMemoryTest::SearchLargestBuffer(int allocNode, const HsaMemFlags &memFla
             sleep(g_SleepTime);
         }
 
-        ret = hsaKmtMapMemoryToGPUNodes(pDb, size, NULL,
+        ret = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, pDb, size, NULL,
                         mapFlags, 1, reinterpret_cast<HSAuint32 *>(&nodeToMap));
         if (ret) {
-            EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pDb, size), nodeToMap);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb, size), nodeToMap);
             highMB = sizeMB;
             continue;
         }
-        EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(pDb), nodeToMap);
-        EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pDb, size), nodeToMap);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, pDb), nodeToMap);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb, size), nodeToMap);
 
         if (lastSizeMB)
            *lastSizeMB = sizeMB;
@@ -896,15 +896,15 @@ void KFDMemoryTest::BigSysBufferStressTest(int gpuNode) {
     for (int repeat = 1; repeat < 5; repeat++) {
 
         for (i = 0; i < ARRAY_ENTRIES; i++) {
-            ret = hsaKmtAllocMemory(0 /* system */, block_size, GetHsaMemFlags(),
+            ret = HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, 0 /* system */, block_size, GetHsaMemFlags(),
                     reinterpret_cast<void**>(&pDb_array[i]));
             if (ret)
                 break;
 
-            ret = hsaKmtMapMemoryToGPUNodes(pDb_array[i], block_size,
+            ret = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, pDb_array[i], block_size,
                     &AlternateVAGPU, mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode));
             if (ret) {
-                EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pDb_array[i], block_size), gpuNode);
+                EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb_array[i], block_size), gpuNode);
                 break;
             }
         }
@@ -917,8 +917,8 @@ void KFDMemoryTest::BigSysBufferStressTest(int gpuNode) {
         EXPECT_GE_GPU(i, allocationCount, gpuNode) << "There might be memory leak!" << std::endl;
 
         for (int j = 0; j < i; j++) {
-            EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(pDb_array[j]), gpuNode);
-            EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pDb_array[j], block_size), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, pDb_array[j]), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb_array[j], block_size), gpuNode);
         }
     }
 }
@@ -1068,7 +1068,7 @@ void KFDMemoryTest::MMBench(int gpuNode) {
         /* Allocation */
         start = GetSystemTickCountInMicroSec();
         for (i = 0; i < nBufs; i++) {
-            ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(allocNode, bufSize, memFlags,
+            ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, allocNode, bufSize, memFlags,
                                              &bufs[i]), gpuNode);
             INTERLEAVE_SDMA();
         }
@@ -1078,7 +1078,7 @@ void KFDMemoryTest::MMBench(int gpuNode) {
         /* Map to one GPU */
         start = GetSystemTickCountInMicroSec();
         for (i = 0; i < nBufs; i++) {
-            ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPUNodes(bufs[i], bufSize,
+            ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, bufs[i], bufSize,
                                                      &altVa, mapFlags, 1,
                                                      (HSAuint32*)&gpuNode),  gpuNode);
             INTERLEAVE_SDMA();
@@ -1089,7 +1089,7 @@ void KFDMemoryTest::MMBench(int gpuNode) {
         /* Unmap from GPU */
         start = GetSystemTickCountInMicroSec();
         for (i = 0; i < nBufs; i++) {
-            EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(bufs[i]), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, bufs[i]), gpuNode);
             INTERLEAVE_SDMA();
         }
         unmap1Time = GetSystemTickCountInMicroSec() - start;
@@ -1099,7 +1099,7 @@ void KFDMemoryTest::MMBench(int gpuNode) {
         if (is_all_large_bar) {
             start = GetSystemTickCountInMicroSec();
             for (i = 0; i < nBufs; i++) {
-                ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(bufs[i], bufSize, &altVa), gpuNode);
+                ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, bufs[i], bufSize, &altVa), gpuNode);
                 INTERLEAVE_SDMA();
             }
             mapAllTime = GetSystemTickCountInMicroSec() - start;
@@ -1108,7 +1108,7 @@ void KFDMemoryTest::MMBench(int gpuNode) {
             /* Unmap from all GPUs */
             start = GetSystemTickCountInMicroSec();
             for (i = 0; i < nBufs; i++) {
-                EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(bufs[i]));
+                EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, bufs[i]));
                 INTERLEAVE_SDMA();
             }
             unmapAllTime = GetSystemTickCountInMicroSec() - start;
@@ -1118,7 +1118,7 @@ void KFDMemoryTest::MMBench(int gpuNode) {
         /* Free */
         start = GetSystemTickCountInMicroSec();
         for (i = 0; i < nBufs; i++) {
-            EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(bufs[i], bufSize), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, bufs[i], bufSize), gpuNode);
             INTERLEAVE_SDMA();
         }
         freeTime = GetSystemTickCountInMicroSec() - start;
@@ -1189,7 +1189,7 @@ void KFDMemoryTest::QueryPointerInfo(int gpuNode) {
 
     /*** Memory allocated on CPU node ***/
     HsaMemoryBuffer hostBuffer(bufSize, 0/*node*/, false, false/*local*/);
-    EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo(hostBuffer.As<void*>(), &ptrInfo), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, hostBuffer.As<void*>(), &ptrInfo), gpuNode);
     EXPECT_EQ_GPU(ptrInfo.Type, HSA_POINTER_ALLOCATED, gpuNode);
     EXPECT_EQ_GPU(ptrInfo.Node, 0, gpuNode);
     EXPECT_EQ_GPU(ptrInfo.MemFlags.Value, hostBuffer.Flags().Value, gpuNode);
@@ -1200,15 +1200,15 @@ void KFDMemoryTest::QueryPointerInfo(int gpuNode) {
     if (hsakmt_is_dgpu()) {
         EXPECT_EQ_GPU((HSAuint64)ptrInfo.NMappedNodes, nGPU, gpuNode);
         // Check NMappedNodes again after unmapping the memory
-        hsaKmtUnmapMemoryToGPU(hostBuffer.As<void*>());
-        hsaKmtQueryPointerInfo(hostBuffer.As<void*>(), &ptrInfo);
+        HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, hostBuffer.As<void*>());
+        HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, hostBuffer.As<void*>(), &ptrInfo);
     }
     EXPECT_EQ_GPU((HSAuint64)ptrInfo.NMappedNodes, 0, gpuNode);
 
     /* Skip testing local memory if the platform does not have it */
     if (GetVramSize(gpuNode)) {
         HsaMemoryBuffer localBuffer(bufSize, gpuNode, false, true);
-        EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo(localBuffer.As<void*>(), &ptrInfo), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, localBuffer.As<void*>(), &ptrInfo), gpuNode);
         EXPECT_EQ_GPU(ptrInfo.Type, HSA_POINTER_ALLOCATED, gpuNode);
         EXPECT_EQ_GPU(ptrInfo.Node, gpuNode, gpuNode);
         EXPECT_EQ_GPU(ptrInfo.MemFlags.Value, localBuffer.Flags().Value, gpuNode);
@@ -1218,7 +1218,7 @@ void KFDMemoryTest::QueryPointerInfo(int gpuNode) {
         EXPECT_EQ_GPU(ptrInfo.MemFlags.ui32.CoarseGrain, 1, gpuNode);
 
         HSAuint32 *addr = localBuffer.As<HSAuint32 *>() + 4;
-        EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo(reinterpret_cast<void *>(addr), &ptrInfo), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, reinterpret_cast<void *>(addr), &ptrInfo), gpuNode);
         EXPECT_EQ_GPU(ptrInfo.GPUAddress, (HSAuint64)localBuffer.As<void*>(), gpuNode);
     }
 
@@ -1232,7 +1232,7 @@ void KFDMemoryTest::QueryPointerInfo(int gpuNode) {
      * Therefore, pointer info can not be queried.
      */
     if (hsakmt_is_dgpu() && mem != hsaBuffer.As<void*>()) {
-        EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo((void *)(&mem[0]), &ptrInfo), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, (void *)(&mem[0]), &ptrInfo), gpuNode);
         EXPECT_EQ_GPU(ptrInfo.Type, HSA_POINTER_REGISTERED_USER, gpuNode);
         EXPECT_EQ_GPU(ptrInfo.CPUAddress, &mem[0], gpuNode);
         EXPECT_EQ_GPU(ptrInfo.GPUAddress, (HSAuint64)hsaBuffer.As<void*>(), gpuNode);
@@ -1244,30 +1244,30 @@ void KFDMemoryTest::QueryPointerInfo(int gpuNode) {
         HSAuint32 nodes[nGPU];
         for (unsigned int i = 0; i < nGPU; i++)
             nodes[i] = gpuNodes.at(i);
-        EXPECT_SUCCESS_GPU(hsaKmtRegisterMemoryToNodes((void *)(&mem[2]),
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemoryToNodes, m_hsakmt_current_ctx, (void *)(&mem[2]),
                                 sizeof(HSAuint32)*2, nGPU, nodes), gpuNode);
-        EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo((void *)(&mem[2]), &ptrInfo), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, (void *)(&mem[2]), &ptrInfo), gpuNode);
         EXPECT_EQ_GPU(ptrInfo.NRegisteredNodes, nGPU, gpuNode);
-        EXPECT_SUCCESS_GPU(hsaKmtDeregisterMemory((void *)(&mem[2])), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, (void *)(&mem[2])), gpuNode);
     }
 
     /* Not a starting address, but an address inside the memory range
      * should also get the memory information
      */
     HSAuint32 *address = hostBuffer.As<HSAuint32 *>() + 1;
-    EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo(reinterpret_cast<void *>(address), &ptrInfo), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, reinterpret_cast<void *>(address), &ptrInfo), gpuNode);
     EXPECT_EQ_GPU(ptrInfo.Type, HSA_POINTER_ALLOCATED, gpuNode);
     EXPECT_EQ_GPU(ptrInfo.CPUAddress, hostBuffer.As<void*>(), gpuNode);
     if (hsakmt_is_dgpu() && &mem[1] != hsaBuffer.As<HSAuint32 *>() + 1) {
-        EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo((void *)(&mem[1]), &ptrInfo), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, (void *)(&mem[1]), &ptrInfo), gpuNode);
         EXPECT_EQ_GPU(ptrInfo.Type, HSA_POINTER_REGISTERED_USER, gpuNode);
         EXPECT_EQ_GPU(ptrInfo.CPUAddress, &mem[0], gpuNode);
     }
 
     /*** Set user data ***/
     char userData[16] = "This is a test.";
-    EXPECT_SUCCESS_GPU(hsaKmtSetMemoryUserData(hostBuffer.As<HSAuint32 *>(), reinterpret_cast<void *>(userData)), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo(hostBuffer.As<void*>(), &ptrInfo), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSetMemoryUserData, m_hsakmt_current_ctx, hostBuffer.As<HSAuint32 *>(), reinterpret_cast<void *>(userData)), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, hostBuffer.As<void*>(), &ptrInfo), gpuNode);
     EXPECT_EQ_GPU(ptrInfo.UserData, (void *)userData, gpuNode);
 }
 
@@ -1311,7 +1311,7 @@ void KFDMemoryTest::PtraceAccess(int gpuNode) {
     // Alloc system memory from node 0 and initialize it
     memFlags.ui32.NonPaged = 0;
     memFlags.ui32.NoNUMABind = 1;
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(0, PAGE_SIZE*2, memFlags, &mem[0]), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, 0, PAGE_SIZE*2, memFlags, &mem[0]), gpuNode);
     for (i = 0; i < 4*sizeof(HSAint64) + 4; i++) {
         (reinterpret_cast<HSAuint8 *>(mem[0]))[i] = i;            // source
         (reinterpret_cast<HSAuint8 *>(mem[0]))[PAGE_SIZE+i] = 0;  // destination
@@ -1320,8 +1320,7 @@ void KFDMemoryTest::PtraceAccess(int gpuNode) {
     // Try to alloc local memory from GPU node
     memFlags.ui32.NonPaged = 1;
     if (Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode)) {
-        EXPECT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode, PAGE_SIZE*2 + (4 << 20),
-                                            memFlags, &mem[1]), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, PAGE_SIZE*2 + (4 << 20), memFlags, &mem[1]), gpuNode);
         mem[1] = reinterpret_cast<void *>(reinterpret_cast<HSAuint8 *>(mem[1]) + VRAM_OFFSET);
         for (i = 0; i < 4*sizeof(HSAint64) + 4; i++) {
             (reinterpret_cast<HSAuint8 *>(mem[1]))[i] = i;
@@ -1413,7 +1412,7 @@ void KFDMemoryTest::PtraceAccess(int gpuNode) {
     EXPECT_EQ_GPU(0, memcmp(mem[0], reinterpret_cast<HSAuint8 *>(mem[0]) + PAGE_SIZE,
                         sizeof(long)*4 + 4), gpuNode);
     // Free memory
-    EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(mem[0], PAGE_SIZE*2), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, mem[0], PAGE_SIZE*2), gpuNode);
 
     if (mem[1]) {
         (reinterpret_cast<uint8_t*>(mem[1]))[  sizeof(HSAint64)    ] = 0;
@@ -1423,7 +1422,7 @@ void KFDMemoryTest::PtraceAccess(int gpuNode) {
         EXPECT_EQ_GPU(0, memcmp(mem[1], reinterpret_cast<HSAuint8 *>(mem[1]) + PAGE_SIZE,
                             sizeof(HSAint64)*4 + 4), gpuNode);
         mem[1] = reinterpret_cast<void *>(reinterpret_cast<HSAuint8 *>(mem[1]) - VRAM_OFFSET);
-        EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(mem[1], PAGE_SIZE*2), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, mem[1], PAGE_SIZE*2), gpuNode);
     }
 }
 
@@ -1472,8 +1471,8 @@ void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
 
     const HSAuint64 VRAM_OFFSET = (4 << 20) - sizeof(HSAuint64);
 
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode, size, memFlags, &mem), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPUNodes(mem, size, NULL,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, size, memFlags, &mem), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, mem, size, NULL,
                                 mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)), gpuNode);
     /* Set the word before 4M boundary to 0xdeadbeefdeadbeef
      * and the word after 4M boundary to 0xcafebabecafebabe
@@ -1578,8 +1577,8 @@ void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
     EXPECT_EQ_GPU(data0[0], dstBuffer.As<unsigned int*>()[0], gpuNode);
 
     // Clean up
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(mem), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(mem, size), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, mem), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, mem, size), gpuNode);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
 
@@ -1632,7 +1631,7 @@ void KFDMemoryTest::SignalHandling(int gpuNode) {
     size = size > (3ULL << 30) ? (3ULL << 30) : size;
 
     GetHsaMemFlags().ui32.NoNUMABind = 1;
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(0 /* system */, size, GetHsaMemFlags(), reinterpret_cast<void**>(&pDb)), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, 0 /* system */, size, GetHsaMemFlags(), reinterpret_cast<void**>(&pDb)), gpuNode);
     // Verify that pDb is not null before it's being used
     EXPECT_NE_GPU(nullPtr, pDb, gpuNode) << "hsaKmtAllocMemory returned a null pointer";
 
@@ -1643,7 +1642,7 @@ void KFDMemoryTest::SignalHandling(int gpuNode) {
         exit(0);
     } else {
         LOG() << "Start Memory Mapping..." << std::endl;
-        ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(pDb, size, NULL), gpuNode);
+        ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, pDb, size, NULL), gpuNode);
         LOG() << "Mapping finished" << std::endl;
         int childStatus;
         pid_t pid;
@@ -1669,9 +1668,9 @@ void KFDMemoryTest::SignalHandling(int gpuNode) {
     EXPECT_TRUE_GPU(WaitOnValue(pDb, 0x01010101), gpuNode);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(pDb), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, pDb), gpuNode);
     // Release the buffers
-    EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pDb, size), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb, size), gpuNode);
 }
 
 TEST_F(KFDMemoryTest, SignalHandling) {
@@ -1717,7 +1716,7 @@ void KFDMemoryTest::CheckZeroInitializationSysMem(int gpuNode) {
     GetHsaMemFlags().ui32.NoNUMABind = 1;
 
     while (count--) {
-        ret = hsaKmtAllocMemory(0 /* system */, sysBufSizePerGPU, GetHsaMemFlags(),
+        ret = HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, 0 /* system */, sysBufSizePerGPU, GetHsaMemFlags(),
                                 reinterpret_cast<void**>(&pDb));
         if (ret) {
             LOG() << "Failed to allocate system buffer of" << std::dec << sysBufSizeMB
@@ -1740,7 +1739,7 @@ void KFDMemoryTest::CheckZeroInitializationSysMem(int gpuNode) {
         EXPECT_EQ_GPU(0, pDb[size-1], gpuNode);
         pDb[size-1] = size;
 
-        EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pDb, sysBufSizePerGPU), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb, sysBufSizePerGPU), gpuNode);
     }
 }
 
@@ -1774,7 +1773,6 @@ static inline void access(volatile void *sd, int size, int rw) {
  * KFD is not allowed to alloc visible vram on non-largebar system.
  */
 void KFDMemoryTest::MMBandWidth(int gpuNode) {
-
     unsigned nBufs = 1000; /* measure us, report ns */
     unsigned testIndex, sizeIndex, memType;
     const unsigned nMemTypes = 2;
@@ -1847,8 +1845,8 @@ void KFDMemoryTest::MMBandWidth(int gpuNode) {
         }
 
         for (i = 0; i < nBufs; i++)
-            ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(allocNode, bufSize, memFlags,
-                        &bufs[i]), gpuNode);
+            ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, allocNode, bufSize, memFlags,
+                                             &bufs[i]), gpuNode);
 
         start = GetSystemTickCountInMicroSec();
         for (i = 0; i < nBufs; i++) {
@@ -1875,7 +1873,7 @@ void KFDMemoryTest::MMBandWidth(int gpuNode) {
         accessRTime = GetSystemTickCountInMicroSec() - start;
 
         for (i = 0; i < nBufs; i++)
-            EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(bufs[i], bufSize), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, bufs[i], bufSize), gpuNode);
 
         LOG() << std::dec
             << std::right << std::setw(3) << (bufSize >> 10) << "K-"
@@ -1954,8 +1952,10 @@ void KFDMemoryTest::HostHdpFlush(int gpuNode) {
     }
 
     HsaMemoryProperties *memoryProperties = new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-    EXPECT_SUCCESS_GPU(hsaKmtGetNodeMemoryProperties(gpuNode, pNodeProperties->NumMemoryBanks,
-                   memoryProperties), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties,
+                                    m_hsakmt_current_ctx,
+                                    gpuNode, pNodeProperties->NumMemoryBanks,
+                                    memoryProperties), gpuNode);
     for (unsigned int bank = 0; bank < pNodeProperties->NumMemoryBanks; bank++) {
         if (memoryProperties[bank].HeapType == HSA_HEAPTYPE_MMIO_REMAP) {
             mmioBase = (unsigned int *)memoryProperties[bank].VirtualBaseAddress;
@@ -1970,9 +1970,9 @@ void KFDMemoryTest::HostHdpFlush(int gpuNode) {
 
     memoryFlags.ui32.NonPaged = 1;
     memoryFlags.ui32.CoarseGrain = 0;
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode, PAGE_SIZE, memoryFlags,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, PAGE_SIZE, memoryFlags,
                    reinterpret_cast<void**>(&buffer)), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(buffer, PAGE_SIZE, NULL), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, buffer, PAGE_SIZE, NULL), gpuNode);
 
     /* Signal is dead from the beginning*/
     buffer[0] = 0xdead;
@@ -2002,8 +2002,8 @@ void KFDMemoryTest::HostHdpFlush(int gpuNode) {
     // Clean up
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
     delete [] memoryProperties;
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(buffer), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(buffer, PAGE_SIZE), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, buffer), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, buffer, PAGE_SIZE), gpuNode);
 }
 
 TEST_F(KFDMemoryTest, HostHdpFlush) {
@@ -2103,8 +2103,8 @@ void KFDMemoryTest::DeviceHdpFlush(int gpuNode) {
     }
 
     HsaMemoryProperties *memoryProperties = new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-    EXPECT_SUCCESS_GPU(hsaKmtGetNodeMemoryProperties(nodes[0], pNodeProperties->NumMemoryBanks,
-                   memoryProperties), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, m_hsakmt_current_ctx,
+                   nodes[0], pNodeProperties->NumMemoryBanks, memoryProperties), gpuNode);
     for (unsigned int bank = 0; bank < pNodeProperties->NumMemoryBanks; bank++) {
         if (memoryProperties[bank].HeapType == HSA_HEAPTYPE_MMIO_REMAP) {
             mmioBase = (unsigned int *)memoryProperties[bank].VirtualBaseAddress;
@@ -2119,9 +2119,9 @@ void KFDMemoryTest::DeviceHdpFlush(int gpuNode) {
 
     memoryFlags.ui32.NonPaged = 1;
     memoryFlags.ui32.CoarseGrain = 0;
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(nodes[0], PAGE_SIZE, memoryFlags,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, 0, PAGE_SIZE, memoryFlags,
                    reinterpret_cast<void**>(&buffer)), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(buffer, PAGE_SIZE, NULL), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, buffer, PAGE_SIZE, NULL), gpuNode);
 
     /* Signal is dead from the beginning*/
     buffer[0] = 0xdead;
@@ -2159,8 +2159,8 @@ void KFDMemoryTest::DeviceHdpFlush(int gpuNode) {
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
     EXPECT_SUCCESS_GPU(queue0.Destroy(), gpuNode);
     delete [] memoryProperties;
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(buffer), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(buffer, PAGE_SIZE), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, buffer), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, buffer, PAGE_SIZE), gpuNode);
 }
 
 TEST_F(KFDMemoryTest, DeviceHdpFlush) {
@@ -2267,8 +2267,9 @@ void KFDMemoryTest::CacheInvalidateOnCPUWrite(int gpuNode) {
     memFlags.ui32.HostAccess = 1;
     memFlags.ui32.NonPaged = 1;
     memFlags.ui32.CoarseGrain = 1;
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode, PAGE_SIZE, memFlags, reinterpret_cast<void**>(&buffer)), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(buffer, PAGE_SIZE, NULL), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx,
+                                    gpuNode, PAGE_SIZE, memFlags, reinterpret_cast<void**>(&buffer)), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, buffer, PAGE_SIZE, NULL), gpuNode);
     *buffer = 0;
 
     /* Read buffer from shader to fill cache */
@@ -2293,8 +2294,8 @@ void KFDMemoryTest::CacheInvalidateOnCPUWrite(int gpuNode) {
     EXPECT_EQ_GPU(buffer[100], 0x5678, gpuNode);
 
     // Clean up
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(buffer), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(buffer, PAGE_SIZE), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, buffer), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, buffer, PAGE_SIZE), gpuNode);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
 
@@ -2523,9 +2524,9 @@ void KFDMemoryTest::VramCacheCoherenceWithCPU(int gpuNode) {
     /* Allocate a fine grain local FB accessed by CPU */
     memFlags.ui32.HostAccess = 1;
     memFlags.ui32.NonPaged = 1;
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode, PAGE_SIZE, memFlags,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, PAGE_SIZE, memFlags,
             reinterpret_cast<void**>(&buffer)), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(buffer, PAGE_SIZE, NULL), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, buffer, PAGE_SIZE, NULL), gpuNode);
     buffer[0] = 0;
     buffer[dwLocation] = 0;
 
@@ -2554,8 +2555,8 @@ void KFDMemoryTest::VramCacheCoherenceWithCPU(int gpuNode) {
     EXPECT_EQ_GPU(buffer[dwLocation], 0x5678, gpuNode);
 
     // Clean up
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(buffer), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(buffer, PAGE_SIZE), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, buffer), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, buffer, PAGE_SIZE), gpuNode);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
 
@@ -2597,9 +2598,11 @@ void KFDMemoryTest::SramCacheCoherenceWithGPU(int gpuNode) {
     unsigned int *fineBuffer = NULL;
     unsigned int tmp;
 
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode /* system */, PAGE_SIZE, GetHsaMemFlags(),
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory,
+                       m_hsakmt_current_ctx, gpuNode,
+                       PAGE_SIZE, GetHsaMemFlags(),
                        reinterpret_cast<void**>(&fineBuffer)), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(fineBuffer, PAGE_SIZE, NULL), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, fineBuffer, PAGE_SIZE, NULL), gpuNode);
     fineBuffer[0] = 0;
     fineBuffer[1] = 0;
     /* Read buffer from CPU to fill cache */
@@ -2633,8 +2636,8 @@ void KFDMemoryTest::SramCacheCoherenceWithGPU(int gpuNode) {
     EXPECT_EQ_GPU(fineBuffer[dwLocation], 0x5678, gpuNode);
 
     // Clean up
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(fineBuffer), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(fineBuffer, PAGE_SIZE), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, fineBuffer), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, fineBuffer, PAGE_SIZE), gpuNode);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
 
@@ -2991,17 +2994,17 @@ static unsigned int RegisterThread(void* p) {
     struct ThreadParams* pArgs = reinterpret_cast<struct ThreadParams*>(p);
 
     pthread_barrier_wait(pArgs->barrier);
-    EXPECT_SUCCESS(hsaKmtRegisterMemory(pArgs->pBuf, pArgs->BufferSize));
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPU(pArgs->pBuf, pArgs->BufferSize, &pArgs->VAGPU));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemory, g_baseTest->m_hsakmt_current_ctx, pArgs->pBuf, pArgs->BufferSize));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, pArgs->pBuf, pArgs->BufferSize, &pArgs->VAGPU));
 
     return 0;
 }
 static unsigned int UnregisterThread(void* p) {
     struct ThreadParams* pArgs = reinterpret_cast<struct ThreadParams*>(p);
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(reinterpret_cast<void *>(pArgs->VAGPU)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, reinterpret_cast<void *>(pArgs->VAGPU)));
     pthread_barrier_wait(pArgs->barrier);
-    EXPECT_SUCCESS(hsaKmtDeregisterMemory(reinterpret_cast<void *>(pArgs->VAGPU)));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, g_baseTest->m_hsakmt_current_ctx, reinterpret_cast<void *>(pArgs->VAGPU)));
 
     return 0;
 }
@@ -3074,9 +3077,11 @@ void KFDMemoryTest::ExportDMABufTest(int gpuNode) {
     memFlags.ui32.NonPaged = 1;
 
     HSAuint32 *buf;
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(0, PAGE_SIZE, memFlags,
-                                          reinterpret_cast<void**>(&buf)), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(buf, PAGE_SIZE, NULL), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory,
+                                m_hsakmt_current_ctx,
+                                gpuNode, PAGE_SIZE, memFlags,
+                                reinterpret_cast<void**>(&buf)), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, buf, PAGE_SIZE, NULL), gpuNode);
 
     for (int i = 0; i < PAGE_SIZE/4; i++)
         buf[i] = i;
@@ -3087,30 +3092,32 @@ void KFDMemoryTest::ExportDMABufTest(int gpuNode) {
 
     // Expected error: address out of range (not a BO)
     ASSERT_EQ_GPU(HSAKMT_STATUS_INVALID_PARAMETER,
-            hsaKmtExportDMABufHandle(buf + PAGE_SIZE/4, SIZE*4, &fd, &offset), gpuNode);
+            HSAKMT_CALL(hsaKmtExportDMABufHandle, m_hsakmt_current_ctx, buf + PAGE_SIZE/4, SIZE*4, &fd, &offset), gpuNode);
     // Expected error: size out of range
     ASSERT_EQ_GPU(HSAKMT_STATUS_INVALID_PARAMETER,
-            hsaKmtExportDMABufHandle(buf + INDEX, PAGE_SIZE, &fd, &offset), gpuNode);
+            HSAKMT_CALL(hsaKmtExportDMABufHandle, m_hsakmt_current_ctx, buf + INDEX, PAGE_SIZE, &fd, &offset), gpuNode);
 
     // For real this time. Check that the offset matches
-    ASSERT_SUCCESS_GPU(hsaKmtExportDMABufHandle(buf + INDEX, SIZE*4, &fd, &offset), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtExportDMABufHandle, m_hsakmt_current_ctx, buf + INDEX, SIZE*4, &fd, &offset), gpuNode);
     ASSERT_EQ_GPU(INDEX*4, offset, gpuNode);
 
     // Free the original BO. The memory should persist as long as the DMA buf
     // handle exists.
-    ASSERT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(buf), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtFreeMemory(buf, PAGE_SIZE), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, buf), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, buf, PAGE_SIZE), gpuNode);
 
     // Import the BO using the Interop API and check the contents. It doesn't
     // map the import for CPU access, which gives us an excuse to test GPU
     // mapping of the imported BO as well.
     HsaGraphicsResourceInfo info;
-    ASSERT_SUCCESS_GPU(hsaKmtRegisterGraphicsHandleToNodes(fd, &info, 1, (HSAuint32 *)&gpuNode), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes, m_hsakmt_current_ctx,
+                                 fd, &info, 1, (HSAuint32 *)&gpuNode), gpuNode);
     buf = reinterpret_cast<HSAuint32 *>(info.MemoryAddress);
     ASSERT_EQ_GPU(info.SizeInBytes, PAGE_SIZE, gpuNode);
 
     HsaMemMapFlags mapFlags = {0};
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPUNodes(buf, PAGE_SIZE, NULL, mapFlags, 1,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx,
+                                             buf, PAGE_SIZE, NULL, mapFlags, 1,
                                              (HSAuint32 *)&gpuNode), gpuNode);
 
     PM4Queue pm4Queue;
@@ -3127,8 +3134,8 @@ void KFDMemoryTest::ExportDMABufTest(int gpuNode) {
     }
     ASSERT_SUCCESS_GPU(pm4Queue.Destroy(), gpuNode);
 
-    ASSERT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(buf), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtDeregisterMemory(buf), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, buf), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, buf), gpuNode);
 
     ASSERT_EQ_GPU(0, close(fd), gpuNode);
 }
@@ -3165,28 +3172,28 @@ void KFDMemoryTest::VA_VRAM_Only_AllocTest(int gpuNode) {
 
     /*alloc va without vram alloc*/
     memFlags.ui32.OnlyAddress = 1;
-    ASSERT_SUCCESS(hsaKmtAllocMemory(gpuNode, PAGE_SIZE, memFlags,
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, PAGE_SIZE, memFlags,
                                           reinterpret_cast<void**>(&buf)));
 
     /*mapping VA allocated by kfd api would fail*/
-    ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, hsaKmtMapMemoryToGPU(buf, PAGE_SIZE, NULL));
-    ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, hsaKmtMapMemoryToGPUNodes(buf, PAGE_SIZE, NULL,
+    ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, buf, PAGE_SIZE, NULL));
+    ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, buf, PAGE_SIZE, NULL,
                                mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)));
 
-    ASSERT_SUCCESS(hsaKmtFreeMemory(buf, PAGE_SIZE));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, buf, PAGE_SIZE));
 
     /*alloc vram without va assigned*/
     memFlags.ui32.OnlyAddress = 0;
     memFlags.ui32.NoAddress = 1;
-    ASSERT_SUCCESS(hsaKmtAllocMemory(gpuNode, PAGE_SIZE, memFlags,
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, PAGE_SIZE, memFlags,
                                       reinterpret_cast<void**>(&buf)));
 
     /*mapping handle allocated by kfd API would fail*/
-    ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, hsaKmtMapMemoryToGPU(buf, PAGE_SIZE, NULL));
-    ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, hsaKmtMapMemoryToGPUNodes(buf, PAGE_SIZE, NULL,
+    ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, buf, PAGE_SIZE, NULL));
+    ASSERT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, buf, PAGE_SIZE, NULL,
                                mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)));
 
-    ASSERT_SUCCESS(hsaKmtFreeMemory(buf, PAGE_SIZE));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, buf, PAGE_SIZE));
 }
 
 TEST_F(KFDMemoryTest, VA_VRAM_Only_AllocTest) {

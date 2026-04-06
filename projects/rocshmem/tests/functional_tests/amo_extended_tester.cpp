@@ -31,10 +31,10 @@ using namespace rocshmem;
 
 /* Declare the global kernel template with a generic implementation */
 template <typename T>
-__global__ void AMOExtendedTest(int loop, int skip, long long int *start_time,
-                                long long int *end_time, T *dest, T *ret_val,
-                                AddrMode addr_mode, TestType type,
-                                ShmemContextType ctx_type) {
+__global__ void AMOExtendedTest([[maybe_unused]] int loop, [[maybe_unused]] int skip, [[maybe_unused]] long long int *start_time,
+                                [[maybe_unused]] long long int *end_time, [[maybe_unused]] T *dest, [[maybe_unused]] T *ret_val,
+                                [[maybe_unused]] AddrMode addr_mode, [[maybe_unused]] TestType type,
+                                [[maybe_unused]] ShmemContextType ctx_type) {
   return;
 }
 
@@ -58,7 +58,7 @@ template <typename T>
 AMOExtendedTester<T>::AMOExtendedTester(TesterArguments args) : Tester(args) {
   n_out   = (args.addr_mode == AddrMode::PerBlock) ? args.num_wgs : 1;
   n_in    = args.num_wgs * args.wg_size;
-  n_loops = args.loop + args.skip;
+  n_loops = std::max(args.loop, args.loop_large) + args.skip;
 
   // One return per *thread* per loop
   CHECK_HIP(hipMalloc((void **)&ret_val, max_msg_size * n_in * n_loops));
@@ -77,22 +77,25 @@ AMOExtendedTester<T>::~AMOExtendedTester() {
 }
 
 template <typename T>
-void AMOExtendedTester<T>::resetBuffers(size_t size) {
+void AMOExtendedTester<T>::resetBuffers([[maybe_unused]] size_t size) {
+  n_loops = num_loops + args.skip;
   memset(ret_val, 0, max_msg_size * n_in  * n_loops);
   memset(dest,    0, max_msg_size * n_out * n_loops);
 }
 
 template <typename T>
 void AMOExtendedTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, int loop,
-                                        size_t size) {
+                                        [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
+  n_loops = loop + args.skip;
+
   hipLaunchKernelGGL(AMOExtendedTest, gridsize, blocksize, shared_bytes, stream,
-                     args.loop, args.skip, start_time, end_time, dest,
+                     loop, args.skip, start_time, end_time, dest,
                      ret_val, args.addr_mode, _type, _shmem_context);
 
-  num_msgs       = n_loops   * gridsize.x * blocksize.x;
-  num_timed_msgs = args.loop * gridsize.x * blocksize.x;
+  num_msgs       = n_loops * gridsize.x * blocksize.x;
+  num_timed_msgs = loop    * gridsize.x * blocksize.x;
 }
 
 template <typename G>

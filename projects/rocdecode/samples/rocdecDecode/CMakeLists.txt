@@ -71,13 +71,13 @@ set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(FFmpeg QUIET)
 find_package(rocdecode QUIET)
-find_package(rocdecode-host 1.0.0 QUIET)
 
 if(HIP_FOUND AND rocdecode_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
 
     if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
+      find_package(rocdecode-host 1.0.0 QUIET)
       # FFMPEG
       include_directories(${AVUTIL_INCLUDE_DIR} ${AVCODEC_INCLUDE_DIR}
                           ${AVFORMAT_INCLUDE_DIR})

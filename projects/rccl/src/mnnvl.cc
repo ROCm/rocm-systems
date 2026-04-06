@@ -11,7 +11,6 @@
 
 // Determine if MNNVL support is available
 ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
-#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   // MNNVL requires cuMem to be enabled
   if (!ncclCuMemEnable()) return ncclSuccess;
 
@@ -24,17 +23,26 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
   // Ignore error if CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED is not supported
   (void) cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev);
   if (!flag) return ncclSuccess;
+
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   // Check that all ranks have initialized the fabric fully
   for (int i = 0; i < comm->nRanks; i++) {
     if (comm->peerInfo[i].fabricInfo.state != NVML_GPU_FABRIC_STATE_COMPLETED) return ncclSuccess;
   }
-
+#else
+  // TODO: To check whether we need to check the accel_state/fabric state for AMD GPUs.
+  // For now, just check that it's not in an unconfigured/error state
+  for (int i = 0; i < comm->nRanks; i++) {
+    if ((comm->peerInfo[i].fabricInfo.state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED) ||
+        (comm->peerInfo[i].fabricInfo.state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR)) return ncclSuccess;
+  }
+#endif
   // Determine our MNNVL domain/clique
   NCCLCHECK(ncclCalloc(&comm->clique.ranks, comm->nRanks));
   comm->clique.id = comm->peerInfo[comm->rank].fabricInfo.cliqueId;
   for (int i = 0; i < comm->nRanks; i++) {
-    nvmlGpuFabricInfoV_t *fabricInfo1 = &comm->peerInfo[comm->rank].fabricInfo;
-    nvmlGpuFabricInfoV_t *fabricInfo2 = &comm->peerInfo[i].fabricInfo;
+    auto fabricInfo1 = &comm->peerInfo[comm->rank].fabricInfo;
+    auto fabricInfo2 = &comm->peerInfo[i].fabricInfo;
     // Check if the cluster UUID and cliqueId match
     // A zero UUID means we don't have MNNVL fabric info - disable MNNVL
     unsigned long uuid0 = 0;
@@ -53,7 +61,7 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 
   // No MNNVL clique found
   if (comm->clique.size <= 1) return ncclSuccess;
-
+#ifdef HIP_FABRIC_API
   // Check that FABRIC handles can be exported & imported by IMEX
   {
     void *ptr = NULL;
@@ -91,3 +99,5 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 #endif
   return ncclSuccess;
 }
+
+

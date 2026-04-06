@@ -60,7 +60,7 @@ typedef struct {
   int major;          /**< Major version number */
   int minor;          /**< Minor version number */
   int patch;          /**< Patch version number */
-  const char *string; /**< Version string (e.g., "1.0.0") */
+  const char* string; /**< Version string (e.g., "1.0.0") */
 } aca_version_info_t;
 
 /**
@@ -85,7 +85,7 @@ int aca_get_version_patch(void);
  * @brief Get the version string
  * @return Pointer to version string (e.g., "1.0.0")
  */
-const char *aca_get_version_string(void);
+const char* aca_get_version_string(void);
 
 /**
  * @brief Get complete version information

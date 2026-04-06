@@ -377,6 +377,8 @@ class GpuAgent : public GpuAgentInt {
     return current_coherency_type_;
   }
 
+  hsa_status_t Preload(uint64_t flags);
+
   core::Agent* GetNearestCpuAgent(void) const;
 
   void RegisterGangPeer(core::Agent& gang_peer, unsigned int bandwidth_factor) override;
@@ -674,6 +676,9 @@ class GpuAgent : public GpuAgentInt {
   // @brief Pool of shared queues owned by this agent
   rocr::core::CountedQueuePoolManager queue_pool_;
 
+  // @brief /// Cached derived CUID for this GPU agent (16 bytes, zeroed if unavailable).
+  uint8_t derived_cuid_[16] = {};
+
   void* trap_code_buf_;
 
   size_t trap_code_buf_size_;
@@ -717,6 +722,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Initialize scratch handler thresholds
   void InitAsyncScratchThresholds();
 
+  // @brief Initialize Secondary CUID for GPU device that 
+  // this agent is running on.
+  void InitDerivedCuid() override;
+
   // @brief Register signal for notification when scratch may become available.
   // @p signal is notified by OR'ing with @p value.
   bool AddScratchNotifier(hsa_signal_t signal, hsa_signal_value_t value) {
@@ -738,6 +747,36 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t DmaCopyBroadcast(
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
+
+  // Multi-linear copy: LINEAR op with num_entries > 0, independent copies
+  // (different src/dst/size per entry) sharing a single completion signal.
+  // Uses prologue/body/epilogue fan-out across available SDMA engines.
+  hsa_status_t DmaCopyMulti(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Linear swap: exchanges the contents of src and dst buffers.
+  // Only supported on gfx94X / gfx95X.  Uses DmaCopyFanOutOp with
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP.
+  hsa_status_t DmaCopySwap(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
+  // and swap operations.  Submits prologue, per-entry bodies (selected by
+  // @p op), and epilogue with one signal.
+  // @p op is the hsa_amd_memory_copy_op_type_t from the public API; only
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR and HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP are
+  // currently supported.
+  hsa_status_t DmaCopyFanOutOp(
+      hsa_amd_memory_copy_op_type_t op,
+      core::Signal& out_signal,
+      std::vector<core::Signal*>& dep_signals,
+      uint16_t num_entries,
+      const void* const* src_list,
+      void* const* dst_list,
+      const hsa_agent_t* dst_agent_list,
+      const size_t* size_list);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
@@ -838,6 +877,11 @@ class GpuAgent : public GpuAgentInt {
     // signal to pass into ExecutePM4() so that we do not need to re-allocate a
     // new signal on each call
     hsa_signal_t exec_pm4_signal;
+
+    // Host-side copies - cannot read these from device_data on non-large BAR systems
+    hsa_signal_t done_sig0;
+    hsa_signal_t done_sig1;
+    uint32_t buf_size;
 
     os::Thread thread;
     pcs::PcsRuntime::PcSamplingSession* session;
