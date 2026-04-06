@@ -63,6 +63,7 @@ docstring-code-line-length = "dynamic"
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+    "-rx",
 ]
 
 pythonpath = [
@@ -70,6 +71,7 @@ pythonpath = [
     "src",
     "src/rocprof_compute_soc",
     "src/utils",
+    "src/roofline",
     "src/rocprof_compute_analyze/utils",
     "tests"
 ]

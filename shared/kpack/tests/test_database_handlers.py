@@ -102,6 +102,53 @@ class TestRocBLASHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942-xnack-"
 
+    def test_detect_arch_subdir_co(self, handler, prefix_root):
+        """Per-arch subdirectory layout: .co file under library/<arch>/."""
+        file_path = (
+            prefix_root
+            / "lib/rocblas/library/gfx942/TensileLibrary_Type_HH_gfx942.co"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_arch_subdir_fallback_dat(self, handler, prefix_root):
+        """Per-arch subdirectory layout: fallback .dat with no arch in filename."""
+        file_path = (
+            prefix_root
+            / "lib/rocblas/library/gfx1100/TensileLibrary_Type_HH_fallback.dat"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1100"
+
+    def test_detect_arch_subdir_manifest(self, handler, prefix_root):
+        """Per-arch subdirectory layout: TensileManifest.txt under library/<arch>/."""
+        file_path = (
+            prefix_root / "lib/rocblas/library/gfx90a/TensileManifest.txt"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx90a"
+
+    def test_detect_arch_subdir_xnack(self, handler, prefix_root):
+        """Per-arch subdirectory layout with xnack variant."""
+        file_path = (
+            prefix_root
+            / "lib/rocblas/library/gfx942-xnack+/TensileLibrary.co"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942-xnack+"
+
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in rocblas/library are rejected."""
         file_path = prefix_root / "lib/other/library/TensileLibrary_gfx1100.dat"
@@ -112,7 +159,7 @@ class TestRocBLASHandler:
         assert result is None
 
     def test_reject_wrong_extension(self, handler, prefix_root):
-        """Test that files with unsupported extensions are rejected."""
+        """Flat layout: unknown extensions without arch subdir are rejected."""
         file_path = prefix_root / "lib/rocblas/library/TensileLibrary_gfx1100.txt"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
@@ -223,6 +270,29 @@ class TestHipBLASLtHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942-xnack-"
 
+    def test_detect_arch_subdir_fallback_dat(self, handler, prefix_root):
+        """Per-arch subdirectory layout: fallback .dat with no arch in filename."""
+        file_path = (
+            prefix_root
+            / "lib/hipblaslt/library/gfx942/TensileLibrary_Type_SS_fallback.dat"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_arch_subdir_manifest(self, handler, prefix_root):
+        """Per-arch subdirectory layout: manifest .txt under library/<arch>/."""
+        file_path = (
+            prefix_root / "lib/hipblaslt/library/gfx1100/TensileManifest.txt"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1100"
+
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in hipblaslt/library are rejected."""
         file_path = prefix_root / "lib/rocblas/library/TensileLibrary_gfx1100.dat"
@@ -233,7 +303,7 @@ class TestHipBLASLtHandler:
         assert result is None
 
     def test_reject_wrong_extension(self, handler, prefix_root):
-        """Test that files with unsupported extensions are rejected."""
+        """Flat layout: unknown extensions without arch subdir are rejected."""
         file_path = prefix_root / "lib/hipblaslt/library/TensileLibrary_gfx1100.json"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
@@ -299,6 +369,18 @@ class TestHipSparseLtHandler:
 
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942"
+
+    def test_detect_arch_subdir_dat(self, handler, prefix_root):
+        """Per-arch subdirectory layout: .dat file under library/<arch>/."""
+        file_path = (
+            prefix_root
+            / "lib/hipsparselt/library/gfx950/TensileLibrary_BB_BB_A_fallback.dat"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx950"
 
     def test_reject_wrong_directory(self, handler, prefix_root):
         file_path = prefix_root / "lib/rocblas/library/something_gfx942.co"
@@ -455,6 +537,32 @@ class TestMIOpenHandler:
 
     def test_name(self, handler):
         assert handler.name() == "miopen"
+
+    def test_detect_kdb(self, handler, prefix_root):
+        """MIOpen .kdb files (SQLite compiled kernel databases)."""
+        file_path = prefix_root / "share/miopen/db/gfx942.kdb"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx942"
+
+    def test_detect_kdb_various_arches(self, handler, prefix_root):
+        """MIOpen .kdb files across multiple architectures."""
+        test_cases = [
+            ("gfx90a.kdb", "gfx90a"),
+            ("gfx908.kdb", "gfx908"),
+            ("gfx1100.kdb", "gfx1100"),
+            ("gfx950.kdb", "gfx950"),
+        ]
+
+        for filename, expected_arch in test_cases:
+            file_path = prefix_root / f"share/miopen/db/{filename}"
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            result = handler.detect(file_path, prefix_root)
+            assert result == expected_arch, f"Failed for {filename}"
 
     def test_detect_tn_model(self, handler, prefix_root):
         file_path = prefix_root / "share/miopen/db/gfx908.tn.model"

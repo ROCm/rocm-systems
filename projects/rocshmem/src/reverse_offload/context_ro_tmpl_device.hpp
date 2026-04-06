@@ -227,7 +227,7 @@ __device__ T ROContext::amo_fetch_add(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_add(void *dst, T value, int pe) {
-  T ret{amo_fetch_add(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_fetch_add(dst, value, pe)};
 }
 
 template <typename T>
@@ -246,7 +246,7 @@ __device__ T ROContext::amo_swap(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_set(void *dst, T value, int pe) {
-  T ret{amo_swap(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_swap(dst, value, pe)};
 }
 
 template <typename T>
@@ -265,7 +265,7 @@ __device__ T ROContext::amo_fetch_and(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_and(void *dst, T value, int pe) {
-  T ret{amo_fetch_and(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_fetch_and(dst, value, pe)};
 }
 
 template <typename T>
@@ -284,7 +284,7 @@ __device__ T ROContext::amo_fetch_or(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_or(void *dst, T value, int pe) {
-  T ret{amo_fetch_or(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_fetch_or(dst, value, pe)};
 }
 
 template <typename T>
@@ -303,7 +303,7 @@ __device__ T ROContext::amo_fetch_xor(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void ROContext::amo_xor(void *dst, T value, int pe) {
-  T ret{amo_fetch_xor(dst, value, pe)};
+  [[maybe_unused]] T ret{amo_fetch_xor(dst, value, pe)};
 }
 
 template <typename T>
@@ -345,11 +345,11 @@ __device__ void ROContext::alltoall(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void ROContext::alltoallv(rocshmem_team_t team,
-                                     T *dest, const size_t dest_nelems[],
-                                     const size_t dest_displs[],
-                                     T *source, const size_t source_nelems[],
-                                     const size_t source_displs[]) {
+__device__ void ROContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
+                                     [[maybe_unused]] T *dest, [[maybe_unused]] const size_t dest_nelems[],
+                                     [[maybe_unused]] const size_t dest_displs[],
+                                     [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
+                                     [[maybe_unused]] const size_t source_displs[]) {
   printf("rocshmem::ipc:alltoallv not implemented\n");
   abort();
 }

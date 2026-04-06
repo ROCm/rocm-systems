@@ -32,6 +32,8 @@
 extern "C" {
 #endif
 
+/* Forward declaration for debug trap ioctl arguments */
+struct kfd_ioctl_dbg_trap_args;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -872,8 +874,10 @@ hsaKmtCheckRuntimeDebugSupport(
 /**
   Debug ops call primarily used for KFD testing
  */
-HSAKMT_STATUS HSAKMTAPI hsaKmtDebugTrapIoctl(
-    struct kfd_ioctl_dbg_trap_args *arg,
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDebugTrapIoctl(
+    struct kfd_ioctl_dbg_trap_args *args,
     HSA_QUEUEID *Queues,
     HSAuint64 *DebugReturn
     );

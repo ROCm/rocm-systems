@@ -518,6 +518,10 @@ namespace envvar {
     extern const var<bool> override_nic_firmware_check;
     extern const var<std::string> alltoallv_wg_algo;
     extern const var<uint32_t> sq_size;
+    // Number of QPs to create per PE for the default context
+    extern const var<size_t> num_qps_per_pe_default_ctx;
+    // Number of QPs to create per PE for each user context
+    extern const var<size_t> num_qps_per_pe_usr_ctx;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem

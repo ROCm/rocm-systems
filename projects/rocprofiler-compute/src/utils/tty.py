@@ -25,6 +25,12 @@ from utils.utils_common import (
     get_uuid,
 )
 
+
+def _tty_view_is_table(args: argparse.Namespace) -> bool:
+    """True when ``--view table`` was given (plain tables; ignore cli_style)."""
+    return getattr(args, "view", None) == "table"
+
+
 KERNEL_NAME_WRAP_WIDTH = 40
 
 
@@ -415,6 +421,19 @@ def print_operator_node(
         )
 
 
+def _safe_round_value(
+    value: object,
+    decimal: int,
+) -> object:
+    """Round *value* to *decimal* places, returning ``"N/A"`` on failure."""
+    if value == "N/A":
+        return value
+    try:
+        return round(float(value), decimal)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return "N/A"
+
+
 def process_table_data(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -522,8 +541,7 @@ def process_table_data(
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
                         cur_df_copy[header] = [
-                            (round(float(x), args.decimal) if x != "N/A" else x)
-                            for x in base_df[header]
+                            _safe_round_value(x, args.decimal) for x in base_df[header]
                         ]
                         result_df = pd.concat([result_df, cur_df_copy[header]], axis=1)
 
@@ -582,13 +600,16 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
-    # enable mem_chart only with single run
-    if (
-        table_config.get("cli_style") == "mem_chart"
+    # When --view table is set, force table output and ignore cli_style from config
+    use_mem_chart = (
+        not _tty_view_is_table(args)
+        and table_config.get("cli_style") == "mem_chart"
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
-    ):
+    )
+
+    if use_mem_chart:
         mem_data = (
             pd
             .DataFrame([df["Metric"], df["Value"]])
@@ -684,7 +705,8 @@ def show_all(
             continue
 
         # Handle roofline panel (400) with custom display logic
-        if panel_id == 400:
+        # Skip if --view table is set; tables 401/402 will be rendered as normal tables
+        if panel_id == 400 and not _tty_view_is_table(args):
             _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
@@ -765,8 +787,12 @@ def show_all(
                         args, table_config, processed_df, table_type, runs, csv_dir
                     )
 
-        # Roofline printing is handled separately above in is_roofline_shown
-        if panel_content and table_config["id"] not in [401, 402]:
+        # Roofline printing is handled separately above in is_roofline_shown.
+        # When --view table is set, roofline tables (401/402) are rendered as normal
+        # tables.
+        if panel_content and (
+            table_config["id"] not in [401, 402] or _tty_view_is_table(args)
+        ):
             print(f"\n{'-' * 80}", file=output)
             print(f"{panel_id // 100}. {panel['title']}", file=output)
             print(panel_content, file=output)

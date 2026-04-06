@@ -430,6 +430,14 @@ configure_settings(bool _init)
         "durations are needed, see ROCPROFSYS_TRACE_PERIODS.",
         0.0, "trace", "profile", "perfetto", "timemory");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_TRACE_REGION",
+        "Comma-separated list of roctx region names. When set, only "
+        "activity inside roctx regions matching one of these names "
+        "(matched against roctxRangeStartA message). Uses process-wide "
+        "roctxRangeStart/roctxRangeStop markers.",
+        std::string{}, "trace", "profile", "perfetto", "rocpd", "timemory", "rocm");
+
     auto _clock_choices = std::vector<std::string>{};
     for(const auto& itr : constraint::get_valid_clock_ids())
     {
@@ -674,11 +682,8 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    if(_init)
-    {
-        rocprofiler_sdk::config_settings(_config);
-        amd_smi::config_settings(_config);
-    }
+    rocprofiler_sdk::config_settings(_config);
+    amd_smi::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(size_t, "ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB",
                               "Hint for shared-memory buffer size in perfetto (in KB)",
@@ -2405,6 +2410,13 @@ get_trace_thread_join()
 {
     static auto _v = get_config()->find("ROCPROFSYS_TRACE_THREAD_JOIN");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+std::string
+get_trace_region()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_TRACE_REGION");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
 bool

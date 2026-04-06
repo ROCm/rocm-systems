@@ -94,18 +94,9 @@ endif()
 
 if(NAVI_DETECTED)
     set(ROCPROFSYS_ROCM_EVENTS_TEST "SQ_WAVES")
-    set(ROCPROFSYS_FILE_CHECKS "rocprof-device-0-SQ_WAVES.txt")
     set(ROCPROFSYS_COUNTER_NAMES_ARG "SQ_WAVES")
 else()
-    set(ROCPROFSYS_ROCM_EVENTS_TEST
-        "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0"
-    )
-    set(ROCPROFSYS_FILE_CHECKS
-        "rocprof-device-0-GRBM_COUNT.txt"
-        "rocprof-device-0-SQ_WAVES.txt"
-        "rocprof-device-0-SQ_INSTS_VALU.txt"
-        "rocprof-device-0-TA_TA_BUSY.txt"
-    )
+    set(ROCPROFSYS_ROCM_EVENTS_TEST "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY")
     set(ROCPROFSYS_COUNTER_NAMES_ARG "GRBM_COUNT" "SQ_WAVES" "SQ_INSTS_VALU" "TA_TA_BUSY")
 endif()
 
@@ -128,7 +119,6 @@ rocprofiler_systems_add_validation_test(
     NAME transpose-rocprofiler-sampling
     PERFETTO_FILE "perfetto-trace.proto"
     ARGS --counter-names ${ROCPROFSYS_COUNTER_NAMES_ARG} -p
-    EXIST_FILES ${ROCPROFSYS_FILE_CHECKS}
     LABELS "rocprofiler"
 )
 
@@ -136,9 +126,51 @@ rocprofiler_systems_add_validation_test(
     NAME transpose-rocprofiler-binary-rewrite
     PERFETTO_FILE "perfetto-trace.proto"
     ARGS --counter-names ${ROCPROFSYS_COUNTER_NAMES_ARG} -p
-    EXIST_FILES ${ROCPROFSYS_FILE_CHECKS}
     LABELS "rocprofiler"
 )
+
+# Verify counter output files exist for any device ID (0-9).
+# The device number in the filename comes from device_type_index which depends on
+# the CI runner's GPU topology, so we check all possible IDs.
+set(_rocprof_output_dir "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output")
+foreach(
+    _PARENT_TEST
+    transpose-rocprofiler-sampling
+    transpose-rocprofiler-binary-rewrite-run
+)
+    if(NOT TEST "${_PARENT_TEST}")
+        continue()
+    endif()
+
+    # The output directory strips "-run" from the test name
+    # (e.g., "binary-rewrite-run" outputs to "binary-rewrite/")
+    string(REGEX REPLACE "-run$" "" _OUTPUT_SUBDIR "${_PARENT_TEST}")
+
+    # Binary-rewrite tests have a cleanup fixture that deletes the output directory,
+    # so validation must run before cleanup by requiring the same fixture.
+    set(_FIXTURES "rocprofsys-global-tmp-files")
+    if("${_OUTPUT_SUBDIR}" MATCHES "-binary-rewrite$")
+        list(APPEND _FIXTURES "${_OUTPUT_SUBDIR}-fixture")
+    endif()
+
+    foreach(_COUNTER ${ROCPROFSYS_COUNTER_NAMES_ARG})
+        add_test(
+            NAME validate-${_PARENT_TEST}-rocprof-device-${_COUNTER}-exists
+            COMMAND
+                bash -c
+                "for i in {0..9}; do test -e ${_rocprof_output_dir}/${_OUTPUT_SUBDIR}/rocprof-device-\${i}-${_COUNTER}.txt && exit 0; done; exit 1"
+        )
+
+        set_tests_properties(
+            validate-${_PARENT_TEST}-rocprof-device-${_COUNTER}-exists
+            PROPERTIES
+                DEPENDS "${_PARENT_TEST}"
+                LABELS "rocprofiler;validate;rocm"
+                TIMEOUT 30
+                FIXTURES_REQUIRED "${_FIXTURES}"
+        )
+    endforeach()
+endforeach()
 
 # -------------------------------------------------------------------------------------- #
 #
