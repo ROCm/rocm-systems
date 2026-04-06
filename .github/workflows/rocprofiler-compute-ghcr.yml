@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       gpu:
-        description: 'GPU target to build (select "all" to build every target)'
+        description: 'GPU target(s) to publish'
         required: true
         default: 'all'
         type: choice
