@@ -8,7 +8,6 @@
 #define ROCR_HOTSWAP_COMGR_CLIENT_HPP
 
 #include <cstddef>
-#include <cstdint>
 
 namespace rocr {
 namespace hotswap {

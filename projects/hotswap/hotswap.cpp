@@ -23,6 +23,11 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
   *out_data = const_cast<void *>(elf_data);
   *out_size = elf_size;
 
+  if (!elf_data || elf_size == 0 || !source_isa || !target_isa) {
+    fprintf(stderr, "hotswap: invalid null input argument(s)\n");
+    return -1;
+  }
+
   if (!ComgrHotswapAvailable()) {
     fprintf(stderr, "hotswap: COMGR not available for %s -> %s\n",
             source_isa ? source_isa : "(null)",

@@ -17,9 +17,13 @@
 #include "hotswap_comgr_client.hpp"
 #include <hsa.h>
 #include <hsa_api_trace.h>
+#include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <elf.h>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unistd.h>
@@ -30,8 +34,10 @@
 
 namespace {
 
+using ByteVec = std::shared_ptr<std::vector<uint8_t>>;
+
 struct CodeObjectData {
-  std::vector<uint8_t> bytes;
+  ByteVec bytes;
 };
 
 std::mutex g_reader_map_mutex;
@@ -44,6 +50,107 @@ decltype(hsa_code_object_reader_create_from_file)* g_orig_reader_create_from_fil
 decltype(hsa_code_object_reader_destroy)* g_orig_reader_destroy = nullptr;
 decltype(hsa_executable_load_agent_code_object)* g_orig_load_agent_code_object = nullptr;
 
+static void stash_bytes(uint64_t handle, const uint8_t* data, size_t size) {
+  auto vec = std::make_shared<std::vector<uint8_t>>(data, data + size);
+  std::lock_guard<std::mutex> lock(g_reader_map_mutex);
+  g_reader_map[handle].bytes = std::move(vec);
+}
+
+static ssize_t read_all(int fd, void* buf, size_t count) {
+  size_t total = 0;
+  while (total < count) {
+    ssize_t n = read(fd, static_cast<uint8_t*>(buf) + total, count - total);
+    if (n > 0) {
+      total += static_cast<size_t>(n);
+    } else if (n == 0) {
+      break;
+    } else if (errno != EINTR) {
+      return -1;
+    }
+  }
+  return static_cast<ssize_t>(total);
+}
+
+// Parse ELF PT_NOTE segments to find the AMDGPU ISA note (NT_AMDGPU_HSA_ISA
+// type 3, owner "AMDGPU") and return the ISA name string.
+static std::string read_elf_isa_note(const uint8_t* elf, size_t size) {
+  if (size < sizeof(Elf64_Ehdr))
+    return {};
+  const auto* ehdr = reinterpret_cast<const Elf64_Ehdr*>(elf);
+  if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0)
+    return {};
+  if (ehdr->e_ident[EI_CLASS] != ELFCLASS64)
+    return {};
+
+  const size_t phoff = ehdr->e_phoff;
+  const uint16_t phnum = ehdr->e_phnum;
+  const uint16_t phentsize = ehdr->e_phentsize;
+  if (phoff == 0 || phnum == 0 || phentsize < sizeof(Elf64_Phdr))
+    return {};
+
+  for (uint16_t i = 0; i < phnum; ++i) {
+    size_t hdr_offset = phoff + static_cast<size_t>(i) * phentsize;
+    if (hdr_offset + sizeof(Elf64_Phdr) > size)
+      break;
+    const auto* phdr = reinterpret_cast<const Elf64_Phdr*>(elf + hdr_offset);
+    if (phdr->p_type != PT_NOTE)
+      continue;
+
+    size_t note_offset = phdr->p_offset;
+    const size_t note_end = note_offset + phdr->p_filesz;
+    if (note_end > size)
+      continue;
+
+    while (note_offset + sizeof(Elf64_Nhdr) <= note_end) {
+      const auto* nhdr = reinterpret_cast<const Elf64_Nhdr*>(elf + note_offset);
+      size_t name_off = note_offset + sizeof(Elf64_Nhdr);
+      size_t name_sz_aligned = (nhdr->n_namesz + 3) & ~3u;
+      size_t desc_off = name_off + name_sz_aligned;
+      size_t desc_sz_aligned = (nhdr->n_descsz + 3) & ~3u;
+      size_t next_note = desc_off + desc_sz_aligned;
+
+      if (next_note > note_end)
+        break;
+
+      // NT_AMDGPU_HSA_ISA (type 3) with owner "AMDGPU"
+      constexpr uint32_t NT_AMDGPU_HSA_ISA = 3;
+      if (nhdr->n_type == NT_AMDGPU_HSA_ISA &&
+          nhdr->n_namesz > 0 &&
+          name_off + nhdr->n_namesz <= note_end &&
+          memcmp(elf + name_off, "AMDGPU", 6) == 0) {
+        if (nhdr->n_descsz > 0 && desc_off + nhdr->n_descsz <= note_end) {
+          const char* desc = reinterpret_cast<const char*>(elf + desc_off);
+          size_t len = strnlen(desc, nhdr->n_descsz);
+          return std::string(desc, len);
+        }
+      }
+
+      // Also check for the ISA name in NT_AMDGPU_METADATA or the AMDGPU
+      // note with the full "amdgcn-amd-amdhsa--" triple.
+      constexpr uint32_t NT_AMDGPU_METADATA = 32;
+      if (nhdr->n_type == NT_AMDGPU_METADATA &&
+          nhdr->n_descsz > 0 && desc_off + nhdr->n_descsz <= note_end) {
+        const char* desc = reinterpret_cast<const char*>(elf + desc_off);
+        const char prefix[] = "amdgcn-amd-amdhsa--";
+        const size_t prefix_len = sizeof(prefix) - 1;
+        for (size_t j = 0; j + prefix_len <= nhdr->n_descsz; ++j) {
+          if (memcmp(desc + j, prefix, prefix_len) == 0) {
+            size_t len = 0;
+            while (j + len < nhdr->n_descsz && desc[j + len] != '\0' &&
+                   desc[j + len] != '\n' && desc[j + len] != '\'' &&
+                   desc[j + len] != '"' && desc[j + len] != ' ')
+              ++len;
+            return std::string(desc + j, len);
+          }
+        }
+      }
+
+      note_offset = next_note;
+    }
+  }
+  return {};
+}
+
 hsa_status_t HSA_API hotswap_reader_create_from_memory(
     const void* code_object, size_t size,
     hsa_code_object_reader_t* code_object_reader) {
@@ -51,36 +158,41 @@ hsa_status_t HSA_API hotswap_reader_create_from_memory(
   if (status != HSA_STATUS_SUCCESS)
     return status;
 
-  std::lock_guard<std::mutex> lock(g_reader_map_mutex);
-  auto& data = g_reader_map[code_object_reader->handle];
-  data.bytes.assign(static_cast<const uint8_t*>(code_object),
-                    static_cast<const uint8_t*>(code_object) + size);
+  stash_bytes(code_object_reader->handle,
+              static_cast<const uint8_t*>(code_object), size);
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API hotswap_reader_create_from_file(
     hsa_file_t file, hsa_code_object_reader_t* code_object_reader) {
-  // Read file contents into memory so we can inspect/rewrite later.
+  // Read file into memory so we can inspect/rewrite later.
+  // NOTE: this converts the file-based reader to a memory-based reader,
+  // which loses URI provenance metadata (affects profiler/debugger traces).
+  off_t saved_pos = lseek(file, 0, SEEK_CUR);
   off_t file_size = lseek(file, 0, SEEK_END);
   if (file_size <= 0) {
+    lseek(file, saved_pos, SEEK_SET);
     return g_orig_reader_create_from_file(file, code_object_reader);
   }
   lseek(file, 0, SEEK_SET);
 
   std::vector<uint8_t> buf(static_cast<size_t>(file_size));
-  ssize_t bytes_read = read(file, buf.data(), buf.size());
+  ssize_t bytes_read = read_all(file, buf.data(), buf.size());
   if (bytes_read != static_cast<ssize_t>(file_size)) {
-    lseek(file, 0, SEEK_SET);
+    lseek(file, saved_pos, SEEK_SET);
     return g_orig_reader_create_from_file(file, code_object_reader);
   }
 
   hsa_status_t status = g_orig_reader_create_from_memory(
       buf.data(), buf.size(), code_object_reader);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
+    lseek(file, saved_pos, SEEK_SET);
     return status;
+  }
 
+  auto vec = std::make_shared<std::vector<uint8_t>>(std::move(buf));
   std::lock_guard<std::mutex> lock(g_reader_map_mutex);
-  g_reader_map[code_object_reader->handle].bytes = std::move(buf);
+  g_reader_map[code_object_reader->handle].bytes = std::move(vec);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -97,9 +209,15 @@ static std::string get_agent_isa_name(hsa_agent_t agent) {
   auto cb = [](hsa_isa_t isa, void* data) -> hsa_status_t {
     auto* name = static_cast<std::string*>(data);
     uint32_t len = 0;
-    hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len);
+    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
+        HSA_STATUS_SUCCESS)
+      return HSA_STATUS_ERROR;
     name->resize(len);
-    hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name->data());
+    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name->data()) !=
+        HSA_STATUS_SUCCESS) {
+      name->clear();
+      return HSA_STATUS_ERROR;
+    }
     if (!name->empty() && name->back() == '\0')
       name->pop_back();
     return HSA_STATUS_INFO_BREAK;
@@ -109,63 +227,51 @@ static std::string get_agent_isa_name(hsa_agent_t agent) {
   return name;
 }
 
-static std::string read_elf_isa_note(const uint8_t* elf, size_t size) {
-  const char prefix[] = "amdgcn-amd-amdhsa--";
-  const size_t prefix_len = sizeof(prefix) - 1;
-  for (size_t i = 0; i + prefix_len <= size; ++i) {
-    if (memcmp(elf + i, prefix, prefix_len) == 0) {
-      const char* start = reinterpret_cast<const char*>(elf + i);
-      size_t len = 0;
-      while (i + len < size && start[len] != '\0' && start[len] != '\n'
-             && start[len] != ' ' && len < 128)
-        ++len;
-      return std::string(start, len);
-    }
-  }
-  return {};
-}
-
 hsa_status_t HSA_API hotswap_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent,
     hsa_code_object_reader_t code_object_reader,
     const char* options, hsa_loaded_code_object_t* loaded_code_object) {
 
-  std::vector<uint8_t> local_bytes;
-  bool have_bytes = false;
+  ByteVec local_bytes;
 
   {
     std::lock_guard<std::mutex> lock(g_reader_map_mutex);
     auto it = g_reader_map.find(code_object_reader.handle);
-    if (it != g_reader_map.end()) {
+    if (it != g_reader_map.end())
       local_bytes = it->second.bytes;
-      have_bytes = true;
-    }
   }
 
-  if (!have_bytes || !rocr::hotswap::ComgrHotswapAvailable()) {
+  if (!local_bytes || !rocr::hotswap::ComgrHotswapAvailable()) {
     return g_orig_load_agent_code_object(executable, agent, code_object_reader,
                                          options, loaded_code_object);
   }
 
-  std::string source_isa = read_elf_isa_note(local_bytes.data(), local_bytes.size());
+  std::string source_isa = read_elf_isa_note(local_bytes->data(), local_bytes->size());
   std::string target_isa = get_agent_isa_name(agent);
 
-  if (source_isa.empty() || target_isa.empty() || source_isa == target_isa) {
+  if (source_isa.empty() || target_isa.empty()) {
     return g_orig_load_agent_code_object(executable, agent, code_object_reader,
                                          options, loaded_code_object);
   }
+
+  // Do NOT skip when source == target: B0-to-A0 patching uses the same ISA
+  // name on both sides. Let COMGR decide whether rewriting is needed.
 
   void* out_elf = nullptr;
   size_t out_elf_size = 0;
   int rc = rocr::hotswap::ComgrHotswapRewrite(
-      local_bytes.data(), local_bytes.size(),
+      local_bytes->data(), local_bytes->size(),
       source_isa.c_str(), target_isa.c_str(),
       &out_elf, &out_elf_size);
 
   if (rc != 0 || !out_elf) {
-    fprintf(stderr, "hotswap: COMGR rewrite failed for %s -> %s (rc=%d), "
-            "falling back to original\n",
-            source_isa.c_str(), target_isa.c_str(), rc);
+    if (out_elf)
+      std::free(out_elf);
+    if (source_isa != target_isa) {
+      fprintf(stderr, "hotswap: COMGR rewrite failed for %s -> %s (rc=%d), "
+              "falling back to original\n",
+              source_isa.c_str(), target_isa.c_str(), rc);
+    }
     return g_orig_load_agent_code_object(executable, agent, code_object_reader,
                                          options, loaded_code_object);
   }
