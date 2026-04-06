@@ -7,6 +7,9 @@ developer = [
     "ruff>=0.14.11",
     "pre-commit",
 ]
+optimizer = [
+    "ortools>=9.10",
+]
 
 [tool.ruff]
 line-length = 88

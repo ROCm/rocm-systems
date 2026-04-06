@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import math
 import os
 import re
@@ -40,6 +41,81 @@ from utils.utils_common import (
     validate_roofline_csv,
 )
 from vendored import yaml
+
+
+def _same_bucket_priority_ids_from_policy_value(
+    arch_name: str,
+    ids: object,
+) -> tuple[str, ...] | None:
+    """
+    Normalize ``same_bucket_priority_metric_ids`` from YAML: list of ids, or
+    mapping id -> { name: ... } (id is the key; order preserved).
+    Returns None if invalid (caller should warn).
+    """
+    if ids is None:
+        return ()
+    if isinstance(ids, list):
+        return tuple(str(x) for x in ids)
+    if isinstance(ids, dict):
+        ordered: list[str] = []
+        for key, meta in ids.items():
+            token = str(key).strip()
+            if not token:
+                continue
+            if meta is not None and not isinstance(meta, dict):
+                console_warning(
+                    "profiling",
+                    (
+                        "Ignoring same_bucket_priority_metric_ids["
+                        f"{arch_name!r}][{token!r}]: "
+                        "expected a mapping or null."
+                    ),
+                )
+                continue
+            ordered.append(token)
+        return tuple(ordered)
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _load_same_bucket_priority_policy_map() -> dict[str, tuple[str, ...]]:
+    """
+    Load ``utils/profiling_counter_grouping_policy.yaml`` into arch -> metric id tuple.
+    """
+    path = (
+        config.rocprof_compute_home / "utils" / "profiling_counter_grouping_policy.yaml"
+    )
+    if not path.is_file():
+        console_warning(
+            "profiling",
+            f"Profiling counter grouping policy missing ({path}); "
+            "same-bucket priority metrics disabled.",
+        )
+        return {}
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if raw is None:
+        return {}
+    archs = raw.get("architectures")
+    if not isinstance(archs, dict):
+        return {}
+    out: dict[str, tuple[str, ...]] = {}
+    for arch_name, cfg in archs.items():
+        if not isinstance(cfg, dict):
+            continue
+        key = str(arch_name)
+        parsed = _same_bucket_priority_ids_from_policy_value(
+            key,
+            cfg.get("same_bucket_priority_metric_ids"),
+        )
+        if parsed is None:
+            console_warning(
+                "profiling",
+                f"Ignoring same_bucket_priority_metric_ids for {key!r}: "
+                "expected a list of ids or a mapping id -> metadata.",
+            )
+            continue
+        out[key] = parsed
+    return out
 
 
 class OmniSoC_Base:
@@ -207,6 +283,356 @@ class OmniSoC_Base:
 
         return gpu_model
 
+    def _append_analysis_yaml_for_filter_token(
+        self,
+        raw_token: str,
+        config_filename_dict: dict[str, str],
+        config_root_dir: str,
+        texts: list[str],
+    ) -> None:
+        block_id = raw_token
+        if METRIC_ID_RE.match(block_id):
+            pass
+        else:
+            alias = block_id
+            panel_alias_dict = get_panel_alias()
+            if alias not in panel_alias_dict:
+                raise KeyError(f"Unknown panel alias: {alias!r}")
+            block_id = str(panel_alias_dict[alias])
+            console_log(f"alias: {alias}, block id: {block_id}")
+
+        file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
+
+        if file_id not in config_filename_dict:
+            console_warning(
+                f"Skipping {block_id}: file id {file_id} not found in {config_root_dir}"
+            )
+            return
+
+        with open(config_filename_dict[file_id]) as stream:
+            file_config = yaml.safe_load(stream)
+        if panel_id is None:
+            texts.append(yaml.dump(file_config, sort_keys=False))
+            return
+
+        panel_dict = {
+            section["metric_table"]["id"]: section["metric_table"]
+            for section in file_config["Panel Config"]["data source"]
+            if "metric_table" in section
+        }
+        if panel_id not in panel_dict:
+            console_warning(
+                f"Skipping {block_id}: metric table {panel_id} not found in "
+                f"{config_filename_dict[file_id]}"
+            )
+            return
+        if metric_id is None:
+            texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
+            return
+
+        metric_dict = {
+            idx: panel_dict[panel_id]["metric"][metric]
+            for idx, metric in enumerate(panel_dict[panel_id]["metric"].keys())
+        }
+        if metric_id not in metric_dict:
+            console_warning(
+                f"Skipping {block_id}: metric id {metric_id} not found in "
+                f"panel id {panel_id}"
+            )
+            return
+        texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
+
+    def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
+        """
+        Optional metric ids (e.g. ``'2.1.3'``) whose PMCs should share the first
+        ``pmc_perf_*`` pass when IP block limits allow. Loaded from
+        ``utils/profiling_counter_grouping_policy.yaml`` for the current arch;
+        subclasses may override.
+        """
+        arch = self._OmniSoC_Base__arch
+        if not arch:
+            return ()
+        return _load_same_bucket_priority_policy_map().get(arch, ())
+
+    def _expanded_hw_counters_for_metric_ids(
+        self, metric_ids: tuple[str, ...]
+    ) -> set[str]:
+        """Hardware PMC names for the given metric id strings, TCC-expanded."""
+        if not metric_ids or not self._OmniSoC_Base__arch:
+            return set()
+        args = self.get_args()
+        config_root_dir = f"{args.config_dir}/{self._OmniSoC_Base__arch}"
+        config_filename_dict = {
+            filename.name.split("_")[0]: str(filename)
+            for filename in Path(config_root_dir).glob("*.yaml")
+        }
+        snippets: list[str] = []
+        for mid in metric_ids:
+            self._append_analysis_yaml_for_filter_token(
+                mid, config_filename_dict, config_root_dir, snippets
+            )
+        if not snippets:
+            return set()
+        raw_counters = self.parse_counters("\n".join(snippets))
+        return self._expand_tcc_template_counters(raw_counters)
+
+    def _priority_metric_keys_for_coalescing(
+        self,
+    ) -> set[tuple[str, Any, int]]:
+        """(yaml stem id, panel id, metric index) for SoC priority metric tokens."""
+        keys: set[tuple[str, Any, int]] = set()
+        for token in self._same_bucket_priority_metric_ids():
+            tid = token.strip()
+            if not METRIC_ID_RE.match(tid):
+                continue
+            file_id, panel_id, metric_idx = convert_metric_id_to_panel_info(tid)
+            if metric_idx is None:
+                continue
+            keys.add((file_id, panel_id, metric_idx))
+        return keys
+
+    def _metric_counter_groups_for_coalescing(
+        self, active_counters: set[str]
+    ) -> list[tuple[int, int, str, str, int, str, frozenset[str]]]:
+        """
+        Build rows for metric-aware packing: sort key then frozen PMC intersection.
+
+        Tuple: (priority_tier, neg_intersection_size, stem_id, panel_s, metric_idx,
+        metric_name, counters_for_metric).
+        """
+        priority_keys = self._priority_metric_keys_for_coalescing()
+        rows: list[tuple[int, int, str, str, int, str, frozenset[str]]] = []
+        for (
+            stem_id,
+            panel_id,
+            metric_idx,
+            metric_name,
+            metric_yaml,
+        ) in self._iter_arch_analysis_yaml_metrics():
+            hw = self.parse_counters(metric_yaml)
+            hw = self._expand_tcc_template_counters(hw)
+            intersection = frozenset(hw & active_counters)
+            if not intersection:
+                continue
+            tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
+            neg_sz = -len(intersection)
+            panel_s = str(panel_id) if panel_id is not None else ""
+            rows.append((
+                tier,
+                neg_sz,
+                stem_id,
+                panel_s,
+                metric_idx,
+                metric_name,
+                intersection,
+            ))
+        rows.sort(key=lambda r: (r[0], r[1], r[2], r[3], r[4]))
+        return rows
+
+    def _metric_aware_coalesce_pass(
+        self,
+        work_set: set[str],
+        output_files: list[CounterFile],
+        file_count: int,
+    ) -> int:
+        """
+        Lexicographic greedy heuristic (see ``_allocate_perfmon_counter_files`` doc):
+        place each metric's PMC subset into the first feasible ``pmc_perf_*`` bucket,
+        else open a new bucket; overflow stays for first-fit.
+        """
+        if not work_set:
+            return file_count
+        cfg = self._OmniSoC_Base__perfmon_config
+        for (
+            _tier,
+            _neg_sz,
+            stem_id,
+            panel_s,
+            metric_idx,
+            metric_name,
+            group,
+        ) in self._metric_counter_groups_for_coalescing(work_set):
+            need_sorted = sorted(c for c in group if c in work_set)
+            if not need_sorted:
+                continue
+            placed = False
+            for bucket_idx, bucket in enumerate(output_files):
+                if not _is_general_perfmon_bucket(bucket):
+                    continue
+                trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
+                if trial is not None:
+                    output_files[bucket_idx] = trial
+                    for ctr in need_sorted:
+                        work_set.discard(ctr)
+                    placed = True
+                    break
+            if placed:
+                continue
+            new_bucket = CounterFile(str(file_count), cfg)
+            trial = _trial_counter_file_with_extra(new_bucket, cfg, need_sorted)
+            if trial is not None and _flat_counters_in_perfmon_file(trial):
+                output_files.append(trial)
+                file_count += 1
+                for ctr in need_sorted:
+                    work_set.discard(ctr)
+            else:
+                console_debug(
+                    "profiling",
+                    f"Metric-aware pack: cannot fit all PMCs for "
+                    f"{stem_id}.{panel_s}.{metric_idx} ({metric_name!r}) in one "
+                    f"bucket; deferring to first-fit.",
+                )
+        return file_count
+
+    def _cp_sat_same_bin_counter_groups(
+        self, work_set: set[str]
+    ) -> list[frozenset[str]]:
+        """Priority metrics intersected with ``work_set`` (for CP-SAT same-bin rows)."""
+        groups: list[frozenset[str]] = []
+        for token in self._same_bucket_priority_metric_ids():
+            expanded = self._expanded_hw_counters_for_metric_ids((token,))
+            inter = frozenset(expanded & work_set)
+            if inter:
+                groups.append(inter)
+        return groups
+
+    def _cp_sat_metric_spread_index_groups(
+        self,
+        items_sorted: list[str],
+    ) -> list[list[int]]:
+        """Per-metric item index lists (len >= 2) for CP-SAT spread objective."""
+        item_index = {name: idx for idx, name in enumerate(items_sorted)}
+        active: set[str] = set(items_sorted)
+        out: list[list[int]] = []
+        for row in self._metric_counter_groups_for_coalescing(active):
+            counter_group = row[-1]
+            idxs = sorted({item_index[c] for c in counter_group if c in item_index})
+            if len(idxs) >= 2:
+                out.append(idxs)
+        return out
+
+    @staticmethod
+    def _cp_sat_metric_spread_penalty_from_env() -> int:
+        raw = os.environ.get(
+            "ROCPROF_COMPUTE_PERFMON_CP_SAT_METRIC_PENALTY", "100"
+        ).strip()
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            return 100
+
+    def _try_cp_sat_pmc_perf_buckets(
+        self,
+        work_set: set[str],
+        file_count_start: int,
+    ) -> list[CounterFile] | None:
+        """
+        If ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and ``ortools`` is installed,
+        partition **all** of ``work_set`` under vector caps. Hard same-bin rows
+        still apply to priority metrics; by default a **metric-spread** objective
+        (``ROCPROF_COMPUTE_PERFMON_CP_SAT_METRIC_PENALTY``, default ``100``)
+        reduces formulas spanning 2+ passes at the cost of more buckets---set
+        ``0`` to restore min-bin-only behavior. On success, clears those
+        counters from ``work_set`` and returns new ``CounterFile`` rows; else
+        returns ``None`` (no mutation).
+        """
+        if os.environ.get("ROCPROF_COMPUTE_PERFMON_CP_SAT", "").strip() != "1":
+            return None
+        if not work_set:
+            return None
+        items = sorted(work_set)
+        if any(is_tcc_channel_counter(c) for c in items):
+            console_debug(
+                "profiling",
+                "CP-SAT perfmon: skipped (TCC channel counters present).",
+            )
+            return None
+
+        try:
+            from utils.perfmon_cp_sat import cp_sat_partition_counters
+        except ImportError as exc:
+            console_debug(
+                "profiling",
+                f"CP-SAT perfmon: skipped (import error: {exc}).",
+            )
+            return None
+
+        groups = self._cp_sat_same_bin_counter_groups(work_set)
+        spread_penalty = self._cp_sat_metric_spread_penalty_from_env()
+        spread_groups = (
+            self._cp_sat_metric_spread_index_groups(items)
+            if spread_penalty > 0
+            else None
+        )
+        if spread_penalty > 0 and spread_groups:
+            console_debug(
+                "profiling",
+                f"CP-SAT perfmon: metric_spread_penalty={spread_penalty}, "
+                f"{len(spread_groups)} metric group(s).",
+            )
+        partition = cp_sat_partition_counters(
+            items,
+            self._OmniSoC_Base__perfmon_config,
+            groups,
+            metric_spread_index_groups=spread_groups,
+            metric_spread_penalty=spread_penalty,
+        )
+        if partition is None:
+            console_debug(
+                "profiling",
+                "CP-SAT perfmon: no feasible/optimal solution within limit; "
+                "using heuristic only.",
+            )
+            return None
+
+        placed_check: set[str] = set()
+        out_files: list[CounterFile] = []
+        file_count = file_count_start
+        for bucket_items in partition:
+            bucket = CounterFile(
+                str(file_count),
+                self._OmniSoC_Base__perfmon_config,
+            )
+            file_count += 1
+            for ctr in sorted(bucket_items):
+                if not bucket.add(ctr):
+                    console_warning(
+                        "profiling",
+                        "CP-SAT perfmon: CounterFile rejected layout; "
+                        "falling back to heuristic.",
+                    )
+                    return None
+                placed_check.add(ctr)
+            out_files.append(bucket)
+
+        if placed_check != set(items):
+            console_warning(
+                "profiling",
+                "CP-SAT perfmon: partition mismatch; falling back to heuristic.",
+            )
+            return None
+
+        for ctr in items:
+            work_set.discard(ctr)
+        console_debug(
+            "profiling",
+            f"CP-SAT perfmon: placed all {len(items)} counter(s) in "
+            f"{len(out_files)} bucket(s).",
+        )
+        return out_files
+
+    def _use_extended_perfmon_allocator(self) -> bool:
+        """
+        When True: run optional CP-SAT (if env + ortools) and metric-aware coalescing
+        (``_metric_aware_coalesce_pass``) before first-fit. Tier-0 / same-bin policy
+        comes from ``profiling_counter_grouping_policy.yaml`` per arch.
+
+        CDNA / MI arches (gfx908, gfx90a, gfx942, gfx950) keep the legacy pass count
+        baseline by using first-fit only after LEVEL buckets. **gfx1151** alone uses
+        the extended allocator.
+        """
+        return self._OmniSoC_Base__arch == "gfx1151"
+
     @demarcate
     def detect_counters(self) -> tuple[set[str], list[str]]:
         """
@@ -254,77 +680,12 @@ class OmniSoC_Base:
                     texts.append(stream.read())
 
         for block_id in filter_blocks:
-            if METRIC_ID_RE.match(block_id):
-                block_id = block_id
-            else:
-                alias = block_id
-                panel_alias_dict = get_panel_alias()
-                if alias not in panel_alias_dict:
-                    raise KeyError(f"Unknown panel alias: {alias!r}")
-                block_id = panel_alias_dict[alias]  # int
-                print(f"alias: {alias}, block id: {block_id}")
-
-            file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
-
-            # File id filtering
-            if file_id not in config_filename_dict:
-                console_warning(
-                    f"Skipping {block_id}: file id {file_id} not found in "
-                    f"{config_root_dir}"
-                )
-                continue
-
-            with open(config_filename_dict[file_id]) as stream:
-                file_config = yaml.safe_load(stream)
-            if panel_id is None:
-                # If no panel id level filtering, then read the whole file
-                texts.append(yaml.dump(file_config, sort_keys=False))
-                continue
-
-            # Panel id filtering
-            panel_dict = {
-                section["metric_table"]["id"]: section["metric_table"]
-                for section in file_config["Panel Config"]["data source"]
-                if "metric_table" in section
-            }
-            if panel_id not in panel_dict:
-                console_warning(
-                    f"Skipping {block_id}: metric table {panel_id} not found in "
-                    f"{config_filename_dict[file_id]}"
-                )
-                continue
-            if metric_id is None:
-                # If no metric id level filtering, then read the whole panel
-                texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
-                continue
-
-            # Metric id filtering
-            metric_dict = {
-                id: panel_dict[panel_id]["metric"][metric]
-                for id, metric in enumerate(panel_dict[panel_id]["metric"].keys())
-            }
-            if metric_id not in metric_dict:
-                console_warning(
-                    f"Skipping {block_id}: metric id {metric_id} not found in "
-                    f"panel id {panel_id}"
-                )
-                continue
-            texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
+            self._append_analysis_yaml_for_filter_token(
+                block_id, config_filename_dict, config_root_dir, texts
+            )
 
         counters = self.parse_counters("\n".join(texts))
-
-        # Handle TCC channel counters: if hw_counter_matches has elems ending with '['
-        # Expand and interleve the TCC channel counters
-        # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
-        num_xcd_for_pmc_file = int(self._mspec.num_xcd)
-        for counter_name in counters.copy():
-            if counter_name.startswith("TCC") and counter_name.endswith("["):
-                counters.remove(counter_name)
-                counter_name = counter_name.split("[")[0]
-                counters = counters.union({
-                    f"{counter_name}[{i}]"
-                    for i in range(num_xcd_for_pmc_file * int(self._mspec.l2_banks))
-                })
+        counters = self._expand_tcc_template_counters(counters)
 
         return counters, filter_blocks
 
@@ -386,9 +747,12 @@ class OmniSoC_Base:
         # hw counter name should have all capital letters or digits
         # and should not end with underscore
         # he counter name can either optionally end with '[' or '_sum'
-        hw_counter_regex = (
-            r"(?:SQ|SQC|TA|TD|TCP|TCC|CPC|CPF|SPI|GRBM)_[0-9A-Z_]*[0-9A-Z](?:\[|_sum)*"
+        _blk = (
+            r"(?:SQ|SQC|SP|TA|TD|TCP|TCC|GL1A|GL1C|GL2A|GL2C|"
+            r"CPC|CPF|SPI|GCEA|GRBM)"
         )
+        _sfx = r"_[0-9A-Z_]*[0-9A-Z](?:\[|_sum|_avr|_max|_min)*"
+        hw_counter_regex = _blk + _sfx
         # only capture the variable name after $ using capturing group
         variable_regex = r"\$([0-9A-Za-z_]*[0-9A-Za-z])"
         hw_counter_matches = set(re.findall(hw_counter_regex, text))
@@ -474,7 +838,25 @@ class OmniSoC_Base:
     def _allocate_perfmon_counter_files(
         self, counters: set[str]
     ) -> tuple[list[CounterFile], int, int]:
-        """Bin-pack counters into perfmon buckets (first-fit)."""
+        """
+        Bin-pack counters into perfmon buckets (same layout as perfmon_coalesce).
+
+        **gfx1151.** Uses a **lexicographic greedy heuristic** (metric-aware
+        whole-metric placement: priority tier from ``_same_bucket_priority_metric_ids``,
+        then larger counter sets first) into existing ``pmc_perf_*`` buckets or a new
+        bucket, then classic first-fit for leftovers. Optional **CP-SAT** when
+        ``ROCPROF_COMPUTE_PERFMON_CP_SAT=1`` and ``ortools`` is installed (see
+        ``_try_cp_sat_pmc_perf_buckets``). LEVEL counters still get dedicated buckets
+        first (same as all arches); that rule is unchanged and does not add passes
+        beyond one file per LEVEL counter on any arch.
+
+        **Other supported arches.** After LEVEL buckets, only **per-counter first-fit**
+        runs (legacy behavior), preserving historical application-pass counts.
+
+        **Problem shape (informal).** Each bucket is a vector-capacity bin; each metric
+        induces a hyperedge. Exact multi-objective resolution is NP-hard; gfx1151 uses
+        heuristics + optional CP-SAT as above.
+        """
         output_files: list[CounterFile] = []
         accu_file_count = 0
 
@@ -495,28 +877,36 @@ class OmniSoC_Base:
                 accu_file_count += 1
 
         file_count = 0
-        # Store all channels for a TCC channel counter in the same file
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
+        work_set = set(work)
+        if self._use_extended_perfmon_allocator():
+            cp_sat_files = self._try_cp_sat_pmc_perf_buckets(work_set, file_count)
+            if cp_sat_files is not None:
+                output_files.extend(cp_sat_files)
+                file_count += len(cp_sat_files)
+
+            file_count = self._metric_aware_coalesce_pass(
+                work_set, output_files, file_count
+            )
+        work = sorted(work_set)
+        tcc_channel_counter_file_map = _rebuild_tcc_channel_file_map(output_files)
+
         for ctr in work:
-            # Store all channels for a TCC channel counter in the same file
             if is_tcc_channel_counter(ctr):
                 output_file = tcc_channel_counter_file_map.get(ctr.split("[")[0])
                 if output_file:
                     output_file.add(ctr)
                     continue
 
-            # Add counter to first file that has room
             added = False
             for output_file in output_files:
                 if output_file.add(ctr):
                     added = True
-                    # Store all channels for a TCC channel counter in the same file
                     if is_tcc_channel_counter(ctr):
                         tcc_channel_counter_file_map[ctr.split("[")[0]] = output_file
                     break
 
-            # All files are full, create a new file
             if not added:
                 output_files.append(CounterFile(str(file_count), self.__perfmon_config))
                 file_count += 1
@@ -1001,6 +1391,50 @@ class CounterFile:
             block = "SQ"
 
         return self.blocks[block].add(counter)
+
+
+def _is_general_perfmon_bucket(bucket: CounterFile) -> bool:
+    """True for standard multi-counter passes; false for LEVEL-only files."""
+    return "LEVEL" not in bucket.file_name_txt
+
+
+def _clone_counter_file(
+    source: CounterFile,
+    perfmon_config: dict[str, int],
+) -> CounterFile:
+    # Strip pmc_perf_ prefix and .txt suffix to recover the original name.
+    original_name = source.file_name_txt.removeprefix("pmc_perf_").removesuffix(".txt")
+    duplicate = CounterFile(original_name, perfmon_config)
+    for ctr in _flat_counters_in_perfmon_file(source):
+        if not duplicate.add(ctr):
+            msg = f"clone replay failed for {ctr!r} in {source.file_name_txt}"
+            raise RuntimeError(msg)
+    return duplicate
+
+
+def _trial_counter_file_with_extra(
+    basis: CounterFile,
+    perfmon_config: dict[str, int],
+    extra_counters_sorted: list[str],
+) -> CounterFile | None:
+    """Return a clone of ``basis`` with ``extra_counters_sorted`` appended, or None."""
+    trial = _clone_counter_file(basis, perfmon_config)
+    for ctr in extra_counters_sorted:
+        if not trial.add(ctr):
+            return None
+    return trial
+
+
+def _rebuild_tcc_channel_file_map(
+    output_files: list[CounterFile],
+) -> dict[str, CounterFile]:
+    """Map TCC counter base name to the bucket that holds its channel instances."""
+    result: dict[str, CounterFile] = {}
+    for bucket in output_files:
+        for ctr in _flat_counters_in_perfmon_file(bucket):
+            if is_tcc_channel_counter(ctr):
+                result[ctr.split("[")[0]] = bucket
+    return result
 
 
 def _flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
