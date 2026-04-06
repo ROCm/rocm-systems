@@ -19,9 +19,6 @@ else()
     set(IS_DISABLED OFF)
 endif()
 
-# Until this test is fixed in PSDB-tests
-set(IS_DISABLED ON)
-
 if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
     set(LOG_LEVEL "warning") # info produces memory leak
 else()
