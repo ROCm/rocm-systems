@@ -1139,18 +1139,18 @@ rocprofsys_finalize_hidden(void)
         sampling::post_process();
     }
 
+    auto _output_registry = output_file_registry{};
+
     if(get_use_causal())
     {
         LOG_DEBUG("Finishing the causal experiments...");
         causal::finish_experimenting();
 
         auto _base = config::get_causal_output_filename();
-        output_file_registry::get_instance().register_file(
-            "Causal profile (JSON)", fmt::format("{}.json", _base),
-            fmt::format("jq . {}.json", _base));
-        output_file_registry::get_instance().register_file(
-            "Causal profile (text)", fmt::format("{}.txt", _base),
-            fmt::format("cat {}.txt", _base));
+        _output_registry.register_file(fmt::format("{}.json", _base),
+                                       output_format::causal_json);
+        _output_registry.register_file(fmt::format("{}.txt", _base),
+                                       output_format::causal_text);
     }
 
     if(get_use_process_sampling())
@@ -1177,13 +1177,13 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Finalizing perfetto...");
         rocprofsys::perfetto::post_process(_timemory_manager.get(),
-                                           _perfetto_output_error);
+                                           _perfetto_output_error, _output_registry);
     }
 
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         _manager.shutdown();
-        _manager.post_process_bulk();
+        _manager.post_process_bulk(_output_registry);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)
@@ -1216,32 +1216,21 @@ rocprofsys_finalize_hidden(void)
                 config::get_setting_value<std::string>("ROCPROFSYS_TIMEMORY_COMPONENTS")
                     .value_or("wall_clock");
 
-            auto _pos = std::string::size_type{ 0 };
-            while(_pos < _components.size())
+            for(auto&& _comp_name : tim::delimit(_components, ",; "))
             {
-                auto _sep       = _components.find_first_of(",; ", _pos);
-                auto _comp_name = _components.substr(
-                    _pos, _sep == std::string::npos ? std::string::npos : _sep - _pos);
-                _pos = (_sep == std::string::npos) ? _components.size() : _sep + 1;
-
                 if(_comp_name.empty()) continue;
 
-                auto _txt_path =
-                    settings::compose_output_filename(_comp_name, "txt", _cfg);
-                auto _json_path =
-                    settings::compose_output_filename(_comp_name, "json", _cfg);
-
-                output_file_registry::get_instance().register_file(
-                    fmt::format("Profile ({})", _comp_name), _txt_path,
-                    fmt::format("cat {}", _txt_path));
-                output_file_registry::get_instance().register_file(
-                    fmt::format("JSON ({})", _comp_name), _json_path,
-                    fmt::format("jq . {}", _json_path));
+                _output_registry.register_file(
+                    settings::compose_output_filename(_comp_name, "txt", _cfg),
+                    output_format::text, _comp_name);
+                _output_registry.register_file(
+                    settings::compose_output_filename(_comp_name, "json", _cfg),
+                    output_format::json, _comp_name);
             }
         }
     }
 
-    config::print_output_summary(output_file_registry::get_instance().get_files());
+    _output_registry.print_summary();
 
     categories::shutdown();
 

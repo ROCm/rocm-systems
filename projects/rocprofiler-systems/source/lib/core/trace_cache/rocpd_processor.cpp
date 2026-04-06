@@ -45,6 +45,14 @@ get_handle_from_code_object(
 #endif
 }
 
+std::string
+generate_db_output_path(int pid)
+{
+    auto _tag    = std::to_string(pid);
+    auto db_name = std::string{ "rocpd" };
+    return rocprofsys::get_database_absolute_path(db_name, _tag);
+}
+
 using memory_operation = std::string;
 using memory_type      = std::string;
 std::pair<memory_operation, memory_type>
@@ -581,13 +589,17 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
-                                     int pid, int ppid)
+                                     int pid, int ppid,
+                                     output_file_registry& output_registry)
 : processor_t<rocpd_processor_t>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_data_processor(std::make_shared<rocpd::data_processor>(
-      std::make_shared<rocpd::data_storage::database>(pid, ppid)))
-{}
+, m_output_registry(output_registry)
+, m_db_output_path(generate_db_output_path(pid))
+{
+    m_data_processor = std::make_shared<rocpd::data_processor>(
+        std::make_shared<rocpd::data_storage::database>(pid, ppid, m_db_output_path));
+}
 
 void
 rocpd_processor_t::prepare_for_processing()
@@ -603,10 +615,7 @@ rocpd_processor_t::finalize_processing()
     LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
 
-    output_file_registry::get_instance().register_file(
-        "RocPD database", m_data_processor->get_database_path(),
-        "sqlite3, AMD Visualizer (OPTIQ), or rocprofiler-sdk provided rocpd Python "
-        "module for conversion to other formats");
+    m_output_registry.register_file(m_db_output_path, output_format::rocpd);
 
     LOG_INFO("Rocpd processor finalized successfully");
 }

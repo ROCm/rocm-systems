@@ -39,7 +39,7 @@ namespace data_storage
 class database
 {
 public:
-    explicit database(int pid, int ppid);
+    explicit database(int pid, int ppid, std::string output_path);
     database()                      = delete;
     database(database&)             = delete;
     database& operator=(database&)  = delete;
@@ -218,8 +218,6 @@ public:
     }
 
     std::string get_upid();
-
-    [[nodiscard]] const std::string& get_path() const noexcept { return m_path; }
 
 private:
     static std::string generate_upid(const int pid, const int ppid);

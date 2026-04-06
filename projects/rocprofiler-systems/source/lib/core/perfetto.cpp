@@ -165,7 +165,8 @@ stop()
 }
 
 void
-post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
+post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
+             output_file_registry& _output_registry)
 {
     using char_vec_t = std::vector<char>;
 
@@ -270,8 +271,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
             if(_timemory_manager)
                 _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
-            output_file_registry::get_instance().register_file(
-                "Perfetto trace", _filename, "Open in https://ui.perfetto.dev");
+            _output_registry.register_file(_filename, output_format::perfetto);
         }
         ofs.close();
     }

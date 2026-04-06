@@ -666,9 +666,6 @@ INSTRUMENTATION WORKFLOW:
         rocprofsys::common_utils::print_pre_execution_info("run", active_presets[0]);
     }
 
-    rocprofsys::common_utils::warn_if_output_not_writable("run");
-    rocprofsys::common_utils::validate_configuration();
-
     return _parser_data;
 }
 

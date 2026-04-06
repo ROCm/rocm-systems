@@ -338,7 +338,8 @@ dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
 
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
-    const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid)
+    const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
+    output_file_registry& output_registry)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
@@ -347,6 +348,7 @@ perfetto_processor_t::perfetto_processor_t(
 , m_tmp_file(nullptr)
 , m_tracing_session(nullptr)
 , m_use_annotations(config::get_perfetto_annotations())
+, m_output_registry(output_registry)
 {}
 
 void
@@ -527,8 +529,7 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
             // Write the trace into a file.
             ofs.write(trace_data.data(), trace_data.size());
             if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
-            output_file_registry::get_instance().register_file(
-                "Perfetto trace", _filename, "Open in https://ui.perfetto.dev");
+            m_output_registry.register_file(_filename, output_format::perfetto);
         }
         ofs.close();
     }

@@ -3,41 +3,52 @@
 
 #pragma once
 
-#include "config.hpp"
-
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace rocprofsys
 {
 
+struct output_file
+{
+    std::string label;
+    std::string path;
+    std::string viewer;
+};
+
+enum class output_format
+{
+    perfetto,
+    rocpd,
+    json,
+    text,
+    causal_json,
+    causal_text
+};
+
 /**
  * Thread-safe registry of output files generated during profiling.
  * Each subsystem registers its output files after successful write.
- * The parent process reads the accumulated list at finalization to
- * print the output summary.
+ * The registry is created in rocprofsys_finalize_hidden and passed
+ * to subsystems that register their output files.
  */
 class output_file_registry
 {
 public:
-    static output_file_registry& get_instance();
+    void register_file(std::string path, output_format format);
+    void register_file(std::string path, output_format format,
+                       std::string component_name);
 
-    void register_file(std::string label, std::string path, std::string viewer);
-    void register_file(config::output_file entry);
-
-    [[nodiscard]] std::vector<config::output_file> get_files() const;
-
+    void print_summary() const;
     void clear();
 
 private:
-    output_file_registry()                                       = default;
-    output_file_registry(const output_file_registry&)            = delete;
-    output_file_registry& operator=(const output_file_registry&) = delete;
-    output_file_registry(output_file_registry&&)                 = delete;
-    output_file_registry& operator=(output_file_registry&&)      = delete;
+    static output_file make_entry(std::string path, output_format format,
+                                  const std::string& component_name = {});
 
-    mutable std::mutex               m_mutex;
-    std::vector<config::output_file> m_files;
+    mutable std::mutex       m_mutex;
+    std::vector<output_file> m_files;
 };
 
 }  // namespace rocprofsys

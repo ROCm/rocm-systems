@@ -163,11 +163,9 @@ namespace rocpd
 {
 namespace data_storage
 {
-database::database(int pid, int ppid)
+database::database(int pid, int ppid, std::string output_path)
+: m_path(std::move(output_path))
 {
-    auto _tag    = std::to_string(pid);
-    auto db_name = std::string{ "rocpd" };
-    m_path       = rocprofsys::get_database_absolute_path(db_name, _tag);
     create_directory_for_database_file(m_path);
     LOG_INFO("Database: {}", m_path);
 

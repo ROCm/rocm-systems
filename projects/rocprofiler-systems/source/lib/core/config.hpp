@@ -435,16 +435,6 @@ get_causal_fixed_speedup();
 std::string
 get_causal_output_filename();
 
-struct output_file
-{
-    std::string label;
-    std::string path;
-    std::string viewer;
-};
-
-void
-print_output_summary(const std::vector<output_file>& entries);
-
 std::vector<std::string>
 get_causal_binary_scope();
 

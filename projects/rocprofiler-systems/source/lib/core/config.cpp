@@ -2864,33 +2864,6 @@ get_causal_output_filename()
     return _fname;
 }
 
-void
-print_output_summary(const std::vector<output_file>& entries)
-{
-    if(entries.empty()) return;
-
-    auto _msg = std::string{};
-    _msg += "\n";
-    _msg += "  ┌──────────────────────────────────────────────┐\n";
-    _msg += "  │            Output Summary                    │\n";
-    _msg += "  └──────────────────────────────────────────────┘\n";
-
-    for(size_t i = 0; i < entries.size(); ++i)
-    {
-        const auto& entry   = entries[i];
-        bool        is_last = (i + 1 == entries.size());
-        auto        branch  = is_last ? "└─" : "├─";
-        auto        cont    = is_last ? "  " : "│ ";
-
-        _msg += fmt::format("  {} {}\n", branch, entry.label);
-        _msg += fmt::format("  {}   File: {}\n", cont, entry.path);
-        _msg += fmt::format("  {}   View with: {}\n", cont, entry.viewer);
-        if(!is_last) _msg += "  │\n";
-    }
-
-    LOG_INFO("{}", _msg);
-}
-
 namespace
 {
 std::vector<std::string>

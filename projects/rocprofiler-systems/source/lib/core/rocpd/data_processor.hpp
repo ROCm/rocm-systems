@@ -206,11 +206,6 @@ public:
 
     size_t map_thread_id_to_primary_key(size_t thread_id);
 
-    [[nodiscard]] const std::string& get_database_path() const
-    {
-        return _database->get_path();
-    }
-
     void flush();
 
 private:

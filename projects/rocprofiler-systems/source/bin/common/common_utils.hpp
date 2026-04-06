@@ -8,8 +8,6 @@
 #include <initializer_list>
 #include <iostream>
 #include <string>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
@@ -24,30 +22,6 @@ get_output_directory(const char* env_var = "ROCPROFSYS_OUTPUT_PATH")
     if(output_path && strlen(output_path) > 0) return std::string(output_path);
 
     return "rocprof-sys-output";
-}
-
-inline bool
-check_directory_writable(const std::string& dir)
-{
-    struct stat st;
-    if(stat(dir.c_str(), &st) == 0)
-    {
-        return (access(dir.c_str(), W_OK) == 0);
-    }
-
-    std::string parent = dir;
-    size_t      pos    = parent.find_last_of('/');
-    if(pos != std::string::npos)
-    {
-        parent = parent.substr(0, pos);
-        if(parent.empty()) parent = ".";
-    }
-    else
-    {
-        parent = ".";
-    }
-
-    return (access(parent.c_str(), W_OK) == 0);
 }
 
 inline std::string
@@ -247,52 +221,6 @@ validate_preset_modes(const std::vector<std::string>& active_presets)
         return false;
     }
     return true;
-}
-
-inline bool
-check_rocm_available()
-{
-    return (access("/opt/rocm/bin/hipconfig", X_OK) == 0);
-}
-
-inline void
-warn_if_output_not_writable(std::string_view tool_name)
-{
-    auto output_dir = get_output_directory();
-    if(!check_directory_writable(output_dir))
-    {
-        std::cerr << "[rocprof-sys][WARNING] Output directory '" << output_dir
-                  << "' is not writable!\n";
-        std::cerr << "  Try: rocprof-sys-" << tool_name
-                  << " -o /tmp/profile -- <command>\n";
-    }
-}
-
-inline void
-validate_configuration()
-{
-    // Check for conflicting ENABLE/DISABLE categories (causes std::abort() at runtime)
-    const char* enable_cats  = std::getenv("ROCPROFSYS_ENABLE_CATEGORIES");
-    const char* disable_cats = std::getenv("ROCPROFSYS_DISABLE_CATEGORIES");
-    if(enable_cats && std::strlen(enable_cats) > 0 && disable_cats &&
-       std::strlen(disable_cats) > 0)
-    {
-        std::cerr << "[rocprof-sys][WARNING] Both ROCPROFSYS_ENABLE_CATEGORIES and "
-                     "ROCPROFSYS_DISABLE_CATEGORIES are set.\n"
-                  << "  This will cause an abort at runtime. Use only one.\n"
-                  << "  ROCPROFSYS_ENABLE_CATEGORIES=" << enable_cats << "\n"
-                  << "  ROCPROFSYS_DISABLE_CATEGORIES=" << disable_cats << "\n";
-    }
-
-    // Check ROCPROFSYS_TMPDIR writability
-    const char* tmpdir     = std::getenv("ROCPROFSYS_TMPDIR");
-    auto        tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
-    if(!check_directory_writable(tmpdir_str))
-    {
-        std::cerr << "[rocprof-sys][WARNING] Temp directory '" << tmpdir_str
-                  << "' is not writable!\n"
-                  << "  Try: export ROCPROFSYS_TMPDIR=/tmp\n";
-    }
 }
 
 }  // namespace common_utils

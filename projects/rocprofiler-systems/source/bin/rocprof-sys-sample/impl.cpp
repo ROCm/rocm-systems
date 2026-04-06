@@ -1313,9 +1313,6 @@ PROFILING WORKFLOW:
         rocprofsys::common_utils::print_pre_execution_info("sample", active_presets[0]);
     }
 
-    rocprofsys::common_utils::warn_if_output_not_writable("sample");
-    rocprofsys::common_utils::validate_configuration();
-
     return _outv;
 }
 
