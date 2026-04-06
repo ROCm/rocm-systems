@@ -8,9 +8,9 @@
 cmake_minimum_required(VERSION 3.25)
 project(hip-remote-worker VERSION 1.0.0 LANGUAGES C CXX)
 
-# Only build on Linux (requires real HIP runtime)
-if(NOT UNIX OR APPLE)
-  message(STATUS "hip-remote-worker: Skipping (not Linux)")
+# Build on Linux or Windows (requires real HIP runtime)
+if(APPLE)
+  message(STATUS "hip-remote-worker: Skipping (not Linux/Windows)")
   return()
 endif()
 
@@ -40,11 +40,15 @@ if(NOT hip_FOUND)
 endif()
 
 if(NOT hip_FOUND)
-  message(WARNING "hip-remote-worker: HIP not found, skipping build")
-  return()
+  if(WIN32 AND ROCM_PATH AND EXISTS "${ROCM_PATH}/include/hip/hip_runtime.h")
+    message(STATUS "hip-remote-worker: Using HIP headers from ${ROCM_PATH}/include")
+  else()
+    message(WARNING "hip-remote-worker: HIP not found, skipping build")
+    return()
+  endif()
+else()
+  message(STATUS "hip-remote-worker: Found HIP at ${hip_DIR}")
 endif()
-
-message(STATUS "hip-remote-worker: Found HIP at ${hip_DIR}")
 
 ################################################################################
 # Include paths (for protocol header)
@@ -71,10 +75,21 @@ target_include_directories(hip-worker PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(hip-worker PRIVATE
-  hip::host
-  pthread
-)
+if(WIN32)
+  target_link_libraries(hip-worker PRIVATE ws2_32)
+  target_compile_definitions(hip-worker PRIVATE __HIP_PLATFORM_AMD__=1)
+  if(ROCM_PATH)
+    target_include_directories(hip-worker PRIVATE "${ROCM_PATH}/include")
+    # Link against the real HIP DLL in _rocm_sdk_core/bin
+    string(REPLACE "_rocm_sdk_devel" "_rocm_sdk_core" ROCM_CORE_PATH "${ROCM_PATH}")
+    target_link_directories(hip-worker PRIVATE "${ROCM_CORE_PATH}/bin")
+    target_link_libraries(hip-worker PRIVATE amdhip64_7)
+  else()
+    target_link_libraries(hip-worker PRIVATE hip::host)
+  endif()
+else()
+  target_link_libraries(hip-worker PRIVATE hip::host pthread)
+endif()
 
 ################################################################################
 # AMD SMI Integration (optional)

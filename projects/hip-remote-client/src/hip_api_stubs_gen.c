@@ -335,8 +335,8 @@ hipError_t hipGraphicsSubResourceGetMappedArray(void) { return 801; }
 hipError_t hipGraphicsUnmapResources(void) { return 801; }
 hipError_t hipGraphicsUnregisterResource(void) { return 801; }
 hipError_t hipHccModuleLaunchKernel(void) { return 801; }
-hipError_t hipHostAlloc(void) { return 801; }
-hipError_t hipHostGetDevicePointer(void) { return 801; }
+/* hipHostAlloc -> moved to hip_api_device.c */
+/* hipHostGetDevicePointer -> moved to hip_api_device.c */
 hipError_t hipHostGetFlags(void) { return 801; }
 hipError_t hipImportExternalMemory(void) { return 801; }
 hipError_t hipImportExternalSemaphore(void) { return 801; }

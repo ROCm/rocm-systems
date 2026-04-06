@@ -539,6 +539,16 @@ hipError_t hipHostFree(void* ptr) {
     return hipFreeHost(ptr);
 }
 
+hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
+    return hipHostMalloc(ptr, size, flags);
+}
+
+hipError_t hipHostGetDevicePointer(void** devPtr, void* hostPtr, unsigned int flags) {
+    if (!devPtr) return hipErrorInvalidValue;
+    *devPtr = hostPtr;
+    return hipSuccess;
+}
+
 hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
     hip_remote_log_debug("hipHostRegister: ptr=%p size=%zu flags=0x%x (not supported remotely)",
                          hostPtr, sizeBytes, flags);

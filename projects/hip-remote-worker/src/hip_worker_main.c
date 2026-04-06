@@ -22,25 +22,60 @@
  * HIP API requests from remote clients (e.g., macOS).
  */
 
+#ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include <errno.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#pragma comment(lib, "ws2_32.lib")
+typedef SOCKET hip_worker_socket_t;
+#define HIP_WORKER_INVALID_SOCKET INVALID_SOCKET
+#define close_socket closesocket
+static int worker_socket_init(void) {
+    WSADATA wsa;
+    return WSAStartup(MAKEWORD(2, 2), &wsa);
+}
+static void worker_socket_cleanup(void) { WSACleanup(); }
+#else
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <dlfcn.h>
+typedef int hip_worker_socket_t;
+#define HIP_WORKER_INVALID_SOCKET (-1)
+#define close_socket close
+static int worker_socket_init(void) { return 0; }
+static void worker_socket_cleanup(void) {}
+#endif
+
+#ifdef _WIN32
+#define getpid _getpid
+#include <process.h>
+#include <signal.h>
+#endif
 
 #include <hip/hip_runtime.h>
+
+#ifdef _WIN32
+extern hipError_t hipExtModuleLaunchKernel(hipFunction_t, unsigned int, unsigned int,
+    unsigned int, unsigned int, unsigned int, unsigned int, size_t, hipStream_t,
+    void**, void**, hipEvent_t, hipEvent_t, unsigned int);
+#endif
 
 /* Include protocol from client */
 #include "hip_remote/hip_remote_protocol.h"
@@ -654,10 +689,19 @@ static struct {
 static int load_comgr(void) {
     if (g_comgr.loaded) return g_comgr.lib != NULL;
     g_comgr.loaded = 1;
+#ifdef _WIN32
+    g_comgr.lib = (void*)LoadLibraryA("amd_comgr0702.dll");
+    if (!g_comgr.lib) g_comgr.lib = (void*)LoadLibraryA("amd_comgr.dll");
+#else
     g_comgr.lib = dlopen("libamd_comgr.so", RTLD_LAZY);
+#endif
     if (!g_comgr.lib) return 0;
 
+#ifdef _WIN32
+    #define LOAD_FN(name) g_comgr.name = (pfn_##name)(void*)GetProcAddress((HMODULE)g_comgr.lib, "amd_comgr_" #name)
+#else
     #define LOAD_FN(name) g_comgr.name = (pfn_##name)dlsym(g_comgr.lib, "amd_comgr_" #name)
+#endif
     LOAD_FN(create_data);
     LOAD_FN(set_data);
     LOAD_FN(get_data_metadata);
@@ -734,10 +778,18 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
                 static pfn_ZSTD_isError fn_isError = NULL;
                 static int zstd_loaded = 0;
                 if (!zstd_loaded) {
+#ifdef _WIN32
+                    void* zlib = (void*)LoadLibraryA("zstd.dll");
+                    if (!zlib) zlib = (void*)LoadLibraryA("libzstd.dll");
+                    if (zlib) {
+                        fn_decompress = (pfn_ZSTD_decompress)(void*)GetProcAddress((HMODULE)zlib, "ZSTD_decompress");
+                        fn_isError = (pfn_ZSTD_isError)(void*)GetProcAddress((HMODULE)zlib, "ZSTD_isError");
+#else
                     void* zlib = dlopen("libzstd.so", RTLD_LAZY);
                     if (zlib) {
                         fn_decompress = (pfn_ZSTD_decompress)dlsym(zlib, "ZSTD_decompress");
                         fn_isError = (pfn_ZSTD_isError)dlsym(zlib, "ZSTD_isError");
+#endif
                     }
                     zstd_loaded = 1;
                 }
@@ -989,19 +1041,24 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
 static int send_all(int fd, const void* data, size_t len) {
     const uint8_t* p = (const uint8_t*)data;
     while (len > 0) {
-#ifdef MSG_NOSIGNAL
+#ifdef _WIN32
+        int chunk = len > 0x7FFFFFFF ? 0x7FFFFFFF : (int)len;
+        int n = send(fd, (const char*)p, chunk, 0);
+#elif defined(MSG_NOSIGNAL)
         ssize_t n = send(fd, p, len, MSG_NOSIGNAL);
 #else
         ssize_t n = send(fd, p, len, 0);
 #endif
         if (n < 0) {
+#ifdef _WIN32
+            int err = WSAGetLastError();
+            if (err == WSAEINTR) continue;
+#else
             if (errno == EINTR) continue;
+#endif
             return -1;
         }
-        if (n == 0) {
-            errno = EPIPE;
-            return -1;
-        }
+        if (n == 0) return -1;
         p += (size_t)n;
         len -= (size_t)n;
     }
@@ -1011,15 +1068,22 @@ static int send_all(int fd, const void* data, size_t len) {
 static int recv_all(int fd, void* data, size_t len) {
     uint8_t* p = (uint8_t*)data;
     while (len > 0) {
+#ifdef _WIN32
+        int chunk = len > 0x7FFFFFFF ? 0x7FFFFFFF : (int)len;
+        int n = recv(fd, (char*)p, chunk, 0);
+#else
         ssize_t n = recv(fd, p, len, 0);
+#endif
         if (n < 0) {
+#ifdef _WIN32
+            int err = WSAGetLastError();
+            if (err == WSAEINTR) continue;
+#else
             if (errno == EINTR) continue;
+#endif
             return -1;
         }
-        if (n == 0) {
-            errno = ECONNRESET;
-            return -1;
-        }
+        if (n == 0) return -1;
         p += (size_t)n;
         len -= (size_t)n;
     }
@@ -1333,7 +1397,11 @@ static void handle_malloc_vaddr(int fd, uint32_t request_id,
         if (err == hipSuccess && ptr) break;
         if (attempt < 2) {
             hipDeviceSynchronize();
+#ifdef _WIN32
+            Sleep(attempt + 1);
+#else
             usleep(1000 * (attempt + 1));
+#endif
         }
     }
 
@@ -4410,7 +4478,7 @@ static void handle_mempool_get_attribute(int fd, uint32_t request_id,
     HipRemoteMemPoolAttrResponse resp;
     memset(&resp, 0, sizeof(resp));
     hipMemPool_t pool = (hipMemPool_t)(uintptr_t)req->mem_pool;
-    hipError_t err = hipMemPoolGetAttribute(pool, (hipMemPoolAttr)req->attr, resp.value);
+    hipError_t err = hipMemPoolGetAttribute(pool, (hipMemPoolAttr)req->attr, (void*)&resp.value);
     resp.header.error_code = (int32_t)err;
     send_response(fd, HIP_OP_MEMPOOL_GET_ATTRIBUTE, request_id, &resp, sizeof(resp));
 }
@@ -4958,7 +5026,7 @@ static void handle_client(int client_fd) {
     }
 
 client_done:
-    close(client_fd);
+    close_socket(client_fd);
     LOG_INFO("Client disconnected");
 }
 
@@ -4966,17 +5034,23 @@ client_done:
  * Signal Handling
  * ============================================================================ */
 
+#ifndef _WIN32
 static void sigchld_handler(int sig) {
     (void)sig;
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
+#endif
 
 static void signal_handler(int sig) {
     (void)sig;
     g_running = false;
     if (g_server_fd >= 0) {
+#ifdef _WIN32
+        shutdown(g_server_fd, SD_BOTH);
+#else
         shutdown(g_server_fd, SHUT_RDWR);
-        close(g_server_fd);
+#endif
+        close_socket(g_server_fd);
         g_server_fd = -1;
     }
 }
@@ -5010,6 +5084,7 @@ int main(int argc, char** argv) {
     if (debug && strcmp(debug, "1") == 0) g_debug_enabled = true;
 
     /* Parse arguments */
+#ifndef _WIN32
     int opt;
     while ((opt = getopt(argc, argv, "p:d:vh")) != -1) {
         switch (opt) {
@@ -5030,12 +5105,24 @@ int main(int argc, char** argv) {
                 return 1;
         }
     }
+#else
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) g_listen_port = atoi(argv[++i]);
+        else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) g_default_device = atoi(argv[++i]);
+        else if (strcmp(argv[i], "-v") == 0) g_debug_enabled = true;
+        else if (strcmp(argv[i], "-h") == 0) { print_usage(argv[0]); return 0; }
+    }
+#endif
 
-    /* Set up signal handlers */
+#ifdef _WIN32
+    worker_socket_init();
+    signal(SIGINT, signal_handler);
+#else
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     signal(SIGCHLD, sigchld_handler);
+#endif
 
     /* Check if content caching is requested */
     const char* cache_env = getenv("HIP_REMOTE_CACHE");
@@ -5073,7 +5160,7 @@ int main(int argc, char** argv) {
     }
 
     int opt_val = 1;
-    setsockopt(g_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt_val, sizeof(opt_val));
+    setsockopt(g_server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt_val, sizeof(opt_val));
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -5107,9 +5194,15 @@ int main(int argc, char** argv) {
         }
 
         int nodelay = 1;
-        setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+        setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
         int keepalive = 1;
-        setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive));
+        setsockopt(client_fd, SOL_SOCKET, SO_KEEPALIVE, (const char*)&keepalive, sizeof(keepalive));
+#ifdef _WIN32
+        if (g_gpu_cache_enabled) {
+            DWORD tv_ms = 120000;
+            setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv_ms, sizeof(tv_ms));
+        }
+#else
         int keepidle = g_gpu_cache_enabled ? 5 : 300;
         int keepintvl = g_gpu_cache_enabled ? 2 : 60;
         int keepcnt = g_gpu_cache_enabled ? 3 : 5;
@@ -5120,10 +5213,24 @@ int main(int argc, char** argv) {
         setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
         setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
         setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+#endif
 
+#ifdef _WIN32
+        /* Windows: always sequential mode (no fork) */
+        if (!g_hip_initialized) {
+            hipError_t herr = hipSetDevice(g_default_device);
+            if (herr != hipSuccess) {
+                LOG_ERROR("HIP init failed: %s", hipGetErrorString(herr));
+                close_socket(client_fd);
+                continue;
+            }
+            g_hip_initialized = 1;
+            if (g_gpu_cache_enabled) gpu_cache_size_from_vram();
+        }
+        reset_session_state();
+        handle_client(client_fd);
+#else
         if (g_gpu_cache_enabled) {
-            /* Sequential mode: handle client inline so the GPU content cache
-             * persists across client sessions.  Only one client at a time. */
             if (!g_hip_initialized) {
                 hipError_t herr = hipSetDevice(g_default_device);
                 if (herr != hipSuccess) {
@@ -5159,10 +5266,11 @@ int main(int argc, char** argv) {
         }
 
         close(client_fd);
+#endif
     }
 
     if (g_server_fd >= 0) {
-        close(g_server_fd);
+        close_socket(g_server_fd);
     }
 
 #ifdef HIP_WORKER_SMI_ENABLED
