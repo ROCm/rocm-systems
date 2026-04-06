@@ -16,7 +16,8 @@ namespace rocjitsu {
 namespace rdna3 {
 
 VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
-    : Vinterp("v_interp_p10_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vinterp("v_interp_p10_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<VInterpP10F32Vinterp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -27,12 +28,13 @@ VInterpP10F32Vinterp::VInterpP10F32Vinterp(const MachineInst *inst)
   src_operands_.emplace_back(&src2);
 }
 
-void VInterpP10F32Vinterp::execute(amdgpu::Wavefront &wf) {
+void VInterpP10F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
-    : Vinterp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vinterp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<VInterpP2F32Vinterp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -43,12 +45,13 @@ VInterpP2F32Vinterp::VInterpP2F32Vinterp(const MachineInst *inst)
   src_operands_.emplace_back(&src2);
 }
 
-void VInterpP2F32Vinterp::execute(amdgpu::Wavefront &wf) {
+void VInterpP2F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
-    : Vinterp("v_interp_p10_f16_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vinterp("v_interp_p10_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<VInterpP10F16F32Vinterp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -59,12 +62,13 @@ VInterpP10F16F32Vinterp::VInterpP10F16F32Vinterp(const MachineInst *inst)
   src_operands_.emplace_back(&src2);
 }
 
-void VInterpP10F16F32Vinterp::execute(amdgpu::Wavefront &wf) {
+void VInterpP10F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
-    : Vinterp("v_interp_p2_f16_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vinterp("v_interp_p2_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<VInterpP2F16F32Vinterp>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -75,12 +79,13 @@ VInterpP2F16F32Vinterp::VInterpP2F16F32Vinterp(const MachineInst *inst)
   src_operands_.emplace_back(&src2);
 }
 
-void VInterpP2F16F32Vinterp::execute(amdgpu::Wavefront &wf) {
+void VInterpP2F16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
-    : Vinterp("v_interp_p10_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vinterp("v_interp_p10_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<VInterpP10RtzF16F32Vinterp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -91,12 +96,13 @@ VInterpP10RtzF16F32Vinterp::VInterpP10RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_.emplace_back(&src2);
 }
 
-void VInterpP10RtzF16F32Vinterp::execute(amdgpu::Wavefront &wf) {
+void VInterpP10RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
-    : Vinterp("v_interp_p2_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vinterp("v_interp_p2_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<VInterpP2RtzF16F32Vinterp>()),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -107,7 +113,7 @@ VInterpP2RtzF16F32Vinterp::VInterpP2RtzF16F32Vinterp(const MachineInst *inst)
   src_operands_.emplace_back(&src2);
 }
 
-void VInterpP2RtzF16F32Vinterp::execute(amdgpu::Wavefront &wf) {
+void VInterpP2RtzF16F32Vinterp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 

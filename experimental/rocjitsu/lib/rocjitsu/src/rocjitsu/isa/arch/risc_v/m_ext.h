@@ -14,7 +14,7 @@ namespace detail {
 class MulInst : public RType {
 public:
   MulInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -23,7 +23,7 @@ private:
 class MulhInst : public RType {
 public:
   MulhInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -32,7 +32,7 @@ private:
 class MulhsuInst : public RType {
 public:
   MulhsuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -41,7 +41,7 @@ private:
 class MulhuInst : public RType {
 public:
   MulhuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -50,7 +50,7 @@ private:
 class DivInst : public RType {
 public:
   DivInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -59,7 +59,7 @@ private:
 class DivuInst : public RType {
 public:
   DivuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -68,7 +68,7 @@ private:
 class RemInst : public RType {
 public:
   RemInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -77,7 +77,7 @@ private:
 class RemuInst : public RType {
 public:
   RemuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -86,7 +86,7 @@ private:
 class MulwInst : public RType {
 public:
   MulwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -95,7 +95,7 @@ private:
 class DivwInst : public RType {
 public:
   DivwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -104,7 +104,7 @@ private:
 class DivuwInst : public RType {
 public:
   DivuwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -113,7 +113,7 @@ private:
 class RemwInst : public RType {
 public:
   RemwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -122,7 +122,7 @@ private:
 class RemuwInst : public RType {
 public:
   RemuwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;

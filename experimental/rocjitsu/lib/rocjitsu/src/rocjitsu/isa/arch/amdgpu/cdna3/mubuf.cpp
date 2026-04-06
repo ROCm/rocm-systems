@@ -23,7 +23,8 @@ namespace rocjitsu {
 namespace cdna3 {
 
 BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadFormatXMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -36,10 +37,11 @@ BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferLoadFormatXMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadFormatXyMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -52,10 +54,11 @@ BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferLoadFormatXyMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadFormatXyzMubuf>()),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -68,10 +71,11 @@ BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferLoadFormatXyzMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadFormatXyzwMubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -84,10 +88,11 @@ BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferLoadFormatXyzwMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreFormatXMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -100,10 +105,11 @@ BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferStoreFormatXMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreFormatXyMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -116,10 +122,11 @@ BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferStoreFormatXyMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreFormatXyzMubuf>()),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -132,10 +139,11 @@ BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferStoreFormatXyzMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreFormatXyzwMubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -148,10 +156,11 @@ BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferStoreFormatXyzwMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_x", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadFormatD16XMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -164,10 +173,11 @@ BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferLoadFormatD16XMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadFormatD16XyMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -180,10 +190,11 @@ BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferLoadFormatD16XyMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadFormatD16XyzMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -196,10 +207,11 @@ BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferLoadFormatD16XyzMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadFormatD16XyzwMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -212,10 +224,11 @@ BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *in
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferLoadFormatD16XyzwMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_x", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreFormatD16XMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -228,10 +241,11 @@ BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferStoreFormatD16XMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreFormatD16XyMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -244,10 +258,11 @@ BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferStoreFormatD16XyMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreFormatD16XyzMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -260,10 +275,11 @@ BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *in
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferStoreFormatD16XyzMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreFormatD16XyzwMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -276,10 +292,11 @@ BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferStoreFormatD16XyzwMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_ubyte", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_ubyte", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadUbyteMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -293,7 +310,7 @@ BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadUbyteMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadUbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 1;
@@ -306,7 +323,8 @@ void BufferLoadUbyteMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_sbyte", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_sbyte", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadSbyteMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -320,7 +338,7 @@ BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadSbyteMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadSbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 1;
@@ -334,7 +352,8 @@ void BufferLoadSbyteMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_ushort", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_ushort", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadUshortMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -348,7 +367,7 @@ BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadUshortMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadUshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 2;
@@ -361,7 +380,8 @@ void BufferLoadUshortMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_sshort", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_sshort", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadSshortMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -375,7 +395,7 @@ BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadSshortMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadSshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 2;
@@ -389,7 +409,8 @@ void BufferLoadSshortMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadDwordMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -403,7 +424,7 @@ BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadDwordMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -416,7 +437,8 @@ void BufferLoadDwordMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadDwordx2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -430,7 +452,7 @@ BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadDwordx2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -443,7 +465,8 @@ void BufferLoadDwordx2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_dwordx3", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadDwordx3Mubuf>()),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -457,7 +480,7 @@ BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadDwordx3Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -470,7 +493,8 @@ void BufferLoadDwordx3Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadDwordx4Mubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -484,7 +508,7 @@ BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadDwordx4Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -497,7 +521,8 @@ void BufferLoadDwordx4Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_byte", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_byte", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreByteMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -511,7 +536,7 @@ BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreByteMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferStoreByteMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
@@ -532,7 +557,8 @@ void BufferStoreByteMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_byte_d16_hi", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_byte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreByteD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -546,7 +572,7 @@ BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreByteD16HiMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferStoreByteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
@@ -567,7 +593,8 @@ void BufferStoreByteD16HiMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_short", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_short", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreShortMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -581,7 +608,7 @@ BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreShortMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferStoreShortMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
@@ -602,7 +629,8 @@ void BufferStoreShortMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreShortD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -616,7 +644,7 @@ BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreShortD16HiMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferStoreShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
@@ -637,7 +665,8 @@ void BufferStoreShortD16HiMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_dword", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_dword", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreDwordMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -651,7 +680,7 @@ BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreDwordMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferStoreDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -672,7 +701,8 @@ void BufferStoreDwordMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreDwordx2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -686,7 +716,7 @@ BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreDwordx2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferStoreDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 2;
@@ -709,7 +739,8 @@ void BufferStoreDwordx2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_dwordx3", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreDwordx3Mubuf>()),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -723,7 +754,7 @@ BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreDwordx3Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferStoreDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 3;
@@ -748,7 +779,8 @@ void BufferStoreDwordx3Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreDwordx4Mubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -762,7 +794,7 @@ BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreDwordx4Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferStoreDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 4;
@@ -789,7 +821,8 @@ void BufferStoreDwordx4Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_ubyte_d16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_ubyte_d16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadUbyteD16Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -803,7 +836,7 @@ BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadUbyteD16Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadUbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 1;
@@ -816,7 +849,8 @@ void BufferLoadUbyteD16Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadUbyteD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -830,7 +864,7 @@ BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadUbyteD16HiMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadUbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 1;
@@ -843,7 +877,8 @@ void BufferLoadUbyteD16HiMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_sbyte_d16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_sbyte_d16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadSbyteD16Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -857,7 +892,7 @@ BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadSbyteD16Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadSbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 1;
@@ -871,7 +906,8 @@ void BufferLoadSbyteD16Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadSbyteD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -885,7 +921,7 @@ BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadSbyteD16HiMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadSbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 1;
@@ -899,7 +935,8 @@ void BufferLoadSbyteD16HiMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_short_d16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_short_d16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadShortD16Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -913,7 +950,7 @@ BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadShortD16Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadShortD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 2;
@@ -926,7 +963,8 @@ void BufferLoadShortD16Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadShortD16HiMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -940,7 +978,7 @@ BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadShortD16HiMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferLoadShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 2;
@@ -953,7 +991,8 @@ void BufferLoadShortD16HiMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst)
-    : Mubuf("buffer_load_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_load_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferLoadFormatD16HiXMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -966,10 +1005,11 @@ BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferLoadFormatD16HiXMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferLoadFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *inst)
-    : Mubuf("buffer_store_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_store_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferStoreFormatD16HiXMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -982,20 +1022,23 @@ BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *in
   src_operands_.emplace_back(&soffset);
 }
 
-void BufferStoreFormatD16HiXMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferStoreFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferWbl2Mubuf::BufferWbl2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_wbl2", reinterpret_cast<const OpEncoding *>(inst)) {}
+    : Mubuf("buffer_wbl2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferWbl2Mubuf>()) {}
 
-void BufferWbl2Mubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferWbl2Mubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferInvMubuf::BufferInvMubuf(const MachineInst *inst)
-    : Mubuf("buffer_inv", reinterpret_cast<const OpEncoding *>(inst)) {}
+    : Mubuf("buffer_inv", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferInvMubuf>()) {}
 
-void BufferInvMubuf::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void BufferInvMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicSwapMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1010,7 +1053,7 @@ BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSwapMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicSwapMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1033,7 +1076,8 @@ void BufferAtomicSwapMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicCmpswapMubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1048,7 +1092,7 @@ BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicCmpswapMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicCmpswapMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1073,7 +1117,8 @@ void BufferAtomicCmpswapMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_add", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicAddMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1088,7 +1133,7 @@ BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAddMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicAddMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1111,7 +1156,8 @@ void BufferAtomicAddMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_sub", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicSubMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1126,7 +1172,7 @@ BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSubMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicSubMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1149,7 +1195,8 @@ void BufferAtomicSubMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_smin", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicSminMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1164,7 +1211,7 @@ BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSminMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicSminMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1187,7 +1234,8 @@ void BufferAtomicSminMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_umin", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicUminMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1202,7 +1250,7 @@ BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicUminMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicUminMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1225,7 +1273,8 @@ void BufferAtomicUminMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_smax", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicSmaxMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1240,7 +1289,7 @@ BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSmaxMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicSmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1263,7 +1312,8 @@ void BufferAtomicSmaxMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_umax", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicUmaxMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1278,7 +1328,7 @@ BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicUmaxMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicUmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1301,7 +1351,8 @@ void BufferAtomicUmaxMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_and", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicAndMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1316,7 +1367,7 @@ BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAndMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicAndMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1339,7 +1390,8 @@ void BufferAtomicAndMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_or", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicOrMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1354,7 +1406,7 @@ BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicOrMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicOrMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1377,7 +1429,8 @@ void BufferAtomicOrMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_xor", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicXorMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1392,7 +1445,7 @@ BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicXorMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicXorMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1415,7 +1468,8 @@ void BufferAtomicXorMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_inc", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicIncMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1430,7 +1484,7 @@ BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicIncMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicIncMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1453,7 +1507,8 @@ void BufferAtomicIncMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_dec", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicDecMubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1468,7 +1523,7 @@ BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicDecMubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicDecMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1491,7 +1546,8 @@ void BufferAtomicDecMubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicAddF32Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1506,7 +1562,7 @@ BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAddF32Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicAddF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1529,7 +1585,8 @@ void BufferAtomicAddF32Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicPkAddF16Mubuf>()),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1544,7 +1601,7 @@ BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicPkAddF16Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicPkAddF16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1567,7 +1624,8 @@ void BufferAtomicPkAddF16Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicAddF64Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1582,7 +1640,7 @@ BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAddF64Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicAddF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1607,7 +1665,8 @@ void BufferAtomicAddF64Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_min_f64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_min_f64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicMinF64Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1622,7 +1681,7 @@ BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicMinF64Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicMinF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1647,7 +1706,8 @@ void BufferAtomicMinF64Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_max_f64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_max_f64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicMaxF64Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1662,7 +1722,7 @@ BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicMaxF64Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicMaxF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
@@ -1687,7 +1747,8 @@ void BufferAtomicMaxF64Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicSwapX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1702,7 +1763,7 @@ BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSwapX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicSwapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -1727,7 +1788,8 @@ void BufferAtomicSwapX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicCmpswapX2Mubuf>()),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1742,7 +1804,7 @@ BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicCmpswapX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicCmpswapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -1771,7 +1833,8 @@ void BufferAtomicCmpswapX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicAddX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1786,7 +1849,7 @@ BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAddX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicAddX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -1811,7 +1874,8 @@ void BufferAtomicAddX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicSubX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1826,7 +1890,7 @@ BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSubX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicSubX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -1851,7 +1915,8 @@ void BufferAtomicSubX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicSminX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1866,7 +1931,7 @@ BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSminX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicSminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -1891,7 +1956,8 @@ void BufferAtomicSminX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicUminX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1906,7 +1972,7 @@ BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicUminX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicUminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -1931,7 +1997,8 @@ void BufferAtomicUminX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicSmaxX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1946,7 +2013,7 @@ BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSmaxX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicSmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -1971,7 +2038,8 @@ void BufferAtomicSmaxX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicUmaxX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -1986,7 +2054,7 @@ BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicUmaxX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicUmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -2011,7 +2079,8 @@ void BufferAtomicUmaxX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicAndX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2026,7 +2095,7 @@ BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAndX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicAndX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -2051,7 +2120,8 @@ void BufferAtomicAndX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicOrX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2066,7 +2136,7 @@ BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicOrX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicOrX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -2091,7 +2161,8 @@ void BufferAtomicOrX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicXorX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2106,7 +2177,7 @@ BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicXorX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicXorX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -2131,7 +2202,8 @@ void BufferAtomicXorX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicIncX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2146,7 +2218,7 @@ BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicIncX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicIncX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;
@@ -2171,7 +2243,8 @@ void BufferAtomicIncX2Mubuf::execute(amdgpu::Wavefront &wf) {
 }
 
 BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
-    : Mubuf("buffer_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mubuf("buffer_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<BufferAtomicDecX2Mubuf>()),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
@@ -2186,7 +2259,7 @@ BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicDecX2Mubuf::execute(amdgpu::Wavefront &wf) {
+void BufferAtomicDecX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 8;

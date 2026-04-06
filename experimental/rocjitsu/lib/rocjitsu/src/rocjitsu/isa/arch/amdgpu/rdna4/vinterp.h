@@ -16,7 +16,7 @@ namespace rdna4 {
 class VInterpP10F32Vinterp : public Vinterp {
 public:
   VInterpP10F32Vinterp(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -26,7 +26,7 @@ public:
 class VInterpP2F32Vinterp : public Vinterp {
 public:
   VInterpP2F32Vinterp(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -36,7 +36,7 @@ public:
 class VInterpP10F16F32Vinterp : public Vinterp {
 public:
   VInterpP10F16F32Vinterp(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -46,7 +46,7 @@ public:
 class VInterpP2F16F32Vinterp : public Vinterp {
 public:
   VInterpP2F16F32Vinterp(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -56,7 +56,7 @@ public:
 class VInterpP10RtzF16F32Vinterp : public Vinterp {
 public:
   VInterpP10RtzF16F32Vinterp(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -66,7 +66,7 @@ public:
 class VInterpP2RtzF16F32Vinterp : public Vinterp {
 public:
   VInterpP2RtzF16F32Vinterp(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;

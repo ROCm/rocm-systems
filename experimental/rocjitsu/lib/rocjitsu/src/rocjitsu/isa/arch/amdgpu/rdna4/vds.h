@@ -16,7 +16,7 @@ namespace rdna4 {
 class DsAddU32Vds : public Vds {
 public:
   DsAddU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -24,7 +24,7 @@ public:
 class DsSubU32Vds : public Vds {
 public:
   DsSubU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -32,7 +32,7 @@ public:
 class DsRsubU32Vds : public Vds {
 public:
   DsRsubU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -40,7 +40,7 @@ public:
 class DsIncU32Vds : public Vds {
 public:
   DsIncU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -48,7 +48,7 @@ public:
 class DsDecU32Vds : public Vds {
 public:
   DsDecU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -56,7 +56,7 @@ public:
 class DsMinI32Vds : public Vds {
 public:
   DsMinI32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -64,7 +64,7 @@ public:
 class DsMaxI32Vds : public Vds {
 public:
   DsMaxI32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -72,7 +72,7 @@ public:
 class DsMinU32Vds : public Vds {
 public:
   DsMinU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -80,7 +80,7 @@ public:
 class DsMaxU32Vds : public Vds {
 public:
   DsMaxU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -88,7 +88,7 @@ public:
 class DsAndB32Vds : public Vds {
 public:
   DsAndB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -96,7 +96,7 @@ public:
 class DsOrB32Vds : public Vds {
 public:
   DsOrB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -104,7 +104,7 @@ public:
 class DsXorB32Vds : public Vds {
 public:
   DsXorB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -112,7 +112,7 @@ public:
 class DsMskorB32Vds : public Vds {
 public:
   DsMskorB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand data1;
@@ -121,7 +121,7 @@ public:
 class DsStoreB32Vds : public Vds {
 public:
   DsStoreB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -129,7 +129,7 @@ public:
 class DsStore2addrB32Vds : public Vds {
 public:
   DsStore2addrB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand data1;
@@ -138,7 +138,7 @@ public:
 class DsStore2addrStride64B32Vds : public Vds {
 public:
   DsStore2addrStride64B32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand data1;
@@ -147,7 +147,7 @@ public:
 class DsCmpstoreB32Vds : public Vds {
 public:
   DsCmpstoreB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand data1;
@@ -156,7 +156,7 @@ public:
 class DsMinNumF32Vds : public Vds {
 public:
   DsMinNumF32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -164,7 +164,7 @@ public:
 class DsMaxNumF32Vds : public Vds {
 public:
   DsMaxNumF32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -172,13 +172,13 @@ public:
 class DsNopVds : public Vds {
 public:
   DsNopVds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
 };
 
 class DsAddF32Vds : public Vds {
 public:
   DsAddF32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -186,7 +186,7 @@ public:
 class DsStoreB8Vds : public Vds {
 public:
   DsStoreB8Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -194,7 +194,7 @@ public:
 class DsStoreB16Vds : public Vds {
 public:
   DsStoreB16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -202,7 +202,7 @@ public:
 class DsAddRtnU32Vds : public Vds {
 public:
   DsAddRtnU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -211,7 +211,7 @@ public:
 class DsSubRtnU32Vds : public Vds {
 public:
   DsSubRtnU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -220,7 +220,7 @@ public:
 class DsRsubRtnU32Vds : public Vds {
 public:
   DsRsubRtnU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -229,7 +229,7 @@ public:
 class DsIncRtnU32Vds : public Vds {
 public:
   DsIncRtnU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -238,7 +238,7 @@ public:
 class DsDecRtnU32Vds : public Vds {
 public:
   DsDecRtnU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -247,7 +247,7 @@ public:
 class DsMinRtnI32Vds : public Vds {
 public:
   DsMinRtnI32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -256,7 +256,7 @@ public:
 class DsMaxRtnI32Vds : public Vds {
 public:
   DsMaxRtnI32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -265,7 +265,7 @@ public:
 class DsMinRtnU32Vds : public Vds {
 public:
   DsMinRtnU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -274,7 +274,7 @@ public:
 class DsMaxRtnU32Vds : public Vds {
 public:
   DsMaxRtnU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -283,7 +283,7 @@ public:
 class DsAndRtnB32Vds : public Vds {
 public:
   DsAndRtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -292,7 +292,7 @@ public:
 class DsOrRtnB32Vds : public Vds {
 public:
   DsOrRtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -301,7 +301,7 @@ public:
 class DsXorRtnB32Vds : public Vds {
 public:
   DsXorRtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -310,7 +310,7 @@ public:
 class DsMskorRtnB32Vds : public Vds {
 public:
   DsMskorRtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -320,7 +320,7 @@ public:
 class DsStorexchgRtnB32Vds : public Vds {
 public:
   DsStorexchgRtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -329,7 +329,7 @@ public:
 class DsStorexchg2addrRtnB32Vds : public Vds {
 public:
   DsStorexchg2addrRtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -339,7 +339,7 @@ public:
 class DsStorexchg2addrStride64RtnB32Vds : public Vds {
 public:
   DsStorexchg2addrStride64RtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -349,7 +349,7 @@ public:
 class DsCmpstoreRtnB32Vds : public Vds {
 public:
   DsCmpstoreRtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -359,7 +359,7 @@ public:
 class DsMinNumRtnF32Vds : public Vds {
 public:
   DsMinNumRtnF32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -368,7 +368,7 @@ public:
 class DsMaxNumRtnF32Vds : public Vds {
 public:
   DsMaxNumRtnF32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -377,7 +377,7 @@ public:
 class DsSwizzleB32Vds : public Vds {
 public:
   DsSwizzleB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -385,7 +385,7 @@ public:
 class DsLoadB32Vds : public Vds {
 public:
   DsLoadB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -393,7 +393,7 @@ public:
 class DsLoad2addrB32Vds : public Vds {
 public:
   DsLoad2addrB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -401,7 +401,7 @@ public:
 class DsLoad2addrStride64B32Vds : public Vds {
 public:
   DsLoad2addrStride64B32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -409,7 +409,7 @@ public:
 class DsLoadI8Vds : public Vds {
 public:
   DsLoadI8Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -417,7 +417,7 @@ public:
 class DsLoadU8Vds : public Vds {
 public:
   DsLoadU8Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -425,7 +425,7 @@ public:
 class DsLoadI16Vds : public Vds {
 public:
   DsLoadI16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -433,7 +433,7 @@ public:
 class DsLoadU16Vds : public Vds {
 public:
   DsLoadU16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -441,21 +441,21 @@ public:
 class DsConsumeVds : public Vds {
 public:
   DsConsumeVds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
 };
 
 class DsAppendVds : public Vds {
 public:
   DsAppendVds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
 };
 
 class DsAddU64Vds : public Vds {
 public:
   DsAddU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -463,7 +463,7 @@ public:
 class DsSubU64Vds : public Vds {
 public:
   DsSubU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -471,7 +471,7 @@ public:
 class DsRsubU64Vds : public Vds {
 public:
   DsRsubU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -479,7 +479,7 @@ public:
 class DsIncU64Vds : public Vds {
 public:
   DsIncU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -487,7 +487,7 @@ public:
 class DsDecU64Vds : public Vds {
 public:
   DsDecU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -495,7 +495,7 @@ public:
 class DsMinI64Vds : public Vds {
 public:
   DsMinI64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -503,7 +503,7 @@ public:
 class DsMaxI64Vds : public Vds {
 public:
   DsMaxI64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -511,7 +511,7 @@ public:
 class DsMinU64Vds : public Vds {
 public:
   DsMinU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -519,7 +519,7 @@ public:
 class DsMaxU64Vds : public Vds {
 public:
   DsMaxU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -527,7 +527,7 @@ public:
 class DsAndB64Vds : public Vds {
 public:
   DsAndB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -535,7 +535,7 @@ public:
 class DsOrB64Vds : public Vds {
 public:
   DsOrB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -543,7 +543,7 @@ public:
 class DsXorB64Vds : public Vds {
 public:
   DsXorB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -551,7 +551,7 @@ public:
 class DsMskorB64Vds : public Vds {
 public:
   DsMskorB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand data1;
@@ -560,7 +560,7 @@ public:
 class DsStoreB64Vds : public Vds {
 public:
   DsStoreB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -568,7 +568,7 @@ public:
 class DsStore2addrB64Vds : public Vds {
 public:
   DsStore2addrB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand data1;
@@ -577,7 +577,7 @@ public:
 class DsStore2addrStride64B64Vds : public Vds {
 public:
   DsStore2addrStride64B64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand data1;
@@ -586,7 +586,7 @@ public:
 class DsCmpstoreB64Vds : public Vds {
 public:
   DsCmpstoreB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
   Operand data1;
@@ -595,7 +595,7 @@ public:
 class DsMinNumF64Vds : public Vds {
 public:
   DsMinNumF64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -603,7 +603,7 @@ public:
 class DsMaxNumF64Vds : public Vds {
 public:
   DsMaxNumF64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -611,7 +611,7 @@ public:
 class DsAddRtnU64Vds : public Vds {
 public:
   DsAddRtnU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -620,7 +620,7 @@ public:
 class DsSubRtnU64Vds : public Vds {
 public:
   DsSubRtnU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -629,7 +629,7 @@ public:
 class DsRsubRtnU64Vds : public Vds {
 public:
   DsRsubRtnU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -638,7 +638,7 @@ public:
 class DsIncRtnU64Vds : public Vds {
 public:
   DsIncRtnU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -647,7 +647,7 @@ public:
 class DsDecRtnU64Vds : public Vds {
 public:
   DsDecRtnU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -656,7 +656,7 @@ public:
 class DsMinRtnI64Vds : public Vds {
 public:
   DsMinRtnI64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -665,7 +665,7 @@ public:
 class DsMaxRtnI64Vds : public Vds {
 public:
   DsMaxRtnI64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -674,7 +674,7 @@ public:
 class DsMinRtnU64Vds : public Vds {
 public:
   DsMinRtnU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -683,7 +683,7 @@ public:
 class DsMaxRtnU64Vds : public Vds {
 public:
   DsMaxRtnU64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -692,7 +692,7 @@ public:
 class DsAndRtnB64Vds : public Vds {
 public:
   DsAndRtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -701,7 +701,7 @@ public:
 class DsOrRtnB64Vds : public Vds {
 public:
   DsOrRtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -710,7 +710,7 @@ public:
 class DsXorRtnB64Vds : public Vds {
 public:
   DsXorRtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -719,7 +719,7 @@ public:
 class DsMskorRtnB64Vds : public Vds {
 public:
   DsMskorRtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -729,7 +729,7 @@ public:
 class DsStorexchgRtnB64Vds : public Vds {
 public:
   DsStorexchgRtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -738,7 +738,7 @@ public:
 class DsStorexchg2addrRtnB64Vds : public Vds {
 public:
   DsStorexchg2addrRtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -748,7 +748,7 @@ public:
 class DsStorexchg2addrStride64RtnB64Vds : public Vds {
 public:
   DsStorexchg2addrStride64RtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -758,7 +758,7 @@ public:
 class DsCmpstoreRtnB64Vds : public Vds {
 public:
   DsCmpstoreRtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -768,7 +768,7 @@ public:
 class DsMinNumRtnF64Vds : public Vds {
 public:
   DsMinNumRtnF64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -777,7 +777,7 @@ public:
 class DsMaxNumRtnF64Vds : public Vds {
 public:
   DsMaxNumRtnF64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -786,7 +786,7 @@ public:
 class DsLoadB64Vds : public Vds {
 public:
   DsLoadB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -794,7 +794,7 @@ public:
 class DsLoad2addrB64Vds : public Vds {
 public:
   DsLoad2addrB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -802,7 +802,7 @@ public:
 class DsLoad2addrStride64B64Vds : public Vds {
 public:
   DsLoad2addrStride64B64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -810,7 +810,7 @@ public:
 class DsAddRtnF32Vds : public Vds {
 public:
   DsAddRtnF32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -819,7 +819,7 @@ public:
 class DsCondxchg32RtnB64Vds : public Vds {
 public:
   DsCondxchg32RtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -828,7 +828,7 @@ public:
 class DsCondSubU32Vds : public Vds {
 public:
   DsCondSubU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -836,7 +836,7 @@ public:
 class DsSubClampU32Vds : public Vds {
 public:
   DsSubClampU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -844,7 +844,7 @@ public:
 class DsPkAddF16Vds : public Vds {
 public:
   DsPkAddF16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -852,7 +852,7 @@ public:
 class DsPkAddBf16Vds : public Vds {
 public:
   DsPkAddBf16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -860,7 +860,7 @@ public:
 class DsStoreB8D16HiVds : public Vds {
 public:
   DsStoreB8D16HiVds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -868,7 +868,7 @@ public:
 class DsStoreB16D16HiVds : public Vds {
 public:
   DsStoreB16D16HiVds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -876,7 +876,7 @@ public:
 class DsLoadU8D16Vds : public Vds {
 public:
   DsLoadU8D16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -884,7 +884,7 @@ public:
 class DsLoadU8D16HiVds : public Vds {
 public:
   DsLoadU8D16HiVds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -892,7 +892,7 @@ public:
 class DsLoadI8D16Vds : public Vds {
 public:
   DsLoadI8D16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -900,7 +900,7 @@ public:
 class DsLoadI8D16HiVds : public Vds {
 public:
   DsLoadI8D16HiVds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -908,7 +908,7 @@ public:
 class DsLoadU16D16Vds : public Vds {
 public:
   DsLoadU16D16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -916,7 +916,7 @@ public:
 class DsLoadU16D16HiVds : public Vds {
 public:
   DsLoadU16D16HiVds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -924,7 +924,7 @@ public:
 class DsCondSubRtnU32Vds : public Vds {
 public:
   DsCondSubRtnU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -933,7 +933,7 @@ public:
 class DsSubClampRtnU32Vds : public Vds {
 public:
   DsSubClampRtnU32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -942,7 +942,7 @@ public:
 class DsPkAddRtnF16Vds : public Vds {
 public:
   DsPkAddRtnF16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -951,7 +951,7 @@ public:
 class DsPkAddRtnBf16Vds : public Vds {
 public:
   DsPkAddRtnBf16Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -960,21 +960,21 @@ public:
 class DsStoreAddtidB32Vds : public Vds {
 public:
   DsStoreAddtidB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand data0;
 };
 
 class DsLoadAddtidB32Vds : public Vds {
 public:
   DsLoadAddtidB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
 };
 
 class DsPermuteB32Vds : public Vds {
 public:
   DsPermuteB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -983,7 +983,7 @@ public:
 class DsBpermuteB32Vds : public Vds {
 public:
   DsBpermuteB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -992,7 +992,7 @@ public:
 class DsBpermuteFiB32Vds : public Vds {
 public:
   DsBpermuteFiB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -1001,7 +1001,7 @@ public:
 class DsStoreB96Vds : public Vds {
 public:
   DsStoreB96Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -1009,7 +1009,7 @@ public:
 class DsStoreB128Vds : public Vds {
 public:
   DsStoreB128Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand addr;
   Operand data0;
 };
@@ -1017,7 +1017,7 @@ public:
 class DsBvhStackPush4Pop1RtnB32Vds : public Vds {
 public:
   DsBvhStackPush4Pop1RtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -1027,7 +1027,7 @@ public:
 class DsBvhStackPush8Pop1RtnB32Vds : public Vds {
 public:
   DsBvhStackPush8Pop1RtnB32Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -1037,7 +1037,7 @@ public:
 class DsBvhStackPush8Pop2RtnB64Vds : public Vds {
 public:
   DsBvhStackPush8Pop2RtnB64Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -1047,7 +1047,7 @@ public:
 class DsLoadB96Vds : public Vds {
 public:
   DsLoadB96Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };
@@ -1055,7 +1055,7 @@ public:
 class DsLoadB128Vds : public Vds {
 public:
   DsLoadB128Vds(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand addr;
 };

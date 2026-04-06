@@ -15,7 +15,7 @@ namespace detail {
 class FenceIInst : public IType {
 public:
   explicit FenceIInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 };
 
 } // namespace detail

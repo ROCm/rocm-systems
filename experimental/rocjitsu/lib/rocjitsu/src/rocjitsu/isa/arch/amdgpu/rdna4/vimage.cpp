@@ -16,137 +16,148 @@ namespace rocjitsu {
 namespace rdna4 {
 
 ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
-    : Vimage("image_load", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_load", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageLoadVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageLoadVimage::execute(amdgpu::Wavefront &wf) {
+void ImageLoadVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
-    : Vimage("image_load_mip", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_load_mip", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageLoadMipVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageLoadMipVimage::execute(amdgpu::Wavefront &wf) {
+void ImageLoadMipVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
-    : Vimage("image_load_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_load_pck", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageLoadPckVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageLoadPckVimage::execute(amdgpu::Wavefront &wf) {
+void ImageLoadPckVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
-    : Vimage("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageLoadPckSgnVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageLoadPckSgnVimage::execute(amdgpu::Wavefront &wf) {
+void ImageLoadPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
-    : Vimage("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageLoadMipPckVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageLoadMipPckVimage::execute(amdgpu::Wavefront &wf) {
+void ImageLoadMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
-    : Vimage("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageLoadMipPckSgnVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageLoadMipPckSgnVimage::execute(amdgpu::Wavefront &wf) {
+void ImageLoadMipPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
-    : Vimage("image_store", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_store", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageStoreVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageStoreVimage::execute(amdgpu::Wavefront &wf) {
+void ImageStoreVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
 ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
-    : Vimage("image_store_mip", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_store_mip", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageStoreMipVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageStoreMipVimage::execute(amdgpu::Wavefront &wf) {
+void ImageStoreMipVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
 ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
-    : Vimage("image_store_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_store_pck", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageStorePckVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageStorePckVimage::execute(amdgpu::Wavefront &wf) {
+void ImageStorePckVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
 ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
-    : Vimage("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageStoreMipPckVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageStoreMipPckVimage::execute(amdgpu::Wavefront &wf) {
+void ImageStoreMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
 ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
-    : Vimage("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicSwapVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -154,12 +165,13 @@ ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicSwapVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicSwapVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
-    : Vimage("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicCmpswapVimage>()),
       vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -167,12 +179,13 @@ ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicCmpswapVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicCmpswapVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
-    : Vimage("image_atomic_add_uint", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_add_uint", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicAddUintVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -180,12 +193,13 @@ ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicAddUintVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicAddUintVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
-    : Vimage("image_atomic_sub_uint", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_sub_uint", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicSubUintVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -193,12 +207,13 @@ ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicSubUintVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicSubUintVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
-    : Vimage("image_atomic_min_int", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_min_int", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicMinIntVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -206,12 +221,13 @@ ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicMinIntVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicMinIntVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
-    : Vimage("image_atomic_min_uint", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_min_uint", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicMinUintVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -219,12 +235,13 @@ ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicMinUintVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicMinUintVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
-    : Vimage("image_atomic_max_int", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_max_int", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicMaxIntVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -232,12 +249,13 @@ ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicMaxIntVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicMaxIntVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
-    : Vimage("image_atomic_max_uint", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_max_uint", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicMaxUintVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -245,12 +263,13 @@ ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicMaxUintVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicMaxUintVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
-    : Vimage("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicAndVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -258,12 +277,13 @@ ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicAndVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicAndVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
-    : Vimage("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicOrVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -271,12 +291,13 @@ ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicOrVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicOrVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
-    : Vimage("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicXorVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -284,12 +305,13 @@ ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicXorVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicXorVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
-    : Vimage("image_atomic_inc_uint", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_inc_uint", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicIncUintVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -297,12 +319,13 @@ ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicIncUintVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicIncUintVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
-    : Vimage("image_atomic_dec_uint", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_dec_uint", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicDecUintVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -310,66 +333,72 @@ ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicDecUintVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicDecUintVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
-    : Vimage("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageGetResinfoVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageGetResinfoVimage::execute(amdgpu::Wavefront &wf) {
+void ImageGetResinfoVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageBvhIntersectRayVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageBvhIntersectRayVimage::execute(amdgpu::Wavefront &wf) {
+void ImageBvhIntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh64_intersect_ray", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_bvh64_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageBvh64IntersectRayVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageBvh64IntersectRayVimage::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void ImageBvh64IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh_dual_intersect_ray", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_bvh_dual_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageBvhDualIntersectRayVimage>()),
       vdata(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageBvhDualIntersectRayVimage::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void ImageBvhDualIntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh8_intersect_ray", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_bvh8_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageBvh8IntersectRayVimage>()),
       vdata(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_.emplace_back(&vdata);
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageBvh8IntersectRayVimage::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void ImageBvh8IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
-    : Vimage("image_atomic_add_flt", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_add_flt", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicAddFltVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -377,12 +406,13 @@ ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicAddFltVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicAddFltVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
-    : Vimage("image_atomic_min_flt", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_min_flt", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicMinFltVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -390,12 +420,13 @@ ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicMinFltVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicMinFltVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
-    : Vimage("image_atomic_max_flt", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_max_flt", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicMaxFltVimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -403,12 +434,13 @@ ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicMaxFltVimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicMaxFltVimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
-    : Vimage("image_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicPkAddF16Vimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -416,12 +448,13 @@ ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicPkAddF16Vimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicPkAddF16Vimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
-    : Vimage("image_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vimage("image_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<ImageAtomicPkAddBf16Vimage>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   src_operands_.emplace_back(&vdata);
@@ -429,7 +462,7 @@ ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
   src_operands_.emplace_back(&rsrc);
 }
 
-void ImageAtomicPkAddBf16Vimage::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicPkAddBf16Vimage::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 

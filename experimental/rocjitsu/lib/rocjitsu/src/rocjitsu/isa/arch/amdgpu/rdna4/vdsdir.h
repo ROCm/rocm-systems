@@ -16,7 +16,7 @@ namespace rdna4 {
 class DsParamLoadVdsdir : public Vdsdir {
 public:
   DsParamLoadVdsdir(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand attr;
 };
@@ -24,7 +24,7 @@ public:
 class DsDirectLoadVdsdir : public Vdsdir {
 public:
   DsDirectLoadVdsdir(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
 };
 

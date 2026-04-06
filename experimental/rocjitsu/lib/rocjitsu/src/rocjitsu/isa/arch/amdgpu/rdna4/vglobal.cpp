@@ -22,7 +22,8 @@ namespace rocjitsu {
 namespace rdna4 {
 
 GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_u8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_u8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadU8Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -32,7 +33,7 @@ GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadU8Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -45,7 +46,8 @@ void GlobalLoadU8Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_i8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_i8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadI8Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -55,7 +57,7 @@ GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadI8Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -69,7 +71,8 @@ void GlobalLoadI8Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_u16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_u16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadU16Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -79,7 +82,7 @@ GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadU16Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadU16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 2;
@@ -92,7 +95,8 @@ void GlobalLoadU16Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_i16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_i16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadI16Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -102,7 +106,7 @@ GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadI16Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadI16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 2;
@@ -116,7 +120,8 @@ void GlobalLoadI16Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadB32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -126,7 +131,7 @@ GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadB32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -139,7 +144,8 @@ void GlobalLoadB32Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadB64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -149,7 +155,7 @@ GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadB64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -162,7 +168,8 @@ void GlobalLoadB64Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_b96", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_b96", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadB96Vglobal>()),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -172,7 +179,7 @@ GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadB96Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -185,7 +192,8 @@ void GlobalLoadB96Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_b128", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_b128", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadB128Vglobal>()),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -195,7 +203,7 @@ GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadB128Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -208,7 +216,8 @@ void GlobalLoadB128Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
-    : Vglobal("global_store_b8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_b8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB8Vglobal>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -218,7 +227,7 @@ GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB8Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalStoreB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
@@ -239,7 +248,8 @@ void GlobalStoreB8Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
-    : Vglobal("global_store_b16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_b16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB16Vglobal>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -249,7 +259,7 @@ GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB16Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalStoreB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
@@ -270,7 +280,8 @@ void GlobalStoreB16Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
-    : Vglobal("global_store_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB32Vglobal>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -280,7 +291,7 @@ GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalStoreB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -301,7 +312,8 @@ void GlobalStoreB32Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
-    : Vglobal("global_store_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB64Vglobal>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -311,7 +323,7 @@ GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalStoreB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 2;
@@ -334,7 +346,8 @@ void GlobalStoreB64Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
-    : Vglobal("global_store_b96", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_b96", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB96Vglobal>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -344,7 +357,7 @@ GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB96Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalStoreB96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 3;
@@ -369,7 +382,8 @@ void GlobalStoreB96Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
-    : Vglobal("global_store_b128", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_b128", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreB128Vglobal>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -379,7 +393,7 @@ GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreB128Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalStoreB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 4;
@@ -406,7 +420,8 @@ void GlobalStoreB128Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16U8Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -416,7 +431,7 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadD16U8Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadD16U8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -429,7 +444,8 @@ void GlobalLoadD16U8Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16I8Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -439,7 +455,7 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadD16I8Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadD16I8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -453,7 +469,8 @@ void GlobalLoadD16I8Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16B16Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -463,7 +480,7 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadD16B16Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadD16B16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 2;
@@ -476,7 +493,8 @@ void GlobalLoadD16B16Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16HiU8Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -486,7 +504,7 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadD16HiU8Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadD16HiU8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -499,7 +517,8 @@ void GlobalLoadD16HiU8Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16HiI8Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -509,7 +528,7 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadD16HiI8Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadD16HiI8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -523,7 +542,8 @@ void GlobalLoadD16HiI8Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadD16HiB16Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -533,7 +553,7 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalLoadD16HiB16Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalLoadD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 2;
@@ -546,7 +566,8 @@ void GlobalLoadD16HiB16Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
-    : Vglobal("global_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreD16HiB8Vglobal>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -556,7 +577,7 @@ GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreD16HiB8Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalStoreD16HiB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
@@ -577,7 +598,8 @@ void GlobalStoreD16HiB8Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
-    : Vglobal("global_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreD16HiB16Vglobal>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -587,7 +609,7 @@ GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalStoreD16HiB16Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalStoreD16HiB16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
@@ -608,37 +630,42 @@ void GlobalStoreD16HiB16Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadAddtidB32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
   dst_operands_.emplace_back(&vdst);
   src_operands_.emplace_back(&saddr);
 }
 
-void GlobalLoadAddtidB32Vglobal::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst)
-    : Vglobal("global_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreAddtidB32Vglobal>()),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
   src_operands_.emplace_back(&vsrc);
   src_operands_.emplace_back(&saddr);
 }
 
-void GlobalStoreAddtidB32Vglobal::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
-    : Vglobal("global_inv", reinterpret_cast<const OpEncoding *>(inst)) {}
+    : Vglobal("global_inv", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalInvVglobal>()) {}
 
-void GlobalInvVglobal::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
-    : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst)) {}
+    : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalWbVglobal>()) {}
 
-void GlobalWbVglobal::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSwapB32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -650,14 +677,15 @@ GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSwapB32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicSwapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_SWAP_B32)
 }
 
 GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicCmpswapB32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -669,14 +697,15 @@ GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicCmpswapB32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_CMPSWAP_B32)
 }
 
 GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAddU32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -688,14 +717,15 @@ GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAddU32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicAddU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_ADD_U32)
 }
 
 GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSubU32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -707,14 +737,15 @@ GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSubU32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_SUB_U32)
 }
 
 GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSubClampU32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -726,14 +757,15 @@ GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSubClampU32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicSubClampU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_SUB_CLAMP_U32)
 }
 
 GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinI32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -745,14 +777,15 @@ GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinI32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMinI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MIN_I32)
 }
 
 GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinU32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -764,14 +797,15 @@ GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinU32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMinU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MIN_U32)
 }
 
 GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxI32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -783,14 +817,15 @@ GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxI32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMaxI32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MAX_I32)
 }
 
 GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxU32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -802,14 +837,15 @@ GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxU32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMaxU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MAX_U32)
 }
 
 GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAndB32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -821,14 +857,15 @@ GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAndB32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicAndB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_AND_B32)
 }
 
 GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicOrB32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -840,14 +877,15 @@ GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicOrB32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicOrB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_OR_B32)
 }
 
 GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicXorB32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -859,14 +897,15 @@ GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicXorB32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicXorB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_XOR_B32)
 }
 
 GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicIncU32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -878,14 +917,15 @@ GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicIncU32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicIncU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_INC_U32)
 }
 
 GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicDecU32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -897,14 +937,15 @@ GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicDecU32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicDecU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_DEC_U32)
 }
 
 GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSwapB64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -916,14 +957,15 @@ GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSwapB64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_SWAP_B64)
 }
 
 GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicCmpswapB64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -935,14 +977,15 @@ GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicCmpswapB64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_CMPSWAP_B64)
 }
 
 GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAddU64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -954,14 +997,15 @@ GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAddU64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_ADD_U64)
 }
 
 GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicSubU64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -973,14 +1017,15 @@ GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicSubU64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_SUB_U64)
 }
 
 GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinI64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -992,14 +1037,15 @@ GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinI64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MIN_I64)
 }
 
 GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinU64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1011,14 +1057,15 @@ GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinU64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MIN_U64)
 }
 
 GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxI64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1030,14 +1077,15 @@ GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxI64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MAX_I64)
 }
 
 GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxU64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1049,14 +1097,15 @@ GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxU64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MAX_U64)
 }
 
 GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAndB64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1068,14 +1117,15 @@ GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAndB64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_AND_B64)
 }
 
 GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicOrB64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1087,14 +1137,15 @@ GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicOrB64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_OR_B64)
 }
 
 GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicXorB64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1106,14 +1157,15 @@ GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicXorB64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_XOR_B64)
 }
 
 GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicIncU64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1125,14 +1177,15 @@ GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicIncU64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_INC_U64)
 }
 
 GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicDecU64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1144,19 +1197,21 @@ GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicDecU64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_DEC_U64)
 }
 
 GlobalWbinvVglobal::GlobalWbinvVglobal(const MachineInst *inst)
-    : Vglobal("global_wbinv", reinterpret_cast<const OpEncoding *>(inst)) {}
+    : Vglobal("global_wbinv", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalWbinvVglobal>()) {}
 
-void GlobalWbinvVglobal::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalWbinvVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicCondSubU32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1168,14 +1223,15 @@ GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicCondSubU32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicCondSubU32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_COND_SUB_U32)
 }
 
 GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMinNumF32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1187,14 +1243,15 @@ GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMinNumF32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMinNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MIN_NUM_F32)
 }
 
 GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicMaxNumF32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1206,14 +1263,15 @@ GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicMaxNumF32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicMaxNumF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_MAX_NUM_F32)
 }
 
 GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
-    : Vglobal("global_load_block", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_block", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadBlockVglobal>()),
       vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -1222,10 +1280,11 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
   src_operands_.emplace_back(&saddr);
 }
 
-void GlobalLoadBlockVglobal::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
-    : Vglobal("global_store_block", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_store_block", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalStoreBlockVglobal>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -1234,10 +1293,11 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
   src_operands_.emplace_back(&saddr);
 }
 
-void GlobalStoreBlockVglobal::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicAddF32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1249,7 +1309,7 @@ GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicAddF32Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicAddF32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -1272,7 +1332,8 @@ void GlobalAtomicAddF32Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_tr_b128", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_tr_b128", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadTrB128Vglobal>()),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -1281,10 +1342,11 @@ GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
   src_operands_.emplace_back(&saddr);
 }
 
-void GlobalLoadTrB128Vglobal::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalLoadTrB128Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
-    : Vglobal("global_load_tr_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_load_tr_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalLoadTrB64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
@@ -1293,10 +1355,11 @@ GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
   src_operands_.emplace_back(&saddr);
 }
 
-void GlobalLoadTrB64Vglobal::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalLoadTrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicPkAddF16Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1308,7 +1371,7 @@ GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicPkAddF16Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicPkAddF16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -1331,7 +1394,8 @@ void GlobalAtomicPkAddF16Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicPkAddBf16Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1343,7 +1407,7 @@ GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicPkAddBf16Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicPkAddBf16Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -1366,7 +1430,8 @@ void GlobalAtomicPkAddBf16Vglobal::execute(amdgpu::Wavefront &wf) {
 }
 
 GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const MachineInst *inst)
-    : Vglobal("global_atomic_ordered_add_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vglobal("global_atomic_ordered_add_b64", reinterpret_cast<const OpEncoding *>(inst),
+              make_exec_fn<GlobalAtomicOrderedAddB64Vglobal>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
@@ -1378,7 +1443,7 @@ GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const Machine
   flags_ |= MEMORY_OP;
 }
 
-void GlobalAtomicOrderedAddB64Vglobal::execute(amdgpu::Wavefront &wf) {
+void GlobalAtomicOrderedAddB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (GLOBAL_ATOMIC_ORDERED_ADD_B64)

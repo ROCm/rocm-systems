@@ -502,9 +502,9 @@ protected:
   void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }
 
   /// @brief Execute one instruction on the given wavefront.
-  void execute_instruction(Instruction *inst, Wavefront &wf) override {
-    static_cast<IsaInstruction<Isa> *>(inst)->execute(wf);
-  }
+  ///
+  /// @brief Execute one instruction on the given wavefront via direct dispatch.
+  void execute_instruction(Instruction *inst, Wavefront &wf) override { inst->execute(*inst, &wf); }
 
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
