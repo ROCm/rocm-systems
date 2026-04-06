@@ -27,9 +27,11 @@ GlobalLoadU8Vglobal::GlobalLoadU8Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -51,9 +53,11 @@ GlobalLoadI8Vglobal::GlobalLoadI8Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -76,9 +80,11 @@ GlobalLoadU16Vglobal::GlobalLoadU16Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -100,9 +106,11 @@ GlobalLoadI16Vglobal::GlobalLoadI16Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -125,9 +133,11 @@ GlobalLoadB32Vglobal::GlobalLoadB32Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -149,9 +159,11 @@ GlobalLoadB64Vglobal::GlobalLoadB64Vglobal(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -173,9 +185,11 @@ GlobalLoadB96Vglobal::GlobalLoadB96Vglobal(const MachineInst *inst)
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -197,9 +211,11 @@ GlobalLoadB128Vglobal::GlobalLoadB128Vglobal(const MachineInst *inst)
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -221,9 +237,11 @@ GlobalStoreB8Vglobal::GlobalStoreB8Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -253,9 +271,11 @@ GlobalStoreB16Vglobal::GlobalStoreB16Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -285,9 +305,11 @@ GlobalStoreB32Vglobal::GlobalStoreB32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -317,9 +339,11 @@ GlobalStoreB64Vglobal::GlobalStoreB64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -351,9 +375,11 @@ GlobalStoreB96Vglobal::GlobalStoreB96Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -387,9 +413,11 @@ GlobalStoreB128Vglobal::GlobalStoreB128Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -425,9 +453,11 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -449,9 +479,11 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -474,9 +506,11 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -498,9 +532,11 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -522,9 +558,11 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -547,9 +585,11 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -571,9 +611,11 @@ GlobalStoreD16HiB8Vglobal::GlobalStoreD16HiB8Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -603,9 +645,11 @@ GlobalStoreD16HiB16Vglobal::GlobalStoreD16HiB16Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -634,8 +678,10 @@ GlobalLoadAddtidB32Vglobal::GlobalLoadAddtidB32Vglobal(const MachineInst *inst)
               make_exec_fn<GlobalLoadAddtidB32Vglobal>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &saddr;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -645,21 +691,29 @@ GlobalStoreAddtidB32Vglobal::GlobalStoreAddtidB32Vglobal(const MachineInst *inst
               make_exec_fn<GlobalStoreAddtidB32Vglobal>()),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vsrc;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 0;
 }
 
 void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
     : Vglobal("global_inv", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalInvVglobal>()) {}
+              make_exec_fn<GlobalInvVglobal>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
+}
 
 void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
     : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalWbVglobal>()) {}
+              make_exec_fn<GlobalWbVglobal>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
+}
 
 void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
@@ -670,10 +724,12 @@ GlobalAtomicSwapB32Vglobal::GlobalAtomicSwapB32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -690,10 +746,12 @@ GlobalAtomicCmpswapB32Vglobal::GlobalAtomicCmpswapB32Vglobal(const MachineInst *
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -710,10 +768,12 @@ GlobalAtomicAddU32Vglobal::GlobalAtomicAddU32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -730,10 +790,12 @@ GlobalAtomicSubU32Vglobal::GlobalAtomicSubU32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -750,10 +812,12 @@ GlobalAtomicSubClampU32Vglobal::GlobalAtomicSubClampU32Vglobal(const MachineInst
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -770,10 +834,12 @@ GlobalAtomicMinI32Vglobal::GlobalAtomicMinI32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -790,10 +856,12 @@ GlobalAtomicMinU32Vglobal::GlobalAtomicMinU32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -810,10 +878,12 @@ GlobalAtomicMaxI32Vglobal::GlobalAtomicMaxI32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -830,10 +900,12 @@ GlobalAtomicMaxU32Vglobal::GlobalAtomicMaxU32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -850,10 +922,12 @@ GlobalAtomicAndB32Vglobal::GlobalAtomicAndB32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -870,10 +944,12 @@ GlobalAtomicOrB32Vglobal::GlobalAtomicOrB32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -890,10 +966,12 @@ GlobalAtomicXorB32Vglobal::GlobalAtomicXorB32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -910,10 +988,12 @@ GlobalAtomicIncU32Vglobal::GlobalAtomicIncU32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -930,10 +1010,12 @@ GlobalAtomicDecU32Vglobal::GlobalAtomicDecU32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -950,10 +1032,12 @@ GlobalAtomicSwapB64Vglobal::GlobalAtomicSwapB64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -970,10 +1054,12 @@ GlobalAtomicCmpswapB64Vglobal::GlobalAtomicCmpswapB64Vglobal(const MachineInst *
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -990,10 +1076,12 @@ GlobalAtomicAddU64Vglobal::GlobalAtomicAddU64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1010,10 +1098,12 @@ GlobalAtomicSubU64Vglobal::GlobalAtomicSubU64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1030,10 +1120,12 @@ GlobalAtomicMinI64Vglobal::GlobalAtomicMinI64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1050,10 +1142,12 @@ GlobalAtomicMinU64Vglobal::GlobalAtomicMinU64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1070,10 +1164,12 @@ GlobalAtomicMaxI64Vglobal::GlobalAtomicMaxI64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1090,10 +1186,12 @@ GlobalAtomicMaxU64Vglobal::GlobalAtomicMaxU64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1110,10 +1208,12 @@ GlobalAtomicAndB64Vglobal::GlobalAtomicAndB64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1130,10 +1230,12 @@ GlobalAtomicOrB64Vglobal::GlobalAtomicOrB64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1150,10 +1252,12 @@ GlobalAtomicXorB64Vglobal::GlobalAtomicXorB64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1170,10 +1274,12 @@ GlobalAtomicIncU64Vglobal::GlobalAtomicIncU64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1190,10 +1296,12 @@ GlobalAtomicDecU64Vglobal::GlobalAtomicDecU64Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1205,7 +1313,10 @@ void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
 
 GlobalWbinvVglobal::GlobalWbinvVglobal(const MachineInst *inst)
     : Vglobal("global_wbinv", reinterpret_cast<const OpEncoding *>(inst),
-              make_exec_fn<GlobalWbinvVglobal>()) {}
+              make_exec_fn<GlobalWbinvVglobal>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
+}
 
 void GlobalWbinvVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
@@ -1216,10 +1327,12 @@ GlobalAtomicCondSubU32Vglobal::GlobalAtomicCondSubU32Vglobal(const MachineInst *
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1236,10 +1349,12 @@ GlobalAtomicMinNumF32Vglobal::GlobalAtomicMinNumF32Vglobal(const MachineInst *in
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1256,10 +1371,12 @@ GlobalAtomicMaxNumF32Vglobal::GlobalAtomicMaxNumF32Vglobal(const MachineInst *in
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1275,9 +1392,11 @@ GlobalLoadBlockVglobal::GlobalLoadBlockVglobal(const MachineInst *inst)
       vdst(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void GlobalLoadBlockVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -1288,9 +1407,11 @@ GlobalStoreBlockVglobal::GlobalStoreBlockVglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(1024, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void GlobalStoreBlockVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -1302,10 +1423,12 @@ GlobalAtomicAddF32Vglobal::GlobalAtomicAddF32Vglobal(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1337,9 +1460,11 @@ GlobalLoadTrB128Vglobal::GlobalLoadTrB128Vglobal(const MachineInst *inst)
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void GlobalLoadTrB128Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -1350,9 +1475,11 @@ GlobalLoadTrB64Vglobal::GlobalLoadTrB64Vglobal(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &saddr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void GlobalLoadTrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -1364,10 +1491,12 @@ GlobalAtomicPkAddF16Vglobal::GlobalAtomicPkAddF16Vglobal(const MachineInst *inst
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1400,10 +1529,12 @@ GlobalAtomicPkAddBf16Vglobal::GlobalAtomicPkAddBf16Vglobal(const MachineInst *in
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1436,10 +1567,12 @@ GlobalAtomicOrderedAddB64Vglobal::GlobalAtomicOrderedAddB64Vglobal(const Machine
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&saddr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &saddr;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 

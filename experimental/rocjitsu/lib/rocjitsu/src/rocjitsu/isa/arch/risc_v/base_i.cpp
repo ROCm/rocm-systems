@@ -39,8 +39,10 @@ int32_t arithmetic_right_shift_32(int32_t val, uint32_t shamt) {
 LuiInst::LuiInst(uint32_t raw)
     : UType("lui", raw, make_exec_fn<LuiInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       imm_op(32, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &imm_op;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void LuiInst::execute_impl(HartState &ctx) {
@@ -51,8 +53,10 @@ void LuiInst::execute_impl(HartState &ctx) {
 AuipcInst::AuipcInst(uint32_t raw)
     : UType("auipc", raw, make_exec_fn<AuipcInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       imm_op(32, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &imm_op;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void AuipcInst::execute_impl(HartState &ctx) {
@@ -65,8 +69,10 @@ void AuipcInst::execute_impl(HartState &ctx) {
 JalInst::JalInst(uint32_t raw)
     : JType("jal", raw, make_exec_fn<JalInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       offset(21, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&offset);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &offset;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void JalInst::execute_impl(HartState &ctx) {
@@ -80,9 +86,11 @@ void JalInst::execute_impl(HartState &ctx) {
 JalrInst::JalrInst(uint32_t raw)
     : IType("jalr", raw, make_exec_fn<JalrInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void JalrInst::execute_impl(HartState &ctx) {
@@ -97,9 +105,11 @@ void JalrInst::execute_impl(HartState &ctx) {
 BeqInst::BeqInst(uint32_t raw)
     : BType("beq", raw, make_exec_fn<BeqInst>()), rs1_op(64, OperandType::OPR_GPR, inst_.rs1),
       rs2_op(64, OperandType::OPR_GPR, inst_.rs2), offset(13, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &rs2_op;
+  src_operands_[2] = &offset;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void BeqInst::execute_impl(HartState &ctx) {
@@ -111,9 +121,11 @@ void BeqInst::execute_impl(HartState &ctx) {
 BneInst::BneInst(uint32_t raw)
     : BType("bne", raw, make_exec_fn<BneInst>()), rs1_op(64, OperandType::OPR_GPR, inst_.rs1),
       rs2_op(64, OperandType::OPR_GPR, inst_.rs2), offset(13, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &rs2_op;
+  src_operands_[2] = &offset;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void BneInst::execute_impl(HartState &ctx) {
@@ -125,9 +137,11 @@ void BneInst::execute_impl(HartState &ctx) {
 BltInst::BltInst(uint32_t raw)
     : BType("blt", raw, make_exec_fn<BltInst>()), rs1_op(64, OperandType::OPR_GPR, inst_.rs1),
       rs2_op(64, OperandType::OPR_GPR, inst_.rs2), offset(13, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &rs2_op;
+  src_operands_[2] = &offset;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void BltInst::execute_impl(HartState &ctx) {
@@ -139,9 +153,11 @@ void BltInst::execute_impl(HartState &ctx) {
 BgeInst::BgeInst(uint32_t raw)
     : BType("bge", raw, make_exec_fn<BgeInst>()), rs1_op(64, OperandType::OPR_GPR, inst_.rs1),
       rs2_op(64, OperandType::OPR_GPR, inst_.rs2), offset(13, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &rs2_op;
+  src_operands_[2] = &offset;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void BgeInst::execute_impl(HartState &ctx) {
@@ -153,9 +169,11 @@ void BgeInst::execute_impl(HartState &ctx) {
 BltuInst::BltuInst(uint32_t raw)
     : BType("bltu", raw, make_exec_fn<BltuInst>()), rs1_op(64, OperandType::OPR_GPR, inst_.rs1),
       rs2_op(64, OperandType::OPR_GPR, inst_.rs2), offset(13, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &rs2_op;
+  src_operands_[2] = &offset;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void BltuInst::execute_impl(HartState &ctx) {
@@ -168,9 +186,11 @@ void BltuInst::execute_impl(HartState &ctx) {
 BgeuInst::BgeuInst(uint32_t raw)
     : BType("bgeu", raw, make_exec_fn<BgeuInst>()), rs1_op(64, OperandType::OPR_GPR, inst_.rs1),
       rs2_op(64, OperandType::OPR_GPR, inst_.rs2), offset(13, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &rs2_op;
+  src_operands_[2] = &offset;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void BgeuInst::execute_impl(HartState &ctx) {
@@ -185,9 +205,11 @@ void BgeuInst::execute_impl(HartState &ctx) {
 LbInst::LbInst(uint32_t raw)
     : IType("lb", raw, make_exec_fn<LbInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&offset);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &offset;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void LbInst::execute_impl(HartState &ctx) {
@@ -200,9 +222,11 @@ void LbInst::execute_impl(HartState &ctx) {
 LhInst::LhInst(uint32_t raw)
     : IType("lh", raw, make_exec_fn<LhInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&offset);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &offset;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void LhInst::execute_impl(HartState &ctx) {
@@ -215,9 +239,11 @@ void LhInst::execute_impl(HartState &ctx) {
 LwInst::LwInst(uint32_t raw)
     : IType("lw", raw, make_exec_fn<LwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&offset);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &offset;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void LwInst::execute_impl(HartState &ctx) {
@@ -230,9 +256,11 @@ void LwInst::execute_impl(HartState &ctx) {
 LdInst::LdInst(uint32_t raw)
     : IType("ld", raw, make_exec_fn<LdInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&offset);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &offset;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void LdInst::execute_impl(HartState &ctx) {
@@ -245,9 +273,11 @@ void LdInst::execute_impl(HartState &ctx) {
 LbuInst::LbuInst(uint32_t raw)
     : IType("lbu", raw, make_exec_fn<LbuInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&offset);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &offset;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void LbuInst::execute_impl(HartState &ctx) {
@@ -260,9 +290,11 @@ void LbuInst::execute_impl(HartState &ctx) {
 LhuInst::LhuInst(uint32_t raw)
     : IType("lhu", raw, make_exec_fn<LhuInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&offset);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &offset;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void LhuInst::execute_impl(HartState &ctx) {
@@ -275,9 +307,11 @@ void LhuInst::execute_impl(HartState &ctx) {
 LwuInst::LwuInst(uint32_t raw)
     : IType("lwu", raw, make_exec_fn<LwuInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1_op);
-  src_operands_.emplace_back(&offset);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1_op;
+  src_operands_[1] = &offset;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void LwuInst::execute_impl(HartState &ctx) {
@@ -292,9 +326,11 @@ void LwuInst::execute_impl(HartState &ctx) {
 SbInst::SbInst(uint32_t raw)
     : SType("sb", raw, make_exec_fn<SbInst>()), rs2_op(64, OperandType::OPR_GPR, inst_.rs2),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
-  src_operands_.emplace_back(&rs1_op);
+  src_operands_[0] = &rs2_op;
+  src_operands_[1] = &offset;
+  src_operands_[2] = &rs1_op;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void SbInst::execute_impl(HartState &ctx) {
@@ -307,9 +343,11 @@ void SbInst::execute_impl(HartState &ctx) {
 ShInst::ShInst(uint32_t raw)
     : SType("sh", raw, make_exec_fn<ShInst>()), rs2_op(64, OperandType::OPR_GPR, inst_.rs2),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
-  src_operands_.emplace_back(&rs1_op);
+  src_operands_[0] = &rs2_op;
+  src_operands_[1] = &offset;
+  src_operands_[2] = &rs1_op;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void ShInst::execute_impl(HartState &ctx) {
@@ -322,9 +360,11 @@ void ShInst::execute_impl(HartState &ctx) {
 SwInst::SwInst(uint32_t raw)
     : SType("sw", raw, make_exec_fn<SwInst>()), rs2_op(64, OperandType::OPR_GPR, inst_.rs2),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
-  src_operands_.emplace_back(&rs1_op);
+  src_operands_[0] = &rs2_op;
+  src_operands_[1] = &offset;
+  src_operands_[2] = &rs1_op;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void SwInst::execute_impl(HartState &ctx) {
@@ -337,9 +377,11 @@ void SwInst::execute_impl(HartState &ctx) {
 SdInst::SdInst(uint32_t raw)
     : SType("sd", raw, make_exec_fn<SdInst>()), rs2_op(64, OperandType::OPR_GPR, inst_.rs2),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
-  src_operands_.emplace_back(&rs1_op);
+  src_operands_[0] = &rs2_op;
+  src_operands_[1] = &offset;
+  src_operands_[2] = &rs1_op;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void SdInst::execute_impl(HartState &ctx) {
@@ -354,9 +396,11 @@ void SdInst::execute_impl(HartState &ctx) {
 AddiInst::AddiInst(uint32_t raw)
     : IType("addi", raw, make_exec_fn<AddiInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void AddiInst::execute_impl(HartState &ctx) {
@@ -367,9 +411,11 @@ void AddiInst::execute_impl(HartState &ctx) {
 SltiInst::SltiInst(uint32_t raw)
     : IType("slti", raw, make_exec_fn<SltiInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SltiInst::execute_impl(HartState &ctx) {
@@ -380,9 +426,11 @@ void SltiInst::execute_impl(HartState &ctx) {
 SltiuInst::SltiuInst(uint32_t raw)
     : IType("sltiu", raw, make_exec_fn<SltiuInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SltiuInst::execute_impl(HartState &ctx) {
@@ -396,9 +444,11 @@ void SltiuInst::execute_impl(HartState &ctx) {
 XoriInst::XoriInst(uint32_t raw)
     : IType("xori", raw, make_exec_fn<XoriInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void XoriInst::execute_impl(HartState &ctx) {
@@ -409,9 +459,11 @@ void XoriInst::execute_impl(HartState &ctx) {
 OriInst::OriInst(uint32_t raw)
     : IType("ori", raw, make_exec_fn<OriInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void OriInst::execute_impl(HartState &ctx) {
@@ -422,9 +474,11 @@ void OriInst::execute_impl(HartState &ctx) {
 AndiInst::AndiInst(uint32_t raw)
     : IType("andi", raw, make_exec_fn<AndiInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void AndiInst::execute_impl(HartState &ctx) {
@@ -437,9 +491,11 @@ void AndiInst::execute_impl(HartState &ctx) {
 SlliInst::SlliInst(uint32_t raw)
     : IType("slli", raw, make_exec_fn<SlliInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SlliInst::execute_impl(HartState &ctx) {
@@ -451,9 +507,11 @@ void SlliInst::execute_impl(HartState &ctx) {
 SrliInst::SrliInst(uint32_t raw)
     : IType("srli", raw, make_exec_fn<SrliInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SrliInst::execute_impl(HartState &ctx) {
@@ -467,9 +525,11 @@ void SrliInst::execute_impl(HartState &ctx) {
 SraiInst::SraiInst(uint32_t raw)
     : IType("srai", raw, make_exec_fn<SraiInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SraiInst::execute_impl(HartState &ctx) {
@@ -484,9 +544,11 @@ void SraiInst::execute_impl(HartState &ctx) {
 AddInst::AddInst(uint32_t raw)
     : RType("add", raw, make_exec_fn<AddInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void AddInst::execute_impl(HartState &ctx) {
@@ -498,9 +560,11 @@ void AddInst::execute_impl(HartState &ctx) {
 SubInst::SubInst(uint32_t raw)
     : RType("sub", raw, make_exec_fn<SubInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SubInst::execute_impl(HartState &ctx) {
@@ -512,9 +576,11 @@ void SubInst::execute_impl(HartState &ctx) {
 SllInst::SllInst(uint32_t raw)
     : RType("sll", raw, make_exec_fn<SllInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SllInst::execute_impl(HartState &ctx) {
@@ -526,9 +592,11 @@ void SllInst::execute_impl(HartState &ctx) {
 SltInst::SltInst(uint32_t raw)
     : RType("slt", raw, make_exec_fn<SltInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SltInst::execute_impl(HartState &ctx) {
@@ -540,9 +608,11 @@ void SltInst::execute_impl(HartState &ctx) {
 SltuInst::SltuInst(uint32_t raw)
     : RType("sltu", raw, make_exec_fn<SltuInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SltuInst::execute_impl(HartState &ctx) {
@@ -556,9 +626,11 @@ void SltuInst::execute_impl(HartState &ctx) {
 XorInst::XorInst(uint32_t raw)
     : RType("xor", raw, make_exec_fn<XorInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void XorInst::execute_impl(HartState &ctx) {
@@ -570,9 +642,11 @@ void XorInst::execute_impl(HartState &ctx) {
 SrlInst::SrlInst(uint32_t raw)
     : RType("srl", raw, make_exec_fn<SrlInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SrlInst::execute_impl(HartState &ctx) {
@@ -586,9 +660,11 @@ void SrlInst::execute_impl(HartState &ctx) {
 SraInst::SraInst(uint32_t raw)
     : RType("sra", raw, make_exec_fn<SraInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SraInst::execute_impl(HartState &ctx) {
@@ -601,9 +677,11 @@ void SraInst::execute_impl(HartState &ctx) {
 OrInst::OrInst(uint32_t raw)
     : RType("or", raw, make_exec_fn<OrInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void OrInst::execute_impl(HartState &ctx) {
@@ -615,9 +693,11 @@ void OrInst::execute_impl(HartState &ctx) {
 AndInst::AndInst(uint32_t raw)
     : RType("and", raw, make_exec_fn<AndInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void AndInst::execute_impl(HartState &ctx) {
@@ -631,9 +711,11 @@ void AndInst::execute_impl(HartState &ctx) {
 AddiwInst::AddiwInst(uint32_t raw)
     : IType("addiw", raw, make_exec_fn<AddiwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void AddiwInst::execute_impl(HartState &ctx) {
@@ -645,9 +727,11 @@ void AddiwInst::execute_impl(HartState &ctx) {
 SlliwInst::SlliwInst(uint32_t raw)
     : IType("slliw", raw, make_exec_fn<SlliwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SlliwInst::execute_impl(HartState &ctx) {
@@ -660,9 +744,11 @@ void SlliwInst::execute_impl(HartState &ctx) {
 SrliwInst::SrliwInst(uint32_t raw)
     : IType("srliw", raw, make_exec_fn<SrliwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SrliwInst::execute_impl(HartState &ctx) {
@@ -675,9 +761,11 @@ void SrliwInst::execute_impl(HartState &ctx) {
 SraiwInst::SraiwInst(uint32_t raw)
     : IType("sraiw", raw, make_exec_fn<SraiwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), imm_op(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&imm_op);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &imm_op;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SraiwInst::execute_impl(HartState &ctx) {
@@ -692,9 +780,11 @@ void SraiwInst::execute_impl(HartState &ctx) {
 AddwInst::AddwInst(uint32_t raw)
     : RType("addw", raw, make_exec_fn<AddwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void AddwInst::execute_impl(HartState &ctx) {
@@ -707,9 +797,11 @@ void AddwInst::execute_impl(HartState &ctx) {
 SubwInst::SubwInst(uint32_t raw)
     : RType("subw", raw, make_exec_fn<SubwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SubwInst::execute_impl(HartState &ctx) {
@@ -722,9 +814,11 @@ void SubwInst::execute_impl(HartState &ctx) {
 SllwInst::SllwInst(uint32_t raw)
     : RType("sllw", raw, make_exec_fn<SllwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SllwInst::execute_impl(HartState &ctx) {
@@ -737,9 +831,11 @@ void SllwInst::execute_impl(HartState &ctx) {
 SrlwInst::SrlwInst(uint32_t raw)
     : RType("srlw", raw, make_exec_fn<SrlwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SrlwInst::execute_impl(HartState &ctx) {
@@ -752,9 +848,11 @@ void SrlwInst::execute_impl(HartState &ctx) {
 SrawInst::SrawInst(uint32_t raw)
     : RType("sraw", raw, make_exec_fn<SrawInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void SrawInst::execute_impl(HartState &ctx) {
@@ -768,7 +866,9 @@ void SrawInst::execute_impl(HartState &ctx) {
 
 FenceInst::FenceInst(uint32_t raw)
     : IType("fence", raw, make_exec_fn<FenceInst>()), imm_op(12, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&imm_op);
+  src_operands_[0] = &imm_op;
+  num_src_ = 1;
+  num_dst_ = 0;
 }
 
 void FenceInst::execute_impl(HartState &ctx) {

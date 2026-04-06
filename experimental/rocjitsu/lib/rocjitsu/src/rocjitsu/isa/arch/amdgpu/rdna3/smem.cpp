@@ -33,9 +33,11 @@ SLoadB32Smem::SLoadB32Smem(const MachineInst *inst)
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -54,9 +56,11 @@ SLoadB64Smem::SLoadB64Smem(const MachineInst *inst)
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -76,9 +80,11 @@ SLoadB128Smem::SLoadB128Smem(const MachineInst *inst)
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -98,9 +104,11 @@ SLoadB256Smem::SLoadB256Smem(const MachineInst *inst)
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -120,9 +128,11 @@ SLoadB512Smem::SLoadB512Smem(const MachineInst *inst)
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -142,9 +152,11 @@ SBufferLoadB32Smem::SBufferLoadB32Smem(const MachineInst *inst)
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -164,9 +176,11 @@ SBufferLoadB64Smem::SBufferLoadB64Smem(const MachineInst *inst)
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -186,9 +200,11 @@ SBufferLoadB128Smem::SBufferLoadB128Smem(const MachineInst *inst)
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -208,9 +224,11 @@ SBufferLoadB256Smem::SBufferLoadB256Smem(const MachineInst *inst)
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -230,9 +248,11 @@ SBufferLoadB512Smem::SBufferLoadB512Smem(const MachineInst *inst)
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
-  dst_operands_.emplace_back(&sdata);
-  src_operands_.emplace_back(&sbase);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &sdata;
+  src_operands_[0] = &sbase;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -247,13 +267,19 @@ void SBufferLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 SGl1InvSmem::SGl1InvSmem(const MachineInst *inst)
-    : Smem("s_gl1_inv", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SGl1InvSmem>()) {}
+    : Smem("s_gl1_inv", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SGl1InvSmem>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
+}
 
 void SGl1InvSmem::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_gl1_inv_smem(*this, wf); }
 
 SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
     : Smem("s_dcache_inv", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SDcacheInvSmem>()) {}
+           make_exec_fn<SDcacheInvSmem>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
+}
 
 void SDcacheInvSmem::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 

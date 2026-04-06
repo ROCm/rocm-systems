@@ -20,8 +20,10 @@ DsParamLoadVdsdir::DsParamLoadVdsdir(const MachineInst *inst)
              make_exec_fn<DsParamLoadVdsdir>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&attr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &attr;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void DsParamLoadVdsdir::execute_impl(amdgpu::Wavefront &wf) {
@@ -32,7 +34,9 @@ DsDirectLoadVdsdir::DsDirectLoadVdsdir(const MachineInst *inst)
     : Vdsdir("ds_direct_load", reinterpret_cast<const OpEncoding *>(inst),
              make_exec_fn<DsDirectLoadVdsdir>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst) {
-  dst_operands_.emplace_back(&vdst);
+  dst_operands_[0] = &vdst;
+  num_src_ = 0;
+  num_dst_ = 1;
 }
 
 void DsDirectLoadVdsdir::execute_impl(amdgpu::Wavefront &wf) {

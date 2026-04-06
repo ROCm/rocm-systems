@@ -21,9 +21,11 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&attr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vsrc;
+  src_operands_[1] = &attr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void VInterpP1F32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
@@ -36,10 +38,12 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
-  src_operands_.emplace_back(&vdst);
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&attr);
+  src_operands_[0] = &vdst;
+  dst_operands_[0] = &vdst;
+  src_operands_[1] = &vsrc;
+  src_operands_[2] = &attr;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void VInterpP2F32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
@@ -52,9 +56,11 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_PARAM, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&vsrc);
-  src_operands_.emplace_back(&attr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &vsrc;
+  src_operands_[1] = &attr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void VInterpMovF32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
