@@ -5,6 +5,7 @@
 
 #include "debug.hpp"
 #include "directory.hpp"
+#include "wal_mmap_vfs.hpp"
 
 #include <filesystem>
 #include <stdexcept>
@@ -150,10 +151,13 @@ namespace rocpdsna::data_storage
 {
 
 std::shared_ptr<sqlite_backend>
-sqlite_backend::create(std::string db_path, std::string uuid, storage_mode_t mode)
+sqlite_backend::create(std::string    db_path,
+                       std::string    uuid,
+                       storage_mode_t mode,
+                       size_t         wal_mmap_size)
 {
     auto backend = std::shared_ptr<sqlite_backend>(
-        new sqlite_backend(std::move(db_path), std::move(uuid), mode));
+        new sqlite_backend(std::move(db_path), std::move(uuid), mode, wal_mmap_size));
 
     // discover_uuids() uses create_read_statement_executor which calls
     // shared_from_this(). This must happen after the shared_ptr is fully
@@ -171,10 +175,14 @@ sqlite_backend::create(std::string db_path, std::string uuid, storage_mode_t mod
     return backend;
 }
 
-sqlite_backend::sqlite_backend(std::string db_path, std::string uuid, storage_mode_t mode)
+sqlite_backend::sqlite_backend(std::string    db_path,
+                               std::string    uuid,
+                               storage_mode_t mode,
+                               size_t         wal_mmap_size)
 : m_db_path{ std::move(db_path) }
 , m_uuid{ std::move(uuid) }
 , m_mode{ mode }
+, m_wal_mmap_size{ wal_mmap_size }
 {
     if(std::filesystem::exists(m_db_path))
     {
@@ -193,8 +201,17 @@ sqlite_backend::sqlite_backend(std::string db_path, std::string uuid, storage_mo
     }
     else if(m_mode == storage_mode_t::on_disk)
     {
+        const char* vfs_name = nullptr;
+        if(m_wal_mmap_size > 0)
+            vfs_name = rocpdsna::data_storage::register_wal_mmap_vfs(m_wal_mmap_size);
+
         validate_sqlite3_result(
-            sqlite3_open(m_db_path.c_str(), &m_sqlite3), "", "database open failed!");
+            sqlite3_open_v2(m_db_path.c_str(),
+                            &m_sqlite3,
+                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                            vfs_name),
+            "",
+            "database open failed!");
     }
 
     LOG_INFO("rocpdsna database initialized (uuid: {}, path: {})", m_uuid, m_db_path);
@@ -240,6 +257,14 @@ sqlite_backend::initialize_schema()
         throw std::runtime_error("Database already initialized!");
     }
 
+    if(m_mode == storage_mode_t::on_disk)
+    {
+        validate_sqlite3_result(
+            sqlite3_exec(m_sqlite3, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr),
+            "PRAGMA journal_mode=WAL",
+            "Failed to enable WAL mode");
+    }
+
     const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
         ROCPD_SQL_SCHEMA_ROCPD_TABLES,
         ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
@@ -282,8 +307,6 @@ sqlite_backend::flush()
 {
     if(m_mode != storage_mode_t::in_memory)
     {
-        LOG_WARNING("Flushing database is not supported for database type: {}",
-                    static_cast<int>(m_mode));
         return;
     }
 

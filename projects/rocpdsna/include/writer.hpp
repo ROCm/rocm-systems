@@ -138,7 +138,9 @@ struct writer_t
 
     /***
      * @brief Flush in-memory data to disk
-     * @note This function is only used with in-memory database option
+     * @note This function transfers data to disk when using write_mode_t::in_memory.
+     *       It is a no-op when using write_mode_t::on_disk, since data is written
+     *       directly to disk in that mode.
      */
     void flush_in_memory_data_to_disk();
 

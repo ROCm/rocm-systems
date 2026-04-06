@@ -12,8 +12,11 @@
 namespace rocpdsna
 {
 
-storage_t::storage_t(const std::string& database_path, const std::string& uuid)
-: m_impl(std::make_unique<impl>(database_path, uuid))
+storage_t::storage_t(const std::string& database_path,
+                     const std::string& uuid,
+                     write_mode_t       write_mode,
+                     size_t             wal_mmap_size)
+: m_impl(std::make_unique<impl>(database_path, uuid, write_mode, wal_mmap_size))
 {}
 
 storage_t::~storage_t() { m_impl.reset(); }

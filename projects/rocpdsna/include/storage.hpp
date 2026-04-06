@@ -16,7 +16,10 @@ struct reader_t;
 class storage_t
 {
 public:
-    explicit storage_t(const std::string& database_path, const std::string& uuid);
+    explicit storage_t(const std::string& database_path,
+                       const std::string& uuid,
+                       write_mode_t       write_mode    = write_mode_t::in_memory,
+                       size_t             wal_mmap_size = 0);
     virtual ~storage_t();
 
     storage_t(const storage_t&)            = delete;

@@ -24,7 +24,10 @@ struct storage_t::impl
         write = 2
     };
 
-    explicit impl(std::string database_path, std::string uuid);
+    explicit impl(std::string database_path,
+                  std::string  uuid,
+                  write_mode_t write_mode,
+                  size_t       wal_mmap_size);
 
     [[nodiscard]] std::string get_database_path() const;
     [[nodiscard]] std::string get_uuid() const;
@@ -42,8 +45,10 @@ private:
     storage_type_t                                m_storage_type{ storage_type_t::none };
     std::shared_ptr<data_storage::sqlite_backend> m_database{ nullptr };
 
-    std::string m_database_path;
-    std::string m_uuid;
+    std::string  m_database_path;
+    std::string  m_uuid;
+    write_mode_t m_write_mode{ write_mode_t::in_memory };
+    size_t       m_wal_mmap_size{ 0 };
 
     struct database_factory_t;
 };

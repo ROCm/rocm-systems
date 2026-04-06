@@ -7,6 +7,8 @@
 
 #include "data_storage/backends/sqlite_backend.hpp"
 
+#include <filesystem>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -20,7 +22,9 @@ struct storage_t::impl::database_factory_t
     static std::shared_ptr<data_storage::sqlite_backend> create_database(
         const std::string&    database_path,
         const std::string&    uuid,
-        const storage_type_t& storage_type)
+        const storage_type_t& storage_type,
+        write_mode_t          write_mode,
+        size_t                wal_mmap_size)
     {
         switch(storage_type)
         {
@@ -30,6 +34,15 @@ struct storage_t::impl::database_factory_t
                     uuid,
                     data_storage::sqlite_backend::storage_mode_t::on_disk);
             case storage_type_t::write:
+                if(write_mode == write_mode_t::on_disk)
+                {
+                    std::filesystem::remove(database_path);
+                    return data_storage::sqlite_backend::create(
+                        database_path,
+                        uuid,
+                        data_storage::sqlite_backend::storage_mode_t::on_disk,
+                        wal_mmap_size);
+                }
                 return data_storage::sqlite_backend::create(
                     database_path,
                     uuid,
@@ -42,9 +55,14 @@ struct storage_t::impl::database_factory_t
     }
 };
 
-storage_t::impl::impl(std::string database_path, std::string uuid)
+storage_t::impl::impl(std::string  database_path,
+                      std::string  uuid,
+                      write_mode_t write_mode,
+                      size_t       wal_mmap_size)
 : m_database_path(std::move(database_path))
 , m_uuid(std::move(uuid))
+, m_write_mode(write_mode)
+, m_wal_mmap_size(wal_mmap_size)
 {}
 
 std::string
@@ -70,8 +88,8 @@ storage_t::impl::create_database(const storage_type_t& storage_type)
 {
     if(!m_database)
     {
-        m_database =
-            database_factory_t::create_database(m_database_path, m_uuid, storage_type);
+        m_database = database_factory_t::create_database(
+            m_database_path, m_uuid, storage_type, m_write_mode, m_wal_mmap_size);
         m_storage_type = storage_type;
     }
     return m_database;

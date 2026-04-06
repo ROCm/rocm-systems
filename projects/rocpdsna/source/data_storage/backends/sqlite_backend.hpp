@@ -192,7 +192,8 @@ public:
     static std::shared_ptr<sqlite_backend> create(
         std::string    db_path,
         std::string    uuid,
-        storage_mode_t mode = storage_mode_t::in_memory);
+        storage_mode_t mode          = storage_mode_t::in_memory,
+        size_t         wal_mmap_size = 0);
 
     ~sqlite_backend();
 
@@ -248,7 +249,10 @@ private:
     // =========================================================================
     // Private constructor -- use create() factory
     // =========================================================================
-    sqlite_backend(std::string db_path, std::string uuid, storage_mode_t mode);
+    sqlite_backend(std::string    db_path,
+                   std::string    uuid,
+                   storage_mode_t mode,
+                   size_t         wal_mmap_size);
 
     // =========================================================================
     // Statement preparation
@@ -496,6 +500,7 @@ private:
     std::string    m_db_path;
     std::string    m_uuid;
     storage_mode_t m_mode;
+    size_t         m_wal_mmap_size{ 0 };
     bool           m_initialized{ false };
     bool           m_flushed{ false };
 };
