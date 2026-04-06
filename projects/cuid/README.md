@@ -168,7 +168,7 @@ sphinx-build docs docs/_build/html
 
 - **LibreSSL** and **BoringSSL** are supported via the HMAC_CTX backend
 - Root/administrator privileges are required for full functionality (ACPI tables, SMBIOS UUID, PCI config space access)
-- The daemon requires systemd for service management
+- systemd is only needed for `udevd` reloads and optional service management; the daemon can also be started using other mechanisms such as an `@reboot` cron job
 
 ## License
 
