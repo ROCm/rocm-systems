@@ -110,7 +110,6 @@ class RocVideoParser {
 public:
     RocVideoParser();    // default constructor
     virtual ~RocVideoParser();
-    RocVideoParser(RocdecParserParams *pParams, u_int log_level) : parser_params_(*pParams) {g_rocdec_logger.SetLogLevel(log_level);};
     virtual void SetParserParams(RocdecParserParams *pParams) { parser_params_ = *pParams; };
     RocdecParserParams *GetParserParams() {return &parser_params_;};
     virtual rocDecStatus Initialize(RocdecParserParams *pParams);

@@ -28,8 +28,6 @@ THE SOFTWARE.
 #include "vp9_defines.h"
 
 RocVideoESParser::RocVideoESParser(const char *input_file_path) {
-    g_rocdec_logger.SetLogLevel(kRocDecLogError);
-
     p_stream_file_.open(input_file_path, std::ifstream::in | std::ifstream::binary);
     if (!p_stream_file_) {
         CriticalLog(g_rocdec_logger, "Failed to open the bitstream file.");
