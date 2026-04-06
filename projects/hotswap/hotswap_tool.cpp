@@ -179,10 +179,9 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
 
   hsa_status_t status = g_orig_reader_create_from_memory(
       buf.data(), buf.size(), code_object_reader);
-  if (status != HSA_STATUS_SUCCESS) {
-    lseek(file, saved_pos, SEEK_SET);
+  lseek(file, saved_pos, SEEK_SET);
+  if (status != HSA_STATUS_SUCCESS)
     return status;
-  }
 
   auto vec = std::make_shared<std::vector<uint8_t>>(std::move(buf));
   std::lock_guard<std::mutex> lock(g_reader_map_mutex);
