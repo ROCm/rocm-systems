@@ -42,7 +42,7 @@ foreach(_XNACK on off)
         COPY conftest.py
         CONFIG pytest.ini
         ARGS --json-input
-             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace/out_results.json
+             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace/out_*_results.json
         TIMEOUT 45
         LABELS "integration-tests;multi-gpu"
         FAIL_REGULAR_EXPRESSION "AssertionError"
