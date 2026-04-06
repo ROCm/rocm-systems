@@ -699,7 +699,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
   hip::Device* device = hip::getCurrentDevice();
   if (device == nullptr) {
-    return hipErrorNoDevice;
+    HIP_RETURN(hipErrorNoDevice);
   }
 
   if (!device->registeredGraphics().add(*resource)) {
@@ -809,7 +809,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
 
   hip::Device* device = hip::getCurrentDevice();
   if (device == nullptr) {
-    return hipErrorNoDevice;
+    HIP_RETURN(hipErrorNoDevice);
   }
 
   if (!device->registeredGraphics().add(*resource)) {
@@ -889,7 +889,7 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
   // Track mapping status
   hip::Device* device = hip::getCurrentDevice();
   if (device == nullptr) {
-    return hipErrorNoDevice;
+    HIP_RETURN(hipErrorNoDevice);
   }
   for (int i = 0; i < count; i++) {
     if (!device->mappedGraphics().add(resources[i])) {
