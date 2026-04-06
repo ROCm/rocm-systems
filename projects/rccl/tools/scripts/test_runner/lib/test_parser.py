@@ -32,8 +32,14 @@ Examples:
   # Skip build and use existing build
   %(prog)s -c test_config.json --no-build
 
+  # Use a custom build directory
+  %(prog)s -c test_config.json --build-dir /tmp/my_rccl_build
+
   # Generate coverage report from existing data
   %(prog)s -c test_config.json --no-build --skip-tests --coverage-report
+
+  # Run on thor2 system (uses thor2 MPI args from config)
+  %(prog)s -c test_config.json --no-build --system thor2
             """
         )
 
@@ -76,15 +82,42 @@ Examples:
             help="Generate code coverage report from profraw files"
         )
         self.parser.add_argument(
-            '--overwrite',
-            action='store_true',
-            help="Overwrite previous build/log directories (default: append timestamp)"
+            '--build-dir',
+            type=str,
+            help="Custom build directory path (default: <workdir>/build/debug or build/release)"
         )
         self.parser.add_argument(
             '--report-suffix',
             type=str,
             default='',
             help="Suffix for report directory name (default: blank)"
+        )
+        self.parser.add_argument(
+            '--rerun-failed',
+            action='store_true',
+            help="Rerun failed tests with additional environment variables from config (rerun_env_variables)"
+        )
+        self.parser.add_argument(
+            '--skip-mpi-check',
+            action='store_true',
+            help="Skip MPI installation check during environment validation"
+        )
+        self.parser.add_argument(
+            '--stop-on-rerun-failure',
+            action='store_true',
+            help="Stop testing immediately if a rerun also fails (requires --rerun-failed)"
+        )
+        self.parser.add_argument(
+            '--system',
+            type=str,
+            default='',
+            help="Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')"
+        )
+        self.parser.add_argument(
+            '--mpich',
+            action='store_true',
+            default=False,
+            help="Use MPICH syntax (-env) instead of OpenMPI (-x) for passing env vars to mpirun"
         )
 
     def parse_arguments(self):
@@ -111,8 +144,13 @@ Examples:
             print(f"No build:          {args.no_build}")
             print(f"Skip tests:        {args.skip_tests}")
             print(f"Coverage report:   {args.coverage_report}")
-            print(f"Overwrite:         {args.overwrite}")
+            print(f"Build dir:         {args.build_dir if args.build_dir else 'default'}")
             print(f"Report suffix:     {args.report_suffix}")
+            print(f"Rerun failed:      {args.rerun_failed}")
+            print(f"Skip MPI check:    {args.skip_mpi_check}")
+            print(f"Stop on rerun fail: {args.stop_on_rerun_failure}")
+            print(f"System profile:    {args.system if args.system else 'none (use default MPI args)'}")
+            print(f"MPI implementation: {'mpich' if args.mpich else 'openmpi (default)'}")
             print("="*80)
             print()
 

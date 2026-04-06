@@ -18,6 +18,8 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 
 * :ref:`Per-kernel roofline analysis <per-kernel-roofline>`: Detailed arithmetic intensity and performance analysis for individual kernels.
 
+* :ref:`Roofline HTML generation <roofline-html-generation>`: Generate interactive HTML roofline charts from profiling data.
+
 Run ``rocprof-compute analyze -h`` for more details.
 
 .. _cli-walkthrough:
@@ -342,6 +344,14 @@ More analysis options
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
 
+**TTY output view (plain tables)**
+
+Use ``--view table`` to force plain tabular output for all sections and ignore ``cli_style`` from the analysis YAML (for example, memory charts and Roofline charts are shown as tables). Additional ``--view`` values may be added in future releases.
+
+.. code-block:: shell
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3 --view table
+
 **Show System Speed-of-Light and CS_Busy blocks only**
 
 .. code-block:: shell
@@ -474,6 +484,36 @@ Analyze multiple kernels for comparison:
 .. code-block:: shell-session
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
+
+.. _roofline-html-generation:
+
+**Roofline HTML generation**
+
+Roofline HTML plots are generated during analyze mode. Profile mode creates
+``roofline.csv`` containing microbenchmark data, and analyze mode uses this
+data to produce interactive HTML roofline charts.
+
+Two-step workflow:
+
+.. code-block:: shell-session
+
+   # Step 1: Profile to generate roofline.csv
+   $ rocprof-compute profile --name vcopy --roof-only -- tests/vcopy -n 1048576 -b 256
+
+   # Step 2: Analyze to generate HTML roofline plots
+   $ rocprof-compute analyze -p workloads/vcopy/MI300A_A1/ -b 4
+
+Roofline visualization options (available only in analyze mode):
+
+* ``--sort``: Overlay top kernels or top dispatches (default: kernels)
+* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, LDS (default: ALL)
+* ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
+
+Example with multiple options:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
 
 .. _analysis-baseline-comparison:
 
@@ -614,21 +654,21 @@ Analysis database example
 
 
 PyTorch Operator Analysis
---------------------------
+=========================
 
 .. warning::
-   
-   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI 
+
+   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI
    will provide different interfaces for operator selection and visualization.
 
-   These options require ``--experimental``. After profiling with 
-   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`), 
-   use ``rocprof-compute --experimental analyze ...`` with 
+   These options require ``--experimental``. After profiling with
+   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
+   use ``rocprof-compute --experimental analyze ...`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
-   
+
 
 Listing All Operators
-^^^^^^^^^^^^^^^^^^^^^^
+---------------------
 
 Display all PyTorch operators captured during profiling:
 
@@ -637,43 +677,49 @@ Display all PyTorch operators captured during profiling:
    $ rocprof-compute --experimental analyze --path ./workload --list-torch-operators
 
    ================================================================================
-   PyTorch Operators in: ./workload
+   PyTorch Operator Call Tree: ./workload
+   Grouped by source location, sorted by total GPU kernel duration.
    ================================================================================
 
-     1. nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d
-     2. nn.Module.Net.forward/nn.Module.Linear.forward/torch.nn.functional.linear
-     3. nn.Module.Net.forward/torch.nn.functional.relu
+   main.py:60 (kernel_launches: 110, total_duration: 59.31 ms)
+   └─ nn.Module.Net.forward (kernel_launches: 110, total_duration: 59.31 ms)
+      ├─ nn.Module.Conv2d.forward
+      |  └─ torch.nn.functional.conv2d (kernel_launches: 40, total_duration: 27.08 ms)
+      └─ nn.Module.Linear.forward
+         └─ torch.nn.functional.linear (kernel_launches: 20, total_duration: 15.41 ms)
 
-   ================================================================================
-   Total: 3 operators
-   ================================================================================
-
-Listed names are the full operator names (hierarchy with ``/``). Per-operator CSVs
-in ``torch_trace/`` are named from the **last** segment of each name (sanitized);
-see :ref:`torch-operator-profiling` for naming details.
+Output is grouped by source location (``file:line``) and shows full operator
+hierarchy (``/``-separated) and kernel stats. A consolidated CSV
+(``torch_trace/consolidated.csv``) is written with all operator/kernel data;
+see :ref:`torch-operator-profiling` for details.
 
 Filtering by Operator
-^^^^^^^^^^^^^^^^^^^^^^
+---------------------
 
-``--torch-operator`` supports exactly two forms of selection:
+``--torch-operator`` uses PurePosixPath glob patterns to select operators.
+Operator hierarchies are ``/``-separated (e.g.
+``nn.Module.Net.forward/torch.nn.functional.relu``), and patterns are matched
+using ``PurePosixPath.match()``:
 
-* **Full hierarchy** — the complete operator path as listed (e.g.
-  ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d``)
-* **Last segment only** — the final component of the name (e.g. ``conv2d``)
-
-Selection at intermediate levels is not supported yet.
+* **Wildcard** — ``*relu`` (ends with relu), ``*conv*`` (contains conv)
+* **Exact** — ``torch.nn.functional.relu``
+* **Multi-level** — ``*/torch.nn.functional.relu``, ``*/*functional*/*``
+* **Match all** — no arguments, ``all``, ``*``, or ``**``
 
 .. code-block:: shell-session
 
-   # Full hierarchy
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d"
+   # Wildcard match
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "*relu"
 
-   # Last segment only (matches any operator whose name ends with that segment)
-   $ rocprof-compute analyze --path ./workload --torch-operator conv2d
+   # Exact match
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator torch.nn.functional.relu
 
-**Filter multiple operators** (each argument is full path or last segment):
+   # Match all operators (no arguments)
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator
+
+**Filter multiple operators** (space or comma separated):
 
 .. code-block:: shell-session
 
    $ rocprof-compute --experimental analyze --path ./workload \
-       --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d" "relu"
+       --torch-operator "*relu,*conv*,*linear"

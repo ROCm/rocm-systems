@@ -40,45 +40,31 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(roctx-pause-resume-env "${PRELOAD_ENV}")
 
-add_test(
-    NAME rocprofv3-test-roctx-pause-resume-pc-sampling-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-roctx-pause-resume-pc-sampling
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --pc-sampling-unit time
         --pc-sampling-method host_trap --pc-sampling-interval 1 -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-pc-sampling -o out --output-format json csv
-        --log-level env -- $<TARGET_FILE:roctx-pause-resume>)
+        --log-level env -- $<TARGET_FILE:roctx-pause-resume>
+    DEPENDS roctx-pause-resume
+    TIMEOUT 45
+    LABELS "integration-tests;pc-sampling;pause-resume"
+    ENVIRONMENT "${roctx-pause-resume-env}"
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    DISABLED "${IS_PC_SAMPLING_DISABLED}"
+    FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-pc-sampling)
 
-set_tests_properties(
-    rocprofv3-test-roctx-pause-resume-pc-sampling-execute
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests;pc-sampling;pause-resume"
-               ENVIRONMENT
-               "${roctx-pause-resume-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               SKIP_REGULAR_EXPRESSION
-               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-               DISABLED
-               "${IS_PC_SAMPLING_DISABLED}")
-
-add_test(
-    NAME rocprofv3-test-roctx-pause-resume-pc-sampling-validate
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-            ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-pc-sampling/out_results.json)
-
-set_tests_properties(
-    rocprofv3-test-roctx-pause-resume-pc-sampling-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests;pc-sampling;pause-resume"
-               DEPENDS
-               rocprofv3-test-roctx-pause-resume-pc-sampling-execute
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               SKIP_REGULAR_EXPRESSION
-               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
-               DISABLED
-               "${IS_PC_SAMPLING_DISABLED}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-roctx-pause-resume-pc-sampling
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-pc-sampling/out_results.json
+    TIMEOUT 45
+    LABELS "integration-tests;pc-sampling;pause-resume"
+    FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-pc-sampling
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    DISABLED "${IS_PC_SAMPLING_DISABLED}")

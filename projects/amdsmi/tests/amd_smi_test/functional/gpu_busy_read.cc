@@ -65,6 +65,7 @@ void TestGPUBusyRead::Run(void) {
   uint32_t val_ui32;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -74,7 +75,9 @@ void TestGPUBusyRead::Run(void) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       PrintDeviceHeader(processor_handles_[i]);
 
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_busy_percent", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_gpu_busy_percent(processor_handles_[i], &val_ui32);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err != AMDSMI_STATUS_SUCCESS) {
         if (err == AMDSMI_STATUS_FILE_ERROR || err == AMDSMI_STATUS_NOT_SUPPORTED) {
           IF_VERB(STANDARD) {

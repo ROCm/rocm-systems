@@ -2556,6 +2556,18 @@ uint16_t hsakmt_get_device_id_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id)
 	return topology_ctx->node_props[node_id].node.DeviceId;
 }
 
+HSAuint8 hsakmt_device_is_apu_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id)
+{
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+
+	/* if no node prop available treat is as dGPU */
+	if (!topology_ctx->node_props || !topology_ctx->system_props ||
+		topology_ctx->system_props->NumNodes <= node_id)
+		return 0;
+
+	return topology_ctx->node_props[node_id].node.Integrated;
+}
+
 bool hsakmt_prefer_ats(HsaKFDContext *ctx, HSAuint32 node_id)
 {
 	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);

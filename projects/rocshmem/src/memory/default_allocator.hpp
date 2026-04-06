@@ -34,7 +34,7 @@
     // the change to make the default allocator a runtime decision.
 #if defined USE_HEAP_DEVICE_COARSEGRAIN
 using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorCoarsegrained;
-#endif    
+#endif
 #if defined USE_HEAP_DEVICE_FINEGRAIN
 using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorFinegrained;
 #endif
@@ -44,6 +44,14 @@ using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorFinegrained;
 using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorUncached;
 #else
 #error "USE_HEAP_DEVICE_UNCACHED unsupported in this HIP version"
+#endif
+#endif
+
+#if defined USE_HEAP_DEVICE_VMM_POSIX
+#if HIP_VERSION >= 70000000
+using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorVMMPosixFd;
+#else
+#error "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer (HIP_VERSION >= 70000000)"
 #endif
 #endif
 
@@ -70,7 +78,7 @@ namespace rocshmem {
 
 #if defined USE_HEAP_DEVICE_COARSEGRAIN
     default_allocator_ = new HIPAllocatorCoarsegrained();
-#endif    
+#endif
 #if defined USE_HEAP_DEVICE_FINEGRAIN
     default_allocator_ = new HIPAllocatorFinegrained();
 #endif
@@ -89,9 +97,14 @@ namespace rocshmem {
     }
 #endif
 #endif
+#if defined USE_HEAP_DEVICE_VMM_POSIX
+#if HIP_VERSION >= 70000000
+    default_allocator_ = new HIPAllocatorVMMPosixFd();
+#endif
+#endif
   }
 
-  static HIPAllocator* get_default_allocator()
+  [[maybe_unused]] static HIPAllocator* get_default_allocator()
   {
     if (default_allocator_ == nullptr) {
       set_default_allocator();
@@ -100,7 +113,7 @@ namespace rocshmem {
     return default_allocator_;
   }
 
-  static void delete_default_allocator()
+  [[maybe_unused]] static void delete_default_allocator()
   {
     if (default_allocator_ != nullptr) {
       delete default_allocator_;

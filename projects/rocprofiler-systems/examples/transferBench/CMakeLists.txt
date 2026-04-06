@@ -5,15 +5,9 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-transferBench-example LANGUAGES CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
@@ -118,18 +112,17 @@ if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
     target_compile_options(transferBench PRIVATE -g1)
 endif()
 
-# Specify GPU architectures to compile for
+# Specify GPU architectures to compile for (skip APU-only targets)
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     rocprofiler_systems_lookup_gfx(${arch} GPU_CATEGORIES)
     if("apu" IN_LIST GPU_CATEGORIES AND NOT "instinct" IN_LIST GPU_CATEGORIES)
         continue()
     endif()
     target_compile_options(transferBench PRIVATE --offload-arch=${arch})
-    target_link_options(transferBench PUBLIC --offload-arch=${arch})
+    target_link_options(transferBench PRIVATE --offload-arch=${arch})
 endforeach()
 
 if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-    # defined in MacroUtilities.cmake
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transferBench)
 endif()
 

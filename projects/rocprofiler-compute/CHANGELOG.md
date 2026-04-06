@@ -6,13 +6,34 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added L2 memory bandwidth derived metrics under `--membw-analysis` to allow L2 memory bandwidth specific profiling and analysis metric block 30.
+
+* Introduced support for MI350P GPU
+
+* ``--view table`` option in analyze mode to force all TTY output to plain tables and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables). The ``--view`` argument is reserved for future TTY views (e.g. other chart styles).
+
 ### Changed
+
+* Standalone roofline (`--roof-only` option) in profile mode now creates `roofline.csv` only. HTML roofline charts are generated via `rocprof-compute analyze`. The `calc_ai_profile()` function has been removed; `calc_ai_analyze()` is the single source of truth for arithmetic intensity calculation.
+  * Roofline visualization options (`--sort`, `--mem-level`, `--roofline-data-type`) have moved from profile mode to analyze mode.
+
+* Standardized unit naming in analysis configs and Python utilities: `pct`/`Pct` → `Percent`, `instr` → `Instructions`.
+
+* Profile mode output format:
+  * Profile mode now creates separate counter collection files for each application replay (pmc_perf_*.csv or results_*.csv).
+  * Analyze mode automatically merges these files into a unified pmc_perf.csv containing information from all application replays during pre-processing.
+
+* ROCm Compute Profiler now builds and runs profile mode with vanilla Python without requiring any Python dependencies to be installed via `pip`.
+  * Note that analysis mode will still require Python dependencies and will report any missing packages.
 
 ### Removed
 
 * Removed HIP API tracing since it's out-of-scope for ROCm Compute Profiler and the trace files were not being analyzed.
 
 ### Optimized
+
+* Filtering for block 21 (`-b 21`) in profile mode, now only performs pc sampling and skips unnecessary counter collection
+  * Filtering for block 21 in analysis mode, now skips metrics calculations and only shows kernel/dispatch/system statisitcs and pc sampling table
 
 ### Resolved issues
 

@@ -55,6 +55,10 @@ jobs:
         uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-compute
+          set-safe-directory: true
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
 
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute

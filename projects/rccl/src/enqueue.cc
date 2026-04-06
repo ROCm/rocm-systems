@@ -344,7 +344,11 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   }
 }
 
-NCCL_PARAM(GraphRegister, "GRAPH_REGISTER", 0); // LWPCOMMLIBS-632: off by default for RCCL as unsupported feature.
+#if ROCM_VERSION >= 71200
+NCCL_PARAM(GraphRegister, "GRAPH_REGISTER", 1);
+#else
+NCCL_PARAM(GraphRegister, "GRAPH_REGISTER", 0);
+#endif
 
 static ncclResult_t getCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* collNetSupport);
 rccl_static ncclResult_t getAlgoInfo(
@@ -435,8 +439,14 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.enableDirectReduceScatter = comm->enableDirectReduceScatter;
       int64_t directReduceScatterLimit = rcclParamDirectReduceScatterThreshold();
       if (directReduceScatterLimit >= 0) {
-        // set threshold to 2MiB hard limit
-        directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+        // set threshold to 8MiB hard limit
+        if (comm->nNodes == 8 || comm->nNodes == 16) {
+          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)8388608);
+        } else if (comm->nNodes == 4) {
+          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)4194304);
+        } else if (comm->nNodes == 2) {
+          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+        }
         devWork.directReduceScatterLimitBytes = (uint32_t) directReduceScatterLimit;
       } else {
         devWork.directReduceScatterLimitBytes = (uint32_t)0;
@@ -448,12 +458,12 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
     
     devWork.isOneRPN = comm->isOneRPN;
     devWork.netRegUsed = devWork.regUsed = 0;
-    devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
     devWork.profilerEnabled = ncclProfilerPluginLoaded() && (task->eActivationMask & ncclProfileKernelCh);
     if (task->regBufType & NCCL_NET_REG_BUFFER)
       devWork.netRegUsed = 1;
     if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
       devWork.regUsed = 1;
+    devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
       struct ncclDevWorkCollReg workReg = {};
@@ -1868,8 +1878,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   for (int i = 0; i < MAXCHANNELS/64; i++)
     nChannels += countOneBits(plan->channelMask.masks[i]);
   void* sym = plan->kernelFn;
-  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
 #ifdef ENABLE_WARP_SPEED
+  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
   nChannels = rcclWarpSpeedSupported(comm, plan) ? (nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0)) : nChannels; // each CU can handle warpsPerBlock
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
@@ -2355,7 +2365,7 @@ static ncclResult_t topoGetAlgoInfo(
   rcclOverrideAlgorithm(ncclAlgoStr, table, info);
   rcclOverrideProtocol(ncclProtoStr, table, info);
 #ifdef ENABLE_WARP_SPEED
-  rcclSetWarpSpeedAuto(comm, info, nBytes);
+  NCCLCHECK(rcclSetWarpSpeedAuto(comm, info, nBytes));
   if(info->useWarpSpeed) {
     rcclSetWarpSpeedCUs(comm, info->algorithm, info->nWarps * comm->WarpSize, nc);
   }
@@ -3086,7 +3096,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     NCCLCHECK(hostToDevRedOp(&opDev, info->op, info->datatype, comm));
 
     if (comm->nRanks == 1) {
-      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream));
+      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream, info->acc));
       return ncclSuccess;
     } else {
       struct ncclDevrWindow* sendWin;

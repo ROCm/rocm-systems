@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+
 #pragma once
 #ifdef __linux__
 #include <errno.h>
