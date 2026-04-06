@@ -2108,14 +2108,18 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
-  // Deep sleep entry is not a real DPM level; exclude it from valid bitmask
+  // Deep sleep entry (index 0 in pp_dpm_sclk marked with 'S') is not a real
+  // DPM level; subtract it from the valid count so the bitmask only covers
+  // actual DPM levels.  Bitmask bit i maps to sysfs DPM level i, which
+  // corresponds to freqs.frequency[i] when has_deep_sleep is false, or
+  // freqs.frequency[i+1] when has_deep_sleep is true.
   if (freqs.num_supported > 0) {
     uint32_t max_levels = freqs.num_supported;
-    if (freqs.has_deep_sleep && max_levels > 0) {
+    if (freqs.has_deep_sleep) {
       max_levels--;
     }
     uint64_t valid_mask = (max_levels > 0) ? (1ULL << max_levels) - 1 : 0;
-    if (freq_bitmask & ~valid_mask) {
+    if (freq_bitmask == 0 || (freq_bitmask & ~valid_mask)) {
       return RSMI_STATUS_INVALID_ARGS;
     }
   }
@@ -2137,6 +2141,9 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
+  // bitfield_to_freq_string iterates [0, num_supported), but the validation
+  // above already guarantees no bits are set beyond the valid DPM range, so
+  // the extra iteration over the deep sleep index (if present) is harmless.
   std::string freq_enable_str = bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
