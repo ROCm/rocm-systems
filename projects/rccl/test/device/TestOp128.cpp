@@ -1027,6 +1027,34 @@ TEST_F(PackRoundtripTest, LoadStorePack_Path1_DirectCast) {
     EXPECT_EQ(h_out[i], h_in[i]) << "at index " << i;
 }
 
+// Path 2: loadPack<BytePack<8>, uint8_t> — funnel-shift path
+// Condition: (8+3)/4+1=3 < 8/1=8, true → path 2
+__global__ void kernelLoadStorePack_Path2(const uint8_t* src, uint8_t* dst, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int ix = i * 8;
+  if (ix >= n) return;
+  BytePack<8> pack = loadPack<BytePack<8>>(const_cast<uint8_t*>(src), ix, n);
+  storePack<BytePack<8>>(dst, ix, n, pack);
+}
+
+TEST_F(PackRoundtripTest, LoadStorePack_Path2_FunnelShift) {
+  const int N = 64;
+  std::vector<uint8_t> h_in(N);
+  for (int i = 0; i < N; i++) h_in[i] = static_cast<uint8_t>(i + 1);
+
+  DeviceBuffer<uint8_t> d_src(N), d_dst(N);
+  d_src.copyFrom(h_in);
+  d_dst.zero();
+
+  int packs = N / 8;
+  kernelLoadStorePack_Path2<<<1, packs>>>(d_src.ptr, d_dst.ptr, N);
+  syncAndCheck();
+
+  auto h_out = d_dst.copyTo();
+  for (int i = 0; i < N; i++)
+    EXPECT_EQ(h_out[i], h_in[i]) << "at index " << i;
+}
+
 // Path 3: loadPack<BytePack<8>, uint32_t> — element-by-element
 // Condition: (8+3)/4+1=3 < 8/4=2, false → path 3
 __global__ void kernelLoadStorePack_Path3(const uint32_t* src, uint32_t* dst, int n) {

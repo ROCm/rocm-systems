@@ -292,8 +292,8 @@
         },
         {
           "name": "DeviceOp128_LoadStorePack",
-          "description": "loadPack/storePack direct cast, element-by-element paths and boundary tests",
-          "test_filter": "PackRoundtripTest.LoadStorePack_Path1*:PackRoundtripTest.LoadStorePack_Path3*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
+          "description": "loadPack/storePack three internal paths (direct cast, funnel-shift, element-by-element) and boundary",
+          "test_filter": "PackRoundtripTest.LoadStorePack_*:PackRoundtripTest.L2_StorePackBoundary:PackRoundtripTest.Store16Load16Global_Direct"
         },
         {
           "name": "Fixtures_All",
