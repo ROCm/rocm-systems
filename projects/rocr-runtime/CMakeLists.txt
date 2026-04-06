@@ -60,6 +60,8 @@ if (NOT DEFINED BUILD_ROCR)
   set(BUILD_ROCR ON)
 endif()
 
+option( BUILD_ROCRTST "Build ${PROJECT_NAME} tests" OFF )
+
 function(add_rocm_subdir subdir subdir_assigns)
     message("add_rocm_subdir() -- " ${subdir})
     # message("  subdir_assigns before:" ${subdir_assigns} "EOM")
@@ -351,6 +353,12 @@ endif()
 cpack_add_component(asan
   DISPLAY_NAME "ASAN"
   DESCRIPTION "ASAN libraries for rocr-runtime")
+
+# Build clients of the library
+if( BUILD_ROCRTST )
+  message(STATUS "Adding test_common subdir")
+  add_subdirectory(rocrtst/suites/test_common)
+endif()
 
 # Debian specific packaging configuration install lintian files
 configure_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
