@@ -38,7 +38,7 @@ namespace rocshmem {
 namespace envvar {
   inline namespace _base {
     const var<bool> uniqueid_with_mpi("UNIQUEID_WITH_MPI",
-      "Defines whether rocSHMEM is expected to use MPI when using the uniqueId based initialization. 0: Do not use MPI; 1: Use MPI",
+      "Defines whether rocSHMEM is expected to use MPI internally when using the uniqueId based initialization. 0: Do not use MPI; 1: Use MPI",
       false);
     const var<types::debug_level> debug_level("DEBUG_LEVEL",
       "Debug output level (NONE, VERSION, WARN, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)",

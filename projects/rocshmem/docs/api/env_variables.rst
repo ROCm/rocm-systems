@@ -54,7 +54,7 @@ control the behavior of rocSHMEM.
         | ``gda``: GPU Direct Async Backend
 
     * - | ``ROCSHMEM_UNIQUEID_WITH_MPI``
-        | Defines whether rocSHMEM is expected to use MPI when using the uniqueId based initialization.
+        | Defines whether rocSHMEM is expected to use MPI internally when using the uniqueId based initialization.
       - ``0``
       - | ``0``: Do not use MPI.
         | ``1``: Use MPI.
