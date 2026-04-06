@@ -191,7 +191,6 @@ class RocProfCompute_Base:
             )
 
         gen_sysinfo(
-            workload_name=args.name,
             workload_dir=args.path,
             app_cmd=args.remaining,
             skip_roof=args.no_roof,
@@ -239,7 +238,6 @@ class RocProfCompute_Base:
                 fnames=str_fnames,
                 profiler_options=options,
                 workload_dir=args.path,
-                mspec=self._soc._mspec,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
                 torch_trace_enabled=getattr(args, "torch_trace", False),
@@ -280,7 +278,7 @@ class RocProfCompute_Base:
             console_log("Filtered sections: All")
 
         # Run profiling on each input file
-        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
+        input_files = sorted(Path(args.path).glob("perfmon/pmc_perf_*.yaml"))
         total_runs = len(input_files)
 
         if total_runs == 0 and is_only_pc_sampling(args.filter_blocks):
@@ -296,6 +294,9 @@ class RocProfCompute_Base:
         native_tool_path = None
         # Native counter collection tool is only compatible with
         # rocprofiler-sdk public API for ROCm version >= 7.x.x
+
+        # PC sampling only profile does not need native tool
+
         # Do not use native tool in attach
         # mode until we figure out how multiple tools can attach
         # TODO: Figure out how multiple tools can attach
@@ -304,6 +305,7 @@ class RocProfCompute_Base:
             and not args.no_native_tool
             and int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
             and not args.attach_pid
+            and not is_only_pc_sampling(args.filter_blocks)
         ):
             # Use native counter collection tool
             # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
@@ -399,37 +401,6 @@ class RocProfCompute_Base:
 
         total_profiling_time = 0.0
 
-        for fname in input_files:
-            # Kernel filtering (in-place replacement)
-            if not args.kernel == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                    str(fname),
-                ])
-                # log output from profile filtering
-                if not success:
-                    console_error(output)
-                else:
-                    console_debug(output)
-
-            # Dispatch filtering (inplace replacement)
-            if args.dispatch is not None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                    str(fname),
-                ])
-                # log output from profile filtering
-                if not success:
-                    console_error(output)
-                else:
-                    console_debug(output)
-
         if args.iteration_multiplexing is not None:
             if native_tool_path is None:
                 console_error(
@@ -497,7 +468,7 @@ class RocProfCompute_Base:
             )
             return
 
-        total_runs = len(list(Path(args.path).glob("perfmon/*.txt")))
+        total_runs = len(list(Path(args.path).glob("perfmon/pmc_perf_*.yaml")))
 
         console_log(f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
 

@@ -124,14 +124,13 @@ AieAqlQueue::~AieAqlQueue() {
 }
 
 hsa_status_t AieAqlQueue::Inactivate() {
-  bool active(active_.exchange(false, std::memory_order_relaxed));
-  hsa_status_t status(HSA_STATUS_SUCCESS);
-
+  bool active = active_.exchange(false, std::memory_order_relaxed);
   if (active) {
-    agent_.driver().DestroyQueue(queue_id_);
+    auto err = agent_.driver().DestroyQueue(queue_id_);
+    assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+    atomic::Fence(std::memory_order_acquire);
   }
-
-  return status;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t AieAqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
@@ -270,8 +269,7 @@ void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {
   StoreRelaxed(value);
 }
 
-hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute,
-                                  void *value) {
+hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
       *static_cast<hsa_agent_t*>(value) = agent_.public_handle();
@@ -293,22 +291,16 @@ hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AieAqlQueue::GetCUMasking(uint32_t num_cu_mask_count,
-                                       uint32_t *cu_mask) {
-  assert(false && "AIE AQL queue does not support CU masking.");
-  return HSA_STATUS_ERROR;
+hsa_status_t AieAqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) {
+  return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-hsa_status_t AieAqlQueue::SetCUMasking(uint32_t num_cu_mask_count,
-                                       const uint32_t *cu_mask) {
-  assert(false && "AIE AQL queue does not support CU masking.");
-  return HSA_STATUS_ERROR;
+hsa_status_t AieAqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) {
+  return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-void AieAqlQueue::ExecutePM4(uint32_t *cmd_data, size_t cmd_size_b,
-                             hsa_fence_scope_t acquireFence,
-                             hsa_fence_scope_t releaseFence,
-                             hsa_signal_t *signal) {
+void AieAqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
+                             hsa_fence_scope_t releaseFence, hsa_signal_t* signal) {
   assert(false && "AIE AQL queue does not support PM4 packets.");
 }
 

@@ -61,7 +61,7 @@ class IpcOnImpl {
 
   __host__ void ipcHostStop();
 
-  __host__ __device__ bool isIpcAvailable(int my_pe, int target_pe, int *local_target_pe) {
+  __host__ __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) {
     if (nullptr == pes_with_ipc_avail) { return false; }
 
     for (int i=0; i<shm_size; i++) {
@@ -154,7 +154,7 @@ class IpcOnImpl {
   __device__ void zero_byte_read(int pe) {
     int local_pe = pe % shm_size;
     uint32_t *pe_ipc_base = reinterpret_cast<uint32_t *>(ipc_bases[local_pe]);
-    volatile uint32_t read_value = __hip_atomic_load(
+    [[maybe_unused]] volatile uint32_t read_value = __hip_atomic_load(
         pe_ipc_base, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 };
@@ -181,7 +181,7 @@ class IpcOffImpl {
 
   __host__ void ipcHostStop() {}
 
-  __host__ __device__ bool isIpcAvailable(int my_pe, int target_pe, int *local_target_pe) { return false; }
+  __host__ __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) { return false; }
 
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}

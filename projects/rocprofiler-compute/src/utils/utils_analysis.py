@@ -592,3 +592,46 @@ def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFra
 
     final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
     return final_df
+
+
+def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Merge counters across unique dispatches from the
+    input dataframe and return processed dataframe.
+    """
+    if df.empty:
+        return df
+
+    data: list[dict[str, Any]] = []
+
+    # Group by unique kernel and merge into a single row
+    for _, group_df in df.groupby([
+        "Dispatch_ID",
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+    ]):
+        row = {
+            "GPU_ID": group_df["GPU_ID"].iloc[0],
+            "Grid_Size": group_df["Grid_Size"].iloc[0],
+            "Workgroup_Size": group_df["Workgroup_Size"].iloc[0],
+            "LDS_Per_Workgroup": group_df["LDS_Per_Workgroup"].iloc[0],
+            "Scratch_Per_Workitem": group_df["Scratch_Per_Workitem"].iloc[0],
+            "Arch_VGPR": group_df["Arch_VGPR"].iloc[0],
+            "Accum_VGPR": group_df["Accum_VGPR"].iloc[0],
+            "SGPR": group_df["SGPR"].iloc[0],
+            "Kernel_Name": group_df["Kernel_Name"].iloc[0],
+            "Kernel_ID": group_df["Kernel_ID"].iloc[0],
+            "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
+            "End_Timestamp": group_df["End_Timestamp"].iloc[0],
+        }
+        # Each counter will become its own column
+        row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
+        data.append(row)
+    df = pd.DataFrame(data)
+    # Rank GPU IDs, map lowest number to 0, next to 1, etc.
+    df["GPU_ID"] = df["GPU_ID"].rank(method="dense").astype(int) - 1
+    # Reset dispatch IDs
+    df["Dispatch_ID"] = range(len(df))
+    return df

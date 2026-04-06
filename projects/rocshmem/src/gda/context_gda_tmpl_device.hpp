@@ -65,7 +65,7 @@ __device__ void GDAContext::put_nbi(T *dest, const T *source, size_t nelems, int
 
 template <typename T>
 __device__ T GDAContext::g(const T *source, int pe) {
-  T ret;
+  T ret{};
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
@@ -95,13 +95,15 @@ template <typename T>
 __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[pe].atomic_nofetch(base_heap[pe] + L_offset, value, 0, pe);
+      qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -117,6 +119,8 @@ template <typename T>
 __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_set not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -130,8 +134,8 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
        * The compare-and-swap loop will execute at least twice if wrong.
        * It may run additional times if contention on memory location.
        */
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset, value,
-                         cond, pe)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, value, cond, wf_info)) != cond) {
         cond = ret_val;
       }
       need_turn = false;
@@ -145,6 +149,8 @@ template <typename T>
 __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_and not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -154,8 +160,8 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset,
-                         desired_val, cond, pe)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val & value;
       }
@@ -175,6 +181,8 @@ template <typename T>
 __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_or not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -184,8 +192,8 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset,
-                         desired_val, cond, pe)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val | value;
       }
@@ -205,6 +213,8 @@ template <typename T>
 __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_xor not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -214,8 +224,8 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while ((ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset,
-                         desired_val, cond, pe)) != cond) {
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
         cond = ret_val;
         desired_val = ret_val ^ value;
       }
@@ -235,13 +245,15 @@ template <typename T>
 __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_cas not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[pe].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, pe);
+      qps[qp_index].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -252,6 +264,8 @@ template <typename T>
 __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fadd not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
   T ret_val = 0;
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -259,7 +273,7 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val =  qps[pe].atomic_fetch(base_heap[pe] + L_offset, value, 0, pe);
+      ret_val =  qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -271,6 +285,8 @@ template <typename T>
 __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
   if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fcas not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -278,7 +294,7 @@ __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      ret_val = qps[pe].atomic_cas(base_heap[pe] + L_offset, value, cond, pe);
+      ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -296,8 +312,8 @@ __device__ void gda_compute_reduce(T *src, T *dst, int size, int wg_id, int wg_s
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ void GDAContext::internal_direct_allreduce(
-    T *dst, const T *src, int nelems, GDATeam *team_obj) {  // NOLINT(runtime/int)
+__device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
+    int nelems, GDATeam *team_obj, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
 
   int stride = team_obj->tinfo_wrt_world->stride;
   int PE_start = team_obj->tinfo_wrt_world->pe_start;
@@ -319,12 +335,12 @@ __device__ void GDAContext::internal_direct_allreduce(
 
   for (int i = PE_start; i < finish; i += stride) {
     if (i != pe) {
-      putmem_wg(&pWrk[pe * nelems], reinterpret_cast<const void *>(src),
-                nelems * sizeof(T), i);
+      internal_putmem_wg(&pWrk[pe * nelems], reinterpret_cast<const void *>(src),
+        nelems * sizeof(T), i, i, wf_info);
 
       if (is_thread_zero_in_block()) {
         fence();
-        putmem(&pSync[pe], &flag_val, sizeof(*pSync), i);
+        internal_putmem(&pSync[pe], &flag_val, sizeof(*pSync), i, i, wf_info);
       }
     }
   }
@@ -412,12 +428,10 @@ __device__ void GDAContext::internal_direct_allreduce(
  *        [03+13+23+33]  [03+13+23+33] [03+13+23+33]  [03+13+23+33]
  */
 template <typename T, ROCSHMEM_OP Op>
-__device__ void GDAContext::internal_ring_allreduce(
-    T *dst, const T *src, int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
-    int n_seg, int seg_size, int chunk_size) {
+__device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
+    int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
+    int n_seg, int seg_size, int chunk_size, ActiveWFInfo &wf_info) {
 
-  int stride = team_obj->tinfo_wrt_world->stride;
-  int PE_start = team_obj->tinfo_wrt_world->pe_start;
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
@@ -444,15 +458,16 @@ __device__ void GDAContext::internal_ring_allreduce(
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
       off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
 
-      putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
-                reinterpret_cast<void *>(&dst[off_send + off_seg]),
-                chunk_size * sizeof(T), send_pe);
+      internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
+        reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
 
       if (is_thread_zero_in_block()) {
         fence();
 
         wait_val = seg + 100;
-        putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+          send_pe, wf_info);
 #if defined(__gfx90a__)
         __threadfence_system();
 #endif /* __gfx90a__ */
@@ -466,14 +481,15 @@ __device__ void GDAContext::internal_ring_allreduce(
     // Loop 2 in the example above
     for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
-      putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
-                    reinterpret_cast<void *>(&dst[off_send + off_seg]),
-                    chunk_size * sizeof(T), send_pe);
+      internal_putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        reinterpret_cast<void *>(&dst[off_send + off_seg]),
+        chunk_size * sizeof(T), send_pe, send_pe, wf_info);
 
       if (is_thread_zero_in_block()) {
         fence();
         wait_val = seg + 100;
-        putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
+        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+          send_pe, wf_info);
 #if defined(__gfx90a__)
         __threadfence_system();
 #endif /* __gfx90a__ */
@@ -503,8 +519,10 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
   size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
-    internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj);
+    internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj, wf_info);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
       size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
@@ -521,7 +539,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
 
       if (n_seg > 0) {
         internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
-                                       seg_size, chunk_size);
+          seg_size, chunk_size, wf_info);
       }
       if (n_seg_up > n_seg) {
         T *p_dst = (dest + (n_seg * seg_size));
@@ -531,8 +549,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
 
         if (p_chunk > 0) {
           internal_ring_allreduce<T, Op>(p_dst, p_src, (p_chunk * PE_size),
-                                         team_obj, 1, (p_chunk * PE_size),
-                                         p_chunk);
+            team_obj, 1, (p_chunk * PE_size), p_chunk, wf_info);
         }
 
         if ((p_chunk * PE_size) < p_count) {
@@ -541,7 +558,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
           p_dst += (p_chunk * PE_size);
           const T *p_src2 = p_src + (p_chunk * PE_size);
 
-          internal_direct_allreduce<T, Op>(p_dst, p_src2, p_count, team_obj);
+          internal_direct_allreduce<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
         }
       }
     } else {
@@ -554,30 +571,30 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void GDAContext::internal_put_broadcast(
-    T *dst, const T *src, int nelems, int pe_root, int pe_start,
-    int stride, int pe_size) {  // NOLINT(runtime/int)
+__device__ void GDAContext::internal_put_broadcast(T *dst, const T *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
   if (my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
       if (i != my_pe) {
-        put_nbi_wg(dst, src, nelems, i);
+        internal_putmem_nbi_wg(dst, src, nelems * sizeof(T), i, i, wf_info);
       }
     }
   }
 }
 
 template <typename T>
-__device__ void GDAContext::internal_get_broadcast(
-  T *dst, const T *src, int nelems, int pe_root) {  // NOLINT(runtime/int)
+__device__ void GDAContext::internal_get_broadcast(T *dst, const T *src,
+    int nelems, int pe_root, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
   if (my_pe != pe_root) {
-    get_wg(dst, src, nelems, pe_root);
+    internal_getmem_wg(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
   }
 }
 
 template <typename T>
 __device__ void GDAContext::broadcast(rocshmem_team_t team, T *dst,
-                                      const T *src, int nelems, int pe_root) {
+    const T *src, int nelems, int pe_root) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int stride = team_obj->tinfo_wrt_world->stride;
@@ -592,19 +609,19 @@ __device__ void GDAContext::broadcast(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ void GDAContext::internal_broadcast(T *dst, const T *src, int nelems,
-                                      int pe_root, int pe_start,
-                                      int stride, int pe_size,
-                                      long *p_sync) {  // NOLINT(runtime/int)
+__device__ void GDAContext::internal_broadcast(T *dst, const T *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync) {  // NOLINT(runtime/int)
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
   if (num_pes < 4) { //TODO: optimized for IPC
     internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
-                           pe_size);
+      pe_size, wf_info);
   } else {
-    internal_get_broadcast(dst, src, nelems, pe_root);
+    internal_get_broadcast(dst, src, nelems, pe_root, wf_info);
   }
 
   // Synchronize on completion of broadcast
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, p_sync);
+  internal_sync_wg(my_pe, pe_start, stride, pe_size, p_sync, wf_info);
 }
 
 template <typename T>
@@ -631,11 +648,9 @@ __device__ void GDAContext::alltoallv(rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
-                                           T *dest, const size_t dest_nelems[],
-                                           const size_t dest_displs[],
-                                           T *source, const size_t source_nelems[],
-                                           const size_t source_displs[]) {
+__device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
+    const size_t dest_nelems[], const size_t dest_displs[], T *source,
+    const size_t source_nelems[], const size_t source_displs[]) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
@@ -670,7 +685,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
     volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(vol_ivars) != 1) { }
 
-    pe_quiet_single(dest_pe);
+    qps[dest_pe].quiet_single();
 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
@@ -696,15 +711,11 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
-                                          T *dest, const size_t dest_nelems[],
-                                          const size_t dest_displs[],
-                                          T *source, const size_t source_nelems[],
-                                          const size_t source_displs[]) {
+__device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
+    [[maybe_unused]] const size_t dest_nelems[], const size_t dest_displs[], T *source,
+    [[maybe_unused]] const size_t source_nelems[], const size_t source_displs[]) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-  int pe_size       = team_obj->num_pes;
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  int stride = team_obj->tinfo_wrt_world->stride;
+  int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   uint64_t a2a_sn   = team_obj->alltoall_sequence_number;
@@ -763,7 +774,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
     volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(vol_ivars) != 1) { }
 
-    pe_quiet_single(dest_pe);
+    qps[dest_pe].quiet_single();
 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
@@ -789,29 +800,29 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
   int wf_id = get_flat_block_id() / WF_SIZE;
   int wf_count = (int) ceil((double)get_flat_block_size() / (double)WF_SIZE);
 
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
   // Have each PE put their designated data to the other PEs
   for (int j = wf_id; j < pe_size; j+= wf_count) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    put_nbi_wave(&dst[my_pe_in_team * nelems], &src[j * nelems], nelems, dest_pe);
+    internal_putmem_nbi_wave(&dst[my_pe_in_team * nelems], &src[j * nelems],
+      nelems * sizeof(T), dest_pe, dest_pe, wf_info);
   }
 
   for (int j = wf_id; j < pe_size; j+= wf_count) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    pe_quiet(dest_pe);
+    qps[dest_pe].quiet(wf_info);
   }
 
   // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team, T *dst,
-                                                        const T *src, int nelems) {
+__device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
+    T *dst, const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
-  int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
-  int stride = team_obj->tinfo_wrt_world->stride;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
@@ -820,13 +831,15 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team, T 
   int step_size = min(get_flat_block_size(), WF_SIZE);
 
   // Have each PE put their designated data to the other PEs
-  for (int j = tid; j < pe_size; j+= step_size) {
+  for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
-    qps[dest_pe].put_nbi_single(reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
-                                &src[j * nelems], nelems * sizeof(T), false);
-    qps[dest_pe].atomic_nofetch_single(reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) + base_heap_offset,
-                                       1);
+    qps[dest_pe].put_nbi_single(
+      reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
+      &src[j * nelems], nelems * sizeof(T), false);
+    qps[dest_pe].atomic_nofetch_single(
+      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
+      base_heap_offset, 1);
   }
 
   // wait until everyone has obtained their designated data
@@ -836,7 +849,7 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team, T 
     volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(vol_ivars) != 1) { }
 
-    pe_quiet_single(dest_pe);
+    qps[dest_pe].quiet_single();
 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
@@ -856,7 +869,7 @@ __device__ void GDAContext::fcollect(rocshmem_team_t team, T *dst,
 
 template <typename T>
 __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
-                                            const T *src, int nelems) {
+    const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
@@ -865,17 +878,23 @@ __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
 
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
   // Have each PE put their designated data to the other PEs
   for (int j = 0; j < pe_size; j++) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    put_nbi_wg(&dst[my_pe_in_team * nelems], src, nelems, dest_pe);
+    internal_putmem_nbi_wg(&dst[my_pe_in_team * nelems], src,
+      nelems * sizeof(T), dest_pe, dest_pe, wf_info);
   }
 
   if (is_thread_zero_in_block()) {
-    quiet();
+    // Iterate through 0th qp of each PE
+    for (int j = 0; j < pe_size; j++) {
+      int dest_pe = team_obj->get_pe_in_world(j);
+      qps[dest_pe].quiet(wf_info);
+    }
   }
   // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
 // Block/wave functions
@@ -937,6 +956,127 @@ __device__ void GDAContext::get_nbi_wave(T *dest, const T *source, size_t nelems
 GDA_CONTEXT_PUT_SIGNAL_DEF()
 GDA_CONTEXT_PUT_SIGNAL_DEF(_wg)
 GDA_CONTEXT_PUT_SIGNAL_DEF(_wave)
+
+// Internal functions used by collective and singnal operations
+template <typename T>
+__device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
+    int qp_index, ActiveWFInfo &wf_info) {
+  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  bool need_turn {true};
+  uint64_t turns = __ballot(need_turn);
+  while (turns) {
+    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
+    int pe_turn = __shfl(pe, lane);
+    if (pe_turn == pe) {
+      qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
+      need_turn = false;
+    }
+    turns = __ballot(need_turn);
+  }
+}
+
+template <typename T>
+__device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
+    int qp_index, ActiveWFInfo &wf_info) {
+  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fadd not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  T ret_val = 0;
+  bool need_turn {true};
+  uint64_t turns = __ballot(need_turn);
+  while (turns) {
+    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
+    int pe_turn = __shfl(pe, lane);
+    if (pe_turn == pe) {
+      ret_val =  qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
+      need_turn = false;
+    }
+    turns = __ballot(need_turn);
+  }
+  return ret_val;
+}
+
+template <typename T>
+__device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
+    int qp_index, ActiveWFInfo &wf_info) {
+  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_set not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  bool need_turn {true};
+  uint64_t turns = __ballot(need_turn);
+  T ret_val;
+  T cond = 0;
+  while (turns) {
+    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
+    int pe_turn = __shfl(pe, lane);
+    if (pe_turn == pe) {
+      /**
+       * Guess that the remote memory is zero by setting condition to zero.
+       * The compare-and-swap loop will execute at least twice if wrong.
+       * It may run additional times if contention on memory location.
+       */
+      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
+             base_heap[pe] + L_offset, value, cond, wf_info)) != cond) {
+        cond = ret_val;
+      }
+      need_turn = false;
+    }
+    turns = __ballot(need_turn);
+  }
+  return ret_val;
+}
+
+/******************************************************************************
+ ****************************** INLINE FUNCTIONS ******************************
+ *****************************************************************************/
+
+/**
+ * @brief Get the Queue Pair index for a given PE based on a atomic counter
+ *        This ensures even distribution of requests across multiple QPs
+ *        allocated per PE.
+ * @param pe The target PE
+ * @return The Queue Pair index
+ *
+ * Explanation of QP indexing scheme:
+ *  num_qps_per_pe = 4
+ *  num_pes        = 3
+ *
+ *  Layout of QPs per PE:
+ *
+ *             PE0          PE1          PE2
+ *           ───────      ───────      ───────
+ *  QP0  ─> [ QP0,0 ]    [ QP0,1 ]    [ QP0,2 ]
+ *  QP1  ─> [ QP1,0 ]    [ QP1,1 ]    [ QP1,2 ]
+ *  QP2  ─> [ QP2,0 ]    [ QP2,1 ]  **[ QP2,2 ]** <-- highlighted (3rd QP of PE2)
+ *  QP3  ─> [ QP3,0 ]    [ QP3,1 ]    [ QP3,2 ]
+ *
+ *  Legend:
+ *    - num_qps_per_pe = 4  →  Four Queue Pairs per PE
+ *    - num_pes = 3         →  Three Processing Elements (PE0–PE2)
+ *    - QP[i,j]             →  i-th QP of PE j
+ *    - **[ QP2,2 ]**       →  The 3rd QP (QP index 2) of PE2
+ */
+__device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
+    ActiveWFInfo wf_info) {
+
+  uint32_t qp_index   {0};
+
+  if(wf_info.pe_group_logical_lane_id == 0) {
+    // Only the leader lane updates the counter (Does it require atomics?)
+    // uint32_t local_qp_counter = __hip_atomic_fetch_add(&qp_counter[pe], 1,
+    //                                        __ATOMIC_RELAXED,
+    //                                        __HIP_MEMORY_SCOPE_AGENT);
+    // local_qp_counter %= num_qps_per_pe;
+    // qp_index = (local_qp_counter * num_pes) + pe;
+    qp_index = (qp_counter[pe]++ % num_qps_per_pe) * num_pes + pe;
+  }
+
+  // Broadcast the qp_index value to other lanes in the wavefront
+  // that are targeting the same PE
+  qp_index = __shfl_sync(wf_info.pe_group_mask, qp_index,
+                wf_info.pe_group_leader_phys_lane_id);
+
+  return qp_index;
+}
 
 }  // namespace rocshmem
 

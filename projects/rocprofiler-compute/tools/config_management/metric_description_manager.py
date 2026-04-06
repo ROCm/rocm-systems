@@ -56,7 +56,7 @@ SECTION_PANEL_MAP: dict[str, int] = {
     "Wavefront runtime stats": 702,
     "Overall instruction mix": 1001,
     "VALU arithmetic instruction mix": 1002,
-    "MFMA instruction mix": 1004,
+    "Matrix instruction mix": 1004,
     "Compute Speed-of-Light": 1101,
     "Pipeline statistics": 1102,
     "Arithmetic operations": 1103,

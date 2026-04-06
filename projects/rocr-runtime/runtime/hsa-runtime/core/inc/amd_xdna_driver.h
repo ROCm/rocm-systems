@@ -120,24 +120,32 @@ class XdnaDriver final : public core::Driver {
 
   /// @brief Per hardware context PDI cache.
   class PDICache {
+   private:
     /// @brief CU mask size.
     constexpr static size_t cu_mask_size = sizeof(uint32_t) * CHAR_BIT;
 
+   public:
+    using size_type = uint32_t;
+
+   private:
     std::array<BOHandle, cu_mask_size> entries = {};
-    size_t entry_count = 0;
+    size_type entry_count = 0;
 
    public:
     /// @brief Sentinel value for entries not found.
-    constexpr static size_t NotFound = cu_mask_size;
+    constexpr static size_type NotFound = cu_mask_size;
+
+    /// @brief Returns if the cache is empty.
+    constexpr bool empty() const { return entry_count == 0; }
 
     /// @brief Returns the size of the cache.
-    constexpr size_t size() const { return entry_count; }
+    constexpr size_type size() const { return entry_count; }
 
     /// @brief Returns the index of the BO handle if it is the cache, otherwise @ref NotFound.
     ///
     /// This function does a linear search because the mask is small (32 elements).
-    size_t GetIndex(uint32_t pdi_handle) const {
-      for (size_t i = 0; i < entry_count; ++i) {
+    size_type GetIndex(uint32_t pdi_handle) const {
+      for (size_type i = 0; i < entry_count; ++i) {
         if (entries[i].handle == pdi_handle) {
           return i;
         }
@@ -146,7 +154,7 @@ class XdnaDriver final : public core::Driver {
     }
 
     /// @brief Sets the next cache entry.
-    hsa_status_t SetNext(const BOHandle& pdi_bo_handle, size_t& index) {
+    hsa_status_t SetNext(const BOHandle& pdi_bo_handle, size_type& index) {
       if (entry_count == entries.size()) {
         // cache is full
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -157,7 +165,7 @@ class XdnaDriver final : public core::Driver {
       return HSA_STATUS_SUCCESS;
     }
 
-    constexpr const BOHandle& operator[](size_t index) const { return entries[index]; }
+    constexpr const BOHandle& operator[](size_type index) const { return entries[index]; }
   };
 
 public:
@@ -286,8 +294,8 @@ public:
 
   std::map<void*, BOHandle> vmem_addr_mappings;
 
-  /// @brief Hardware context to PDI cache mapping.
-  std::unordered_map<uint32_t, PDICache> hw_ctx_pdi_cache_map;
+  /// @brief Queue to PDI cache map.
+  std::unordered_map<HSA_QUEUEID, PDICache> queue_pdi_map_;
 
   /// @brief Virtual address range allocated for the device heap.
   ///
