@@ -17,8 +17,6 @@ class BufferLoadFormatXMubuf : public Mubuf {
 public:
   BufferLoadFormatXMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -29,8 +27,6 @@ class BufferLoadFormatXyMubuf : public Mubuf {
 public:
   BufferLoadFormatXyMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -41,8 +37,6 @@ class BufferLoadFormatXyzMubuf : public Mubuf {
 public:
   BufferLoadFormatXyzMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -53,8 +47,6 @@ class BufferLoadFormatXyzwMubuf : public Mubuf {
 public:
   BufferLoadFormatXyzwMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -65,8 +57,6 @@ class BufferStoreFormatXMubuf : public Mubuf {
 public:
   BufferStoreFormatXMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -77,8 +67,6 @@ class BufferStoreFormatXyMubuf : public Mubuf {
 public:
   BufferStoreFormatXyMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -89,8 +77,6 @@ class BufferStoreFormatXyzMubuf : public Mubuf {
 public:
   BufferStoreFormatXyzMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -101,8 +87,6 @@ class BufferStoreFormatXyzwMubuf : public Mubuf {
 public:
   BufferStoreFormatXyzwMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -113,8 +97,6 @@ class BufferLoadUbyteMubuf : public Mubuf {
 public:
   BufferLoadUbyteMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -125,8 +107,6 @@ class BufferLoadSbyteMubuf : public Mubuf {
 public:
   BufferLoadSbyteMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -137,8 +117,6 @@ class BufferLoadUshortMubuf : public Mubuf {
 public:
   BufferLoadUshortMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -149,8 +127,6 @@ class BufferLoadSshortMubuf : public Mubuf {
 public:
   BufferLoadSshortMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -161,8 +137,6 @@ class BufferLoadDwordMubuf : public Mubuf {
 public:
   BufferLoadDwordMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -173,8 +147,6 @@ class BufferLoadDwordx2Mubuf : public Mubuf {
 public:
   BufferLoadDwordx2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -185,8 +157,6 @@ class BufferLoadDwordx4Mubuf : public Mubuf {
 public:
   BufferLoadDwordx4Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -197,8 +167,6 @@ class BufferLoadDwordx3Mubuf : public Mubuf {
 public:
   BufferLoadDwordx3Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -209,8 +177,6 @@ class BufferStoreByteMubuf : public Mubuf {
 public:
   BufferStoreByteMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -221,8 +187,6 @@ class BufferStoreByteD16HiMubuf : public Mubuf {
 public:
   BufferStoreByteD16HiMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -233,8 +197,6 @@ class BufferStoreShortMubuf : public Mubuf {
 public:
   BufferStoreShortMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -245,8 +207,6 @@ class BufferStoreShortD16HiMubuf : public Mubuf {
 public:
   BufferStoreShortD16HiMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -257,8 +217,6 @@ class BufferStoreDwordMubuf : public Mubuf {
 public:
   BufferStoreDwordMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -269,8 +227,6 @@ class BufferStoreDwordx2Mubuf : public Mubuf {
 public:
   BufferStoreDwordx2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -281,8 +237,6 @@ class BufferStoreDwordx4Mubuf : public Mubuf {
 public:
   BufferStoreDwordx4Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -293,8 +247,6 @@ class BufferStoreDwordx3Mubuf : public Mubuf {
 public:
   BufferStoreDwordx3Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -305,8 +257,6 @@ class BufferLoadUbyteD16Mubuf : public Mubuf {
 public:
   BufferLoadUbyteD16Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -317,8 +267,6 @@ class BufferLoadUbyteD16HiMubuf : public Mubuf {
 public:
   BufferLoadUbyteD16HiMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -329,8 +277,6 @@ class BufferLoadSbyteD16Mubuf : public Mubuf {
 public:
   BufferLoadSbyteD16Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -341,8 +287,6 @@ class BufferLoadSbyteD16HiMubuf : public Mubuf {
 public:
   BufferLoadSbyteD16HiMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -353,8 +297,6 @@ class BufferLoadShortD16Mubuf : public Mubuf {
 public:
   BufferLoadShortD16Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -365,8 +307,6 @@ class BufferLoadShortD16HiMubuf : public Mubuf {
 public:
   BufferLoadShortD16HiMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -377,8 +317,6 @@ class BufferLoadFormatD16HiXMubuf : public Mubuf {
 public:
   BufferLoadFormatD16HiXMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -389,8 +327,6 @@ class BufferStoreFormatD16HiXMubuf : public Mubuf {
 public:
   BufferStoreFormatD16HiXMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -401,8 +337,6 @@ class BufferAtomicSwapMubuf : public Mubuf {
 public:
   BufferAtomicSwapMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -413,8 +347,6 @@ class BufferAtomicCmpswapMubuf : public Mubuf {
 public:
   BufferAtomicCmpswapMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -425,8 +357,6 @@ class BufferAtomicAddMubuf : public Mubuf {
 public:
   BufferAtomicAddMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -437,8 +367,6 @@ class BufferAtomicSubMubuf : public Mubuf {
 public:
   BufferAtomicSubMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -449,8 +377,6 @@ class BufferAtomicCsubMubuf : public Mubuf {
 public:
   BufferAtomicCsubMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -461,8 +387,6 @@ class BufferAtomicSminMubuf : public Mubuf {
 public:
   BufferAtomicSminMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -473,8 +397,6 @@ class BufferAtomicUminMubuf : public Mubuf {
 public:
   BufferAtomicUminMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -485,8 +407,6 @@ class BufferAtomicSmaxMubuf : public Mubuf {
 public:
   BufferAtomicSmaxMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -497,8 +417,6 @@ class BufferAtomicUmaxMubuf : public Mubuf {
 public:
   BufferAtomicUmaxMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -509,8 +427,6 @@ class BufferAtomicAndMubuf : public Mubuf {
 public:
   BufferAtomicAndMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -521,8 +437,6 @@ class BufferAtomicOrMubuf : public Mubuf {
 public:
   BufferAtomicOrMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -533,8 +447,6 @@ class BufferAtomicXorMubuf : public Mubuf {
 public:
   BufferAtomicXorMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -545,8 +457,6 @@ class BufferAtomicIncMubuf : public Mubuf {
 public:
   BufferAtomicIncMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -557,8 +467,6 @@ class BufferAtomicDecMubuf : public Mubuf {
 public:
   BufferAtomicDecMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -569,8 +477,6 @@ class BufferAtomicFcmpswapMubuf : public Mubuf {
 public:
   BufferAtomicFcmpswapMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -581,8 +487,6 @@ class BufferAtomicFminMubuf : public Mubuf {
 public:
   BufferAtomicFminMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -593,8 +497,6 @@ class BufferAtomicFmaxMubuf : public Mubuf {
 public:
   BufferAtomicFmaxMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -605,8 +507,6 @@ class BufferAtomicSwapX2Mubuf : public Mubuf {
 public:
   BufferAtomicSwapX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -617,8 +517,6 @@ class BufferAtomicCmpswapX2Mubuf : public Mubuf {
 public:
   BufferAtomicCmpswapX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -629,8 +527,6 @@ class BufferAtomicAddX2Mubuf : public Mubuf {
 public:
   BufferAtomicAddX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -641,8 +537,6 @@ class BufferAtomicSubX2Mubuf : public Mubuf {
 public:
   BufferAtomicSubX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -653,8 +547,6 @@ class BufferAtomicSminX2Mubuf : public Mubuf {
 public:
   BufferAtomicSminX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -665,8 +557,6 @@ class BufferAtomicUminX2Mubuf : public Mubuf {
 public:
   BufferAtomicUminX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -677,8 +567,6 @@ class BufferAtomicSmaxX2Mubuf : public Mubuf {
 public:
   BufferAtomicSmaxX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -689,8 +577,6 @@ class BufferAtomicUmaxX2Mubuf : public Mubuf {
 public:
   BufferAtomicUmaxX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -701,8 +587,6 @@ class BufferAtomicAndX2Mubuf : public Mubuf {
 public:
   BufferAtomicAndX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -713,8 +597,6 @@ class BufferAtomicOrX2Mubuf : public Mubuf {
 public:
   BufferAtomicOrX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -725,8 +607,6 @@ class BufferAtomicXorX2Mubuf : public Mubuf {
 public:
   BufferAtomicXorX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -737,8 +617,6 @@ class BufferAtomicIncX2Mubuf : public Mubuf {
 public:
   BufferAtomicIncX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -749,8 +627,6 @@ class BufferAtomicDecX2Mubuf : public Mubuf {
 public:
   BufferAtomicDecX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -761,8 +637,6 @@ class BufferAtomicFcmpswapX2Mubuf : public Mubuf {
 public:
   BufferAtomicFcmpswapX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -773,8 +647,6 @@ class BufferAtomicFminX2Mubuf : public Mubuf {
 public:
   BufferAtomicFminX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -785,8 +657,6 @@ class BufferAtomicFmaxX2Mubuf : public Mubuf {
 public:
   BufferAtomicFmaxX2Mubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -797,24 +667,18 @@ class BufferGl0InvMubuf : public Mubuf {
 public:
   BufferGl0InvMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class BufferGl1InvMubuf : public Mubuf {
 public:
   BufferGl1InvMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class BufferLoadFormatD16XMubuf : public Mubuf {
 public:
   BufferLoadFormatD16XMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -825,8 +689,6 @@ class BufferLoadFormatD16XyMubuf : public Mubuf {
 public:
   BufferLoadFormatD16XyMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -837,8 +699,6 @@ class BufferLoadFormatD16XyzMubuf : public Mubuf {
 public:
   BufferLoadFormatD16XyzMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -849,8 +709,6 @@ class BufferLoadFormatD16XyzwMubuf : public Mubuf {
 public:
   BufferLoadFormatD16XyzwMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -861,8 +719,6 @@ class BufferStoreFormatD16XMubuf : public Mubuf {
 public:
   BufferStoreFormatD16XMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -873,8 +729,6 @@ class BufferStoreFormatD16XyMubuf : public Mubuf {
 public:
   BufferStoreFormatD16XyMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -885,8 +739,6 @@ class BufferStoreFormatD16XyzMubuf : public Mubuf {
 public:
   BufferStoreFormatD16XyzMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -897,8 +749,6 @@ class BufferStoreFormatD16XyzwMubuf : public Mubuf {
 public:
   BufferStoreFormatD16XyzwMubuf(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;

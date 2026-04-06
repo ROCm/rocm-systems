@@ -17,8 +17,6 @@ class SNopSopp : public Sopp {
 public:
   SNopSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -26,8 +24,6 @@ class SSetkillSopp : public Sopp {
 public:
   SSetkillSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -35,8 +31,6 @@ class SSethaltSopp : public Sopp {
 public:
   SSethaltSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -44,8 +38,6 @@ class SSleepSopp : public Sopp {
 public:
   SSleepSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -53,8 +45,6 @@ class SSetInstPrefetchDistanceSopp : public Sopp {
 public:
   SSetInstPrefetchDistanceSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -62,8 +52,6 @@ class SClauseSopp : public Sopp {
 public:
   SClauseSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -71,8 +59,6 @@ class SDelayAluSopp : public Sopp {
 public:
   SDelayAluSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -80,8 +66,6 @@ class SWaitcntDepctrSopp : public Sopp {
 public:
   SWaitcntDepctrSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -89,8 +73,6 @@ class SWaitcntSopp : public Sopp {
 public:
   SWaitcntSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -98,16 +80,12 @@ class SWaitIdleSopp : public Sopp {
 public:
   SWaitIdleSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class SWaitEventSopp : public Sopp {
 public:
   SWaitEventSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -115,8 +93,6 @@ class STrapSopp : public Sopp {
 public:
   STrapSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -124,8 +100,6 @@ class SRoundModeSopp : public Sopp {
 public:
   SRoundModeSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -133,8 +107,6 @@ class SDenormModeSopp : public Sopp {
 public:
   SDenormModeSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -142,16 +114,12 @@ class SCodeEndSopp : public Sopp {
 public:
   SCodeEndSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class SBranchSopp : public Sopp {
 public:
   SBranchSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -159,8 +127,6 @@ class SCbranchScc0Sopp : public Sopp {
 public:
   SCbranchScc0Sopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -168,8 +134,6 @@ class SCbranchScc1Sopp : public Sopp {
 public:
   SCbranchScc1Sopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -177,8 +141,6 @@ class SCbranchVcczSopp : public Sopp {
 public:
   SCbranchVcczSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -186,8 +148,6 @@ class SCbranchVccnzSopp : public Sopp {
 public:
   SCbranchVccnzSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -195,8 +155,6 @@ class SCbranchExeczSopp : public Sopp {
 public:
   SCbranchExeczSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -204,8 +162,6 @@ class SCbranchExecnzSopp : public Sopp {
 public:
   SCbranchExecnzSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -213,8 +169,6 @@ class SCbranchCdbgsysSopp : public Sopp {
 public:
   SCbranchCdbgsysSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -222,8 +176,6 @@ class SCbranchCdbguserSopp : public Sopp {
 public:
   SCbranchCdbguserSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -231,8 +183,6 @@ class SCbranchCdbgsysOrUserSopp : public Sopp {
 public:
   SCbranchCdbgsysOrUserSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -240,8 +190,6 @@ class SCbranchCdbgsysAndUserSopp : public Sopp {
 public:
   SCbranchCdbgsysAndUserSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -249,40 +197,30 @@ class SEndpgmSopp : public Sopp {
 public:
   SEndpgmSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class SEndpgmSavedSopp : public Sopp {
 public:
   SEndpgmSavedSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class SEndpgmOrderedPsDoneSopp : public Sopp {
 public:
   SEndpgmOrderedPsDoneSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class SWakeupSopp : public Sopp {
 public:
   SWakeupSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class SSetprioSopp : public Sopp {
 public:
   SSetprioSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -290,8 +228,6 @@ class SSendmsgSopp : public Sopp {
 public:
   SSendmsgSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -299,8 +235,6 @@ class SSendmsghaltSopp : public Sopp {
 public:
   SSendmsghaltSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -308,8 +242,6 @@ class SIncperflevelSopp : public Sopp {
 public:
   SIncperflevelSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -317,8 +249,6 @@ class SDecperflevelSopp : public Sopp {
 public:
   SDecperflevelSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -326,16 +256,12 @@ class STtracedataSopp : public Sopp {
 public:
   STtracedataSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class STtracedataImmSopp : public Sopp {
 public:
   STtracedataImmSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -343,16 +269,12 @@ class SIcacheInvSopp : public Sopp {
 public:
   SIcacheInvSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class SBarrierSopp : public Sopp {
 public:
   SBarrierSopp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 } // namespace rdna3_5

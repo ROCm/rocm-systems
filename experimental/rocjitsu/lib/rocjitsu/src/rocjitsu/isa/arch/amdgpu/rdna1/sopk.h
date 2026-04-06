@@ -17,8 +17,6 @@ class SMovkI32Sopk : public Sopk {
 public:
   SMovkI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -27,8 +25,6 @@ class SVersionSopk : public Sopk {
 public:
   SVersionSopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -36,8 +32,6 @@ class SCmovkI32Sopk : public Sopk {
 public:
   SCmovkI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -46,8 +40,6 @@ class SCmpkEqI32Sopk : public Sopk {
 public:
   SCmpkEqI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -56,8 +48,6 @@ class SCmpkLgI32Sopk : public Sopk {
 public:
   SCmpkLgI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -66,8 +56,6 @@ class SCmpkGtI32Sopk : public Sopk {
 public:
   SCmpkGtI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -76,8 +64,6 @@ class SCmpkGeI32Sopk : public Sopk {
 public:
   SCmpkGeI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -86,8 +72,6 @@ class SCmpkLtI32Sopk : public Sopk {
 public:
   SCmpkLtI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -96,8 +80,6 @@ class SCmpkLeI32Sopk : public Sopk {
 public:
   SCmpkLeI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -106,8 +88,6 @@ class SCmpkEqU32Sopk : public Sopk {
 public:
   SCmpkEqU32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -116,8 +96,6 @@ class SCmpkLgU32Sopk : public Sopk {
 public:
   SCmpkLgU32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -126,8 +104,6 @@ class SCmpkGtU32Sopk : public Sopk {
 public:
   SCmpkGtU32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -136,8 +112,6 @@ class SCmpkGeU32Sopk : public Sopk {
 public:
   SCmpkGeU32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -146,8 +120,6 @@ class SCmpkLtU32Sopk : public Sopk {
 public:
   SCmpkLtU32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -156,8 +128,6 @@ class SCmpkLeU32Sopk : public Sopk {
 public:
   SCmpkLeU32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -166,8 +136,6 @@ class SAddkI32Sopk : public Sopk {
 public:
   SAddkI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -176,8 +144,6 @@ class SMulkI32Sopk : public Sopk {
 public:
   SMulkI32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -186,8 +152,6 @@ class SGetregB32Sopk : public Sopk {
 public:
   SGetregB32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -196,8 +160,6 @@ class SSetregB32Sopk : public Sopk {
 public:
   SSetregB32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
   Operand sdst;
 };
@@ -206,8 +168,6 @@ class SSetregImm32B32Sopk : public Sopk {
 public:
   SSetregImm32B32Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand simm16;
 };
 
@@ -215,8 +175,6 @@ class SCallB64Sopk : public Sopk {
 public:
   SCallB64Sopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -225,8 +183,6 @@ class SWaitcntVscntSopk : public Sopk {
 public:
   SWaitcntVscntSopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -235,8 +191,6 @@ class SWaitcntVmcntSopk : public Sopk {
 public:
   SWaitcntVmcntSopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -245,8 +199,6 @@ class SWaitcntExpcntSopk : public Sopk {
 public:
   SWaitcntExpcntSopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -255,8 +207,6 @@ class SWaitcntLgkmcntSopk : public Sopk {
 public:
   SWaitcntLgkmcntSopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -265,8 +215,6 @@ class SSubvectorLoopBeginSopk : public Sopk {
 public:
   SSubvectorLoopBeginSopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
@@ -275,8 +223,6 @@ class SSubvectorLoopEndSopk : public Sopk {
 public:
   SSubvectorLoopEndSopk(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdst;
   Operand simm16;
 };
