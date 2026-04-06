@@ -3438,6 +3438,10 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     hsa_amd_pointer_info_t ptr_info = {};
     ptr_info.size = sizeof(ptr_info);
     hsa_status_t status = PtrInfo(ptrs[i], &ptr_info, nullptr, nullptr, nullptr);
+    if (status != HSA_STATUS_SUCCESS) {
+      debug_warning(false && "Retrieving SVM pointer information failed");
+      return status;
+    }
     
     // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for discard
     if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
@@ -3562,12 +3566,10 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()),
                              std::memory_order_release);
     for (size_t i = 0; i < pending_deps.size(); i++) {
-      hsa_status_t err = SetAsyncSignalHandler(pending_deps[i], 
-                                              HSA_SIGNAL_CONDITION_EQ, 0, 
-                                              signal_handler, op);
-      if (err != HSA_STATUS_SUCCESS) {
-        throw AMD::hsa_exception(err, "Signal handler could not be set.");
-      }
+      /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to 
+      return errors in the future, we need to handle the possibility of use-after-free and double deletion 
+      of op if this call fails midway and leaves some handlers set but not others. */
+      SetAsyncSignalHandler(pending_deps[i], HSA_SIGNAL_CONDITION_EQ, 0, signal_handler, op);
     }
   }
 

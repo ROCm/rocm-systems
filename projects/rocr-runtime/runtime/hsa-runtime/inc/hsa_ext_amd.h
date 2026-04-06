@@ -462,15 +462,15 @@ enum {
   HSA_STATUS_ERROR_RESOURCE_BUSY = 46,
 
   /**
-   * Xnack is disabled on the system, but is required 
-   * for the requested operation.
-   */
-  HSA_STATUS_ERROR_XNACK_DISABLED = 47,
-
-  /**
    * Request is not supported by this system
    */
-  HSA_STATUS_ERROR_NOT_SUPPORTED = 48,
+  HSA_STATUS_ERROR_NOT_SUPPORTED = 47,
+
+  /**
+   * Xnack is disabled on this system, but required 
+   * by the requested operation.
+   */
+  HSA_STATUS_ERROR_XNACK_DISABLED = 48,
 };
 
 /** @} */

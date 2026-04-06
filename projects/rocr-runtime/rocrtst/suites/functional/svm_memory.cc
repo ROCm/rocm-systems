@@ -392,7 +392,6 @@ void SvmMemoryTestBasic::TestSVMBatchDiscard(void) {
   }
 
   ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
-  auto pool_idx = 0;
   for (auto a : agent_pools) {
     for (auto p : a->pools) {
       TestSVMBatchDiscard(a->agent, p);
@@ -430,7 +429,6 @@ void SvmMemoryTestBasic::TestSVMDiscardNegative() {
   }
 
   ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
-  auto pool_idx = 0;
   for (auto a : agent_pools) {
     TestSVMDiscardNegative(a->agent);
   }
@@ -782,6 +780,11 @@ void SvmMemoryTestBasic::TestSVMBatchDiscard(hsa_agent_t agent, hsa_amd_memory_p
   
   for (int i = 0; i < kNumDepSignals; i++) {
     hsa_signal_destroy(dep_signals[i]);
+  }
+
+  // Free reserved SVM regions
+  for (int i = 0; i < kNumRegions; i++) {
+    hsa_amd_vmem_address_free(regions[i].ptr, regions[i].size);
   }
 
   if (queue) {
