@@ -8332,28 +8332,18 @@ class AMDSMICommands:
 
                 # Convert based on interface type and input format
                 if has_gpu_od:
-                    # For gpu_od interface: read OD_RANGE dynamically
-                    od_min = 20
-                    od_max = 100
-                    try:
-                        fan_pwm_path = os.path.join(gpu_od_path, "fan_ctrl", "fan_minimum_pwm")
-                        with open(fan_pwm_path, "r") as f:
-                            pwm_content = f.read()
-                        # Parse "OD_RANGE:\nMINIMUM_PWM: <min> <max>"
-                        for line in pwm_content.splitlines():
-                            if line.strip().startswith("MINIMUM_PWM:"):
-                                parts = line.strip().split()
-                                if len(parts) >= 3:
-                                    od_min = int(parts[1])
-                                    od_max = int(parts[2])
-                    except (OSError, IOError, ValueError) as e:
-                        logging.warning(
-                            "Failed to parse gpu_od OD_RANGE from %s: %s. Using defaults od_min=%d od_max=%d",
-                            fan_pwm_path,
-                            e,
-                            od_min,
-                            od_max,
+                    # For gpu_od interface: read OD_RANGE dynamically using shared helper
+                    od_min, od_max = self.helpers.parse_gpu_od_fan_range(gpu_od_path)
+                    if od_min is None:
+                        # Parsing failed - cannot proceed without valid range
+                        result = format_fan_error(
+                            f"Unable to read gpu_od OD_RANGE from {gpu_od_path}. Cannot set fan speed.",
+                            include_driver_note=True,
                         )
+                        self.logger.store_output(args.gpu, "fan", result)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
 
                     od_range = od_max - od_min
                     if is_percentage:

@@ -2397,7 +2397,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         if self.helpers.is_amdgpu_initialized():
             if self.helpers.is_baremetal():
                 fan_support = self.helpers.get_fan_support()
-                set_fan_help = f"Set GPU fan speed ({fan_support})"
+                # Check if fan_support contains multi-line format (starts with newline)
+                if fan_support.startswith("\n"):
+                    # Multi-line format - don't wrap in parentheses
+                    set_fan_help = f"Set GPU fan speed :{fan_support}"
+                else:
+                    # Single line format - wrap in parentheses
+                    set_fan_help = f"Set GPU fan speed ({fan_support})"
                 perf_level_help_choices_str = ", ".join(self.helpers.get_perf_levels()[0][0:-1])
                 set_perf_level_help = (
                     f"Set one of the following performance levels:\n\t{perf_level_help_choices_str}"
