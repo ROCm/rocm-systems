@@ -111,8 +111,6 @@ void TestMutualExclusion::Close() {
   TestBase::Close();
 }
 
-extern amdsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
-
 void TestMutualExclusion::Run(void) {
   amdsmi_status_t ret;
 

@@ -25,6 +25,7 @@
 #ifndef _TESTER_HPP_
 #define _TESTER_HPP_
 
+#include <algorithm>
 #include <rocshmem/rocshmem.hpp>
 #include <vector>
 #include <climits>
