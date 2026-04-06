@@ -16,7 +16,8 @@ namespace rocjitsu {
 namespace rdna1 {
 
 VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
-    : Vintrp("v_interp_p1_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vintrp("v_interp_p1_f32", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<VInterpP1F32Vintrp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
@@ -25,12 +26,13 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
   src_operands_.emplace_back(&attr);
 }
 
-void VInterpP1F32Vintrp::execute(amdgpu::Wavefront &wf) {
+void VInterpP1F32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
-    : Vintrp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vintrp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<VInterpP2F32Vintrp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
@@ -40,12 +42,13 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
   src_operands_.emplace_back(&attr);
 }
 
-void VInterpP2F32Vintrp::execute(amdgpu::Wavefront &wf) {
+void VInterpP2F32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 
 VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
-    : Vintrp("v_interp_mov_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vintrp("v_interp_mov_f32", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<VInterpMovF32Vintrp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_PARAM, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
@@ -54,7 +57,7 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
   src_operands_.emplace_back(&attr);
 }
 
-void VInterpMovF32Vintrp::execute(amdgpu::Wavefront &wf) {
+void VInterpMovF32Vintrp::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
 }
 

@@ -17,7 +17,7 @@ namespace rdna2 {
 
 class Sop1 : public IsaInstruction<Isa> {
 public:
-  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst);
+  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Sop1MachineInst;
 
 public:
@@ -30,7 +30,7 @@ private:
 
 class Sopc : public IsaInstruction<Isa> {
 public:
-  Sopc(std::string_view mnemonic, const SopcMachineInst *inst);
+  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = SopcMachineInst;
 
 public:
@@ -45,7 +45,7 @@ private:
 
 class Sopp : public IsaInstruction<Isa> {
 public:
-  Sopp(std::string_view mnemonic, const SoppMachineInst *inst);
+  Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = SoppMachineInst;
 
 public:
@@ -57,7 +57,7 @@ private:
 
 class Sopk : public IsaInstruction<Isa> {
 public:
-  Sopk(std::string_view mnemonic, const SopkMachineInst *inst);
+  Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = SopkMachineInst;
 
 public:
@@ -70,7 +70,7 @@ private:
 
 class Sop2 : public IsaInstruction<Isa> {
 public:
-  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst);
+  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Sop2MachineInst;
 
 public:
@@ -85,7 +85,7 @@ private:
 
 class Smem : public IsaInstruction<Isa> {
 public:
-  Smem(std::string_view mnemonic, const SmemMachineInst *inst);
+  Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = SmemMachineInst;
 
 public:
@@ -96,7 +96,7 @@ private:
 
 class Vop1 : public IsaInstruction<Isa> {
 public:
-  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst);
+  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop1MachineInst;
 
 public:
@@ -109,7 +109,7 @@ private:
 
 class Vopc : public IsaInstruction<Isa> {
 public:
-  Vopc(std::string_view mnemonic, const VopcMachineInst *inst);
+  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = VopcMachineInst;
 
 public:
@@ -122,7 +122,7 @@ private:
 
 class Vop2 : public IsaInstruction<Isa> {
 public:
-  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst);
+  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop2MachineInst;
 
 public:
@@ -136,7 +136,7 @@ private:
 
 class Vintrp : public IsaInstruction<Isa> {
 public:
-  Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst);
+  Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = VintrpMachineInst;
 
 public:
@@ -148,7 +148,7 @@ private:
 
 class Vop3 : public IsaInstruction<Isa> {
 public:
-  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst);
+  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3MachineInst;
 
 public:
@@ -166,7 +166,7 @@ private:
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
-  Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst);
+  Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3pMachineInst;
 
 public:
@@ -184,7 +184,7 @@ private:
 
 class Ds : public IsaInstruction<Isa> {
 public:
-  Ds(std::string_view mnemonic, const DsMachineInst *inst);
+  Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = DsMachineInst;
 
 public:
@@ -195,7 +195,7 @@ private:
 
 class Mubuf : public IsaInstruction<Isa> {
 public:
-  Mubuf(std::string_view mnemonic, const MubufMachineInst *inst);
+  Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = MubufMachineInst;
 
 public:
@@ -206,7 +206,7 @@ private:
 
 class Mtbuf : public IsaInstruction<Isa> {
 public:
-  Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst);
+  Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = MtbufMachineInst;
 
 public:
@@ -217,7 +217,7 @@ private:
 
 class Mimg : public IsaInstruction<Isa> {
 public:
-  Mimg(std::string_view mnemonic, const MimgMachineInst *inst);
+  Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = MimgMachineInst;
 
 public:
@@ -231,7 +231,7 @@ private:
 
 class Exp : public IsaInstruction<Isa> {
 public:
-  Exp(std::string_view mnemonic, const ExpMachineInst *inst);
+  Exp(std::string_view mnemonic, const ExpMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = ExpMachineInst;
 
 public:
@@ -242,7 +242,7 @@ private:
 
 class Flat : public IsaInstruction<Isa> {
 public:
-  Flat(std::string_view mnemonic, const FlatMachineInst *inst);
+  Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = FlatMachineInst;
 
 public:
@@ -254,7 +254,7 @@ private:
 
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
-  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst);
+  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3SdstEncMachineInst;
 
 public:

@@ -13,7 +13,7 @@ namespace risc_v {
 namespace detail {
 
 LrWInst::LrWInst(uint32_t raw)
-    : RType("lr.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("lr.w", raw, make_exec_fn<LrWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -22,7 +22,7 @@ LrWInst::LrWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void LrWInst::execute(HartState &ctx) {
+void LrWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -33,7 +33,7 @@ void LrWInst::execute(HartState &ctx) {
 }
 
 ScWInst::ScWInst(uint32_t raw)
-    : RType("sc.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("sc.w", raw, make_exec_fn<ScWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -43,7 +43,7 @@ ScWInst::ScWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void ScWInst::execute(HartState &ctx) {
+void ScWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -57,7 +57,7 @@ void ScWInst::execute(HartState &ctx) {
 }
 
 AmoswapWInst::AmoswapWInst(uint32_t raw)
-    : RType("amoswap.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoswap.w", raw, make_exec_fn<AmoswapWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -67,7 +67,7 @@ AmoswapWInst::AmoswapWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoswapWInst::execute(HartState &ctx) {
+void AmoswapWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -79,7 +79,7 @@ void AmoswapWInst::execute(HartState &ctx) {
 }
 
 AmoaddWInst::AmoaddWInst(uint32_t raw)
-    : RType("amoadd.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoadd.w", raw, make_exec_fn<AmoaddWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -89,7 +89,7 @@ AmoaddWInst::AmoaddWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoaddWInst::execute(HartState &ctx) {
+void AmoaddWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -101,7 +101,7 @@ void AmoaddWInst::execute(HartState &ctx) {
 }
 
 AmoxorWInst::AmoxorWInst(uint32_t raw)
-    : RType("amoxor.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoxor.w", raw, make_exec_fn<AmoxorWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -111,7 +111,7 @@ AmoxorWInst::AmoxorWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoxorWInst::execute(HartState &ctx) {
+void AmoxorWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -123,7 +123,7 @@ void AmoxorWInst::execute(HartState &ctx) {
 }
 
 AmoandWInst::AmoandWInst(uint32_t raw)
-    : RType("amoand.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoand.w", raw, make_exec_fn<AmoandWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -133,7 +133,7 @@ AmoandWInst::AmoandWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoandWInst::execute(HartState &ctx) {
+void AmoandWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -145,7 +145,7 @@ void AmoandWInst::execute(HartState &ctx) {
 }
 
 AmoorWInst::AmoorWInst(uint32_t raw)
-    : RType("amoor.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoor.w", raw, make_exec_fn<AmoorWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -155,7 +155,7 @@ AmoorWInst::AmoorWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoorWInst::execute(HartState &ctx) {
+void AmoorWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -167,7 +167,7 @@ void AmoorWInst::execute(HartState &ctx) {
 }
 
 AmominWInst::AmominWInst(uint32_t raw)
-    : RType("amomin.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amomin.w", raw, make_exec_fn<AmominWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -177,7 +177,7 @@ AmominWInst::AmominWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmominWInst::execute(HartState &ctx) {
+void AmominWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -189,7 +189,7 @@ void AmominWInst::execute(HartState &ctx) {
 }
 
 AmomaxWInst::AmomaxWInst(uint32_t raw)
-    : RType("amomax.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amomax.w", raw, make_exec_fn<AmomaxWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -199,7 +199,7 @@ AmomaxWInst::AmomaxWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmomaxWInst::execute(HartState &ctx) {
+void AmomaxWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -211,7 +211,7 @@ void AmomaxWInst::execute(HartState &ctx) {
 }
 
 AmominuWInst::AmominuWInst(uint32_t raw)
-    : RType("amominu.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amominu.w", raw, make_exec_fn<AmominuWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -221,7 +221,7 @@ AmominuWInst::AmominuWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmominuWInst::execute(HartState &ctx) {
+void AmominuWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -234,7 +234,7 @@ void AmominuWInst::execute(HartState &ctx) {
 }
 
 AmomaxuWInst::AmomaxuWInst(uint32_t raw)
-    : RType("amomaxu.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amomaxu.w", raw, make_exec_fn<AmomaxuWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -244,7 +244,7 @@ AmomaxuWInst::AmomaxuWInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmomaxuWInst::execute(HartState &ctx) {
+void AmomaxuWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -257,7 +257,7 @@ void AmomaxuWInst::execute(HartState &ctx) {
 }
 
 LrDInst::LrDInst(uint32_t raw)
-    : RType("lr.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("lr.d", raw, make_exec_fn<LrDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -266,7 +266,7 @@ LrDInst::LrDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void LrDInst::execute(HartState &ctx) {
+void LrDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -277,7 +277,7 @@ void LrDInst::execute(HartState &ctx) {
 }
 
 ScDInst::ScDInst(uint32_t raw)
-    : RType("sc.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("sc.d", raw, make_exec_fn<ScDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -287,7 +287,7 @@ ScDInst::ScDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void ScDInst::execute(HartState &ctx) {
+void ScDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -301,7 +301,7 @@ void ScDInst::execute(HartState &ctx) {
 }
 
 AmoswapDInst::AmoswapDInst(uint32_t raw)
-    : RType("amoswap.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoswap.d", raw, make_exec_fn<AmoswapDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -311,7 +311,7 @@ AmoswapDInst::AmoswapDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoswapDInst::execute(HartState &ctx) {
+void AmoswapDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -323,7 +323,7 @@ void AmoswapDInst::execute(HartState &ctx) {
 }
 
 AmoaddDInst::AmoaddDInst(uint32_t raw)
-    : RType("amoadd.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoadd.d", raw, make_exec_fn<AmoaddDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -333,7 +333,7 @@ AmoaddDInst::AmoaddDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoaddDInst::execute(HartState &ctx) {
+void AmoaddDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -345,7 +345,7 @@ void AmoaddDInst::execute(HartState &ctx) {
 }
 
 AmoxorDInst::AmoxorDInst(uint32_t raw)
-    : RType("amoxor.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoxor.d", raw, make_exec_fn<AmoxorDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -355,7 +355,7 @@ AmoxorDInst::AmoxorDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoxorDInst::execute(HartState &ctx) {
+void AmoxorDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -367,7 +367,7 @@ void AmoxorDInst::execute(HartState &ctx) {
 }
 
 AmoandDInst::AmoandDInst(uint32_t raw)
-    : RType("amoand.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoand.d", raw, make_exec_fn<AmoandDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -377,7 +377,7 @@ AmoandDInst::AmoandDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoandDInst::execute(HartState &ctx) {
+void AmoandDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -389,7 +389,7 @@ void AmoandDInst::execute(HartState &ctx) {
 }
 
 AmoorDInst::AmoorDInst(uint32_t raw)
-    : RType("amoor.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amoor.d", raw, make_exec_fn<AmoorDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -399,7 +399,7 @@ AmoorDInst::AmoorDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmoorDInst::execute(HartState &ctx) {
+void AmoorDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -411,7 +411,7 @@ void AmoorDInst::execute(HartState &ctx) {
 }
 
 AmominDInst::AmominDInst(uint32_t raw)
-    : RType("amomin.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amomin.d", raw, make_exec_fn<AmominDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -421,7 +421,7 @@ AmominDInst::AmominDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmominDInst::execute(HartState &ctx) {
+void AmominDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -433,7 +433,7 @@ void AmominDInst::execute(HartState &ctx) {
 }
 
 AmomaxDInst::AmomaxDInst(uint32_t raw)
-    : RType("amomax.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amomax.d", raw, make_exec_fn<AmomaxDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -443,7 +443,7 @@ AmomaxDInst::AmomaxDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmomaxDInst::execute(HartState &ctx) {
+void AmomaxDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -455,7 +455,7 @@ void AmomaxDInst::execute(HartState &ctx) {
 }
 
 AmominuDInst::AmominuDInst(uint32_t raw)
-    : RType("amominu.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amominu.d", raw, make_exec_fn<AmominuDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -465,7 +465,7 @@ AmominuDInst::AmominuDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmominuDInst::execute(HartState &ctx) {
+void AmominuDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);
@@ -478,7 +478,7 @@ void AmominuDInst::execute(HartState &ctx) {
 }
 
 AmomaxuDInst::AmomaxuDInst(uint32_t raw)
-    : RType("amomaxu.d", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("amomaxu.d", raw, make_exec_fn<AmomaxuDInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
   dst_operands_.emplace_back(&rd);
   src_operands_.emplace_back(&rs1);
@@ -488,7 +488,7 @@ AmomaxuDInst::AmomaxuDInst(uint32_t raw)
   if (inst_.funct7 & 0x01)
     modifiers_ += " rl";
 }
-void AmomaxuDInst::execute(HartState &ctx) {
+void AmomaxuDInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = h->read_xreg(rs1.encoding_value_);

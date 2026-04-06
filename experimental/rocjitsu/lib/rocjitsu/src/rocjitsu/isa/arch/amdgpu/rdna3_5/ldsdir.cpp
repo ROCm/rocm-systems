@@ -17,24 +17,26 @@ namespace rocjitsu {
 namespace rdna3_5 {
 
 LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
-    : Ldsdir("lds_param_load", reinterpret_cast<const OpEncoding *>(inst)),
+    : Ldsdir("lds_param_load", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<LdsParamLoadLdsdir>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
   dst_operands_.emplace_back(&vdst);
   src_operands_.emplace_back(&attr);
 }
 
-void LdsParamLoadLdsdir::execute(amdgpu::Wavefront &wf) {
+void LdsParamLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_lds_param_load_ldsdir(*this, wf);
 }
 
 LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
-    : Ldsdir("lds_direct_load", reinterpret_cast<const OpEncoding *>(inst)),
+    : Ldsdir("lds_direct_load", reinterpret_cast<const OpEncoding *>(inst),
+             make_exec_fn<LdsDirectLoadLdsdir>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst) {
   dst_operands_.emplace_back(&vdst);
 }
 
-void LdsDirectLoadLdsdir::execute(amdgpu::Wavefront &wf) {
+void LdsDirectLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_lds_direct_load_ldsdir(*this, wf);
 }
 

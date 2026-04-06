@@ -16,7 +16,7 @@ namespace cdna2 {
 class SLoadDwordSmem : public Smem {
 public:
   SLoadDwordSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -25,7 +25,7 @@ public:
 class SLoadDwordx2Smem : public Smem {
 public:
   SLoadDwordx2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -34,7 +34,7 @@ public:
 class SLoadDwordx4Smem : public Smem {
 public:
   SLoadDwordx4Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -43,7 +43,7 @@ public:
 class SLoadDwordx8Smem : public Smem {
 public:
   SLoadDwordx8Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -52,7 +52,7 @@ public:
 class SLoadDwordx16Smem : public Smem {
 public:
   SLoadDwordx16Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -61,7 +61,7 @@ public:
 class SScratchLoadDwordSmem : public Smem {
 public:
   SScratchLoadDwordSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -70,7 +70,7 @@ public:
 class SScratchLoadDwordx2Smem : public Smem {
 public:
   SScratchLoadDwordx2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -79,7 +79,7 @@ public:
 class SScratchLoadDwordx4Smem : public Smem {
 public:
   SScratchLoadDwordx4Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -88,7 +88,7 @@ public:
 class SBufferLoadDwordSmem : public Smem {
 public:
   SBufferLoadDwordSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -97,7 +97,7 @@ public:
 class SBufferLoadDwordx2Smem : public Smem {
 public:
   SBufferLoadDwordx2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -106,7 +106,7 @@ public:
 class SBufferLoadDwordx4Smem : public Smem {
 public:
   SBufferLoadDwordx4Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -115,7 +115,7 @@ public:
 class SBufferLoadDwordx8Smem : public Smem {
 public:
   SBufferLoadDwordx8Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -124,7 +124,7 @@ public:
 class SBufferLoadDwordx16Smem : public Smem {
 public:
   SBufferLoadDwordx16Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -133,7 +133,7 @@ public:
 class SStoreDwordSmem : public Smem {
 public:
   SStoreDwordSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -142,7 +142,7 @@ public:
 class SStoreDwordx2Smem : public Smem {
 public:
   SStoreDwordx2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -151,7 +151,7 @@ public:
 class SStoreDwordx4Smem : public Smem {
 public:
   SStoreDwordx4Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -160,7 +160,7 @@ public:
 class SScratchStoreDwordSmem : public Smem {
 public:
   SScratchStoreDwordSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -169,7 +169,7 @@ public:
 class SScratchStoreDwordx2Smem : public Smem {
 public:
   SScratchStoreDwordx2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -178,7 +178,7 @@ public:
 class SScratchStoreDwordx4Smem : public Smem {
 public:
   SScratchStoreDwordx4Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -187,7 +187,7 @@ public:
 class SBufferStoreDwordSmem : public Smem {
 public:
   SBufferStoreDwordSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -196,7 +196,7 @@ public:
 class SBufferStoreDwordx2Smem : public Smem {
 public:
   SBufferStoreDwordx2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -205,7 +205,7 @@ public:
 class SBufferStoreDwordx4Smem : public Smem {
 public:
   SBufferStoreDwordx4Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -214,45 +214,45 @@ public:
 class SDcacheInvSmem : public Smem {
 public:
   SDcacheInvSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
 };
 
 class SDcacheWbSmem : public Smem {
 public:
   SDcacheWbSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
 };
 
 class SDcacheInvVolSmem : public Smem {
 public:
   SDcacheInvVolSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
 };
 
 class SDcacheWbVolSmem : public Smem {
 public:
   SDcacheWbVolSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
 };
 
 class SMemtimeSmem : public Smem {
 public:
   SMemtimeSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
 };
 
 class SMemrealtimeSmem : public Smem {
 public:
   SMemrealtimeSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
 };
 
 class SAtcProbeSmem : public Smem {
 public:
   SAtcProbeSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -261,7 +261,7 @@ public:
 class SAtcProbeBufferSmem : public Smem {
 public:
   SAtcProbeBufferSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -270,7 +270,7 @@ public:
 class SDcacheDiscardSmem : public Smem {
 public:
   SDcacheDiscardSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sbase;
   Operand soffset;
 };
@@ -278,7 +278,7 @@ public:
 class SDcacheDiscardX2Smem : public Smem {
 public:
   SDcacheDiscardX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sbase;
   Operand soffset;
 };
@@ -286,7 +286,7 @@ public:
 class SBufferAtomicSwapSmem : public Smem {
 public:
   SBufferAtomicSwapSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -295,7 +295,7 @@ public:
 class SBufferAtomicCmpswapSmem : public Smem {
 public:
   SBufferAtomicCmpswapSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -304,7 +304,7 @@ public:
 class SBufferAtomicAddSmem : public Smem {
 public:
   SBufferAtomicAddSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -313,7 +313,7 @@ public:
 class SBufferAtomicSubSmem : public Smem {
 public:
   SBufferAtomicSubSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -322,7 +322,7 @@ public:
 class SBufferAtomicSminSmem : public Smem {
 public:
   SBufferAtomicSminSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -331,7 +331,7 @@ public:
 class SBufferAtomicUminSmem : public Smem {
 public:
   SBufferAtomicUminSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -340,7 +340,7 @@ public:
 class SBufferAtomicSmaxSmem : public Smem {
 public:
   SBufferAtomicSmaxSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -349,7 +349,7 @@ public:
 class SBufferAtomicUmaxSmem : public Smem {
 public:
   SBufferAtomicUmaxSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -358,7 +358,7 @@ public:
 class SBufferAtomicAndSmem : public Smem {
 public:
   SBufferAtomicAndSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -367,7 +367,7 @@ public:
 class SBufferAtomicOrSmem : public Smem {
 public:
   SBufferAtomicOrSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -376,7 +376,7 @@ public:
 class SBufferAtomicXorSmem : public Smem {
 public:
   SBufferAtomicXorSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -385,7 +385,7 @@ public:
 class SBufferAtomicIncSmem : public Smem {
 public:
   SBufferAtomicIncSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -394,7 +394,7 @@ public:
 class SBufferAtomicDecSmem : public Smem {
 public:
   SBufferAtomicDecSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -403,7 +403,7 @@ public:
 class SBufferAtomicSwapX2Smem : public Smem {
 public:
   SBufferAtomicSwapX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -412,7 +412,7 @@ public:
 class SBufferAtomicCmpswapX2Smem : public Smem {
 public:
   SBufferAtomicCmpswapX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -421,7 +421,7 @@ public:
 class SBufferAtomicAddX2Smem : public Smem {
 public:
   SBufferAtomicAddX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -430,7 +430,7 @@ public:
 class SBufferAtomicSubX2Smem : public Smem {
 public:
   SBufferAtomicSubX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -439,7 +439,7 @@ public:
 class SBufferAtomicSminX2Smem : public Smem {
 public:
   SBufferAtomicSminX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -448,7 +448,7 @@ public:
 class SBufferAtomicUminX2Smem : public Smem {
 public:
   SBufferAtomicUminX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -457,7 +457,7 @@ public:
 class SBufferAtomicSmaxX2Smem : public Smem {
 public:
   SBufferAtomicSmaxX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -466,7 +466,7 @@ public:
 class SBufferAtomicUmaxX2Smem : public Smem {
 public:
   SBufferAtomicUmaxX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -475,7 +475,7 @@ public:
 class SBufferAtomicAndX2Smem : public Smem {
 public:
   SBufferAtomicAndX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -484,7 +484,7 @@ public:
 class SBufferAtomicOrX2Smem : public Smem {
 public:
   SBufferAtomicOrX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -493,7 +493,7 @@ public:
 class SBufferAtomicXorX2Smem : public Smem {
 public:
   SBufferAtomicXorX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -502,7 +502,7 @@ public:
 class SBufferAtomicIncX2Smem : public Smem {
 public:
   SBufferAtomicIncX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -511,7 +511,7 @@ public:
 class SBufferAtomicDecX2Smem : public Smem {
 public:
   SBufferAtomicDecX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -520,7 +520,7 @@ public:
 class SAtomicSwapSmem : public Smem {
 public:
   SAtomicSwapSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -529,7 +529,7 @@ public:
 class SAtomicCmpswapSmem : public Smem {
 public:
   SAtomicCmpswapSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -538,7 +538,7 @@ public:
 class SAtomicAddSmem : public Smem {
 public:
   SAtomicAddSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -547,7 +547,7 @@ public:
 class SAtomicSubSmem : public Smem {
 public:
   SAtomicSubSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -556,7 +556,7 @@ public:
 class SAtomicSminSmem : public Smem {
 public:
   SAtomicSminSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -565,7 +565,7 @@ public:
 class SAtomicUminSmem : public Smem {
 public:
   SAtomicUminSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -574,7 +574,7 @@ public:
 class SAtomicSmaxSmem : public Smem {
 public:
   SAtomicSmaxSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -583,7 +583,7 @@ public:
 class SAtomicUmaxSmem : public Smem {
 public:
   SAtomicUmaxSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -592,7 +592,7 @@ public:
 class SAtomicAndSmem : public Smem {
 public:
   SAtomicAndSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -601,7 +601,7 @@ public:
 class SAtomicOrSmem : public Smem {
 public:
   SAtomicOrSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -610,7 +610,7 @@ public:
 class SAtomicXorSmem : public Smem {
 public:
   SAtomicXorSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -619,7 +619,7 @@ public:
 class SAtomicIncSmem : public Smem {
 public:
   SAtomicIncSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -628,7 +628,7 @@ public:
 class SAtomicDecSmem : public Smem {
 public:
   SAtomicDecSmem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -637,7 +637,7 @@ public:
 class SAtomicSwapX2Smem : public Smem {
 public:
   SAtomicSwapX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -646,7 +646,7 @@ public:
 class SAtomicCmpswapX2Smem : public Smem {
 public:
   SAtomicCmpswapX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -655,7 +655,7 @@ public:
 class SAtomicAddX2Smem : public Smem {
 public:
   SAtomicAddX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -664,7 +664,7 @@ public:
 class SAtomicSubX2Smem : public Smem {
 public:
   SAtomicSubX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -673,7 +673,7 @@ public:
 class SAtomicSminX2Smem : public Smem {
 public:
   SAtomicSminX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -682,7 +682,7 @@ public:
 class SAtomicUminX2Smem : public Smem {
 public:
   SAtomicUminX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -691,7 +691,7 @@ public:
 class SAtomicSmaxX2Smem : public Smem {
 public:
   SAtomicSmaxX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -700,7 +700,7 @@ public:
 class SAtomicUmaxX2Smem : public Smem {
 public:
   SAtomicUmaxX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -709,7 +709,7 @@ public:
 class SAtomicAndX2Smem : public Smem {
 public:
   SAtomicAndX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -718,7 +718,7 @@ public:
 class SAtomicOrX2Smem : public Smem {
 public:
   SAtomicOrX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -727,7 +727,7 @@ public:
 class SAtomicXorX2Smem : public Smem {
 public:
   SAtomicXorX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -736,7 +736,7 @@ public:
 class SAtomicIncX2Smem : public Smem {
 public:
   SAtomicIncX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -745,7 +745,7 @@ public:
 class SAtomicDecX2Smem : public Smem {
 public:
   SAtomicDecX2Smem(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
   Operand sbase;
   Operand soffset;

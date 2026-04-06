@@ -16,7 +16,7 @@ namespace rdna3 {
 class LdsParamLoadLdsdir : public Ldsdir {
 public:
   LdsParamLoadLdsdir(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand attr;
 };
@@ -24,7 +24,7 @@ public:
 class LdsDirectLoadLdsdir : public Ldsdir {
 public:
   LdsDirectLoadLdsdir(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
 };
 

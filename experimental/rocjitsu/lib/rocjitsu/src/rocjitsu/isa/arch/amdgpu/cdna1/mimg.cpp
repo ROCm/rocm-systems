@@ -16,7 +16,7 @@ namespace rocjitsu {
 namespace cdna1 {
 
 ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
-    : Mimg("image_load", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_load", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<ImageLoadMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -25,13 +25,14 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageLoadMimg::execute(amdgpu::Wavefront &wf) {
+void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
-    : Mimg("image_load_mip", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_load_mip", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageLoadMipMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -40,13 +41,14 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageLoadMipMimg::execute(amdgpu::Wavefront &wf) {
+void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
-    : Mimg("image_load_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_load_pck", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageLoadPckMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -55,13 +57,14 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageLoadPckMimg::execute(amdgpu::Wavefront &wf) {
+void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
-    : Mimg("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageLoadPckSgnMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -70,13 +73,14 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageLoadPckSgnMimg::execute(amdgpu::Wavefront &wf) {
+void ImageLoadPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
-    : Mimg("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageLoadMipPckMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -85,13 +89,14 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageLoadMipPckMimg::execute(amdgpu::Wavefront &wf) {
+void ImageLoadMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
-    : Mimg("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageLoadMipPckSgnMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -100,13 +105,14 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageLoadMipPckSgnMimg::execute(amdgpu::Wavefront &wf) {
+void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
 ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
-    : Mimg("image_store", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_store", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageStoreMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -115,13 +121,14 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageStoreMimg::execute(amdgpu::Wavefront &wf) {
+void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
 ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
-    : Mimg("image_store_mip", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_store_mip", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageStoreMipMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -130,13 +137,14 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageStoreMipMimg::execute(amdgpu::Wavefront &wf) {
+void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
 ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
-    : Mimg("image_store_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_store_pck", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageStorePckMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -145,13 +153,14 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageStorePckMimg::execute(amdgpu::Wavefront &wf) {
+void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
 ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
-    : Mimg("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageStoreMipPckMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -160,13 +169,14 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageStoreMipPckMimg::execute(amdgpu::Wavefront &wf) {
+void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
 ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
-    : Mimg("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGetResinfoMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -175,12 +185,13 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageGetResinfoMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
-    : Mimg("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicSwapMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -190,12 +201,13 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicSwapMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
-    : Mimg("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicCmpswapMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -205,12 +217,13 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicCmpswapMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
-    : Mimg("image_atomic_add", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicAddMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -220,12 +233,13 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicAddMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
-    : Mimg("image_atomic_sub", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicSubMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -235,12 +249,13 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicSubMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
-    : Mimg("image_atomic_smin", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicSminMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -250,12 +265,13 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicSminMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
-    : Mimg("image_atomic_umin", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicUminMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -265,12 +281,13 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicUminMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
-    : Mimg("image_atomic_smax", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicSmaxMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -280,12 +297,13 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicSmaxMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
-    : Mimg("image_atomic_umax", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicUmaxMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -295,12 +313,13 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicUmaxMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
-    : Mimg("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicAndMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -310,12 +329,13 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicAndMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
-    : Mimg("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicOrMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -325,12 +345,13 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicOrMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
-    : Mimg("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicXorMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -340,12 +361,13 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicXorMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
-    : Mimg("image_atomic_inc", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicIncMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -355,12 +377,13 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicIncMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
-    : Mimg("image_atomic_dec", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageAtomicDecMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -370,12 +393,13 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   src_operands_.emplace_back(&srsrc);
 }
 
-void ImageAtomicDecMimg::execute(amdgpu::Wavefront &wf) {
+void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
-    : Mimg("image_sample", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -386,12 +410,13 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
-    : Mimg("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -402,12 +427,13 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
-    : Mimg("image_sample_d", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_d", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleDMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -418,12 +444,13 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleDMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleDMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
-    : Mimg("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleDClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -434,12 +461,13 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleDClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleDClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
-    : Mimg("image_sample_l", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_l", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleLMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -450,12 +478,13 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleLMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleLMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
-    : Mimg("image_sample_b", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleBMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -466,12 +495,13 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleBMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleBMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
-    : Mimg("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleBClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -482,12 +512,13 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleBClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleBClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
-    : Mimg("image_sample_lz", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_lz", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleLzMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -498,12 +529,13 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleLzMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleLzMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
-    : Mimg("image_sample_c", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -514,12 +546,13 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -530,12 +563,13 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCDMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -546,12 +580,13 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCDMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCDMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCDClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -562,12 +597,13 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCDClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCDClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCLMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -578,12 +614,13 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCLMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCLMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCBMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -594,12 +631,13 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCBMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCBMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCBClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -610,12 +648,13 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCBClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCBClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCLzMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -626,12 +665,13 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCLzMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCLzMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
-    : Mimg("image_sample_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -642,12 +682,13 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
-    : Mimg("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -658,12 +699,13 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
-    : Mimg("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleDOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -674,12 +716,13 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleDOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleDOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
-    : Mimg("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleDClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -690,12 +733,13 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleDClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleDClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
-    : Mimg("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleLOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -706,12 +750,13 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleLOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleLOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
-    : Mimg("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleBOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -722,12 +767,13 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleBOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleBOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
-    : Mimg("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleBClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -738,12 +784,13 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleBClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
-    : Mimg("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleLzOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -754,12 +801,13 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleLzOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -770,12 +818,13 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -786,12 +835,13 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCDOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -802,12 +852,13 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCDOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCDOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCDClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -818,12 +869,13 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCDClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCDClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCLOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -834,12 +886,13 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCLOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCLOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCBOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -850,12 +903,13 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCBOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCBOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCBClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -866,12 +920,13 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCBClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCLzOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -882,12 +937,13 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCLzOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
-    : Mimg("image_gather4", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4Mimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -898,12 +954,13 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4Mimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4Mimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
-    : Mimg("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4ClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -914,12 +971,13 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4ClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4ClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
-    : Mimg("image_gather4h", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4hMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -930,12 +988,13 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4hMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4hMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
-    : Mimg("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4LMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -946,12 +1005,13 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4LMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4LMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
-    : Mimg("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4BMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -962,12 +1022,13 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4BMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4BMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
-    : Mimg("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4BClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -978,12 +1039,13 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4BClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4BClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
-    : Mimg("image_gather4_lz", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_lz", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4LzMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -994,12 +1056,13 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4LzMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4LzMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1010,12 +1073,13 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1026,12 +1090,13 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
-    : Mimg("image_gather4h_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4h_pck", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4hPckMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1042,12 +1107,13 @@ ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4hPckMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4hPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
-    : Mimg("image_gather8h_pck", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather8h_pck", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather8hPckMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1058,12 +1124,13 @@ ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather8hPckMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather8hPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CLMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1074,12 +1141,13 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CLMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CLMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CBMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1090,12 +1158,13 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CBMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CBMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CBClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1106,12 +1175,13 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CBClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CBClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CLzMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1122,12 +1192,13 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CLzMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CLzMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
-    : Mimg("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4OMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1138,12 +1209,13 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4OMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4OMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4ClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1154,12 +1226,13 @@ ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4ClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4ClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_l_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_l_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4LOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1170,12 +1243,13 @@ ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4LOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4LOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_b_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_b_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4BOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1186,12 +1260,13 @@ ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4BOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4BOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_b_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4BClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1202,12 +1277,13 @@ ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4BClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4BClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4LzOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1218,12 +1294,13 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4LzOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4LzOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4COMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1234,12 +1311,13 @@ ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4COMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4COMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1250,12 +1328,13 @@ ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_l_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CLOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1266,12 +1345,13 @@ ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CLOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CLOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_b_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CBOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1282,12 +1362,13 @@ ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CBOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CBOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CBClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1298,12 +1379,13 @@ ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CBClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
-    : Mimg("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGather4CLzOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1314,12 +1396,13 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGather4CLzOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGather4CLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
-    : Mimg("image_get_lod", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageGetLodMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1330,12 +1413,13 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageGetLodMimg::execute(amdgpu::Wavefront &wf) {
+void ImageGetLodMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
-    : Mimg("image_sample_cd", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_cd", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCdMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1346,12 +1430,13 @@ ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCdMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCdMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
-    : Mimg("image_sample_cd_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_cd_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCdClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1362,12 +1447,13 @@ ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCdClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCdClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_cd", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_cd", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCCdMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1378,12 +1464,13 @@ ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCCdMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCCdMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_cd_cl", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_cd_cl", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCCdClMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1394,12 +1481,13 @@ ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCCdClMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCCdClMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
-    : Mimg("image_sample_cd_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_cd_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCdOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1410,12 +1498,13 @@ ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCdOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCdOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
-    : Mimg("image_sample_cd_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_cd_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCdClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1426,12 +1515,13 @@ ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCdClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCdClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_cd_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_cd_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCCdOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1442,12 +1532,13 @@ ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCCdOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCCdOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
-    : Mimg("image_sample_c_cd_cl_o", reinterpret_cast<const OpEncoding *>(inst)),
+    : Mimg("image_sample_c_cd_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<ImageSampleCCdClOMimg>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1458,7 +1549,7 @@ ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
   src_operands_.emplace_back(&ssamp);
 }
 
-void ImageSampleCCdClOMimg::execute(amdgpu::Wavefront &wf) {
+void ImageSampleCCdClOMimg::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Image pipeline not yet implemented.
 }
 
