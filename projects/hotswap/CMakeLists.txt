@@ -60,4 +60,4 @@ enable_testing()
 add_test(NAME hotswap_test COMMAND hotswap_test)
 add_test(NAME hotswap_test_with_comgr COMMAND hotswap_test_with_comgr)
 set_tests_properties(hotswap_test_with_comgr PROPERTIES
-  ENVIRONMENT "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:mock-comgr>")
+  ENVIRONMENT "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:mock-comgr>:$ENV{LD_LIBRARY_PATH}")

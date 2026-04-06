@@ -285,25 +285,16 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
                                          options, loaded_code_object);
   }
 
-  // Do NOT skip when source == target: B0-to-A0 patching uses the same ISA
-  // name on both sides. Let COMGR decide whether rewriting is needed.
-
+  // Route through RetargetCodeObject for unified logging, validation,
+  // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
+  // patching uses the same ISA name on both sides.
   void *out_elf = nullptr;
   size_t out_elf_size = 0;
-  const int rc = rocr::hotswap::ComgrHotswapRewrite(
+  const int rc = rocr::hotswap::RetargetCodeObject(
       local_bytes->data(), local_bytes->size(), source_isa.c_str(),
       target_isa.c_str(), &out_elf, &out_elf_size);
 
-  if (rc != 0 || !out_elf) {
-    if (out_elf) {
-      std::free(out_elf);
-    }
-    if (source_isa != target_isa) {
-      fprintf(stderr,
-              "hotswap: COMGR rewrite failed for %s -> %s (rc=%d), "
-              "falling back to original\n",
-              source_isa.c_str(), target_isa.c_str(), rc);
-    }
+  if (rc != 0 || out_elf == local_bytes->data()) {
     return g_orig_load_agent_code_object(executable, agent, code_object_reader,
                                          options, loaded_code_object);
   }
