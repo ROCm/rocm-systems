@@ -2,6 +2,17 @@ name: Publish GHCR Packages for rocprofiler-compute CI Images
 
 on:
   workflow_dispatch:
+    inputs:
+      gpu:
+        description: 'GPU target to build (select "all" to build every target)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - gfx94X
+          - gfx950
+          - gfx1151
   schedule:
     - cron: 0 5 * * *
   push:
@@ -21,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
+      gpu_list: ${{ steps.generate_gpu_list.outputs.gpu_list }}
 
     steps:
       - uses: actions/checkout@v5
@@ -34,6 +46,16 @@ jobs:
           MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
           echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
 
+      - name: Generate GPU list
+        id: generate_gpu_list
+        run: |
+          INPUT="${{ github.event.inputs.gpu }}"
+          if [ -z "$INPUT" ] || [ "$INPUT" = "all" ]; then
+            echo 'gpu_list=["gfx94X","gfx950","gfx1151"]' >> $GITHUB_OUTPUT
+          else
+            echo "gpu_list=[\"$INPUT\"]" >> $GITHUB_OUTPUT
+          fi
+
   rocprofiler-compute-ci-gfx:
     needs: prepare_matrix_ci
     runs-on: ubuntu-latest
@@ -45,7 +67,7 @@ jobs:
       fail-fast: false
       matrix:
         system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
-        gpu: [ 'gfx94X', 'gfx950', 'gfx1151' ]
+        gpu: ${{ fromJSON(needs.prepare_matrix_ci.outputs.gpu_list) }}
 
     steps:
       - name: Checkout Repository
