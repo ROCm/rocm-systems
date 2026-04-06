@@ -1521,8 +1521,6 @@ typedef union
     } ui32;
 } HSA_REGISTER_MEM_FLAGS;
 
-#pragma pack(pop, hsakmttypes_h)
-
 typedef enum _HsaAisFlags {
     HSA_AIS_READ = 0x1,
     HSA_AIS_WRITE= 0x2
@@ -1541,28 +1539,28 @@ typedef enum _HsaMemoryMapFlags {
 
 /* Handle type for import */
 typedef enum _HsaExternalHandleType{
-    HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME = 0,
-    HSA_EXTERNAL_HANDLE_KMS     = 1,
-    HSA_EXTERNAL_HANDLE_DMA_BUF = 2
+    HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME  = 0,
+    HSA_EXTERNAL_HANDLE_KMS             = 1,
+    HSA_EXTERNAL_HANDLE_DMA_BUF         = 2,
 } HsaExternalHandleType;
 
-typedef struct _HsaExternalHandleDesc {
+typedef struct HsaHandleImportDesc {
     HsaAMDGPUDeviceHandle device_handle; // GPU device handle (used for import only)
-    HSAint64 fd; // dmabuf fd
     HsaExternalHandleType type; // handle type
+    union {
+        HSAint64 dmabuf_fd; // dmabuf fd
+        HsaMemoryObjectHandle buf_handle; // Driver handle
+    };
     void *mem; // existing buffer address (for windows and WSL only)
     HSAuint32 metadata; // Used for IPC handles
-} HsaExternalHandleDesc;
+} HsaHandleImportDesc;
 
 typedef struct _HsaHandleImportResult {
-    HsaMemoryObjectHandle buf_handle; // Thunk buffer object handle
+    HsaMemoryObjectHandle buf_handle; // Buffer Object handle
+    HSAint64 dmabuf_fd;
     HSAuint64 alloc_size; // allocation size for import
     HSAuint32 metadata; // Used for IPC handles
 } HsaHandleImportResult;
-
-typedef struct _HsaMemoryExportResult {
-    HSAint32 fd; // dmabuf fd
-} HsaMemoryExportResult;
 
 typedef struct _HsaHandleImportFlags {
     struct {
@@ -1578,6 +1576,27 @@ typedef struct _HsaStructureSizes {
   HSAuint16 SizeOfHsaNodeProperties;  // sizeof(HsaNodeProperties)
   HSAuint16 Reserved[6];
 } HsaStructureSizes;
+typedef struct _HsaHandleExportDesc {
+    HsaAMDGPUDeviceHandle device_handle;
+    HsaExternalHandleType type;
+    HsaMemoryObjectHandle buf_handle; // Thunk buffer object handle
+    HSAuint64 size;
+} HsaHandleExportDesc;
+
+typedef struct _HsaMemoryExportResult {
+    union {
+        HSAint64 dmabuf_fd;
+    };
+} HsaMemoryExportResult;
+
+typedef struct _HsaHandleExportFlags {
+    struct {
+        unsigned int Reserved       : 32;
+    } ui32;
+} HsaHandleExportFlags;
+
+
+#pragma pack(pop, hsakmttypes_h)
 
 #ifdef __cplusplus
 }   //extern "C"

@@ -3872,7 +3872,7 @@ hsa_status_t hsa_amd_vmem_get_access(void* va, hsa_access_permission_t* perms,
                                      hsa_agent_t agent_handle);
 
 /**
- * @brief Get an exportable shareable handle
+ * @brief Get an exportable locally unique shareable handle
  *
  * Get an exportable shareable handle for a memory_handle. This shareabl handle can then be used to
  * re-create a virtual memory handle using hsa_amd_vmem_import_shareable_handle. The shareable

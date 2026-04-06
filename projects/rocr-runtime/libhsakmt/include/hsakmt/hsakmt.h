@@ -562,6 +562,8 @@ hsaKmtRegisterGraphicsHandleToNodesExt(
  * allocation. The memory will remain allocated even after the allocation is
  * freed by hsaKmtFreeMemory for as long as a dmabuf fd remains open or any
  * importer of that fd maintains an active reference to the memory.
+ * This is the legacy API that exports dmabuf from KFD interface. To export
+ * dmabuf from DRM interface, use hsaKmtHandleExport instead
  */
 
 HSAKMT_STATUS
@@ -1300,9 +1302,17 @@ hsaKmtModelEnabled(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtHandleImport(
-    const HsaExternalHandleDesc* ImportDesc,
+    const HsaHandleImportDesc* ImportDesc,
     HsaHandleImportResult* ImportResult,
     HsaHandleImportFlags* Flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtHandleExport(
+    const HsaHandleExportDesc* ExportDesc,
+    HsaMemoryExportResult* ExportResult,
+    HsaHandleExportFlags* Flags
 );
 
 HSAKMT_STATUS
@@ -1342,8 +1352,14 @@ HSAKMTAPI
 hsaKmtMemoryGetCpuAddr(
   HsaAMDGPUDeviceHandle DeviceHandle,
   HsaMemoryObjectHandle MemoryHandle,
-  HSAint32* fd, // OUT
   HSAuint64* cpu_addr // OUT
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetAmdGPUDeviceFd(
+  HsaAMDGPUDeviceHandle DeviceHandle, //IN
+  int *fd //OUT
 );
 
 #ifdef __cplusplus

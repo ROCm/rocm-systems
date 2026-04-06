@@ -95,11 +95,13 @@ hsaKmtAisReadWriteFile;
 hsaKmtGetMemoryHandle;
 #endif
 hsaKmtHandleImport;
+hsaKmtHandleExport;
 hsaKmtMemoryVaMap;
 hsaKmtMemoryVaUnmap;
 hsaKmtMemHandleFree;
 hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
+hsaKmtGetAmdGPUDeviceFd;
 local: *;
 };
 
