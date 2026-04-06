@@ -4882,7 +4882,7 @@ class CodeGenerator:
             ),
             cgen.Line('private:'),
             cgen.Statement(
-                'using DecodeFunc = std::function<std::unique_ptr<Instruction>(const MachineInst *)>'
+                'using DecodeFunc = std::unique_ptr<Instruction>(*)(const MachineInst *)'
             ),
             cgen.FunctionDeclaration(
                 cgen.Value(
@@ -5074,7 +5074,6 @@ class CodeGenerator:
                     False,
                 ),
                 ('array', True),
-                ('functional', True),
                 ('memory', True),
             ],
             ['Instruction'],
