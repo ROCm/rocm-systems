@@ -32,11 +32,16 @@ public:
 
     /**
      * @param driver Shared pointer to the procfs driver.
+     * @param socket_id Physical package (socket) ID for this device.
      * @param monitored_cpus Set of CPU IDs to collect metrics for.
      */
-    device(std::shared_ptr<Driver> driver, std::set<size_t> monitored_cpus)
+    device(std::shared_ptr<Driver> driver, size_t socket_id,
+           std::set<size_t> monitored_cpus)
     : m_driver(std::move(driver))
+    , m_socket_id(socket_id)
     , m_monitored_cpus(std::move(monitored_cpus))
+    , m_device_name("CPU" + std::to_string(socket_id))
+    , m_product_name("CPU" + std::to_string(socket_id))
     {
         initialize_supported_metrics();
     }
@@ -51,7 +56,7 @@ public:
         return m_supported_metrics;
     }
 
-    [[nodiscard]] size_t get_index() const noexcept { return 0; }
+    [[nodiscard]] size_t get_index() const noexcept { return m_socket_id; }
 
     [[nodiscard]] const std::string& get_name() const noexcept { return m_device_name; }
 
@@ -240,12 +245,13 @@ private:
     }
 
     std::shared_ptr<Driver>       m_driver;
+    size_t                        m_socket_id = 0;
     std::set<size_t>              m_monitored_cpus;
     enabled_metrics               m_supported_metrics{};
     std::map<size_t, cpu_jiffies> m_prev_jiffies;
-    std::string                   m_device_name  = "CPU";
-    std::string                   m_product_name = "CPU";
-    std::string                   m_vendor_name  = "AMD";
+    std::string                   m_device_name;
+    std::string                   m_product_name;
+    std::string                   m_vendor_name = "AMD";
 };
 
 }  // namespace rocprofsys::pmc::collectors::cpu

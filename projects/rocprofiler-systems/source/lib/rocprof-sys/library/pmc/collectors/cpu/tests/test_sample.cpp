@@ -36,13 +36,14 @@ TEST_F(cpu_pmc_sample_test, serialize_deserialize)
 
     std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
     std::vector<uint8_t> loads_data = { 10, 20, 30, 40 };
-    cpu_pmc_sample       original(em, 80000, pm, freqs_data, loads_data);
+    cpu_pmc_sample       original(em, 1u, 80000, pm, freqs_data, loads_data);
 
     serialize(buffer.data(), original);
 
     uint8_t* buffer_ptr   = buffer.data();
     auto     deserialized = deserialize<cpu_pmc_sample>(buffer_ptr);
 
+    EXPECT_EQ(deserialized.device_id, original.device_id);
     EXPECT_EQ(deserialized.timestamp, original.timestamp);
     EXPECT_EQ(deserialized.process_data.page_rss, original.process_data.page_rss);
     EXPECT_EQ(deserialized.process_data.virt_mem, original.process_data.virt_mem);
@@ -67,7 +68,7 @@ TEST_F(cpu_pmc_sample_test, get_size)
 
     std::vector<uint8_t> freqs_data = { 100, 150, 200, 180, 190, 195, 185, 170 };
     std::vector<uint8_t> loads_data = { 10, 20, 30, 40 };
-    cpu_pmc_sample       s(em, 80000, pm, freqs_data, loads_data);
+    cpu_pmc_sample       s(em, 0u, 80000, pm, freqs_data, loads_data);
 
     EXPECT_GT(get_size(s), 0u);
 }
@@ -84,7 +85,7 @@ TEST_F(cpu_pmc_sample_test, empty_data)
     enabled_metrics      em{};
     process_metrics      pm{};
     std::vector<uint8_t> empty;
-    cpu_pmc_sample       original(em, 0, pm, empty, empty);
+    cpu_pmc_sample       original(em, 0u, 0, pm, empty, empty);
 
     serialize(buffer.data(), original);
 

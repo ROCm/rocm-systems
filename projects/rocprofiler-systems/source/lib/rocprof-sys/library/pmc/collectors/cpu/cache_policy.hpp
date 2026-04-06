@@ -46,9 +46,14 @@ struct cache_policy
     /**
      * @brief Initialize per-CPU PMC metadata entries.
      *
-     * @param monitored_cpus Set of CPU IDs being monitored.
+     * @param socket_id Socket (physical package) ID for agent registration.
+     * @param monitored_cpus Set of CPU IDs being monitored on this socket.
+     * @param is_first_socket True if this is the first selected socket —
+     *        process-level metrics are registered only once, under this socket.
      */
-    static void initialize_pmc_metadata(const std::set<size_t>& monitored_cpus)
+    static void initialize_pmc_metadata(size_t                  socket_id,
+                                        const std::set<size_t>& monitored_cpus,
+                                        bool                    is_first_socket)
     {
         constexpr size_t      EVENT_CODE       = 0;
         constexpr size_t      INSTANCE_ID      = 0;
@@ -58,50 +63,52 @@ struct cache_policy
         constexpr const char* EXPRESSION       = "";
         constexpr const char* TARGET_ARCH      = "CPU";
 
-        for(auto cpu_id : monitored_cpus)
+        for(const auto cpu_id : monitored_cpus)
         {
-            auto freq_name = "cpu" + std::to_string(cpu_id) + "_frequency";
+            const auto freq_name = "cpu" + std::to_string(cpu_id) + "_frequency";
             trace_cache::get_metadata_registry().add_pmc_info(
-                { agent_type::CPU, cpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   freq_name.c_str(), freq_name.c_str(), "CPU Core Frequency",
                   LONG_DESCRIPTION, COMPONENT, "MHz", rocprofsys::trace_cache::ABSOLUTE,
                   BLOCK, EXPRESSION, 0, 0 });
 
-            auto load_name = "cpu" + std::to_string(cpu_id) + "_load";
+            const auto load_name = "cpu" + std::to_string(cpu_id) + "_load";
             trace_cache::get_metadata_registry().add_pmc_info(
-                { agent_type::CPU, cpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   load_name.c_str(), load_name.c_str(), "CPU Core Load Percentage",
                   LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
                   rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
         }
 
-        // Process-level metrics (registered once, not per-CPU)
+        // Process-level metrics are process-wide; register under first selected socket
+        if(!is_first_socket) return;
+
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, 0, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_page_rss", "Page RSS", "Process Physical Memory (RSS)",
               LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0 });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, 0, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_virt_mem", "Virt Mem", "Process Virtual Memory", LONG_DESCRIPTION,
               COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
               0 });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, 0, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_peak_rss", "Peak RSS", "Process Peak Memory (HWM)",
               LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0 });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, 0, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_ctx_switches", "Ctx Switches", "Context Switches",
               LONG_DESCRIPTION, COMPONENT, "count", rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0 });
 
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, 0, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               "process_page_faults", "Page Faults", "Page Faults", LONG_DESCRIPTION,
               COMPONENT, "count", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
               0 });
@@ -114,14 +121,14 @@ struct cache_policy
      * serialized by type_mutex<category::amd_smi> in pmc::sample/pause.
      * The static s_zero_entries is safe under this single-writer invariant.
      *
-     * @param device_id Device identifier (always 0 for CPU).
+     * @param device_id Socket (physical package) ID.
      * @param device_name Device name (unused for CPU).
      * @param enabled_metrics_cfg Metrics enabled by configuration.
      * @param supported_metrics Metrics supported by the device.
      * @param metric_values Collected metric values.
      * @param timestamp Sample timestamp in nanoseconds.
      */
-    static void store_sample(size_t /*device_id*/, const std::string& /*device_name*/,
+    static void store_sample(size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_metrics_cfg,
                              const enabled_metrics& supported_metrics,
                              const metrics& metric_values, uint64_t timestamp)
@@ -132,8 +139,9 @@ struct cache_policy
         const auto& cpu_data = get_effective_cpu_data(metric_values);
 
         trace_cache::get_buffer_storage().store(trace_cache::cpu_pmc_sample{
-            effective, timestamp, metric_values.process_data,
-            serialize_frequencies(cpu_data), serialize_loads(cpu_data) });
+            effective, static_cast<uint32_t>(device_id), timestamp,
+            metric_values.process_data, serialize_frequencies(cpu_data),
+            serialize_loads(cpu_data) });
     }
 
 private:

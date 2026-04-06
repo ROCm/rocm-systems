@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <sys/resource.h>
@@ -35,6 +36,10 @@ static constexpr int64_t KB_TO_BYTES = 1024;
 static constexpr int64_t US_PER_SECOND = 1'000'000;
 // kHz to MHz conversion for sysfs scaling_cur_freq.
 static constexpr float KHZ_TO_MHZ = 0.001f;
+// /proc/stat per-CPU line prefix.
+static constexpr std::string_view PROC_STAT_CPU_PREFIX = "cpu";
+// Number of jiffies fields per CPU line in /proc/stat.
+static constexpr size_t JIFFIES_FIELD_COUNT = 7;
 
 class unique_fd
 {
@@ -92,18 +97,20 @@ ltrim(std::string_view str) noexcept
     return str.substr(static_cast<size_t>(it - str.begin()));
 }
 
-template <typename Fn>
-void
-for_each_line(std::string_view content, Fn&& fn)
+inline std::vector<std::string_view>
+split_lines(std::string_view content)
 {
-    size_t line_start = 0;
-    while(line_start < content.size())
+    std::vector<std::string_view> lines;
+    size_t                        pos = 0;
+    while(pos < content.size())
     {
-        auto line_end = content.find('\n', line_start);
-        if(line_end == std::string_view::npos) line_end = content.size();
-        fn(content.substr(line_start, line_end - line_start));
-        line_start = line_end + 1;
+        const auto end = content.find('\n', pos);
+        const auto len =
+            (end == std::string_view::npos) ? content.size() - pos : end - pos;
+        lines.push_back(content.substr(pos, len));
+        pos += len + 1;
     }
+    return lines;
 }
 
 struct cpu_jiffies
@@ -138,8 +145,128 @@ struct rusage_snapshot
     int64_t kernel_mode_time = 0;
 };
 
-// virt_mem (first) and page_rss (second) from /proc/self/statm, in bytes.
-using statm_data = std::pair<int64_t, int64_t>;
+struct statm_data
+{
+    int64_t virt_mem = 0;
+    int64_t page_rss = 0;
+};
+
+// Maps socket (physical package) ID to the set of logical CPU IDs on that socket.
+using socket_topology_t = std::map<size_t, std::set<size_t>>;
+
+// sysfs topology file: value is a small integer, always < 16 bytes.
+static constexpr size_t SYSFS_TOPOLOGY_BUFFER_SIZE = 16;
+
+/**
+ * @brief Discover CPU socket topology from sysfs.
+ *
+ * Reads /sys/devices/system/cpu/cpuN/topology/physical_package_id for each
+ * online CPU and groups them by socket ID. Falls back to a single socket 0
+ * if sysfs topology is unavailable.
+ *
+ * @param cpu_count Number of online logical CPUs.
+ * @return Map of socket_id to set of cpu_ids belonging to that socket.
+ */
+inline socket_topology_t
+read_socket_topology(size_t cpu_count)
+{
+    socket_topology_t topology;
+    char              buf[SYSFS_TOPOLOGY_BUFFER_SIZE];
+
+    for(size_t cpu = 0; cpu < cpu_count; ++cpu)
+    {
+        const auto path = "/sys/devices/system/cpu/cpu" + std::to_string(cpu) +
+                          "/topology/physical_package_id";
+        const int fd = ::open(path.c_str(), O_RDONLY);
+        if(fd < 0)
+        {
+            topology[0].insert(cpu);
+            continue;
+        }
+
+        const auto bytes = ::read(fd, buf, sizeof(buf) - 1);
+        ::close(fd);
+
+        if(bytes <= 0)
+        {
+            topology[0].insert(cpu);
+            continue;
+        }
+
+        size_t socket_id  = 0;
+        const auto [p, e] = std::from_chars(buf, buf + bytes, socket_id);
+        if(e != std::errc()) socket_id = 0;
+
+        topology[socket_id].insert(cpu);
+    }
+
+    if(topology.empty() && cpu_count > 0) topology[0] = {};
+
+    return topology;
+}
+
+[[nodiscard]] inline std::map<size_t, cpu_jiffies>
+parse_proc_stat(std::string_view content)
+{
+    std::map<size_t, cpu_jiffies> result;
+    const auto                    lines = split_lines(content);
+
+    std::for_each(lines.begin(), lines.end(), [&](std::string_view line) {
+        if(!starts_with(line, PROC_STAT_CPU_PREFIX) ||
+           line.size() <= PROC_STAT_CPU_PREFIX.size() ||
+           !std::isdigit(static_cast<unsigned char>(line[PROC_STAT_CPU_PREFIX.size()])))
+            return;
+
+        const auto space = line.find(' ');
+        if(space == std::string_view::npos) return;
+
+        size_t cpu_id        = 0;
+        const auto [ptr, ec] = std::from_chars(line.data() + PROC_STAT_CPU_PREFIX.size(),
+                                               line.data() + space, cpu_id);
+        if(ec != std::errc()) return;
+
+        cpu_jiffies j;
+        uint64_t*   fields[]  = { &j.user,   &j.nice, &j.system, &j.idle,
+                                  &j.iowait, &j.irq,  &j.softirq };
+        auto        remaining = ltrim(line.substr(space));
+
+        for(size_t i = 0; i < JIFFIES_FIELD_COUNT && !remaining.empty(); ++i)
+        {
+            const auto [p, e] = std::from_chars(
+                remaining.data(), remaining.data() + remaining.size(), *fields[i]);
+            if(e != std::errc()) break;
+            remaining = ltrim(
+                { p, static_cast<size_t>(remaining.data() + remaining.size() - p) });
+        }
+        result[cpu_id] = j;
+    });
+
+    return result;
+}
+
+[[nodiscard]] inline std::optional<statm_data>
+parse_statm(std::string_view content)
+{
+    static const long page_size = sysconf(_SC_PAGESIZE);
+
+    auto remaining = ltrim(content);
+
+    size_t virt_pages   = 0;
+    const auto [p1, e1] = std::from_chars(
+        remaining.data(), remaining.data() + remaining.size(), virt_pages);
+    if(e1 != std::errc()) return std::nullopt;
+
+    remaining =
+        ltrim({ p1, static_cast<size_t>(remaining.data() + remaining.size() - p1) });
+
+    size_t rss_pages = 0;
+    const auto [p2, e2] =
+        std::from_chars(remaining.data(), remaining.data() + remaining.size(), rss_pages);
+    if(e2 != std::errc()) return std::nullopt;
+
+    return statm_data{ static_cast<int64_t>(virt_pages) * page_size,
+                       static_cast<int64_t>(rss_pages) * page_size };
+}
 
 /**
  * @brief Driver wrapping Linux procfs/sysfs and getrusage for CPU metrics.
@@ -168,10 +295,21 @@ public:
             unique_fd fd{ ::open(path.c_str(), O_RDONLY) };
             if(fd) m_sysfs_freq_fds.emplace(i, std::move(fd));
         }
-        m_use_sysfs_freq = !m_sysfs_freq_fds.empty();
+        m_use_sysfs_freq  = !m_sysfs_freq_fds.empty();
+        m_socket_topology = read_socket_topology(cpu_count);
     }
 
     // Rule of Zero: unique_fd and map<.., unique_fd> handle cleanup.
+
+    [[nodiscard]] const socket_topology_t& get_socket_topology() const noexcept
+    {
+        return m_socket_topology;
+    }
+
+    [[nodiscard]] size_t get_socket_count() const noexcept
+    {
+        return m_socket_topology.size();
+    }
 
     [[nodiscard]] std::map<size_t, cpu_jiffies> read_proc_stat()
     {
@@ -211,8 +349,8 @@ public:
         {
             if(const auto data = parse_statm(content))
             {
-                snap.virt_mem = data->first;
-                snap.page_rss = data->second;
+                snap.virt_mem = data->virt_mem;
+                snap.page_rss = data->page_rss;
             }
         }
 
@@ -256,71 +394,12 @@ private:
         return result;
     }
 
-    [[nodiscard]] static std::map<size_t, cpu_jiffies> parse_proc_stat(
-        std::string_view content)
-    {
-        std::map<size_t, cpu_jiffies> result;
-
-        for_each_line(content, [&](std::string_view line) {
-            if(!starts_with(line, "cpu") || line.size() < 4 ||
-               !std::isdigit(static_cast<unsigned char>(line[3])))
-                return;
-
-            const auto space = line.find(' ');
-            if(space == std::string_view::npos) return;
-
-            size_t cpu_id = 0;
-            const auto [ptr, ec] =
-                std::from_chars(line.data() + 3, line.data() + space, cpu_id);
-            if(ec != std::errc()) return;
-
-            cpu_jiffies j;
-            uint64_t*   fields[]  = { &j.user,   &j.nice, &j.system, &j.idle,
-                                      &j.iowait, &j.irq,  &j.softirq };
-            auto        remaining = ltrim(line.substr(space));
-
-            for(size_t i = 0; i < 7 && !remaining.empty(); ++i)
-            {
-                const auto [p, e] = std::from_chars(
-                    remaining.data(), remaining.data() + remaining.size(), *fields[i]);
-                if(e != std::errc()) break;
-                remaining = ltrim(
-                    { p, static_cast<size_t>(remaining.data() + remaining.size() - p) });
-            }
-            result[cpu_id] = j;
-        });
-
-        return result;
-    }
-
-    [[nodiscard]] static std::optional<statm_data> parse_statm(std::string_view content)
-    {
-        static const long page_size = sysconf(_SC_PAGESIZE);
-
-        auto remaining = ltrim(content);
-
-        size_t virt_pages   = 0;
-        const auto [p1, e1] = std::from_chars(
-            remaining.data(), remaining.data() + remaining.size(), virt_pages);
-        if(e1 != std::errc()) return std::nullopt;
-
-        remaining =
-            ltrim({ p1, static_cast<size_t>(remaining.data() + remaining.size() - p1) });
-
-        size_t rss_pages    = 0;
-        const auto [p2, e2] = std::from_chars(
-            remaining.data(), remaining.data() + remaining.size(), rss_pages);
-        if(e2 != std::errc()) return std::nullopt;
-
-        return statm_data{ static_cast<int64_t>(virt_pages) * page_size,
-                           static_cast<int64_t>(rss_pages) * page_size };
-    }
-
     unique_fd                   m_proc_stat_fd;
     unique_fd                   m_proc_statm_fd;
     std::map<size_t, unique_fd> m_sysfs_freq_fds;
     bool                        m_use_sysfs_freq = false;
     size_t                      m_cpu_count      = 0;
+    socket_topology_t           m_socket_topology;
     std::vector<char>           m_stat_buffer;
     std::vector<char>           m_statm_buffer;
     std::vector<char>           m_freq_buffer;

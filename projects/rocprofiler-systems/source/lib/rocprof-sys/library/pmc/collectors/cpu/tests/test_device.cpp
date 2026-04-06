@@ -75,7 +75,7 @@ protected:
 
 TEST_F(cpu_device_test, all_metrics_supported_when_procfs_readable)
 {
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
     auto supported = dev.get_supported_metrics();
@@ -95,7 +95,7 @@ TEST_F(cpu_device_test, no_load_when_proc_stat_empty)
     ON_CALL(*mock_driver, read_proc_stat())
         .WillByDefault(Return(std::map<size_t, cpu_jiffies>{}));
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
     EXPECT_EQ(dev.get_supported_metrics().bits.load, 0u);
@@ -107,7 +107,7 @@ TEST_F(cpu_device_test, no_frequency_when_cpuinfo_empty)
     ON_CALL(*mock_driver, read_cpu_frequencies())
         .WillByDefault(Return(std::map<size_t, float>{}));
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     EXPECT_TRUE(dev.is_supported());
     EXPECT_EQ(dev.get_supported_metrics().bits.frequency, 0u);
@@ -116,7 +116,7 @@ TEST_F(cpu_device_test, no_frequency_when_cpuinfo_empty)
 
 TEST_F(cpu_device_test, device_interface_methods)
 {
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     EXPECT_EQ(dev.get_index(), 0u);
     EXPECT_EQ(dev.get_name(), "CPU");
@@ -130,7 +130,7 @@ TEST_F(cpu_device_test, frequencies_collected)
     ON_CALL(*mock_driver, read_cpu_frequencies())
         .WillByDefault(Return(make_freqs(3500.0f)));
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     auto               result = dev.get_cpu_metrics();
 
     for(const auto& cpu : result.cpu_data)
@@ -142,7 +142,7 @@ TEST_F(cpu_device_test, frequencies_collected)
 TEST_F(cpu_device_test, frequencies_filtered_by_monitored_set)
 {
     std::set<size_t>   subset = { 1, 3 };
-    device<MockDriver> dev(mock_driver, subset);
+    device<MockDriver> dev(mock_driver, 0, subset);
     auto               result = dev.get_cpu_metrics();
 
     std::set<size_t> collected_ids;
@@ -158,7 +158,7 @@ TEST_F(cpu_device_test, frequencies_filtered_by_monitored_set)
 
 TEST_F(cpu_device_test, first_sample_returns_zero_load)
 {
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     auto               result = dev.get_cpu_metrics();
 
     for(const auto& cpu : result.cpu_data)
@@ -180,7 +180,7 @@ TEST_F(cpu_device_test, load_calculation_with_increasing_jiffies)
         .WillOnce(Return(baseline))  // first sample (baseline stored)
         .WillOnce(Return(after));    // second sample (delta computed)
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     (void) dev.get_cpu_metrics();  // baseline
 
     auto result = dev.get_cpu_metrics();
@@ -201,7 +201,7 @@ TEST_F(cpu_device_test, full_load_calculation)
         .WillOnce(Return(baseline))
         .WillOnce(Return(after));
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     (void) dev.get_cpu_metrics();
 
     auto result = dev.get_cpu_metrics();
@@ -222,7 +222,7 @@ TEST_F(cpu_device_test, zero_load_when_idle)
         .WillOnce(Return(baseline))
         .WillOnce(Return(after));
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     (void) dev.get_cpu_metrics();
 
     auto result = dev.get_cpu_metrics();
@@ -237,7 +237,7 @@ TEST_F(cpu_device_test, process_metrics_collected)
     auto snap = make_rusage();
     ON_CALL(*mock_driver, read_rusage()).WillByDefault(Return(snap));
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     auto               result = dev.get_cpu_metrics();
 
     EXPECT_EQ(result.process_data.page_rss, 50 * 1024 * 1024);
@@ -255,14 +255,14 @@ TEST_F(cpu_device_test, zero_peak_rss_marks_unsupported)
     snap.peak_rss = 0;
     ON_CALL(*mock_driver, read_rusage()).WillByDefault(Return(snap));
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     EXPECT_EQ(dev.get_supported_metrics().bits.peak_rss, 0u);
 }
 
 TEST_F(cpu_device_test, empty_monitored_set_produces_no_per_cpu_data)
 {
     std::set<size_t>   empty_set;
-    device<MockDriver> dev(mock_driver, empty_set);
+    device<MockDriver> dev(mock_driver, 0, empty_set);
     auto               result = dev.get_cpu_metrics();
 
     EXPECT_TRUE(result.cpu_data.empty());
@@ -272,7 +272,7 @@ TEST_F(cpu_device_test, empty_monitored_set_produces_no_per_cpu_data)
 TEST_F(cpu_device_test, single_cpu_monitored)
 {
     std::set<size_t>   single = { 2 };
-    device<MockDriver> dev(mock_driver, single);
+    device<MockDriver> dev(mock_driver, 0, single);
     auto               result = dev.get_cpu_metrics();
 
     size_t cpu2_count = 0;
@@ -286,7 +286,7 @@ TEST_F(cpu_device_test, single_cpu_monitored)
 TEST_F(cpu_device_test, nonexistent_cpu_id_skipped)
 {
     std::set<size_t>   nonexistent = { 99 };
-    device<MockDriver> dev(mock_driver, nonexistent);
+    device<MockDriver> dev(mock_driver, 0, nonexistent);
     auto               result = dev.get_cpu_metrics();
 
     EXPECT_TRUE(result.cpu_data.empty());
@@ -306,7 +306,7 @@ TEST_F(cpu_device_test, multiple_samples_accumulate_correctly)
         .WillOnce(Return(jiffies2))   // sample 2
         .WillOnce(Return(jiffies3));  // sample 3
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     (void) dev.get_cpu_metrics();  // baseline
 
@@ -339,7 +339,7 @@ TEST_F(cpu_device_test, all_metrics_combined_in_single_sample)
     auto snap = make_rusage(100 * 1024 * 1024, 500 * 1024 * 1024);
     ON_CALL(*mock_driver, read_rusage()).WillByDefault(Return(snap));
 
-    device<MockDriver> dev(mock_driver, monitored_cpus);
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
     (void) dev.get_cpu_metrics();  // baseline
 
     auto result = dev.get_cpu_metrics();

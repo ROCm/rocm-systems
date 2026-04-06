@@ -942,55 +942,67 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
         process_kern_track::emplace(0, "CPU Kernel Time (S)", "sec");
     });
 
-    const auto  _ts = _cpu_sample.timestamp;
-    const auto& _em = _cpu_sample.enabled_metric;
+    const auto  _ts        = _cpu_sample.timestamp;
+    const auto& _em        = _cpu_sample.enabled_metric;
+    const auto  _device_id = _cpu_sample.device_id;
 
-    if(_em.bits.page_rss)
-        TRACE_COUNTER(
-            trait::name<category::process_page>::value, process_page_track::at(0, 0), _ts,
-            static_cast<double>(_cpu_sample.process_data.page_rss) / units::megabyte);
+    // Process-level metrics are global — emit once from the lowest selected socket
+    static auto s_process_device_id = _device_id;
+    const bool  _is_process_owner   = (_device_id == s_process_device_id);
 
-    if(_em.bits.virt_mem)
-        TRACE_COUNTER(
-            trait::name<category::process_virt>::value, process_virt_track::at(0, 0), _ts,
-            static_cast<double>(_cpu_sample.process_data.virt_mem) / units::megabyte);
+    if(_is_process_owner)
+    {
+        if(_em.bits.page_rss)
+            TRACE_COUNTER(trait::name<category::process_page>::value,
+                          process_page_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.page_rss) /
+                              units::megabyte);
 
-    if(_em.bits.peak_rss)
-        TRACE_COUNTER(
-            trait::name<category::process_peak>::value, process_peak_track::at(0, 0), _ts,
-            static_cast<double>(_cpu_sample.process_data.peak_rss) / units::megabyte);
+        if(_em.bits.virt_mem)
+            TRACE_COUNTER(trait::name<category::process_virt>::value,
+                          process_virt_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.virt_mem) /
+                              units::megabyte);
+        if(_em.bits.peak_rss)
+            TRACE_COUNTER(trait::name<category::process_peak>::value,
+                          process_peak_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.peak_rss) /
+                              units::megabyte);
 
-    if(_em.bits.ctx_switches)
-        TRACE_COUNTER(trait::name<category::process_context_switch>::value,
-                      process_cntx_track::at(0, 0), _ts,
-                      static_cast<double>(_cpu_sample.process_data.context_switches));
+        if(_em.bits.ctx_switches)
+            TRACE_COUNTER(trait::name<category::process_context_switch>::value,
+                          process_cntx_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.context_switches));
 
-    if(_em.bits.page_faults)
-        TRACE_COUNTER(trait::name<category::process_page_fault>::value,
-                      process_flts_track::at(0, 0), _ts,
-                      static_cast<double>(_cpu_sample.process_data.page_faults));
+        if(_em.bits.page_faults)
+            TRACE_COUNTER(trait::name<category::process_page_fault>::value,
+                          process_flts_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.page_faults));
 
-    if(_em.bits.user_time)
-        TRACE_COUNTER(trait::name<category::process_user_mode_time>::value,
-                      process_user_track::at(0, 0), _ts,
-                      static_cast<double>(_cpu_sample.process_data.user_mode_time) /
-                          units::sec);
+        if(_em.bits.user_time)
+            TRACE_COUNTER(trait::name<category::process_user_mode_time>::value,
+                          process_user_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.user_mode_time) /
+                              units::sec);
 
-    if(_em.bits.kernel_time)
-        TRACE_COUNTER(trait::name<category::process_kernel_mode_time>::value,
-                      process_kern_track::at(0, 0), _ts,
-                      static_cast<double>(_cpu_sample.process_data.kernel_mode_time) /
-                          units::sec);
+        if(_em.bits.kernel_time)
+            TRACE_COUNTER(trait::name<category::process_kernel_mode_time>::value,
+                          process_kern_track::at(0, 0), _ts,
+                          static_cast<double>(_cpu_sample.process_data.kernel_mode_time) /
+                              units::sec);
+    }
 
     if(_em.bits.frequency)
     {
-        auto cpu_freqs = deserialize_freqs(_cpu_sample.freqs);
+        const auto cpu_freqs = deserialize_freqs(_cpu_sample.freqs);
         for(const auto& cpu_data : cpu_freqs)
         {
             const size_t cpu_id = cpu_data.id;
             if(!cpu_freq_track::exists(cpu_id))
             {
-                auto track_name = "CPU Frequency [" + std::to_string(cpu_id) + "] (S)";
+                const auto track_name = "CPU [" + std::to_string(_device_id) +
+                                        "] Core [" + std::to_string(cpu_id) +
+                                        "] Frequency (S)";
                 cpu_freq_track::emplace(cpu_id, track_name, "MHz");
             }
             TRACE_COUNTER(trait::name<category::cpu_freq>::value,
@@ -1001,13 +1013,15 @@ perfetto_processor_t::handle(const cpu_pmc_sample& _cpu_sample)
 
     if(_em.bits.load)
     {
-        auto cpu_loads = deserialize_loads(_cpu_sample.loads);
+        const auto cpu_loads = deserialize_loads(_cpu_sample.loads);
         for(const auto& cpu_data : cpu_loads)
         {
             const size_t cpu_id = cpu_data.id;
             if(!cpu_load_track::exists(cpu_id))
             {
-                auto track_name = "CPU Load [" + std::to_string(cpu_id) + "] (S)";
+                const auto track_name = "CPU [" + std::to_string(_device_id) +
+                                        "] Core [" + std::to_string(cpu_id) +
+                                        "] Load (S)";
                 cpu_load_track::emplace(cpu_id, track_name, "%");
             }
             TRACE_COUNTER(trait::name<category::cpu_load>::value,

@@ -24,9 +24,10 @@ using ::rocprofsys::pmc::device_selection_mode;
 /**
  * @brief Traits type for CPU collector configuration.
  *
- * Unlike GPU which manages multiple device instances, CPU manages a single
- * device that monitors multiple CPU cores. The device filter applies to which
- * cores are monitored, not which device instances are created.
+ * Each CPU socket (physical package) is modeled as a separate device, aligned
+ * with the GPU pattern where each GPU is a separate device. The device filter
+ * selects socket IDs (not individual cores). All cores on a selected socket
+ * are always monitored.
  *
  * @tparam DriverProvider The provider type (wraps procfs driver).
  */
@@ -63,7 +64,11 @@ struct cpu_traits
     template <typename Cache>
     static void init_pmc_metadata(const device_ptr_t& dev)
     {
-        Cache::initialize_pmc_metadata(dev->get_monitored_cpus());
+        static bool first_socket_registered = false;
+        const bool  is_first                = !first_socket_registered;
+        first_socket_registered             = true;
+        Cache::initialize_pmc_metadata(dev->get_index(), dev->get_monitored_cpus(),
+                                       is_first);
     }
 
     template <typename Perfetto, typename DeviceVector>
@@ -76,16 +81,18 @@ struct cpu_traits
     static void setup_counter_tracks(const device_ptr_t&      dev,
                                      const enabled_metrics_t& enabled)
     {
-        Perfetto::setup_counter_tracks(dev->get_monitored_cpus(), enabled);
+        Perfetto::setup_counter_tracks(dev->get_index(), dev->get_monitored_cpus(),
+                                       enabled);
     }
 
     template <typename Perfetto, typename DeviceEntries>
     static void post_process_perfetto(const DeviceEntries&     entries,
                                       const enabled_metrics_t& enabled)
     {
-        if(!entries.empty())
+        for(const auto& entry : entries)
         {
-            Perfetto::post_process(entries[0].device->get_monitored_cpus(), enabled);
+            Perfetto::post_process(entry.device->get_index(),
+                                   entry.device->get_monitored_cpus(), enabled);
         }
     }
 
@@ -97,17 +104,18 @@ struct cpu_traits
     }
 
     /**
-     * @brief Enumerate CPU device (single logical device with multiple cores).
+     * @brief Enumerate CPU devices — one per socket (physical package).
      *
-     * Creates a single device that monitors cores based on the filter.
-     * The provider's get_driver() and get_cpu_count() determine available cores.
+     * The filter selects socket IDs (not core IDs). All cores on a
+     * selected socket are always monitored. All devices share a single
+     * driver instance (one /proc/stat read serves all sockets).
      */
     template <typename Settings, typename Provider>
     [[nodiscard]] static std::vector<device_entry> enumerate_devices(
         std::shared_ptr<Provider> provider)
     {
         std::vector<device_entry> entries;
-        auto                      filter = get_device_filter<Settings>();
+        const auto                filter = get_device_filter<Settings>();
 
         if(filter.mode == device_selection_mode::NONE)
         {
@@ -115,51 +123,59 @@ struct cpu_traits
             return entries;
         }
 
-        auto cpu_count = provider->get_cpu_count();
-        LOG_INFO("Detected {} online CPUs for PMC sampling", cpu_count);
+        const auto& topology     = provider->get_socket_topology();
+        const auto  socket_count = topology.size();
+        LOG_INFO("Detected {} CPU socket(s), {} online CPUs", socket_count,
+                 provider->get_cpu_count());
 
-        std::set<size_t> monitored_cpus;
+        // Select which sockets to monitor
+        std::set<size_t> selected_sockets;
         switch(filter.mode)
         {
             case device_selection_mode::ALL:
-                for(size_t i = 0; i < cpu_count; ++i)
-                    monitored_cpus.insert(i);
+                for(const auto& [socket_id, cpus] : topology)
+                    selected_sockets.insert(socket_id);
                 break;
             case device_selection_mode::NONE: return entries;
             case device_selection_mode::SPECIFIC:
-                for(auto idx : filter.indices)
+                for(const auto idx : filter.indices)
                 {
-                    if(idx < cpu_count)
+                    if(topology.count(idx) > 0)
                     {
-                        monitored_cpus.insert(idx);
+                        selected_sockets.insert(idx);
                     }
-                    else if(cpu_count > 0)
+                    else if(!topology.empty())
                     {
-                        LOG_WARNING("CPU index {} out of range (max: {})", idx,
-                                    cpu_count - 1);
+                        LOG_WARNING("CPU socket {} not found (available: 0-{})", idx,
+                                    topology.rbegin()->first);
                     }
                 }
                 break;
         }
 
-        if(monitored_cpus.empty())
+        if(selected_sockets.empty())
         {
-            LOG_WARNING("No CPUs selected for monitoring");
+            LOG_WARNING("No CPU sockets selected for monitoring");
             return entries;
         }
 
-        auto drv = provider->get_driver();
-        auto dev = std::make_shared<device_t>(std::move(drv), monitored_cpus);
+        const auto& drv = provider->get_driver();
 
-        if(!dev->is_supported())
+        for(const auto socket_id : selected_sockets)
         {
-            LOG_WARNING("No CPU metrics are supported on this system");
+            const auto& cpu_set = topology.at(socket_id);
+            auto        dev     = std::make_shared<device_t>(drv, socket_id, cpu_set);
+
+            if(!dev->is_supported())
+            {
+                LOG_WARNING("No CPU metrics supported on socket {}", socket_id);
+            }
+
+            const auto supported = dev->get_supported_metrics();
+            entries.push_back(device_entry{ std::move(dev), supported });
         }
 
-        auto supported = dev->get_supported_metrics();
-        entries.push_back(device_entry{ std::move(dev), supported });
-        LOG_INFO("Enabled {} CPUs for PMC sampling", monitored_cpus.size());
-
+        LOG_INFO("Enabled {} CPU socket(s) for PMC sampling", selected_sockets.size());
         return entries;
     }
 };

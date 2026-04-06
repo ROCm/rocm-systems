@@ -46,6 +46,17 @@ public:
 
     [[nodiscard]] size_t get_cpu_count() const noexcept { return m_cpu_count; }
 
+    [[nodiscard]] size_t get_socket_count() const noexcept
+    {
+        return m_driver->get_socket_count();
+    }
+
+    [[nodiscard]] const drivers::procfs::socket_topology_t& get_socket_topology()
+        const noexcept
+    {
+        return m_driver->get_socket_topology();
+    }
+
     void init() {}
     void shutdown() {}
 

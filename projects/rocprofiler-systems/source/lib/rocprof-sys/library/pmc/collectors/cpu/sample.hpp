@@ -26,10 +26,11 @@ struct sample : trace_cache::cacheable_t
     };
 
     sample() = default;
-    sample(enabled_metrics _settings, uint64_t _timestamp,
+    sample(enabled_metrics _settings, uint32_t _device_id, uint64_t _timestamp,
            const process_metrics& _process_data, std::vector<uint8_t> _freqs,
            std::vector<uint8_t> _loads)
     : enabled_metric(_settings)
+    , device_id(_device_id)
     , timestamp(_timestamp)
     , process_data(_process_data)
     , freqs(std::move(_freqs))
@@ -37,6 +38,7 @@ struct sample : trace_cache::cacheable_t
     {}
 
     enabled_metrics      enabled_metric{};
+    uint32_t             device_id = 0;
     uint64_t             timestamp = 0;
     process_metrics      process_data{};
     std::vector<uint8_t> freqs;  // serialized cpu_id+freq pairs
@@ -93,7 +95,7 @@ inline void
 serialize(uint8_t* buffer, const pmc::collectors::cpu::sample& item)
 {
     utility::store_value(buffer, static_cast<uint32_t>(item.enabled_metric.value),
-                         item.timestamp, item.process_data.page_rss,
+                         item.device_id, item.timestamp, item.process_data.page_rss,
                          item.process_data.virt_mem, item.process_data.peak_rss,
                          item.process_data.context_switches,
                          item.process_data.page_faults, item.process_data.user_mode_time,
@@ -105,9 +107,10 @@ inline pmc::collectors::cpu::sample
 deserialize(uint8_t*& buffer)
 {
     pmc::collectors::cpu::sample item;
-    utility::parse_value(buffer, item.enabled_metric.value, item.timestamp,
-                         item.process_data.page_rss, item.process_data.virt_mem,
-                         item.process_data.peak_rss, item.process_data.context_switches,
+    utility::parse_value(buffer, item.enabled_metric.value, item.device_id,
+                         item.timestamp, item.process_data.page_rss,
+                         item.process_data.virt_mem, item.process_data.peak_rss,
+                         item.process_data.context_switches,
                          item.process_data.page_faults, item.process_data.user_mode_time,
                          item.process_data.kernel_mode_time, item.freqs, item.loads);
     return item;
@@ -118,7 +121,7 @@ inline size_t
 get_size(const pmc::collectors::cpu::sample& item)
 {
     return utility::get_size(
-        static_cast<uint32_t>(item.enabled_metric.value), item.timestamp,
+        static_cast<uint32_t>(item.enabled_metric.value), item.device_id, item.timestamp,
         item.process_data.page_rss, item.process_data.virt_mem,
         item.process_data.peak_rss, item.process_data.context_switches,
         item.process_data.page_faults, item.process_data.user_mode_time,

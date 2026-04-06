@@ -27,6 +27,8 @@ public:
     MOCK_METHOD((std::map<size_t, float>), read_cpu_frequencies, ());
     MOCK_METHOD(rusage_snapshot, read_rusage, ());
     MOCK_METHOD(size_t, get_cpu_count, ());
+    MOCK_METHOD((const socket_topology_t&), get_socket_topology, (), (const));
+    MOCK_METHOD(size_t, get_socket_count, (), (const));
 
     /**
      * @brief Set up default mock behaviors.
@@ -70,6 +72,11 @@ public:
         default_rusage.user_mode_time   = 5000000;
         default_rusage.kernel_mode_time = 1000000;
         ON_CALL(*this, read_rusage()).WillByDefault(Return(default_rusage));
+
+        static socket_topology_t default_topology = { { 0, { 0, 1 } }, { 1, { 2, 3 } } };
+        ON_CALL(*this, get_socket_topology())
+            .WillByDefault(::testing::ReturnRef(default_topology));
+        ON_CALL(*this, get_socket_count()).WillByDefault(Return(2));
     }
 };
 

@@ -510,9 +510,10 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_SAMPLING_CPUS",
-        "CPUs to collect frequency information for. Values should be separated by commas "
-        "and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies 'all' and "
-        "'none' suppresses all CPU frequency sampling",
+        "CPU socket (physical package) IDs for CPU PMC sampling. Values should be "
+        "separated by commas and can be explicit or ranges, e.g. 0,1. Selects which "
+        "CPU sockets to monitor; all cores on a selected socket are always sampled. "
+        "An empty value or 'all' enables all sockets; 'none' disables CPU PMC sampling",
         std::string{ "none" }, "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
