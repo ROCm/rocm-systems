@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <cstring>
 #include <iostream>
+#include <set>
 #include <string>
 #include <sstream>
 
@@ -53,6 +54,13 @@ void parse_config_file() {
   const std::string undef_pre  = "/* #undef ";
   const std::string undef_post = " */";
 
+  // Already printed at the top of the output; suppress duplicates here.
+  const std::set<std::string> skip = {
+    "ROCSHMEM_GIT_HASH",
+    "ROCSHMEM_INSTALL_PREFIX",
+    "ROCSHMEM_OFFLOAD_TARGETS",
+  };
+
   printf("#------------------------------------------------------------------------------#\n");
   printf("#                              Build Configuration                             #\n");
   printf("#------------------------------------------------------------------------------#\n");
@@ -72,12 +80,14 @@ void parse_config_file() {
       if (space != std::string::npos) {
         // String-valued define: #define NAME "value"
         std::string name  = rest.substr(0, space);
+        if (skip.count(name)) continue;
         std::string value = rest.substr(space + 1);
         if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
           value = value.substr(1, value.size() - 2);
         PRINT_ENTRY(name.c_str(), value.c_str());
       } else {
         // Boolean define: #define NAME
+        if (skip.count(rest)) continue;
         PRINT_ENTRY(rest.c_str(), "ON");
       }
     }
