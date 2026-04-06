@@ -592,8 +592,9 @@ TEST_F(PackRoundtripTest, L2_BytePack4CopySemantics) {
     EXPECT_EQ(h_out[i], h_in[i]) << "pattern 0x" << std::hex << h_in[i];
 }
 
-// Chain: store as BytePack<4>, load back as BytePack<4>, then store as
-// BytePack<8> from two halves. Tests interplay of different-width operations.
+// Load two adjacent BytePack<4> values, combine into BytePack<8> via
+// half[] views, and store as BytePack<8>. Tests interplay of different-width
+// load/store operations.
 __global__ void kernelChainedSizes(const uint32_t* __restrict__ in,
                                    uint64_t* __restrict__ out) {
   uintptr_t inAddr = cvta_to_global(in);
@@ -716,5 +717,365 @@ TEST_F(PackRoundtripTest, L4_SingleBitWalk_LdSt4) {
   for (int i = 0; i < N; i++)
     EXPECT_EQ(h_out[i], 1u << i) << "bit " << i;
 }
+
+// ===========================================================================
+// Guarded with #ifdef HIP_VERSION where HIP-specific builtins are required.
+// ===========================================================================
+
+#ifdef HIP_VERSION
+
+// ---------------------------------------------------------------------------
+// Pointer-based volatile / relaxed / acquire-release load & store roundtrips
+// (ld_volatile_global(uint64_t*), st_volatile_global, ld_relaxed_sys_global,
+//  st_relaxed_sys_global, ld_acquire_sys_global, st_release_sys_global)
+// ---------------------------------------------------------------------------
+
+__global__ void kernelLdStVolatileGlobalPtr(uint64_t* src, uint64_t* dst) {
+  uint64_t val = ld_volatile_global(src);
+  st_volatile_global(dst, val);
+}
+
+TEST_F(PackRoundtripTest, LdStVolatileGlobalPtr) {
+  uint64_t h_val = 0xDEADBEEFCAFEBABEULL;
+  DeviceBuffer<uint64_t> d_src(1), d_dst(1);
+  d_src.upload(h_val);
+
+  kernelLdStVolatileGlobalPtr<<<1, 1>>>(d_src.ptr, d_dst.ptr);
+  syncAndCheck();
+
+  EXPECT_EQ(d_dst.download(), h_val);
+}
+
+__global__ void kernelLdStRelaxedSysGlobal(uint64_t* src, uint64_t* dst) {
+  uint64_t val = ld_relaxed_sys_global(src);
+  st_relaxed_sys_global(dst, val);
+}
+
+TEST_F(PackRoundtripTest, LdStRelaxedSysGlobal) {
+  uint64_t h_val = 0x0123456789ABCDEFULL;
+  DeviceBuffer<uint64_t> d_src(1), d_dst(1);
+  d_src.upload(h_val);
+
+  kernelLdStRelaxedSysGlobal<<<1, 1>>>(d_src.ptr, d_dst.ptr);
+  syncAndCheck();
+
+  EXPECT_EQ(d_dst.download(), h_val);
+}
+
+__global__ void kernelLdStAcquireReleaseSysGlobal(uint64_t* src, uint64_t* dst) {
+  uint64_t val = ld_acquire_sys_global(src);
+  st_release_sys_global(dst, val);
+}
+
+TEST_F(PackRoundtripTest, LdStAcquireReleaseSysGlobal) {
+  uint64_t h_val = 0xAAAABBBBCCCCDDDDULL;
+  DeviceBuffer<uint64_t> d_src(1), d_dst(1);
+  d_src.upload(h_val);
+
+  kernelLdStAcquireReleaseSysGlobal<<<1, 1>>>(d_src.ptr, d_dst.ptr);
+  syncAndCheck();
+
+  EXPECT_EQ(d_dst.download(), h_val);
+}
+
+// Multiple values through the volatile load/store path to verify no
+// corruption across different bit patterns with concurrent threads.
+__global__ void kernelPtrLdStMulti(const uint64_t* src, uint64_t* dst, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) return;
+  uint64_t val = ld_volatile_global(const_cast<uint64_t*>(src + i));
+  st_volatile_global(dst + i, val);
+}
+
+TEST_F(PackRoundtripTest, L2_VolatileGlobalPtr_MultiElement) {
+  const int N = 1024;
+  std::vector<uint64_t> h_in(N);
+  for (int i = 0; i < N; i++) h_in[i] = 0xFF00FF00ULL * i + 0xABCD;
+
+  DeviceBuffer<uint64_t> d_src(N), d_dst(N);
+  d_src.copyFrom(h_in);
+
+  kernelPtrLdStMulti<<<gridFor(N), kDefaultBlockSize>>>(d_src.ptr, d_dst.ptr, N);
+  syncAndCheck();
+
+  auto h_out = d_dst.copyTo();
+  for (int i = 0; i < N; i++)
+    EXPECT_EQ(h_out[i], h_in[i]) << "at index " << i;
+}
+
+// ---------------------------------------------------------------------------
+// cvta_from_global: roundtrip through uintptr_t and back to typed pointer
+// ---------------------------------------------------------------------------
+
+__global__ void kernelCvtaFromGlobal(float* src, float* out) {
+  uintptr_t addr = cvta_to_global(src);
+  float* restored = cvta_from_global<float>(addr);
+  out[0] = restored[0];
+}
+
+TEST_F(PackRoundtripTest, CvtaFromGlobal) {
+  float h_val = 3.14f;
+  DeviceBuffer<float> d_src(1), d_out(1);
+  d_src.upload(h_val);
+
+  kernelCvtaFromGlobal<<<1, 1>>>(d_src.ptr, d_out.ptr);
+  syncAndCheck();
+
+  EXPECT_FLOAT_EQ(d_out.download(), h_val);
+}
+
+// ---------------------------------------------------------------------------
+// shmemCvtPtr: verify volatile-to-non-volatile shared memory pointer cast
+// ---------------------------------------------------------------------------
+
+__global__ void kernelShmemCvtPtr(uint64_t* out) {
+  __shared__ volatile uint64_t smem[2];
+  smem[0] = 0xDEADBEEFCAFEBABEULL;
+  smem[1] = 0x1234567890ABCDEFULL;
+  __syncthreads();
+
+  uint64_t* p = shmemCvtPtr(smem);
+  out[0] = p[0];
+  out[1] = p[1];
+}
+
+TEST_F(PackRoundtripTest, ShmemCvtPtr) {
+  DeviceBuffer<uint64_t> d_out(2);
+
+  kernelShmemCvtPtr<<<1, 1>>>(d_out.ptr);
+  syncAndCheck();
+
+  auto h = d_out.copyTo();
+  EXPECT_EQ(h[0], 0xDEADBEEFCAFEBABEULL);
+  EXPECT_EQ(h[1], 0x1234567890ABCDEFULL);
+}
+
+// ---------------------------------------------------------------------------
+// loadShmem128 / storeShmem128 roundtrip through shared memory
+// ---------------------------------------------------------------------------
+
+__global__ void kernelShmem128Roundtrip(const uint64_t* in, uint64_t* out) {
+  __shared__ uint64_t smem[2];
+  if (threadIdx.x == 0) {
+    storeShmem128(smem, in[0], in[1]);
+  }
+  __syncthreads();
+
+  if (threadIdx.x == 0) {
+    uint64_t v0, v1;
+    loadShmem128(smem, v0, v1);
+    out[0] = v0;
+    out[1] = v1;
+  }
+}
+
+TEST_F(PackRoundtripTest, LoadStoreShmem128) {
+  uint64_t h_in[2] = {0xAAAABBBBCCCCDDDDULL, 0x1111222233334444ULL};
+  DeviceBuffer<uint64_t> d_in(2), d_out(2);
+  d_in.copyFrom(h_in, 2);
+
+  kernelShmem128Roundtrip<<<1, 1>>>(d_in.ptr, d_out.ptr);
+  syncAndCheck();
+
+  auto h_out = d_out.copyTo();
+  EXPECT_EQ(h_out[0], h_in[0]);
+  EXPECT_EQ(h_out[1], h_in[1]);
+}
+
+// ---------------------------------------------------------------------------
+// loadShmemMisaligned128: three code paths based on sizeof(T)
+//   sizeof(T) < 4  → funnel-shift path
+//   sizeof(T) == 4 → nontemporal u32 path
+//   sizeof(T) == 8 → nontemporal u64 path
+// ---------------------------------------------------------------------------
+
+__global__ void kernelLoadShmemMisaligned128_u32(uint64_t* out) {
+  __shared__ uint32_t smem[8];
+  if (threadIdx.x == 0) {
+    smem[0] = 0x11111111u;
+    smem[1] = 0x22222222u;
+    smem[2] = 0x33333333u;
+    smem[3] = 0x44444444u;
+  }
+  __syncthreads();
+
+  uint64_t v0, v1;
+  loadShmemMisaligned128<uint32_t>(smem, v0, v1);
+  out[0] = v0;
+  out[1] = v1;
+}
+
+TEST_F(PackRoundtripTest, LoadShmemMisaligned128_Uint32) {
+  DeviceBuffer<uint64_t> d_out(2);
+
+  kernelLoadShmemMisaligned128_u32<<<1, 1>>>(d_out.ptr);
+  syncAndCheck();
+
+  auto h = d_out.copyTo();
+  uint64_t expected_lo = 0x2222222211111111ULL;
+  uint64_t expected_hi = 0x4444444433333333ULL;
+  EXPECT_EQ(h[0], expected_lo);
+  EXPECT_EQ(h[1], expected_hi);
+}
+
+__global__ void kernelLoadShmemMisaligned128_u64(uint64_t* out) {
+  __shared__ uint64_t smem[4];
+  if (threadIdx.x == 0) {
+    smem[0] = 0xAAAABBBBCCCCDDDDULL;
+    smem[1] = 0x1111222233334444ULL;
+  }
+  __syncthreads();
+
+  uint64_t v0, v1;
+  loadShmemMisaligned128<uint64_t>(smem, v0, v1);
+  out[0] = v0;
+  out[1] = v1;
+}
+
+TEST_F(PackRoundtripTest, LoadShmemMisaligned128_Uint64) {
+  DeviceBuffer<uint64_t> d_out(2);
+
+  kernelLoadShmemMisaligned128_u64<<<1, 1>>>(d_out.ptr);
+  syncAndCheck();
+
+  auto h = d_out.copyTo();
+  EXPECT_EQ(h[0], 0xAAAABBBBCCCCDDDDULL);
+  EXPECT_EQ(h[1], 0x1111222233334444ULL);
+}
+
+__global__ void kernelLoadShmemMisaligned128_u16(uint64_t* out) {
+  __shared__ uint16_t smem[16];
+  if (threadIdx.x == 0) {
+    for (int i = 0; i < 8; i++) smem[i] = static_cast<uint16_t>(0x1100u + i);
+  }
+  __syncthreads();
+
+  uint64_t v0, v1;
+  loadShmemMisaligned128<uint16_t>(smem, v0, v1);
+  out[0] = v0;
+  out[1] = v1;
+}
+
+TEST_F(PackRoundtripTest, LoadShmemMisaligned128_Uint16) {
+  DeviceBuffer<uint64_t> d_out(2);
+
+  kernelLoadShmemMisaligned128_u16<<<1, 1>>>(d_out.ptr);
+  syncAndCheck();
+
+  auto h = d_out.copyTo();
+  // smem layout (little-endian): 0x1100 0x1101 0x1102 0x1103 | 0x1104 0x1105 0x1106 0x1107
+  // u64[0] = 0x1103_1102_1101_1100, u64[1] = 0x1107_1106_1105_1104
+  uint64_t expected_lo = (uint64_t)0x1100 | ((uint64_t)0x1101 << 16)
+                       | ((uint64_t)0x1102 << 32) | ((uint64_t)0x1103 << 48);
+  uint64_t expected_hi = (uint64_t)0x1104 | ((uint64_t)0x1105 << 16)
+                       | ((uint64_t)0x1106 << 32) | ((uint64_t)0x1107 << 48);
+  EXPECT_EQ(h[0], expected_lo);
+  EXPECT_EQ(h[1], expected_hi);
+}
+
+// ---------------------------------------------------------------------------
+// store16global / load16global: standalone 16-byte global helpers
+// ---------------------------------------------------------------------------
+
+__global__ void kernelStore16Load16Direct(const uint64_t* src, uint64_t* dst) {
+  BytePack<16> val = load16global(cvta_to_global(src));
+  store16global(cvta_to_global(dst), val);
+}
+
+TEST_F(PackRoundtripTest, Store16Load16Global_Direct) {
+  uint64_t h_in[2] = {0xFEDCBA9876543210ULL, 0x0123456789ABCDEFULL};
+  DeviceBuffer<uint64_t> d_src(2), d_dst(2);
+  d_src.copyFrom(h_in, 2);
+
+  kernelStore16Load16Direct<<<1, 1>>>(d_src.ptr, d_dst.ptr);
+  syncAndCheck();
+
+  auto h_out = d_dst.copyTo();
+  EXPECT_EQ(h_out[0], h_in[0]);
+  EXPECT_EQ(h_out[1], h_in[1]);
+}
+
+// ---------------------------------------------------------------------------
+// loadPack / storePack: three internal paths
+//   Path 1: alignof(T)==Size && sizeof(T)==Size  (direct cast)
+//   Path 2: (Size+3)/4+1 < Size/sizeof(T)       (funnel-shift, uint8_t packs)
+//   Path 3: default element-by-element
+// ---------------------------------------------------------------------------
+
+// Path 1: loadPack<BytePack<4>, uint32_t> — direct cast load
+__global__ void kernelLoadStorePack_Path1(const uint32_t* src, uint32_t* dst, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) return;
+  BytePack<4> pack = loadPack<BytePack<4>>(src, i, n);
+  storePack<BytePack<4>>(dst, i, n, pack);
+}
+
+TEST_F(PackRoundtripTest, LoadStorePack_Path1_DirectCast) {
+  const int N = 64;
+  std::vector<uint32_t> h_in(N);
+  for (int i = 0; i < N; i++) h_in[i] = 0xDEAD0000u + i;
+
+  DeviceBuffer<uint32_t> d_src(N), d_dst(N);
+  d_src.copyFrom(h_in);
+  d_dst.zero();
+
+  kernelLoadStorePack_Path1<<<gridFor(N), kDefaultBlockSize>>>(d_src.ptr, d_dst.ptr, N);
+  syncAndCheck();
+
+  auto h_out = d_dst.copyTo();
+  for (int i = 0; i < N; i++)
+    EXPECT_EQ(h_out[i], h_in[i]) << "at index " << i;
+}
+
+// Path 3: loadPack<BytePack<8>, uint32_t> — element-by-element
+// Condition: (8+3)/4+1=3 < 8/4=2, false → path 3
+__global__ void kernelLoadStorePack_Path3(const uint32_t* src, uint32_t* dst, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int ix = i * 2;
+  if (ix >= n) return;
+  BytePack<8> pack = loadPack<BytePack<8>>(const_cast<uint32_t*>(src), ix, n);
+  storePack<BytePack<8>>(dst, ix, n, pack);
+}
+
+TEST_F(PackRoundtripTest, LoadStorePack_Path3_ElementByElement) {
+  const int N = 64;
+  std::vector<uint32_t> h_in(N);
+  for (int i = 0; i < N; i++) h_in[i] = 0xBEEF0000u + i;
+
+  DeviceBuffer<uint32_t> d_src(N), d_dst(N);
+  d_src.copyFrom(h_in);
+  d_dst.zero();
+
+  int packs = N / 2;
+  kernelLoadStorePack_Path3<<<1, packs>>>(d_src.ptr, d_dst.ptr, N);
+  syncAndCheck();
+
+  auto h_out = d_dst.copyTo();
+  for (int i = 0; i < N; i++)
+    EXPECT_EQ(h_out[i], h_in[i]) << "at index " << i;
+}
+
+// storePack boundary: end cuts off before full pack — trailing elements
+// must NOT be written past end.
+__global__ void kernelStorePackBoundary(uint32_t* dst) {
+  BytePack<8> pack;
+  pack.u32[0] = 0xAAAAAAAAu;
+  pack.u32[1] = 0xBBBBBBBBu;
+  storePack<BytePack<8>>(dst, 0, 1, pack);
+}
+
+TEST_F(PackRoundtripTest, L2_StorePackBoundary) {
+  DeviceBuffer<uint32_t> d_dst(2);
+  d_dst.zero();
+
+  kernelStorePackBoundary<<<1, 1>>>(d_dst.ptr);
+  syncAndCheck();
+
+  auto h = d_dst.copyTo();
+  EXPECT_EQ(h[0], 0xAAAAAAAAu);
+  EXPECT_EQ(h[1], 0u) << "element past end should remain zero";
+}
+
+#endif // HIP_VERSION
 
 } // namespace RcclUnitTesting
