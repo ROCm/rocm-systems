@@ -69,13 +69,13 @@ simple_kernel(float* data, int size)
 }
 
 void
-execute_kernels(const size_t tid, const size_t device_id)
+execute_kernels(const size_t      tid,
+                const hipStream_t stream,
+                const size_t      stream_id,
+                const size_t      device_id)
 {
     // Set device
     HIP_ASSERT(hipSetDevice(device_id));
-
-    auto* stream = hipStream_t{nullptr};
-    HIP_ASSERT(hipStreamCreate(&stream));
 
     // Allocate memory
     const int    size  = 1024 * 1024;  // 1M elements
@@ -96,8 +96,8 @@ execute_kernels(const size_t tid, const size_t device_id)
     {
         // compose string first to avoid multithreaded handling of cout << operator
         auto msg = std::stringstream{};
-        msg << "Starting kernel execution loop for thread " << tid << " on device " << device_id
-            << "...\n";
+        msg << "Starting kernel execution loop for thread " << tid << " with stream " << stream_id
+              << " on device " << device_id << "...\n";
         std::cout << msg.str();
     }
     const int num_iterations = 30;
@@ -113,8 +113,8 @@ execute_kernels(const size_t tid, const size_t device_id)
         auto err = hipMemcpyAsync(d_data, h_data, bytes, hipMemcpyHostToDevice, stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id
-                      << "...\n";
+            std::cerr << "Failed to copy data for thread " << tid << " with stream " << stream_id
+                      << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
@@ -132,8 +132,8 @@ execute_kernels(const size_t tid, const size_t device_id)
         err = hipMemcpyAsync(h_data, d_data, bytes, hipMemcpyDeviceToHost, stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id
-                      << "...\n";
+            std::cerr << "Failed to copy data for thread " << tid << " with stream " << stream_id
+                      << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
@@ -143,7 +143,7 @@ execute_kernels(const size_t tid, const size_t device_id)
         err = hipStreamSynchronize(stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to synchronize stream " << stream << " with thread " << tid
+            std::cerr << "Failed to synchronize stream " << stream_id << " with thread " << tid
                       << " on device " << device_id << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
@@ -158,12 +158,11 @@ execute_kernels(const size_t tid, const size_t device_id)
     {
         // compose string first to avoid multithreaded handling of cout << operator
         auto msg = std::stringstream{};
-        msg << "Kernel execution loop completed for thread " << tid << " on device " << device_id
-            << "...\n";
+        msg << "Kernel execution loop completed for thread " << tid << " with stream "
+            << stream_id << " on device " << device_id << "...\n";
         std::cout << msg.str();
     }
 
-    HIP_ASSERT(hipStreamDestroy(stream));
     // Cleanup
     HIP_ASSERT(hipFree(d_data));
     delete[] h_data;
@@ -175,7 +174,8 @@ main(int argc, char** argv)
     // Install signal handler for SIGINT
     std::signal(SIGWINCH, attachment_test_signal_handler);
 
-    size_t nthreads{8};
+    size_t nthreads{32};
+    size_t nstreams{8};
     int    ndevices{0};
     for(int i = 1; i < argc; ++i)
     {
@@ -183,14 +183,17 @@ main(int argc, char** argv)
         if(_arg == "?" || _arg == "-h" || _arg == "--help")
         {
             fprintf(stderr,
-                    "usage: attachment-test [NUM_THREADS (%zu)] [NUM_DEVICES (%d)]\n",
+                    "usage: attachment-test [NUM_THREADS (%zu)] [NUM_STREAMS (%zu)] "
+                    "[NUM_DEVICES (%d)]\n",
                     nthreads,
+                    nstreams,
                     ndevices);
             exit(EXIT_SUCCESS);
         }
     }
     if(argc > 1) nthreads = std::atoll(argv[1]);
-    if(argc > 2) ndevices = std::stoi(argv[2]);
+    if(argc > 2) nstreams = std::atoll(argv[2]);
+    if(argc > 3) ndevices = std::stoi(argv[3]);
 
     std::cout << "Attachment test app started with PID: " << getpid() << std::endl;
 
@@ -215,13 +218,21 @@ main(int argc, char** argv)
     std::cout << "After first call " << getpid() << std::endl;
 
     auto _threads = std::vector<std::thread>{};
+    auto _streams = std::vector<hipStream_t>(nstreams);
     _threads.reserve(nthreads);
 
+    for(auto& itr : _streams)
+        HIP_ASSERT(hipStreamCreate(&itr));
     for(size_t i = 0; i < nthreads; ++i)
-        _threads.emplace_back(execute_kernels, i, i % ndevices);
+        _threads.emplace_back(
+            execute_kernels, i, _streams.at(i % nstreams), i % nstreams, i % ndevices);
     for(auto& itr : _threads)
         itr.join();
 
+    // Destroy streams
+    for(auto itr : _streams)
+        HIP_ASSERT(hipStreamDestroy(itr));
+    
     if(signal_received)
     {
         std::cout << "Attachment test process " << getpid() << " received signal "

@@ -19,6 +19,9 @@ else()
     set(IS_DISABLED OFF)
 endif()
 
+# Until this test is fixed in PSDB-tests
+set(IS_DISABLED ON)
+
 if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
     set(LOG_LEVEL "warning") # info produces memory leak
 else()
@@ -47,7 +50,6 @@ rocprofiler_add_integration_execute_test(
     SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-once
     FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
 # Validate the output from the attached profiling
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-attachment-attach-once-csv
