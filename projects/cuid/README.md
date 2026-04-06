@@ -142,7 +142,7 @@ sphinx-build docs docs/_build/html
 | **CMake** | 3.14 | Build system requirement |
 | **GCC** | 5.0 | C++14 standard required |
 | **Kernel** | 2.6+ | Standard sysfs interfaces |
-| **Architecture** | x86_64 | CPUID intrinsics (fallback exists for other architectures) |
+| **Architecture** | x86_64 required for CPUID-based CPU fields | Limited fallback via `/proc/cpuinfo` on other architectures |
 
 #### Linux Distribution Compatibility
 
