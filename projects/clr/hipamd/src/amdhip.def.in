@@ -533,3 +533,4 @@ hipMipmappedArrayGetMemoryRequirements
 hipKernelGetAttribute
 hipKernelSetAttribute
 hipKernelGetFunction
+@HSA_EXPORTS@
