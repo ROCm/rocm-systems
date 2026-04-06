@@ -252,10 +252,12 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(
 
 #endif  // __gfx942__ || __gfx950__
 
+template <int N = 16>
 __device__ __forceinline__ void load_store_asm(buffer_resource* src,
                                                buffer_resource* dst,
-                                               size_t stride, size_t thread_idx,
-                                               size_t size, int work_per_thread=16) {
+                                               size_t stride,
+                                               size_t thread_idx) {
+  static_assert(N >= 1 && N <= 16, "load_store_asm: N must be in [1, 16]");
 #if defined(__gfx906__)
 #endif
 #if defined(__gfx908__)
@@ -265,16 +267,15 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src,
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
 
-  __int128_t regs[16];
-  // work_per_thread should be 16 at maximum
+  __int128_t regs[N];
 
-  // #pragma unroll
-  for (int i = 0; i < work_per_thread; i++) {
+  #pragma unroll
+  for (int i = 0; i < N; i++) {
     regs[i] = llvm_amdgcn_raw_buffer_load_b128(
         *reinterpret_cast<i32x4*>(src), thread_idx, i * stride, 0b10011u);
   }
-  // #pragma unroll
-  for (int i = 0; i < work_per_thread; i++) {
+  #pragma unroll
+  for (int i = 0; i < N; i++) {
     llvm_amdgcn_raw_buffer_store_b128(regs[i], *reinterpret_cast<i32x4*>(dst),
                                       thread_idx, i * stride, 0b10011u);
   }
@@ -285,6 +286,21 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src,
 #if defined(__gfx1201__)
     //! needs to be implemented
 #endif
+}
+
+__device__ __forceinline__ void load_store_asm_dispatch(buffer_resource* src,
+                                                        buffer_resource* dst,
+                                                        size_t stride,
+                                                        size_t thread_idx,
+                                                        int work_per_thread) {
+  switch (work_per_thread) {
+    case 16: load_store_asm<16>(src, dst, stride, thread_idx); break;
+    case  8: load_store_asm< 8>(src, dst, stride, thread_idx); break;
+    case  4: load_store_asm< 4>(src, dst, stride, thread_idx); break;
+    case  2: load_store_asm< 2>(src, dst, stride, thread_idx); break;
+    case  1: load_store_asm< 1>(src, dst, stride, thread_idx); break;
+    default: break;
+  }
 }
 
 __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,

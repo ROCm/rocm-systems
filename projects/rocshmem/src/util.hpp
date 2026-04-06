@@ -521,7 +521,7 @@ template <typename... Args>
       // }
 
       for (int i = 0; i < cpy_size; i++) {
-        load_store_asm(&br_src, &br_dst, stride, thread_idx, size, work_per_thread);
+        load_store_asm_dispatch(&br_src, &br_dst, stride, thread_idx, work_per_thread);
 
         br_src.ptr += block_bytes;
         br_dst.ptr += block_bytes;
@@ -597,7 +597,7 @@ template <typename... Args>
       // }
 
       for (int i = 0; i < cpy_size; i++) {
-        load_store_asm(&br_src, &br_dst, stride, thread_idx, size, work_per_thread);
+        load_store_asm_dispatch(&br_src, &br_dst, stride, thread_idx, work_per_thread);
 
         br_src.ptr += block_bytes;
         br_dst.ptr += block_bytes;
