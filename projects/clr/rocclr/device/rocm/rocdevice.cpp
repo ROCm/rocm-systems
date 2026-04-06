@@ -3837,6 +3837,9 @@ ProfilingSignal::~ProfilingSignal() {
 cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
   cl_int cl_error = CL_SUCCESS;
   switch (hsa_status) {
+    case HSA_STATUS_ERROR_OUT_OF_RESOURCES:
+      cl_error = CL_OUT_OF_RESOURCES;
+      break;
     case HSA_STATUS_ERROR_EXCEPTION:
       cl_error = CL_INVALID_OPERATION;
       break;
