@@ -24,7 +24,7 @@
 #define SRC_CORE_PM4_FACTORY_H_
 
 #include <assert.h>
-#include <hsa/hsa_ext_amd.h>
+#include "hsa_includes.h"
 #include <stdint.h>
 #include <string.h>
 

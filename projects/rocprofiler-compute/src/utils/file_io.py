@@ -229,34 +229,45 @@ def create_df_pmc(
         dfs: list[pd.DataFrame] = []
         coll_levels: list[str] = []
 
-        for csv_file in Path(raw_data_dir).rglob("*.csv"):
-            file_name = csv_file.name
+        coll_level_map = {}
+        for file_name in Path(raw_data_dir).rglob("*.csv"):
+            # In csv format accumulator counters are specified as
+            # SQ_ACCUM_PREV_HIRES counter in the coll_level specific csv
+            if config_dict.get(
+                "format_rocprof_output"
+            ) == "csv" and file_name.name.startswith("pmc_perf_SQ"):
+                coll_level_map[file_name] = file_name.name[
+                    len("pmc_perf_") : -len(".csv")
+                ]
 
-            is_sq_file = file_name.startswith("SQ")
-            is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+            # coll_level for pmc_perf.csv
+            if file_name.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv":
+                coll_level_map[file_name] = schema.PMC_PERF_FILE_PREFIX
 
-            if is_sq_file or is_pmc_perf:
-                tmp_df = pd.read_csv(csv_file)
+        for csv_file in coll_level_map:
+            tmp_df = pd.read_csv(csv_file)
 
-                if config_dict.get("format_rocprof_output") == "rocpd":
-                    tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
+            if config_dict.get("format_rocprof_output") == "rocpd":
+                tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
 
-                # Demangle original KernelNames
-                # Skip for Standalone Roofline with -1 to keep full kernel names
-                if kernel_verbose >= 0:
-                    kernel_name_shortener(tmp_df, kernel_verbose)
+            # Demangle original KernelNames
+            # Skip for Standalone Roofline with -1 to keep full kernel names
+            if kernel_verbose >= 0:
+                kernel_name_shortener(tmp_df, kernel_verbose)
 
-                # NB:
-                #   Idealy, the Node column should be added out of
-                #   multiindexing level. Here, we add it into pmc_perf
-                #   as it is the main sub-df which can be handled easily
-                #   later.
-                if file_name == "pmc_perf.csv" and node_name is not None:
-                    tmp_df.insert(0, "Node", node_name)
+            # NB:
+            #   Idealy, the Node column should be added out of
+            #   multiindexing level. Here, we add it into pmc_perf
+            #   as it is the main sub-df which can be handled easily
+            #   later.
+            if (
+                csv_file.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+                and node_name is not None
+            ):
+                tmp_df.insert(0, "Node", node_name)
 
-                dfs.append(tmp_df)
-                # Remove .csv extension for collection level
-                coll_levels.append(csv_file.stem)
+            dfs.append(tmp_df)
+            coll_levels.append(coll_level_map[csv_file])
 
         if not dfs:
             return pd.DataFrame()

@@ -28,7 +28,7 @@ from utils.utils_common import (
     capture_subprocess_output,
     create_temp_rocprofiler_metrics_path,
     get_rocprof_cmd,
-    parse_text,
+    parse_pmc_perf,
     perform_attach_detach,
 )
 from vendored import yaml
@@ -78,10 +78,10 @@ def run_prof(
         options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
         if multiple_files:
             options["ROCPROF_COUNTERS"] = ", ".join([
-                f"pmc: {' '.join(parse_text(fname))}" for fname in fnames
+                f"pmc: {' '.join(parse_pmc_perf(fname))}" for fname in fnames
             ])
         else:
-            options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fnames))}"
+            options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_pmc_perf(fnames))}"
         options["ROCPROF_AGENT_INDEX"] = "absolute"
     else:
         if multiple_files:
@@ -106,8 +106,12 @@ def run_prof(
         sdk_config = yaml.safe_load(filename)
     # Extra counter definitions
     for fname in fnames if multiple_files else [fnames]:
-        if Path(fname).with_suffix(".yaml").exists():
-            with open(Path(fname).with_suffix(".yaml")) as file:
+        fname_path = Path(fname)
+        counter_def_fname = fname_path.parent / (
+            "counter_def_" + fname_path.name[len("pmc_perf_") :]
+        )
+        if counter_def_fname.exists():
+            with open(Path(counter_def_fname)) as file:
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
@@ -154,9 +158,18 @@ def run_prof(
 
     time_2 = time.time()
     console_debug(
-        f"Finishing subprocess of fname {fname}, the time taken is "
+        f"Finishing subprocess of pmc file(s), the time taken is "
         f"{int((time_2 - time_1) / 60)} m {str((time_2 - time_1) % 60)} sec "
     )
+
+    if get_rocprof_cmd() != "rocprofiler-sdk":
+        # rocprofv3 with yaml input file can write out/pass_1 instead of out/pmc_1
+        # Move files from out/pass_1 to out/pmc_1 if pass_1 exists
+        pass_1 = Path(workload_dir) / "out" / "pass_1"
+        if pass_1.exists():
+            shutil.copytree(
+                pass_1, Path(workload_dir) / "out" / "pmc_1", dirs_exist_ok=True
+            )
 
     # Delete counter definition temporary directory
     if new_env.get("ROCPROFILER_METRICS_PATH"):
