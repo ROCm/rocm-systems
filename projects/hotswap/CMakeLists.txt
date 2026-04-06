@@ -41,6 +41,23 @@ if(UNIX)
     POSITION_INDEPENDENT_CODE ON)
 endif()
 
-# Test executable
+# Mock COMGR library for testing the dlopen path
+add_library(mock-comgr SHARED tests/mock_comgr.cpp)
+set_target_properties(mock-comgr PROPERTIES
+  OUTPUT_NAME "amd_comgr"
+  POSITION_INDEPENDENT_CODE ON)
+
+# Test executable (without mock — tests the "COMGR unavailable" paths)
 add_executable(hotswap_test tests/hotswap_test.cpp)
 target_link_libraries(hotswap_test PRIVATE hotswap-static)
+
+# Test with mock COMGR (tests the dlopen/rewrite paths)
+add_executable(hotswap_test_with_comgr tests/hotswap_test.cpp)
+target_link_libraries(hotswap_test_with_comgr PRIVATE hotswap-static)
+add_dependencies(hotswap_test_with_comgr mock-comgr)
+
+enable_testing()
+add_test(NAME hotswap_test COMMAND hotswap_test)
+add_test(NAME hotswap_test_with_comgr COMMAND hotswap_test_with_comgr)
+set_tests_properties(hotswap_test_with_comgr PROPERTIES
+  ENVIRONMENT "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:mock-comgr>")

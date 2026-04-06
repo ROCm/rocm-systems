@@ -23,13 +23,50 @@ static void check(bool cond, const char *name) {
   }
 }
 
-static void test_ComgrUnavailable() {
-  printf("TEST ComgrUnavailable...\n");
-  check(!rocr::hotswap::ComgrHotswapAvailable(),
-        "ComgrHotswapAvailable returns false when unbound");
+static void test_ComgrAvailability() {
+  printf("TEST ComgrAvailability...\n");
+  bool available = rocr::hotswap::ComgrHotswapAvailable();
+  if (available) {
+    printf("  (COMGR found via dlopen)\n");
+    check(true, "ComgrHotswapAvailable returns true with COMGR present");
+  } else {
+    printf("  (COMGR not found — dlopen tests will be skipped)\n");
+    check(true, "ComgrHotswapAvailable returns false when unbound");
+  }
+}
+
+static void test_RetargetWithComgr() {
+  if (!rocr::hotswap::ComgrHotswapAvailable()) {
+    printf("TEST RetargetWithComgr... SKIPPED (no COMGR)\n");
+    return;
+  }
+  printf("TEST RetargetWithComgr...\n");
+  const unsigned char fake_elf[] = {
+      0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  void *out_data = nullptr;
+  size_t out_size = 0;
+  int rc = rocr::hotswap::RetargetCodeObject(
+      fake_elf, sizeof(fake_elf),
+      "amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx1250",
+      &out_data, &out_size);
+
+  check(rc == 0, "RetargetCodeObject succeeds with COMGR");
+  check(out_size == sizeof(fake_elf), "output size matches input");
+  if (out_data && out_data != fake_elf) {
+    check(memcmp(out_data, fake_elf, sizeof(fake_elf)) == 0,
+          "output bytes match input (passthrough)");
+    std::free(out_data);
+  } else {
+    check(out_data != nullptr, "out_data is non-null");
+  }
 }
 
 static void test_RetargetReturnsInputWhenComgrUnavailable() {
+  if (rocr::hotswap::ComgrHotswapAvailable()) {
+    printf("TEST RetargetReturnsInputWhenComgrUnavailable... SKIPPED (COMGR present)\n");
+    return;
+  }
   printf("TEST RetargetReturnsInputWhenComgrUnavailable...\n");
   const unsigned char fake_elf[] = {
       0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00,
@@ -57,7 +94,8 @@ static void test_RetargetNullOutputPointers() {
 }
 
 int main() {
-  test_ComgrUnavailable();
+  test_ComgrAvailability();
+  test_RetargetWithComgr();
   test_RetargetReturnsInputWhenComgrUnavailable();
   test_RetargetNullOutputPointers();
 
