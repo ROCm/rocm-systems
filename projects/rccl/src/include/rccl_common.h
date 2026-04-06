@@ -129,6 +129,9 @@ bool validHsaScratchEnvSetting(const char*hsaScratchEnv, int hipRuntimeVersion, 
 
 // Direct ReduceScatter Limit
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
+// Hierarchical AllGather enabled
+RCCL_PARAM_DECLARE(HierarchicalAllGather);
+#define HIERARCHICAL_AG_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 #ifdef ENABLE_WARP_SPEED

@@ -53,7 +53,7 @@ hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKe
     if (auto ki = kernels_.find(std::make_pair(f.first, device_id)); ki!= kernels_.end()) {
       kern = ki->second;
     } else {
-      auto ret = f.second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
+      auto ret = f.second.get()->GetDynFunc(reinterpret_cast<hipFunction_t*>(&kern), m);
       if (ret != hipSuccess) {
         return ret;
       }
@@ -75,7 +75,7 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
   if (f == functions_.end()) {
     return hipErrorNotFound;
   }
-  auto ret = f->second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
+  auto ret = f->second.get()->GetDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
   if (ret != hipSuccess) {
     return ret;
   }
@@ -260,11 +260,7 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
   if (kernel == nullptr || paramOffset == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  const auto* const d_function = hip::DeviceFunc::asFunction(reinterpret_cast<hipFunction_t>(kernel));
-  if (d_function == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-  const auto* const d_kernel = d_function->kernel();
+  const auto* const d_kernel = hip::asKernel(reinterpret_cast<hipFunction_t>(kernel));
   if (d_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
@@ -287,13 +283,9 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  const auto* const d_function = hip::DeviceFunc::asFunction(kernel);
-  if (d_function == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-  const auto* const d_kernel = d_function->kernel();
+  const auto* const d_kernel = hip::asKernel(kernel);
   if (d_kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+    HIP_RETURN(hipErrorInvalidHandle);
   }
 
   auto* currentDevice = hip::getCurrentDevice();
@@ -301,8 +293,8 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
   if (dev < 0 || static_cast<size_t>(dev) >= devices.size()) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-  const auto& device = *devices[dev]; 
-  
+  const auto& device = *devices[dev];
+
   auto* dev_kernel = d_kernel->getDeviceKernel(device);
   if (dev_kernel == nullptr) {
     HIP_RETURN(hipErrorMissingConfiguration);
@@ -360,11 +352,7 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  const auto* const d_function = hip::DeviceFunc::asFunction(kernel);
-  if (d_function == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-  amd::Kernel* d_kernel = d_function->kernel();
+  amd::Kernel* d_kernel = hip::asKernel(kernel);
   if (d_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }

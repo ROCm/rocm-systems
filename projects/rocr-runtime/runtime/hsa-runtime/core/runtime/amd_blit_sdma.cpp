@@ -85,6 +85,9 @@ template <bool useGCR>
 const uint32_t BlitSdma<useGCR>::broadcast_copy_command_size_ = sizeof(SDMA_PKT_COPY_LINEAR_BROADCAST);
 
 template <bool useGCR>
+const uint32_t BlitSdma<useGCR>::swap_copy_command_size_ = sizeof(SDMA_PKT_COPY_LINEAR_SWAP);
+
+template <bool useGCR>
 const uint32_t BlitSdma<useGCR>::fill_command_size_ = sizeof(SDMA_PKT_CONSTANT_FILL);
 
 template <bool useGCR>
@@ -128,7 +131,8 @@ BlitSdma<useGCR>::BlitSdma()
       queue_rptr_(nullptr),
       queue_doorbell_(nullptr),
       broadcast_supported_(false),
-      multicast_supported_(false) {
+      multicast_supported_(false),
+      swap_supported_(false) {
   std::memset(&queue_resource_, 0, sizeof(queue_resource_));
 }
 
@@ -188,10 +192,12 @@ hsa_status_t BlitSdma<useGCR>::Initialize(const core::Agent& agent, bool use_xgm
     broadcast_supported_ = true;
   } else if (major == 9) {
     broadcast_supported_ = (minor >= 4) || (minor == 0 && stepping >= 10);
+    swap_supported_ = (minor >= 4);
   }
 
   // Multicast not yet supported on any current hardware.
   multicast_supported_ = false;
+
 
   // Allocate queue buffer.
   queue_start_addr_ =
@@ -1000,6 +1006,33 @@ hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyBody(
 }
 
 template <bool useGCR>
+hsa_status_t BlitSdma<useGCR>::SubmitLinearSwapBody(
+    void* addr_a, void* addr_b, size_t size,
+    core::Signal& prologue_signal,
+    core::Signal& body_signal) {
+
+  if (!swap_supported_)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Addresses must be aligned for SWAP operation. Make this check here to
+  // avoid SDMA blit creation at top level.
+  constexpr size_t kAlign = SDMA_PKT_COPY_LINEAR_SWAP::kAlignment_;
+  if ((reinterpret_cast<uintptr_t>(addr_a) & (kAlign - 1)) != 0 ||
+      (reinterpret_cast<uintptr_t>(addr_b) & (kAlign - 1)) != 0)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  const size_t max_copy_size = SDMA_PKT_COPY_LINEAR_SWAP::kMaxSize_;
+  const uint32_t num_copy_command =
+      static_cast<uint32_t>((size + max_copy_size - 1) / max_copy_size);
+
+  std::vector<SDMA_PKT_COPY_LINEAR_SWAP> buff(num_copy_command);
+  BuildSwapCopyCommand(reinterpret_cast<char*>(&buff[0]), num_copy_command, addr_a, addr_b, size);
+
+  return SubmitBody(&buff[0], buff.size() * sizeof(SDMA_PKT_COPY_LINEAR_SWAP), size,
+                    prologue_signal, body_signal);
+}
+
+template <bool useGCR>
 hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyCommand(void* dst, const void* src, size_t size) {
   // Break the copy into multiple copy operation incase the copy size exceeds
   // the SDMA linear copy limit.
@@ -1051,6 +1084,13 @@ hsa_status_t BlitSdma<useGCR>::SubmitLinearCopyBroadcastCommand(
 
   if (dsts.empty() || size == 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  constexpr size_t kMask = SDMA_PKT_COPY_LINEAR_BROADCAST::kDstAlignMask_;
+  for (size_t i = 0; i + 1 < dsts.size(); i += 2) {
+    if ((reinterpret_cast<uintptr_t>(dsts[i]) & kMask) !=
+        (reinterpret_cast<uintptr_t>(dsts[i + 1]) & kMask))
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
   // Each broadcast packet copies from one src to two dsts.
@@ -1238,7 +1278,8 @@ void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint6
   while (true) {
     // Make sure that the address before ::curr_index is already released.
     // Otherwise the CP may read invalid packets.
-    if (atomic::Load(&cached_commit_index_, std::memory_order_acquire) == curr_index) {
+    uint64_t commit_index = atomic::Load(&cached_commit_index_, std::memory_order_acquire);
+    if (commit_index == curr_index) {
       if (sdma_wait_idle_) {
         // TODO: remove when sdma wpointer issue is resolved.
         // Wait until the SDMA engine finish processing all packets before
@@ -1270,6 +1311,7 @@ void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint6
     // burning CPU cycles.
     if (core::g_use_mwaitx) {
       timer::DoMwaitx(static_cast<int64_t*>(static_cast<void*>(&cached_commit_index_)),
+                      static_cast<int64_t>(commit_index),
                       10000, true);
     } else {
       os::YieldThread();
@@ -1390,6 +1432,9 @@ template <bool useGCR>
 void BlitSdma<useGCR>::BuildBroadcastCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                                                   void* dst1, void* dst2,
                                                   const void* src, size_t size) {
+  constexpr size_t kMask = SDMA_PKT_COPY_LINEAR_BROADCAST::kDstAlignMask_;
+  assert((reinterpret_cast<uintptr_t>(dst1) & kMask) ==
+         (reinterpret_cast<uintptr_t>(dst2) & kMask));
   size_t cur_size = 0;
   const size_t max_copy_size = max_single_linear_copy_size_ ? max_single_linear_copy_size_ :
                                                               kMaxSingleCopySize;
@@ -1425,6 +1470,45 @@ void BlitSdma<useGCR>::BuildBroadcastCopyCommand(char* cmd_addr, uint32_t num_co
     packet_addr->DST2_ADDR_HI_UNION.dst2_addr_63_32 = ptrhigh32(cur_dst2);
 
     cmd_addr += broadcast_copy_command_size_;
+    cur_size += copy_size;
+  }
+
+  assert(cur_size == size);
+}
+
+template <bool useGCR>
+void BlitSdma<useGCR>::BuildSwapCopyCommand(char* cmd_addr, uint32_t num_copy_command,
+                                            void* addr_a, void* addr_b, size_t size) {
+  constexpr size_t kAlign = SDMA_PKT_COPY_LINEAR_SWAP::kAlignment_;
+  assert((reinterpret_cast<uintptr_t>(addr_a) & (kAlign - 1)) == 0);
+  assert((reinterpret_cast<uintptr_t>(addr_b) & (kAlign - 1)) == 0);
+
+  size_t cur_size = 0;
+  const size_t max_copy_size = SDMA_PKT_COPY_LINEAR_SWAP::kMaxSize_;
+  for (uint32_t i = 0; i < num_copy_command; ++i) {
+    const uint32_t copy_size =
+        static_cast<uint32_t>(std::min((size - cur_size), max_copy_size));
+
+    void* cur_addr_a = static_cast<char*>(addr_a) + cur_size;
+    void* cur_addr_b = static_cast<char*>(addr_b) + cur_size;
+
+    SDMA_PKT_COPY_LINEAR_SWAP* packet_addr =
+        reinterpret_cast<SDMA_PKT_COPY_LINEAR_SWAP*>(cmd_addr);
+
+    memset(packet_addr, 0, sizeof(SDMA_PKT_COPY_LINEAR_SWAP));
+
+    packet_addr->HEADER_UNION.op = SDMA_OP_COPY;
+    packet_addr->HEADER_UNION.sub_op = SDMA_SUBOP_COPY_SWAP;
+
+    packet_addr->COUNT_UNION.count = copy_size - 1;
+
+    packet_addr->ADDR_A_LO_UNION.DW_3_DATA = ptrlow32(cur_addr_a);
+    packet_addr->ADDR_A_HI_UNION.addr_a_63_32 = ptrhigh32(cur_addr_a);
+
+    packet_addr->ADDR_B_LO_UNION.DW_5_DATA = ptrlow32(cur_addr_b);
+    packet_addr->ADDR_B_HI_UNION.addr_b_63_32 = ptrhigh32(cur_addr_b);
+
+    cmd_addr += swap_copy_command_size_;
     cur_size += copy_size;
   }
 

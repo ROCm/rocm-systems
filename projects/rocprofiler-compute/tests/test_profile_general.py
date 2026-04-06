@@ -459,7 +459,7 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
 
     # Check if all test dataframes have the same group keys as the baseline
     if not all(baseline_group_keys == keys for keys in tests_group_keys):
-        return False
+        return False, "Group keys do not match between baseline and test dataframes"
 
     # series prior to MI350 use CSN, MI350 uses CS{0,1,2,3}
     deterministic_counter_patterns = list(
@@ -502,9 +502,12 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
             ):
                 continue
 
-            return False
+            return (
+                False,
+                f"{counter_name} is not equal between baseline and test dataframes",
+            )
 
-    return True
+    return True, "All deterministic counters are equal"
 
 
 # --
@@ -663,41 +666,15 @@ def test_path_csv(
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     all_csvs_mi100 = sorted([
-        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_LEVEL_WAVES.csv",
         "sysinfo.csv",
     ])
     all_csvs_mi200 = sorted([
-        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
         "sysinfo.csv",
     ])
     all_csvs_mi300 = sorted([
-        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
         "sysinfo.csv",
     ])
     all_csvs_mi350 = sorted([
-        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
-        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
         "sysinfo.csv",
     ])
 
@@ -1198,7 +1175,7 @@ def test_roofline_workload_dir_not_set_error():
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     try:
-        from roofline import Roofline
+        from roofline.roofline_main import Roofline
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1394,7 +1371,7 @@ def test_roofline_plot_points_data_generation():
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     try:
-        from roofline import Roofline
+        from roofline.roofline_main import Roofline
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1419,7 +1396,7 @@ def test_roofline_plot_points_data_generation():
             "l2": [[0.01, 10], [10, 800], 80],
             "hbm": [[0.01, 10], [10, 500], 50],
             "valu": [[1, 100], [200, 200], 200],
-            "mfma": [[1, 100], [500, 500], 500],
+            "matrix_ops": [[1, 100], [500, 500], 500],
         }
 
         plot_points_data = []
@@ -1498,7 +1475,7 @@ def test_roofline_bound_status_calculation():
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
     try:
-        from roofline import Roofline
+        from roofline.roofline_main import Roofline
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1523,7 +1500,7 @@ def test_roofline_bound_status_calculation():
         ceiling_data = {
             "hbm": [[0.01, 10], [10, 1000], 100],
             "valu": [[1, 100], [200, 200], 200],
-            "mfma": [[1, 100], [500, 500], 500],
+            "matrix_ops": [[1, 100], [500, 500], 500],
         }
 
         status1 = roofline_instance._determine_kernel_bound_status(
@@ -2066,8 +2043,8 @@ def test_comprehensive_error_paths():
     from utils.parser import (
         build_comparable_columns,
         build_eval_string,
-        calc_builtin_var,
     )
+    from utils.utils_common import calc_builtin_var
 
     columns = build_comparable_columns("ms")
     expected = [
@@ -2080,10 +2057,7 @@ def test_comprehensive_error_paths():
     for expected_col in expected:
         assert expected_col in columns
 
-    class MockSysInfo:
-        total_l2_chan = 16
-
-    sys_info = MockSysInfo()
+    sys_info = {"total_l2_chan": 16}
     result = calc_builtin_var(42, sys_info)
     assert result == 42
 
@@ -2492,6 +2466,9 @@ def test_iteration_multiplexing_kernel_launch_params(
 
 
 @pytest.mark.iteration_multiplexing_2
+@pytest.mark.xfail(
+    reason="Multiple profiling workloads mapped to the same GPU corrupts the counters"
+)
 def test_iteration_multiplexing_deterministic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
@@ -3411,40 +3388,5 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     output = stdout + stderr
     assert "Multi-rank application detected" not in output
     assert "Application replay mode" not in output
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.multi_rank
-def test_multi_rank_warning_pc_sampling(
-    binary_handler_profile_rocprof_compute, monkeypatch
-):
-    """
-    Test that a warning is printed when running a multi-rank application
-    with PC sampling enabled.
-    """
-    # Set MPI environment variable to simulate multi-rank
-    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
-
-    workload_dir = test_utils.get_output_dir()
-
-    # Enable PC sampling
-    options = ["--block", "21"]
-
-    _, stdout, stderr = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        app_name="app_1",
-        capture_output=True,
-        check_success=False,
-    )
-
-    # Check that PC sampling warning is in output
-    output = stdout + stderr
-    assert "Multi-rank application detected with PC sampling enabled" in output
-    assert "--iteration-multiplexing" in output
-    assert "--block" not in output
-    assert "--set" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

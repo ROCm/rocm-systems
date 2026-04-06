@@ -71,7 +71,7 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
-            logger_.ErrorLog(MakeMsg(STR("Parser failed!")));
+            ErrorLog(logger_, STR("Parser failed!"));
             FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
@@ -110,7 +110,7 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 
         // Decode the picture
         if (SendPicForDecode() != PARSER_OK) {
-            logger_.ErrorLog(MakeMsg(STR("Failed to decode!")));
+            ErrorLog(logger_, STR("Failed to decode!"));
             FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
@@ -168,7 +168,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     do {
         ret = GetNalUnit();
         if (ret == PARSER_NOT_FOUND) {
-            logger_.ErrorLog(MakeMsg(STR("Error: no start code found in the frame data.")));
+            ErrorLog(logger_, STR("Error: no start code found in the frame data."));
             return ret;
         }
 
@@ -183,7 +183,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
                     rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
                     if ((ret2 = ParseSps(rbsp_buf_, rbsp_size_)) != PARSER_OK) {
-                        logger_.ErrorLog(MakeMsg("Error occurred in SPS parsing. This SPS NAL unit is skipped."));
+                        ErrorLog(logger_, "Error occurred in SPS parsing. This SPS NAL unit is skipped.");
                     }
                     break;
                 }
@@ -192,7 +192,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
                     rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
                     if ((ret2 = ParsePps(rbsp_buf_, rbsp_size_)) != PARSER_OK) {
-                        logger_.ErrorLog(MakeMsg("Error occurred in PPS parsing. This PPS NAL unit is skipped."));
+                        ErrorLog(logger_, "Error occurred in PPS parsing. This PPS NAL unit is skipped.");
                     }
                     break;
                 }
@@ -214,7 +214,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
                     AvcSliceHeader *p_slice_header = &slice_info_list_[num_slices_].slice_header;
                     if ((ret2 = ParseSliceHeader(rbsp_buf_, rbsp_size_, p_slice_header)) != PARSER_OK) {
-                        logger_.ErrorLog(MakeMsg("Error occurred in slice header parsing. This slice NAL unit is skipped."));
+                        ErrorLog(logger_, "Error occurred in slice header parsing. This slice NAL unit is skipped.");
                         break;      // ignore and continue to next nal_unit
                     }
                     slice_info_list_[num_slices_].slice_data_offset = curr_start_code_offset_;
@@ -262,7 +262,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 
                     // Reference picture lists construction (8.2.4)
                     if (SetupReflist(&slice_info_list_[num_slices_]) != PARSER_OK) {
-                        logger_.ErrorLog(MakeMsg("Error occurred in SetupReflist(). Ignore and continue."));
+                        ErrorLog(logger_, "Error occurred in SetupReflist(). Ignore and continue.");
                     }
 
                     if (num_slices_ == 0) {
@@ -364,7 +364,7 @@ ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
             break;
         }
         default:
-            logger_.ErrorLog(MakeMsg(STR("Error: Sequence Callback function - Chroma Format is not supported")));
+            ErrorLog(logger_, STR("Error: Sequence Callback function - Chroma Format is not supported"));
             return PARSER_FAIL;
     }
     int chroma_array_type = p_sps->separate_colour_plane_flag ? 0 : p_sps->chroma_format_idc;
@@ -432,7 +432,7 @@ ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
 
     // callback function with RocdecVideoFormat params filled out
     if (pfn_sequence_cb_(parser_params_.user_data, &video_format_params_) == 0) {
-        logger_.ErrorLog(MakeMsg("Sequence callback function failed."));
+        ErrorLog(logger_, "Sequence callback function failed.");
         FunctionExitLog(logger_);
         return PARSER_FAIL;
     } else {
@@ -740,7 +740,7 @@ ParserResult AvcVideoParser::SendPicForDecode() {
 #endif // DBGINFO
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
-        logger_.ErrorLog(MakeMsg("Decode error occurred."));
+        ErrorLog(logger_, "Decode error occurred.");
         FunctionExitLog(logger_);
         return PARSER_FAIL;
     } else {
@@ -1065,7 +1065,7 @@ ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_b
     uint32_t seq_parameter_set_id = Parser::ExpGolomb::ReadUe(p_stream, offset);
     CHECK_ALLOWED_RANGE("seq_parameter_set_id", seq_parameter_set_id, 0, 31);
     if (sps_list_[seq_parameter_set_id].is_received == 0) {
-        logger_.ErrorLog(MakeMsg("Empty SPS is referred."));
+        ErrorLog(logger_, "Empty SPS is referred.");
         return PARSER_WRONG_STATE;
     }
     p_sps = &sps_list_[seq_parameter_set_id];
@@ -1080,7 +1080,7 @@ ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_b
     p_pps->num_slice_groups_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
     if (p_pps->num_slice_groups_minus1 > 0) {
         // Note: VCN supports High Profile only (num_slice_groups_minus1 = 0)
-        logger_.ErrorLog(MakeMsg("Multiple slice groups are not supported"));
+        ErrorLog(logger_, "Multiple slice groups are not supported");
         return PARSER_NOT_SUPPORTED;
     }
 
@@ -1255,7 +1255,7 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
     int32_t active_pps_id = Parser::ExpGolomb::ReadUe(p_stream, offset);
     CHECK_ALLOWED_RANGE("pic_parameter_set_id", active_pps_id, 0, 255);
     if (pps_list_[active_pps_id].is_received == 0) {
-        logger_.ErrorLog(MakeMsg("Empty PPS is referred."));
+        ErrorLog(logger_, "Empty PPS is referred.");
         return PARSER_WRONG_STATE;
     }
     active_pps_id_ = active_pps_id;
@@ -1264,14 +1264,14 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
 
     int32_t active_sps_id = p_pps->seq_parameter_set_id;
     if (sps_list_[active_sps_id].is_received == 0) {
-        logger_.ErrorLog(MakeMsg("Empty SPS is referred."));
+        ErrorLog(logger_, "Empty SPS is referred.");
         return PARSER_WRONG_STATE;
     }
     if (active_sps_id_ != p_pps->seq_parameter_set_id) {
         active_sps_id_ = p_pps->seq_parameter_set_id;
         p_sps = &sps_list_[active_sps_id_];
         if ( p_sps->is_received == 0) {
-            logger_.ErrorLog(MakeMsg("Empty SPS is referred."));
+            ErrorLog(logger_, "Empty SPS is referred.");
             return PARSER_WRONG_STATE;
         }
         new_seq_activated_ = true;  // Note: clear this flag after the actions are taken.
@@ -1954,7 +1954,7 @@ ParserResult AvcVideoParser::DecodeFrameNumGaps() {
     if (slice_nal_unit_header_.nal_unit_type == kAvcNalTypeSlice_IDR) {
         prev_ref_frame_num_ = 0;
     } else if ((p_slice_header->frame_num != prev_ref_frame_num_) && (p_slice_header->frame_num != ((prev_ref_frame_num_ + 1) % max_frame_num))) {
-        logger_.ErrorLog(MakeMsg("Support for gaps in frame_num is currently disabled."));
+        ErrorLog(logger_, "Support for gaps in frame_num is currently disabled.");
         return PARSER_NOT_SUPPORTED;
         #if 0
         int unused_short_term_frame_num = (prev_ref_frame_num_ + 1) % max_frame_num;
@@ -2093,7 +2093,7 @@ ParserResult AvcVideoParser::DecodeFrameNumGaps() {
                 if (min_index < dpb_buffer_.dpb_size) {
                     dpb_buffer_.frame_buffer_list[min_index].is_reference = kUnusedForReference;
                 } else {
-                    logger_.ErrorLog(MakeMsg("Could not find any short term ref picture."));
+                    ErrorLog(logger_, "Could not find any short term ref picture.");
                     return PARSER_FAIL;
                 }
                 dpb_buffer_.num_short_term--;
@@ -2118,7 +2118,7 @@ ParserResult AvcVideoParser::DecodeFrameNumGaps() {
                 dpb_buffer_.dpb_fullness++;
                 dpb_buffer_.num_short_term++;
             } else {
-                logger_.ErrorLog(MakeMsg("Could not find any free frame buffer in DPB."));
+                ErrorLog(logger_, "Could not find any free frame buffer in DPB.");
                 return PARSER_FAIL;
             }
 
@@ -2659,7 +2659,7 @@ ParserResult AvcVideoParser::ModifiyRefList(AvcPicture *ref_pic_list_x, AvcListM
                 }
             }
             if (i == num_short_term_pics) {
-                logger_.ErrorLog(MakeMsg("Could not find a short-term reference with the modified pic num."));
+                ErrorLog(logger_, "Could not find a short-term reference with the modified pic num.");
                 return PARSER_OUT_OF_RANGE;
             }
             ref_pic_list_mod[ref_idx_lx] = ref_pic_list_x[i];
@@ -2686,7 +2686,7 @@ ParserResult AvcVideoParser::ModifiyRefList(AvcPicture *ref_pic_list_x, AvcListM
                 }
             }
             if (i == num_short_term_pics + num_long_term_pics) {
-                logger_.ErrorLog(MakeMsg("Could not find long-term reference with the modified long term pic num."));
+                ErrorLog(logger_, "Could not find long-term reference with the modified long term pic num.");
                 return PARSER_OUT_OF_RANGE;
             }
             ref_pic_list_mod[ref_idx_lx] = ref_pic_list_x[i];
@@ -2733,7 +2733,7 @@ ParserResult AvcVideoParser::FindFreeInDecBufPool() {
             }
         }
         if (dec_buf_index == dec_buf_pool_size_) {
-            logger_.ErrorLog(MakeMsg("Could not find a free buffer in decode buffer pool."));
+            ErrorLog(logger_, "Could not find a free buffer in decode buffer pool.");
             return PARSER_NOT_FOUND;
         }
 
@@ -2772,7 +2772,7 @@ ParserResult AvcVideoParser::FindFreeBufInDpb() {
                 curr_pic_.use_status = kBottomFieldUsedForDecode;
             }
         } else {
-            logger_.ErrorLog(MakeMsg("Could not find any free frame buffer in DPB."));
+            ErrorLog(logger_, "Could not find any free frame buffer in DPB.");
             return PARSER_FAIL;
         }
 
@@ -3079,7 +3079,7 @@ ParserResult AvcVideoParser::MarkDecodedRefPics() {
                     break;
 
                     default: {
-                        logger_.ErrorLog(MakeMsg("Invalid memory management control operation!"));
+                        ErrorLog(logger_, "Invalid memory management control operation!");
                         return PARSER_INVALID_ARG;
                     }
                 }
@@ -3111,7 +3111,7 @@ ParserResult AvcVideoParser::MarkDecodedRefPics() {
                     dpb_buffer_.field_pic_list[min_index * 2].is_reference = kUnusedForReference;
                     dpb_buffer_.field_pic_list[min_index * 2 + 1].is_reference = kUnusedForReference;
                 } else {
-                    logger_.ErrorLog(MakeMsg("Could not find any short term ref picture."));
+                    ErrorLog(logger_, "Could not find any short term ref picture.");
                     return PARSER_FAIL;
                 }
                 dpb_buffer_.num_short_term--;
@@ -3146,7 +3146,7 @@ ParserResult AvcVideoParser::BumpPicFromDpb() {
         }
     }
     if (min_poc_pic_idx_no_ref >= dpb_buffer_.dpb_size) {
-        logger_.ErrorLog(MakeMsg("Error! Could not find a non-reference buffer to bump."));
+        ErrorLog(logger_, "Error! Could not find a non-reference buffer to bump.");
         return PARSER_OUT_OF_RANGE;
     }
 
@@ -3158,7 +3158,7 @@ ParserResult AvcVideoParser::BumpPicFromDpb() {
             // Insert into output/display picture list
             if (pfn_display_picture_cb_) {
                 if (num_output_pics_ >= dec_buf_pool_size_) {
-                    logger_.ErrorLog(MakeMsg("Error! Decode buffer pool overflow!"));
+                    ErrorLog(logger_, "Error! Decode buffer pool overflow!");
                     return PARSER_OUT_OF_RANGE;
                 } else {
                     output_pic_list_[num_output_pics_] = dpb_buffer_.frame_buffer_list[min_poc_pic_idx_ref].dec_buf_idx;
@@ -3186,7 +3186,7 @@ ParserResult AvcVideoParser::BumpPicFromDpb() {
         // Insert into output/display picture list
         if (pfn_display_picture_cb_) {
             if (num_output_pics_ >= dec_buf_pool_size_) {
-                logger_.ErrorLog(MakeMsg("Error! Decode buffer pool overflow!"));
+                ErrorLog(logger_, "Error! Decode buffer pool overflow!");
                 return PARSER_OUT_OF_RANGE;
             } else {
                 output_pic_list_[num_output_pics_] = dpb_buffer_.frame_buffer_list[min_poc_pic_idx_no_ref].dec_buf_idx;
@@ -3269,7 +3269,7 @@ ParserResult AvcVideoParser::InsertCurrPicIntoDpb() {
         decode_buffer_pool_[curr_pic_.dec_buf_idx].pic_order_cnt = curr_pic_.pic_order_cnt;
         decode_buffer_pool_[curr_pic_.dec_buf_idx].pts = curr_pts_;
     } else {
-        logger_.ErrorLog(MakeMsg("Could not find the reserved frame buffer for the current picture in DPB."));
+        ErrorLog(logger_, "Could not find the reserved frame buffer for the current picture in DPB.");
         return PARSER_FAIL;
     }
 

@@ -1,5 +1,5 @@
 include(GoogleTest)
-find_package(GTest REQUIRED)
+find_package(GTest QUIET)
 include_directories(${GTEST_INCLUDE_DIRS})
 
 add_executable(utility_tests)
@@ -13,18 +13,13 @@ target_include_directories(utility_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${L
 target_link_libraries(
     utility_tests
     PRIVATE
-            hsa-runtime64::hsa-runtime64
+            $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
+            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>
             GTest::gtest
             GTest::gtest_main
-            dl)
+            $<$<NOT:$<BOOL:${WIN32}>>:dl>)
 
-
-gtest_add_tests(
-    TARGET utility_tests
-    SOURCES ${AQLPROFILE_UTILITY_SOURCES}
-    TEST_LIST utility_tests_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${utility_tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-                                 "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+gtest_discover_tests(
+    utility_tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION "${AQLPROFILE_DEFAULT_FAIL_REGEX}")

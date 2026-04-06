@@ -23,13 +23,17 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.roofline_calc import validate_roofline_csv
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
     merge_counters_spatial_multiplex,
 )
-from utils.utils_common import get_uuid
+from utils.utils_common import (
+    get_uuid,
+    is_only_pc_sampling,
+    load_panel_configs,
+    validate_roofline_csv,
+)
 
 # the build-in config to list kernel names purpose only
 TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
@@ -82,7 +86,10 @@ def detect_missing_counters(
     if join_type == "grid":
         group_labels.append("Grid_Size")
 
-    num_files = len(list(workload_dir.glob("perfmon/*.txt")))
+    # Old workloads have *.txt, new workloads have pmc_perf_*.yaml
+    num_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
+        list(workload_dir.glob("perfmon/pmc_perf_*.yaml"))
+    )
     kernels_with_missing_counters = []
     for _, groups in df.groupby(group_labels):
         if groups["Dispatch_ID"].nunique() < num_files:
@@ -119,6 +126,11 @@ class OmniAnalyze_Base:
 
     def get_profiling_config(self) -> dict[str, Any]:
         return self._profiling_config
+
+    def pc_sampling_only(self) -> bool:
+        """True when profiling collected only PC sampling (block 21)."""
+        config = getattr(self, "_profiling_config", {})
+        return is_only_pc_sampling(config.get("filter_blocks", []))
 
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
@@ -166,7 +178,7 @@ class OmniAnalyze_Base:
                         / arch
                     )
                 )
-            ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
+            ac.panel_configs = load_panel_configs(arch_panel_config)
 
         # TODO: filter_metrics should/might be one per arch
         parser.build_dfs(
@@ -330,6 +342,7 @@ class OmniAnalyze_Base:
                 args.list_nodes,
                 args.spatial_multiplexing,
                 profiling_config.get("iteration_multiplexing"),
+                self.pc_sampling_only(),
             ]):
                 is_workload_empty(dir_info[0])
 
@@ -730,10 +743,11 @@ class OmniAnalyze_Base:
             for path_info, filter_value in zip(args.path, filter_list):
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
-        # Join pmc_perf_*.csv or results_*.csv files if needed
-        for path_info in args.path:
-            workload_dir = Path(path_info[0])
-            self.join_workload_csvs(workload_dir)
+        if not self.pc_sampling_only():
+            # Join pmc_perf_*.csv or results_*.csv files if needed
+            for path_info in args.path:
+                workload_dir = Path(path_info[0])
+                self.join_workload_csvs(workload_dir)
 
     @abstractmethod
     def run_analysis(self) -> None:

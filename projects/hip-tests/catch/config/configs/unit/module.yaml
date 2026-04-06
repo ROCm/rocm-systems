@@ -43,6 +43,8 @@ module:
     tags: [launch]
   Unit_hipExtLaunchKernelGGL_Functional:
     <<: *level_2
+    # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23 ===
+    disabled: [amd_windows, amd_wsl]
     tags: [launch]
   Unit_hipModuleLoadDataEx_Positive_Basic:
     <<: *level_2
@@ -53,11 +55,6 @@ module:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-    tags: [load]
-  Unit_hipModuleLoadDataEx_Negative_Image_Is_An_Empty_String:
-    <<: *level_2
-    # Note: Following two tests disabled due to defect - EXSWHTEC-153
-    disabled: [amd_windows]
     tags: [load]
   Unit_hipGetFuncBySymbol_PositiveTest:
     <<: *level_2
@@ -145,11 +142,6 @@ module:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-    tags: [load]
-  Unit_hipModuleLoadData_Negative_Image_Is_An_Empty_String:
-    <<: *level_2
-    # Note: Following two tests disabled due to defect - EXSWHTEC-153
-    disabled: [amd_windows]
     tags: [load]
   Unit_hipModuleLoadData_Functional:
     <<: *level_2
@@ -310,8 +302,3 @@ module:
   Unit_hipFuncGetAttributes_basic:
     <<: *level_2
     tags: [function]
-  Unit_hipModuleGetLoadingMode_DefaultModeCheck: *level_2
-  Unit_hipModuleGetLoadingMode_EagerModeCheck: *level_2
-  Unit_hipModuleGetLoadingMode_EagerModeKernel: *level_2
-  Unit_hipModuleGetLoadingMode_LazyModeKernel: *level_2
-  Unit_hipModuleGetLoadingMode_MultiThread: *level_2

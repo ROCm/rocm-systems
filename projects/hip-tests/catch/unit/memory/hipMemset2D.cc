@@ -31,7 +31,6 @@ static constexpr std::initializer_list<tupletype> tableItems{
  * Basic Functionality of hipMemset2D
  */
 HIP_TEST_CASE(Unit_hipMemset2D_BasicFunctional) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;
@@ -70,7 +69,6 @@ HIP_TEST_CASE(Unit_hipMemset2D_BasicFunctional) {
  * Basic Functionality of hipMemset2DAsync
  */
 HIP_TEST_CASE(Unit_hipMemset2DAsync_BasicFunctional) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x26;
   constexpr size_t numH = 256;
@@ -113,7 +111,6 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_BasicFunctional) {
  * Memset partial buffer with unique Width and Height
  */
 HIP_TEST_CASE(Unit_hipMemset2D_UniqueWidthHeight) {
-  CHECK_IMAGE_SUPPORT
 
   int width2D, height2D;
   int memsetWidth, memsetHeight;
@@ -227,7 +224,6 @@ HIP_TEST_CASE(Unit_hipMemset2DAsync_capturehipMemset2DAsync) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipMemset2D_Capture) {
-  CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;
