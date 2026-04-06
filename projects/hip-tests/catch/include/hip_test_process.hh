@@ -21,6 +21,7 @@
 #include <future>
 #include <vector>
 #include <sstream>
+#include <algorithm>
 #include <map>
 
 #if HT_WIN
@@ -171,6 +172,16 @@ class SpawnProc {
     std::vector<char> envBlock;
     LPVOID lpEnvironment = NULL;
     if (!envVars_.empty()) {
+      auto icaseFind = [&](const std::string& key) {
+        std::string lowerKey = key;
+        std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(), ::tolower);
+        for (const auto& kv : envVars_) {
+          std::string lowerMapKey = kv.first;
+          std::transform(lowerMapKey.begin(), lowerMapKey.end(), lowerMapKey.begin(), ::tolower);
+          if (lowerMapKey == lowerKey) return true;
+        }
+        return false;
+      };
       LPCH currentEnv = GetEnvironmentStrings();
       if (currentEnv) {
         LPSTR var = currentEnv;
@@ -178,7 +189,7 @@ class SpawnProc {
           std::string entry(var);
           auto eq = entry.find('=', 1);
           std::string key = (eq != std::string::npos) ? entry.substr(0, eq) : entry;
-          if (envVars_.find(key) == envVars_.end()) {
+          if (!icaseFind(key)) {
             envBlock.insert(envBlock.end(), entry.begin(), entry.end());
             envBlock.push_back('\0');
           }
