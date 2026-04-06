@@ -16,7 +16,7 @@ namespace rdna4 {
 class ImageMsaaLoadVsample : public Vsample {
 public:
   ImageMsaaLoadVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
 };
@@ -24,7 +24,7 @@ public:
 class ImageSampleVsample : public Vsample {
 public:
   ImageSampleVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -33,7 +33,7 @@ public:
 class ImageSampleDVsample : public Vsample {
 public:
   ImageSampleDVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -42,7 +42,7 @@ public:
 class ImageSampleLVsample : public Vsample {
 public:
   ImageSampleLVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -51,7 +51,7 @@ public:
 class ImageSampleBVsample : public Vsample {
 public:
   ImageSampleBVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -60,7 +60,7 @@ public:
 class ImageSampleLzVsample : public Vsample {
 public:
   ImageSampleLzVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -69,7 +69,7 @@ public:
 class ImageSampleCVsample : public Vsample {
 public:
   ImageSampleCVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -78,7 +78,7 @@ public:
 class ImageSampleCDVsample : public Vsample {
 public:
   ImageSampleCDVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -87,7 +87,7 @@ public:
 class ImageSampleCLVsample : public Vsample {
 public:
   ImageSampleCLVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -96,7 +96,7 @@ public:
 class ImageSampleCBVsample : public Vsample {
 public:
   ImageSampleCBVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -105,7 +105,7 @@ public:
 class ImageSampleCLzVsample : public Vsample {
 public:
   ImageSampleCLzVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -114,7 +114,7 @@ public:
 class ImageSampleOVsample : public Vsample {
 public:
   ImageSampleOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -123,7 +123,7 @@ public:
 class ImageSampleDOVsample : public Vsample {
 public:
   ImageSampleDOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -132,7 +132,7 @@ public:
 class ImageSampleLOVsample : public Vsample {
 public:
   ImageSampleLOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -141,7 +141,7 @@ public:
 class ImageSampleBOVsample : public Vsample {
 public:
   ImageSampleBOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -150,7 +150,7 @@ public:
 class ImageSampleLzOVsample : public Vsample {
 public:
   ImageSampleLzOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -159,7 +159,7 @@ public:
 class ImageSampleCOVsample : public Vsample {
 public:
   ImageSampleCOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -168,7 +168,7 @@ public:
 class ImageSampleCDOVsample : public Vsample {
 public:
   ImageSampleCDOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -177,7 +177,7 @@ public:
 class ImageSampleCLOVsample : public Vsample {
 public:
   ImageSampleCLOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -186,7 +186,7 @@ public:
 class ImageSampleCBOVsample : public Vsample {
 public:
   ImageSampleCBOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -195,7 +195,7 @@ public:
 class ImageSampleCLzOVsample : public Vsample {
 public:
   ImageSampleCLzOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -204,7 +204,7 @@ public:
 class ImageGather4Vsample : public Vsample {
 public:
   ImageGather4Vsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -213,7 +213,7 @@ public:
 class ImageGather4LVsample : public Vsample {
 public:
   ImageGather4LVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -222,7 +222,7 @@ public:
 class ImageGather4BVsample : public Vsample {
 public:
   ImageGather4BVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -231,7 +231,7 @@ public:
 class ImageGather4LzVsample : public Vsample {
 public:
   ImageGather4LzVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -240,7 +240,7 @@ public:
 class ImageGather4CVsample : public Vsample {
 public:
   ImageGather4CVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -249,7 +249,7 @@ public:
 class ImageGather4CLzVsample : public Vsample {
 public:
   ImageGather4CLzVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -258,7 +258,7 @@ public:
 class ImageGather4OVsample : public Vsample {
 public:
   ImageGather4OVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -267,7 +267,7 @@ public:
 class ImageGather4LzOVsample : public Vsample {
 public:
   ImageGather4LzOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -276,7 +276,7 @@ public:
 class ImageGather4CLzOVsample : public Vsample {
 public:
   ImageGather4CLzOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -285,7 +285,7 @@ public:
 class ImageGetLodVsample : public Vsample {
 public:
   ImageGetLodVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -294,7 +294,7 @@ public:
 class ImageSampleDG16Vsample : public Vsample {
 public:
   ImageSampleDG16Vsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -303,7 +303,7 @@ public:
 class ImageSampleCDG16Vsample : public Vsample {
 public:
   ImageSampleCDG16Vsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -312,7 +312,7 @@ public:
 class ImageSampleDOG16Vsample : public Vsample {
 public:
   ImageSampleDOG16Vsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -321,7 +321,7 @@ public:
 class ImageSampleCDOG16Vsample : public Vsample {
 public:
   ImageSampleCDOG16Vsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -330,7 +330,7 @@ public:
 class ImageSampleClVsample : public Vsample {
 public:
   ImageSampleClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -339,7 +339,7 @@ public:
 class ImageSampleDClVsample : public Vsample {
 public:
   ImageSampleDClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -348,7 +348,7 @@ public:
 class ImageSampleBClVsample : public Vsample {
 public:
   ImageSampleBClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -357,7 +357,7 @@ public:
 class ImageSampleCClVsample : public Vsample {
 public:
   ImageSampleCClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -366,7 +366,7 @@ public:
 class ImageSampleCDClVsample : public Vsample {
 public:
   ImageSampleCDClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -375,7 +375,7 @@ public:
 class ImageSampleCBClVsample : public Vsample {
 public:
   ImageSampleCBClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -384,7 +384,7 @@ public:
 class ImageSampleClOVsample : public Vsample {
 public:
   ImageSampleClOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -393,7 +393,7 @@ public:
 class ImageSampleDClOVsample : public Vsample {
 public:
   ImageSampleDClOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -402,7 +402,7 @@ public:
 class ImageSampleBClOVsample : public Vsample {
 public:
   ImageSampleBClOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -411,7 +411,7 @@ public:
 class ImageSampleCClOVsample : public Vsample {
 public:
   ImageSampleCClOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -420,7 +420,7 @@ public:
 class ImageSampleCDClOVsample : public Vsample {
 public:
   ImageSampleCDClOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -429,7 +429,7 @@ public:
 class ImageSampleCBClOVsample : public Vsample {
 public:
   ImageSampleCBClOVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -438,7 +438,7 @@ public:
 class ImageSampleCDClG16Vsample : public Vsample {
 public:
   ImageSampleCDClG16Vsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -447,7 +447,7 @@ public:
 class ImageSampleDClOG16Vsample : public Vsample {
 public:
   ImageSampleDClOG16Vsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -456,7 +456,7 @@ public:
 class ImageSampleCDClOG16Vsample : public Vsample {
 public:
   ImageSampleCDClOG16Vsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -465,7 +465,7 @@ public:
 class ImageSampleDClG16Vsample : public Vsample {
 public:
   ImageSampleDClG16Vsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -474,7 +474,7 @@ public:
 class ImageGather4ClVsample : public Vsample {
 public:
   ImageGather4ClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -483,7 +483,7 @@ public:
 class ImageGather4BClVsample : public Vsample {
 public:
   ImageGather4BClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -492,7 +492,7 @@ public:
 class ImageGather4CClVsample : public Vsample {
 public:
   ImageGather4CClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -501,7 +501,7 @@ public:
 class ImageGather4CLVsample : public Vsample {
 public:
   ImageGather4CLVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -510,7 +510,7 @@ public:
 class ImageGather4CBVsample : public Vsample {
 public:
   ImageGather4CBVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -519,7 +519,7 @@ public:
 class ImageGather4CBClVsample : public Vsample {
 public:
   ImageGather4CBClVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;
@@ -528,7 +528,7 @@ public:
 class ImageGather4hVsample : public Vsample {
 public:
   ImageGather4hVsample(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand rsrc;
   Operand samp;

@@ -14,7 +14,7 @@ namespace detail {
 class LrWInst : public RType {
 public:
   LrWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1;
@@ -23,7 +23,7 @@ private:
 class ScWInst : public RType {
 public:
   ScWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -32,7 +32,7 @@ private:
 class AmoswapWInst : public RType {
 public:
   AmoswapWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -41,7 +41,7 @@ private:
 class AmoaddWInst : public RType {
 public:
   AmoaddWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -50,7 +50,7 @@ private:
 class AmoxorWInst : public RType {
 public:
   AmoxorWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -59,7 +59,7 @@ private:
 class AmoandWInst : public RType {
 public:
   AmoandWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -68,7 +68,7 @@ private:
 class AmoorWInst : public RType {
 public:
   AmoorWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -77,7 +77,7 @@ private:
 class AmominWInst : public RType {
 public:
   AmominWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -86,7 +86,7 @@ private:
 class AmomaxWInst : public RType {
 public:
   AmomaxWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -95,7 +95,7 @@ private:
 class AmominuWInst : public RType {
 public:
   AmominuWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -104,7 +104,7 @@ private:
 class AmomaxuWInst : public RType {
 public:
   AmomaxuWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -113,7 +113,7 @@ private:
 class LrDInst : public RType {
 public:
   LrDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1;
@@ -122,7 +122,7 @@ private:
 class ScDInst : public RType {
 public:
   ScDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -131,7 +131,7 @@ private:
 class AmoswapDInst : public RType {
 public:
   AmoswapDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -140,7 +140,7 @@ private:
 class AmoaddDInst : public RType {
 public:
   AmoaddDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -149,7 +149,7 @@ private:
 class AmoxorDInst : public RType {
 public:
   AmoxorDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -158,7 +158,7 @@ private:
 class AmoandDInst : public RType {
 public:
   AmoandDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -167,7 +167,7 @@ private:
 class AmoorDInst : public RType {
 public:
   AmoorDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -176,7 +176,7 @@ private:
 class AmominDInst : public RType {
 public:
   AmominDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -185,7 +185,7 @@ private:
 class AmomaxDInst : public RType {
 public:
   AmomaxDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -194,7 +194,7 @@ private:
 class AmominuDInst : public RType {
 public:
   AmominuDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;
@@ -203,7 +203,7 @@ private:
 class AmomaxuDInst : public RType {
 public:
   AmomaxuDInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd, rs1, rs2;

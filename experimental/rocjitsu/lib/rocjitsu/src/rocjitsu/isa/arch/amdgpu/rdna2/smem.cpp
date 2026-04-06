@@ -28,7 +28,8 @@ Operand make_smem_offset(const Smem::OpEncoding *enc) {
 } // namespace
 
 SLoadDwordSmem::SLoadDwordSmem(const MachineInst *inst)
-    : Smem("s_load_dword", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_load_dword", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SLoadDwordSmem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -38,7 +39,7 @@ SLoadDwordSmem::SLoadDwordSmem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SLoadDwordSmem::execute(amdgpu::Wavefront &wf) {
+void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 1;
@@ -49,7 +50,8 @@ void SLoadDwordSmem::execute(amdgpu::Wavefront &wf) {
 }
 
 SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
-    : Smem("s_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SLoadDwordx2Smem>()),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -59,7 +61,7 @@ SLoadDwordx2Smem::SLoadDwordx2Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SLoadDwordx2Smem::execute(amdgpu::Wavefront &wf) {
+void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 2;
@@ -70,7 +72,8 @@ void SLoadDwordx2Smem::execute(amdgpu::Wavefront &wf) {
 }
 
 SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
-    : Smem("s_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SLoadDwordx4Smem>()),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -80,7 +83,7 @@ SLoadDwordx4Smem::SLoadDwordx4Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SLoadDwordx4Smem::execute(amdgpu::Wavefront &wf) {
+void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 4;
@@ -91,7 +94,8 @@ void SLoadDwordx4Smem::execute(amdgpu::Wavefront &wf) {
 }
 
 SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
-    : Smem("s_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SLoadDwordx8Smem>()),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -101,7 +105,7 @@ SLoadDwordx8Smem::SLoadDwordx8Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SLoadDwordx8Smem::execute(amdgpu::Wavefront &wf) {
+void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 8;
@@ -112,7 +116,8 @@ void SLoadDwordx8Smem::execute(amdgpu::Wavefront &wf) {
 }
 
 SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
-    : Smem("s_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SLoadDwordx16Smem>()),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -122,7 +127,7 @@ SLoadDwordx16Smem::SLoadDwordx16Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SLoadDwordx16Smem::execute(amdgpu::Wavefront &wf) {
+void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 16;
@@ -133,7 +138,8 @@ void SLoadDwordx16Smem::execute(amdgpu::Wavefront &wf) {
 }
 
 SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
-    : Smem("s_buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SBufferLoadDwordSmem>()),
       sdata(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -143,7 +149,7 @@ SBufferLoadDwordSmem::SBufferLoadDwordSmem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordSmem::execute(amdgpu::Wavefront &wf) {
+void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 1;
@@ -154,7 +160,8 @@ void SBufferLoadDwordSmem::execute(amdgpu::Wavefront &wf) {
 }
 
 SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
-    : Smem("s_buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SBufferLoadDwordx2Smem>()),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -164,7 +171,7 @@ SBufferLoadDwordx2Smem::SBufferLoadDwordx2Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordx2Smem::execute(amdgpu::Wavefront &wf) {
+void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 2;
@@ -175,7 +182,8 @@ void SBufferLoadDwordx2Smem::execute(amdgpu::Wavefront &wf) {
 }
 
 SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
-    : Smem("s_buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SBufferLoadDwordx4Smem>()),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -185,7 +193,7 @@ SBufferLoadDwordx4Smem::SBufferLoadDwordx4Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordx4Smem::execute(amdgpu::Wavefront &wf) {
+void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 4;
@@ -196,7 +204,8 @@ void SBufferLoadDwordx4Smem::execute(amdgpu::Wavefront &wf) {
 }
 
 SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
-    : Smem("s_buffer_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_buffer_load_dwordx8", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SBufferLoadDwordx8Smem>()),
       sdata(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -206,7 +215,7 @@ SBufferLoadDwordx8Smem::SBufferLoadDwordx8Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordx8Smem::execute(amdgpu::Wavefront &wf) {
+void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 8;
@@ -217,7 +226,8 @@ void SBufferLoadDwordx8Smem::execute(amdgpu::Wavefront &wf) {
 }
 
 SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
-    : Smem("s_buffer_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_buffer_load_dwordx16", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SBufferLoadDwordx16Smem>()),
       sdata(512, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->sbase),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
@@ -227,7 +237,7 @@ SBufferLoadDwordx16Smem::SBufferLoadDwordx16Smem(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void SBufferLoadDwordx16Smem::execute(amdgpu::Wavefront &wf) {
+void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::ScalarMemState>();
   d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;
   d->num_dwords = 16;
@@ -238,30 +248,32 @@ void SBufferLoadDwordx16Smem::execute(amdgpu::Wavefront &wf) {
 }
 
 SGl1InvSmem::SGl1InvSmem(const MachineInst *inst)
-    : Smem("s_gl1_inv", reinterpret_cast<const OpEncoding *>(inst)) {}
+    : Smem("s_gl1_inv", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SGl1InvSmem>()) {}
 
-void SGl1InvSmem::execute(amdgpu::Wavefront &wf) { wf.cu().l1_vector().invalidate_all(); }
+void SGl1InvSmem::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_vector().invalidate_all(); }
 
 SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
-    : Smem("s_dcache_inv", reinterpret_cast<const OpEncoding *>(inst)) {}
+    : Smem("s_dcache_inv", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SDcacheInvSmem>()) {}
 
-void SDcacheInvSmem::execute(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
+void SDcacheInvSmem::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
 SMemtimeSmem::SMemtimeSmem(const MachineInst *inst)
-    : Smem("s_memtime", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_memtime", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMemtimeSmem>()),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata) {
   dst_operands_.emplace_back(&sdata);
 }
 
-void SMemtimeSmem::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void SMemtimeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SMemrealtimeSmem::SMemrealtimeSmem(const MachineInst *inst)
-    : Smem("s_memrealtime", reinterpret_cast<const OpEncoding *>(inst)),
+    : Smem("s_memrealtime", reinterpret_cast<const OpEncoding *>(inst),
+           make_exec_fn<SMemrealtimeSmem>()),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata) {
   dst_operands_.emplace_back(&sdata);
 }
 
-void SMemrealtimeSmem::execute(amdgpu::Wavefront &wf) { (void)wf; }
+void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 } // namespace rdna2
 } // namespace rocjitsu

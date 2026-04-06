@@ -16,7 +16,7 @@ namespace rocjitsu {
 namespace rdna4 {
 
 ExportVexport::ExportVexport(const MachineInst *inst)
-    : Vexport("export", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vexport("export", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<ExportVexport>()),
       tgt(128, OperandType::OPR_TGT, reinterpret_cast<const OpEncoding *>(inst)->tgt),
       vsrc0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -29,7 +29,7 @@ ExportVexport::ExportVexport(const MachineInst *inst)
   src_operands_.emplace_back(&vsrc3);
 }
 
-void ExportVexport::execute(amdgpu::Wavefront &wf) {
+void ExportVexport::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf; // Export: no-op in compute simulation.
 }
 

@@ -380,6 +380,7 @@ class CodeGenerator:
                             f'const {inst_enc.fmt_enc_name}MachineInst',
                             '*inst',
                         ),
+                        cgen.Value('ExecuteFn', 'exec_fn'),
                     ],
                 ),
             ]
@@ -458,16 +459,16 @@ class CodeGenerator:
                 # string_view in Instruction doesn't dangle.
                 class_ctor_impl = (
                     f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
-                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst) '
-                    f': IsaInstruction<Isa>(""), inst_(*inst), '
+                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, ExecuteFn exec_fn) '
+                    f': IsaInstruction<Isa>("", exec_fn), inst_(*inst), '
                     f'owned_mnemonic_({mnemonic_expr}) '
                     f'{{ mnemonic_ = owned_mnemonic_;{size_line}{modifier_lines}}}'
                 )
             else:
                 class_ctor_impl = (
                     f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
-                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst) '
-                    f': IsaInstruction<Isa>({mnemonic_expr}), inst_(*inst) '
+                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, ExecuteFn exec_fn) '
+                    f': IsaInstruction<Isa>({mnemonic_expr}, exec_fn), inst_(*inst) '
                     f'{{{size_line}{modifier_lines}}}'
                 )
             class_func_impls.append(cgen.Line(class_ctor_impl))
@@ -4015,7 +4016,7 @@ class CodeGenerator:
                     public_members.append(class_ctor_decl)
                     public_members.append(
                         cgen.Statement(
-                            'void execute(amdgpu::Wavefront &wf) override'
+                            'void execute_impl(amdgpu::Wavefront &wf)'
                         )
                     )
                     # Embed the full mnemonic (with suffix) as a string literal
@@ -4024,7 +4025,8 @@ class CodeGenerator:
                     full_mnemonic = inst.mnemonic + (rule.suffix or '')
                     init_list_parts = [
                         f'{inst.fmt_true_enc_name}("{full_mnemonic}", '
-                        f'reinterpret_cast<const OpEncoding*>(inst))'
+                        f'reinterpret_cast<const OpEncoding*>(inst), '
+                        f'make_exec_fn<{inst.fmt_name}>())'
                     ] + opnd_ctor_init
                     init_list = ', '.join(init_list_parts)
                     # Check if this is a memory instruction to set MEMORY_OP flag
@@ -4106,22 +4108,21 @@ class CodeGenerator:
                         f'{inst.fmt_name} : public {inst.fmt_true_enc_name}',
                         class_members,
                     )
-                    # Generate execute() body
+                    # Generate execute_impl — non-static member method with
+                    # the actual execute logic.  Called via make_exec_fn<>.
                     sem = (
                         self.semantics.instructions.get(inst.name)
                         if self.semantics
                         else None
                     )
-                    exec_impl: cgen.Line
                     if sem:
                         body = self._gen_execute_body(inst, sem, enc.enc_name)
                         can_share = self._can_share_execute(inst.mnemonic)
                         if can_share:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
-                            # Delegate to shared execute template.
                             exec_impl = cgen.Line(
-                                f'void {inst.fmt_name}::execute'
+                                f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
                                 f'  amdgpu::execute_{tmpl_name}(*this, wf);\n}}'
                             )
@@ -4131,13 +4132,13 @@ class CodeGenerator:
                             )
                         else:
                             exec_impl = cgen.Line(
-                                f'void {inst.fmt_name}::execute'
+                                f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
                                 f'{body}\n}}'
                             )
                     else:
                         exec_impl = cgen.Line(
-                            f'void {inst.fmt_name}::execute'
+                            f'void {inst.fmt_name}::execute_impl'
                             f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
                         )
 

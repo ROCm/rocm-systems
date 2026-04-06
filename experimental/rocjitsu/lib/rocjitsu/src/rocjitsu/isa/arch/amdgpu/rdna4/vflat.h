@@ -16,7 +16,7 @@ namespace rdna4 {
 class FlatLoadU8Vflat : public Vflat {
 public:
   FlatLoadU8Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -24,7 +24,7 @@ public:
 class FlatLoadI8Vflat : public Vflat {
 public:
   FlatLoadI8Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -32,7 +32,7 @@ public:
 class FlatLoadU16Vflat : public Vflat {
 public:
   FlatLoadU16Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -40,7 +40,7 @@ public:
 class FlatLoadI16Vflat : public Vflat {
 public:
   FlatLoadI16Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -48,7 +48,7 @@ public:
 class FlatLoadB32Vflat : public Vflat {
 public:
   FlatLoadB32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -56,7 +56,7 @@ public:
 class FlatLoadB64Vflat : public Vflat {
 public:
   FlatLoadB64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -64,7 +64,7 @@ public:
 class FlatLoadB96Vflat : public Vflat {
 public:
   FlatLoadB96Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -72,7 +72,7 @@ public:
 class FlatLoadB128Vflat : public Vflat {
 public:
   FlatLoadB128Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -80,7 +80,7 @@ public:
 class FlatStoreB8Vflat : public Vflat {
 public:
   FlatStoreB8Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
 };
@@ -88,7 +88,7 @@ public:
 class FlatStoreB16Vflat : public Vflat {
 public:
   FlatStoreB16Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
 };
@@ -96,7 +96,7 @@ public:
 class FlatStoreB32Vflat : public Vflat {
 public:
   FlatStoreB32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
 };
@@ -104,7 +104,7 @@ public:
 class FlatStoreB64Vflat : public Vflat {
 public:
   FlatStoreB64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
 };
@@ -112,7 +112,7 @@ public:
 class FlatStoreB96Vflat : public Vflat {
 public:
   FlatStoreB96Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
 };
@@ -120,7 +120,7 @@ public:
 class FlatStoreB128Vflat : public Vflat {
 public:
   FlatStoreB128Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
 };
@@ -128,7 +128,7 @@ public:
 class FlatLoadD16U8Vflat : public Vflat {
 public:
   FlatLoadD16U8Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -136,7 +136,7 @@ public:
 class FlatLoadD16I8Vflat : public Vflat {
 public:
   FlatLoadD16I8Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -144,7 +144,7 @@ public:
 class FlatLoadD16B16Vflat : public Vflat {
 public:
   FlatLoadD16B16Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -152,7 +152,7 @@ public:
 class FlatLoadD16HiU8Vflat : public Vflat {
 public:
   FlatLoadD16HiU8Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -160,7 +160,7 @@ public:
 class FlatLoadD16HiI8Vflat : public Vflat {
 public:
   FlatLoadD16HiI8Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -168,7 +168,7 @@ public:
 class FlatLoadD16HiB16Vflat : public Vflat {
 public:
   FlatLoadD16HiB16Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
 };
@@ -176,7 +176,7 @@ public:
 class FlatStoreD16HiB8Vflat : public Vflat {
 public:
   FlatStoreD16HiB8Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
 };
@@ -184,7 +184,7 @@ public:
 class FlatStoreD16HiB16Vflat : public Vflat {
 public:
   FlatStoreD16HiB16Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
 };
@@ -192,7 +192,7 @@ public:
 class FlatAtomicSwapB32Vflat : public Vflat {
 public:
   FlatAtomicSwapB32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -201,7 +201,7 @@ public:
 class FlatAtomicCmpswapB32Vflat : public Vflat {
 public:
   FlatAtomicCmpswapB32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -210,7 +210,7 @@ public:
 class FlatAtomicAddU32Vflat : public Vflat {
 public:
   FlatAtomicAddU32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -219,7 +219,7 @@ public:
 class FlatAtomicSubU32Vflat : public Vflat {
 public:
   FlatAtomicSubU32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -228,7 +228,7 @@ public:
 class FlatAtomicSubClampU32Vflat : public Vflat {
 public:
   FlatAtomicSubClampU32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -237,7 +237,7 @@ public:
 class FlatAtomicMinI32Vflat : public Vflat {
 public:
   FlatAtomicMinI32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -246,7 +246,7 @@ public:
 class FlatAtomicMinU32Vflat : public Vflat {
 public:
   FlatAtomicMinU32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -255,7 +255,7 @@ public:
 class FlatAtomicMaxI32Vflat : public Vflat {
 public:
   FlatAtomicMaxI32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -264,7 +264,7 @@ public:
 class FlatAtomicMaxU32Vflat : public Vflat {
 public:
   FlatAtomicMaxU32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -273,7 +273,7 @@ public:
 class FlatAtomicAndB32Vflat : public Vflat {
 public:
   FlatAtomicAndB32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -282,7 +282,7 @@ public:
 class FlatAtomicOrB32Vflat : public Vflat {
 public:
   FlatAtomicOrB32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -291,7 +291,7 @@ public:
 class FlatAtomicXorB32Vflat : public Vflat {
 public:
   FlatAtomicXorB32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -300,7 +300,7 @@ public:
 class FlatAtomicIncU32Vflat : public Vflat {
 public:
   FlatAtomicIncU32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -309,7 +309,7 @@ public:
 class FlatAtomicDecU32Vflat : public Vflat {
 public:
   FlatAtomicDecU32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -318,7 +318,7 @@ public:
 class FlatAtomicSwapB64Vflat : public Vflat {
 public:
   FlatAtomicSwapB64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -327,7 +327,7 @@ public:
 class FlatAtomicCmpswapB64Vflat : public Vflat {
 public:
   FlatAtomicCmpswapB64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -336,7 +336,7 @@ public:
 class FlatAtomicAddU64Vflat : public Vflat {
 public:
   FlatAtomicAddU64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -345,7 +345,7 @@ public:
 class FlatAtomicSubU64Vflat : public Vflat {
 public:
   FlatAtomicSubU64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -354,7 +354,7 @@ public:
 class FlatAtomicMinI64Vflat : public Vflat {
 public:
   FlatAtomicMinI64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -363,7 +363,7 @@ public:
 class FlatAtomicMinU64Vflat : public Vflat {
 public:
   FlatAtomicMinU64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -372,7 +372,7 @@ public:
 class FlatAtomicMaxI64Vflat : public Vflat {
 public:
   FlatAtomicMaxI64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -381,7 +381,7 @@ public:
 class FlatAtomicMaxU64Vflat : public Vflat {
 public:
   FlatAtomicMaxU64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -390,7 +390,7 @@ public:
 class FlatAtomicAndB64Vflat : public Vflat {
 public:
   FlatAtomicAndB64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -399,7 +399,7 @@ public:
 class FlatAtomicOrB64Vflat : public Vflat {
 public:
   FlatAtomicOrB64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -408,7 +408,7 @@ public:
 class FlatAtomicXorB64Vflat : public Vflat {
 public:
   FlatAtomicXorB64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -417,7 +417,7 @@ public:
 class FlatAtomicIncU64Vflat : public Vflat {
 public:
   FlatAtomicIncU64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -426,7 +426,7 @@ public:
 class FlatAtomicDecU64Vflat : public Vflat {
 public:
   FlatAtomicDecU64Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -435,7 +435,7 @@ public:
 class FlatAtomicCondSubU32Vflat : public Vflat {
 public:
   FlatAtomicCondSubU32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -444,7 +444,7 @@ public:
 class FlatAtomicMinNumF32Vflat : public Vflat {
 public:
   FlatAtomicMinNumF32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -453,7 +453,7 @@ public:
 class FlatAtomicMaxNumF32Vflat : public Vflat {
 public:
   FlatAtomicMaxNumF32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -462,7 +462,7 @@ public:
 class FlatAtomicAddF32Vflat : public Vflat {
 public:
   FlatAtomicAddF32Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -471,7 +471,7 @@ public:
 class FlatAtomicPkAddF16Vflat : public Vflat {
 public:
   FlatAtomicPkAddF16Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -480,7 +480,7 @@ public:
 class FlatAtomicPkAddBf16Vflat : public Vflat {
 public:
   FlatAtomicPkAddBf16Vflat(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
