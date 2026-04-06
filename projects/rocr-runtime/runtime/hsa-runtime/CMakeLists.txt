@@ -291,20 +291,6 @@ if (${PC_SAMPLING_SUPPORT})
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
 endif()
 
-option(ENABLE_HOTSWAP "Enable HotSwap ISA rewriting support (COMGR dlopen)" OFF)
-
-if(${ENABLE_HOTSWAP})
-  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_HOTSWAP_SUPPORT)
-
-  set(HOTSWAP_SRCS hotswap/hotswap.cpp
-                   hotswap/hotswap_comgr_client.cpp)
-
-  target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/hotswap)
-
-  target_sources(${CORE_RUNTIME_TARGET} PRIVATE ${HOTSWAP_SRCS})
-endif()
-
 if (${AMDCUID_FOUND})
   find_package(OpenSSL REQUIRED) # Required by CUID library
   target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
