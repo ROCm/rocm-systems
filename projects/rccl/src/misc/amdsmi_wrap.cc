@@ -502,22 +502,7 @@ ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersio
     }
     *fwVersion = info.fw_info_list[0].fw_version;
   } else {
-    // Read MEC firmware version from sysfs; path may not exist on card0, so search all cards until found
-    constexpr uint32_t maxCards = 128;
-    *fwVersion = 0;
-    for (uint32_t card = 0; card < maxCards; card++) {
-      char path[256];
-      snprintf(path, sizeof(path), "/sys/class/drm/card%u/device/fw_version/mec_fw_version", card);
-      FILE* fp = fopen(path, "r");
-      if (fp != nullptr) {
-        char line[64];
-        if (fgets(line, sizeof(line), fp) != nullptr) {
-          *fwVersion = strtoull(line, nullptr, 16);
-        }
-        fclose(fp);
-        break;
-      }
-    }
+    ARSMICHECK(ARSMI_get_fw_version(deviceIndex, fwVersion));
   }
   return ncclSuccess;
 }
@@ -546,9 +531,49 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
   if (fabricInitialized) return fabricInitResult;
   fabricInitialized = true;
 
-  // Fabric requires amd_smi_lib
+  // Fabric via sysfs ualink when amd_smi_lib is not in use
   if (!rcclParamUseAmdSmiLib()) {
-    INFO(NCCL_INIT, "UALoE fabric detection skipped: RCCL_USE_AMD_SMI_LIB not set");
+    uint32_t numDevs = 0;
+    if (amd_smi_getNumDevice(&numDevs) != ncclSuccess || numDevs == 0) {
+      fabricInitResult = ncclSuccess;
+      return fabricInitResult;
+    }
+    if (numDevs > (uint32_t)amdsmiFabricMaxDevices) {
+      WARN("ARSMI fabric: device count %u exceeds max %d, truncating", numDevs, amdsmiFabricMaxDevices);
+      numDevs = amdsmiFabricMaxDevices;
+    }
+    amdsmiFabricDeviceCount = numDevs;
+
+    for (uint32_t d = 0; d < numDevs; d++) {
+      struct amdsmiFabricDeviceInfo* devInfo = &amdsmiFabricDevices[d];
+      memset(devInfo, 0, sizeof(*devInfo));
+
+      ARSMI_fabricInfo arsmiInfo;
+      if (ARSMI_get_fabric_info(d, &arsmiInfo) != 0) {
+        devInfo->fabricSupported = false;
+        continue;
+      }
+
+      devInfo->fabricSupported = (bool)arsmiInfo.supported;
+      devInfo->fabricType      = (amdsmi_fabric_type_t)arsmiInfo.fabric_type;
+      devInfo->state           = (amdsmi_fabric_accelerator_vpod_state_t)arsmiInfo.accel_state;
+      devInfo->acceleratorId   = arsmiInfo.accel_id;
+      devInfo->bandwidth       = arsmiInfo.bandwidth;
+      devInfo->latency         = arsmiInfo.latency;
+      memcpy(devInfo->clusterUuid, arsmiInfo.ppod_id, sizeof(devInfo->clusterUuid));
+      devInfo->ppodSize        = arsmiInfo.ppod_size;
+      devInfo->cliqueId        = arsmiInfo.vpod_id;
+      devInfo->vpodSize        = arsmiInfo.vpod_size;
+
+      if (devInfo->fabricSupported) {
+        uint64_t uuidHigh, uuidLow;
+        memcpy(&uuidHigh, devInfo->clusterUuid, sizeof(uint64_t));
+        memcpy(&uuidLow, devInfo->clusterUuid + sizeof(uint64_t), sizeof(uint64_t));
+        INFO(NCCL_INIT, "GPU %d: UALoE fabric detected (sysfs) - accelId=%u bw=%uMb/s lat=%uns vpod=%u/%u uuid=%lx.%lx ppod_size=%u",
+             d, devInfo->acceleratorId, devInfo->bandwidth, devInfo->latency,
+             devInfo->cliqueId, devInfo->vpodSize, uuidHigh, uuidLow, devInfo->ppodSize);
+      }
+    }
     fabricInitResult = ncclSuccess;
     return fabricInitResult;
   }
@@ -599,18 +624,19 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
       continue;
     }
     // Check fabric info version
-    if (fabricInfo.info.version != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
+    if (fabricInfo.fabric_info.version != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
       WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u",
-         fabricInfo.info.version, d, AMDSMI_FABRIC_INFO_CURRENT_VERSION);
+         fabricInfo.fabric_info.version, d, AMDSMI_FABRIC_INFO_CURRENT_VERSION);
       devInfo->fabricSupported = false;
       continue;
     }
 
     // Populate cached info from v1 structure
-    const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.info.v1;
-    devInfo->fabricSupported = (v1->fabric_type == AMDSMI_FABRIC_TYPE_UALOE &&
-                               (v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
-                                v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY));
+    const amdsmi_fabric_info_v1_t* v1 = &fabricInfo.fabric_info.fabric_version.v1;
+    devInfo->fabricSupported = ((v1->fabric_type == AMDSMI_FABRIC_TYPE_UALOE ||
+                                 v1->fabric_type == AMDSMI_FABRIC_TYPE_UALLINK) &&
+                                (v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
+                                 v1->accel_state == AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY));
     devInfo->fabricType = v1->fabric_type;
     devInfo->state = v1->accel_state;
     devInfo->acceleratorId = v1->accelerator_id;
@@ -629,10 +655,9 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
          d, devInfo->acceleratorId, devInfo->bandwidth, devInfo->latency,
          devInfo->cliqueId, devInfo->vpodSize, uuidHigh, uuidLow, devInfo->ppodSize);
     }
-
   }
 
-  fabricInitResult = amd_smi_FabricFunctionsLoaded()? ncclSuccess : ncclInternalError;
+  fabricInitResult = ncclSuccess;
   return fabricInitResult;
 }
 
@@ -721,7 +746,7 @@ ncclResult_t amd_smi_freeFabricTelemetry(uint32_t deviceIndex,
 
 const char* amd_smi_fabricTelemIdToString(uint64_t telemId) {
   if (pfn_amdsmi_fabric_telem_id_to_string == nullptr) {
-    return "UNKNOWN";
+    return ARSMI_fabric_telem_id_to_string(telemId);
   }
   return pfn_amdsmi_fabric_telem_id_to_string(telemId);
 }
