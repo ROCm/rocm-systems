@@ -159,22 +159,27 @@ inspectorResult_t inspectorPluginCollInfoRefSafe(struct inspectorCollInfo *collI
   inspectorUnlockRWLock(&collInfo->guard);
   return inspectorSuccess;
 }
-
 inspectorResult_t inspectorPluginCollInfoDeRef(struct inspectorCollInfo *collInfo) {
   collInfo->refCount -= 1;
   if (collInfo->refCount == 0) {
-    inspectorLockDestroy(&collInfo->guard);
-    memset(collInfo, 0, sizeof(struct inspectorCollInfo));
-    free(collInfo);
     return inspectorReturn;
   }
   return inspectorSuccess;
+}
+
+static void inspectorPluginCollInfoFree(struct inspectorCollInfo *collInfo) {
+  inspectorLockDestroy(&collInfo->guard);
+  memset(collInfo, 0, sizeof(struct inspectorCollInfo));
+  free(collInfo);
 }
 
 inspectorResult_t inspectorPluginCollInfoDeRefSafe(struct inspectorCollInfo *collInfo) {
   inspectorLockWr(&collInfo->guard);
   inspectorResult_t res = inspectorPluginCollInfoDeRef(collInfo);
   inspectorUnlockRWLock(&collInfo->guard);
+  if (res == inspectorReturn) {
+    inspectorPluginCollInfoFree(collInfo);
+  }
   return res;
 }
 
@@ -376,6 +381,8 @@ __hidden ncclResult_t inspectorPluginStopEvent(void *eHandle) {
                               collInfo);
     res = inspectorPluginCollInfoDeRef(collInfo);
     if (res == inspectorReturn) {
+      inspectorUnlockRWLock(&collInfo->guard);
+      inspectorPluginCollInfoFree(collInfo);
       return ncclSuccess;
     }
     inspectorUnlockRWLock(&collInfo->guard);
@@ -397,6 +404,8 @@ __hidden ncclResult_t inspectorPluginStopEvent(void *eHandle) {
       res = inspectorPluginCollInfoDeRef(collInfo);
       if (res == inspectorReturn) {
         WARN("NCCL Inspector unnatural return: inspectorPluginStopEvent:ncclProfileKernelCh");
+        inspectorUnlockRWLock(&collInfo->guard);
+        inspectorPluginCollInfoFree(collInfo);
         return ncclSuccess;
       }
       // Dump when all kernel channels have completed. nChannels is now reliably set
@@ -413,8 +422,9 @@ __hidden ncclResult_t inspectorPluginStopEvent(void *eHandle) {
         inspectorUpdateCollPerf(&completedColl, collInfo);
 
         res = inspectorPluginCollInfoDeRef(collInfo);
-        if (res != inspectorReturn) {
-          inspectorUnlockRWLock(&collInfo->guard);
+        inspectorUnlockRWLock(&collInfo->guard);
+        if (res == inspectorReturn) {
+          inspectorPluginCollInfoFree(collInfo);
         }
         if (commInfo != nullptr) {
           inspectorLockWr(&commInfo->guard);
@@ -482,6 +492,8 @@ __hidden ncclResult_t inspectorPluginRecordEventState(void* eHandle,
         res = inspectorPluginCollInfoDeRef(collInfo);
         if (res == inspectorReturn) {
           WARN("NCCL Inspector unnatural return: inspectorPluginRecordEventState");
+          inspectorUnlockRWLock(&collInfo->guard);
+          inspectorPluginCollInfoFree(collInfo);
           return ncclSuccess;
         }
       }

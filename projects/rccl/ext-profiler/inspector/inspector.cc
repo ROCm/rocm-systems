@@ -369,8 +369,11 @@ static inspectorResult_t inspectorCommInfoMetaHeader(jsonFileOutput* jfo) {
     JSON_CHK(jsonKey(jfo, "rec_mechanism")); JSON_CHK(jsonStr(jfo, "nccl_profiler_interface"));
     JSON_CHK(jsonKey(jfo, "dump_timestamp_us")); JSON_CHK(jsonUint64(jfo, inspectorGetTime()));
     char hostname[256];
-    if (gethostname(hostname, sizeof(hostname)) != 0) hostname[0] = 0;
-    hostname[sizeof(hostname) - 1] = 0; // POSIX does not guarantee NUL on truncation
+    if (gethostname(hostname, sizeof(hostname)) != 0) {
+      hostname[0] = '\0';
+    } else {
+      hostname[sizeof(hostname) - 1] = 0; // POSIX does not guarantee NUL on truncation
+    }
     JSON_CHK(jsonKey(jfo, "hostname")); JSON_CHK(jsonStr(jfo, hostname));
     JSON_CHK(jsonKey(jfo, "pid")); JSON_CHK(jsonUint64(jfo, getpid()));
   }
@@ -761,7 +764,11 @@ struct inspectorDumpThread {
       INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: couldn't init lock");
     }
     pthread_mutex_init(&sleepMutex, nullptr);
-    pthread_cond_init(&sleepCond, nullptr);
+    pthread_condattr_t condAttr;
+    pthread_condattr_init(&condAttr);
+    pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
+    pthread_cond_init(&sleepCond, &condAttr);
+    pthread_condattr_destroy(&condAttr);
   }
 
   ~inspectorDumpThread() {
@@ -870,7 +877,7 @@ struct inspectorDumpThread {
 
       // Interruptible sleep: wakes immediately when stopThread signals the condvar.
       struct timespec deadline;
-      clock_gettime(CLOCK_REALTIME, &deadline);
+      clock_gettime(CLOCK_MONOTONIC, &deadline);
       uint64_t nsTotal = dumper->sampleIntervalUsecs * 1000ULL;  // µs → ns
       deadline.tv_sec  += nsTotal / 1000000000ULL;
       deadline.tv_nsec += nsTotal % 1000000000ULL;
