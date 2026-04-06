@@ -43,7 +43,6 @@ set(SRC_FILES
   src/device/reduce_kernel.h
   src/device/reduce_scatter.h
   src/device/rccl_metadata.h
-  src/device/rccl_ptr.h
   src/device/sendrecv.h
   src/device/common.cu
   src/device/onerank.cu
@@ -151,6 +150,7 @@ set(SRC_FILES
   src/include/nccl_device/ll_a2a.h
   src/include/nccl_device/mem_barrier.h
   src/include/nccl_device/ptr.h
+  src/include/nccl_device/rccl_ptr.h
   src/include/nccl_device/utility.h
   src/include/nccl_device/impl/comm__funcs.h
   src/include/nccl_device/impl/comm__types.h
@@ -347,6 +347,7 @@ endif()
 
 # Keep build output layout identical to the historical root-CMake build.
 set(HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
+set(NCCL_DEVICE_HIP_FILES "")
 
 ## Loop over each source file to hipify
 foreach(SRC_FILE ${SRC_FILES})
@@ -366,6 +367,10 @@ foreach(SRC_FILE ${SRC_FILES})
   string(REPLACE "\.cuh" "\.h" HIP_FILE ${HIP_FILE})
   string(REPLACE "\.cu" "\.cu.cpp" HIP_FILE ${HIP_FILE})
   list(APPEND HIP_SOURCES ${HIP_FILE})
+
+  if(SRC_FILE STREQUAL "src/include/nccl_device.h" OR SRC_FILE MATCHES "^src/include/nccl_device/")
+    list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_FILE})
+  endif()
 
   # Create a custom command to create hipified source code
   if (FAULT_INJECTION)
@@ -389,6 +394,17 @@ foreach(SRC_FILE ${SRC_FILES})
     )
   endif()
 endforeach()
+
+set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/rccl/nccl_device.h")
+add_custom_command(
+  OUTPUT ${NCCL_DEVICE_HEADER}
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
+  COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+  DEPENDS ${NCCL_DEVICE_HIP_FILES}
+  VERBATIM
+)
+add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER})
 
 # Adding custom target to hipify all the source files
 # This is required to make sure that all the hipified source files are
@@ -507,7 +523,7 @@ endif()
 
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
-add_dependencies(rccl update_git_version)
+add_dependencies(rccl update_git_version copy_nccl_device_headers)
 
 ## Set RCCL include directories
 target_include_directories(rccl PRIVATE ${PROJECT_BINARY_DIR}/include)        # for generated rccl.h header

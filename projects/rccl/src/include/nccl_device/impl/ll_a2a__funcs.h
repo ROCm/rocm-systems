@@ -9,7 +9,7 @@
 #include "ll_a2a__types.h"
 #include "comm__types.h"
 #include "../utility.h"
-#include "device/rccl_ptr.h"
+#include "../rccl_ptr.h"
 
 #if __CUDACC__
 NCCL_DEVICE_INLINE void ncclLLA2aStoreLineAmd(uint32_t* dst, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {

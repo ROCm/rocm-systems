@@ -7,7 +7,6 @@
 #ifndef _NCCL_DEVICE_COOP_H_
 #define _NCCL_DEVICE_COOP_H_
 #include "utility.h"
-#include "device.h"
 
 // ncclCoop[Foo]: NCCL's versions of CUDA's Cooperative Groups. They conform
 // to just this subset of the CUDA API:
@@ -15,6 +14,16 @@
 //   int Coop::size();
 //   int Coop::num_threads(); // same as size()
 //   void Coop::sync();
+
+#if defined(__HIP_DEVICE_COMPILE__)
+  #if defined(__GFX9__)
+  #define WARP_SIZE 64
+  #else
+  #define WARP_SIZE 32
+  #endif
+#else
+  #define WARP_SIZE 32
+#endif
 
 #if __CUDACC__
 #if __HIP_PLATFORM_AMD__
