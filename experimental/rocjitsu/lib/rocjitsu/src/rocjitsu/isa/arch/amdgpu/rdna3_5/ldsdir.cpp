@@ -21,8 +21,10 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
              make_exec_fn<LdsParamLoadLdsdir>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
-  dst_operands_.emplace_back(&vdst);
-  src_operands_.emplace_back(&attr);
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &attr;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void LdsParamLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {
@@ -33,7 +35,9 @@ LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
     : Ldsdir("lds_direct_load", reinterpret_cast<const OpEncoding *>(inst),
              make_exec_fn<LdsDirectLoadLdsdir>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst) {
-  dst_operands_.emplace_back(&vdst);
+  dst_operands_[0] = &vdst;
+  num_src_ = 0;
+  num_dst_ = 1;
 }
 
 void LdsDirectLoadLdsdir::execute_impl(amdgpu::Wavefront &wf) {

@@ -21,9 +21,11 @@ namespace detail {
 FlwInst::FlwInst(uint32_t raw)
     : IType("flw", raw, make_exec_fn<FlwInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&offset);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &offset;
+  src_operands_[1] = &rs1;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FlwInst::execute_impl(HartState &ctx) {
@@ -39,9 +41,11 @@ void FlwInst::execute_impl(HartState &ctx) {
 FswInst::FswInst(uint32_t raw)
     : SType("fsw", raw, make_exec_fn<FswInst>()), rs2_op(32, OperandType::OPR_FPR, inst_.rs2),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
-  src_operands_.emplace_back(&rs1_op);
+  src_operands_[0] = &rs2_op;
+  src_operands_[1] = &offset;
+  src_operands_[2] = &rs1_op;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
 void FswInst::execute_impl(HartState &ctx) {
@@ -56,9 +60,11 @@ void FswInst::execute_impl(HartState &ctx) {
 FaddSInst::FaddSInst(uint32_t raw)
     : RType("fadd.s", raw, make_exec_fn<FaddSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FaddSInst::execute_impl(HartState &ctx) {
@@ -72,9 +78,11 @@ void FaddSInst::execute_impl(HartState &ctx) {
 FsubSInst::FsubSInst(uint32_t raw)
     : RType("fsub.s", raw, make_exec_fn<FsubSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FsubSInst::execute_impl(HartState &ctx) {
@@ -88,9 +96,11 @@ void FsubSInst::execute_impl(HartState &ctx) {
 FmulSInst::FmulSInst(uint32_t raw)
     : RType("fmul.s", raw, make_exec_fn<FmulSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FmulSInst::execute_impl(HartState &ctx) {
@@ -104,9 +114,11 @@ void FmulSInst::execute_impl(HartState &ctx) {
 FdivSInst::FdivSInst(uint32_t raw)
     : RType("fdiv.s", raw, make_exec_fn<FdivSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FdivSInst::execute_impl(HartState &ctx) {
@@ -120,9 +132,11 @@ void FdivSInst::execute_impl(HartState &ctx) {
 FsgnjSInst::FsgnjSInst(uint32_t raw)
     : RType("fsgnj.s", raw, make_exec_fn<FsgnjSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FsgnjSInst::execute_impl(HartState &ctx) {
@@ -136,9 +150,11 @@ void FsgnjSInst::execute_impl(HartState &ctx) {
 FsgnjnSInst::FsgnjnSInst(uint32_t raw)
     : RType("fsgnjn.s", raw, make_exec_fn<FsgnjnSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FsgnjnSInst::execute_impl(HartState &ctx) {
@@ -152,9 +168,11 @@ void FsgnjnSInst::execute_impl(HartState &ctx) {
 FsgnjxSInst::FsgnjxSInst(uint32_t raw)
     : RType("fsgnjx.s", raw, make_exec_fn<FsgnjxSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FsgnjxSInst::execute_impl(HartState &ctx) {
@@ -168,9 +186,11 @@ void FsgnjxSInst::execute_impl(HartState &ctx) {
 FminSInst::FminSInst(uint32_t raw)
     : RType("fmin.s", raw, make_exec_fn<FminSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FminSInst::execute_impl(HartState &ctx) {
@@ -199,9 +219,11 @@ void FminSInst::execute_impl(HartState &ctx) {
 FmaxSInst::FmaxSInst(uint32_t raw)
     : RType("fmax.s", raw, make_exec_fn<FmaxSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FmaxSInst::execute_impl(HartState &ctx) {
@@ -232,8 +254,10 @@ void FmaxSInst::execute_impl(HartState &ctx) {
 FsqrtSInst::FsqrtSInst(uint32_t raw)
     : RType("fsqrt.s", raw, make_exec_fn<FsqrtSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FsqrtSInst::execute_impl(HartState &ctx) {
@@ -248,8 +272,10 @@ void FsqrtSInst::execute_impl(HartState &ctx) {
 FcvtWSInst::FcvtWSInst(uint32_t raw)
     : RType("fcvt.w.s", raw, make_exec_fn<FcvtWSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FcvtWSInst::execute_impl(HartState &ctx) {
@@ -271,8 +297,10 @@ void FcvtWSInst::execute_impl(HartState &ctx) {
 FcvtWuSInst::FcvtWuSInst(uint32_t raw)
     : RType("fcvt.wu.s", raw, make_exec_fn<FcvtWuSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FcvtWuSInst::execute_impl(HartState &ctx) {
@@ -295,8 +323,10 @@ void FcvtWuSInst::execute_impl(HartState &ctx) {
 FcvtLSInst::FcvtLSInst(uint32_t raw)
     : RType("fcvt.l.s", raw, make_exec_fn<FcvtLSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FcvtLSInst::execute_impl(HartState &ctx) {
@@ -318,8 +348,10 @@ void FcvtLSInst::execute_impl(HartState &ctx) {
 FcvtLuSInst::FcvtLuSInst(uint32_t raw)
     : RType("fcvt.lu.s", raw, make_exec_fn<FcvtLuSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FcvtLuSInst::execute_impl(HartState &ctx) {
@@ -343,8 +375,10 @@ void FcvtLuSInst::execute_impl(HartState &ctx) {
 FcvtSWInst::FcvtSWInst(uint32_t raw)
     : RType("fcvt.s.w", raw, make_exec_fn<FcvtSWInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FcvtSWInst::execute_impl(HartState &ctx) {
@@ -357,8 +391,10 @@ void FcvtSWInst::execute_impl(HartState &ctx) {
 FcvtSWuInst::FcvtSWuInst(uint32_t raw)
     : RType("fcvt.s.wu", raw, make_exec_fn<FcvtSWuInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FcvtSWuInst::execute_impl(HartState &ctx) {
@@ -371,8 +407,10 @@ void FcvtSWuInst::execute_impl(HartState &ctx) {
 FcvtSLInst::FcvtSLInst(uint32_t raw)
     : RType("fcvt.s.l", raw, make_exec_fn<FcvtSLInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FcvtSLInst::execute_impl(HartState &ctx) {
@@ -385,8 +423,10 @@ void FcvtSLInst::execute_impl(HartState &ctx) {
 FcvtSLuInst::FcvtSLuInst(uint32_t raw)
     : RType("fcvt.s.lu", raw, make_exec_fn<FcvtSLuInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FcvtSLuInst::execute_impl(HartState &ctx) {
@@ -401,8 +441,10 @@ void FcvtSLuInst::execute_impl(HartState &ctx) {
 FmvXWInst::FmvXWInst(uint32_t raw)
     : RType("fmv.x.w", raw, make_exec_fn<FmvXWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FmvXWInst::execute_impl(HartState &ctx) {
@@ -415,8 +457,10 @@ void FmvXWInst::execute_impl(HartState &ctx) {
 FclassSInst::FclassSInst(uint32_t raw)
     : RType("fclass.s", raw, make_exec_fn<FclassSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FclassSInst::execute_impl(HartState &ctx) {
@@ -457,8 +501,10 @@ void FclassSInst::execute_impl(HartState &ctx) {
 FmvWXInst::FmvWXInst(uint32_t raw)
     : RType("fmv.w.x", raw, make_exec_fn<FmvWXInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
 void FmvWXInst::execute_impl(HartState &ctx) {
@@ -472,9 +518,11 @@ void FmvWXInst::execute_impl(HartState &ctx) {
 FeqSInst::FeqSInst(uint32_t raw)
     : RType("feq.s", raw, make_exec_fn<FeqSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FeqSInst::execute_impl(HartState &ctx) {
@@ -487,9 +535,11 @@ void FeqSInst::execute_impl(HartState &ctx) {
 FltSInst::FltSInst(uint32_t raw)
     : RType("flt.s", raw, make_exec_fn<FltSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FltSInst::execute_impl(HartState &ctx) {
@@ -502,9 +552,11 @@ void FltSInst::execute_impl(HartState &ctx) {
 FleSInst::FleSInst(uint32_t raw)
     : RType("fle.s", raw, make_exec_fn<FleSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
 void FleSInst::execute_impl(HartState &ctx) {
@@ -520,10 +572,12 @@ FmaddSInst::FmaddSInst(uint32_t raw)
     : R4Type("fmadd.s", raw, make_exec_fn<FmaddSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2),
       rs3(32, OperandType::OPR_FPR, inst_.rs3) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
-  src_operands_.emplace_back(&rs3);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  src_operands_[2] = &rs3;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void FmaddSInst::execute_impl(HartState &ctx) {
@@ -539,10 +593,12 @@ FmsubSInst::FmsubSInst(uint32_t raw)
     : R4Type("fmsub.s", raw, make_exec_fn<FmsubSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2),
       rs3(32, OperandType::OPR_FPR, inst_.rs3) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
-  src_operands_.emplace_back(&rs3);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  src_operands_[2] = &rs3;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void FmsubSInst::execute_impl(HartState &ctx) {
@@ -558,10 +614,12 @@ FnmsubSInst::FnmsubSInst(uint32_t raw)
     : R4Type("fnmsub.s", raw, make_exec_fn<FnmsubSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2),
       rs3(32, OperandType::OPR_FPR, inst_.rs3) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
-  src_operands_.emplace_back(&rs3);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  src_operands_[2] = &rs3;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void FnmsubSInst::execute_impl(HartState &ctx) {
@@ -578,10 +636,12 @@ FnmaddSInst::FnmaddSInst(uint32_t raw)
     : R4Type("fnmadd.s", raw, make_exec_fn<FnmaddSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2),
       rs3(32, OperandType::OPR_FPR, inst_.rs3) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
-  src_operands_.emplace_back(&rs3);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  src_operands_[2] = &rs3;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void FnmaddSInst::execute_impl(HartState &ctx) {

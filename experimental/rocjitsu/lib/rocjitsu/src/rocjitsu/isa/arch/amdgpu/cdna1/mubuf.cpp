@@ -29,10 +29,12 @@ BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void BufferLoadFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -45,10 +47,12 @@ BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void BufferLoadFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -61,10 +65,12 @@ BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void BufferLoadFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -77,10 +83,12 @@ BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void BufferLoadFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -93,10 +101,12 @@ BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void BufferStoreFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -109,10 +119,12 @@ BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void BufferStoreFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -125,10 +137,12 @@ BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void BufferStoreFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -141,10 +155,12 @@ BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void BufferStoreFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -157,10 +173,12 @@ BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void BufferLoadFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -173,10 +191,12 @@ BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void BufferLoadFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -189,10 +209,12 @@ BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void BufferLoadFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -205,10 +227,12 @@ BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *in
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void BufferLoadFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -221,10 +245,12 @@ BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void BufferStoreFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -237,10 +263,12 @@ BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void BufferStoreFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -253,10 +281,12 @@ BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *in
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void BufferStoreFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -269,10 +299,12 @@ BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void BufferStoreFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -285,10 +317,12 @@ BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -312,10 +346,12 @@ BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -340,10 +376,12 @@ BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -367,10 +405,12 @@ BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -395,10 +435,12 @@ BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -422,10 +464,12 @@ BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -449,10 +493,12 @@ BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -476,10 +522,12 @@ BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -503,10 +551,12 @@ BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -538,10 +588,12 @@ BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -573,10 +625,12 @@ BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -608,10 +662,12 @@ BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -643,10 +699,12 @@ BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -678,10 +736,12 @@ BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -715,10 +775,12 @@ BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -754,10 +816,12 @@ BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
   flags_ |= MEMORY_OP;
 }
 
@@ -795,10 +859,12 @@ BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -822,10 +888,12 @@ BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -849,10 +917,12 @@ BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -877,10 +947,12 @@ BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -905,10 +977,12 @@ BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -932,10 +1006,12 @@ BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -959,10 +1035,12 @@ BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void BufferLoadFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -975,10 +1053,12 @@ BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *in
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void BufferStoreFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -989,15 +1069,20 @@ BufferStoreLdsDwordMubuf::BufferStoreLdsDwordMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &srsrc;
+  src_operands_[1] = &soffset;
+  num_src_ = 2;
+  num_dst_ = 0;
 }
 
 void BufferStoreLdsDwordMubuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 BufferWbinvl1Mubuf::BufferWbinvl1Mubuf(const MachineInst *inst)
     : Mubuf("buffer_wbinvl1", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferWbinvl1Mubuf>()) {}
+            make_exec_fn<BufferWbinvl1Mubuf>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
+}
 
 void BufferWbinvl1Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   wf.cu().l1_scalar().invalidate_all();
@@ -1005,7 +1090,10 @@ void BufferWbinvl1Mubuf::execute_impl(amdgpu::Wavefront &wf) {
 
 BufferWbinvl1VolMubuf::BufferWbinvl1VolMubuf(const MachineInst *inst)
     : Mubuf("buffer_wbinvl1_vol", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferWbinvl1VolMubuf>()) {}
+            make_exec_fn<BufferWbinvl1VolMubuf>()) {
+  num_src_ = 0;
+  num_dst_ = 0;
+}
 
 void BufferWbinvl1VolMubuf::execute_impl(amdgpu::Wavefront &wf) {
   wf.cu().l1_scalar().invalidate_all();
@@ -1019,11 +1107,13 @@ BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1057,11 +1147,13 @@ BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1097,11 +1189,13 @@ BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1135,11 +1229,13 @@ BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1173,11 +1269,13 @@ BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1211,11 +1309,13 @@ BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1249,11 +1349,13 @@ BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1287,11 +1389,13 @@ BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1325,11 +1429,13 @@ BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1363,11 +1469,13 @@ BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1401,11 +1509,13 @@ BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1439,11 +1549,13 @@ BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1477,11 +1589,13 @@ BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1515,11 +1629,13 @@ BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1553,11 +1669,13 @@ BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1591,11 +1709,13 @@ BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1631,11 +1751,13 @@ BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1675,11 +1797,13 @@ BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1715,11 +1839,13 @@ BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1755,11 +1881,13 @@ BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1795,11 +1923,13 @@ BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1835,11 +1965,13 @@ BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1875,11 +2007,13 @@ BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1915,11 +2049,13 @@ BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1955,11 +2091,13 @@ BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -1995,11 +2133,13 @@ BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -2035,11 +2175,13 @@ BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 
@@ -2075,11 +2217,13 @@ BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  dst_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
 

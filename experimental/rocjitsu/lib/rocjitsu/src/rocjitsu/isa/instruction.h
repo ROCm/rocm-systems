@@ -10,13 +10,13 @@
 #include "rocjitsu/isa/operand.h"
 #include "util/intrusive_list.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -114,11 +114,11 @@ public:
 
   /// @brief The instruction's number of source operands.
   /// @returns Source operand count.
-  int num_src_operands() const { return src_operands_.size(); }
+  int num_src_operands() const { return num_src_; }
 
   /// @brief The instruction's number of destination operands.
   /// @returns Destination operand count.
-  int num_dst_operands() const { return dst_operands_.size(); }
+  int num_dst_operands() const { return num_dst_; }
 
   /// @brief Size of the instruction's encoding in bytes.
   /// @returns Encoding size in bytes.
@@ -143,14 +143,14 @@ public:
     if (disassembly_.empty()) {
       disassembly_ = mnemonic_;
       bool first = true;
-      for (auto *opnd : dst_operands_) {
+      for (uint8_t i = 0; i < num_dst_; ++i) {
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += opnd->name();
+        disassembly_ += dst_operands_[i]->name();
         first = false;
       }
-      for (auto *opnd : src_operands_) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += opnd->name();
+        disassembly_ += src_operands_[i]->name();
         first = false;
       }
       if (!modifiers_.empty())
@@ -162,10 +162,12 @@ public:
 protected:
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
-  /// @brief Instruction's source operands.
-  std::vector<Operand *> src_operands_;
-  /// @brief Instruction's destination operands.
-  std::vector<Operand *> dst_operands_;
+  /// @brief Instruction's source operands (max 4).
+  std::array<Operand *, 4> src_operands_{};
+  uint8_t num_src_ = 0;
+  /// @brief Instruction's destination operands (max 2).
+  std::array<Operand *, 2> dst_operands_{};
+  uint8_t num_dst_ = 0;
   /// @brief Modifier flags appended after operands (e.g. "offset:80 sc0 sc1").
   std::string modifiers_;
   /// @brief Cached disassembly string.

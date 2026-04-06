@@ -31,10 +31,12 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void TbufferLoadFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -48,10 +50,12 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void TbufferLoadFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -65,10 +69,12 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void TbufferLoadFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -82,10 +88,12 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void TbufferLoadFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -99,10 +107,12 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void TbufferStoreFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -116,10 +126,12 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void TbufferStoreFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -133,10 +145,12 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void TbufferStoreFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -150,10 +164,12 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void TbufferStoreFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -167,10 +183,12 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -184,10 +202,12 @@ TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -201,10 +221,12 @@ TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *in
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -218,10 +240,12 @@ TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  dst_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  dst_operands_[0] = &vdata;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
 void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -235,10 +259,12 @@ TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void TbufferStoreFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -252,10 +278,12 @@ TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *in
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void TbufferStoreFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -269,10 +297,12 @@ TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void TbufferStoreFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
@@ -286,10 +316,12 @@ TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SSRC_NOLIT,
               reinterpret_cast<const OpEncoding *>(inst)->soffset) {
-  src_operands_.emplace_back(&vdata);
-  src_operands_.emplace_back(&vaddr);
-  src_operands_.emplace_back(&srsrc);
-  src_operands_.emplace_back(&soffset);
+  src_operands_[0] = &vdata;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &srsrc;
+  src_operands_[3] = &soffset;
+  num_src_ = 4;
+  num_dst_ = 0;
 }
 
 void TbufferStoreFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }

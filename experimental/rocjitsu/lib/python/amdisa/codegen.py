@@ -3968,27 +3968,31 @@ class CodeGenerator:
                     private_members = []
                     opnd_ctor_init = []
                     opnd_body = []
+                    src_idx = 0
+                    dst_idx = 0
                     reads_dst = self._dst_is_also_source(inst)
                     for opnd in inst.operands:
                         if opnd.is_input:
                             opnd_body.append(
-                                f'src_operands_.emplace_back(&{opnd.name});'
+                                f'src_operands_[{src_idx}] = &{opnd.name};'
                             )
+                            src_idx += 1
                         elif (reads_dst and opnd.is_output
                               and opnd.name in ('vdst', 'sdst')):
-                            # Destination is also read (accumulate, swap, etc.)
-                            # but the XML only marks it as output.
                             opnd_body.append(
-                                f'src_operands_.emplace_back(&{opnd.name});'
+                                f'src_operands_[{src_idx}] = &{opnd.name};'
                             )
+                            src_idx += 1
                         if opnd.is_output:
                             opnd_body.append(
-                                f'dst_operands_.emplace_back(&{opnd.name});'
+                                f'dst_operands_[{dst_idx}] = &{opnd.name};'
                             )
+                            dst_idx += 1
                         if not opnd.is_input and not opnd.is_output:
                             opnd_body.append(
-                                f'dst_operands_.emplace_back(&{opnd.name});'
+                                f'dst_operands_[{dst_idx}] = &{opnd.name};'
                             )
+                            dst_idx += 1
                         private_members.append(
                             cgen.Statement(f'Operand {opnd.name}')
                         )
@@ -4042,6 +4046,8 @@ class CodeGenerator:
                         'ds_read', 'ds_write', 'ds_atomic',
                     })
                     ctor_body_parts = list(opnd_body)
+                    ctor_body_parts.append(f'num_src_ = {src_idx};')
+                    ctor_body_parts.append(f'num_dst_ = {dst_idx};')
 
                     # Literal constant fixup: when src0/ssrc0/ssrc1 == 255,
                     # replace the operand with the 32-bit literal from the

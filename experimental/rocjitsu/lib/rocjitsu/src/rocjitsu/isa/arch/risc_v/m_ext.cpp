@@ -16,9 +16,11 @@ namespace detail {
 MulInst::MulInst(uint32_t raw)
     : RType("mul", raw, make_exec_fn<MulInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void MulInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -30,9 +32,11 @@ void MulInst::execute_impl(HartState &ctx) {
 MulhInst::MulhInst(uint32_t raw)
     : RType("mulh", raw, make_exec_fn<MulhInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void MulhInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -45,9 +49,11 @@ void MulhInst::execute_impl(HartState &ctx) {
 MulhsuInst::MulhsuInst(uint32_t raw)
     : RType("mulhsu", raw, make_exec_fn<MulhsuInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void MulhsuInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -60,9 +66,11 @@ void MulhsuInst::execute_impl(HartState &ctx) {
 MulhuInst::MulhuInst(uint32_t raw)
     : RType("mulhu", raw, make_exec_fn<MulhuInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void MulhuInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -75,9 +83,11 @@ void MulhuInst::execute_impl(HartState &ctx) {
 DivInst::DivInst(uint32_t raw)
     : RType("div", raw, make_exec_fn<DivInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void DivInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -97,9 +107,11 @@ void DivInst::execute_impl(HartState &ctx) {
 DivuInst::DivuInst(uint32_t raw)
     : RType("divu", raw, make_exec_fn<DivuInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void DivuInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -117,9 +129,11 @@ void DivuInst::execute_impl(HartState &ctx) {
 RemInst::RemInst(uint32_t raw)
     : RType("rem", raw, make_exec_fn<RemInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void RemInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -139,9 +153,11 @@ void RemInst::execute_impl(HartState &ctx) {
 RemuInst::RemuInst(uint32_t raw)
     : RType("remu", raw, make_exec_fn<RemuInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void RemuInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -159,9 +175,11 @@ void RemuInst::execute_impl(HartState &ctx) {
 MulwInst::MulwInst(uint32_t raw)
     : RType("mulw", raw, make_exec_fn<MulwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void MulwInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -173,9 +191,11 @@ void MulwInst::execute_impl(HartState &ctx) {
 DivwInst::DivwInst(uint32_t raw)
     : RType("divw", raw, make_exec_fn<DivwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void DivwInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -195,9 +215,11 @@ void DivwInst::execute_impl(HartState &ctx) {
 DivuwInst::DivuwInst(uint32_t raw)
     : RType("divuw", raw, make_exec_fn<DivuwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void DivuwInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -215,9 +237,11 @@ void DivuwInst::execute_impl(HartState &ctx) {
 RemwInst::RemwInst(uint32_t raw)
     : RType("remw", raw, make_exec_fn<RemwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void RemwInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -237,9 +261,11 @@ void RemwInst::execute_impl(HartState &ctx) {
 RemuwInst::RemuwInst(uint32_t raw)
     : RType("remuw", raw, make_exec_fn<RemuwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void RemuwInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);

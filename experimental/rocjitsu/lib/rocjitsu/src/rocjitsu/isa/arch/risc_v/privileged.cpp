@@ -37,8 +37,10 @@ void WfiInst::execute_impl(HartState &ctx) {
 SfenceVmaInst::SfenceVmaInst(uint32_t raw)
     : RType("sfence.vma", raw, make_exec_fn<SfenceVmaInst>()),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), rs2(64, OperandType::OPR_GPR, inst_.rs2) {
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 0;
 }
 void SfenceVmaInst::execute_impl(HartState &ctx) {
   (void)ctx; // No-op: no TLB in this simulation.
