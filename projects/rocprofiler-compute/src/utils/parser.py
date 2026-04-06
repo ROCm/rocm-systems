@@ -1146,6 +1146,8 @@ def _eval_expr_based_table(
         if not expr_str:
             for col in stat_columns:
                 df.loc[row_id, col] = ""
+            if has_pop:
+                df.loc[row_id, "Pct of Peak"] = "N/A"
             continue
 
         prev_count = get_noise_clamp_warnings()["count"]
@@ -1159,15 +1161,11 @@ def _eval_expr_based_table(
                 f"{row_id} {metric_name}"
             )
 
-        if eval_result == "N/A":
-            for col in stat_columns:
-                df.loc[row_id, col] = eval_result
-            continue
-
         for col in stat_columns:
-            df.loc[row_id, col] = STAT_AGGREGATION_MAP[col](
-                eval_result
-            )
+            result = STAT_AGGREGATION_MAP[col](eval_result)
+            if np.isscalar(result) and pd.isna(result):
+                result = "N/A"
+            df.loc[row_id, col] = result
 
         for peak_col in peak_columns:
             peak_expr = row.get(peak_col, "")
@@ -1206,8 +1204,12 @@ def _compute_pop(
     value directly.  For non-percentage metrics with a valid peak:
     ``pop = (100 * avg) / peak``.
     """
+    if "Pct of Peak" not in df.columns:
+        return
+
     avg_value = df.loc[row_id, avg_col]
     if avg_value == "N/A" or avg_value == "":
+        df.loc[row_id, "Pct of Peak"] = "N/A"
         return
 
     unit_col = _find_unit_column(df)
@@ -1219,6 +1221,7 @@ def _compute_pop(
 
     peak_value = _get_evaluated_peak(df, row_id, peak_columns)
     if peak_value is None:
+        df.loc[row_id, "Pct of Peak"] = "N/A"
         return
 
     try:
