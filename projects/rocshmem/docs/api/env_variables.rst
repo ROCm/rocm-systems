@@ -144,7 +144,7 @@ control the behavior of rocSHMEM.
 
     * - | ``ROCSHMEM_GDA_SQ_SIZE``
         | This environment variable sets the length of the SQ for GDA.
-      - ``4096``
+      - ``1024``
       - | Maximum number of Work Queue Entries (WQEs) posted on the Send Queue (SQ)
 
     * - | ``ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX``
@@ -156,3 +156,23 @@ control the behavior of rocSHMEM.
         | Sets the number of Queue Pairs (QPs) to create per PE for each user context.
       - ``1``
       - Number of QPs per PE for each user context.
+
+    * - | ``ROCSHMEM_MAX_WF_BUFFERS``
+        | Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)
+      - ``1024``
+      -
+
+    * - | ``ROCSHMEM_BOOTSTRAP_TIMEOUT``
+        | Bootstrap initialization timeout in seconds
+      - ``5``
+      -
+
+    * - | ``ROCSHMEM_BOOTSTRAP_HOSTID``
+        | Override host identifier for bootstrap. Empty string uses hostname.
+      - `` ``
+      -
+
+    * - | ``ROCSHMEM_BOOTSTRAP_SOCKET_FAMILY``
+        | Socket family for bootstrap (AF_UNSPEC, AF_INET, AF_INET6)
+      - ``types::socket_family::UNSPEC``
+      -
