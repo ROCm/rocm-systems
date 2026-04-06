@@ -24,8 +24,6 @@
 
 #include "team.hpp"
 
-#include <cmath>
-
 #include "rocshmem/rocshmem.hpp"
 #include "backend_bc.hpp"
 #include "util.hpp"
@@ -74,7 +72,6 @@ __host__ __device__ TeamInfo::TeamInfo(Team* _parent_team, int _pe_start,
       pe_start(_pe_start),
       stride(_stride),
       size(_size) {
-  log_stride = log2(stride);
 }
 
 __host__ Team::Team(Backend* handle, TeamInfo* team_info_wrt_parent,

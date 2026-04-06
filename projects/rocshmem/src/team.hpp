@@ -66,11 +66,6 @@ class TeamInfo {
   int stride{-1};
 
   /**
-   * @brief The log2 stride used to calculate team members.
-   */
-  double log_stride{-1};
-
-  /**
    * @brief The size of this team.
    */
   int size{-1};
