@@ -74,7 +74,7 @@ rocprofiler_add_integration_execute_test(
         --att-buffer-size 0x6000000 --att-simd-select 0x3 --att-serialize-all 1 -o out --
         $<TARGET_FILE:hsa_code_object_testapp>
     DEPENDS hsa_code_object_testapp
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
     FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path)
@@ -87,7 +87,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/att_input.json --
         $<TARGET_FILE:hsa_code_object_testapp>
     DEPENDS hsa_code_object_testapp
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
     FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-json)
@@ -99,7 +99,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path
     ARGS --input
@@ -116,7 +116,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-json
     DISABLED ${IS_DISABLED}
     ARGS --input
@@ -145,7 +145,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:hsa_code_object_testapp>
     DEPENDS hsa_code_object_testapp
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED})
 
 # Invalid lib path has to fail
@@ -157,7 +157,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:hsa_code_object_testapp>
     DEPENDS hsa_code_object_testapp
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     WILL_FAIL
     DISABLED ${IS_DISABLED})
 
@@ -167,7 +167,7 @@ rocprofiler_add_integration_execute_test(
             --log-level env --echo -- $<TARGET_FILE:hsa_code_object_testapp>
     DEPENDS hsa_code_object_testapp
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     WILL_FAIL
     DISABLED ${IS_DISABLED})
 
@@ -177,7 +177,7 @@ rocprofiler_add_integration_execute_test(
             --att-library-path . --echo -- $<TARGET_FILE:hsa_code_object_testapp>
     DEPENDS hsa_code_object_testapp
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     WILL_FAIL
     DISABLED ${IS_DISABLED}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
@@ -188,7 +188,7 @@ rocprofiler_add_integration_execute_test(
             $<TARGET_FILE:hsa_code_object_testapp>
     DEPENDS hsa_code_object_testapp
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
 #
@@ -200,7 +200,7 @@ rocprofiler_add_integration_execute_test(
             SQ_WAVES -o out -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED})
 
 # Check for conflict PMC + activity
@@ -210,7 +210,7 @@ rocprofiler_add_integration_execute_test(
             SQ_WAVES -o out --att-activity 8 -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     WILL_FAIL
     DISABLED ${IS_DISABLED})
 
@@ -221,7 +221,7 @@ rocprofiler_add_integration_execute_test(
             --att-perfcounter-ctrl 8 -o out --att-activity 8 -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     WILL_FAIL
     DISABLED ${IS_DISABLED})
 
@@ -266,7 +266,7 @@ rocprofiler_add_integration_execute_test(
             --att-gpu-index 0,9999 -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     WILL_FAIL
     DISABLED ${IS_DISABLED}
     FAIL_REGULAR_EXPRESSION "Invalid GPU Device Index")
@@ -284,7 +284,7 @@ rocprofiler_add_integration_execute_test(
         -o out --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED}
     FIXTURES_SETUP rocprofv3-test-att-perfcounter-target-cu)
 
@@ -294,7 +294,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-att-perfcounter-target-cu
     ARGS --input
@@ -320,7 +320,7 @@ rocprofiler_add_integration_execute_test(
             $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED_OTHER_SIMD}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
@@ -332,7 +332,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED_OTHER_SIMD}
     FIXTURES_REQUIRED rocprofv3-test-att-other-simd
     DISCOVERY_ARGS -k test_other_simd_data
@@ -347,7 +347,7 @@ rocprofiler_add_integration_execute_test(
             $<TARGET_FILE:thread-trace-api-multi-test>
     DEPENDS thread-trace-api-multi-test
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
@@ -360,7 +360,7 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     DISCOVERY_ARGS -k test_shaderdata
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-att-shaderdata
     ARGS --att-shaderdata-out-dir ${SHADERDATA_OUT_DIR}
