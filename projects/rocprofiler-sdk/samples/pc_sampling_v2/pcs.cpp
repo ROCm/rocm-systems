@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 ROCm Developer Tools
+// Copyright (c) 2023-2026 ROCm Developer Tools
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -176,6 +176,7 @@ void
 query_arbiter_fields_for_agent(tool_agent_info* agent_info)
 {
     agent_info->arbiter_fields->clear();
+    agent_info->arbiter_field_names.clear();
 
     auto cb = [](const rocprofiler_pc_sampling_arbiter_state_field_id_t* fields,
                  size_t                                                  num_fields,
@@ -202,6 +203,7 @@ query_arbiter_fields_for_agent(tool_agent_info* agent_info)
         return;
     }
 
+    // Build the field-name LUT once so the buffer callback never has to query names.
     ss << "Agent " << agent_info->agent_id.handle << " supports "
        << agent_info->arbiter_fields->size() << " arbiter state fields:";
     for(auto field_id : *agent_info->arbiter_fields)
@@ -212,10 +214,14 @@ query_arbiter_fields_for_agent(tool_agent_info* agent_info)
             rocprofiler_get_pc_sampling_arbiter_state_field_name(field_id, &name, &name_len);
         if(name_status == ROCPROFILER_STATUS_SUCCESS && name != nullptr)
         {
-            ss << " " << std::string(name, name_len);
+            auto name_str = std::string(name, name_len);
+            agent_info->arbiter_field_names.emplace(field_id, name_str);
+            ss << " " << name_str;
         }
         else
         {
+            agent_info->arbiter_field_names.emplace(
+                field_id, "field_" + std::to_string(static_cast<int>(field_id)));
             ss << " UNKNOWN(" << static_cast<int>(field_id) << ")";
         }
     }
@@ -312,6 +318,30 @@ configure_pc_sampling_v2_prefer_stochastic(tool_agent_info*         agent_info,
 // Printing helpers for v2 record types
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief Print fields common to V1 and V2 records: pc, timestamp, exec_mask,
+ * workgroup_position, wave_in_group, chiplet, dispatch_id, and correlation_id.
+ *
+ * V0 records lack the workgroup/hw_id fields and are printed separately.
+ */
+template <typename PcSamplingRecordT>
+void
+print_sample_common_fields(std::ostream& os, const PcSamplingRecordT* sample)
+{
+    os << "(code_obj_id, offset): (" << sample->pc.code_object_id << ", 0x" << std::hex
+       << sample->pc.code_object_offset << "), " << std::dec
+       << "timestamp: " << sample->timestamp << ", "
+       << "exec: " << std::hex << std::setw(16) << sample->exec_mask << std::dec << ", "
+       << "workgroup_pos_(x=" << std::setw(5) << sample->workgroup_position.x << ", "
+       << "y=" << std::setw(5) << sample->workgroup_position.y << ", "
+       << "z=" << std::setw(5) << sample->workgroup_position.z << "), "
+       << "wave_in_group: " << std::setw(2) << sample->wave_in_group << ", "
+       << "chiplet: " << std::setw(2) << static_cast<unsigned int>(sample->hw_id.chiplet) << ", "
+       << "dispatch_id: " << std::setw(7) << sample->dispatch_id << ", "
+       << "correlation: {internal=" << std::setw(7) << sample->correlation_id.internal << ", "
+       << "external=" << std::setw(5) << sample->correlation_id.external.value << "}";
+}
+
 void
 print_sample_v0(std::ostream& os, const rocprofiler_pc_sampling_record_v0_t* sample)
 {
@@ -328,44 +358,26 @@ print_sample_v0(std::ostream& os, const rocprofiler_pc_sampling_record_v0_t* sam
 void
 print_sample_v1(std::ostream& os, const rocprofiler_pc_sampling_record_v1_t* sample)
 {
-    os << "(code_obj_id, offset): (" << sample->pc.code_object_id << ", 0x" << std::hex
-       << sample->pc.code_object_offset << "), " << std::dec
-       << "timestamp: " << sample->timestamp << ", "
-       << "exec: " << std::hex << std::setw(16) << sample->exec_mask << std::dec << ", "
-       << "workgroup_pos_(x=" << std::setw(5) << sample->workgroup_position.x << ", "
-       << "y=" << std::setw(5) << sample->workgroup_position.y << ", "
-       << "z=" << std::setw(5) << sample->workgroup_position.z << "), "
-       << "wave_in_group: " << std::setw(2) << sample->wave_in_group << ", "
-       << "chiplet: " << std::setw(2) << static_cast<unsigned int>(sample->hw_id.chiplet) << ", "
-       << "dispatch_id: " << std::setw(7) << sample->dispatch_id << ", "
-       << "correlation: {internal=" << std::setw(7) << sample->correlation_id.internal << ", "
-       << "external=" << std::setw(5) << sample->correlation_id.external.value << "}"
-       << "\n";
+    print_sample_common_fields(os, sample);
+    os << "\n";
 }
 
 /**
  * @brief Print a V2 stochastic PC sampling record, including arbiter state
  * decoded via the per-agent arbiter fields.
  *
- * @param agent_info The agent info containing the pre-queried arbiter_fields.
+ * @param agent_info The agent info containing the pre-queried arbiter_fields
+ *                   and the memoized arbiter_field_names map.  Passed as
+ *                   buffer client_data so there is no need to iterate over
+ *                   the global agent list -- this is the recommended policy.
  */
 void
 print_sample_v2(std::ostream&                              os,
                 const rocprofiler_pc_sampling_record_v2_t* sample,
                 const tool_agent_info*                     agent_info)
 {
-    os << "(code_obj_id, offset): (" << sample->pc.code_object_id << ", 0x" << std::hex
-       << sample->pc.code_object_offset << "), " << std::dec
-       << "timestamp: " << sample->timestamp << ", "
-       << "exec: " << std::hex << std::setw(16) << sample->exec_mask << std::dec << ", "
-       << "workgroup_pos_(x=" << std::setw(5) << sample->workgroup_position.x << ", "
-       << "y=" << std::setw(5) << sample->workgroup_position.y << ", "
-       << "z=" << std::setw(5) << sample->workgroup_position.z << "), "
-       << "wave_in_group: " << std::setw(2) << sample->wave_in_group << ", "
-       << "chiplet: " << std::setw(2) << static_cast<unsigned int>(sample->hw_id.chiplet) << ", "
-       << "dispatch_id: " << std::setw(7) << sample->dispatch_id << ", "
-       << "correlation: {internal=" << std::setw(7) << sample->correlation_id.internal << ", "
-       << "external=" << std::setw(5) << sample->correlation_id.external.value << "}, ";
+    print_sample_common_fields(os, sample);
+    os << ", ";
 
     // Print snapshot_information fields
     auto& snap = sample->snapshot_information;
@@ -401,30 +413,34 @@ print_sample_v2(std::ostream&                              os,
 
     os << "wave_count: " << static_cast<unsigned int>(snap.wave_count) << ", ";
 
-    // Decode arbiter_state using the per-agent arbiter fields
+    // Decode arbiter_state using the pre-queried per-agent arbiter fields
+    // and the memoized name map (avoids calling the name API per-sample).
     if(agent_info != nullptr && agent_info->arbiter_fields != nullptr &&
        !agent_info->arbiter_fields->empty())
     {
         os << "arbiter_state: {";
 
-        // Use the extraction API to get field values
+        // Use the extraction API to get field values; look up names from the LUT.
+        struct arbiter_cb_data
+        {
+            std::ostream*                   os;
+            const arbiter_field_name_map_t* name_map;
+        };
+        auto cb_data = arbiter_cb_data{&os, &agent_info->arbiter_field_names};
+
         auto arbiter_cb = [](const rocprofiler_pc_sampling_arbiter_state_field_id_t* field_ids,
                              const uint32_t*                                         values,
                              size_t                                                  num_fields,
                              void* user_data) -> rocprofiler_status_t {
-            auto& out = *static_cast<std::ostream*>(user_data);
+            auto&  data  = *static_cast<arbiter_cb_data*>(user_data);
+            bool   first = true;
             for(size_t i = 0; i < num_fields; i++)
             {
-                if(i > 0) out << ", ";
-                const char* field_name     = nullptr;
-                uint64_t    field_name_len = 0;
-                auto        name_status    = rocprofiler_get_pc_sampling_arbiter_state_field_name(
-                    field_ids[i], &field_name, &field_name_len);
-                if(name_status == ROCPROFILER_STATUS_SUCCESS && field_name != nullptr)
-                    out << std::string(field_name, field_name_len);
-                else
-                    out << "field_" << static_cast<int>(field_ids[i]);
-                out << "=" << values[i];
+                auto it = data.name_map->find(field_ids[i]);
+                if(it == data.name_map->end()) continue;
+                if(!first) *data.os << ", ";
+                *data.os << it->second << "=" << values[i];
+                first = false;
             }
             return ROCPROFILER_STATUS_SUCCESS;
         };
@@ -434,7 +450,7 @@ print_sample_v2(std::ostream&                              os,
             agent_info->arbiter_fields->data(),
             agent_info->arbiter_fields->size(),
             arbiter_cb,
-            static_cast<void*>(&os));
+            static_cast<void*>(&cb_data));
 
         if(extract_status != ROCPROFILER_STATUS_SUCCESS)
         {
@@ -456,14 +472,25 @@ print_sample_invalid(std::ostream& os, const rocprofiler_pc_sampling_record_inva
 // Buffer callback
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief Buffer callback for PC sampling records.
+ *
+ * The @p data parameter carries the @c tool_agent_info* for the GPU agent
+ * that owns this buffer.  Creating one buffer per agent and passing the
+ * agent info as client_data is the recommended policy: it gives the
+ * callback direct access to the per-agent arbiter field IDs and the
+ * memoized name map without having to iterate over the global agent list.
+ */
 void
 rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
                                  rocprofiler_buffer_id_t /*buffer_id*/,
                                  rocprofiler_record_header_t** headers,
                                  size_t                        num_headers,
-                                 void* /*data*/,
-                                 uint64_t drop_count)
+                                 void*                         data,
+                                 uint64_t                      drop_count)
 {
+    auto* agent_info = static_cast<const tool_agent_info*>(data);
+
     std::stringstream ss;
     ss << "The number of delivered samples is: " << num_headers << ", "
        << "while the number of dropped samples is: " << drop_count << "\n";
@@ -500,19 +527,7 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
             {
                 auto* pc_sample =
                     static_cast<rocprofiler_pc_sampling_record_v2_t*>(cur_header->payload);
-                // Find the agent info to look up per-agent arbiter fields.
-                // In this sample, we use the first agent that has arbiter fields.
-                // A production tool would map buffer_id -> agent_id for precise lookup.
-                const tool_agent_info* agent_for_sample = nullptr;
-                for(const auto& agent : gpu_agents)
-                {
-                    if(agent->arbiter_fields && !agent->arbiter_fields->empty())
-                    {
-                        agent_for_sample = agent.get();
-                        break;
-                    }
-                }
-                print_sample_v2(ss, pc_sample, agent_for_sample);
+                print_sample_v2(ss, pc_sample, agent_info);
             }
             else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
             {
@@ -522,7 +537,6 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
             }
             else
             {
-                // Also handle old record types for completeness
                 assert(false && "Unexpected PC sampling record kind in v2 sample");
             }
         }

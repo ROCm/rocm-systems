@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 ROCm Developer Tools
+// Copyright (c) 2023-2026 ROCm Developer Tools
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,19 +26,22 @@
 #include <rocprofiler-sdk/pc_sampling.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace client
 {
 namespace pcs
 {
-constexpr size_t BUFFER_SIZE_BYTES = 8192;
-constexpr size_t WATERMARK         = (BUFFER_SIZE_BYTES / 4);
+constexpr size_t BUFFER_SIZE_BYTES = 4 * 1024 * 1024;  // 4 MB
+constexpr size_t WATERMARK         = (BUFFER_SIZE_BYTES * 3 / 4);
 
 struct tool_agent_info;
 using avail_configs_vec_t         = std::vector<rocprofiler_pc_sampling_configuration_t>;
 using arbiter_fields_vec_t        = std::vector<rocprofiler_pc_sampling_arbiter_state_field_id_t>;
+using arbiter_field_name_map_t    = std::map<rocprofiler_pc_sampling_arbiter_state_field_id_t, std::string>;
 using tool_agent_info_vec_t       = std::vector<std::unique_ptr<tool_agent_info>>;
 using pc_sampling_buffer_id_vec_t = std::vector<rocprofiler_buffer_id_t>;
 
@@ -49,6 +52,10 @@ struct tool_agent_info
     const rocprofiler_agent_t*           agent;
     /// Arbiter state fields supported by this GPU agent (queried per-agent).
     std::unique_ptr<arbiter_fields_vec_t> arbiter_fields;
+    /// Memoized mapping from arbiter field ID to its name string.
+    /// Populated once during query_arbiter_fields_for_agent to avoid
+    /// repeated name lookups in the buffer callback hot path.
+    arbiter_field_name_map_t arbiter_field_names;
 };
 
 // GPU agents supporting some kind of PC sampling.

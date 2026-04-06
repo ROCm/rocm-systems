@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 ROCm Developer Tools
+// Copyright (c) 2023-2026 ROCm Developer Tools
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -93,6 +93,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
 
     for(auto& gpu_agent : pcs::gpu_agents)
     {
+        // Create one buffer per agent. Pass the agent info as client_data so
+        // the buffer callback has direct access to the per-agent arbiter
+        // field IDs and memoized name map without iterating the global list.
         rocprofiler_buffer_policy_t drop_buffer_action = ROCPROFILER_BUFFER_POLICY_LOSSLESS;
         auto                        buffer_id          = rocprofiler_buffer_id_t{};
         ROCPROFILER_CHECK(rocprofiler_create_buffer(client_ctx,
@@ -100,7 +103,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
                                                     client::pcs::WATERMARK,
                                                     drop_buffer_action,
                                                     client::pcs::rocprofiler_pc_sampling_callback,
-                                                    nullptr,
+                                                    static_cast<void*>(gpu_agent.get()),
                                                     &buffer_id));
 
         // Use the v2 configure API with versioned record kinds
