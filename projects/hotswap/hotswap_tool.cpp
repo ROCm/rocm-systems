@@ -112,21 +112,8 @@ static std::string read_elf_isa_note(const uint8_t* elf, size_t size) {
       if (next_note > note_end)
         break;
 
-      // NT_AMDGPU_HSA_ISA (type 3) with owner "AMDGPU"
-      constexpr uint32_t NT_AMDGPU_HSA_ISA = 3;
-      if (nhdr->n_type == NT_AMDGPU_HSA_ISA &&
-          nhdr->n_namesz > 0 &&
-          name_off + nhdr->n_namesz <= note_end &&
-          memcmp(elf + name_off, "AMDGPU", 6) == 0) {
-        if (nhdr->n_descsz > 0 && desc_off + nhdr->n_descsz <= note_end) {
-          const char* desc = reinterpret_cast<const char*>(elf + desc_off);
-          size_t len = strnlen(desc, nhdr->n_descsz);
-          return std::string(desc, len);
-        }
-      }
-
-      // Also check for the ISA name in NT_AMDGPU_METADATA or the AMDGPU
-      // note with the full "amdgcn-amd-amdhsa--" triple.
+      // NT_AMDGPU_METADATA (type 32, owner "AMDGPU") contains msgpack
+      // metadata with the ISA triple for v3+ code objects.
       constexpr uint32_t NT_AMDGPU_METADATA = 32;
       if (nhdr->n_type == NT_AMDGPU_METADATA &&
           nhdr->n_descsz > 0 && desc_off + nhdr->n_descsz <= note_end) {
