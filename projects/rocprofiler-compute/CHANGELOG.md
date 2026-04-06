@@ -57,7 +57,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
-* --path and --subpath options will be removed as they are already deprecated
+* `--path` and `--subpath` options will be removed as they are already deprecated
 
 ## ROCm Compute Profiler 3.5.0 for ROCm 7.12.0
 
