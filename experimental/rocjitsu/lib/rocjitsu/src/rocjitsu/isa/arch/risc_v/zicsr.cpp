@@ -11,9 +11,11 @@ namespace detail {
 CsrrwInst::CsrrwInst(uint32_t raw)
     : IType("csrrw", raw, make_exec_fn<CsrrwInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), csr(12, OperandType::OPR_CSR, inst_.imm11_0) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&csr);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &csr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void CsrrwInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -26,9 +28,11 @@ void CsrrwInst::execute_impl(HartState &ctx) {
 CsrrsInst::CsrrsInst(uint32_t raw)
     : IType("csrrs", raw, make_exec_fn<CsrrsInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), csr(12, OperandType::OPR_CSR, inst_.imm11_0) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&csr);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &csr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void CsrrsInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -41,9 +45,11 @@ void CsrrsInst::execute_impl(HartState &ctx) {
 CsrrcInst::CsrrcInst(uint32_t raw)
     : IType("csrrc", raw, make_exec_fn<CsrrcInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), csr(12, OperandType::OPR_CSR, inst_.imm11_0) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&csr);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &csr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void CsrrcInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -56,9 +62,11 @@ void CsrrcInst::execute_impl(HartState &ctx) {
 CsrrwiInst::CsrrwiInst(uint32_t raw)
     : IType("csrrwi", raw, make_exec_fn<CsrrwiInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       uimm(5, OperandType::OPR_IMM, inst_.rs1), csr(12, OperandType::OPR_CSR, inst_.imm11_0) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&uimm);
-  src_operands_.emplace_back(&csr);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &uimm;
+  src_operands_[1] = &csr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void CsrrwiInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -71,9 +79,11 @@ void CsrrwiInst::execute_impl(HartState &ctx) {
 CsrrsiInst::CsrrsiInst(uint32_t raw)
     : IType("csrrsi", raw, make_exec_fn<CsrrsiInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       uimm(5, OperandType::OPR_IMM, inst_.rs1), csr(12, OperandType::OPR_CSR, inst_.imm11_0) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&uimm);
-  src_operands_.emplace_back(&csr);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &uimm;
+  src_operands_[1] = &csr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void CsrrsiInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
@@ -86,9 +96,11 @@ void CsrrsiInst::execute_impl(HartState &ctx) {
 CsrrciInst::CsrrciInst(uint32_t raw)
     : IType("csrrci", raw, make_exec_fn<CsrrciInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       uimm(5, OperandType::OPR_IMM, inst_.rs1), csr(12, OperandType::OPR_CSR, inst_.imm11_0) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&uimm);
-  src_operands_.emplace_back(&csr);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &uimm;
+  src_operands_[1] = &csr;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 void CsrrciInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
