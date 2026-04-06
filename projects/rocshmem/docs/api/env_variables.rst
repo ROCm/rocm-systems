@@ -19,11 +19,21 @@ control the behavior of rocSHMEM.
       - **Default value**
       - **Value**
 
+    * - | ``ROCSHMEM_DEBUG_LEVEL``
+        | Debug output level (NONE, VERSION, WARN, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)
+      - `` ``
+      -
+
     * - | ``ROCSHMEM_HEAP_SIZE``
         | Defines the size of the rocSHMEM symmetric heap in bytes (per PE).
       - ``1073741824`` (1 GB)
       - | Size in bytes (per PE).
         | Note: the heap is on GPU memory.
+
+    * - | ``ROCSHMEM_MAX_NUM_HOST_CONTEXTS``
+        | Maximum number of host-side communication contexts
+      - ``1``
+      - Maximum number of host-side contexts.
 
     * - | ``ROCSHMEM_MAX_NUM_CONTEXTS``
         | Defines the number of contexts an application can use.

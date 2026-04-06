@@ -38,87 +38,97 @@ namespace rocshmem {
 namespace envvar {
   inline namespace _base {
     const var<bool> uniqueid_with_mpi("UNIQUEID_WITH_MPI",
-                                      "Use MPI when using uniqueId-based initialization",
-                                      false);
+      "Defines whether rocSHMEM is expected to use MPI when using the uniqueId based initialization. 0: Do not use MPI; 1: Use MPI",
+      false);
     const var<types::debug_level> debug_level("DEBUG_LEVEL",
-                                              "Debug output level (NONE, VERSION, WARN, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)",
-                                              types::debug_level::NONE);
+      "Debug output level (NONE, VERSION, WARN, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)",
+      types::debug_level::NONE);
     const var<size_t> heap_size("HEAP_SIZE",
-                                "Size of the rocSHMEM symmetric heap in bytes (per PE). Note: heap is on GPU memory.",
-                                1L << 30);
+      "Defines the size of the rocSHMEM symmetric heap in bytes (per PE). Size in bytes (per PE); Note: the heap is on GPU memory",
+      1L << 30);
     const var<size_t> max_num_teams("MAX_NUM_TEAMS",
-                                    "Maximum number of teams an application can use",
-                                    40);
+      "Defines the number of teams an application can use.",
+      40);
     const var<size_t> max_num_host_contexts("MAX_NUM_HOST_CONTEXTS",
-                                            "Maximum number of host-side communication contexts",
-                                            1);
+      "Maximum number of host-side communication contexts",
+      1);
     const var<size_t> max_num_contexts("MAX_NUM_CONTEXTS",
-                                       "Maximum number of contexts an application can use",
-                                       32);
+      "Defines the number of contexts an application can use.",
+      32);
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
-                                            "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
-                                            1024);
+      "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
+      1024);
     const var<std::string> requested_nic("USE_IB_HCA",
-                                         "Specify which NIC this PE should bind to (e.g., 'bnxt_re0'). Empty string enables auto-detection.");
-    const var<std::string> hca_list("HCA_LIST", "");
+      "Forces the NIC that this PE uses. When this value is set NIC auto-detection and mapping is disabled, the NIC specified in the variable will be selected. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. Example value: bnxt_re0");
+    const var<std::string> hca_list("HCA_LIST",
+      "Comma separated list of NIC names that can be used by rocSHMEM. Unlike ROCSHMEM_USE_IB_HCA, when this variable is set, NIC auto-detection and mapping still executes, but NICs that are not in the list are discarded before auto-detection runs. Prefixing the list with ^ turns the list in an exclude list, NICs that are in the list are discarded before auto-detection runs. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. Example value: bnxt_re1,bnxt_re11, ^mlx5_0,mlx5_3");
     const var<uint32_t> sq_size("SQ_SIZE",
-                                "Send queue size for GDA backend",
-                                1024);
+      "Send queue size for GDA backend",
+      1024);
     const var<std::string> backend("BACKEND",
-                                   "Backend selection (ipc, ro, gda). Empty string enables auto-selection.");
+      "When rocSHMEM is compiled for all backends, this environment variable selects which backend to execute. The default value is an empty string and rocSHMEM auto-selects the most appropriate backend. ipc: IPC Backend; ro: Reverse Offload Backend; gda: GPU Direct Async Backend");
     const var<bool> disable_mixed_ipc("DISABLE_MIXED_IPC",
-                                      "Force using network conduit even when IPC is available",
-                                      false);
+      "Defines whether to force using the network conduit even when IPC is available. 0: Use IPC when available; 1: Force network conduit",
+      false);
     const var<bool> disable_ipc("DISABLE_IPC",
-                                "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
-                                false);
+      "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
+      false);
   }  // inline namespace _base
 
   namespace bootstrap {
     const var<int64_t> timeout("TIMEOUT",
-                               "Bootstrap initialization timeout in seconds",
-                               5);
+      "Bootstrap initialization timeout in seconds",
+      5);
     const var<std::string> hostid("HOSTID",
-                                  "Override host identifier for bootstrap. Empty string uses hostname.");
+      "Override host identifier for bootstrap. Empty string uses hostname.");
     const var<types::socket_family> socket_family("SOCKET_FAMILY",
-                                                  "Socket family for bootstrap (AF_UNSPEC, AF_INET, AF_INET6)",
-                                                  types::socket_family::UNSPEC);
+      "Socket family for bootstrap (AF_UNSPEC, AF_INET, AF_INET6)",
+      types::socket_family::UNSPEC);
     const var<std::string> socket_ifname("SOCKET_IFNAME",
-                                         "Interface to use for bootstrap (only valid when not using MPI, e.g., 'eno8303'). Empty string enables auto-detection.");
+      "Chooses the interface to bootstrap rocSHMEM with. Only valid when not using MPI. The default value is an empty string and rocSHMEM auto-detects the most appropriate interface. Example value: eno8303");
   }  // namespace bootstrap
 
   namespace ro {
     const var<bool> disable_ipc("DISABLE_IPC",
-                                "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
-                                false);
+      "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
+      false);
     const var<useconds_t> progress_delay("PROGRESS_DELAY",
-                                         "Progress engine delay in microseconds (reduces memory subsystem load for performance)",
-                                         3);
+      "Progress engine delay in microseconds (reduces memory subsystem load for performance)",
+      3);
     const var<bool> net_cpu_queue("NET_CPU_QUEUE",
-                                  "Use CPU queue for network operations in Reverse Offload backend",
-                                  false);
+      "Use CPU queue for network operations in Reverse Offload backend",
+      false);
   }  // namespace ro
 
   namespace gda {
     const var<std::string> provider("PROVIDER",
-                                    "NIC vendor selection (bnxt, pensando, ionic, mlx5). Empty string enables auto-detection.");
+      "When rocSHMEM is compiled with support for multiple NIC vendors, the environment variable selects the desired provider. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. bnxt: Broadcom Thor 2; pensando: AMD Pensando Pollara; ionic: AMD Pensando Pollara (alias); mlx5: Mellanox ConnectX-7");
     const var<bool> alternate_qp_ports("ALTERNATE_QP_PORTS",
-                                       "Enable alternating QP mappings across rocSHMEM contexts (helps saturate bandwidth on multiport bonded interfaces)",
-                                       true);
+      "Enables or disables alternating QP mappings across rocSHMEM contexts. 0: Disabled; 1: Enabled. This helps saturate bandwidth on multiport bonded interfaces",
+      true);
     const var<uint8_t> traffic_class("TRAFFIC_CLASS",
-                                     "Traffic class for QPs when using Ethernet link layer",
-                                     0);
+      "When using an NIC with an Ethernet link layer, this sets the traffic class for the QPs.",
+      0);
     const var<bool> pcie_relaxed_ordering("PCIE_RELAXED_ORDERING",
-                                          "Enable PCIe Relaxed Ordering when registering symmetric heap with RDMA NICs",
-                                          false);
+      "Enables PCIe Relaxed Ordering when registering the symmetric heap with the RDMA NICs. 0: Disabled; 1: Enabled",
+      false);
     const var<bool> enable_dmabuf("ENABLE_DMABUF",
-                                  "Enable dmabuf support for memory registration",
-                                  false);
-    const var<bool> override_nic_firmware_check("OVERRIDE_NIC_FIRMWARE_CHECK", "", false);
-    const var<std::string> alltoallv_wg_algo("ALLTOALLV_WG_ALGO", "");
-    const var<uint32_t> sq_size("SQ_SIZE", "", 4096);
-    const var<size_t> num_qps_per_pe_default_ctx("NUM_QPS_PER_PE_DEFAULT_CTX", "", 1);
-    const var<size_t> num_qps_per_pe_usr_ctx("NUM_QPS_PER_PE_USR_CTX", "", 1);
+      "Enable dmabuf support for memory registration. 0: Disabled; 1: Enabled",
+      false);
+    const var<bool> override_nic_firmware_check("OVERRIDE_NIC_FIRMWARE_CHECK",
+      "This environment variable should be used with caution. It overrides the NIC firmware check if a user wants to use an unsupported NIC firmware. If the firmware check is disabled rocSHMEM is not guaranteed to work. 0: Disabled; 1: Enabled",
+      false);
+    const var<std::string> alltoallv_wg_algo("ALLTOALLV_WG_ALGO",
+      "Selects between two algorithms to use for GDA based alltoallv. The GET algorithm uses an initial round of alltoallv communication to distribute displacements then a second round to get transfer data. This algorithm has a higher latency but has better performance for large messages. The COPY algorithm does an alltoallv communication pattern into a staging buffer then does a copy into the destination buffers. This reduces latency but requires more memory, this algorithm only works for small messages.");
+    const var<uint32_t> sq_size("SQ_SIZE",
+      "This environment variable sets the length of the SQ for GDA. Maximum number of Work Queue Entries (WQEs) posted on the Send Queue (SQ)",
+      4096);
+    const var<size_t> num_qps_per_pe_default_ctx("NUM_QPS_PER_PE_DEFAULT_CTX",
+      "Sets the number of Queue Pairs (QPs) to create per PE for the default context.",
+      1);
+    const var<size_t> num_qps_per_pe_usr_ctx("NUM_QPS_PER_PE_USR_CTX",
+      "Sets the number of Queue Pairs (QPs) to create per PE for each user context.",
+      1);
   }  // namespace gda
 
   namespace _detail {
