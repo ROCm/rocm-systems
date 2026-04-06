@@ -229,10 +229,12 @@ TEST(PacingControllerTest, StateTransitions) {
   EXPECT_EQ(pc.state(), PacingController::State::TRACKING);
 
   // TRACKING → STABLE after stable_count low-offset calls.
-  // Pass sim_time slightly ahead of target to guarantee a small positive offset
-  // (wall clock advances between sim_tick_now() and the internal re-read in throttle).
+  // Pass sim_time well ahead of target to guarantee a positive offset even
+  // under sanitizer slowdown (TSan can add milliseconds between the caller's
+  // sim_tick_now() and the internal re-read in throttle).
   for (uint32_t i = 0; i < 8; ++i)
-    pc.throttle(pc.sim_tick_now() + 1'000'000); // +1us ensures positive offset.
+    pc.throttle(pc.sim_tick_now() +
+                100'000'000'000ULL); // +100ms wall-equivalent ensures positive offset under TSan.
   EXPECT_EQ(pc.state(), PacingController::State::STABLE);
 }
 

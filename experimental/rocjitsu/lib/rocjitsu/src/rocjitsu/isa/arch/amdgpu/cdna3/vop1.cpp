@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna3/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -1239,14 +1240,7 @@ VMovB64Vop1::VMovB64Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMovB64Vop1::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane64(wf, lane, src0.read_lane64(wf, lane));
-  }
-}
+void VMovB64Vop1::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_mov_b64_vop1(*this, wf); }
 
 VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_f16_u16", reinterpret_cast<const OpEncoding *>(inst)),

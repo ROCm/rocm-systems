@@ -968,7 +968,7 @@ DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
 }
 
 void DsSwizzleB32Vds::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // DS swizzle: Phase C placeholder.
+  (void)wf; // DS swizzle: not yet implemented.
 }
 
 DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
@@ -2464,7 +2464,7 @@ DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
 }
 
 void DsPermuteB32Vds::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // DS permute: Phase C placeholder.
+  (void)wf; // DS permute: not yet implemented.
 }
 
 DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
@@ -2478,7 +2478,7 @@ DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
 }
 
 void DsBpermuteB32Vds::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // DS permute: Phase C placeholder.
+  (void)wf; // DS permute: not yet implemented.
 }
 
 DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)

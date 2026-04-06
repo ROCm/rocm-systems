@@ -17,8 +17,6 @@ class ImageLoadVimage : public Vimage {
 public:
   ImageLoadVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -27,8 +25,6 @@ class ImageLoadMipVimage : public Vimage {
 public:
   ImageLoadMipVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -37,8 +33,6 @@ class ImageLoadPckVimage : public Vimage {
 public:
   ImageLoadPckVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -47,8 +41,6 @@ class ImageLoadPckSgnVimage : public Vimage {
 public:
   ImageLoadPckSgnVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -57,8 +49,6 @@ class ImageLoadMipPckVimage : public Vimage {
 public:
   ImageLoadMipPckVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -67,8 +57,6 @@ class ImageLoadMipPckSgnVimage : public Vimage {
 public:
   ImageLoadMipPckSgnVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -77,8 +65,6 @@ class ImageStoreVimage : public Vimage {
 public:
   ImageStoreVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -87,8 +73,6 @@ class ImageStoreMipVimage : public Vimage {
 public:
   ImageStoreMipVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -97,8 +81,6 @@ class ImageStorePckVimage : public Vimage {
 public:
   ImageStorePckVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -107,8 +89,6 @@ class ImageStoreMipPckVimage : public Vimage {
 public:
   ImageStoreMipPckVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -117,8 +97,6 @@ class ImageAtomicSwapVimage : public Vimage {
 public:
   ImageAtomicSwapVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -127,8 +105,6 @@ class ImageAtomicCmpswapVimage : public Vimage {
 public:
   ImageAtomicCmpswapVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -137,8 +113,6 @@ class ImageAtomicAddUintVimage : public Vimage {
 public:
   ImageAtomicAddUintVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -147,8 +121,6 @@ class ImageAtomicSubUintVimage : public Vimage {
 public:
   ImageAtomicSubUintVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -157,8 +129,6 @@ class ImageAtomicMinIntVimage : public Vimage {
 public:
   ImageAtomicMinIntVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -167,8 +137,6 @@ class ImageAtomicMinUintVimage : public Vimage {
 public:
   ImageAtomicMinUintVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -177,8 +145,6 @@ class ImageAtomicMaxIntVimage : public Vimage {
 public:
   ImageAtomicMaxIntVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -187,8 +153,6 @@ class ImageAtomicMaxUintVimage : public Vimage {
 public:
   ImageAtomicMaxUintVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -197,8 +161,6 @@ class ImageAtomicAndVimage : public Vimage {
 public:
   ImageAtomicAndVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -207,8 +169,6 @@ class ImageAtomicOrVimage : public Vimage {
 public:
   ImageAtomicOrVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -217,8 +177,6 @@ class ImageAtomicXorVimage : public Vimage {
 public:
   ImageAtomicXorVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -227,8 +185,6 @@ class ImageAtomicIncUintVimage : public Vimage {
 public:
   ImageAtomicIncUintVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -237,8 +193,6 @@ class ImageAtomicDecUintVimage : public Vimage {
 public:
   ImageAtomicDecUintVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -247,8 +201,6 @@ class ImageGetResinfoVimage : public Vimage {
 public:
   ImageGetResinfoVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -257,8 +209,6 @@ class ImageBvhIntersectRayVimage : public Vimage {
 public:
   ImageBvhIntersectRayVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -267,8 +217,6 @@ class ImageBvh64IntersectRayVimage : public Vimage {
 public:
   ImageBvh64IntersectRayVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -277,8 +225,6 @@ class ImageBvhDualIntersectRayVimage : public Vimage {
 public:
   ImageBvhDualIntersectRayVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -287,8 +233,6 @@ class ImageBvh8IntersectRayVimage : public Vimage {
 public:
   ImageBvh8IntersectRayVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -297,8 +241,6 @@ class ImageAtomicAddFltVimage : public Vimage {
 public:
   ImageAtomicAddFltVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -307,8 +249,6 @@ class ImageAtomicMinFltVimage : public Vimage {
 public:
   ImageAtomicMinFltVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -317,8 +257,6 @@ class ImageAtomicMaxFltVimage : public Vimage {
 public:
   ImageAtomicMaxFltVimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -327,8 +265,6 @@ class ImageAtomicPkAddF16Vimage : public Vimage {
 public:
   ImageAtomicPkAddF16Vimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };
@@ -337,8 +273,6 @@ class ImageAtomicPkAddBf16Vimage : public Vimage {
 public:
   ImageAtomicPkAddBf16Vimage(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand rsrc;
 };

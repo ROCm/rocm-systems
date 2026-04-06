@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -45,11 +46,7 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   src_operands_.emplace_back(&simm16);
 }
 
-void SCmovkI32Sopk::execute(amdgpu::Wavefront &wf) {
-  if (wf.read_scc())
-    sdst.write_scalar(wf, static_cast<uint32_t>(
-                              static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_))));
-}
+void SCmovkI32Sopk::execute(amdgpu::Wavefront &wf) { amdgpu::execute_s_cmovk_i32_sopk(*this, wf); }
 
 SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
     : Sopk("s_addk_co_i32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -71,11 +68,7 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
   src_operands_.emplace_back(&simm16);
 }
 
-void SMulkI32Sopk::execute(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  sdst.write_scalar(wf, static_cast<uint32_t>(s0 * imm));
-}
+void SMulkI32Sopk::execute(amdgpu::Wavefront &wf) { amdgpu::execute_s_mulk_i32_sopk(*this, wf); }
 
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
     : Sopk("s_getreg_b32", reinterpret_cast<const OpEncoding *>(inst)),

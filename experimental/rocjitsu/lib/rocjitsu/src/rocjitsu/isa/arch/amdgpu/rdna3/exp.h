@@ -17,8 +17,6 @@ class ExpExp : public Exp {
 public:
   ExpExp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand tgt;
   Operand vsrc0;
   Operand vsrc1;

@@ -17,8 +17,6 @@ class ExportVexport : public Vexport {
 public:
   ExportVexport(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand tgt;
   Operand vsrc0;
   Operand vsrc1;

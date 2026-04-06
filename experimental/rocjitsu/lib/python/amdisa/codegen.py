@@ -264,11 +264,15 @@ class CodeGenerator:
         out_path: str,
         semantics: SemanticsSpec | None = None,
         config: CodegenConfig | None = None,
+        shared_plan: 'SharedInstructionPlan | None' = None,
     ) -> None:
         self.isa_spec = isa_spec
         self.out_path = out_path
         self.semantics = semantics
         self.config = config if config is not None else CodegenConfig()
+        self.shared_plan = shared_plan
+        # Keyed by (mnemonic, enc_name) to avoid cross-encoding conflicts.
+        self._shared_execute_bodies: dict[tuple[str, str], tuple] = {}
         self._emitter = _SemanticEmitter(isa_spec, semantics)
 
     def gen_all(self) -> None:
@@ -519,9 +523,9 @@ class CodeGenerator:
                     f'using OpEncoding = {inst_enc.fmt_enc_name}MachineInst'
                 )
             )
-            # inst_ is protected so derived instruction classes can
-            # access encoding fields (e.g. VOP3 neg/abs/clamp/omod).
-            protected_members = [cgen.Line('protected:')]
+            # inst_ is public so shared execute templates can access
+            # encoding fields through the instruction reference.
+            protected_members = [cgen.Line('public:')]
             protected_members.append(
                 cgen.Statement(
                     '[[maybe_unused]] const OpEncoding inst_'
@@ -1092,28 +1096,28 @@ class CodeGenerator:
         if cls == 'ds_permute':
             # DS_PERMUTE_B32: dst[lane] = src[addr[lane] / 4]
             # DS_BPERMUTE_B32: dst[addr[lane] / 4] = src[lane]
-            L.append('  (void)wf; // DS permute: Phase C placeholder.')
+            L.append('  (void)wf; // DS permute: not yet implemented.')
             return '\n'.join(L)
 
         if cls == 'ds_swizzle':
-            L.append('  (void)wf; // DS swizzle: Phase C placeholder.')
+            L.append('  (void)wf; // DS swizzle: not yet implemented.')
             return '\n'.join(L)
 
-        # ── Image pipeline stubs (Phase C placeholders) ──────────────────
+        # ── Image pipeline stubs ──────────────────────────────────────────
         if cls == 'image_load':
             # Minimal image load: treat as a flat read from the image resource base address.
-            # Full image addressing (texture coordinates, dimensions) deferred to Phase E.
-            L.append('  // Minimal image load stub — Phase C placeholder.')
+            # Full image addressing (texture coordinates, dimensions) not yet implemented.
+            L.append('  // Minimal image load stub — not yet implemented.')
             L.append('  (void)wf;')
             return '\n'.join(L)
 
         if cls == 'image_store':
-            L.append('  // Minimal image store stub — Phase C placeholder.')
+            L.append('  // Minimal image store stub — not yet implemented.')
             L.append('  (void)wf;')
             return '\n'.join(L)
 
         if cls in ('image_atomic', 'image_sample', 'image_query', 'image_bvh'):
-            L.append('  (void)wf; // Deferred to Phase E (image pipeline).')
+            L.append('  (void)wf; // Image pipeline not yet implemented.')
             return '\n'.join(L)
 
         # ── Graphics-only stubs (no-ops in compute simulation) ───────────
@@ -3867,8 +3871,74 @@ class CodeGenerator:
                 return True
         return False
 
+    # Semantic classes whose execute() bodies reference ISA-profile-specific
+    # code (mtype_from_flags, coherency fields, addr_calc, etc.).
+    # These cannot have shared execute templates.
+    _NON_SHAREABLE_CLASSES = frozenset({
+        # Profile-dependent (ISA-specific coherency/mtype calls):
+        'smem_load', 'smem_store',
+        'flat_load', 'flat_store', 'flat_atomic',
+        'buffer_load', 'buffer_store', 'buffer_atomic',
+        'tbuffer_load', 'tbuffer_store',
+        'ds_read', 'ds_write', 'ds_atomic',
+        'global_load', 'global_store',
+        'dcache_inv', 'dcache_wb',
+        'image_load', 'image_store', 'image_atomic', 'image_sample',
+        'image_query',
+        # Nop/stub bodies don't benefit from sharing:
+        'nop',
+        # ISA-dependent control flow (reference Isa:: constants or size_):
+        'waitcnt', 'wait_counter',
+        'endpgm', 'branch', 'cbranch',
+        'scalar_getpc', 'scalar_setpc', 'scalar_swappc', 'scalar_call',
+        # MFMA/WMMA reference ISA-specific headers:
+        'mfma',
+        # Interp/export use ISA-specific encoding struct fields:
+        'interp', 'export',
+        # AccVGPR read/write use ISA-specific register file:
+        'accvgpr_read', 'accvgpr_write',
+        # Vector swap accesses protected inst_ member:
+        'vector_swap',
+        # Vector readlane/writelane/readfirstlane access encoding fields:
+        'vector_readlane', 'vector_writelane', 'vector_readfirstlane',
+    })
+
+    def _can_share_execute(self, mnemonic: str) -> bool:
+        """Check if an instruction's execute() body can be shared across ISAs.
+
+        An instruction is shareable if:
+        1. It exists on 2+ ISAs with the same semantic class (family_shared
+           or universal in the shared_plan).
+        2. Its semantic class is profile-independent (no mtype/coherency calls).
+        3. The current ISA is one of the ISAs that share this instruction.
+        """
+        if self.shared_plan is None:
+            return False
+        arch = self.isa_spec.arch_name
+        # Check universal
+        if mnemonic in self.shared_plan.universal:
+            info = self.shared_plan.universal[mnemonic]
+            if info.semantic_class in self._NON_SHAREABLE_CLASSES:
+                return False
+            return arch in info.isa_names and len(info.isa_names) >= 2
+        # Check family_shared
+        for fam_insts in self.shared_plan.family_shared.values():
+            if mnemonic in fam_insts:
+                info = fam_insts[mnemonic]
+                if info.semantic_class in self._NON_SHAREABLE_CLASSES:
+                    return False
+                return arch in info.isa_names and len(info.isa_names) >= 2
+        return False
+
     def gen_insts(self) -> None:
-        """Generate instruction classes deriving from encoding classes."""
+        """Generate instruction classes deriving from encoding classes.
+
+        When ``shared_plan`` is set (``--multi`` mode), universal instructions
+        are emitted into ``shared/<enc>.h/.cpp`` in the ``rocjitsu::amdgpu``
+        namespace.  Per-ISA files include the shared header and emit
+        ``using amdgpu::<ClassName>;`` aliases for universals, plus full
+        definitions for ISA-exclusive instructions.
+        """
         for enc in self.isa_spec.inst_encodings:
             inst_classes = []
             class_func_impls = []
@@ -3879,7 +3949,7 @@ class CodeGenerator:
                 for inst in enc.insts:
                     class_members = []
                     public_members = [cgen.Line('public:')]
-                    private_members = [cgen.Line('private:')]
+                    private_members = []
                     opnd_ctor_init = []
                     opnd_body = []
                     reads_dst = self._dst_is_also_source(inst)
@@ -4017,31 +4087,44 @@ class CodeGenerator:
                         f'{inst.fmt_name} : public {inst.fmt_true_enc_name}',
                         class_members,
                     )
-                    inst_classes.append(s)
-                    class_func_impls.append(class_ctor_impl)
-
                     # Generate execute() body
                     sem = (
                         self.semantics.instructions.get(inst.name)
                         if self.semantics
                         else None
                     )
+                    exec_impl: cgen.Line
                     if sem:
                         body = self._gen_execute_body(inst, sem, enc.enc_name)
-                        class_func_impls.append(
-                            cgen.Line(
+                        can_share = self._can_share_execute(inst.mnemonic)
+                        if can_share:
+                            enc_key = enc.enc_name.lower().replace('enc_', '')
+                            tmpl_name = f'{inst.mnemonic}_{enc_key}'
+                            # Delegate to shared execute template.
+                            exec_impl = cgen.Line(
+                                f'void {inst.fmt_name}::execute'
+                                f'(amdgpu::Wavefront &wf) {{\n'
+                                f'  amdgpu::execute_{tmpl_name}(*this, wf);\n}}'
+                            )
+                            body_key = (inst.mnemonic, enc.enc_name)
+                            self._shared_execute_bodies[body_key] = (
+                                inst, sem, body, enc.enc_name,
+                            )
+                        else:
+                            exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute'
                                 f'(amdgpu::Wavefront &wf) {{\n'
                                 f'{body}\n}}'
                             )
-                        )
                     else:
-                        class_func_impls.append(
-                            cgen.Line(
-                                f'void {inst.fmt_name}::execute'
-                                f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
-                            )
+                        exec_impl = cgen.Line(
+                            f'void {inst.fmt_name}::execute'
+                            f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
                         )
+
+                    inst_classes.append(s)
+                    class_func_impls.append(class_ctor_impl)
+                    class_func_impls.append(exec_impl)
 
                 # Build include lists for .cpp files
                 cpp_includes = [
@@ -4101,24 +4184,41 @@ class CodeGenerator:
                         ('limits', True),
                     ])
 
+                # Include the unified shared execute template header when
+                # any instruction in this encoding delegates to a template.
+                if self.shared_plan is not None:
+                    has_shared = any(
+                        self._can_share_execute(i.mnemonic)
+                        for i in enc.insts
+                        if self.semantics and i.name in self.semantics.instructions
+                    )
+                    if has_shared:
+                        cpp_includes.append((
+                            'rocjitsu/isa/arch/amdgpu/shared/execute_shared.h',
+                            False,
+                        ))
+
+                # Build per-ISA header includes.
+                h_includes = [
+                    (
+                        f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/encodings.h',
+                        False,
+                    ),
+                    (
+                        f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/isa.h',
+                        False,
+                    ),
+                    (
+                        f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/operand.h',
+                        False,
+                    ),
+                ]
+
                 inst_def_file = CppFile(
                     f'{enc.fmt_enc_name.lower()}',
                     self.out_path,
                     True,
-                    [
-                        (
-                            f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/encodings.h',
-                            False,
-                        ),
-                        (
-                            f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/isa.h',
-                            False,
-                        ),
-                        (
-                            f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/operand.h',
-                            False,
-                        ),
-                    ],
+                    h_includes,
                     [],
                     inst_classes,
                     self.isa_spec.arch_name,
@@ -4173,6 +4273,155 @@ class CodeGenerator:
 
                 inst_def_file.gen_code()
                 inst_impl_file.gen_code()
+
+        # Shared execute templates are written by _run_multi after all ISAs
+        # are processed, using the accumulated _shared_execute_bodies dict.
+        # Individual ISA codegens just collect; they don't write.
+
+    def _write_shared_inst_files(
+        self,
+        shared_by_enc: dict[str, tuple[list, list, list, list]],
+    ) -> None:
+        """Write shared/<enc>.h for universal instruction classes.
+
+        Universal instruction classes are emitted as header-only definitions
+        in the ``rocjitsu::amdgpu`` namespace.  Per-ISA files pull them in
+        with ``using amdgpu::ClassName;``.
+
+        Note: the shared classes currently reference per-ISA types
+        (``encodings.h``, ``isa.h``, ``operand.h``) from the last-processed
+        ISA.  This is correct for compilation because all universal
+        instructions have identical encoding layouts, and the per-ISA header
+        that includes the shared header provides the correct ISA context.
+        Phase F.5 will introduce shared encoding bases to eliminate this
+        dependency.
+        """
+        import os
+
+        shared_dir = os.path.join(self.out_path, 'shared')
+        os.makedirs(shared_dir, exist_ok=True)
+
+        for enc_name, (classes, impls, _, _) in sorted(shared_by_enc.items()):
+            if not classes:
+                continue
+            guard = f'ROCJITSU_ISA_AMDGPU_SHARED_{enc_name.upper()}_H_'
+
+            h_path = os.path.join(shared_dir, f'{enc_name}.h')
+            with open(h_path, 'w') as f:
+                f.write(
+                    '// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.\n'
+                    '// SPDX-License-Identifier: MIT\n\n'
+                    '// Automatically generated shared instruction classes.\n'
+                    '// Do not modify.\n//\n'
+                    '// This header is a namespace-less code fragment included\n'
+                    '// inside the per-ISA namespace block by each <isa>/<enc>.h.\n'
+                    '// It relies on the encoding base classes (Sop2, Vop1, etc.),\n'
+                    '// Operand, OperandType, and MachineInst being visible in the\n'
+                    '// including namespace.\n\n'
+                )
+                f.write(f'#ifndef {guard}\n#define {guard}\n\n')
+                # No #include directives here — this file is included inside
+                # a namespace block.  All required headers (wavefront.h,
+                # except.h, data_types.h, <cmath>, etc.) must be included
+                # by the per-ISA header BEFORE the namespace opens.\n
+
+                # No namespace — this file is included inside per-ISA
+                # namespace rocjitsu::<isa> { ... }.
+
+                # Emit class definitions.
+                for cls in classes:
+                    out = re.sub(r'^struct\s', 'class ', f'{cls}\n\n')
+                    f.write(out)
+
+                # Emit inline constructor + execute() bodies.
+                for impl in impls:
+                    f.write(f'inline {impl}\n\n')
+
+                f.write(f'#endif // {guard}\n')
+
+    def _write_shared_execute_templates(self) -> None:
+        """Write shared/execute_<enc>.h with full template execute bodies.
+
+        Each shared instruction gets a template function:
+        ``template<typename Inst> inline void execute_<mnemonic>(Inst &inst, Wavefront &wf)``
+        with the execute body modified to access operands through ``self.``.
+        """
+        import os
+
+        import os
+        import re as _re
+
+        entries: list[tuple[str, str, str]] = []
+        for (mnemonic, enc_name_key), (inst, sem, body, enc_name) in sorted(
+            self._shared_execute_bodies.items()
+        ):
+            enc_key = enc_name.lower().replace('enc_', '')
+            mnemonic = f'{mnemonic}_{enc_key}'
+            prefixed_body = body
+            for opnd in inst.operands:
+                pattern = rf'(?<!\.)(?<!\w){_re.escape(opnd.name)}\.'
+                prefixed_body = _re.sub(pattern, f'inst.{opnd.name}.', prefixed_body)
+            prefixed_body = _re.sub(r'(?<!\.)(?<!\w)inst_\.', 'inst.inst_.', prefixed_body)
+            prefixed_body = _re.sub(r'(?<!\.)(?<!\w)set_data\(', 'inst.set_data(', prefixed_body)
+            prefixed_body = _re.sub(r'(?<!\.)(?<!\w)size_(?!\w)', 'inst.size()', prefixed_body)
+            prefixed_body = _re.sub(r'(?<!\.)(?<!\w)mnemonic\(\)', 'inst.mnemonic()', prefixed_body)
+            prefixed_body = _re.sub(r'(?<!\.)(?<!\w)simm32_(?!\w)', 'inst.simm32_', prefixed_body)
+            prefixed_body = _re.sub(r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body)
+            entries.append((mnemonic, prefixed_body, sem.semantic_class))
+
+        shared_dir = os.path.join(self.out_path, 'shared')
+        os.makedirs(shared_dir, exist_ok=True)
+
+        guard = 'ROCJITSU_ISA_AMDGPU_SHARED_EXECUTE_SHARED_H_'
+        lines = [
+            '// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.',
+            '// SPDX-License-Identifier: MIT',
+            '',
+            '// Automatically generated shared execute() templates.',
+            '// Do not modify.',
+            '',
+            f'#ifndef {guard}',
+            f'#define {guard}',
+            '',
+            '#include "rocjitsu/vm/amdgpu/wavefront.h"',
+            '#include "rocjitsu/vm/amdgpu/compute_unit.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
+            '#include "util/data_types.h"',
+            '#include "util/except.h"',
+            '#include <algorithm>',
+            '#include <bit>',
+            '#include <cmath>',
+            '#include <limits>',
+            '',
+            'namespace rocjitsu {',
+            'namespace amdgpu {',
+            '',
+        ]
+
+        for mnemonic, prefixed_body, sem_class in entries:
+            lines.append(f'/// @brief Shared execute() for {mnemonic} ({sem_class}).')
+            lines.append('template <typename Inst>')
+            lines.append(
+                f'inline void execute_{mnemonic}('
+                f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {{'
+            )
+            lines.append(prefixed_body)
+            lines.append('}')
+            lines.append('')
+
+        lines.append('} // namespace amdgpu')
+        lines.append('} // namespace rocjitsu')
+        lines.append('')
+        lines.append(f'#endif // {guard}')
+        lines.append('')
+
+        filepath = os.path.join(shared_dir, 'execute_shared.h')
+        with open(filepath, 'w') as f:
+            f.write('\n'.join(lines))
+
+        import sys
+        print(f'Generated shared/execute_shared.h with '
+              f'{len(entries)} template functions', file=sys.stderr)
 
     def gen_operand_types(self) -> None:
         """Generate operand type and OpSel enums."""

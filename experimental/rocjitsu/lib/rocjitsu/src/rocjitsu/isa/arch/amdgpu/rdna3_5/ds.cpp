@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/ds.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -1084,7 +1085,7 @@ DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
 }
 
 void DsSwizzleB32Ds::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // DS swizzle: Phase C placeholder.
+  amdgpu::execute_ds_swizzle_b32_ds(*this, wf);
 }
 
 DsLoadB32Ds::DsLoadB32Ds(const MachineInst *inst)
@@ -2553,7 +2554,7 @@ DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
 }
 
 void DsPermuteB32Ds::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // DS permute: Phase C placeholder.
+  amdgpu::execute_ds_permute_b32_ds(*this, wf);
 }
 
 DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
@@ -2567,7 +2568,7 @@ DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
 }
 
 void DsBpermuteB32Ds::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // DS permute: Phase C placeholder.
+  amdgpu::execute_ds_bpermute_b32_ds(*this, wf);
 }
 
 DsStoreB96Ds::DsStoreB96Ds(const MachineInst *inst)

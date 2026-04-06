@@ -19,7 +19,7 @@ public:
   Sop1(const std::string &mnemonic, const Sop1MachineInst *inst);
   using OpEncoding = Sop1MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -32,7 +32,7 @@ public:
   Sopc(const std::string &mnemonic, const SopcMachineInst *inst);
   using OpEncoding = SopcMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -47,7 +47,7 @@ public:
   Sopp(const std::string &mnemonic, const SoppMachineInst *inst);
   using OpEncoding = SoppMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -59,7 +59,7 @@ public:
   Sopk(const std::string &mnemonic, const SopkMachineInst *inst);
   using OpEncoding = SopkMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -72,7 +72,7 @@ public:
   Sop2(const std::string &mnemonic, const Sop2MachineInst *inst);
   using OpEncoding = Sop2MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -88,7 +88,7 @@ public:
   Smem(const std::string &mnemonic, const SmemMachineInst *inst);
   using OpEncoding = SmemMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -99,7 +99,7 @@ public:
   Vop1(const std::string &mnemonic, const Vop1MachineInst *inst);
   using OpEncoding = Vop1MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -112,7 +112,7 @@ public:
   Vopc(const std::string &mnemonic, const VopcMachineInst *inst);
   using OpEncoding = VopcMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -125,7 +125,7 @@ public:
   Vop2(const std::string &mnemonic, const Vop2MachineInst *inst);
   using OpEncoding = Vop2MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -139,7 +139,7 @@ public:
   Vop3(const std::string &mnemonic, const Vop3MachineInst *inst);
   using OpEncoding = Vop3MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -157,7 +157,7 @@ public:
   Vop3p(const std::string &mnemonic, const Vop3pMachineInst *inst);
   using OpEncoding = Vop3pMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -175,7 +175,7 @@ public:
   Vinterp(const std::string &mnemonic, const VinterpMachineInst *inst);
   using OpEncoding = VinterpMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -186,7 +186,7 @@ public:
   Vdsdir(const std::string &mnemonic, const VdsdirMachineInst *inst);
   using OpEncoding = VdsdirMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -198,7 +198,7 @@ public:
   Vds(const std::string &mnemonic, const VdsMachineInst *inst);
   using OpEncoding = VdsMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -209,7 +209,7 @@ public:
   Vbuffer(const std::string &mnemonic, const VbufferMachineInst *inst);
   using OpEncoding = VbufferMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -220,7 +220,7 @@ public:
   Vimage(const std::string &mnemonic, const VimageMachineInst *inst);
   using OpEncoding = VimageMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -231,7 +231,7 @@ public:
   Vsample(const std::string &mnemonic, const VsampleMachineInst *inst);
   using OpEncoding = VsampleMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -242,7 +242,7 @@ public:
   Vexport(const std::string &mnemonic, const VexportMachineInst *inst);
   using OpEncoding = VexportMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -253,7 +253,7 @@ public:
   Vflat(const std::string &mnemonic, const VflatMachineInst *inst);
   using OpEncoding = VflatMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -264,7 +264,7 @@ public:
   Vscratch(const std::string &mnemonic, const VscratchMachineInst *inst);
   using OpEncoding = VscratchMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -275,7 +275,7 @@ public:
   Vglobal(const std::string &mnemonic, const VglobalMachineInst *inst);
   using OpEncoding = VglobalMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -286,7 +286,7 @@ public:
   Vop3SdstEnc(const std::string &mnemonic, const Vop3SdstEncMachineInst *inst);
   using OpEncoding = Vop3SdstEncMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:

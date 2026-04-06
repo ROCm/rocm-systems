@@ -17,8 +17,6 @@ class SLoadB32Smem : public Smem {
 public:
   SLoadB32Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -28,8 +26,6 @@ class SLoadB64Smem : public Smem {
 public:
   SLoadB64Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -39,8 +35,6 @@ class SLoadB128Smem : public Smem {
 public:
   SLoadB128Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -50,8 +44,6 @@ class SLoadB256Smem : public Smem {
 public:
   SLoadB256Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -61,8 +53,6 @@ class SLoadB512Smem : public Smem {
 public:
   SLoadB512Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -72,8 +62,6 @@ class SBufferLoadB32Smem : public Smem {
 public:
   SBufferLoadB32Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -83,8 +71,6 @@ class SBufferLoadB64Smem : public Smem {
 public:
   SBufferLoadB64Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -94,8 +80,6 @@ class SBufferLoadB128Smem : public Smem {
 public:
   SBufferLoadB128Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -105,8 +89,6 @@ class SBufferLoadB256Smem : public Smem {
 public:
   SBufferLoadB256Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -116,8 +98,6 @@ class SBufferLoadB512Smem : public Smem {
 public:
   SBufferLoadB512Smem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand sdata;
   Operand sbase;
   Operand soffset;
@@ -127,16 +107,12 @@ class SGl1InvSmem : public Smem {
 public:
   SGl1InvSmem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class SDcacheInvSmem : public Smem {
 public:
   SDcacheInvSmem(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 } // namespace rdna3

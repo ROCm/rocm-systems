@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/mfma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -711,37 +712,7 @@ VMadMixF32Vop3p::VMadMixF32Vop3p(const MachineInst *inst)
 }
 
 void VMadMixF32Vop3p::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = src0.read_lane(wf, lane);
-    uint32_t raw1 = src1.read_lane(wf, lane);
-    uint32_t raw2 = src2.read_lane(wf, lane);
-    float a, b, c;
-    if (inst_.op_sel_hi & 1)
-      a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
-    else
-      a = std::bit_cast<float>(raw0);
-    if (inst_.op_sel_hi & 2)
-      b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
-    else
-      b = std::bit_cast<float>(raw1);
-    if (inst_.op_sel_hi_2)
-      c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
-    else
-      c = std::bit_cast<float>(raw2);
-    if (inst_.neg & 1)
-      a = -a;
-    if (inst_.neg & 2)
-      b = -b;
-    if (inst_.neg & 4)
-      c = -c;
-    float result = a * b + c;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
-  }
+  amdgpu::execute_v_mad_mix_f32_vop3p(*this, wf);
 }
 
 VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
@@ -758,39 +729,7 @@ VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
 }
 
 void VMadMixloF16Vop3p::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = src0.read_lane(wf, lane);
-    uint32_t raw1 = src1.read_lane(wf, lane);
-    uint32_t raw2 = src2.read_lane(wf, lane);
-    float a, b, c;
-    if (inst_.op_sel_hi & 1)
-      a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
-    else
-      a = std::bit_cast<float>(raw0);
-    if (inst_.op_sel_hi & 2)
-      b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
-    else
-      b = std::bit_cast<float>(raw1);
-    if (inst_.op_sel_hi_2)
-      c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
-    else
-      c = std::bit_cast<float>(raw2);
-    if (inst_.neg & 1)
-      a = -a;
-    if (inst_.neg & 2)
-      b = -b;
-    if (inst_.neg & 4)
-      c = -c;
-    float result = a * b + c;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    uint16_t h = util::f32_to_f16(result);
-    uint32_t prev = vdst.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, (prev & 0xFFFF0000u) | h);
-  }
+  amdgpu::execute_v_mad_mixlo_f16_vop3p(*this, wf);
 }
 
 VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
@@ -807,39 +746,7 @@ VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
 }
 
 void VMadMixhiF16Vop3p::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = src0.read_lane(wf, lane);
-    uint32_t raw1 = src1.read_lane(wf, lane);
-    uint32_t raw2 = src2.read_lane(wf, lane);
-    float a, b, c;
-    if (inst_.op_sel_hi & 1)
-      a = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 1) ? (raw0 >> 16) : raw0));
-    else
-      a = std::bit_cast<float>(raw0);
-    if (inst_.op_sel_hi & 2)
-      b = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 2) ? (raw1 >> 16) : raw1));
-    else
-      b = std::bit_cast<float>(raw1);
-    if (inst_.op_sel_hi_2)
-      c = util::f16_to_f32(static_cast<uint16_t>((inst_.op_sel & 4) ? (raw2 >> 16) : raw2));
-    else
-      c = std::bit_cast<float>(raw2);
-    if (inst_.neg & 1)
-      a = -a;
-    if (inst_.neg & 2)
-      b = -b;
-    if (inst_.neg & 4)
-      c = -c;
-    float result = a * b + c;
-    if (inst_.clamp)
-      result = std::clamp(result, 0.0f, 1.0f);
-    uint16_t h = util::f32_to_f16(result);
-    uint32_t prev = vdst.read_lane(wf, lane);
-    vdst.write_lane(wf, lane, (prev & 0x0000FFFFu) | (static_cast<uint32_t>(h) << 16));
-  }
+  amdgpu::execute_v_mad_mixhi_f16_vop3p(*this, wf);
 }
 
 VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
