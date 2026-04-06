@@ -143,8 +143,7 @@ void TestFrequenciesReadWrite::Run(void) {
         if (dpm_levels < 2) {
           // Not enough DPM levels to test a non-trivial bitmask; skip.
           IF_VERB(STANDARD) {
-            std::cout << "\t**Set " << FreqEnumToStr(amdsmi_clk)
-                      << ": Only " << dpm_levels
+            std::cout << "\t**Set " << FreqEnumToStr(amdsmi_clk) << ": Only " << dpm_levels
                       << " DPM level(s), skipping write test." << std::endl;
           }
           return;
