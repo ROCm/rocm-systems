@@ -6,6 +6,7 @@
 
 #include "device.h"
 #include "collectives.h"
+#define NCCL_DEFINE_SHMEM
 #include "common.h"
 
 struct RunWorkNop {

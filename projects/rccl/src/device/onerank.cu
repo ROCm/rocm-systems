@@ -8,6 +8,7 @@
 #include "alloc.h"
 #include "collectives.h"
 #include "common_kernel.h"
+#define NCCL_DEFINE_SHMEM
 #include "common.h"
 #include <cuda_runtime.h>
 

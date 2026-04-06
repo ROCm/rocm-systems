@@ -592,6 +592,7 @@ for name in name_to_funcs.keys():
 
     out = f.write
     out(
+      '#define NCCL_DEFINE_SHMEM\n'
       '#include "common.h"\n'
       '#include "{lower_coll}.h"\n'
       .format(lower_coll=coll_camel_to_lower[coll])

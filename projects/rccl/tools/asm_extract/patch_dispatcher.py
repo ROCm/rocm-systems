@@ -75,6 +75,11 @@ def patch_abs_symbols(lines, max_res):
             result.append(f'{m.group(1)}.has_indirect_call, 1\n')
             continue
 
+        m = re.match(r'(\s*\.set\s+\S+)\.(num_named_barrier),\s*(.*)', line)
+        if m:
+            result.append(f'{m.group(1)}.num_named_barrier, 0\n')
+            continue
+
         result.append(line)
     return result
 
