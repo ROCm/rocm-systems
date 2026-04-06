@@ -144,7 +144,7 @@ main(int argc, char** argv)
 
     tim::unwind::set_bfd_verbose(3);
     rocprofsys::set_state(rocprofsys::State::Init);
-    rocprofsys::config::configure_settings();
+    rocprofsys::config::configure_settings(false);
 
     std::set<std::string> _category_options = component_categories{}();
     {
