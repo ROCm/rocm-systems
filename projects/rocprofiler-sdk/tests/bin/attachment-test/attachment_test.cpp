@@ -97,7 +97,7 @@ execute_kernels(const size_t      tid,
         // compose string first to avoid multithreaded handling of cout << operator
         auto msg = std::stringstream{};
         msg << "Starting kernel execution loop for thread " << tid << " with stream " << stream_id
-              << " on device " << device_id << "...\n";
+            << " on device " << device_id << "...\n";
         std::cout << msg.str();
     }
     const int num_iterations = 30;
@@ -158,8 +158,8 @@ execute_kernels(const size_t      tid,
     {
         // compose string first to avoid multithreaded handling of cout << operator
         auto msg = std::stringstream{};
-        msg << "Kernel execution loop completed for thread " << tid << " with stream "
-            << stream_id << " on device " << device_id << "...\n";
+        msg << "Kernel execution loop completed for thread " << tid << " with stream " << stream_id
+            << " on device " << device_id << "...\n";
         std::cout << msg.str();
     }
 
@@ -232,7 +232,7 @@ main(int argc, char** argv)
     // Destroy streams
     for(auto itr : _streams)
         HIP_ASSERT(hipStreamDestroy(itr));
-    
+
     if(signal_received)
     {
         std::cout << "Attachment test process " << getpid() << " received signal "
