@@ -777,11 +777,7 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string* retStr) {
   return 0;
 }
 
-int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr, bool returnWriteErr) {
-  // returnWriteErr = false, backwards compatibility (old calls)
-  // returnWriteErr = true, improvement - allows us to detect errors
-  // when writing to file
-  // (such as EBUSY)
+int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   auto sysfs_path = path_;
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);
@@ -886,7 +882,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
       return writeDevInfoStr(type, val);
     case kDevComputePartition:
     case kDevMemoryPartition:
-      return writeDevInfoStr(type, val, true);
+      return writeDevInfoStr(type, val);
 
     default:
       return EINVAL;
