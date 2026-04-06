@@ -273,7 +273,7 @@ uint32_t rj_code_basic_block_num_instructions(const rj_code_basic_block_t *block
 const char *rj_code_inst_mnemonic(const rj_code_inst_t *inst) {
   if (!inst)
     return nullptr;
-  return reinterpret_cast<const Instruction *>(inst)->mnemonic().c_str();
+  return reinterpret_cast<const Instruction *>(inst)->mnemonic().data();
 }
 
 uint32_t rj_code_inst_size(const rj_code_inst_t *inst) {

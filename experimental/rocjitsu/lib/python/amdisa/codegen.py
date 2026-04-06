@@ -375,7 +375,7 @@ class CodeGenerator:
                 cgen.FunctionDeclaration(
                     cgen.Value('', f'{inst_enc.fmt_enc_name}'),
                     [
-                        cgen.Value('const std::string', '&mnemonic'),
+                        cgen.Value('std::string_view', 'mnemonic'),
                         cgen.Value(
                             f'const {inst_enc.fmt_enc_name}MachineInst',
                             '*inst',
@@ -423,9 +423,9 @@ class CodeGenerator:
             rule = profile.mnemonic_rule(inst_enc.enc_name)
             if rule.use_flat_mnemonic:
                 mnemonic_expr = 'flat_mnemonic(mnemonic, inst->seg)'
-            elif rule.suffix:
-                mnemonic_expr = f'mnemonic + "{rule.suffix}"'
             else:
+                # Suffix is pre-baked into the literal by the instruction
+                # constructor, so the encoding base just passes through.
                 mnemonic_expr = 'mnemonic'
 
             modifier_lines = ''
@@ -452,12 +452,24 @@ class CodeGenerator:
                     f' if ({size_condition})'
                     f' size_ += sizeof(MachineInst);'
                 )
-            class_ctor_impl = (
-                f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
-                f'(const std::string &mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst) '
-                f': IsaInstruction<Isa>({mnemonic_expr}), inst_(*inst) '
-                f'{{{size_line}{modifier_lines}}}'
-            )
+            if rule.use_flat_mnemonic:
+                # FLAT mnemonics are dynamically constructed ("scratch_*",
+                # "global_*"). Store the owned string in a member so the
+                # string_view in Instruction doesn't dangle.
+                class_ctor_impl = (
+                    f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
+                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst) '
+                    f': IsaInstruction<Isa>(""), inst_(*inst), '
+                    f'owned_mnemonic_({mnemonic_expr}) '
+                    f'{{ mnemonic_ = owned_mnemonic_;{size_line}{modifier_lines}}}'
+                )
+            else:
+                class_ctor_impl = (
+                    f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
+                    f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst) '
+                    f': IsaInstruction<Isa>({mnemonic_expr}), inst_(*inst) '
+                    f'{{{size_line}{modifier_lines}}}'
+                )
             class_func_impls.append(cgen.Line(class_ctor_impl))
             fmt_enc_name = inst_enc.fmt_enc_name
 
@@ -531,6 +543,11 @@ class CodeGenerator:
                     '[[maybe_unused]] const OpEncoding inst_'
                 )
             )
+            # FLAT encoding bases need an owned string for the dynamic mnemonic.
+            if rule.use_flat_mnemonic:
+                protected_members.append(
+                    cgen.Statement('std::string owned_mnemonic_')
+                )
             class_members.extend(protected_members)
             class_members.extend(private_members)
             s = cgen.Struct(
@@ -554,6 +571,7 @@ class CodeGenerator:
                 ),
                 ('rocjitsu/isa/instruction.h', False),
                 ('string', True),
+                ('string_view', True),
             ],
             [],
             enc_classes,
@@ -567,16 +585,13 @@ class CodeGenerator:
         if needs_flat_mnemonic:
             flat_mnemonic_helper = cgen.Line(
                 'namespace {\n'
-                'std::string flat_mnemonic(const std::string &mnemonic, int seg) {\n'
+                'std::string flat_mnemonic(std::string_view mnemonic, int seg) {\n'
                 '  // seg: 0=FLAT, 1=SCRATCH, 2=GLOBAL\n'
-                '  if (seg == 1) {\n'
-                '    if (mnemonic.substr(0, 5) == "flat_")\n'
-                '      return "scratch_" + mnemonic.substr(5);\n'
-                '  } else if (seg == 2) {\n'
-                '    if (mnemonic.substr(0, 5) == "flat_")\n'
-                '      return "global_" + mnemonic.substr(5);\n'
-                '  }\n'
-                '  return mnemonic;\n'
+                '  if (seg == 1 && mnemonic.substr(0, 5) == "flat_")\n'
+                '    return std::string("scratch_").append(mnemonic.substr(5));\n'
+                '  if (seg == 2 && mnemonic.substr(0, 5) == "flat_")\n'
+                '    return std::string("global_").append(mnemonic.substr(5));\n'
+                '  return std::string(mnemonic);\n'
                 '}\n'
                 '} // namespace'
             )
@@ -4003,8 +4018,12 @@ class CodeGenerator:
                             'void execute(amdgpu::Wavefront &wf) override'
                         )
                     )
+                    # Embed the full mnemonic (with suffix) as a string literal
+                    # so the encoding base gets a string_view to static storage.
+                    rule = self.isa_spec.profile.mnemonic_rule(enc.enc_name)
+                    full_mnemonic = inst.mnemonic + (rule.suffix or '')
                     init_list_parts = [
-                        f'{inst.fmt_true_enc_name}("{inst.mnemonic}", '
+                        f'{inst.fmt_true_enc_name}("{full_mnemonic}", '
                         f'reinterpret_cast<const OpEncoding*>(inst))'
                     ] + opnd_ctor_init
                     init_list = ', '.join(init_list_parts)
