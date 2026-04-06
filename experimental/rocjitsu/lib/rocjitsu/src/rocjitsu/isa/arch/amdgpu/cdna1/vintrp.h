@@ -17,8 +17,6 @@ class VInterpP1F32Vintrp : public Vintrp {
 public:
   VInterpP1F32Vintrp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vsrc;
   Operand attr;
@@ -28,8 +26,6 @@ class VInterpP2F32Vintrp : public Vintrp {
 public:
   VInterpP2F32Vintrp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vsrc;
   Operand attr;
@@ -39,8 +35,6 @@ class VInterpMovF32Vintrp : public Vintrp {
 public:
   VInterpMovF32Vintrp(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vsrc;
   Operand attr;

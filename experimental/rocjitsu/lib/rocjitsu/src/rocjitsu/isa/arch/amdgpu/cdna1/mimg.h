@@ -17,8 +17,6 @@ class ImageLoadMimg : public Mimg {
 public:
   ImageLoadMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -28,8 +26,6 @@ class ImageLoadMipMimg : public Mimg {
 public:
   ImageLoadMipMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -39,8 +35,6 @@ class ImageLoadPckMimg : public Mimg {
 public:
   ImageLoadPckMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -50,8 +44,6 @@ class ImageLoadPckSgnMimg : public Mimg {
 public:
   ImageLoadPckSgnMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -61,8 +53,6 @@ class ImageLoadMipPckMimg : public Mimg {
 public:
   ImageLoadMipPckMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -72,8 +62,6 @@ class ImageLoadMipPckSgnMimg : public Mimg {
 public:
   ImageLoadMipPckSgnMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -83,8 +71,6 @@ class ImageStoreMimg : public Mimg {
 public:
   ImageStoreMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -94,8 +80,6 @@ class ImageStoreMipMimg : public Mimg {
 public:
   ImageStoreMipMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -105,8 +89,6 @@ class ImageStorePckMimg : public Mimg {
 public:
   ImageStorePckMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -116,8 +98,6 @@ class ImageStoreMipPckMimg : public Mimg {
 public:
   ImageStoreMipPckMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -127,8 +107,6 @@ class ImageGetResinfoMimg : public Mimg {
 public:
   ImageGetResinfoMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -138,8 +116,6 @@ class ImageAtomicSwapMimg : public Mimg {
 public:
   ImageAtomicSwapMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -149,8 +125,6 @@ class ImageAtomicCmpswapMimg : public Mimg {
 public:
   ImageAtomicCmpswapMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -160,8 +134,6 @@ class ImageAtomicAddMimg : public Mimg {
 public:
   ImageAtomicAddMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -171,8 +143,6 @@ class ImageAtomicSubMimg : public Mimg {
 public:
   ImageAtomicSubMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -182,8 +152,6 @@ class ImageAtomicSminMimg : public Mimg {
 public:
   ImageAtomicSminMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -193,8 +161,6 @@ class ImageAtomicUminMimg : public Mimg {
 public:
   ImageAtomicUminMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -204,8 +170,6 @@ class ImageAtomicSmaxMimg : public Mimg {
 public:
   ImageAtomicSmaxMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -215,8 +179,6 @@ class ImageAtomicUmaxMimg : public Mimg {
 public:
   ImageAtomicUmaxMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -226,8 +188,6 @@ class ImageAtomicAndMimg : public Mimg {
 public:
   ImageAtomicAndMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -237,8 +197,6 @@ class ImageAtomicOrMimg : public Mimg {
 public:
   ImageAtomicOrMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -248,8 +206,6 @@ class ImageAtomicXorMimg : public Mimg {
 public:
   ImageAtomicXorMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -259,8 +215,6 @@ class ImageAtomicIncMimg : public Mimg {
 public:
   ImageAtomicIncMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -270,8 +224,6 @@ class ImageAtomicDecMimg : public Mimg {
 public:
   ImageAtomicDecMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -281,8 +233,6 @@ class ImageSampleMimg : public Mimg {
 public:
   ImageSampleMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -293,8 +243,6 @@ class ImageSampleClMimg : public Mimg {
 public:
   ImageSampleClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -305,8 +253,6 @@ class ImageSampleDMimg : public Mimg {
 public:
   ImageSampleDMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -317,8 +263,6 @@ class ImageSampleDClMimg : public Mimg {
 public:
   ImageSampleDClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -329,8 +273,6 @@ class ImageSampleLMimg : public Mimg {
 public:
   ImageSampleLMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -341,8 +283,6 @@ class ImageSampleBMimg : public Mimg {
 public:
   ImageSampleBMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -353,8 +293,6 @@ class ImageSampleBClMimg : public Mimg {
 public:
   ImageSampleBClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -365,8 +303,6 @@ class ImageSampleLzMimg : public Mimg {
 public:
   ImageSampleLzMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -377,8 +313,6 @@ class ImageSampleCMimg : public Mimg {
 public:
   ImageSampleCMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -389,8 +323,6 @@ class ImageSampleCClMimg : public Mimg {
 public:
   ImageSampleCClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -401,8 +333,6 @@ class ImageSampleCDMimg : public Mimg {
 public:
   ImageSampleCDMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -413,8 +343,6 @@ class ImageSampleCDClMimg : public Mimg {
 public:
   ImageSampleCDClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -425,8 +353,6 @@ class ImageSampleCLMimg : public Mimg {
 public:
   ImageSampleCLMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -437,8 +363,6 @@ class ImageSampleCBMimg : public Mimg {
 public:
   ImageSampleCBMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -449,8 +373,6 @@ class ImageSampleCBClMimg : public Mimg {
 public:
   ImageSampleCBClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -461,8 +383,6 @@ class ImageSampleCLzMimg : public Mimg {
 public:
   ImageSampleCLzMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -473,8 +393,6 @@ class ImageSampleOMimg : public Mimg {
 public:
   ImageSampleOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -485,8 +403,6 @@ class ImageSampleClOMimg : public Mimg {
 public:
   ImageSampleClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -497,8 +413,6 @@ class ImageSampleDOMimg : public Mimg {
 public:
   ImageSampleDOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -509,8 +423,6 @@ class ImageSampleDClOMimg : public Mimg {
 public:
   ImageSampleDClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -521,8 +433,6 @@ class ImageSampleLOMimg : public Mimg {
 public:
   ImageSampleLOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -533,8 +443,6 @@ class ImageSampleBOMimg : public Mimg {
 public:
   ImageSampleBOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -545,8 +453,6 @@ class ImageSampleBClOMimg : public Mimg {
 public:
   ImageSampleBClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -557,8 +463,6 @@ class ImageSampleLzOMimg : public Mimg {
 public:
   ImageSampleLzOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -569,8 +473,6 @@ class ImageSampleCOMimg : public Mimg {
 public:
   ImageSampleCOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -581,8 +483,6 @@ class ImageSampleCClOMimg : public Mimg {
 public:
   ImageSampleCClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -593,8 +493,6 @@ class ImageSampleCDOMimg : public Mimg {
 public:
   ImageSampleCDOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -605,8 +503,6 @@ class ImageSampleCDClOMimg : public Mimg {
 public:
   ImageSampleCDClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -617,8 +513,6 @@ class ImageSampleCLOMimg : public Mimg {
 public:
   ImageSampleCLOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -629,8 +523,6 @@ class ImageSampleCBOMimg : public Mimg {
 public:
   ImageSampleCBOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -641,8 +533,6 @@ class ImageSampleCBClOMimg : public Mimg {
 public:
   ImageSampleCBClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -653,8 +543,6 @@ class ImageSampleCLzOMimg : public Mimg {
 public:
   ImageSampleCLzOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -665,8 +553,6 @@ class ImageGather4Mimg : public Mimg {
 public:
   ImageGather4Mimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -677,8 +563,6 @@ class ImageGather4ClMimg : public Mimg {
 public:
   ImageGather4ClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -689,8 +573,6 @@ class ImageGather4hMimg : public Mimg {
 public:
   ImageGather4hMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -701,8 +583,6 @@ class ImageGather4LMimg : public Mimg {
 public:
   ImageGather4LMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -713,8 +593,6 @@ class ImageGather4BMimg : public Mimg {
 public:
   ImageGather4BMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -725,8 +603,6 @@ class ImageGather4BClMimg : public Mimg {
 public:
   ImageGather4BClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -737,8 +613,6 @@ class ImageGather4LzMimg : public Mimg {
 public:
   ImageGather4LzMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -749,8 +623,6 @@ class ImageGather4CMimg : public Mimg {
 public:
   ImageGather4CMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -761,8 +633,6 @@ class ImageGather4CClMimg : public Mimg {
 public:
   ImageGather4CClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -773,8 +643,6 @@ class ImageGather4hPckMimg : public Mimg {
 public:
   ImageGather4hPckMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -785,8 +653,6 @@ class ImageGather8hPckMimg : public Mimg {
 public:
   ImageGather8hPckMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -797,8 +663,6 @@ class ImageGather4CLMimg : public Mimg {
 public:
   ImageGather4CLMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -809,8 +673,6 @@ class ImageGather4CBMimg : public Mimg {
 public:
   ImageGather4CBMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -821,8 +683,6 @@ class ImageGather4CBClMimg : public Mimg {
 public:
   ImageGather4CBClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -833,8 +693,6 @@ class ImageGather4CLzMimg : public Mimg {
 public:
   ImageGather4CLzMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -845,8 +703,6 @@ class ImageGather4OMimg : public Mimg {
 public:
   ImageGather4OMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -857,8 +713,6 @@ class ImageGather4ClOMimg : public Mimg {
 public:
   ImageGather4ClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -869,8 +723,6 @@ class ImageGather4LOMimg : public Mimg {
 public:
   ImageGather4LOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -881,8 +733,6 @@ class ImageGather4BOMimg : public Mimg {
 public:
   ImageGather4BOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -893,8 +743,6 @@ class ImageGather4BClOMimg : public Mimg {
 public:
   ImageGather4BClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -905,8 +753,6 @@ class ImageGather4LzOMimg : public Mimg {
 public:
   ImageGather4LzOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -917,8 +763,6 @@ class ImageGather4COMimg : public Mimg {
 public:
   ImageGather4COMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -929,8 +773,6 @@ class ImageGather4CClOMimg : public Mimg {
 public:
   ImageGather4CClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -941,8 +783,6 @@ class ImageGather4CLOMimg : public Mimg {
 public:
   ImageGather4CLOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -953,8 +793,6 @@ class ImageGather4CBOMimg : public Mimg {
 public:
   ImageGather4CBOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -965,8 +803,6 @@ class ImageGather4CBClOMimg : public Mimg {
 public:
   ImageGather4CBClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -977,8 +813,6 @@ class ImageGather4CLzOMimg : public Mimg {
 public:
   ImageGather4CLzOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -989,8 +823,6 @@ class ImageGetLodMimg : public Mimg {
 public:
   ImageGetLodMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -1001,8 +833,6 @@ class ImageSampleCdMimg : public Mimg {
 public:
   ImageSampleCdMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -1013,8 +843,6 @@ class ImageSampleCdClMimg : public Mimg {
 public:
   ImageSampleCdClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -1025,8 +853,6 @@ class ImageSampleCCdMimg : public Mimg {
 public:
   ImageSampleCCdMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -1037,8 +863,6 @@ class ImageSampleCCdClMimg : public Mimg {
 public:
   ImageSampleCCdClMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -1049,8 +873,6 @@ class ImageSampleCdOMimg : public Mimg {
 public:
   ImageSampleCdOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -1061,8 +883,6 @@ class ImageSampleCdClOMimg : public Mimg {
 public:
   ImageSampleCdClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -1073,8 +893,6 @@ class ImageSampleCCdOMimg : public Mimg {
 public:
   ImageSampleCCdOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -1085,8 +903,6 @@ class ImageSampleCCdClOMimg : public Mimg {
 public:
   ImageSampleCCdClOMimg(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand srsrc;

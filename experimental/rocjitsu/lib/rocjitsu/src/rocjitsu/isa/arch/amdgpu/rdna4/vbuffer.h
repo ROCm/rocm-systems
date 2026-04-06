@@ -17,8 +17,6 @@ class BufferLoadFormatXVbuffer : public Vbuffer {
 public:
   BufferLoadFormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -29,8 +27,6 @@ class BufferLoadFormatXyVbuffer : public Vbuffer {
 public:
   BufferLoadFormatXyVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -41,8 +37,6 @@ class BufferLoadFormatXyzVbuffer : public Vbuffer {
 public:
   BufferLoadFormatXyzVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -53,8 +47,6 @@ class BufferLoadFormatXyzwVbuffer : public Vbuffer {
 public:
   BufferLoadFormatXyzwVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -65,8 +57,6 @@ class BufferStoreFormatXVbuffer : public Vbuffer {
 public:
   BufferStoreFormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -77,8 +67,6 @@ class BufferStoreFormatXyVbuffer : public Vbuffer {
 public:
   BufferStoreFormatXyVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -89,8 +77,6 @@ class BufferStoreFormatXyzVbuffer : public Vbuffer {
 public:
   BufferStoreFormatXyzVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -101,8 +87,6 @@ class BufferStoreFormatXyzwVbuffer : public Vbuffer {
 public:
   BufferStoreFormatXyzwVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -113,8 +97,6 @@ class BufferLoadD16FormatXVbuffer : public Vbuffer {
 public:
   BufferLoadD16FormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -125,8 +107,6 @@ class BufferLoadD16FormatXyVbuffer : public Vbuffer {
 public:
   BufferLoadD16FormatXyVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -137,8 +117,6 @@ class BufferLoadD16FormatXyzVbuffer : public Vbuffer {
 public:
   BufferLoadD16FormatXyzVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -149,8 +127,6 @@ class BufferLoadD16FormatXyzwVbuffer : public Vbuffer {
 public:
   BufferLoadD16FormatXyzwVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -161,8 +137,6 @@ class BufferStoreD16FormatXVbuffer : public Vbuffer {
 public:
   BufferStoreD16FormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -173,8 +147,6 @@ class BufferStoreD16FormatXyVbuffer : public Vbuffer {
 public:
   BufferStoreD16FormatXyVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -185,8 +157,6 @@ class BufferStoreD16FormatXyzVbuffer : public Vbuffer {
 public:
   BufferStoreD16FormatXyzVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -197,8 +167,6 @@ class BufferStoreD16FormatXyzwVbuffer : public Vbuffer {
 public:
   BufferStoreD16FormatXyzwVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -209,8 +177,6 @@ class BufferLoadU8Vbuffer : public Vbuffer {
 public:
   BufferLoadU8Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -221,8 +187,6 @@ class BufferLoadI8Vbuffer : public Vbuffer {
 public:
   BufferLoadI8Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -233,8 +197,6 @@ class BufferLoadU16Vbuffer : public Vbuffer {
 public:
   BufferLoadU16Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -245,8 +207,6 @@ class BufferLoadI16Vbuffer : public Vbuffer {
 public:
   BufferLoadI16Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -257,8 +217,6 @@ class BufferLoadB32Vbuffer : public Vbuffer {
 public:
   BufferLoadB32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -269,8 +227,6 @@ class BufferLoadB64Vbuffer : public Vbuffer {
 public:
   BufferLoadB64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -281,8 +237,6 @@ class BufferLoadB96Vbuffer : public Vbuffer {
 public:
   BufferLoadB96Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -293,8 +247,6 @@ class BufferLoadB128Vbuffer : public Vbuffer {
 public:
   BufferLoadB128Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -305,8 +257,6 @@ class BufferStoreB8Vbuffer : public Vbuffer {
 public:
   BufferStoreB8Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -317,8 +267,6 @@ class BufferStoreB16Vbuffer : public Vbuffer {
 public:
   BufferStoreB16Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -329,8 +277,6 @@ class BufferStoreB32Vbuffer : public Vbuffer {
 public:
   BufferStoreB32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -341,8 +287,6 @@ class BufferStoreB64Vbuffer : public Vbuffer {
 public:
   BufferStoreB64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -353,8 +297,6 @@ class BufferStoreB96Vbuffer : public Vbuffer {
 public:
   BufferStoreB96Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -365,8 +307,6 @@ class BufferStoreB128Vbuffer : public Vbuffer {
 public:
   BufferStoreB128Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -377,8 +317,6 @@ class BufferLoadD16U8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16U8Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -389,8 +327,6 @@ class BufferLoadD16I8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16I8Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -401,8 +337,6 @@ class BufferLoadD16B16Vbuffer : public Vbuffer {
 public:
   BufferLoadD16B16Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -413,8 +347,6 @@ class BufferLoadD16HiU8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16HiU8Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -425,8 +357,6 @@ class BufferLoadD16HiI8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16HiI8Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -437,8 +367,6 @@ class BufferLoadD16HiB16Vbuffer : public Vbuffer {
 public:
   BufferLoadD16HiB16Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -449,8 +377,6 @@ class BufferStoreD16HiB8Vbuffer : public Vbuffer {
 public:
   BufferStoreD16HiB8Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -461,8 +387,6 @@ class BufferStoreD16HiB16Vbuffer : public Vbuffer {
 public:
   BufferStoreD16HiB16Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -473,8 +397,6 @@ class BufferLoadD16HiFormatXVbuffer : public Vbuffer {
 public:
   BufferLoadD16HiFormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -485,8 +407,6 @@ class BufferStoreD16HiFormatXVbuffer : public Vbuffer {
 public:
   BufferStoreD16HiFormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -497,8 +417,6 @@ class BufferAtomicSwapB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicSwapB32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -509,8 +427,6 @@ class BufferAtomicCmpswapB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicCmpswapB32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -521,8 +437,6 @@ class BufferAtomicAddU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicAddU32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -533,8 +447,6 @@ class BufferAtomicSubU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicSubU32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -545,8 +457,6 @@ class BufferAtomicSubClampU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicSubClampU32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -557,8 +467,6 @@ class BufferAtomicMinI32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinI32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -569,8 +477,6 @@ class BufferAtomicMinU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinU32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -581,8 +487,6 @@ class BufferAtomicMaxI32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxI32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -593,8 +497,6 @@ class BufferAtomicMaxU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxU32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -605,8 +507,6 @@ class BufferAtomicAndB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicAndB32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -617,8 +517,6 @@ class BufferAtomicOrB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicOrB32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -629,8 +527,6 @@ class BufferAtomicXorB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicXorB32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -641,8 +537,6 @@ class BufferAtomicIncU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicIncU32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -653,8 +547,6 @@ class BufferAtomicDecU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicDecU32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -665,8 +557,6 @@ class BufferAtomicSwapB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicSwapB64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -677,8 +567,6 @@ class BufferAtomicCmpswapB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicCmpswapB64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -689,8 +577,6 @@ class BufferAtomicAddU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicAddU64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -701,8 +587,6 @@ class BufferAtomicSubU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicSubU64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -713,8 +597,6 @@ class BufferAtomicMinI64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinI64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -725,8 +607,6 @@ class BufferAtomicMinU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinU64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -737,8 +617,6 @@ class BufferAtomicMaxI64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxI64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -749,8 +627,6 @@ class BufferAtomicMaxU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxU64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -761,8 +637,6 @@ class BufferAtomicAndB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicAndB64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -773,8 +647,6 @@ class BufferAtomicOrB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicOrB64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -785,8 +657,6 @@ class BufferAtomicXorB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicXorB64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -797,8 +667,6 @@ class BufferAtomicIncU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicIncU64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -809,8 +677,6 @@ class BufferAtomicDecU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicDecU64Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -821,8 +687,6 @@ class BufferAtomicCondSubU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicCondSubU32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -833,8 +697,6 @@ class BufferAtomicMinNumF32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinNumF32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -845,8 +707,6 @@ class BufferAtomicMaxNumF32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxNumF32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -857,8 +717,6 @@ class BufferAtomicAddF32Vbuffer : public Vbuffer {
 public:
   BufferAtomicAddF32Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -869,8 +727,6 @@ class BufferAtomicPkAddF16Vbuffer : public Vbuffer {
 public:
   BufferAtomicPkAddF16Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -881,8 +737,6 @@ class BufferAtomicPkAddBf16Vbuffer : public Vbuffer {
 public:
   BufferAtomicPkAddBf16Vbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -893,8 +747,6 @@ class TbufferLoadFormatXVbuffer : public Vbuffer {
 public:
   TbufferLoadFormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -905,8 +757,6 @@ class TbufferLoadFormatXyVbuffer : public Vbuffer {
 public:
   TbufferLoadFormatXyVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -917,8 +767,6 @@ class TbufferLoadFormatXyzVbuffer : public Vbuffer {
 public:
   TbufferLoadFormatXyzVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -929,8 +777,6 @@ class TbufferLoadFormatXyzwVbuffer : public Vbuffer {
 public:
   TbufferLoadFormatXyzwVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -941,8 +787,6 @@ class TbufferStoreFormatXVbuffer : public Vbuffer {
 public:
   TbufferStoreFormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -953,8 +797,6 @@ class TbufferStoreFormatXyVbuffer : public Vbuffer {
 public:
   TbufferStoreFormatXyVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -965,8 +807,6 @@ class TbufferStoreFormatXyzVbuffer : public Vbuffer {
 public:
   TbufferStoreFormatXyzVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -977,8 +817,6 @@ class TbufferStoreFormatXyzwVbuffer : public Vbuffer {
 public:
   TbufferStoreFormatXyzwVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -989,8 +827,6 @@ class TbufferLoadD16FormatXVbuffer : public Vbuffer {
 public:
   TbufferLoadD16FormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -1001,8 +837,6 @@ class TbufferLoadD16FormatXyVbuffer : public Vbuffer {
 public:
   TbufferLoadD16FormatXyVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -1013,8 +847,6 @@ class TbufferLoadD16FormatXyzVbuffer : public Vbuffer {
 public:
   TbufferLoadD16FormatXyzVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -1025,8 +857,6 @@ class TbufferLoadD16FormatXyzwVbuffer : public Vbuffer {
 public:
   TbufferLoadD16FormatXyzwVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -1037,8 +867,6 @@ class TbufferStoreD16FormatXVbuffer : public Vbuffer {
 public:
   TbufferStoreD16FormatXVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -1049,8 +877,6 @@ class TbufferStoreD16FormatXyVbuffer : public Vbuffer {
 public:
   TbufferStoreD16FormatXyVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -1061,8 +887,6 @@ class TbufferStoreD16FormatXyzVbuffer : public Vbuffer {
 public:
   TbufferStoreD16FormatXyzVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -1073,8 +897,6 @@ class TbufferStoreD16FormatXyzwVbuffer : public Vbuffer {
 public:
   TbufferStoreD16FormatXyzwVbuffer(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdata;
   Operand vaddr;
   Operand rsrc;

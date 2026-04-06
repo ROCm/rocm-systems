@@ -17,8 +17,6 @@ class GlobalLoadU8Vglobal : public Vglobal {
 public:
   GlobalLoadU8Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -28,8 +26,6 @@ class GlobalLoadI8Vglobal : public Vglobal {
 public:
   GlobalLoadI8Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -39,8 +35,6 @@ class GlobalLoadU16Vglobal : public Vglobal {
 public:
   GlobalLoadU16Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -50,8 +44,6 @@ class GlobalLoadI16Vglobal : public Vglobal {
 public:
   GlobalLoadI16Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -61,8 +53,6 @@ class GlobalLoadB32Vglobal : public Vglobal {
 public:
   GlobalLoadB32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -72,8 +62,6 @@ class GlobalLoadB64Vglobal : public Vglobal {
 public:
   GlobalLoadB64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -83,8 +71,6 @@ class GlobalLoadB96Vglobal : public Vglobal {
 public:
   GlobalLoadB96Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -94,8 +80,6 @@ class GlobalLoadB128Vglobal : public Vglobal {
 public:
   GlobalLoadB128Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -105,8 +89,6 @@ class GlobalStoreB8Vglobal : public Vglobal {
 public:
   GlobalStoreB8Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -116,8 +98,6 @@ class GlobalStoreB16Vglobal : public Vglobal {
 public:
   GlobalStoreB16Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -127,8 +107,6 @@ class GlobalStoreB32Vglobal : public Vglobal {
 public:
   GlobalStoreB32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -138,8 +116,6 @@ class GlobalStoreB64Vglobal : public Vglobal {
 public:
   GlobalStoreB64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -149,8 +125,6 @@ class GlobalStoreB96Vglobal : public Vglobal {
 public:
   GlobalStoreB96Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -160,8 +134,6 @@ class GlobalStoreB128Vglobal : public Vglobal {
 public:
   GlobalStoreB128Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -171,8 +143,6 @@ class GlobalLoadD16U8Vglobal : public Vglobal {
 public:
   GlobalLoadD16U8Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -182,8 +152,6 @@ class GlobalLoadD16I8Vglobal : public Vglobal {
 public:
   GlobalLoadD16I8Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -193,8 +161,6 @@ class GlobalLoadD16B16Vglobal : public Vglobal {
 public:
   GlobalLoadD16B16Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -204,8 +170,6 @@ class GlobalLoadD16HiU8Vglobal : public Vglobal {
 public:
   GlobalLoadD16HiU8Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -215,8 +179,6 @@ class GlobalLoadD16HiI8Vglobal : public Vglobal {
 public:
   GlobalLoadD16HiI8Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -226,8 +188,6 @@ class GlobalLoadD16HiB16Vglobal : public Vglobal {
 public:
   GlobalLoadD16HiB16Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -237,8 +197,6 @@ class GlobalStoreD16HiB8Vglobal : public Vglobal {
 public:
   GlobalStoreD16HiB8Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -248,8 +206,6 @@ class GlobalStoreD16HiB16Vglobal : public Vglobal {
 public:
   GlobalStoreD16HiB16Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -259,8 +215,6 @@ class GlobalLoadAddtidB32Vglobal : public Vglobal {
 public:
   GlobalLoadAddtidB32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand saddr;
 };
@@ -269,8 +223,6 @@ class GlobalStoreAddtidB32Vglobal : public Vglobal {
 public:
   GlobalStoreAddtidB32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vsrc;
   Operand saddr;
 };
@@ -279,24 +231,18 @@ class GlobalInvVglobal : public Vglobal {
 public:
   GlobalInvVglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class GlobalWbVglobal : public Vglobal {
 public:
   GlobalWbVglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class GlobalAtomicSwapB32Vglobal : public Vglobal {
 public:
   GlobalAtomicSwapB32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -307,8 +253,6 @@ class GlobalAtomicCmpswapB32Vglobal : public Vglobal {
 public:
   GlobalAtomicCmpswapB32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -319,8 +263,6 @@ class GlobalAtomicAddU32Vglobal : public Vglobal {
 public:
   GlobalAtomicAddU32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -331,8 +273,6 @@ class GlobalAtomicSubU32Vglobal : public Vglobal {
 public:
   GlobalAtomicSubU32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -343,8 +283,6 @@ class GlobalAtomicSubClampU32Vglobal : public Vglobal {
 public:
   GlobalAtomicSubClampU32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -355,8 +293,6 @@ class GlobalAtomicMinI32Vglobal : public Vglobal {
 public:
   GlobalAtomicMinI32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -367,8 +303,6 @@ class GlobalAtomicMinU32Vglobal : public Vglobal {
 public:
   GlobalAtomicMinU32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -379,8 +313,6 @@ class GlobalAtomicMaxI32Vglobal : public Vglobal {
 public:
   GlobalAtomicMaxI32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -391,8 +323,6 @@ class GlobalAtomicMaxU32Vglobal : public Vglobal {
 public:
   GlobalAtomicMaxU32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -403,8 +333,6 @@ class GlobalAtomicAndB32Vglobal : public Vglobal {
 public:
   GlobalAtomicAndB32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -415,8 +343,6 @@ class GlobalAtomicOrB32Vglobal : public Vglobal {
 public:
   GlobalAtomicOrB32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -427,8 +353,6 @@ class GlobalAtomicXorB32Vglobal : public Vglobal {
 public:
   GlobalAtomicXorB32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -439,8 +363,6 @@ class GlobalAtomicIncU32Vglobal : public Vglobal {
 public:
   GlobalAtomicIncU32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -451,8 +373,6 @@ class GlobalAtomicDecU32Vglobal : public Vglobal {
 public:
   GlobalAtomicDecU32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -463,8 +383,6 @@ class GlobalAtomicSwapB64Vglobal : public Vglobal {
 public:
   GlobalAtomicSwapB64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -475,8 +393,6 @@ class GlobalAtomicCmpswapB64Vglobal : public Vglobal {
 public:
   GlobalAtomicCmpswapB64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -487,8 +403,6 @@ class GlobalAtomicAddU64Vglobal : public Vglobal {
 public:
   GlobalAtomicAddU64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -499,8 +413,6 @@ class GlobalAtomicSubU64Vglobal : public Vglobal {
 public:
   GlobalAtomicSubU64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -511,8 +423,6 @@ class GlobalAtomicMinI64Vglobal : public Vglobal {
 public:
   GlobalAtomicMinI64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -523,8 +433,6 @@ class GlobalAtomicMinU64Vglobal : public Vglobal {
 public:
   GlobalAtomicMinU64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -535,8 +443,6 @@ class GlobalAtomicMaxI64Vglobal : public Vglobal {
 public:
   GlobalAtomicMaxI64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -547,8 +453,6 @@ class GlobalAtomicMaxU64Vglobal : public Vglobal {
 public:
   GlobalAtomicMaxU64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -559,8 +463,6 @@ class GlobalAtomicAndB64Vglobal : public Vglobal {
 public:
   GlobalAtomicAndB64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -571,8 +473,6 @@ class GlobalAtomicOrB64Vglobal : public Vglobal {
 public:
   GlobalAtomicOrB64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -583,8 +483,6 @@ class GlobalAtomicXorB64Vglobal : public Vglobal {
 public:
   GlobalAtomicXorB64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -595,8 +493,6 @@ class GlobalAtomicIncU64Vglobal : public Vglobal {
 public:
   GlobalAtomicIncU64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -607,8 +503,6 @@ class GlobalAtomicDecU64Vglobal : public Vglobal {
 public:
   GlobalAtomicDecU64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -619,16 +513,12 @@ class GlobalWbinvVglobal : public Vglobal {
 public:
   GlobalWbinvVglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
 };
 
 class GlobalAtomicCondSubU32Vglobal : public Vglobal {
 public:
   GlobalAtomicCondSubU32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -639,8 +529,6 @@ class GlobalAtomicMinNumF32Vglobal : public Vglobal {
 public:
   GlobalAtomicMinNumF32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -651,8 +539,6 @@ class GlobalAtomicMaxNumF32Vglobal : public Vglobal {
 public:
   GlobalAtomicMaxNumF32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -663,8 +549,6 @@ class GlobalLoadBlockVglobal : public Vglobal {
 public:
   GlobalLoadBlockVglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -674,8 +558,6 @@ class GlobalStoreBlockVglobal : public Vglobal {
 public:
   GlobalStoreBlockVglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vaddr;
   Operand vsrc;
   Operand saddr;
@@ -685,8 +567,6 @@ class GlobalAtomicAddF32Vglobal : public Vglobal {
 public:
   GlobalAtomicAddF32Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -697,8 +577,6 @@ class GlobalLoadTrB128Vglobal : public Vglobal {
 public:
   GlobalLoadTrB128Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -708,8 +586,6 @@ class GlobalLoadTrB64Vglobal : public Vglobal {
 public:
   GlobalLoadTrB64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -719,8 +595,6 @@ class GlobalAtomicPkAddF16Vglobal : public Vglobal {
 public:
   GlobalAtomicPkAddF16Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -731,8 +605,6 @@ class GlobalAtomicPkAddBf16Vglobal : public Vglobal {
 public:
   GlobalAtomicPkAddBf16Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
@@ -743,8 +615,6 @@ class GlobalAtomicOrderedAddB64Vglobal : public Vglobal {
 public:
   GlobalAtomicOrderedAddB64Vglobal(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;

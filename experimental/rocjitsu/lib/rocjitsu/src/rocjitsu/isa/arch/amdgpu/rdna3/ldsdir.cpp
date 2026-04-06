@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3/ldsdir.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -24,7 +25,7 @@ LdsParamLoadLdsdir::LdsParamLoadLdsdir(const MachineInst *inst)
 }
 
 void LdsParamLoadLdsdir::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  amdgpu::execute_lds_param_load_ldsdir(*this, wf);
 }
 
 LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
@@ -34,7 +35,7 @@ LdsDirectLoadLdsdir::LdsDirectLoadLdsdir(const MachineInst *inst)
 }
 
 void LdsDirectLoadLdsdir::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+  amdgpu::execute_lds_direct_load_ldsdir(*this, wf);
 }
 
 } // namespace rdna3

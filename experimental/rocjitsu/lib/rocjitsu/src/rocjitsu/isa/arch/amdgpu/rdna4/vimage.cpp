@@ -24,7 +24,7 @@ ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
 }
 
 void ImageLoadVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — Phase C placeholder.
+  // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
@@ -37,7 +37,7 @@ ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
 }
 
 void ImageLoadMipVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — Phase C placeholder.
+  // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
@@ -50,7 +50,7 @@ ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
 }
 
 void ImageLoadPckVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — Phase C placeholder.
+  // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
@@ -63,7 +63,7 @@ ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
 }
 
 void ImageLoadPckSgnVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — Phase C placeholder.
+  // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
@@ -76,7 +76,7 @@ ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
 }
 
 void ImageLoadMipPckVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — Phase C placeholder.
+  // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
@@ -89,7 +89,7 @@ ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
 }
 
 void ImageLoadMipPckSgnVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — Phase C placeholder.
+  // Minimal image load stub — not yet implemented.
   (void)wf;
 }
 
@@ -102,7 +102,7 @@ ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
 }
 
 void ImageStoreVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — Phase C placeholder.
+  // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
@@ -115,7 +115,7 @@ ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
 }
 
 void ImageStoreMipVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — Phase C placeholder.
+  // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
@@ -128,7 +128,7 @@ ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
 }
 
 void ImageStorePckVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — Phase C placeholder.
+  // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
@@ -141,7 +141,7 @@ ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
 }
 
 void ImageStoreMipPckVimage::execute(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — Phase C placeholder.
+  // Minimal image store stub — not yet implemented.
   (void)wf;
 }
 
@@ -155,7 +155,7 @@ ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
 }
 
 void ImageAtomicSwapVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
@@ -168,7 +168,7 @@ ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
 }
 
 void ImageAtomicCmpswapVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
@@ -181,7 +181,7 @@ ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicAddUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
@@ -194,7 +194,7 @@ ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicSubUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
@@ -207,7 +207,7 @@ ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMinIntVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
@@ -220,7 +220,7 @@ ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMinUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
@@ -233,7 +233,7 @@ ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMaxIntVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
@@ -246,7 +246,7 @@ ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMaxUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
@@ -259,7 +259,7 @@ ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
 }
 
 void ImageAtomicAndVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
@@ -272,7 +272,7 @@ ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
 }
 
 void ImageAtomicOrVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
@@ -285,7 +285,7 @@ ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
 }
 
 void ImageAtomicXorVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
@@ -298,7 +298,7 @@ ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicIncUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
@@ -311,7 +311,7 @@ ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
 }
 
 void ImageAtomicDecUintVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
@@ -323,7 +323,7 @@ ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
 }
 
 void ImageGetResinfoVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
@@ -335,7 +335,7 @@ ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
 }
 
 void ImageBvhIntersectRayVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *inst)
@@ -378,7 +378,7 @@ ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
 }
 
 void ImageAtomicAddFltVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
@@ -391,7 +391,7 @@ ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMinFltVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
@@ -404,7 +404,7 @@ ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
 }
 
 void ImageAtomicMaxFltVimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
@@ -417,7 +417,7 @@ ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
 }
 
 void ImageAtomicPkAddF16Vimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
@@ -430,7 +430,7 @@ ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
 }
 
 void ImageAtomicPkAddBf16Vimage::execute(amdgpu::Wavefront &wf) {
-  (void)wf; // Deferred to Phase E (image pipeline).
+  (void)wf; // Image pipeline not yet implemented.
 }
 
 } // namespace rdna4

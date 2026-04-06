@@ -17,8 +17,6 @@ class FlatLoadU8Flat : public Flat {
 public:
   FlatLoadU8Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -27,8 +25,6 @@ class FlatLoadI8Flat : public Flat {
 public:
   FlatLoadI8Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -37,8 +33,6 @@ class FlatLoadU16Flat : public Flat {
 public:
   FlatLoadU16Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -47,8 +41,6 @@ class FlatLoadI16Flat : public Flat {
 public:
   FlatLoadI16Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -57,8 +49,6 @@ class FlatLoadB32Flat : public Flat {
 public:
   FlatLoadB32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -67,8 +57,6 @@ class FlatLoadB64Flat : public Flat {
 public:
   FlatLoadB64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -77,8 +65,6 @@ class FlatLoadB96Flat : public Flat {
 public:
   FlatLoadB96Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -87,8 +73,6 @@ class FlatLoadB128Flat : public Flat {
 public:
   FlatLoadB128Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -97,8 +81,6 @@ class FlatStoreB8Flat : public Flat {
 public:
   FlatStoreB8Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand addr;
   Operand data;
 };
@@ -107,8 +89,6 @@ class FlatStoreB16Flat : public Flat {
 public:
   FlatStoreB16Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand addr;
   Operand data;
 };
@@ -117,8 +97,6 @@ class FlatStoreB32Flat : public Flat {
 public:
   FlatStoreB32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand addr;
   Operand data;
 };
@@ -127,8 +105,6 @@ class FlatStoreB64Flat : public Flat {
 public:
   FlatStoreB64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand addr;
   Operand data;
 };
@@ -137,8 +113,6 @@ class FlatStoreB96Flat : public Flat {
 public:
   FlatStoreB96Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand addr;
   Operand data;
 };
@@ -147,8 +121,6 @@ class FlatStoreB128Flat : public Flat {
 public:
   FlatStoreB128Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand addr;
   Operand data;
 };
@@ -157,8 +129,6 @@ class FlatLoadD16U8Flat : public Flat {
 public:
   FlatLoadD16U8Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -167,8 +137,6 @@ class FlatLoadD16I8Flat : public Flat {
 public:
   FlatLoadD16I8Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -177,8 +145,6 @@ class FlatLoadD16B16Flat : public Flat {
 public:
   FlatLoadD16B16Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -187,8 +153,6 @@ class FlatLoadD16HiU8Flat : public Flat {
 public:
   FlatLoadD16HiU8Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -197,8 +161,6 @@ class FlatLoadD16HiI8Flat : public Flat {
 public:
   FlatLoadD16HiI8Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -207,8 +169,6 @@ class FlatLoadD16HiB16Flat : public Flat {
 public:
   FlatLoadD16HiB16Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
 };
@@ -217,8 +177,6 @@ class FlatStoreD16HiB8Flat : public Flat {
 public:
   FlatStoreD16HiB8Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand addr;
   Operand data;
 };
@@ -227,8 +185,6 @@ class FlatStoreD16HiB16Flat : public Flat {
 public:
   FlatStoreD16HiB16Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand addr;
   Operand data;
 };
@@ -237,8 +193,6 @@ class FlatAtomicSwapB32Flat : public Flat {
 public:
   FlatAtomicSwapB32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -248,8 +202,6 @@ class FlatAtomicCmpswapB32Flat : public Flat {
 public:
   FlatAtomicCmpswapB32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -259,8 +211,6 @@ class FlatAtomicAddU32Flat : public Flat {
 public:
   FlatAtomicAddU32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -270,8 +220,6 @@ class FlatAtomicSubU32Flat : public Flat {
 public:
   FlatAtomicSubU32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -281,8 +229,6 @@ class FlatAtomicMinI32Flat : public Flat {
 public:
   FlatAtomicMinI32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -292,8 +238,6 @@ class FlatAtomicMinU32Flat : public Flat {
 public:
   FlatAtomicMinU32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -303,8 +247,6 @@ class FlatAtomicMaxI32Flat : public Flat {
 public:
   FlatAtomicMaxI32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -314,8 +256,6 @@ class FlatAtomicMaxU32Flat : public Flat {
 public:
   FlatAtomicMaxU32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -325,8 +265,6 @@ class FlatAtomicAndB32Flat : public Flat {
 public:
   FlatAtomicAndB32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -336,8 +274,6 @@ class FlatAtomicOrB32Flat : public Flat {
 public:
   FlatAtomicOrB32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -347,8 +283,6 @@ class FlatAtomicXorB32Flat : public Flat {
 public:
   FlatAtomicXorB32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -358,8 +292,6 @@ class FlatAtomicIncU32Flat : public Flat {
 public:
   FlatAtomicIncU32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -369,8 +301,6 @@ class FlatAtomicDecU32Flat : public Flat {
 public:
   FlatAtomicDecU32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -380,8 +310,6 @@ class FlatAtomicSwapB64Flat : public Flat {
 public:
   FlatAtomicSwapB64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -391,8 +319,6 @@ class FlatAtomicCmpswapB64Flat : public Flat {
 public:
   FlatAtomicCmpswapB64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -402,8 +328,6 @@ class FlatAtomicAddU64Flat : public Flat {
 public:
   FlatAtomicAddU64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -413,8 +337,6 @@ class FlatAtomicSubU64Flat : public Flat {
 public:
   FlatAtomicSubU64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -424,8 +346,6 @@ class FlatAtomicMinI64Flat : public Flat {
 public:
   FlatAtomicMinI64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -435,8 +355,6 @@ class FlatAtomicMinU64Flat : public Flat {
 public:
   FlatAtomicMinU64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -446,8 +364,6 @@ class FlatAtomicMaxI64Flat : public Flat {
 public:
   FlatAtomicMaxI64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -457,8 +373,6 @@ class FlatAtomicMaxU64Flat : public Flat {
 public:
   FlatAtomicMaxU64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -468,8 +382,6 @@ class FlatAtomicAndB64Flat : public Flat {
 public:
   FlatAtomicAndB64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -479,8 +391,6 @@ class FlatAtomicOrB64Flat : public Flat {
 public:
   FlatAtomicOrB64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -490,8 +400,6 @@ class FlatAtomicXorB64Flat : public Flat {
 public:
   FlatAtomicXorB64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -501,8 +409,6 @@ class FlatAtomicIncU64Flat : public Flat {
 public:
   FlatAtomicIncU64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -512,8 +418,6 @@ class FlatAtomicDecU64Flat : public Flat {
 public:
   FlatAtomicDecU64Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -523,8 +427,6 @@ class FlatAtomicCmpswapF32Flat : public Flat {
 public:
   FlatAtomicCmpswapF32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -534,8 +436,6 @@ class FlatAtomicMinF32Flat : public Flat {
 public:
   FlatAtomicMinF32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -545,8 +445,6 @@ class FlatAtomicMaxF32Flat : public Flat {
 public:
   FlatAtomicMaxF32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;
@@ -556,8 +454,6 @@ class FlatAtomicAddF32Flat : public Flat {
 public:
   FlatAtomicAddF32Flat(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand addr;
   Operand data;

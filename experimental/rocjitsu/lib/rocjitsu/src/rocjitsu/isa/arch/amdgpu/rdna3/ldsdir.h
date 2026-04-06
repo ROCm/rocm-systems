@@ -17,8 +17,6 @@ class LdsParamLoadLdsdir : public Ldsdir {
 public:
   LdsParamLoadLdsdir(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand attr;
 };
@@ -27,8 +25,6 @@ class LdsDirectLoadLdsdir : public Ldsdir {
 public:
   LdsDirectLoadLdsdir(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
 };
 
