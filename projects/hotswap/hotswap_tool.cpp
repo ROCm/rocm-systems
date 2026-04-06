@@ -43,6 +43,13 @@ struct CodeObjectData {
 std::mutex g_reader_map_mutex;
 std::unordered_map<uint64_t, CodeObjectData> g_reader_map;
 
+// Rewritten ELF buffers must outlive the executable because ROCR's
+// LoadedCodeObjectImpl stores a raw pointer to the ELF data (used by
+// debuggers, profilers, and hsa_ven_amd_loader queries). We keep them
+// alive until OnUnload.
+std::mutex g_rewritten_elfs_mutex;
+std::vector<void*> g_rewritten_elfs;
+
 CoreApiTable* g_core_table = nullptr;
 
 decltype(hsa_code_object_reader_create_from_memory)* g_orig_reader_create_from_memory = nullptr;
@@ -275,7 +282,14 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
   status = g_orig_load_agent_code_object(executable, agent, new_reader,
                                          options, loaded_code_object);
   g_orig_reader_destroy(new_reader);
-  std::free(out_elf);
+
+  // ROCR's LoadedCodeObjectImpl holds a raw pointer to the ELF data for
+  // debugger/profiler queries. The buffer must outlive the executable.
+  {
+    std::lock_guard<std::mutex> lock(g_rewritten_elfs_mutex);
+    g_rewritten_elfs.push_back(out_elf);
+  }
+
   return status;
 }
 
@@ -344,8 +358,17 @@ void OnUnload() {
   g_orig_reader_destroy = nullptr;
   g_orig_load_agent_code_object = nullptr;
 
-  std::lock_guard<std::mutex> lock(g_reader_map_mutex);
-  g_reader_map.clear();
+  {
+    std::lock_guard<std::mutex> lock(g_reader_map_mutex);
+    g_reader_map.clear();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_rewritten_elfs_mutex);
+    for (void* p : g_rewritten_elfs)
+      std::free(p);
+    g_rewritten_elfs.clear();
+  }
 
   fprintf(stderr, "hotswap: tool unloaded\n");
 }
