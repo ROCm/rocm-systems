@@ -9,8 +9,8 @@
 namespace rocjitsu {
 namespace rdna4 {
 
-Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -20,8 +20,8 @@ bool Sop1::default_encoding() { return inst_.ssrc0 != 255; }
 
 bool Sop1::has_lit_0() { return inst_.ssrc0 == 255; }
 
-Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -35,8 +35,8 @@ bool Sopc::has_lit_1() { return inst_.ssrc0 != 255 && inst_.ssrc1 == 255; }
 
 bool Sopc::has_lit_0_has_lit_1() { return inst_.ssrc0 == 255 && inst_.ssrc1 == 255; }
 
-Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -44,8 +44,8 @@ Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst)
 
 bool Sopp::default_encoding() { return true; }
 
-Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
@@ -55,8 +55,8 @@ bool Sopk::default_encoding() { return true; }
 
 bool Sopk::hasImpliedLiteral() { return inst_.op == 19; }
 
-Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
@@ -72,15 +72,15 @@ bool Sop2::has_lit_0_has_lit_1() { return inst_.ssrc0 == 255 && inst_.ssrc1 == 2
 
 bool Sop2::hasImpliedLiteral() { return inst_.op == 69 || inst_.op == 70; }
 
-Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (inst->nv)
     modifiers_ += " nv";
 }
 
-Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -92,8 +92,8 @@ bool Vop1::default_encoding() {
 
 bool Vop1::has_lit() { return inst_.src0 == 255; }
 
-Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -105,8 +105,8 @@ bool Vopc::default_encoding() {
 
 bool Vopc::has_lit() { return inst_.src0 == 255; }
 
-Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
@@ -122,8 +122,8 @@ bool Vop2::hasImpliedLiteral() {
   return inst_.op == 44 || inst_.op == 45 || inst_.op == 55 || inst_.op == 56;
 }
 
-Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
@@ -156,8 +156,8 @@ bool Vop3::has_lit_0_has_lit_1_has_lit_2() {
   return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 == 255;
 }
 
-Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
@@ -190,13 +190,13 @@ bool Vop3p::has_lit_0_has_lit_1_has_lit_2() {
   return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 == 255;
 }
 
-Vinterp::Vinterp(std::string_view mnemonic, const VinterpMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vinterp::Vinterp(std::string_view mnemonic, const VinterpMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
-Vdsdir::Vdsdir(std::string_view mnemonic, const VdsdirMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vdsdir::Vdsdir(std::string_view mnemonic, const VdsdirMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -204,13 +204,13 @@ Vdsdir::Vdsdir(std::string_view mnemonic, const VdsdirMachineInst *inst)
 
 bool Vdsdir::default_encoding() { return true; }
 
-Vds::Vds(std::string_view mnemonic, const VdsMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vds::Vds(std::string_view mnemonic, const VdsMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
-Vbuffer::Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vbuffer::Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (inst->offen)
     modifiers_ += " offen";
@@ -222,44 +222,45 @@ Vbuffer::Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst)
     modifiers_ += " nv";
 }
 
-Vimage::Vimage(std::string_view mnemonic, const VimageMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vimage::Vimage(std::string_view mnemonic, const VimageMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
-Vsample::Vsample(std::string_view mnemonic, const VsampleMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vsample::Vsample(std::string_view mnemonic, const VsampleMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
-Vexport::Vexport(std::string_view mnemonic, const VexportMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vexport::Vexport(std::string_view mnemonic, const VexportMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
-Vflat::Vflat(std::string_view mnemonic, const VflatMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
-  size_ = sizeof(OpEncoding);
-  if (inst->nv)
-    modifiers_ += " nv";
-}
-
-Vscratch::Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vflat::Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (inst->nv)
     modifiers_ += " nv";
 }
 
-Vglobal::Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vscratch::Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (inst->nv)
     modifiers_ += " nv";
 }
 
-Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vglobal::Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  size_ = sizeof(OpEncoding);
+  if (inst->nv)
+    modifiers_ += " nv";
+}
+
+Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst,
+                         ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 

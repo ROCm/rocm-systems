@@ -16,7 +16,7 @@ namespace rdna3 {
 class SMovB32Sop1 : public Sop1 {
 public:
   SMovB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -24,7 +24,7 @@ public:
 class SMovB64Sop1 : public Sop1 {
 public:
   SMovB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -32,7 +32,7 @@ public:
 class SCmovB32Sop1 : public Sop1 {
 public:
   SCmovB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -40,7 +40,7 @@ public:
 class SCmovB64Sop1 : public Sop1 {
 public:
   SCmovB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -48,7 +48,7 @@ public:
 class SBrevB32Sop1 : public Sop1 {
 public:
   SBrevB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -56,7 +56,7 @@ public:
 class SBrevB64Sop1 : public Sop1 {
 public:
   SBrevB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -64,7 +64,7 @@ public:
 class SCtzI32B32Sop1 : public Sop1 {
 public:
   SCtzI32B32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -72,7 +72,7 @@ public:
 class SCtzI32B64Sop1 : public Sop1 {
 public:
   SCtzI32B64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -80,7 +80,7 @@ public:
 class SClzI32U32Sop1 : public Sop1 {
 public:
   SClzI32U32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -88,7 +88,7 @@ public:
 class SClzI32U64Sop1 : public Sop1 {
 public:
   SClzI32U64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -96,7 +96,7 @@ public:
 class SClsI32Sop1 : public Sop1 {
 public:
   SClsI32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -104,7 +104,7 @@ public:
 class SClsI32I64Sop1 : public Sop1 {
 public:
   SClsI32I64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -112,7 +112,7 @@ public:
 class SSextI32I8Sop1 : public Sop1 {
 public:
   SSextI32I8Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -120,7 +120,7 @@ public:
 class SSextI32I16Sop1 : public Sop1 {
 public:
   SSextI32I16Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -128,7 +128,7 @@ public:
 class SBitset0B32Sop1 : public Sop1 {
 public:
   SBitset0B32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -136,7 +136,7 @@ public:
 class SBitset0B64Sop1 : public Sop1 {
 public:
   SBitset0B64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -144,7 +144,7 @@ public:
 class SBitset1B32Sop1 : public Sop1 {
 public:
   SBitset1B32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -152,7 +152,7 @@ public:
 class SBitset1B64Sop1 : public Sop1 {
 public:
   SBitset1B64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -160,7 +160,7 @@ public:
 class SBitreplicateB64B32Sop1 : public Sop1 {
 public:
   SBitreplicateB64B32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -168,7 +168,7 @@ public:
 class SAbsI32Sop1 : public Sop1 {
 public:
   SAbsI32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -176,7 +176,7 @@ public:
 class SBcnt0I32B32Sop1 : public Sop1 {
 public:
   SBcnt0I32B32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -184,7 +184,7 @@ public:
 class SBcnt0I32B64Sop1 : public Sop1 {
 public:
   SBcnt0I32B64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -192,7 +192,7 @@ public:
 class SBcnt1I32B32Sop1 : public Sop1 {
 public:
   SBcnt1I32B32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -200,7 +200,7 @@ public:
 class SBcnt1I32B64Sop1 : public Sop1 {
 public:
   SBcnt1I32B64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -208,7 +208,7 @@ public:
 class SQuadmaskB32Sop1 : public Sop1 {
 public:
   SQuadmaskB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -216,7 +216,7 @@ public:
 class SQuadmaskB64Sop1 : public Sop1 {
 public:
   SQuadmaskB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -224,7 +224,7 @@ public:
 class SWqmB32Sop1 : public Sop1 {
 public:
   SWqmB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -232,7 +232,7 @@ public:
 class SWqmB64Sop1 : public Sop1 {
 public:
   SWqmB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -240,7 +240,7 @@ public:
 class SNotB32Sop1 : public Sop1 {
 public:
   SNotB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -248,7 +248,7 @@ public:
 class SNotB64Sop1 : public Sop1 {
 public:
   SNotB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -256,7 +256,7 @@ public:
 class SAndSaveexecB32Sop1 : public Sop1 {
 public:
   SAndSaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -264,7 +264,7 @@ public:
 class SAndSaveexecB64Sop1 : public Sop1 {
 public:
   SAndSaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -272,7 +272,7 @@ public:
 class SOrSaveexecB32Sop1 : public Sop1 {
 public:
   SOrSaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -280,7 +280,7 @@ public:
 class SOrSaveexecB64Sop1 : public Sop1 {
 public:
   SOrSaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -288,7 +288,7 @@ public:
 class SXorSaveexecB32Sop1 : public Sop1 {
 public:
   SXorSaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -296,7 +296,7 @@ public:
 class SXorSaveexecB64Sop1 : public Sop1 {
 public:
   SXorSaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -304,7 +304,7 @@ public:
 class SNandSaveexecB32Sop1 : public Sop1 {
 public:
   SNandSaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -312,7 +312,7 @@ public:
 class SNandSaveexecB64Sop1 : public Sop1 {
 public:
   SNandSaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -320,7 +320,7 @@ public:
 class SNorSaveexecB32Sop1 : public Sop1 {
 public:
   SNorSaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -328,7 +328,7 @@ public:
 class SNorSaveexecB64Sop1 : public Sop1 {
 public:
   SNorSaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -336,7 +336,7 @@ public:
 class SXnorSaveexecB32Sop1 : public Sop1 {
 public:
   SXnorSaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -344,7 +344,7 @@ public:
 class SXnorSaveexecB64Sop1 : public Sop1 {
 public:
   SXnorSaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -352,7 +352,7 @@ public:
 class SAndNot0SaveexecB32Sop1 : public Sop1 {
 public:
   SAndNot0SaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -360,7 +360,7 @@ public:
 class SAndNot0SaveexecB64Sop1 : public Sop1 {
 public:
   SAndNot0SaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -368,7 +368,7 @@ public:
 class SOrNot0SaveexecB32Sop1 : public Sop1 {
 public:
   SOrNot0SaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -376,7 +376,7 @@ public:
 class SOrNot0SaveexecB64Sop1 : public Sop1 {
 public:
   SOrNot0SaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -384,7 +384,7 @@ public:
 class SAndNot1SaveexecB32Sop1 : public Sop1 {
 public:
   SAndNot1SaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -392,7 +392,7 @@ public:
 class SAndNot1SaveexecB64Sop1 : public Sop1 {
 public:
   SAndNot1SaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -400,7 +400,7 @@ public:
 class SOrNot1SaveexecB32Sop1 : public Sop1 {
 public:
   SOrNot1SaveexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -408,7 +408,7 @@ public:
 class SOrNot1SaveexecB64Sop1 : public Sop1 {
 public:
   SOrNot1SaveexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -416,7 +416,7 @@ public:
 class SAndNot0WrexecB32Sop1 : public Sop1 {
 public:
   SAndNot0WrexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -424,7 +424,7 @@ public:
 class SAndNot0WrexecB64Sop1 : public Sop1 {
 public:
   SAndNot0WrexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -432,7 +432,7 @@ public:
 class SAndNot1WrexecB32Sop1 : public Sop1 {
 public:
   SAndNot1WrexecB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -440,7 +440,7 @@ public:
 class SAndNot1WrexecB64Sop1 : public Sop1 {
 public:
   SAndNot1WrexecB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -448,7 +448,7 @@ public:
 class SMovrelsB32Sop1 : public Sop1 {
 public:
   SMovrelsB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -456,7 +456,7 @@ public:
 class SMovrelsB64Sop1 : public Sop1 {
 public:
   SMovrelsB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -464,7 +464,7 @@ public:
 class SMovreldB32Sop1 : public Sop1 {
 public:
   SMovreldB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -472,7 +472,7 @@ public:
 class SMovreldB64Sop1 : public Sop1 {
 public:
   SMovreldB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -480,7 +480,7 @@ public:
 class SMovrelsd2B32Sop1 : public Sop1 {
 public:
   SMovrelsd2B32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -488,21 +488,21 @@ public:
 class SGetpcB64Sop1 : public Sop1 {
 public:
   SGetpcB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
 };
 
 class SSetpcB64Sop1 : public Sop1 {
 public:
   SSetpcB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
 };
 
 class SSwappcB64Sop1 : public Sop1 {
 public:
   SSwappcB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -510,14 +510,14 @@ public:
 class SRfeB64Sop1 : public Sop1 {
 public:
   SRfeB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand ssrc0;
 };
 
 class SSendmsgRtnB32Sop1 : public Sop1 {
 public:
   SSendmsgRtnB32Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };
@@ -525,7 +525,7 @@ public:
 class SSendmsgRtnB64Sop1 : public Sop1 {
 public:
   SSendmsgRtnB64Sop1(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand sdst;
   Operand ssrc0;
 };

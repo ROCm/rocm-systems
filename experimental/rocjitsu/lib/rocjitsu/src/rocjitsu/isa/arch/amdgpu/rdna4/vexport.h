@@ -16,7 +16,7 @@ namespace rdna4 {
 class ExportVexport : public Vexport {
 public:
   ExportVexport(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand tgt;
   Operand vsrc0;
   Operand vsrc1;

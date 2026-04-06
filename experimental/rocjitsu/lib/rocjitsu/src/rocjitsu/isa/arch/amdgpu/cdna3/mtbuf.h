@@ -16,7 +16,7 @@ namespace cdna3 {
 class TbufferLoadFormatXMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -26,7 +26,7 @@ public:
 class TbufferLoadFormatXyMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXyMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -36,7 +36,7 @@ public:
 class TbufferLoadFormatXyzMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXyzMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -46,7 +46,7 @@ public:
 class TbufferLoadFormatXyzwMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatXyzwMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -56,7 +56,7 @@ public:
 class TbufferStoreFormatXMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -66,7 +66,7 @@ public:
 class TbufferStoreFormatXyMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXyMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -76,7 +76,7 @@ public:
 class TbufferStoreFormatXyzMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXyzMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -86,7 +86,7 @@ public:
 class TbufferStoreFormatXyzwMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatXyzwMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -96,7 +96,7 @@ public:
 class TbufferLoadFormatD16XMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -106,7 +106,7 @@ public:
 class TbufferLoadFormatD16XyMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XyMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -116,7 +116,7 @@ public:
 class TbufferLoadFormatD16XyzMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XyzMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -126,7 +126,7 @@ public:
 class TbufferLoadFormatD16XyzwMtbuf : public Mtbuf {
 public:
   TbufferLoadFormatD16XyzwMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -136,7 +136,7 @@ public:
 class TbufferStoreFormatD16XMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatD16XMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -146,7 +146,7 @@ public:
 class TbufferStoreFormatD16XyMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatD16XyMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -156,7 +156,7 @@ public:
 class TbufferStoreFormatD16XyzMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatD16XyzMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -166,7 +166,7 @@ public:
 class TbufferStoreFormatD16XyzwMtbuf : public Mtbuf {
 public:
   TbufferStoreFormatD16XyzwMtbuf(const MachineInst *inst);
-  void execute(amdgpu::Wavefront &wf) override;
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand srsrc;

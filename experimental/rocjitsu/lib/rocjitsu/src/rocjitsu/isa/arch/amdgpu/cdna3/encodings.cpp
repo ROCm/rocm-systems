@@ -20,8 +20,8 @@ std::string flat_mnemonic(std::string_view mnemonic, int seg) {
 }
 } // namespace
 
-Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -31,8 +31,8 @@ bool Sop1::default_encoding() { return inst_.ssrc0 != 255; }
 
 bool Sop1::has_lit_0() { return inst_.ssrc0 == 255; }
 
-Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -46,8 +46,8 @@ bool Sopc::has_lit_1() { return inst_.ssrc0 != 255 && inst_.ssrc1 == 255; }
 
 bool Sopc::has_lit_0_has_lit_1() { return inst_.ssrc0 == 255 && inst_.ssrc1 == 255; }
 
-Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -55,8 +55,8 @@ Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst)
 
 bool Sopp::default_encoding() { return true; }
 
-Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
@@ -66,8 +66,8 @@ bool Sopk::default_encoding() { return true; }
 
 bool Sopk::hasImpliedLiteral() { return inst_.op == 20; }
 
-Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -81,8 +81,8 @@ bool Sop2::has_lit_1() { return inst_.ssrc0 != 255 && inst_.ssrc1 == 255; }
 
 bool Sop2::has_lit_0_has_lit_1() { return inst_.ssrc0 == 255 && inst_.ssrc1 == 255; }
 
-Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (inst->soffset_en && inst->imm)
     modifiers_ += " offset:" + std::to_string(inst->offset);
@@ -92,8 +92,8 @@ Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst)
     modifiers_ += " nv";
 }
 
-Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -109,8 +109,8 @@ bool Vop1::has_dpp() { return inst_.src0 == 250; }
 
 bool Vop1::has_sdwa() { return inst_.src0 == 249; }
 
-Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding())
     size_ += sizeof(MachineInst);
@@ -124,8 +124,8 @@ bool Vopc::has_lit() { return inst_.src0 == 255; }
 
 bool Vopc::has_sdwa() { return inst_.src0 == 249; }
 
-Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (!default_encoding() || hasImpliedLiteral())
     size_ += sizeof(MachineInst);
@@ -145,23 +145,23 @@ bool Vop2::hasImpliedLiteral() {
   return inst_.op == 23 || inst_.op == 24 || inst_.op == 36 || inst_.op == 37;
 }
 
-Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
-Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
-Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
-Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (inst->offen)
     modifiers_ += " offen";
@@ -177,8 +177,8 @@ Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst)
     modifiers_ += " nt";
 }
 
-Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   if (inst->offen)
     modifiers_ += " offen";
@@ -192,8 +192,9 @@ Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst)
     modifiers_ += " nt";
 }
 
-Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst)
-    : IsaInstruction<Isa>(""), inst_(*inst), owned_mnemonic_(flat_mnemonic(mnemonic, inst->seg)) {
+Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>("", exec_fn), inst_(*inst),
+      owned_mnemonic_(flat_mnemonic(mnemonic, inst->seg)) {
   mnemonic_ = owned_mnemonic_;
   size_ = sizeof(OpEncoding);
   int flat_offset = (inst->seg != 0) ? (inst->offset | (inst->pad_12 << 12)) : inst->offset;
@@ -207,13 +208,14 @@ Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst)
     modifiers_ += " nt";
 }
 
-Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst,
+                         ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 
-Vop3pMfma::Vop3pMfma(std::string_view mnemonic, const Vop3pMfmaMachineInst *inst)
-    : IsaInstruction<Isa>(mnemonic), inst_(*inst) {
+Vop3pMfma::Vop3pMfma(std::string_view mnemonic, const Vop3pMfmaMachineInst *inst, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
 }
 

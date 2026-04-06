@@ -22,7 +22,8 @@ namespace rocjitsu {
 namespace rdna4 {
 
 FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_u8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_u8", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadU8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -30,7 +31,7 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadU8Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadU8Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -43,7 +44,8 @@ void FlatLoadU8Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_i8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_i8", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadI8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -51,7 +53,7 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadI8Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadI8Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -65,7 +67,8 @@ void FlatLoadI8Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
-    : Vflat("flat_load_u16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_u16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadU16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -73,7 +76,7 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadU16Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadU16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 2;
@@ -86,7 +89,8 @@ void FlatLoadU16Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
-    : Vflat("flat_load_i16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_i16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadI16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -94,7 +98,7 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadI16Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadI16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 2;
@@ -108,7 +112,8 @@ void FlatLoadI16Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
-    : Vflat("flat_load_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_b32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadB32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -116,7 +121,7 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadB32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -129,7 +134,8 @@ void FlatLoadB32Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
-    : Vflat("flat_load_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_b64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadB64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -137,7 +143,7 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadB64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -150,7 +156,8 @@ void FlatLoadB64Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
-    : Vflat("flat_load_b96", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_b96", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadB96Vflat>()),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -158,7 +165,7 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadB96Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadB96Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -171,7 +178,8 @@ void FlatLoadB96Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
-    : Vflat("flat_load_b128", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_b128", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadB128Vflat>()),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -179,7 +187,7 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadB128Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadB128Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -192,7 +200,8 @@ void FlatLoadB128Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_store_b8", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatStoreB8Vflat>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
   src_operands_.emplace_back(&vaddr);
@@ -200,7 +209,7 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatStoreB8Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatStoreB8Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
@@ -221,7 +230,8 @@ void FlatStoreB8Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_store_b16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatStoreB16Vflat>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
   src_operands_.emplace_back(&vaddr);
@@ -229,7 +239,7 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatStoreB16Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatStoreB16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
@@ -250,7 +260,8 @@ void FlatStoreB16Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_store_b32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatStoreB32Vflat>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
   src_operands_.emplace_back(&vaddr);
@@ -258,7 +269,7 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatStoreB32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatStoreB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -279,7 +290,8 @@ void FlatStoreB32Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_store_b64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatStoreB64Vflat>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
   src_operands_.emplace_back(&vaddr);
@@ -287,7 +299,7 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatStoreB64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatStoreB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 2;
@@ -310,7 +322,8 @@ void FlatStoreB64Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b96", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_store_b96", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatStoreB96Vflat>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
   src_operands_.emplace_back(&vaddr);
@@ -318,7 +331,7 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatStoreB96Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatStoreB96Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 3;
@@ -343,7 +356,8 @@ void FlatStoreB96Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
-    : Vflat("flat_store_b128", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_store_b128", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatStoreB128Vflat>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
   src_operands_.emplace_back(&vaddr);
@@ -351,7 +365,7 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatStoreB128Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatStoreB128Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 4;
   d->num_elems = 4;
@@ -378,7 +392,8 @@ void FlatStoreB128Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadD16U8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -386,7 +401,7 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadD16U8Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadD16U8Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -399,7 +414,8 @@ void FlatLoadD16U8Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadD16I8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -407,7 +423,7 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadD16I8Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadD16I8Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -421,7 +437,8 @@ void FlatLoadD16I8Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
-    : Vflat("flat_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadD16B16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -429,7 +446,7 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadD16B16Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadD16B16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 2;
@@ -442,7 +459,8 @@ void FlatLoadD16B16Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadD16HiU8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -450,7 +468,7 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadD16HiU8Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadD16HiU8Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -463,7 +481,8 @@ void FlatLoadD16HiU8Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
-    : Vflat("flat_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadD16HiI8Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -471,7 +490,7 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadD16HiI8Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadD16HiI8Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 1;
@@ -485,7 +504,8 @@ void FlatLoadD16HiI8Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
-    : Vflat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatLoadD16HiB16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr) {
   dst_operands_.emplace_back(&vdst);
@@ -493,7 +513,7 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatLoadD16HiB16Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatLoadD16HiB16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 2;
@@ -506,7 +526,8 @@ void FlatLoadD16HiB16Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
-    : Vflat("flat_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatStoreD16HiB8Vflat>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
   src_operands_.emplace_back(&vaddr);
@@ -514,7 +535,7 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatStoreD16HiB8Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatStoreD16HiB8Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
@@ -535,7 +556,8 @@ void FlatStoreD16HiB8Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
-    : Vflat("flat_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatStoreD16HiB16Vflat>()),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
   src_operands_.emplace_back(&vaddr);
@@ -543,7 +565,7 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatStoreD16HiB16Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatStoreD16HiB16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
@@ -564,7 +586,8 @@ void FlatStoreD16HiB16Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicSwapB32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -574,14 +597,15 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicSwapB32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicSwapB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_SWAP_B32)
 }
 
 FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicCmpswapB32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -591,14 +615,15 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicCmpswapB32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicCmpswapB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_CMPSWAP_B32)
 }
 
 FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicAddU32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -608,14 +633,15 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicAddU32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicAddU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_ADD_U32)
 }
 
 FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicSubU32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -625,14 +651,15 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicSubU32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicSubU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_SUB_U32)
 }
 
 FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicSubClampU32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -642,14 +669,15 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicSubClampU32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicSubClampU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_SUB_CLAMP_U32)
 }
 
 FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMinI32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -659,14 +687,15 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMinI32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMinI32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_I32)
 }
 
 FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMinU32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -676,14 +705,15 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMinU32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMinU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_U32)
 }
 
 FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMaxI32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -693,14 +723,15 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMaxI32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMaxI32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_I32)
 }
 
 FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMaxU32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -710,14 +741,15 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMaxU32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMaxU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_U32)
 }
 
 FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicAndB32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -727,14 +759,15 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicAndB32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicAndB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_AND_B32)
 }
 
 FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicOrB32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -744,14 +777,15 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicOrB32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicOrB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_OR_B32)
 }
 
 FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicXorB32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -761,14 +795,15 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicXorB32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicXorB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_XOR_B32)
 }
 
 FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicIncU32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -778,14 +813,15 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicIncU32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicIncU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_INC_U32)
 }
 
 FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicDecU32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -795,14 +831,15 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicDecU32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicDecU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_DEC_U32)
 }
 
 FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicSwapB64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -812,14 +849,15 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicSwapB64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicSwapB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_SWAP_B64)
 }
 
 FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicCmpswapB64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -829,14 +867,15 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicCmpswapB64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicCmpswapB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_CMPSWAP_B64)
 }
 
 FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicAddU64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -846,14 +885,15 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicAddU64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicAddU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_ADD_U64)
 }
 
 FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicSubU64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -863,14 +903,15 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicSubU64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicSubU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_SUB_U64)
 }
 
 FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMinI64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -880,14 +921,15 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMinI64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMinI64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_I64)
 }
 
 FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMinU64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -897,14 +939,15 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMinU64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMinU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_U64)
 }
 
 FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMaxI64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -914,14 +957,15 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMaxI64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMaxI64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_I64)
 }
 
 FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMaxU64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -931,14 +975,15 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMaxU64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMaxU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_U64)
 }
 
 FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicAndB64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -948,14 +993,15 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicAndB64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicAndB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_AND_B64)
 }
 
 FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicOrB64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -965,14 +1011,15 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicOrB64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicOrB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_OR_B64)
 }
 
 FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicXorB64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -982,14 +1029,15 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicXorB64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicXorB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_XOR_B64)
 }
 
 FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicIncU64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -999,14 +1047,15 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicIncU64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicIncU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_INC_U64)
 }
 
 FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicDecU64Vflat>()),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -1016,14 +1065,15 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicDecU64Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicDecU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_DEC_U64)
 }
 
 FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicCondSubU32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -1033,14 +1083,15 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicCondSubU32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicCondSubU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_COND_SUB_U32)
 }
 
 FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMinNumF32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -1050,14 +1101,15 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMinNumF32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMinNumF32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MIN_NUM_F32)
 }
 
 FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicMaxNumF32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -1067,14 +1119,15 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicMaxNumF32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicMaxNumF32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
   throw util::UnimplementedInst(
       mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_MAX_NUM_F32)
 }
 
 FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicAddF32Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -1084,7 +1137,7 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicAddF32Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicAddF32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -1107,7 +1160,8 @@ void FlatAtomicAddF32Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicPkAddF16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -1117,7 +1171,7 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicPkAddF16Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicPkAddF16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;
@@ -1140,7 +1194,8 @@ void FlatAtomicPkAddF16Vflat::execute(amdgpu::Wavefront &wf) {
 }
 
 FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
-    : Vflat("flat_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst)),
+    : Vflat("flat_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
+            make_exec_fn<FlatAtomicPkAddBf16Vflat>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc) {
@@ -1150,7 +1205,7 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void FlatAtomicPkAddBf16Vflat::execute(amdgpu::Wavefront &wf) {
+void FlatAtomicPkAddBf16Vflat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
   d->elem_size = 4;

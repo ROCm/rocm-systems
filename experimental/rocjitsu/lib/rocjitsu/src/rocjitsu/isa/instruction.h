@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 /// @file instruction.h
@@ -58,17 +58,28 @@ protected:
 /// @brief Abstract base class that defines the API for an instruction.
 class Instruction : public util::IListNode<Instruction, util::IListParent<BasicBlock>> {
 public:
+  /// @brief Function pointer type for direct (non-virtual) execute dispatch.
+  /// @param self The instruction instance.
+  /// @param ctx  ISA-specific execution context (cast to concrete type by impl).
+  using ExecuteFn = void (*)(Instruction &self, void *ctx);
+
   /// @brief Construct an instruction with the given mnemonic.
   /// @param[in] mnemonic Human-readable mnemonic (must point to static storage
   ///            or storage that outlives the instruction — typically a string
   ///            literal or a member of the encoding base class).
-  Instruction(std::string_view mnemonic) : mnemonic_(mnemonic) {}
+  Instruction(std::string_view mnemonic, ExecuteFn exec) : execute(exec), mnemonic_(mnemonic) {}
   virtual ~Instruction() = default;
 
   Instruction(const Instruction &) = delete;
   Instruction &operator=(const Instruction &) = delete;
   Instruction(Instruction &&) = delete;
   Instruction &operator=(Instruction &&) = delete;
+
+  /// @brief Direct execute dispatch.  Callers invoke as:
+  ///   ``inst->execute(*inst, &ctx)``
+  /// Each derived instruction class sets this to a trampoline that calls
+  /// its ``execute_impl()`` method.  No virtual dispatch.
+  const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
   /// @returns Pointer to the dynamic state, or nullptr.
@@ -176,11 +187,22 @@ template <typename Isa> class IsaInstruction : public Instruction {
 public:
   /// @brief Construct an ISA instruction with the given mnemonic.
   /// @param[in] mnemonic Human-readable mnemonic string.
-  IsaInstruction(std::string_view mnemonic) : Instruction(mnemonic) {}
+  IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn) : Instruction(mnemonic, exec_fn) {}
 
-  /// @brief Execute this instruction in the given ISA context.
-  /// @param[in,out] ctx ISA-specific execution context (e.g. wavefront state).
-  virtual void execute(typename Isa::Context &ctx) = 0;
+  /// @brief Helper to create an execute dispatch trampoline for a concrete type.
+  ///
+  /// The returned function pointer casts the base ``Instruction&`` to the
+  /// concrete ``Derived&`` and calls ``execute_impl()`` on it.
+  ///
+  /// Usage in a constructor init-list:
+  /// @code
+  ///   AddInst(...) : RType("add", raw, make_exec_fn<AddInst>()) {}
+  /// @endcode
+  template <typename Derived> static constexpr ExecuteFn make_exec_fn() {
+    return [](Instruction &self, void *ctx) {
+      static_cast<Derived &>(self).execute_impl(*static_cast<typename Isa::Context *>(ctx));
+    };
+  }
 };
 
 } // namespace rocjitsu
