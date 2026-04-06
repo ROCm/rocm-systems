@@ -37,6 +37,7 @@ endif()
 # a Makefile-generator circular dependency between the target name
 # (e.g. "shmem_hello") and the identically-named output file.
 set(_SHMEM_BINDIR ${CMAKE_CURRENT_BINARY_DIR}/bin)
+file(MAKE_DIRECTORY ${_SHMEM_BINDIR})
 set(_SHMEM_SRCDIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(_SHMEM_HELLO_EXE ${_SHMEM_BINDIR}/shmem_hello${CMAKE_EXECUTABLE_SUFFIX})
 set(_SHMEM_PINGPONG_EXE ${_SHMEM_BINDIR}/shmem_pingpong${CMAKE_EXECUTABLE_SUFFIX})

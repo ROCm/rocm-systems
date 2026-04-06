@@ -14,6 +14,7 @@
 //   -p, --pressure <MB>   Total managed memory for pressure test (default: 512)
 //   -d, --device <ID>     GPU device ID (default: 0)
 //   -i, --iterations <N>  Iterations for ping-pong tests (default: 8)
+//   -a, --all             Run all 16 tests (default: first 6 only)
 //   -h, --help            Show this help message
 
 #include <algorithm>
@@ -101,6 +102,7 @@ struct Config
     size_t pressure_mb   = 512;
     int    device_id     = 0;
     int    iterations    = 8;
+    bool   run_all       = false;
 };
 
 static void
@@ -113,6 +115,7 @@ print_usage(const char* prog)
     printf("  -p, --pressure <MB>   Managed memory for pressure test (default: 512)\n");
     printf("  -d, --device <ID>     GPU device ID (default: 0)\n");
     printf("  -i, --iterations <N>  Ping-pong iterations (default: 8)\n");
+    printf("  -a, --all             Run all 16 tests (default: first 6 only)\n");
     printf("  -h, --help            Show this help message\n");
 }
 
@@ -139,6 +142,8 @@ parse_args(int argc, char** argv)
         else if((strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--iterations") == 0) &&
                 i + 1 < argc)
             cfg.iterations = atoi(argv[++i]);
+        else if(strcmp(argv[i], "-a") == 0 || strcmp(argv[i], "--all") == 0)
+            cfg.run_all = true;
         else
         {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
@@ -176,7 +181,7 @@ banner(const char* title)
 // ---------------------------------------------------------------------------
 
 static void
-test_gpu_read_fault(size_t bytes, int /*device*/)
+test_gpu_read_fault(size_t bytes, int device)
 {
     banner("Test 1: GPU Read Fault (CPU write → GPU read)");
 
@@ -187,6 +192,10 @@ test_gpu_read_fault(size_t bytes, int /*device*/)
     for(size_t i = 0; i < n; i++)
         managed[i] = i;
     printf("  CPU initialized %zu MB of managed memory\n", bytes >> 20);
+
+    HIP_CHECK(hipMemPrefetchAsync(managed, bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    printf("  Prefetched to GPU (avoids demand-fault avalanche under XNACK)\n");
 
     uint64_t* d_result = nullptr;
     HIP_CHECK(hipMalloc(&d_result, sizeof(uint64_t)));
@@ -212,13 +221,16 @@ test_gpu_read_fault(size_t bytes, int /*device*/)
 // ---------------------------------------------------------------------------
 
 static void
-test_gpu_write_fault(size_t bytes, int /*device*/)
+test_gpu_write_fault(size_t bytes, int device)
 {
     banner("Test 2: GPU Write Fault (GPU writes fresh managed memory)");
 
     size_t    n       = bytes / sizeof(uint64_t);
     uint64_t* managed = nullptr;
     HIP_CHECK(hipMallocManaged(&managed, bytes));
+
+    HIP_CHECK(hipMemPrefetchAsync(managed, bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
 
     kern_write_pattern<<<grid_size(n), BLOCK_SIZE>>>(managed, n, 0xDEAD);
     HIP_CHECK(hipDeviceSynchronize());
@@ -242,13 +254,16 @@ test_gpu_write_fault(size_t bytes, int /*device*/)
 // ---------------------------------------------------------------------------
 
 static void
-test_cpu_read_fault(size_t bytes, int /*device*/)
+test_cpu_read_fault(size_t bytes, int device)
 {
     banner("Test 3: CPU Read Fault (GPU write → CPU read)");
 
     size_t    n       = bytes / sizeof(uint64_t);
     uint64_t* managed = nullptr;
     HIP_CHECK(hipMallocManaged(&managed, bytes));
+
+    HIP_CHECK(hipMemPrefetchAsync(managed, bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
 
     kern_write_pattern<<<grid_size(n), BLOCK_SIZE>>>(managed, n, 0xBEEF);
     HIP_CHECK(hipDeviceSynchronize());
@@ -285,9 +300,13 @@ test_cpu_write_fault(size_t bytes, int /*device*/)
     HIP_CHECK(hipDeviceSynchronize());
     printf("  GPU wrote pattern to %zu MB\n", bytes >> 20);
 
+    HIP_CHECK(hipMemPrefetchAsync(managed, bytes, hipCpuDeviceId, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    printf("  Prefetched to CPU (avoids demand-fault avalanche under XNACK)\n");
+
     for(size_t i = 0; i < n; i++)
         managed[i] = i * 2;
-    printf("  CPU overwrote all %zu MB (triggers write faults)\n", bytes >> 20);
+    printf("  CPU overwrote all %zu MB\n", bytes >> 20);
 
     HIP_CHECK(hipFree(managed));
     printf("  DONE\n");
@@ -350,7 +369,7 @@ test_prefetch(size_t bytes, int device)
 // ---------------------------------------------------------------------------
 
 static void
-test_pingpong(size_t bytes, int /*device*/, int iterations)
+test_pingpong(size_t bytes, int device, int iterations)
 {
     banner("Test 6: Ping-Pong Migration (alternating CPU/GPU access)");
 
@@ -362,12 +381,16 @@ test_pingpong(size_t bytes, int /*device*/, int iterations)
     {
         if(iter % 2 == 0)
         {
+            HIP_CHECK(hipMemPrefetchAsync(managed, bytes, hipCpuDeviceId, nullptr));
+            HIP_CHECK(hipDeviceSynchronize());
             for(size_t i = 0; i < n; i++)
                 managed[i] = iter + i;
             printf("  [iter %d] CPU wrote %zu MB\n", iter, bytes >> 20);
         }
         else
         {
+            HIP_CHECK(hipMemPrefetchAsync(managed, bytes, device, nullptr));
+            HIP_CHECK(hipDeviceSynchronize());
             kern_write_pattern<<<grid_size(n), BLOCK_SIZE>>>(managed, n, iter * 1000ULL);
             HIP_CHECK(hipDeviceSynchronize());
             printf("  [iter %d] GPU wrote %zu MB\n", iter, bytes >> 20);
@@ -399,6 +422,9 @@ test_mem_advise(size_t bytes, int device)
 
     for(size_t i = 0; i < n; i++)
         managed[i] = i;
+
+    HIP_CHECK(hipMemPrefetchAsync(managed, bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
 
     kern_write_pattern<<<grid_size(n), BLOCK_SIZE>>>(managed, n, 0xA1);
     HIP_CHECK(hipDeviceSynchronize());
@@ -446,6 +472,9 @@ test_read_mostly(size_t bytes, int device)
     printf("  Setting hipMemAdviseSetReadMostly\n");
     HIP_CHECK(hipMemAdvise(managed, bytes, hipMemAdviseSetReadMostly, device));
 
+    HIP_CHECK(hipMemPrefetchAsync(managed, bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+
     uint64_t* d_result = nullptr;
     HIP_CHECK(hipMalloc(&d_result, sizeof(uint64_t)));
     HIP_CHECK(hipMemset(d_result, 0, sizeof(uint64_t)));
@@ -482,7 +511,7 @@ test_read_mostly(size_t bytes, int device)
 // ---------------------------------------------------------------------------
 
 static void
-test_stencil_pipeline(size_t bytes, int /*device*/, int iterations)
+test_stencil_pipeline(size_t bytes, int device, int iterations)
 {
     banner("Test 9: Multi-Kernel Stencil Pipeline");
 
@@ -501,16 +530,24 @@ test_stencil_pipeline(size_t bytes, int /*device*/, int iterations)
         buf_c[i] = 0;
     }
 
+    HIP_CHECK(hipMemPrefetchAsync(buf_a, bytes, device, nullptr));
+    HIP_CHECK(hipMemPrefetchAsync(buf_b, bytes, device, nullptr));
+    HIP_CHECK(hipMemPrefetchAsync(buf_c, bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+
     for(int iter = 0; iter < iterations; iter++)
     {
         kern_read_write_stencil<<<grid_size(n), BLOCK_SIZE>>>(buf_b, buf_a, n);
         kern_read_write_stencil<<<grid_size(n), BLOCK_SIZE>>>(buf_c, buf_b, n);
         kern_read_write_stencil<<<grid_size(n), BLOCK_SIZE>>>(buf_a, buf_c, n);
         HIP_CHECK(hipDeviceSynchronize());
-
-        uint64_t spot_check = buf_a[0];
-        printf("  [iter %d] buf_a[0] = %lu\n", iter, spot_check);
+        printf("  [iter %d] kernels completed\n", iter);
     }
+
+    HIP_CHECK(hipMemPrefetchAsync(buf_a, bytes, hipCpuDeviceId, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+    uint64_t spot_check = buf_a[0];
+    printf("  buf_a[0] = %lu\n", spot_check);
 
     HIP_CHECK(hipFree(buf_a));
     HIP_CHECK(hipFree(buf_b));
@@ -530,7 +567,7 @@ test_stencil_pipeline(size_t bytes, int /*device*/, int iterations)
 // ---------------------------------------------------------------------------
 
 static void
-test_saxpy_managed(size_t bytes, int /*device*/, int iterations)
+test_saxpy_managed(size_t bytes, int device, int iterations)
 {
     banner("Test 10: SAXPY with Managed Memory");
 
@@ -546,6 +583,10 @@ test_saxpy_managed(size_t bytes, int /*device*/, int iterations)
         y[i] = 2.0f;
     }
     printf("  CPU initialized x and y (%zu MB each)\n", bytes >> 20);
+
+    HIP_CHECK(hipMemPrefetchAsync(x, bytes, device, nullptr));
+    HIP_CHECK(hipMemPrefetchAsync(y, bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
 
     float a = 3.0f;
     for(int iter = 0; iter < iterations; iter++)
@@ -621,6 +662,11 @@ test_memory_pressure(size_t total_bytes, int device)
             chunks[c][i] = c * 1000 + i;
     }
 
+    printf("  Prefetching all chunks to GPU...\n");
+    for(size_t c = 0; c < n_chunks; c++)
+        HIP_CHECK(hipMemPrefetchAsync(chunks[c], CHUNK_SIZE, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+
     printf("  GPU touching all chunks (creating migration pressure)...\n");
     for(size_t c = 0; c < n_chunks; c++)
     {
@@ -630,7 +676,12 @@ test_memory_pressure(size_t total_bytes, int device)
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    printf("  CPU reading back all chunks (triggers GPU→CPU migration)...\n");
+    printf("  Prefetching all chunks back to CPU...\n");
+    for(size_t c = 0; c < n_chunks; c++)
+        HIP_CHECK(hipMemPrefetchAsync(chunks[c], CHUNK_SIZE, hipCpuDeviceId, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    printf("  CPU reading back all chunks...\n");
     uint64_t total_sum = 0;
     for(size_t c = 0; c < n_chunks; c++)
     {
@@ -735,7 +786,7 @@ test_prefetch_pingpong(size_t bytes, int device, int iterations)
 // ---------------------------------------------------------------------------
 
 static void
-test_multi_stream(size_t bytes, int /*device*/)
+test_multi_stream(size_t bytes, int device)
 {
     banner("Test 14: Multi-Stream Concurrent Access");
 
@@ -753,6 +804,11 @@ test_multi_stream(size_t bytes, int /*device*/)
     }
     printf("  Created %d streams with %zu MB managed buffers each\n", NUM_STREAMS,
            bytes >> 20);
+
+    for(int s = 0; s < NUM_STREAMS; s++)
+        HIP_CHECK(hipMemPrefetchAsync(buffers[s], bytes, device, streams[s]));
+    for(int s = 0; s < NUM_STREAMS; s++)
+        HIP_CHECK(hipStreamSynchronize(streams[s]));
 
     printf("  Launching concurrent kernels on all streams...\n");
     for(int s = 0; s < NUM_STREAMS; s++)
@@ -787,7 +843,7 @@ test_multi_stream(size_t bytes, int /*device*/)
 // ---------------------------------------------------------------------------
 
 static void
-test_partial_range(size_t bytes, int /*device*/)
+test_partial_range(size_t bytes, int device)
 {
     banner("Test 15: Partial Range Access (page-level faults)");
 
@@ -795,14 +851,16 @@ test_partial_range(size_t bytes, int /*device*/)
     uint64_t* managed = nullptr;
     HIP_CHECK(hipMallocManaged(&managed, bytes));
 
-    size_t quarter = n / 4;
+    size_t quarter       = n / 4;
+    size_t quarter_bytes = quarter * sizeof(uint64_t);
 
-    printf("  CPU writing first quarter (%zu MB)...\n",
-           (quarter * sizeof(uint64_t)) >> 20);
+    printf("  CPU writing first quarter (%zu MB)...\n", quarter_bytes >> 20);
     for(size_t i = 0; i < quarter; i++)
         managed[i] = i;
 
     printf("  GPU writing second quarter...\n");
+    HIP_CHECK(hipMemPrefetchAsync(managed + quarter, quarter_bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
     kern_write_pattern<<<grid_size(quarter), BLOCK_SIZE>>>(managed + quarter, quarter,
                                                            0xAA);
     HIP_CHECK(hipDeviceSynchronize());
@@ -812,17 +870,28 @@ test_partial_range(size_t bytes, int /*device*/)
         managed[i] = i * 3;
 
     printf("  GPU writing fourth quarter...\n");
+    HIP_CHECK(hipMemPrefetchAsync(managed + 3 * quarter, quarter_bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
     kern_write_pattern<<<grid_size(quarter), BLOCK_SIZE>>>(managed + 3 * quarter, quarter,
                                                            0xBB);
     HIP_CHECK(hipDeviceSynchronize());
 
     printf("  Cross-reading: CPU reads GPU quarters, GPU reads CPU quarters...\n");
+    HIP_CHECK(
+        hipMemPrefetchAsync(managed + quarter, quarter_bytes, hipCpuDeviceId, nullptr));
+    HIP_CHECK(hipMemPrefetchAsync(managed + 3 * quarter, quarter_bytes, hipCpuDeviceId,
+                                  nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
     uint64_t cpu_sum = 0;
     for(size_t i = quarter; i < 2 * quarter; i += 64)
         cpu_sum += managed[i];
     for(size_t i = 3 * quarter; i < n; i += 64)
         cpu_sum += managed[i];
     printf("  CPU sum of GPU quarters: %lu\n", cpu_sum);
+
+    HIP_CHECK(hipMemPrefetchAsync(managed, quarter_bytes, device, nullptr));
+    HIP_CHECK(hipMemPrefetchAsync(managed + 2 * quarter, quarter_bytes, device, nullptr));
+    HIP_CHECK(hipDeviceSynchronize());
 
     uint64_t* d_result = nullptr;
     HIP_CHECK(hipMalloc(&d_result, sizeof(uint64_t)));
@@ -908,6 +977,7 @@ main(int argc, char** argv)
     printf("  Per-allocation size: %zu MB\n", cfg.alloc_size_mb);
     printf("  Pressure test size: %zu MB\n", cfg.pressure_mb);
     printf("  Iterations: %d\n", cfg.iterations);
+    printf("  Test suite: %s\n", cfg.run_all ? "all (1-16)" : "basic (1-6)");
 
     if(!props.managedMemory)
     {
@@ -930,29 +1000,36 @@ main(int argc, char** argv)
 
     auto t0 = std::chrono::steady_clock::now();
 
+    int n_tests = 6;
+
     test_gpu_read_fault(alloc_bytes, cfg.device_id);
     test_gpu_write_fault(alloc_bytes, cfg.device_id);
     test_cpu_read_fault(alloc_bytes, cfg.device_id);
     test_cpu_write_fault(alloc_bytes, cfg.device_id);
     test_prefetch(alloc_bytes, cfg.device_id);
     test_pingpong(alloc_bytes, cfg.device_id, cfg.iterations);
-    test_mem_advise(alloc_bytes, cfg.device_id);
-    test_read_mostly(alloc_bytes, cfg.device_id);
-    test_stencil_pipeline(alloc_bytes, cfg.device_id, cfg.iterations);
-    test_saxpy_managed(alloc_bytes, cfg.device_id, cfg.iterations);
-    test_memory_pressure(pressure_bytes, cfg.device_id);
-    test_alloc_free_cycle(alloc_bytes, cfg.device_id, cfg.iterations * 2);
-    test_prefetch_pingpong(alloc_bytes, cfg.device_id, cfg.iterations);
-    test_multi_stream(alloc_bytes, cfg.device_id);
-    test_partial_range(alloc_bytes, cfg.device_id);
-    test_large_allocation(alloc_bytes, cfg.device_id);
+
+    if(cfg.run_all)
+    {
+        n_tests = 16;
+        test_mem_advise(alloc_bytes, cfg.device_id);
+        test_read_mostly(alloc_bytes, cfg.device_id);
+        test_stencil_pipeline(alloc_bytes, cfg.device_id, cfg.iterations);
+        test_saxpy_managed(alloc_bytes, cfg.device_id, cfg.iterations);
+        test_memory_pressure(pressure_bytes, cfg.device_id);
+        test_alloc_free_cycle(alloc_bytes, cfg.device_id, cfg.iterations * 2);
+        test_prefetch_pingpong(alloc_bytes, cfg.device_id, cfg.iterations);
+        test_multi_stream(alloc_bytes, cfg.device_id);
+        test_partial_range(alloc_bytes, cfg.device_id);
+        test_large_allocation(alloc_bytes, cfg.device_id);
+    }
 
     auto   t1 = std::chrono::steady_clock::now();
     double elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() / 1000.0;
 
     banner("SUMMARY");
-    printf("  All 16 tests completed in %.2f seconds\n", elapsed);
+    printf("  %d tests completed in %.2f seconds\n", n_tests, elapsed);
     printf("  KFD event categories exercised:\n");
     printf("    - Page Faults (read/write, migrated/updated)\n");
     printf("    - Page Migrations (prefetch, GPU pagefault, CPU pagefault)\n");

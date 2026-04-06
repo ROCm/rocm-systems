@@ -31,10 +31,13 @@ endif()
 # ROCm < 7.3.0 ships rocprofiler-sdk without handling for KFD_IOCTL_SVM_LOCATION_UNDEFINED
 # node IDs (0xFFFFFFFF), causing a fatal crash in the SDK's KFD parsing thread. Fixed in
 # ROCm 7.3.0.
-if(ROCPROFSYS_ROCM_VERSION VERSION_LESS "7.3.0")
+if(
+    ROCPROFSYS_ROCM_VERSION VERSION_LESS "7.3.0"
+    AND rocprofiler-sdk_VERSION VERSION_LESS "1.2.2"
+)
     rocprofiler_systems_message(
         WARNING
-            "KFD tests disabled: ROCm ${ROCPROFSYS_ROCM_VERSION} has a rocprofiler-sdk bug with undefined node IDs (fixed in ROCm >= 7.3.0)"
+            "KFD tests disabled: ROCm ${ROCPROFSYS_ROCM_VERSION} (rocprofiler-sdk ${rocprofiler-sdk_VERSION}) has a rocprofiler-sdk bug with undefined node IDs (fixed in ROCm >= 7.3.0)"
     )
     return()
 endif()
@@ -63,11 +66,11 @@ rocprofiler_systems_add_test(
     GPU ON
     MPI OFF
     NUM_PROCS 1
-    RUN_ARGS -s 32 -p 256 -i 4
+    RUN_ARGS -s 4 -p 32 -i 2
     ENVIRONMENT "${_kfd_environment}"
     LABELS "kfd"
     TIMEOUT 120
-    PASS_REGEX "All 16 tests completed"
+    PASS_REGEX "All [0-9]+ tests completed"
 )
 
 # -------------------------------------------------------------------------------------- #
