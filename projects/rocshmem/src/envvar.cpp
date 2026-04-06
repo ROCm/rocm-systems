@@ -46,33 +46,30 @@ namespace envvar {
     const var<size_t> heap_size("HEAP_SIZE",
       "Defines the size of the rocSHMEM symmetric heap in bytes (per PE). Size in bytes (per PE); Note: the heap is on GPU memory",
       1L << 30);
-    const var<size_t> max_num_teams("MAX_NUM_TEAMS",
-      "Defines the number of teams an application can use.",
-      40);
-    const var<size_t> max_num_host_contexts("MAX_NUM_HOST_CONTEXTS",
-      "Maximum number of host-side communication contexts",
-      1);
+    const var<std::string> backend("BACKEND",
+      "When rocSHMEM is compiled for all backends, this environment variable selects which backend to execute. The default value is an empty string and rocSHMEM auto-selects the most appropriate backend. ipc: IPC Backend; ro: Reverse Offload Backend; gda: GPU Direct Async Backend");
     const var<size_t> max_num_contexts("MAX_NUM_CONTEXTS",
       "Defines the number of contexts an application can use.",
       32);
-    const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
-      "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
-      1024);
-    const var<std::string> requested_nic("USE_IB_HCA",
-      "Forces the NIC that this PE uses. When this value is set NIC auto-detection and mapping is disabled, the NIC specified in the variable will be selected. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. Example value: bnxt_re0");
+    const var<size_t> max_num_host_contexts("MAX_NUM_HOST_CONTEXTS",
+      "Maximum number of host-side communication contexts",
+      1);
+    const var<size_t> max_num_teams("MAX_NUM_TEAMS",
+      "Defines the number of teams an application can use.",
+      40);
     const var<std::string> hca_list("HCA_LIST",
       "Comma separated list of NIC names that can be used by rocSHMEM. Unlike ROCSHMEM_USE_IB_HCA, when this variable is set, NIC auto-detection and mapping still executes, but NICs that are not in the list are discarded before auto-detection runs. Prefixing the list with ^ turns the list in an exclude list, NICs that are in the list are discarded before auto-detection runs. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. Example value: bnxt_re1,bnxt_re11, ^mlx5_0,mlx5_3");
-    const var<uint32_t> sq_size("SQ_SIZE",
-      "Send queue size for GDA backend",
-      1024);
-    const var<std::string> backend("BACKEND",
-      "When rocSHMEM is compiled for all backends, this environment variable selects which backend to execute. The default value is an empty string and rocSHMEM auto-selects the most appropriate backend. ipc: IPC Backend; ro: Reverse Offload Backend; gda: GPU Direct Async Backend");
+    const var<std::string> requested_nic("USE_IB_HCA",
+      "Forces the NIC that this PE uses. When this value is set NIC auto-detection and mapping is disabled, the NIC specified in the variable will be selected. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC. Example value: bnxt_re0");
     const var<bool> disable_mixed_ipc("DISABLE_MIXED_IPC",
       "Defines whether to force using the network conduit even when IPC is available. 0: Use IPC when available; 1: Force network conduit",
       false);
     const var<bool> disable_ipc("DISABLE_IPC",
       "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
       false);
+    const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
+      "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
+      1024);
   }  // inline namespace _base
 
   namespace bootstrap {
@@ -122,7 +119,7 @@ namespace envvar {
       "Selects between two algorithms to use for GDA based alltoallv. The GET algorithm uses an initial round of alltoallv communication to distribute displacements then a second round to get transfer data. This algorithm has a higher latency but has better performance for large messages. The COPY algorithm does an alltoallv communication pattern into a staging buffer then does a copy into the destination buffers. This reduces latency but requires more memory, this algorithm only works for small messages.");
     const var<uint32_t> sq_size("SQ_SIZE",
       "This environment variable sets the length of the SQ for GDA. Maximum number of Work Queue Entries (WQEs) posted on the Send Queue (SQ)",
-      4096);
+      1024);
     const var<size_t> num_qps_per_pe_default_ctx("NUM_QPS_PER_PE_DEFAULT_CTX",
       "Sets the number of Queue Pairs (QPs) to create per PE for the default context.",
       1);
