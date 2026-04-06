@@ -106,17 +106,6 @@ namespace
 namespace fs          = ::rocprofiler::common::filesystem;
 using function_args_t = std::vector<argument_info>;
 
-struct rocpd_db;
-struct pending_insert_batch;
-void
-finish_pending_insert_batch(rocpd_db& db);
-void
-flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending);
-std::string
-normalize_batch_table_name(const rocpd_db& db, std::string_view table);
-void
-log_batch_flush_stats(const rocpd_db& db);
-
 struct sql_insert_value
 {
     std::string_view                                                                     name  = {};
@@ -141,6 +130,7 @@ struct rocpd_db
     using batch_stats_map_t   = std::unordered_map<std::string, batch_stats_t>;
     using pending_batch_map_t = std::unordered_map<std::string, pending_insert_batch>;
     using fk_parent_map_t     = std::unordered_map<std::string, std::vector<std::string>>;
+    using flushing_set_t      = std::unordered_set<std::string>;
 
     static constexpr size_t max_pending_batches = 6;
 
@@ -160,11 +150,21 @@ struct rocpd_db
     statement_cache_t   statements          = {};
     pending_batch_map_t pending_batches     = {};
     fk_parent_map_t     fk_parent_tables    = {};
+    flushing_set_t      flushing_tables     = {};
     uint64_t            pending_touch_count = 0;
     batch_stats_map_t   batch_stats         = {};
 
     size_t get_event_id() { return ++event_id_counter; }
 };
+
+void
+finish_pending_insert_batch(rocpd_db& db);
+void
+flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending);
+std::string
+normalize_batch_table_name(const rocpd_db& db, std::string_view table);
+void
+log_batch_flush_stats(const rocpd_db& db);
 
 template <typename Tp>
 auto
@@ -616,12 +616,16 @@ flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending)
     if(pending.rows.empty()) return;
 
     ROCP_FATAL_IF(db.conn == nullptr) << "Pending insert batch missing sqlite connection";
+    ROCP_FATAL_IF(db.flushing_tables.count(pending.table) > 0)
+        << "FK cycle detected: flush of '" << pending.table << "' is already in progress";
+
+    db.flushing_tables.insert(pending.table);
 
     // Flush direct FK parents first so references are always materialized before child rows.
-    // Parent flushes recurse, so transitive dependencies are naturally ordered as well.
+    // Parent flushes recurse; flushing_tables guards against cycles in the dependency graph.
     for(const auto& parent_table : get_fk_parent_tables(db, pending.table))
     {
-        if(parent_table == pending.table) continue;
+        if(db.flushing_tables.count(parent_table) > 0) continue;
         if(auto pitr = db.pending_batches.find(parent_table);
            pitr != db.pending_batches.end() && !pitr->second.rows.empty())
         {
@@ -670,6 +674,7 @@ flush_pending_insert_batch(rocpd_db& db, pending_insert_batch& pending)
     }
 
     pending.rows.clear();
+    db.flushing_tables.erase(pending.table);
 }
 
 void
@@ -729,7 +734,10 @@ get_insert_statement(rocpd_db& db, std::string_view _table, std::vector<sql_inse
         return;
     }
 
-    if(db.pending_batches.size() >= rocpd_db::max_pending_batches)
+    const auto live_count = std::count_if(db.pending_batches.begin(),
+                                          db.pending_batches.end(),
+                                          [](const auto& kv) { return !kv.second.rows.empty(); });
+    if(static_cast<size_t>(live_count) >= rocpd_db::max_pending_batches)
     {
         auto victim = select_pending_batch_victim(db);
 
