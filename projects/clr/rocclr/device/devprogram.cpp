@@ -2018,6 +2018,7 @@ amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData
   if (status != AMD_COMGR_STATUS_SUCCESS) {
     return status;
   }
+
   /* If symbol type is object(Variable) add it to vector */
   if ((std::strcmp(name, "") != 0) && (type == sym_info->sym_type)) {
     sym_info->var_names->push_back(std::string(name));
