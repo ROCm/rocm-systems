@@ -1610,6 +1610,10 @@ HIP_TEST_CASE(Unit_hipMemSetAccessHost_devicealloc) {
   HIP_CHECK_ERROR(hipMemSetAccess(addr, mapSize, &accHost, 1), hipErrorNotSupported);
 #endif
 
+  // Exercise access to the virtual memory range from the host
+  int* hostPtr = reinterpret_cast<int*>(addr);
+  for (size_t i = 0; i < N; ++i) hostPtr[i] = static_cast<int>(i);
+
   HIP_CHECK(hipMemUnmap(addr, mapSize));
   HIP_CHECK(hipMemAddressFree(addr, mapSize));
   HIP_CHECK(hipMemRelease(handle));
