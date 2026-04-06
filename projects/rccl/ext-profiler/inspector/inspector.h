@@ -139,6 +139,7 @@ struct inspectorCollInfo {
   uint32_t nChannels;
   uint32_t nKernelChStarted;
   uint32_t nKernelChCompleted;
+  bool collStopFired;  // set when ncclProfileColl stop event fires
   pthread_rwlock_t guard;
   struct inspectorKernelChInfo kernelCh[MAX_CHANNELS];
   struct inspectorEventTrkCollInfo collEvtTrk;

@@ -748,12 +748,18 @@ struct inspectorDumpThread {
   uint64_t sampleIntervalUsecs;
   pthread_t pthread;
   pthread_rwlock_t guard;
+  // Mutex + condvar used to wake the sleeping dump thread immediately on stop,
+  // replacing the nanosleep-based heuristic that caused teardown hangs.
+  pthread_mutex_t sleepMutex;
+  pthread_cond_t  sleepCond;
 
   inspectorDumpThread(const char* outputRoot, uint64_t sampleIntervalUsecs)
     : jfo(nullptr), outputRoot(strdup(outputRoot)), sampleIntervalUsecs(sampleIntervalUsecs) {
     if (inspectorLockInit(&guard) != inspectorSuccess) {
       INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: couldn't init lock");
     }
+    pthread_mutex_init(&sleepMutex, nullptr);
+    pthread_cond_init(&sleepCond, nullptr);
   }
 
   ~inspectorDumpThread() {
@@ -768,12 +774,14 @@ struct inspectorDumpThread {
     if (inspectorLockDestroy(&guard) != inspectorSuccess) {
       INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: couldn't destroy lock");
     }
+    pthread_cond_destroy(&sleepCond);
+    pthread_mutex_destroy(&sleepMutex);
   }
 
   void startThread() {
-    inspectorLockWr(&guard);
+    pthread_mutex_lock(&sleepMutex);
     run = true;
-    inspectorUnlockRWLock(&guard);
+    pthread_mutex_unlock(&sleepMutex);
     if (pthread_create(&pthread, NULL, dumpMain, this) != 0) {
       INFO(NCCL_INSPECTOR,
            "NCCL Inspector inspectorDumpThread: couldn't create dump thread!");
@@ -784,13 +792,13 @@ struct inspectorDumpThread {
 
   void stopThread() {
     INFO(NCCL_ENV, "NCCL Inspector Stopping Dump thread");
-    inspectorLockWr(&guard);
+    // Set run = false and signal under sleepMutex so the dump thread cannot
+    // miss the wakeup regardless of where it is in its loop.
+    pthread_mutex_lock(&sleepMutex);
     run = false;
-    inspectorUnlockRWLock(&guard);
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = 1000000; // 1ms
-    nanosleep(&ts, NULL);
+    pthread_cond_signal(&sleepCond);
+    pthread_mutex_unlock(&sleepMutex);
+    pthread_join(pthread, NULL);
     INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: stopped");
   }
 
@@ -805,7 +813,7 @@ struct inspectorDumpThread {
 
     if (jfo == 0) {
       char hostname[256];
-      gethostname(hostname, 255);
+      gethostname(hostname, sizeof(hostname));
       char tmp[2048];
       snprintf(tmp, sizeof(tmp), "%s/%s-pid%d.log", output_root, hostname, getpid());
       jsonResult_t result = jsonInitFileOutput(&jfo, tmp);
@@ -821,7 +829,12 @@ struct inspectorDumpThread {
       inspectorCommInfoListDump(jfo, &g_state.deletedComms);
     }
 
-    if (g_state.deletedComms.ncomms > 0) {
+    // Re-check ncomms under the list's own lock to avoid a TOCTOU race between
+    // inspectorCommInfoListDump releasing the lock and this read.
+    inspectorLockRd(&g_state.deletedComms.guard);
+    bool hasDeleted = (g_state.deletedComms.ncomms > 0);
+    inspectorUnlockRWLock(&g_state.deletedComms.guard);
+    if (hasDeleted) {
       inspectorCommInfoListFinalize(&g_state.deletedComms);
     }
     return inspectorSuccess;
@@ -830,24 +843,36 @@ struct inspectorDumpThread {
   static void* dumpMain(void* arg) {
     inspectorDumpThread* dumper = (inspectorDumpThread*)arg;
     inspectorResult_t res = inspectorSuccess;
-    struct timespec ts;
-    ts.tv_sec = dumper->sampleIntervalUsecs / 1000000;
-    ts.tv_nsec = dumper->sampleIntervalUsecs % 1000000;
 
-    while (dumper->run) {
-      inspectorLockWr(&dumper->guard);
-      if (!dumper->run) {
-        inspectorUnlockRWLock(&dumper->guard);
-        break;
-      }
+    while (true) {
+      // Check run flag under sleepMutex so stopThread's signal is never missed.
+      pthread_mutex_lock(&dumper->sleepMutex);
+      bool shouldRun = dumper->run;
+      pthread_mutex_unlock(&dumper->sleepMutex);
+      if (!shouldRun) break;
+
+      // Perform the dump without holding dumper->guard. The dump acquires
+      // per-communicator locks internally; holding dumper->guard here would
+      // create a lock-order inversion with profiler proxy threads that hold
+      // commInfo->guard and then indirectly wait on dumper->guard via stopThread.
       res = dumper->inspectorStateDump(dumper->outputRoot);
-      if (res == inspectorFileOpenError || res == inspectorDisabledError) {
-        inspectorUnlockRWLock(&dumper->guard);
-        break;
-      }
-      inspectorUnlockRWLock(&dumper->guard);
+      if (res == inspectorFileOpenError || res == inspectorDisabledError) break;
 
-      nanosleep(&ts, NULL);
+      // Interruptible sleep: wakes immediately when stopThread signals the condvar.
+      struct timespec deadline;
+      clock_gettime(CLOCK_REALTIME, &deadline);
+      uint64_t nsTotal = dumper->sampleIntervalUsecs * 1000ULL;  // µs → ns
+      deadline.tv_sec  += nsTotal / 1000000000ULL;
+      deadline.tv_nsec += nsTotal % 1000000000ULL;
+      if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_sec  += 1;
+        deadline.tv_nsec -= 1000000000L;
+      }
+      pthread_mutex_lock(&dumper->sleepMutex);
+      if (dumper->run) {
+        pthread_cond_timedwait(&dumper->sleepCond, &dumper->sleepMutex, &deadline);
+      }
+      pthread_mutex_unlock(&dumper->sleepMutex);
     }
 
     return 0;
@@ -1361,11 +1386,11 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
     factor = ((double)(2 * (commInfo->nranks - 1))) / ((double)commInfo->nranks);
     break;
   case ncclFuncReduceScatter:
-    trafficSize = (double)(completedColl->msgSizeBytes * commInfo->nranks);
+    trafficSize = (double)completedColl->msgSizeBytes * (double)commInfo->nranks;
     factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
     break;
   case ncclFuncAllGather:
-    trafficSize = (double)(completedColl->msgSizeBytes * commInfo->nranks);
+    trafficSize = (double)completedColl->msgSizeBytes * (double)commInfo->nranks;
     factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
     break;
   case ncclFuncSendRecv:
@@ -1406,8 +1431,10 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
 static uint64_t calculateKernelGpuExecTimeUsecs(struct inspectorKernelChInfo *kernelCh) {
   if (kernelCh->startGpuClk != 0 && kernelCh->stopGpuClk != 0) {
     if (kernelCh->stopGpuClk > kernelCh->startGpuClk) {
-      uint64_t execTimeNanosecs = kernelCh->stopGpuClk - kernelCh->startGpuClk;
-      return execTimeNanosecs / 1000;
+      uint64_t ticks = kernelCh->stopGpuClk - kernelCh->startGpuClk;
+      // AMD wall_clock64() / HIP clock64() runs at 100 MHz (10 ns per tick).
+      // Convert ticks → µs: ticks * 10ns / 1000 = ticks / 100.
+      return ticks / 100;
     }
   }
   return 0;
@@ -1467,6 +1494,7 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
     return maxKernelExecTimeUsecs;
   } else {
     *timingSource = inspectorTimingSourceCollectiveCpu;
+    if (collInfo->tsCompletedUsec <= collInfo->tsStartUsec) return 0;
     return collInfo->tsCompletedUsec - collInfo->tsStartUsec;
   }
 }
