@@ -38,11 +38,11 @@ template <typename T> struct Context {
     static T *get()
     {
         std::lock_guard<std::mutex> lock{m};
+        if (replacement)
+            return replacement;
         HIPFILE_WARN_NO_EXIT_DTOR_OFF
         static DefaultImpl standard{};
         HIPFILE_WARN_NO_EXIT_DTOR_ON
-        if (replacement)
-            return replacement;
         return &standard;
     }
 
