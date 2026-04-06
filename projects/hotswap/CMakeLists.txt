@@ -1,27 +1,25 @@
-if(NOT TARGET hsa-runtime64)
-  cmake_minimum_required(VERSION 3.16)
-  project(rocr-hotswap LANGUAGES CXX)
-endif()
+cmake_minimum_required(VERSION 3.16)
+project(hotswap LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # HSA runtime headers (needed for hsa.h, hsa_api_trace.h)
-set(HSA_RUNTIME_INC "${CMAKE_CURRENT_SOURCE_DIR}/../inc"
+set(HSA_RUNTIME_INC "${CMAKE_CURRENT_SOURCE_DIR}/../rocr-runtime/runtime/hsa-runtime/inc"
     CACHE PATH "Path to HSA runtime include directory")
 
 # Static library for standalone testing
-add_library(rocr-hotswap STATIC
+add_library(hotswap-static STATIC
   hotswap.cpp
   hotswap_comgr_client.cpp
 )
 
-target_include_directories(rocr-hotswap PUBLIC
+target_include_directories(hotswap-static PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 if(UNIX)
-  target_link_libraries(rocr-hotswap PUBLIC ${CMAKE_DL_LIBS})
+  target_link_libraries(hotswap-static PUBLIC ${CMAKE_DL_LIBS})
 endif()
 
 # Shared library for HSA_TOOLS_LIB usage
@@ -45,4 +43,4 @@ endif()
 
 # Test executable
 add_executable(hotswap_test tests/hotswap_test.cpp)
-target_link_libraries(hotswap_test PRIVATE rocr-hotswap)
+target_link_libraries(hotswap_test PRIVATE hotswap-static)
