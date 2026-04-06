@@ -93,9 +93,6 @@ get_constants(uint64_t starting_id)
     return constants;
 }
 
-// ============================================================================
-// YAML Parsing Helper Functions
-// ============================================================================
 static void
 print_counter_yaml_schema_hint()
 {
@@ -367,7 +364,6 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         {
             ROCP_ERROR << "Ignoring invalid extra counters YAML";
         }
-        // Note: Continue with main counters even if append fails
     }
 
     // Track counter names per architecture to detect duplicates
@@ -440,7 +436,6 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                     metricVec.insert(metricVec.end(), constants.begin(), constants.end());
                     current_id += constants.size();
                 }
-
                 metricVec.emplace_back(
                     arch_name, counter_name, block, event, description, expression, "", current_id);
                 current_id++;
