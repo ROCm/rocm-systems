@@ -819,8 +819,11 @@ struct inspectorDumpThread {
 
     if (jfo == 0) {
       char hostname[256];
-      gethostname(hostname, sizeof(hostname));
-      hostname[sizeof(hostname) - 1] = 0; // POSIX does not guarantee NUL on truncation
+      if (gethostname(hostname, sizeof(hostname)) != 0) {
+        hostname[0] = '\0';
+      } else {
+        hostname[sizeof(hostname) - 1] = 0; // POSIX does not guarantee NUL on truncation
+      }
       char tmp[2048];
       snprintf(tmp, sizeof(tmp), "%s/%s-pid%d.log", output_root, hostname, getpid());
       jsonResult_t result = jsonInitFileOutput(&jfo, tmp);
