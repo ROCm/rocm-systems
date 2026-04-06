@@ -134,8 +134,8 @@ __global__ void fp16(float *res) {
   res[103] = __heq(__ushort2half_rz(2), 2);
   res[104] = __heq(__ushort2half_rd(2), 2);
   res[105] = __heq(__ushort2half_ru(2), 2);
-  res[106] = __half2ull_rn(1.1234), 1;
-  res[107] = __half2ull_rz(1.1234), 1;
+  res[106] = __half2ull_rn(1.1234) == 1;
+  res[107] = __half2ull_rz(1.1234) == 1;
   res[108] = __half2ull_rd(1.1234) == 1;
   res[109] = __half2ull_ru(1.1234) == 1;
   res[110] = __heq(__ull2half_rn(2), 2);

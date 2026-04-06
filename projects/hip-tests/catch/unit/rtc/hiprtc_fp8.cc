@@ -48,7 +48,7 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
   int device = 0;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
 #ifdef __HIP_PLATFORM_AMD__
-  std::string sarg = std::string("--offload-arch=") + props.gcnArchName;
+  std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
 #else
   std::string sarg = std::string("--fmad=false");
 #endif
