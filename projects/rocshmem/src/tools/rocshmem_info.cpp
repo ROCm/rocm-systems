@@ -152,7 +152,6 @@ void print_usage(const char* progname) {
   std::cout << "Display rocSHMEM build information and environment variables.\n\n";
   std::cout << "Options:\n";
   std::cout << "  -h, --help       Show this help message\n";
-  std::cout << "  -o FILE          Write output to FILE instead of stdout\n";
   std::cout << "  --env:all        Print all environment variables (name=value)\n";
   std::cout << "  --env:full       Print all environment variables with full documentation\n";
   std::cout << "\n";
@@ -163,8 +162,7 @@ void print_usage(const char* progname) {
   std::cout << "  " << progname << " --env:full         # Show build info + env vars with docs\n";
 }
 
-int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
-  const char* output_file = nullptr;
+int main (int argc, char **argv) {
   rocshmem::envvar::print_mode env_mode = rocshmem::envvar::print_mode::MODIFIED;
 
   // Parse command line arguments
@@ -172,14 +170,6 @@ int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
     if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
       print_usage(argv[0]);
       return 0;
-    } else if (std::strcmp(argv[i], "-o") == 0) {
-      if (i + 1 < argc) {
-        output_file = argv[++i];
-      } else {
-        std::cerr << "Error: -o requires a filename argument\n";
-        print_usage(argv[0]);
-        return 1;
-      }
     } else if (std::strcmp(argv[i], "--env:all") == 0) {
       env_mode = rocshmem::envvar::print_mode::ALL_VALUES;
     } else if (std::strcmp(argv[i], "--env:full") == 0) {
@@ -189,21 +179,6 @@ int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
       print_usage(argv[0]);
       return 1;
     }
-  }
-
-  // Redirect output if requested
-  std::ofstream file;
-  std::streambuf* cout_buf = std::cout.rdbuf();
-  std::streambuf* cerr_buf = std::cerr.rdbuf();
-
-  if (output_file) {
-    file.open(output_file);
-    if (!file) {
-      std::cerr << "Error: Could not open file '" << output_file << "' for writing\n";
-      return 1;
-    }
-    std::cout.rdbuf(file.rdbuf());
-    std::cerr.rdbuf(file.rdbuf());
   }
 
   printf("################################################################################\n");
@@ -232,14 +207,6 @@ int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
   rocshmem::DisplayTopology(false);
   printf("################################################################################\n");
 #endif //defined(USE_GDA)
-
-  // Restore cout/cerr if redirected
-  if (output_file) {
-    std::cout.rdbuf(cout_buf);
-    std::cerr.rdbuf(cerr_buf);
-    file.close();
-    std::cout << "Information written to: " << output_file << "\n";
-  }
 
   return 0;
 }
