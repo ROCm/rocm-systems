@@ -326,7 +326,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease) {
 }
 
 static constexpr size_t kBufferSize = 4 * 1024;
-static constexpr size_t kBufferSize_BYTES = kBufferSize * sizeof(int);
+static constexpr size_t kBufferSizeBytes = kBufferSize * sizeof(int);
 static constexpr int N_BYTES = sizeof(int);
 
 /*
@@ -381,11 +381,11 @@ HIP_TEST_CASE(Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch) {
   size_t orgValue = 0;
   HIP_CHECK(hipDeviceGetLimit(&orgValue, hipExtLimitScratchCurrent));
 
-  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, kBufferSize_BYTES));
+  HIP_CHECK(hipDeviceSetLimit(hipExtLimitScratchCurrent, kBufferSizeBytes));
 
   size_t getValue = 0;
   HIP_CHECK(hipDeviceGetLimit(&getValue, hipExtLimitScratchCurrent));
-  REQUIRE(getValue == kBufferSize_BYTES);
+  REQUIRE(getValue == kBufferSizeBytes);
 
   addOneKernelUseScratch<<<1, 1, 0, stream>>>(devMem);
   HIP_CHECK(hipStreamSynchronize(stream));

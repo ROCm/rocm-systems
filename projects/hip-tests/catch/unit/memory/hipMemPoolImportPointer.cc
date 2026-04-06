@@ -44,7 +44,7 @@ HIP_TEST_CASE(Unit_hipMemPoolImportPointer_Negative) {
   hipMemAllocationHandleType handleType = hipMemHandleTypePosixFileDescriptor;
   #endif
 
-  // Create mempool with Posix File Descriptor
+  // Create mempool with OS specific handle type
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = 0;
   pool_props.location.type = hipMemLocationTypeDevice;

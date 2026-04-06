@@ -12,6 +12,9 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
+#include <chrono>
+#include <thread>
+
 namespace {
 constexpr auto wait_ms = 500;
 }  // anonymous namespace
@@ -470,7 +473,11 @@ public:
       return errno;
     }
     addr_ = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd_, 0);
-    if (addr_ == MAP_FAILED) { addr_ = nullptr; return errno; }
+    if (addr_ == MAP_FAILED) {
+      addr_ = nullptr;
+      close();
+      return errno;
+    }
 #endif
     opened_ = true;
     return 0;
@@ -495,8 +502,8 @@ public:
     }
     addr_ = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd_, 0);
     if (addr_ == MAP_FAILED) {
-      close();
       addr_ = nullptr;
+      close();
       return errno;
     }
 #endif
@@ -505,7 +512,6 @@ public:
   }
 
   void close() {
-    if (!opened_) return;
 #if HT_WIN
     if (addr_) { UnmapViewOfFile(addr_); addr_ = nullptr; }
     if (shmHandle_) { CloseHandle(shmHandle_); shmHandle_ = nullptr; }
@@ -524,21 +530,25 @@ public:
   T* as() { return reinterpret_cast<T*>(addr_); }
 };
 
-inline void barrierWait(std::atomic<int>& barrier, std::atomic<int>& sense, unsigned int n) {
-  // fetch_add returns the value BEFORE the add, so add 1 to get the 'count'
+inline void barrierWait(std::atomic<int>& barrier, std::atomic<int>& sense, unsigned int n,
+                        std::chrono::seconds timeout = std::chrono::seconds(10)) {
   int count = barrier.fetch_add(1, std::memory_order_acq_rel) + 1;
 
   if (static_cast<unsigned int>(count) == n) {
-    // last thread resets the barrier and flips the sense
     barrier.store(0, std::memory_order_release);
-    // Use a temporary to flip the value (0 -> 1 or 1 -> 0)
     int current_sense = sense.load(std::memory_order_relaxed);
     sense.store(1 - current_sense, std::memory_order_release);
   } else {
-    // Other threads wait for the sense to change
     int old_sense = sense.load(std::memory_order_relaxed);
-    // memory_order_acquire ensures we see the updated data after the flip
-    while (sense.load(std::memory_order_acquire) == old_sense) { }
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (sense.load(std::memory_order_acquire) == old_sense) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        WARN("barrierWait timed out after " << timeout.count() << "s waiting for "
+             << n << " threads (only " << count << " arrived)");
+        break;
+      }
+      std::this_thread::yield();
+    }
   }
 }
 
@@ -546,8 +556,8 @@ struct mempoolIpcShmStruct {
   hipMemPoolPtrExportData ptrExportData;
   hipMemAllocationHandleType handleType;
   int device;
-  std::atomic<int> barrier{0};
-  std::atomic<int> sense{0};
+  std::atomic<int> barrier;
+  std::atomic<int> sense;
 };
 
 struct ipcHdl {
@@ -589,7 +599,7 @@ class ipcSocketCom {
     handle->socket = -1;
     handle->name = NULL;
 
-    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == 0) {
+    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
       perror("Socket failure: Socket creation failed");
       return -1;
     }
@@ -625,12 +635,18 @@ class ipcSocketCom {
       perror("Socket failure: Handle memory allocation failed");
       return -1;
     }
+    memset(handle, 0, sizeof(*handle));
+    handle->mailslot = INVALID_HANDLE_VALUE;
+    handle->name = nullptr;
     char name[128];
     sprintf(name, "\\\\.\\mailslot\\hipMemPoolIPC_%lu",
             (unsigned long)GetCurrentProcessId());
     handle->mailslot = CreateMailslot(name, 0, MAILSLOT_WAIT_FOREVER, NULL);
     if (handle->mailslot == INVALID_HANDLE_VALUE) {
       fprintf(stderr, "CreateMailslot failed (%lu)\n", GetLastError());
+      if (handle->name) delete[] handle->name;
+      delete handle;
+      handle = nullptr;
       return -1;
     }
     handle->name = new char[strlen(name) + 1];
@@ -680,6 +696,7 @@ class ipcSocketCom {
     }
     if (handle->name) delete[] handle->name;
     delete handle;
+    handle = nullptr;
     return 0;
 #else
     if (!handle) {

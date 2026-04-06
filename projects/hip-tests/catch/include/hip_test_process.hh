@@ -196,7 +196,7 @@ class SpawnProc {
     }
 
     memset(&process_, 0, sizeof(process_));
-    BOOL ok = CreateProcess(NULL, LPSTR(cmdLineInput.data()), NULL, NULL,
+    BOOL ok = CreateProcess(exeName_.c_str(), cmdLineInput.data(), NULL, NULL,
                             inheritHandles, 0, lpEnvironment, NULL, &si, &process_);
 
     if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);

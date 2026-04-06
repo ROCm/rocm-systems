@@ -52,7 +52,6 @@ static void fill_data(std::vector<int>& A_h, std::vector<int>& B_h, std::vector<
  *    - unit/memory/hipMemPoolExportImportToShareableHandle.cc
  * Test requirements
  * ------------------------
- *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_SameProc) {
@@ -444,14 +443,13 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
  * ------------------------
  *    - Cross-platform multiprocess test. Parent creates a mempool with IPC-capable
  * handle type, allocates memory, fills it with data, and exports the handle and
- * pointer via shared memory. A child process (self-re-exec with [multiproc_child]
- * tag filter) imports the handle and pointer, runs a square kernel, and exits.
- * The parent verifies the results.
+ * pointer via shared memory. A child process imports the handle and pointer,
+ * runs a square kernel, and exits. The parent verifies the results.
  * ------------------------
  *    - unit/memory/hipMemPoolExportToShareableHandle.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.2
+ *    - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   checkMempoolSupported(0)
@@ -511,6 +509,8 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   SharedMemory shm;
   REQUIRE(shm.create(shmName, sizeof(mempoolIpcShmStruct)) == 0);
   auto *shmData = shm.as<mempoolIpcShmStruct>();
+  shmData->barrier.store(0, std::memory_order_relaxed);
+  shmData->sense.store(0, std::memory_order_relaxed);
   shmData->ptrExportData = ptrExp;
   shmData->handleType = handleType;
   shmData->device = 0;
@@ -559,7 +559,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
  *    - unit/memory/hipMemPoolExportToShareableHandle.cc
  * Test requirements
  * ------------------------
- *    - HIP_VERSION >= 6.2
+ *    - HIP_VERSION >= 7.2
  */
 HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
   unsigned long parentPid = getParentProcessId();
@@ -617,7 +617,6 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
  *    - unit/memory/hipMemPoolExportImportToShareableHandle.cc
  * Test requirements
  * ------------------------
- *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_Negative) {
