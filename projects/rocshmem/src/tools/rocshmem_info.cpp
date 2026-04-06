@@ -25,9 +25,10 @@
 #include "util.hpp"
 #include "envvar.hpp"
 
+#include "rocshmem_config_embedded.hpp"
+
 #include <stdio.h>
 #include <cstring>
-#include <fstream>
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -44,31 +45,9 @@
 #define PRINT_ENTRY(NAME, INFO)   \
   printf("# %-*s: %-*s#\n", NAME_COLUMN_WIDTH, NAME, INFO_COLUMN_WIDTH, INFO)
 
-const std::string config_file_path = std::string(ROCSHMEM_INSTALL_PREFIX)
-                                   + std::string("/include/rocshmem/rocshmem_config.h");
-
-bool is_config_file_valid() {
-  std::ifstream file;
-
-  if (file.is_open()) {
-    fprintf(stderr, "Could not open config file: %s\n", config_file_path.c_str());
-    return false;
-  }
-
-  file.open(config_file_path);
-  if (!file.is_open()) {
-    fprintf(stderr, "Error opening config file: %s\n", config_file_path.c_str());
-    return false;
-  }
-
-  file.close();
-
-  return true;
-}
-
 void parse_config_file() {
   std::string line;
-  std::ifstream file;
+  std::istringstream stream(rocshmem_config_h_content);
 
   const std::string define     = "#define ";
   const std::string undef_pre  = "/* #undef ";
@@ -78,22 +57,31 @@ void parse_config_file() {
   printf("#                              Build Configuration                             #\n");
   printf("#------------------------------------------------------------------------------#\n");
 
-  file.open(config_file_path);
-
-  while (std::getline(file, line)) {
+  while (std::getline(stream, line)) {
     if (line.find(undef_pre) != std::string::npos) {
       line.replace(line.find(undef_pre), undef_pre.length(), "");
       line.replace(line.find(undef_post), undef_post.length(), "");
       PRINT_ENTRY(line.c_str(), "OFF");
+      continue;
     }
 
-    if (line.find(define) != std::string::npos) {
-      line.replace(line.find(define), define.length(), "");
-      PRINT_ENTRY(line.c_str(), "ON");
+    size_t def_pos = line.find(define);
+    if (def_pos != std::string::npos) {
+      std::string rest = line.substr(def_pos + define.length());
+      size_t space = rest.find(' ');
+      if (space != std::string::npos) {
+        // String-valued define: #define NAME "value"
+        std::string name  = rest.substr(0, space);
+        std::string value = rest.substr(space + 1);
+        if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
+          value = value.substr(1, value.size() - 2);
+        PRINT_ENTRY(name.c_str(), value.c_str());
+      } else {
+        // Boolean define: #define NAME
+        PRINT_ENTRY(rest.c_str(), "ON");
+      }
     }
   }
-
-  file.close();
 }
 
 void print_arch_info() {
@@ -106,8 +94,6 @@ void print_arch_info() {
   std::istringstream compiled_arch_list(ROCSHMEM_OFFLOAD_TARGETS);
 
   CHECK_HIP(hipGetDeviceProperties(&prop, 0));
-
-  PRINT_ENTRY("System Arch", prop.gcnArchName);
 
   system_arch = std::string(prop.gcnArchName, strcspn(prop.gcnArchName, ":"));
 
@@ -125,6 +111,8 @@ void print_arch_info() {
 
     n_compiled_arch++;
   }
+
+  PRINT_ENTRY("System Arch", prop.gcnArchName);
 
   PRINT_ENTRY("Supported System Arch", supported_arch ? "Yes" : "No");
 }
@@ -193,9 +181,7 @@ int main (int argc, char **argv) {
   print_rocm_info();
   print_mpi_info();
 
-  if (is_config_file_valid()) {
-    parse_config_file();
-  }
+  parse_config_file();
 
   printf("################################################################################\n");
   std::cout << "\n";

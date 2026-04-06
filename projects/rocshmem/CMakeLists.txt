@@ -206,6 +206,18 @@ if (NOT BUILD_TESTS_ONLY)
     set(HAVE_DEVICE_MALLOC_UNCACHED OFF)
   endif()
 
+  execute_process(
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE ROCSHMEM_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(NOT ROCSHMEM_GIT_HASH)
+    set(ROCSHMEM_GIT_HASH "unknown")
+  endif()
+
+  string(REPLACE ";" " " ROCSHMEM_OFFLOAD_TARGETS "${GPU_TARGETS}")
+
   configure_file(cmake/rocshmem_config.h.in include/rocshmem/rocshmem_config.h)
 
   #############################################################################

@@ -24,28 +24,25 @@
 # SOURCES
 ###############################################################################
 
-execute_process (
-  COMMAND bash -c "git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD;"
-  OUTPUT_VARIABLE GIT_HASH
+# Embed rocshmem_config.h as a C++17 raw string literal at configure time so
+# rocshmem_info does not need to locate the file at runtime.
+set(_config_h "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config.h")
+file(READ "${_config_h}" _config_content)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_config_embedded.hpp"
+  "// Auto-generated from rocshmem_config.h — do not edit.\n"
+  "#pragma once\n"
+  "static const char rocshmem_config_h_content[] = R\"ROCSHMEM_CFG_END(\n"
+  "${_config_content}"
+  ")ROCSHMEM_CFG_END\";\n"
 )
-
-string(STRIP "${GIT_HASH}" GIT_HASH)
-string(REPLACE ";" " " ROCSHMEM_OFFLOAD_TARGETS "${COMPILING_TARGETS}")
 
 add_executable(rocshmem_info rocshmem_info.cpp)
-
-target_compile_definitions(
-  rocshmem_info
-  PRIVATE
-  ROCSHMEM_INSTALL_PREFIX="${CMAKE_INSTALL_PREFIX}"
-  ROCSHMEM_GIT_HASH="${GIT_HASH}"
-  ROCSHMEM_OFFLOAD_TARGETS="${ROCSHMEM_OFFLOAD_TARGETS}"
-)
 
 target_include_directories(
   rocshmem_info
   PRIVATE
     roc::rocshmem
+    "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 target_link_libraries(
