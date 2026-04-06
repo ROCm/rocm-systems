@@ -756,6 +756,7 @@ static ncclResult_t scheduleCollTasksToPlan(
       NCCLCHECK(calcCollChunking(comm, task, nChannels, nBytes, &chunkSize, &directFlags, &proxyOp));
       devWork->channelLo = 0;
       devWork->channelHi = nChannels-1;
+      task->nChannels = (uint8_t) nChannels; // Propagate to profiler (mirrors the non-CollNet path).
       devWork->collnet.count = task->count;
       devWork->collnet.chunkCount = chunkSize/ncclTypeSize(task->datatype);
       devWork->direct = directFlags;

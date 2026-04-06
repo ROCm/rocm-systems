@@ -369,7 +369,8 @@ static inspectorResult_t inspectorCommInfoMetaHeader(jsonFileOutput* jfo) {
     JSON_CHK(jsonKey(jfo, "rec_mechanism")); JSON_CHK(jsonStr(jfo, "nccl_profiler_interface"));
     JSON_CHK(jsonKey(jfo, "dump_timestamp_us")); JSON_CHK(jsonUint64(jfo, inspectorGetTime()));
     char hostname[256];
-    gethostname(hostname, 255);
+    if (gethostname(hostname, sizeof(hostname)) != 0) hostname[0] = 0;
+    hostname[sizeof(hostname) - 1] = 0; // POSIX does not guarantee NUL on truncation
     JSON_CHK(jsonKey(jfo, "hostname")); JSON_CHK(jsonStr(jfo, hostname));
     JSON_CHK(jsonKey(jfo, "pid")); JSON_CHK(jsonUint64(jfo, getpid()));
   }
@@ -743,6 +744,7 @@ static void genDumpDir(char** workdir) {
 
 struct inspectorDumpThread {
   bool run{false};
+  bool threadStarted{false};
   jsonFileOutput* jfo;
   char* outputRoot;
   uint64_t sampleIntervalUsecs;
@@ -785,8 +787,12 @@ struct inspectorDumpThread {
     if (pthread_create(&pthread, NULL, dumpMain, this) != 0) {
       INFO(NCCL_INSPECTOR,
            "NCCL Inspector inspectorDumpThread: couldn't create dump thread!");
+      pthread_mutex_lock(&sleepMutex);
+      run = false;
+      pthread_mutex_unlock(&sleepMutex);
       return;
     }
+    threadStarted = true;
     INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: created");
   }
 
@@ -798,7 +804,7 @@ struct inspectorDumpThread {
     run = false;
     pthread_cond_signal(&sleepCond);
     pthread_mutex_unlock(&sleepMutex);
-    pthread_join(pthread, NULL);
+    if (threadStarted) pthread_join(pthread, NULL);
     INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: stopped");
   }
 
@@ -814,6 +820,7 @@ struct inspectorDumpThread {
     if (jfo == 0) {
       char hostname[256];
       gethostname(hostname, sizeof(hostname));
+      hostname[sizeof(hostname) - 1] = 0; // POSIX does not guarantee NUL on truncation
       char tmp[2048];
       snprintf(tmp, sizeof(tmp), "%s/%s-pid%d.log", output_root, hostname, getpid());
       jsonResult_t result = jsonInitFileOutput(&jfo, tmp);
@@ -1411,8 +1418,8 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
  * Description:
  *
  *   Helper function to calculate kernel execution time using GPU
- *   clock values.  The GPU clock values are measured in nanoseconds
- *   from the globaltimer register.
+ *   clock values, which are ticks from `wall_clock64()` (100 MHz, 10 ns per tick)
+ *   divide by 100 to convert to microseconds.
  *
  * Thread Safety:
  *   Thread-safe (read-only operations on kernel info).
