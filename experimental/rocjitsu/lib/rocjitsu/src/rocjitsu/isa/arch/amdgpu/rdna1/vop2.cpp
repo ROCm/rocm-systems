@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna1/vop2.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -180,15 +181,7 @@ VMulLegacyF32Vop2::VMulLegacyF32Vop2(const MachineInst *inst)
 }
 
 void VMulLegacyF32Vop2::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float sv1 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
-    vdst.write_lane(wf, lane,
-                    std::bit_cast<uint32_t>(sv0 == 0.0f || sv1 == 0.0f ? 0.0f : sv0 * sv1));
-  }
+  amdgpu::execute_v_mul_legacy_f32_vop2(*this, wf);
 }
 
 VMulF32Vop2::VMulF32Vop2(const MachineInst *inst)
@@ -974,17 +967,7 @@ VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst)
   simm32_ = reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32;
 }
 
-void VFmamkF32Vop2::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float k = std::bit_cast<float>(simm32_);
-    float s2 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::fma(s0, k, s2)));
-  }
-}
+void VFmamkF32Vop2::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_fmamk_f32_vop2(*this, wf); }
 
 VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst)
     : Vop2("v_fmaak_f32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1002,17 +985,7 @@ VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst)
   simm32_ = reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32;
 }
 
-void VFmaakF32Vop2::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
-    float k = std::bit_cast<float>(simm32_);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(std::fma(s0, s1, k)));
-  }
-}
+void VFmaakF32Vop2::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_fmaak_f32_vop2(*this, wf); }
 
 VCvtPkrtzF16F32Vop2::VCvtPkrtzF16F32Vop2(const MachineInst *inst)
     : Vop2("v_cvt_pkrtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1029,16 +1002,7 @@ VCvtPkrtzF16F32Vop2::VCvtPkrtzF16F32Vop2(const MachineInst *inst)
 }
 
 void VCvtPkrtzF16F32Vop2::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
-    uint32_t lo = util::f32_to_f16(s0);
-    uint32_t hi = util::f32_to_f16(s1);
-    vdst.write_lane(wf, lane, lo | (hi << 16));
-  }
+  amdgpu::execute_v_cvt_pkrtz_f16_f32_vop2(*this, wf);
 }
 
 VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
@@ -1185,17 +1149,7 @@ VFmamkF16Vop2::VFmamkF16Vop2(const MachineInst *inst)
   simm32_ = reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32;
 }
 
-void VFmamkF16Vop2::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float k = util::f16_to_f32(static_cast<uint16_t>(simm32_));
-    float s2 = util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane)));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::fma(s0, k, s2)));
-  }
-}
+void VFmamkF16Vop2::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_fmamk_f16_vop2(*this, wf); }
 
 VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst)
     : Vop2("v_fmaak_f16", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1213,17 +1167,7 @@ VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst)
   simm32_ = reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32;
 }
 
-void VFmaakF16Vop2::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane)));
-    float k = util::f16_to_f32(static_cast<uint16_t>(simm32_));
-    vdst.write_lane(wf, lane, util::f32_to_f16(std::fma(s0, s1, k)));
-  }
-}
+void VFmaakF16Vop2::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_fmaak_f16_vop2(*this, wf); }
 
 VMaxF16Vop2::VMaxF16Vop2(const MachineInst *inst)
     : Vop2("v_max_f16", reinterpret_cast<const OpEncoding *>(inst)),

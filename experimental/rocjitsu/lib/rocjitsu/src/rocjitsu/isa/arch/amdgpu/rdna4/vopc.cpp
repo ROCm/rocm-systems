@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -812,21 +813,7 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLtF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 < s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpLtF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_lt_f64_vopc(*this, wf); }
 
 VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -840,21 +827,7 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpEqF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 == s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpEqF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_eq_f64_vopc(*this, wf); }
 
 VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -868,21 +841,7 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLeF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 <= s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpLeF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_le_f64_vopc(*this, wf); }
 
 VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -896,21 +855,7 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGtF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 > s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpGtF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_gt_f64_vopc(*this, wf); }
 
 VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lg_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -924,21 +869,7 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLgF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 < s1 || s0 > s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpLgF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_lg_f64_vopc(*this, wf); }
 
 VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -952,21 +883,7 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGeF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 >= s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpGeF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_ge_f64_vopc(*this, wf); }
 
 VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_o_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -980,21 +897,7 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpOF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpOF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_o_f64_vopc(*this, wf); }
 
 VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_u_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1008,21 +911,7 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpUF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (std::isnan(s0) || std::isnan(s1))
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpUF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_u_f64_vopc(*this, wf); }
 
 VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nge_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1037,19 +926,7 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
 }
 
 void VCmpNgeF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 >= s1))
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_nge_f64_vopc(*this, wf);
 }
 
 VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
@@ -1065,19 +942,7 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
 }
 
 void VCmpNlgF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 < s1 || s0 > s1))
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_nlg_f64_vopc(*this, wf);
 }
 
 VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
@@ -1093,19 +958,7 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
 }
 
 void VCmpNgtF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 > s1))
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_ngt_f64_vopc(*this, wf);
 }
 
 VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
@@ -1121,19 +974,7 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
 }
 
 void VCmpNleF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 <= s1))
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_nle_f64_vopc(*this, wf);
 }
 
 VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
@@ -1149,19 +990,7 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
 }
 
 void VCmpNeqF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_neq_f64_vopc(*this, wf);
 }
 
 VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
@@ -1177,19 +1006,7 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
 }
 
 void VCmpNltF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 < s1))
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_nlt_f64_vopc(*this, wf);
 }
 
 VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
@@ -1876,21 +1693,7 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLtI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 < s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpLtI64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_lt_i64_vopc(*this, wf); }
 
 VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_i64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1904,21 +1707,7 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpEqI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 == s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpEqI64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_eq_i64_vopc(*this, wf); }
 
 VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_i64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1932,21 +1721,7 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLeI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 <= s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpLeI64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_le_i64_vopc(*this, wf); }
 
 VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_i64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1960,21 +1735,7 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGtI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 > s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpGtI64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_gt_i64_vopc(*this, wf); }
 
 VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_i64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -1988,21 +1749,7 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNeI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 != s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpNeI64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_ne_i64_vopc(*this, wf); }
 
 VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_i64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2016,21 +1763,7 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGeI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 >= s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpGeI64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_ge_i64_vopc(*this, wf); }
 
 VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_u64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2044,21 +1777,7 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLtU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 < s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpLtU64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_lt_u64_vopc(*this, wf); }
 
 VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2072,21 +1791,7 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpEqU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 == s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpEqU64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_eq_u64_vopc(*this, wf); }
 
 VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_u64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2100,21 +1805,7 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLeU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 <= s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpLeU64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_le_u64_vopc(*this, wf); }
 
 VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_u64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2128,21 +1819,7 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGtU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 > s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpGtU64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_gt_u64_vopc(*this, wf); }
 
 VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_u64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2156,21 +1833,7 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNeU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 != s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpNeU64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_ne_u64_vopc(*this, wf); }
 
 VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_u64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2184,21 +1847,7 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGeU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 >= s1)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
-}
+void VCmpGeU64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmp_ge_u64_vopc(*this, wf); }
 
 VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_class_f16", reinterpret_cast<const OpEncoding *>(inst)),
@@ -2317,44 +1966,7 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
 }
 
 void VCmpClassF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    uint32_t mask = vsrc1.read_lane(wf, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      vcc |= (1ULL << lane);
-    else
-      vcc &= ~(1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_class_f64_vopc(*this, wf);
 }
 
 VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
@@ -3098,17 +2710,7 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxLtF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_lt_f64_vopc(*this, wf);
 }
 
 VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
@@ -3124,17 +2726,7 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxEqF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_eq_f64_vopc(*this, wf);
 }
 
 VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
@@ -3150,17 +2742,7 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxLeF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_le_f64_vopc(*this, wf);
 }
 
 VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
@@ -3176,17 +2758,7 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxGtF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_gt_f64_vopc(*this, wf);
 }
 
 VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
@@ -3202,17 +2774,7 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxLgF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 < s1 || s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_lg_f64_vopc(*this, wf);
 }
 
 VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
@@ -3228,17 +2790,7 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxGeF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_ge_f64_vopc(*this, wf);
 }
 
 VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
@@ -3253,19 +2805,7 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpxOF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
-}
+void VCmpxOF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmpx_o_f64_vopc(*this, wf); }
 
 VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_u_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -3279,19 +2819,7 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpxUF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
-}
+void VCmpxUF64Vopc::execute(amdgpu::Wavefront &wf) { amdgpu::execute_v_cmpx_u_f64_vopc(*this, wf); }
 
 VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nge_f64", reinterpret_cast<const OpEncoding *>(inst)),
@@ -3306,17 +2834,7 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxNgeF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 >= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_nge_f64_vopc(*this, wf);
 }
 
 VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
@@ -3332,17 +2850,7 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxNlgF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 < s1 || s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_nlg_f64_vopc(*this, wf);
 }
 
 VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
@@ -3358,17 +2866,7 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxNgtF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_ngt_f64_vopc(*this, wf);
 }
 
 VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
@@ -3384,17 +2882,7 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxNleF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 <= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_nle_f64_vopc(*this, wf);
 }
 
 VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
@@ -3410,17 +2898,7 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxNeqF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_neq_f64_vopc(*this, wf);
 }
 
 VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
@@ -3436,17 +2914,7 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxNltF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    double s1 = std::bit_cast<double>(vsrc1.read_lane64(wf, lane));
-    if (!(s0 < s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_nlt_f64_vopc(*this, wf);
 }
 
 VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
@@ -4086,17 +3554,7 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
 }
 
 void VCmpxLtI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_lt_i64_vopc(*this, wf);
 }
 
 VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
@@ -4112,17 +3570,7 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
 }
 
 void VCmpxEqI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_eq_i64_vopc(*this, wf);
 }
 
 VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
@@ -4138,17 +3586,7 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
 }
 
 void VCmpxLeI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_le_i64_vopc(*this, wf);
 }
 
 VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
@@ -4164,17 +3602,7 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
 }
 
 void VCmpxGtI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_gt_i64_vopc(*this, wf);
 }
 
 VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
@@ -4190,17 +3618,7 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
 }
 
 void VCmpxNeI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_ne_i64_vopc(*this, wf);
 }
 
 VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
@@ -4216,17 +3634,7 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
 }
 
 void VCmpxGeI64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(src0.read_lane64(wf, lane));
-    int64_t s1 = static_cast<int64_t>(vsrc1.read_lane64(wf, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_ge_i64_vopc(*this, wf);
 }
 
 VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
@@ -4242,17 +3650,7 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
 }
 
 void VCmpxLtU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_lt_u64_vopc(*this, wf);
 }
 
 VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
@@ -4268,17 +3666,7 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
 }
 
 void VCmpxEqU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_eq_u64_vopc(*this, wf);
 }
 
 VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
@@ -4294,17 +3682,7 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
 }
 
 void VCmpxLeU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_le_u64_vopc(*this, wf);
 }
 
 VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
@@ -4320,17 +3698,7 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
 }
 
 void VCmpxGtU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_gt_u64_vopc(*this, wf);
 }
 
 VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
@@ -4346,17 +3714,7 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
 }
 
 void VCmpxNeU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_ne_u64_vopc(*this, wf);
 }
 
 VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
@@ -4372,17 +3730,7 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
 }
 
 void VCmpxGeU64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = src0.read_lane64(wf, lane);
-    uint64_t s1 = vsrc1.read_lane64(wf, lane);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_ge_u64_vopc(*this, wf);
 }
 
 VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
@@ -4498,42 +3846,7 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxClassF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
-    uint32_t mask = vsrc1.read_lane(wf, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_class_f64_vopc(*this, wf);
 }
 
 } // namespace rdna4

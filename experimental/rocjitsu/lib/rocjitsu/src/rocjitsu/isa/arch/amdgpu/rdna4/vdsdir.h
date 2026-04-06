@@ -17,8 +17,6 @@ class DsParamLoadVdsdir : public Vdsdir {
 public:
   DsParamLoadVdsdir(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
   Operand attr;
 };
@@ -27,8 +25,6 @@ class DsDirectLoadVdsdir : public Vdsdir {
 public:
   DsDirectLoadVdsdir(const MachineInst *inst);
   void execute(amdgpu::Wavefront &wf) override;
-
-private:
   Operand vdst;
 };
 

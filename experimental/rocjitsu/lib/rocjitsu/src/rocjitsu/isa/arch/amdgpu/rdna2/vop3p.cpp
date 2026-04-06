@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna2/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -751,22 +752,7 @@ VDot2I32I16Vop3p::VDot2I32I16Vop3p(const MachineInst *inst)
 }
 
 void VDot2I32I16Vop3p::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = src0.read_lane(wf, lane);
-    uint32_t raw1 = src1.read_lane(wf, lane);
-    int16_t a0 = static_cast<int16_t>(raw0);
-    int16_t a1 = static_cast<int16_t>(raw0 >> 16);
-    int16_t b0 = static_cast<int16_t>(raw1);
-    int16_t b1 = static_cast<int16_t>(raw1 >> 16);
-    int32_t acc = static_cast<int32_t>(src2.read_lane(wf, lane));
-    int32_t result = static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1 + acc;
-    if (inst_.clamp)
-      result = std::clamp(result, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(result));
-  }
+  amdgpu::execute_v_dot2_i32_i16_vop3p(*this, wf);
 }
 
 VDot2U32U16Vop3p::VDot2U32U16Vop3p(const MachineInst *inst)
@@ -782,20 +768,7 @@ VDot2U32U16Vop3p::VDot2U32U16Vop3p(const MachineInst *inst)
 }
 
 void VDot2U32U16Vop3p::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = src0.read_lane(wf, lane);
-    uint32_t raw1 = src1.read_lane(wf, lane);
-    uint16_t a0 = static_cast<uint16_t>(raw0);
-    uint16_t a1 = static_cast<uint16_t>(raw0 >> 16);
-    uint16_t b0 = static_cast<uint16_t>(raw1);
-    uint16_t b1 = static_cast<uint16_t>(raw1 >> 16);
-    uint32_t acc = src2.read_lane(wf, lane);
-    uint32_t result = static_cast<uint32_t>(a0) * b0 + static_cast<uint32_t>(a1) * b1 + acc;
-    vdst.write_lane(wf, lane, result);
-  }
+  amdgpu::execute_v_dot2_u32_u16_vop3p(*this, wf);
 }
 
 VDot4I32I8Vop3p::VDot4I32I8Vop3p(const MachineInst *inst)
@@ -811,23 +784,7 @@ VDot4I32I8Vop3p::VDot4I32I8Vop3p(const MachineInst *inst)
 }
 
 void VDot4I32I8Vop3p::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = src0.read_lane(wf, lane);
-    uint32_t raw1 = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(src2.read_lane(wf, lane));
-    int32_t sum = acc;
-    for (int i = 0; i < 4; ++i) {
-      int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
-      int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<int32_t>(a) * b;
-    }
-    if (inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
-  }
+  amdgpu::execute_v_dot4_i32_i8_vop3p(*this, wf);
 }
 
 VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
@@ -873,27 +830,7 @@ VDot8I32I4Vop3p::VDot8I32I4Vop3p(const MachineInst *inst)
 }
 
 void VDot8I32I4Vop3p::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = src0.read_lane(wf, lane);
-    uint32_t raw1 = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(src2.read_lane(wf, lane));
-    int32_t sum = acc;
-    for (int i = 0; i < 8; ++i) {
-      int32_t a = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
-      if (a & 0x8)
-        a |= ~0xF;
-      int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
-      if (b & 0x8)
-        b |= ~0xF;
-      sum += a * b;
-    }
-    if (inst_.clamp)
-      sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(sum));
-  }
+  amdgpu::execute_v_dot8_i32_i4_vop3p(*this, wf);
 }
 
 VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)

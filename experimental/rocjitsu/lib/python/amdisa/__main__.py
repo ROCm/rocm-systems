@@ -21,6 +21,7 @@ from amdisa import (
     Rdna4Profile,
 )
 from amdisa import xml_schema as xs
+from amdisa.cross_isa import CrossIsaAnalyzer
 from amdisa.semantics import derive_all_semantics
 
 _PROFILES = {
@@ -68,13 +69,68 @@ def _detect_profile(isa_xml: str) -> str:
     return 'cdna'
 
 
+def _run_multi(args) -> None:
+    """Multi-ISA mode: parse all XMLs, run CrossIsaAnalyzer, generate shared + per-ISA."""
+    specs = []
+    for entry in args.multi:
+        if ':' not in entry:
+            print(f'error: --multi entry must be name:xml_path, got: {entry}', file=sys.stderr)
+            sys.exit(1)
+        name, xml_path = entry.split(':', 1)
+        profile_key = name.replace('.', '_')
+        if profile_key not in _PROFILES:
+            profile_key = _detect_profile(xml_path)
+        profile = _PROFILES[profile_key]()
+        spec = Parser(xml_path, profile).parse()
+        sem = derive_all_semantics(spec)
+        specs.append((name, spec, sem))
+
+    analyzer = CrossIsaAnalyzer()
+    plan = analyzer.analyze(specs)
+
+    print(f'Cross-ISA analysis: {plan.total_universal} universal, '
+          f'{plan.total_family_shared} family-shared, '
+          f'{plan.total_exclusive} exclusive', file=sys.stderr)
+
+    config = CodegenConfig(use_shared=args.use_shared)
+
+    # Generate per-ISA files, accumulating shared execute bodies.
+    all_shared_bodies: dict[tuple[str, str], tuple] = {}
+    for name, spec, sem in specs:
+        code_gen = CodeGenerator(spec, args.output, sem, config=config,
+                                 shared_plan=plan)
+        if args.gen_all:
+            code_gen.gen_all()
+        # Merge shared execute bodies (first ISA wins for each key).
+        for key, data in code_gen._shared_execute_bodies.items():
+            if key not in all_shared_bodies:
+                all_shared_bodies[key] = data
+
+    # Write accumulated shared execute templates once.
+    if all_shared_bodies:
+        first_spec = specs[0][1]
+        first_sem = specs[0][2]
+        writer = CodeGenerator(first_spec, args.output, first_sem,
+                               config=config, shared_plan=plan)
+        writer._shared_execute_bodies = all_shared_bodies
+        writer._write_shared_execute_templates()
+
+    # Single unified shared execute header — no per-encoding stubs needed.
+
+
 def main() -> None:
     """Parse an AMD GPU ISA XML spec and generate C++ sources."""
     arg_parser = argparse.ArgumentParser(
         description="Parse a machine-readable AMD GPU ISA specification and generate C++ sources"
     )
     arg_parser.add_argument(
-        "isafile", help="XML file with machine-readable AMD GPU ISA specification"
+        "isafile", nargs='?', default=None,
+        help="XML file with machine-readable AMD GPU ISA specification"
+    )
+    arg_parser.add_argument(
+        "--multi", nargs='+', metavar='NAME:XML',
+        help="Multi-ISA mode: parse all XMLs and generate shared execute() templates. "
+             "Each argument is name:xml_path (e.g., cdna1:/path/to/cdna1.xml)."
     )
     arg_parser.add_argument(
         "--profile",
@@ -119,7 +175,17 @@ def main() -> None:
         help="Emit using-aliases for structs that match the shared baseline "
              "headers (machine_insts_scalar.h, machine_insts_cdna.h)",
     )
+    arg_parser.add_argument(
+        "--gen-shared-execute",
+        action="store_true",
+        help="Generate shared/execute_*.h template headers (requires --multi).",
+    )
     args = arg_parser.parse_args()
+
+    # Multi-ISA mode.
+    if args.multi:
+        _run_multi(args)
+        return
 
     gen_flags = [
         args.gen_all, args.gen_decoder, args.gen_isa, args.gen_opr_types,
@@ -129,6 +195,10 @@ def main() -> None:
     if not any(gen_flags):
         print('warning: no --gen-* flag specified; nothing to generate', file=sys.stderr)
         sys.exit(0)
+
+    if not args.isafile:
+        print('error: isafile required in single-ISA mode', file=sys.stderr)
+        sys.exit(1)
 
     profile_key = args.profile or _detect_profile(args.isafile)
     profile = _PROFILES[profile_key]()

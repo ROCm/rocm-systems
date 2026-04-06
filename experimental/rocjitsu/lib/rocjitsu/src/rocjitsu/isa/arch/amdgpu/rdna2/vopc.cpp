@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna2/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -444,14 +445,7 @@ VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
 }
 
 void VCmpTruF32Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vcc |= (1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_tru_f32_vopc(*this, wf);
 }
 
 VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
@@ -854,14 +848,7 @@ VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
 }
 
 void VCmpxTruF32Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_tru_f32_vopc(*this, wf);
 }
 
 VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
@@ -1292,14 +1279,7 @@ VCmpTruF64Vopc::VCmpTruF64Vopc(const MachineInst *inst)
 }
 
 void VCmpTruF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vcc |= (1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_tru_f64_vopc(*this, wf);
 }
 
 VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
@@ -1702,14 +1682,7 @@ VCmpxTruF64Vopc::VCmpxTruF64Vopc(const MachineInst *inst)
 }
 
 void VCmpxTruF64Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_tru_f64_vopc(*this, wf);
 }
 
 VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
@@ -4763,14 +4736,7 @@ VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
 }
 
 void VCmpTruF16Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vcc |= (1ULL << lane);
-  }
-  wf.set_vcc(vcc);
+  amdgpu::execute_v_cmp_tru_f16_vopc(*this, wf);
 }
 
 VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
@@ -5170,14 +5136,7 @@ VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
 }
 
 void VCmpxTruF16Vopc::execute(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::execute_v_cmpx_tru_f16_vopc(*this, wf);
 }
 
 } // namespace rdna2
