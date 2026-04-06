@@ -22,11 +22,13 @@ ExpExp::ExpExp(const MachineInst *inst)
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       vsrc2(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc2),
       vsrc3(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc3) {
-  dst_operands_.emplace_back(&tgt);
-  src_operands_.emplace_back(&vsrc0);
-  src_operands_.emplace_back(&vsrc1);
-  src_operands_.emplace_back(&vsrc2);
-  src_operands_.emplace_back(&vsrc3);
+  dst_operands_[0] = &tgt;
+  src_operands_[0] = &vsrc0;
+  src_operands_[1] = &vsrc1;
+  src_operands_[2] = &vsrc2;
+  src_operands_[3] = &vsrc3;
+  num_src_ = 4;
+  num_dst_ = 1;
 }
 
 void ExpExp::execute_impl(amdgpu::Wavefront &wf) {
