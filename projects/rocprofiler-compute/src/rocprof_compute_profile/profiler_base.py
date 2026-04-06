@@ -85,6 +85,14 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
+        if getattr(args, "profile_dry_run", False):
+            # No executable required: drop leading "--" if present, leave rest unused.
+            rem = [] if not args.remaining else list(args.remaining)
+            if rem and rem[0] == "--":
+                rem = rem[1:]
+            args.remaining = " ".join(rem) if rem else ""
+            return
+
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
         resolved_exec_path: Optional[Path] = None
@@ -169,6 +177,18 @@ class RocProfCompute_Base:
         """Perform any pre-processing steps prior to profiling."""
         args = self.get_args()
         console_debug("profiling", f"pre-processing using {self.__profiler} profiler")
+
+        if getattr(args, "profile_dry_run", False):
+            if args.attach_pid:
+                args.remaining = ""
+            # Resolve PMC set from filters, allocate virtual perfmon files, print plan.
+            self._filter_blocks = self._soc.perfmon_filter_dry_run()
+            console_log(
+                "profiling",
+                "Dry-run: skipped profiling_config.yaml, sysinfo, "
+                "and perfmon file writes.",
+            )
+            return
 
         if args.attach_pid:
             args.remaining = ""

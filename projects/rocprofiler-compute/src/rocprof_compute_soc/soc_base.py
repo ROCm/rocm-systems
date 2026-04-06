@@ -1,6 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+from __future__ import annotations
+
 import argparse
 import math
 import os
@@ -8,6 +10,7 @@ import re
 import shutil
 import sys
 from abc import abstractmethod
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional
 
@@ -468,54 +471,24 @@ class OmniSoC_Base:
         return rocprof_counters
 
     @demarcate
-    def perfmon_coalesce(self, counters: set[str]) -> None:
-        """
-        Sort and bucket all related performance counters to minimize required
-        application passes
-        """
-        workload_perfmon_dir = Path(self.get_args().path) / "perfmon"
-        workload_perfmon_dir.mkdir(parents=True, exist_ok=True)
-
-        # Sanity check whether counters are supported by underlying rocprof tool
-        rocprof_counters = self.get_rocprof_supported_counters()
-        # rocprof does not support TCC channel counters in the avail output,
-        # so remove channel suffix for comparison
-        not_supported_counters = {
-            counter.split("[")[0] if is_tcc_channel_counter(counter) else counter
-            for counter in counters
-        } - rocprof_counters
-
-        if not_supported_counters:
-            console_warning(
-                "Following counters might not be supported by rocprof: "
-                f"{', '.join(not_supported_counters)}"
-            )
-
-        # We might be providing definitions of unsupported counters, so still try to
-        # collect them
-        if not counters:
-            console_error(
-                "profiling",
-                "No performance counters to collect, "
-                "please check the provided profiling filters",
-            )
-
-        console_debug(f"Collecting following counters: {', '.join(counters)} ")
-
+    def _allocate_perfmon_counter_files(
+        self, counters: set[str]
+    ) -> tuple[list[CounterFile], int, int]:
+        """Bin-pack counters into perfmon buckets (first-fit)."""
         output_files: list[CounterFile] = []
         accu_file_count = 0
 
         # Create separate perfmon file for LEVEL counters without _sum suffix
         # TCC LEVEL counters are handled channel wise, so ignore them
         # Convert set to sorted list for determinism in pmc txt files
-        counters = sorted(list(counters))
-        for counter in counters.copy():
+        work = sorted(list(counters))
+        for counter in work.copy():
             if (
                 "LEVEL" in counter
                 and not counter.endswith("_sum")
                 and not is_tcc_channel_counter(counter)
             ):
-                counters.remove(counter)
+                work.remove(counter)
                 output_files.append(CounterFile(counter, self.__perfmon_config))
                 output_files[-1].add(counter)
                 output_files[-1].add(f"{counter}_ACCUM")
@@ -525,7 +498,7 @@ class OmniSoC_Base:
         # Store all channels for a TCC channel counter in the same file
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
-        for ctr in counters:
+        for ctr in work:
             # Store all channels for a TCC channel counter in the same file
             if is_tcc_channel_counter(ctr):
                 output_file = tcc_channel_counter_file_map.get(ctr.split("[")[0])
@@ -548,6 +521,48 @@ class OmniSoC_Base:
                 output_files.append(CounterFile(str(file_count), self.__perfmon_config))
                 file_count += 1
                 output_files[-1].add(ctr)
+
+        return output_files, file_count, accu_file_count
+
+    @demarcate
+    def perfmon_coalesce(self, counters: set[str]) -> None:
+        """
+        Sort and bucket all related performance counters to minimize required
+        application passes
+        """
+        workload_perfmon_dir = Path(self.get_args().path) / "perfmon"
+        workload_perfmon_dir.mkdir(parents=True, exist_ok=True)
+
+        # Dry-run has no rocprofiler-sdk avail list; rely on YAML counter names only.
+        if not getattr(self.get_args(), "profile_dry_run", False):
+            rocprof_counters = self.get_rocprof_supported_counters()
+            # rocprof does not support TCC channel counters in the avail output,
+            # so remove channel suffix for comparison
+            not_supported_counters = {
+                counter.split("[")[0] if is_tcc_channel_counter(counter) else counter
+                for counter in counters
+            } - rocprof_counters
+
+            if not_supported_counters:
+                console_warning(
+                    "Following counters might not be supported by rocprof: "
+                    f"{', '.join(not_supported_counters)}"
+                )
+
+        # We might be providing definitions of unsupported counters, so still try to
+        # collect them
+        if not counters:
+            console_error(
+                "profiling",
+                "No performance counters to collect, "
+                "please check the provided profiling filters",
+            )
+
+        console_debug(f"Collecting following counters: {', '.join(counters)} ")
+
+        output_files, file_count, accu_file_count = (
+            self._allocate_perfmon_counter_files(counters)
+        )
 
         console_debug("profiling", f"perfmon_coalesce file_count {file_count}")
 
@@ -650,6 +665,239 @@ class OmniSoC_Base:
                     with open(counter_def_filename, "w") as fp:
                         fp.write(yaml.dump(counter_def, sort_keys=False))
 
+    def _expand_tcc_template_counters(self, counters: set[str]) -> set[str]:
+        """
+        Expand TCC channel templates (name ending with '[') into indexed channel
+        counters, matching perfmon allocation.
+        """
+        out = set(counters)
+        num_xcd = int(self._mspec.num_xcd)
+        l2_banks = int(self._mspec.l2_banks)
+        for counter_name in counters.copy():
+            if counter_name.startswith("TCC") and counter_name.endswith("["):
+                out.discard(counter_name)
+                base = counter_name.split("[")[0]
+                out.update(f"{base}[{i}]" for i in range(num_xcd * l2_banks))
+        return out
+
+    def _iter_arch_analysis_yaml_metrics(
+        self,
+    ) -> Iterator[tuple[str, Any, int, str, str]]:
+        """Iterate analysis_configs/<arch> YAML metric_table rows."""
+        args = self.get_args()
+        arch = self.__arch
+        if not arch:
+            return
+        config_root = Path(args.config_dir) / arch
+        if not config_root.is_dir():
+            return
+        exclude: set[str] = set()
+        if not args.membw_analysis:
+            exclude.add("3000")
+
+        for ypath in sorted(config_root.glob("*.yaml")):
+            stem_id = ypath.name.split("_")[0]
+            if stem_id in exclude:
+                continue
+            try:
+                with open(ypath, encoding="utf-8") as stream:
+                    doc = yaml.safe_load(stream)
+            except (OSError, UnicodeError, yaml.YAMLError):
+                continue
+            if not isinstance(doc, dict):
+                continue
+            panel_cfg = doc.get("Panel Config")
+            if not isinstance(panel_cfg, dict):
+                continue
+            sources = panel_cfg.get("data source")
+            if not isinstance(sources, list):
+                continue
+            for section in sources:
+                if not isinstance(section, dict) or "metric_table" not in section:
+                    continue
+                mt = section["metric_table"]
+                if not isinstance(mt, dict):
+                    continue
+                metrics = mt.get("metric")
+                if not isinstance(metrics, dict):
+                    continue
+                panel_id = mt.get("id")
+                for idx, (metric_name, metric_body) in enumerate(metrics.items()):
+                    try:
+                        metric_text = yaml.dump(
+                            metric_body, sort_keys=False, allow_unicode=True
+                        )
+                    except (TypeError, yaml.YAMLError):
+                        continue
+                    yield stem_id, panel_id, idx, metric_name, metric_text
+
+    def _log_perfmon_bucket_plan(self, output_files: list[CounterFile]) -> None:
+        """Stdout markdown tables: one Bucket section per perfmon pass file."""
+        arch = self.get_arch() or "unknown"
+        print(f"Perfmon dry-run plan (architecture: {arch})")
+        global_columns, col_widths = _dry_run_global_ip_column_widths(output_files)
+        total_assignments = 0
+        for counter_file in output_files:
+            bucket_label = counter_file.file_name_txt.replace(".txt", "")
+            flat = _flat_counters_in_perfmon_file(counter_file)
+            total_assignments += len(flat)
+            print(f"\nBucket: {bucket_label}")
+            if not flat:
+                print("(no PMC counters)")
+                continue
+            if not global_columns:
+                continue
+            print(_format_dry_run_bucket_markdown(flat, global_columns, col_widths))
+        print(
+            f"\nSummary: {len(output_files)} bucket(s), "
+            f"{total_assignments} counter assignment(s).",
+            flush=True,
+        )
+
+    def _print_dry_run_multi_bucket_metrics(
+        self, output_files: list[CounterFile]
+    ) -> None:
+        """
+        After bucket allocation, report metrics by how in-collection PMCs map to
+        buckets: (1) 2+ bucket labels, (2) exactly one label. Same YAML scan scope.
+        """
+        args = self.get_args()
+        arch = self.__arch or "unknown"
+        scan_root = Path(args.config_dir) / arch
+        counter_to_bucket = _dry_run_counter_to_bucket_map(output_files)
+
+        if not scan_root.is_dir():
+            print(
+                "\nMetrics spanning multiple perfmon buckets "
+                "(skipped: config directory missing)\n",
+                flush=True,
+            )
+            return
+
+        multi_rows: list[tuple[str, str, int, str, int, str]] = []
+        single_rows: list[tuple[str, str, int, str, str]] = []
+        total_metrics = 0
+        for (
+            file_id,
+            panel_id,
+            metric_idx,
+            metric_name,
+            metric_yaml,
+        ) in self._iter_arch_analysis_yaml_metrics():
+            total_metrics += 1
+            hw = self.parse_counters(metric_yaml)
+            hw = self._expand_tcc_template_counters(hw)
+            buckets: set[str] = set()
+            # Only PMCs present in this dry-run's collection have a bucket mapping.
+            for c in hw:
+                b = counter_to_bucket.get(c)
+                if b is not None:
+                    buckets.add(b)
+            panel_s = str(panel_id) if panel_id is not None else "-"
+            n_b = len(buckets)
+            if n_b > 1:
+                multi_rows.append((
+                    file_id,
+                    panel_s,
+                    metric_idx,
+                    metric_name,
+                    n_b,
+                    ", ".join(sorted(buckets)),
+                ))
+            elif n_b == 1:
+                single_rows.append((
+                    file_id,
+                    panel_s,
+                    metric_idx,
+                    metric_name,
+                    next(iter(buckets)),
+                ))
+
+        multi_count = len(multi_rows)
+        pct = (100.0 * multi_count / total_metrics) if total_metrics else 0.0
+        pct_str = f"{pct:.1f}%" if total_metrics else "n/a"
+        print(
+            f"\nMetrics with PMC counters assigned to more than one perfmon bucket "
+            f"({multi_count} of {total_metrics} metrics, {pct_str})"
+        )
+        print(
+            "All *.yaml under the arch are scanned. Listed rows are metrics where at "
+            "least one formula counter is in this dry-run's collection and those "
+            "counters map to 2+ buckets in the layout above."
+        )
+        print(f"Config tree: {scan_root}")
+
+        if total_metrics == 0:
+            print("(no metrics found in YAML scan)\n", flush=True)
+            return
+
+        if not multi_rows:
+            print(
+                "(none listed -- in-collection counters stay in one bucket"
+                " per metric)\n"
+            )
+        else:
+            _dry_run_print_markdown_metric_table(
+                ["File", "Panel", "Idx", "Metric name", "#Bkts", "Buckets"],
+                [[r[0], r[1], str(r[2]), r[3], str(r[4]), r[5]] for r in multi_rows],
+            )
+
+        single_count = len(single_rows)
+        spct = (100.0 * single_count / total_metrics) if total_metrics else 0.0
+        spct_str = f"{spct:.1f}%" if total_metrics else "n/a"
+        print(
+            f"\nMetrics with PMC counters assigned to one perfmon bucket "
+            f"({single_count} of {total_metrics} metrics, {spct_str})"
+        )
+        print(
+            "Listed rows are metrics where at least one formula counter is in this "
+            "dry-run's collection and every such counter maps to the same single "
+            "bucket above (metrics with no in-collection PMCs are omitted)."
+        )
+        if not single_rows:
+            print(
+                "(none listed -- no metric has in-collection PMCs confined to one "
+                "bucket)\n"
+            )
+        else:
+            _dry_run_print_markdown_metric_table(
+                ["File", "Panel", "Idx", "Metric name", "Bucket"],
+                [[r[0], r[1], str(r[2]), r[3], r[4]] for r in single_rows],
+            )
+        print(flush=True)
+
+    @demarcate
+    def perfmon_filter_dry_run(self) -> list[str]:
+        """Counter resolution like profiling_setup; stdout plan + multi-bucket scan."""
+        counters, filter_blocks = self.detect_counters()
+        if is_only_pc_sampling(filter_blocks):
+            console_log(
+                "profiling",
+                "Dry-run: PC sampling only -- no PMC perfmon buckets.",
+            )
+            return filter_blocks
+
+        counters = counters - {"SQ_ACCUM_PREV_HIRES"}
+        if not counters:
+            console_error(
+                "profiling",
+                "No performance counters to collect for dry-run, "
+                "please check the provided profiling filters",
+            )
+
+        console_debug(f"Collecting following counters: {', '.join(counters)} ")
+        output_files, file_count, _accu = self._allocate_perfmon_counter_files(counters)
+        console_debug("profiling", f"perfmon dry-run file_count {file_count}")
+        self._log_perfmon_bucket_plan(output_files)
+        self._print_dry_run_multi_bucket_metrics(output_files)
+        if self.get_args().spatial_multiplexing:
+            console_warning(
+                "profiling",
+                "Dry-run lists logical PMC buckets only; --spatial-multiplexing "
+                "rewrites perfmon layout for multi-node runs.",
+            )
+        return filter_blocks
+
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
@@ -736,6 +984,7 @@ class LimitedSet:
 # block limited according to perfmon config.
 class CounterFile:
     def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
+        self.file_name_txt: str = f"pmc_perf_{name}.txt"
         self.pmc_filename: str = f"pmc_perf_{name}.yaml"
         self.counter_def_filename: str = f"counter_def_{name}.yaml"
         self.blocks: dict[str, LimitedSet] = {
@@ -745,8 +994,121 @@ class CounterFile:
     def add(self, counter: str) -> bool:
         block = counter.split("_")[0]
 
-        # SQ and SQC belong to the same IP block
+        # SQ, SQC, and SP belong to the same IP block
         if block == "SQC":
+            block = "SQ"
+        if block == "SP":
             block = "SQ"
 
         return self.blocks[block].add(counter)
+
+
+def _flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
+    """Ordered list of PMC counter names assigned to one perfmon bucket file."""
+    return [
+        ctr
+        for block_name in counter_file.blocks
+        for ctr in counter_file.blocks[block_name].elements
+    ]
+
+
+def _counter_display_ip_prefix(counter: str) -> str:
+    """First IP-style token of a PMC name (column key for dry-run tables)."""
+    if is_tcc_channel_counter(counter):
+        base = counter.split("[")[0]
+        return base.split("_", 1)[0] if "_" in base else base
+    if "_" not in counter:
+        return counter
+    return counter.split("_", 1)[0]
+
+
+def _counters_grouped_by_ip_sorted(counters: list[str]) -> dict[str, list[str]]:
+    by_ip: dict[str, list[str]] = {}
+    for ctr in counters:
+        ip = _counter_display_ip_prefix(ctr)
+        by_ip.setdefault(ip, []).append(ctr)
+    for names in by_ip.values():
+        names.sort()
+    return by_ip
+
+
+def _dry_run_global_ip_column_widths(
+    output_files: list[CounterFile],
+) -> tuple[list[str], dict[str, int]]:
+    """
+    Column order and cell widths from the longest header or counter name
+    per IP block across every bucket (aligned pipes between tables).
+    """
+    max_cell: dict[str, int] = {}
+    for counter_file in output_files:
+        flat = _flat_counters_in_perfmon_file(counter_file)
+        by_ip = _counters_grouped_by_ip_sorted(flat)
+        for ip, names in by_ip.items():
+            longest = max((len(n) for n in names), default=0)
+            max_cell[ip] = max(max_cell.get(ip, 0), longest, len(ip))
+    columns = sorted(max_cell.keys())
+    widths = {ip: max_cell[ip] for ip in columns}
+    return columns, widths
+
+
+def _format_dry_run_bucket_markdown(
+    counters: list[str],
+    global_columns: list[str],
+    widths: dict[str, int],
+) -> str:
+    """GitHub-style pipe table with fixed column widths (spaces, not tabs)."""
+    by_ip = _counters_grouped_by_ip_sorted(counters)
+    height = max((len(by_ip.get(c, [])) for c in global_columns), default=0)
+
+    def pipe_row(cells: list[str]) -> str:
+        return "| " + " | ".join(cells) + " |"
+
+    lines = [
+        pipe_row([ip.ljust(widths[ip]) for ip in global_columns]),
+        pipe_row(["-" * widths[ip] for ip in global_columns]),
+    ]
+    for row_idx in range(height):
+        lines.append(
+            pipe_row([
+                (by_ip[c][row_idx] if row_idx < len(by_ip.get(c, [])) else "").ljust(
+                    widths[c]
+                )
+                for c in global_columns
+            ])
+        )
+    return "\n".join(lines)
+
+
+def _dry_run_counter_to_bucket_map(
+    output_files: list[CounterFile],
+) -> dict[str, str]:
+    """Map each PMC counter string to its perfmon bucket label (e.g. pmc_perf_0)."""
+    result: dict[str, str] = {}
+    for counter_file in output_files:
+        label = counter_file.file_name_txt.replace(".txt", "")
+        for ctr in _flat_counters_in_perfmon_file(counter_file):
+            result[ctr] = label
+    return result
+
+
+def _dry_run_print_markdown_metric_table(
+    headers: list[str],
+    str_rows: list[list[str]],
+) -> None:
+    """Print a left-padded pipe table for dry-run metric listings."""
+    widths = [
+        max(len(headers[i]), max(len(row[i]) for row in str_rows))
+        for i in range(len(headers))
+    ]
+
+    def pipe_line(parts: list[str]) -> str:
+        return (
+            "| "
+            + " | ".join(parts[i].ljust(widths[i]) for i in range(len(parts)))
+            + " |"
+        )
+
+    print(pipe_line(headers))
+    print(pipe_line(["-" * widths[i] for i in range(len(widths))]))
+    for row in str_rows:
+        print(pipe_line(row))

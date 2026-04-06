@@ -214,6 +214,80 @@ def generate_machine_specs(
     return specs
 
 
+def _apply_soc_derived_mspec_fields(specs: MachineSpecs) -> None:
+    """Fill fields normally set after SoC init inside generate_machine_specs."""
+    if specs.rocminfo_lines is None:
+        # Yaml-only / no rocminfo: skip get_gpu_model (avoids chip-id warnings).
+        specs.gpu_model = specs.gpu_model or ""
+    else:
+        specs.gpu_model = (
+            mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
+        )
+    specs.num_xcd = str(
+        mi_gpu_specs.get_num_xcds(
+            specs.gpu_arch, specs.gpu_model or None, specs.compute_partition
+        )
+    )
+    specs.total_l2_chan = totall2_banks(
+        specs.gpu_arch,
+        specs.gpu_model,
+        specs.l2_banks,
+        specs.compute_partition,
+    )
+    specs.num_hbm_channels = str(specs.get_hbm_channels())
+
+
+def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
+    """Map LLVM GPU targets that share one SoC and analysis config tree."""
+    if gpu_arch is None:
+        return None
+    if gpu_arch == "gfx1152":
+        return "gfx1151"
+    return gpu_arch
+
+
+@demarcate
+def machine_specs_for_arch_yaml_preview(args: argparse.Namespace) -> MachineSpecs:
+    """
+    Minimal MachineSpecs for ``--dry-run --arch``: YAML/config for that GPU only --
+    no rocminfo, AMDGPU, or amd-smi queries.
+    """
+    raw_arch = args.profile_arch_override
+    arch = canonical_gpu_arch(raw_arch)
+    if arch is None:
+        console_error(f"Invalid GPU architecture for yaml preview: {raw_arch!r}")
+
+    now = datetime.now()
+    local_now = now.astimezone()
+    local_tzname = local_now.tzinfo.tzname(local_now)  # type: ignore
+    timestamp = f"{now.strftime('%c')} ({local_tzname}) [yaml-preview]"
+
+    version = get_version(config.rocprof_compute_home)["version"]
+    specs_version = version[: version.find(".")]
+
+    # rocminfo_lines=None marks yaml-preview: downstream must not parse AMDGPU text.
+    specs = MachineSpecs(
+        version=specs_version,
+        timestamp=timestamp,
+        hostname=socket.gethostname(),
+        gpu_arch=arch,
+        rocminfo_lines=None,
+    )
+
+    try:
+        # Construct SoC once so arch-specific defaults populate MachineSpecs fields.
+        soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
+        soc_class = getattr(soc_module, f"{arch}_soc")
+        soc_class(args, specs)
+    except (ModuleNotFoundError, AttributeError) as e:
+        console_error(
+            f"Architecture {arch} is not available for yaml-only preview: {e}"
+        )
+
+    _apply_soc_derived_mspec_fields(specs)
+    return specs
+
+
 @demarcate
 def extract_machine_info() -> dict[str, Any]:
     result: dict[str, Optional[str]] = {
