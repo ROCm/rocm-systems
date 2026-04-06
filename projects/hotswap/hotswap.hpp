@@ -19,7 +19,14 @@ namespace hotswap {
 /// the agent's ISA, or when stepping patches are needed (e.g., B0-to-A0).
 /// Delegates to COMGR's amd_comgr_hotswap_rewrite via dlopen.
 ///
-/// The caller must free *out_data with free() if it differs from elf_data.
+/// On success, *out_data and *out_size describe the rewritten code object.
+/// If *out_data differs from elf_data, it was allocated by this function
+/// and the caller must free it with free().
+///
+/// On failure, *out_data is set to elf_data and *out_size is set to
+/// elf_size so callers can continue using the original code object.
+/// When *out_data == elf_data, the caller must not free it.
+///
 /// Returns 0 on success, non-zero on failure.
 int RetargetCodeObject(const void *elf_data, size_t elf_size,
                        const char *source_isa, const char *target_isa,

@@ -22,8 +22,11 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <unistd.h>
 #include <unordered_map>
 #include <vector>
+
+#define HSA_HOTSWAP_EXPORT __attribute__((visibility("default")))
 
 namespace {
 
@@ -33,6 +36,8 @@ struct CodeObjectData {
 
 std::mutex g_reader_map_mutex;
 std::unordered_map<uint64_t, CodeObjectData> g_reader_map;
+
+CoreApiTable* g_core_table = nullptr;
 
 decltype(hsa_code_object_reader_create_from_memory)* g_orig_reader_create_from_memory = nullptr;
 decltype(hsa_code_object_reader_create_from_file)* g_orig_reader_create_from_file = nullptr;
@@ -55,7 +60,28 @@ hsa_status_t HSA_API hotswap_reader_create_from_memory(
 
 hsa_status_t HSA_API hotswap_reader_create_from_file(
     hsa_file_t file, hsa_code_object_reader_t* code_object_reader) {
-  return g_orig_reader_create_from_file(file, code_object_reader);
+  // Read file contents into memory so we can inspect/rewrite later.
+  off_t file_size = lseek(file, 0, SEEK_END);
+  if (file_size <= 0) {
+    return g_orig_reader_create_from_file(file, code_object_reader);
+  }
+  lseek(file, 0, SEEK_SET);
+
+  std::vector<uint8_t> buf(static_cast<size_t>(file_size));
+  ssize_t bytes_read = read(file, buf.data(), buf.size());
+  if (bytes_read != static_cast<ssize_t>(file_size)) {
+    lseek(file, 0, SEEK_SET);
+    return g_orig_reader_create_from_file(file, code_object_reader);
+  }
+
+  hsa_status_t status = g_orig_reader_create_from_memory(
+      buf.data(), buf.size(), code_object_reader);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+
+  std::lock_guard<std::mutex> lock(g_reader_map_mutex);
+  g_reader_map[code_object_reader->handle].bytes = std::move(buf);
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API hotswap_reader_destroy(
@@ -84,12 +110,10 @@ static std::string get_agent_isa_name(hsa_agent_t agent) {
 }
 
 static std::string read_elf_isa_note(const uint8_t* elf, size_t size) {
-  // Minimal ELF note parser for the ISA name.
-  // The code object ISA is in an NT_AMDGPU_METADATA or AMDGPU .note section.
-  // For simplicity, we scan for the "amdgcn-amd-amdhsa--" prefix in the ELF.
   const char prefix[] = "amdgcn-amd-amdhsa--";
-  for (size_t i = 0; i + sizeof(prefix) < size; ++i) {
-    if (memcmp(elf + i, prefix, sizeof(prefix) - 1) == 0) {
+  const size_t prefix_len = sizeof(prefix) - 1;
+  for (size_t i = 0; i + prefix_len <= size; ++i) {
+    if (memcmp(elf + i, prefix, prefix_len) == 0) {
       const char* start = reinterpret_cast<const char*>(elf + i);
       size_t len = 0;
       while (i + len < size && start[len] != '\0' && start[len] != '\n'
@@ -106,16 +130,14 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     hsa_code_object_reader_t code_object_reader,
     const char* options, hsa_loaded_code_object_t* loaded_code_object) {
 
-  const uint8_t* elf_data = nullptr;
-  size_t elf_size = 0;
+  std::vector<uint8_t> local_bytes;
   bool have_bytes = false;
 
   {
     std::lock_guard<std::mutex> lock(g_reader_map_mutex);
     auto it = g_reader_map.find(code_object_reader.handle);
     if (it != g_reader_map.end()) {
-      elf_data = it->second.bytes.data();
-      elf_size = it->second.bytes.size();
+      local_bytes = it->second.bytes;
       have_bytes = true;
     }
   }
@@ -125,7 +147,7 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
                                          options, loaded_code_object);
   }
 
-  std::string source_isa = read_elf_isa_note(elf_data, elf_size);
+  std::string source_isa = read_elf_isa_note(local_bytes.data(), local_bytes.size());
   std::string target_isa = get_agent_isa_name(agent);
 
   if (source_isa.empty() || target_isa.empty() || source_isa == target_isa) {
@@ -136,7 +158,7 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
   void* out_elf = nullptr;
   size_t out_elf_size = 0;
   int rc = rocr::hotswap::ComgrHotswapRewrite(
-      elf_data, elf_size,
+      local_bytes.data(), local_bytes.size(),
       source_isa.c_str(), target_isa.c_str(),
       &out_elf, &out_elf_size);
 
@@ -168,13 +190,25 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
 
 extern "C" {
 
+HSA_HOTSWAP_EXPORT
 bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
             uint64_t failed_count, const char* const* failed_names) {
   (void)runtime_version;
   (void)failed_count;
   (void)failed_names;
 
+  if (!table || !table->core_)
+    return false;
+
   CoreApiTable* core = table->core_;
+
+  if (!core->hsa_code_object_reader_create_from_memory_fn ||
+      !core->hsa_code_object_reader_create_from_file_fn ||
+      !core->hsa_code_object_reader_destroy_fn ||
+      !core->hsa_executable_load_agent_code_object_fn)
+    return false;
+
+  g_core_table = core;
 
   g_orig_reader_create_from_memory =
       core->hsa_code_object_reader_create_from_memory_fn;
@@ -198,7 +232,28 @@ bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   return true;
 }
 
+HSA_HOTSWAP_EXPORT
 void OnUnload() {
+  if (g_core_table) {
+    g_core_table->hsa_code_object_reader_create_from_memory_fn =
+        g_orig_reader_create_from_memory;
+    g_core_table->hsa_code_object_reader_create_from_file_fn =
+        g_orig_reader_create_from_file;
+    g_core_table->hsa_code_object_reader_destroy_fn =
+        g_orig_reader_destroy;
+    g_core_table->hsa_executable_load_agent_code_object_fn =
+        g_orig_load_agent_code_object;
+    g_core_table = nullptr;
+  }
+
+  g_orig_reader_create_from_memory = nullptr;
+  g_orig_reader_create_from_file = nullptr;
+  g_orig_reader_destroy = nullptr;
+  g_orig_load_agent_code_object = nullptr;
+
+  std::lock_guard<std::mutex> lock(g_reader_map_mutex);
+  g_reader_map.clear();
+
   fprintf(stderr, "hotswap: tool unloaded\n");
 }
 
