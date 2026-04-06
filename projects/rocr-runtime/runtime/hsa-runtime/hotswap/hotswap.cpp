@@ -1,4 +1,4 @@
-//===- hotswap.cpp - HotSwap ISA rewriting ROCR integration (stub) --------===//
+//===- hotswap.cpp - HotSwap ISA rewriting (stub) -------------------------===//
 //
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
