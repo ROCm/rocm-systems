@@ -4,7 +4,7 @@ set -eux
 
 # export GPU_MAX_HW_QUEUES=32
 
-LOG_DIR=./tests-results-skip0/logs-heatmap-default
+LOG_DIR=./tests-results-skip0/logs-heatmap-loadstore-dispatch
 mkdir -p $LOG_DIR
 
 # Test cases
