@@ -422,9 +422,14 @@ std::unordered_map<std::string, FactoryFn> &factories() {
     };
 
     f["command_processor"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,
-                                rj_code_arch_t,
+                                rj_code_arch_t arch,
                                 amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
-      return std::make_unique<amdgpu::CommandProcessor>(n);
+      auto cp = std::make_unique<amdgpu::CommandProcessor>(n);
+      // VGPR granularity: 8 for CDNA3/CDNA4 (GFX940+), 4 for earlier GFX9.
+      uint32_t gran =
+          (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) ? 8 : 4;
+      cp->set_vgpr_granularity(gran);
+      return cp;
     };
 
     f["compute_unit"] = [](const std::string &n, const CfgMap &cfg, simdojo::ExecMode mode,
@@ -559,9 +564,12 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
   {
     std::vector<simdojo::Component *> all;
     root->collect_components(all);
-    for (auto *c : all)
+    for (auto *c : all) {
       if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(c))
         cu->set_memory(mem);
+      if (auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(c))
+        cp->set_memory(mem);
+    }
   }
 
   set_cu_l2(root);
@@ -640,6 +648,16 @@ rj_code_arch_t parse_arch(const std::string &arch_str) {
     return ROCJITSU_CODE_ARCH_CDNA3;
   if (arch_str == "cdna4")
     return ROCJITSU_CODE_ARCH_CDNA4;
+  if (arch_str == "rdna1")
+    return ROCJITSU_CODE_ARCH_RDNA1;
+  if (arch_str == "rdna2")
+    return ROCJITSU_CODE_ARCH_RDNA2;
+  if (arch_str == "rdna3")
+    return ROCJITSU_CODE_ARCH_RDNA3;
+  if (arch_str == "rdna3_5" || arch_str == "rdna3.5")
+    return ROCJITSU_CODE_ARCH_RDNA3_5;
+  if (arch_str == "rdna4")
+    return ROCJITSU_CODE_ARCH_RDNA4;
   if (arch_str == "rv32i")
     return ROCJITSU_CODE_ARCH_RV32I;
   if (arch_str == "rv64i")
@@ -657,6 +675,16 @@ const char *arch_to_string(rj_code_arch_t arch) {
     return "cdna3";
   case ROCJITSU_CODE_ARCH_CDNA4:
     return "cdna4";
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return "rdna1";
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return "rdna2";
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return "rdna3";
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return "rdna3_5";
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return "rdna4";
   case ROCJITSU_CODE_ARCH_RV32I:
     return "rv32i";
   case ROCJITSU_CODE_ARCH_RV64I:

@@ -3,15 +3,20 @@
 
 cmake_minimum_required(VERSION 3.28)
 
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+include(rj_default_compiler)
+
 project(rocm_jit_suite)
 
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 find_package(Threads REQUIRED)
+
+# Shared HSA headers from the ROCr runtime (shared/headers/hsa/).
+set(HSA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/../../shared/headers")
 
 option(RJ_BUILD_GUI "Build the simulation GUI (requires OpenGL)" ON)
 
@@ -35,6 +40,11 @@ if(RJ_SANITIZER)
     if(RJ_SANITIZER STREQUAL "asan")
       add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
       add_link_options(-fsanitize=address)
+      # GCC 13+ emits false-positive -Wmaybe-uninitialized in std_function.h
+      # when ASAN is enabled. Suppress to avoid -Werror failures.
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-Wno-maybe-uninitialized)
+      endif()
     elseif(RJ_SANITIZER STREQUAL "ubsan")
       add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
       add_link_options(-fsanitize=undefined)
@@ -63,6 +73,7 @@ if(RJ_CLANG_TIDY)
   endif()
 endif()
 
+# Third-party dependencies (fetched into third_party/).
 # Third-party dependencies (fetched into third_party/).
 set(FETCHCONTENT_BASE_DIR ${PROJECT_SOURCE_DIR}/third_party)
 include(FetchContent)

@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+#Add a name for the rocm-systems location
+set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
 # Set cmake_prefix_path for searching, ROCM_PATH if avail otherwise default to general rocm install path
 set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 message(STATUS "ROCM_PATH: $ENV{ROCM_PATH}")
@@ -659,6 +662,23 @@ if(${ENABLE_COVERAGE})
             ENVIRONMENT "COVERAGE_FILE=${COVERAGE_DATA_PATH}"
             TIMEOUT 600
     )
+endif()
+
+# -------------------
+# Test categorization
+# -------------------
+set(_test_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_categories.yaml")
+include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
+
+if(COMMAND apply_ctest_category_labels)
+    if(EXISTS "${_test_categories_yaml}")
+        message(STATUS "YAML-based test categorization")
+        apply_ctest_category_labels("${_test_categories_yaml}")
+    else()
+        message(STATUS "No test categorization (YAML missing)")
+    endif()
+else()
+    message(STATUS "Test categorization not available (TestCategories.cmake not found)")
 endif()
 
 # -------------------

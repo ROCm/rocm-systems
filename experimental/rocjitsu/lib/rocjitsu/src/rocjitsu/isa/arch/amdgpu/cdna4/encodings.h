@@ -10,16 +10,17 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
 #include <string>
+#include <string_view>
 
 namespace rocjitsu {
 namespace cdna4 {
 
 class Sop1 : public IsaInstruction<Isa> {
 public:
-  Sop1(const std::string &mnemonic, const Sop1MachineInst *inst);
+  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Sop1MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -29,10 +30,10 @@ private:
 
 class Sopc : public IsaInstruction<Isa> {
 public:
-  Sopc(const std::string &mnemonic, const SopcMachineInst *inst);
+  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = SopcMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -44,10 +45,10 @@ private:
 
 class Sopp : public IsaInstruction<Isa> {
 public:
-  Sopp(const std::string &mnemonic, const SoppMachineInst *inst);
+  Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = SoppMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -55,10 +56,10 @@ private:
 
 class Sopk : public IsaInstruction<Isa> {
 public:
-  Sopk(const std::string &mnemonic, const SopkMachineInst *inst);
+  Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = SopkMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -67,10 +68,10 @@ private:
 
 class Sop2 : public IsaInstruction<Isa> {
 public:
-  Sop2(const std::string &mnemonic, const Sop2MachineInst *inst);
+  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Sop2MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -82,10 +83,11 @@ private:
 
 class Smem : public IsaInstruction<Isa> {
 public:
-  Smem(const std::string &mnemonic, const SmemMachineInst *inst);
+  Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = SmemMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -93,10 +95,10 @@ private:
 
 class Vop1 : public IsaInstruction<Isa> {
 public:
-  Vop1(const std::string &mnemonic, const Vop1MachineInst *inst);
+  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop1MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -108,10 +110,10 @@ private:
 
 class Vopc : public IsaInstruction<Isa> {
 public:
-  Vopc(const std::string &mnemonic, const VopcMachineInst *inst);
+  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = VopcMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -122,10 +124,10 @@ private:
 
 class Vop2 : public IsaInstruction<Isa> {
 public:
-  Vop2(const std::string &mnemonic, const Vop2MachineInst *inst);
+  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop2MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -138,10 +140,10 @@ private:
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
-  Vop3p(const std::string &mnemonic, const Vop3pMachineInst *inst);
+  Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3pMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -149,10 +151,10 @@ private:
 
 class Vop3 : public IsaInstruction<Isa> {
 public:
-  Vop3(const std::string &mnemonic, const Vop3MachineInst *inst);
+  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3MachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -160,10 +162,10 @@ private:
 
 class Ds : public IsaInstruction<Isa> {
 public:
-  Ds(const std::string &mnemonic, const DsMachineInst *inst);
+  Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = DsMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -171,10 +173,11 @@ private:
 
 class Mubuf : public IsaInstruction<Isa> {
 public:
-  Mubuf(const std::string &mnemonic, const MubufMachineInst *inst);
+  Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = MubufMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -182,10 +185,11 @@ private:
 
 class Mtbuf : public IsaInstruction<Isa> {
 public:
-  Mtbuf(const std::string &mnemonic, const MtbufMachineInst *inst);
+  Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = MtbufMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -193,21 +197,23 @@ private:
 
 class Flat : public IsaInstruction<Isa> {
 public:
-  Flat(const std::string &mnemonic, const FlatMachineInst *inst);
+  Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = FlatMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
+  std::string owned_mnemonic_;
 
 private:
 };
 
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
-  Vop3SdstEnc(const std::string &mnemonic, const Vop3SdstEncMachineInst *inst);
+  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3SdstEncMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:
@@ -215,10 +221,10 @@ private:
 
 class Vop3pMfma : public IsaInstruction<Isa> {
 public:
-  Vop3pMfma(const std::string &mnemonic, const Vop3pMfmaMachineInst *inst);
+  Vop3pMfma(std::string_view mnemonic, const Vop3pMfmaMachineInst *inst, ExecuteFn exec_fn);
   using OpEncoding = Vop3pMfmaMachineInst;
 
-protected:
+public:
   [[maybe_unused]] const OpEncoding inst_;
 
 private:

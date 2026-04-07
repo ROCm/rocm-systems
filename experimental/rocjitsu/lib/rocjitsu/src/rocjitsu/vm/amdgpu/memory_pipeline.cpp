@@ -41,7 +41,10 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
     for (uint32_t i = 0; i < vgpr_count; ++i) {
       uint32_t val = 0;
       uint32_t data_offset = lane * stride + i * 4;
-      uint32_t copy_size = std::min(d.elem_size - i * 4, 4u);
+      // For atomics (8-byte element split across 2 VGPRs): copy 4 then 4.
+      // For regular loads (one element per VGPR): always copy elem_size bytes.
+      uint32_t copy_size =
+          is_atomic ? std::min(d.elem_size - i * 4, 4u) : std::min(d.elem_size, 4u);
       std::memcpy(&val, &d.response_data[data_offset], copy_size);
       cu.write_vgpr(d.dst_reg_base + i, lane, val);
     }
@@ -64,8 +67,9 @@ void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
   if (!d.is_load)
     return;
   auto &cu = wf.cu();
-  for (uint32_t i = 0; i < d.num_dwords; ++i)
+  for (uint32_t i = 0; i < d.num_dwords; ++i) {
     cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
+  }
 }
 
 namespace {

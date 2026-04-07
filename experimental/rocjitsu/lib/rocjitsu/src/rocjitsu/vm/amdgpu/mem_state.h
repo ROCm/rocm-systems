@@ -56,6 +56,7 @@ struct ScalarMemState : DynamicInstState {
   uint32_t dst_reg_base = 0;
   uint32_t num_dwords = 0;
   bool is_load = true;
+  Mtype mtype = Mtype::RW;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
 };
