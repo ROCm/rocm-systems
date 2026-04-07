@@ -211,11 +211,11 @@ public:
         ASSERT_EQ(hipFileStreamRegister(hip_stream, 0xf), HIPFILE_SUCCESS);
         auto [_file, _buffer, _stream] =
             Context<DriverState>::get()->getFileBufferAndStream(fh, dev_ptr, hip_stream);
-        file              = _file;
-        buffer            = _buffer;
-        stream            = _stream;
-        op                = std::shared_ptr<AsyncOpFallback>(new AsyncOpFallback(
-            io_type, file, buffer, stream, &io_size, &file_offset, &buffer_offset, &bytes_transferred));
+        file   = _file;
+        buffer = _buffer;
+        stream = _stream;
+        op     = std::make_shared<AsyncOpFallback>(io_type, file, buffer, stream, &io_size, &file_offset,
+                                                   &buffer_offset, &bytes_transferred);
         bytes_transferred = static_cast<ssize_t>(io_size);
         if (io_type == IoType::Read) {
             // For a read, bytes_transferred_internal needs to be set to simulate that the read from disk

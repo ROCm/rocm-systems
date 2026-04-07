@@ -25,14 +25,14 @@ enum class IoType;
 
 namespace hipFile {
 
-struct AsyncOpFallback : AsyncOp {
+struct alignas(64) AsyncOpFallback : AsyncOp {
     size_t      submitted_size;
     ssize_t     bytes_transferred_internal;
     void *const gpu_buffer;
     void       *bounce_buffer_dev_ptr;
 
 private:
-    std::unique_ptr<void, void (*)(void *)> bounce_buffer;
+    std::unique_ptr<uint8_t[], void (*)(void *)> bounce_buffer;
 
 public:
     AsyncOpFallback(IoType ioType, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer,
@@ -43,8 +43,6 @@ public:
     void *devPtr();
 
     virtual ~AsyncOpFallback() override;
-    void  operator delete(void *ptr) noexcept;
-    void *operator new(size_t size);
 };
 
 }
