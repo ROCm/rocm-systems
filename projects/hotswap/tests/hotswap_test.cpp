@@ -5,7 +5,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "hotswap.hpp"
-#include "hotswap_comgr_client.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,12 +20,6 @@ static void check(bool cond, const char *name) {
     ++tests_failed;
     fprintf(stderr, "  FAIL: %s\n", name);
   }
-}
-
-static void test_ComgrAvailable() {
-  printf("TEST ComgrAvailable...\n");
-  check(rocr::hotswap::ComgrHotswapAvailable(),
-        "ComgrHotswapAvailable returns true");
 }
 
 static void test_RetargetPassthrough() {
@@ -72,7 +65,6 @@ static void test_RetargetNullInputs() {
 }
 
 int main() {
-  test_ComgrAvailable();
   test_RetargetPassthrough();
   test_RetargetNullOutputPointers();
   test_RetargetNullInputs();

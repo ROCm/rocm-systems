@@ -5,9 +5,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "hotswap.hpp"
-#include "hotswap_comgr_client.hpp"
 #include <cstdio>
 #include <cstdlib>
+
+// TODO(COMGR-upstream): Replace this forward declaration with
+// #include <amd_comgr.h> once the hotswap API lands in a released COMGR.
+// The return type is amd_comgr_status_t (enum, ABI-compatible with int).
+extern "C" int amd_comgr_hotswap_rewrite(const void *elf_data, size_t elf_size,
+                                         const char *source_isa_name,
+                                         const char *target_isa_name,
+                                         void **out_elf,
+                                         size_t *out_elf_size);
 
 namespace rocr::hotswap {
 
@@ -27,16 +35,10 @@ int RetargetCodeObject(const void *elf_data, size_t elf_size,
     return -1;
   }
 
-  if (!ComgrHotswapAvailable()) {
-    fprintf(stderr, "hotswap: COMGR not available for %s -> %s\n", source_isa,
-            target_isa);
-    return -1;
-  }
-
   void *out_elf = nullptr;
   size_t out_elf_size = 0;
-  const int rc = ComgrHotswapRewrite(elf_data, elf_size, source_isa,
-                                     target_isa, &out_elf, &out_elf_size);
+  const int rc = amd_comgr_hotswap_rewrite(elf_data, elf_size, source_isa,
+                                           target_isa, &out_elf, &out_elf_size);
   if (rc != 0) {
     fprintf(stderr, "hotswap: COMGR rewrite failed for %s -> %s (rc=%d)\n",
             source_isa, target_isa, rc);

@@ -32,7 +32,6 @@ endif()
 add_library(hsa-hotswap SHARED
   hotswap_tool.cpp
   hotswap.cpp
-  hotswap_comgr_client.cpp
 )
 
 target_include_directories(hsa-hotswap PRIVATE
@@ -48,7 +47,6 @@ set_target_properties(hsa-hotswap PROPERTIES
 # Test executable — links COMGR directly (mock or real)
 add_executable(hotswap_test tests/hotswap_test.cpp
   hotswap.cpp
-  hotswap_comgr_client.cpp
 )
 target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hotswap_test PRIVATE ${COMGR_LINK_LIB})
