@@ -10,7 +10,7 @@ This example stress-tests GPU scratch memory allocation by launching kernels wit
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler
 - HSA runtime library
 
