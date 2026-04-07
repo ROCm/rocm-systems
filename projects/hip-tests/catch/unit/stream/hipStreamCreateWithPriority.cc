@@ -58,7 +58,7 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
 
   // Check if priorities are indeed supported
   if (priority_low == priority_high) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamPriorityRangeUnsupported);
+    WARN("Stream priority range not supported. Skipping test.");
     return;
   }
 
@@ -215,7 +215,7 @@ bool runFuncTestsForAllPriorityLevelsMultThread(unsigned int flags) {
 
   // Check if priorities are indeed supported
   if (priority_low == priority_high) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamPriorityRangeUnsupported);
+    WARN("Stream priority range not supported. Skipping test.");
     return true;
   }
 
@@ -263,7 +263,7 @@ template <typename T> bool verifyStreamPriorityKernelResults() {
                                            << ",normal: " << (priority_low + priority_high) / 2);
   // Check if priorities are indeed supported
   if (priority_low == priority_high) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamPriorityRangeUnsupported);
+    WARN("Stream priority range not supported. Skipping test.");
     return true;
   }
 
@@ -807,7 +807,7 @@ HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_NegTst) {
   HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
   // Check if priorities are indeed supported
   if (priority_low == priority_high) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamPriorityRangeUnsupported);
+    WARN("Stream priority range not supported. Skipping test.");
     return;  // exit the test since priorities are not supported
   }
 

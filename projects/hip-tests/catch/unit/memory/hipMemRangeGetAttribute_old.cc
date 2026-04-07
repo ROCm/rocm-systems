@@ -48,11 +48,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
     int isPageableHMM = 0;
     HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
     if (!isPageableHMM) {
-      HipTest::HIP_SKIP_TEST(
-          "Running on a system  where all the memory requested in hipMallocManaged "
-          "is allocated on the host.\nThis can cause instability because of out-of-memory "
-          "failures.\n"
-          "Hence skipping the test with Pass result.\n");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
       return;
     }
 #endif

@@ -393,7 +393,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_PeerDeviceAccessAPIs) {
     int canAccessPeer_ptr = 0, canAccessPeer = 0, devCount = 0;
     HIP_CHECK(hipGetDeviceCount(&devCount));
     if (devCount < 2) {
-      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
       return;
     }
     // hipDeviceCanAccessPeer API
@@ -418,7 +418,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_PeerDeviceAccessAPIs) {
         HIP_CHECK(hipSetDevice(dev));
         HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, dev, peerDev));
         if (canAccessPeer == 0) {
-          WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
+          HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
           return;
         }
         HIP_CHECK(hipDeviceEnablePeerAccess(peerDev, 0));

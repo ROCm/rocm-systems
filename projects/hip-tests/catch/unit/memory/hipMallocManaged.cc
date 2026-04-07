@@ -97,13 +97,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
   HIP_CHECK(hipMemRangeGetAttribute(&read_only, sizeof(read_only), hipMemRangeAttributeReadMostly,
                                     A, numElements * sizeof(float)));
   if (read_only != 1) {
-    std::string const skip_msg =
-        "hipMemRangeGetAttribute error, read_only = " + std::to_string(read_only);
-    HipTest::HIP_SKIP_TEST(skip_msg.c_str());
-    HIP_CHECK(hipFree(A));
-    HIP_CHECK(hipFree(B));
-    HIP_CHECK(hipFree(C));
-    return;
+    SUCCEED("hipMemRangeGetAttribute error, read_only = " << read_only);
   }
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
@@ -127,15 +121,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Advanced) {
                                     hipMemRangeAttributeLastPrefetchLocation, A,
                                     numElements * sizeof(float)));
   if (device != hipCpuDeviceId) {
-    std::string const skip_msg =
-        "hipMemRangeGetAttribute error device = " + std::to_string(static_cast<int>(device));
-    HipTest::HIP_SKIP_TEST(skip_msg.c_str());
-    HIP_CHECK(hipEventDestroy(event0));
-    HIP_CHECK(hipEventDestroy(event1));
-    HIP_CHECK(hipFree(A));
-    HIP_CHECK(hipFree(B));
-    HIP_CHECK(hipFree(C));
-    return;
+    SUCCEED("hipMemRangeGetAttribute error device = " << device);
   }
 
   for (size_t i = 0; i < numElements; i++) {

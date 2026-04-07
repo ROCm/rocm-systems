@@ -138,7 +138,7 @@ HIP_TEST_CASE(Unit_hipDeviceGet_MaskedDevices) {
     ret = runMaskedDeviceTest(count);
     REQUIRE(ret == true);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
