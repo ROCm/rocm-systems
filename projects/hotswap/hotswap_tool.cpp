@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "hotswap.hpp"
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -26,15 +27,21 @@
 #include <mutex>
 #include <limits>
 #include <string>
-#include <unistd.h>
 #include <unordered_map>
 #include <vector>
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 #define HSA_HOTSWAP_EXPORT __attribute__((visibility("default")))
 
 namespace {
 
 using ByteVec = std::shared_ptr<std::vector<uint8_t>>;
+using OwnedElf = std::unique_ptr<void, decltype(&std::free)>;
 
 struct ReaderEntry {
   ByteVec bytes;
@@ -114,10 +121,23 @@ void mark_reader_keepalive(uint64_t handle) {
 }
 
 ssize_t read_all(int fd, void *buf, size_t count) {
+  constexpr size_t kMaxReadChunk =
+#ifdef _WIN32
+      static_cast<size_t>(std::numeric_limits<unsigned int>::max());
+#else
+      static_cast<size_t>(std::numeric_limits<ssize_t>::max());
+#endif
   size_t total = 0;
   while (total < count) {
+    const size_t chunk_size = std::min(count - total, kMaxReadChunk);
+#ifdef _WIN32
+    const int n =
+        _read(fd, static_cast<uint8_t *>(buf) + total,
+              static_cast<unsigned int>(chunk_size));
+#else
     const ssize_t n =
-        read(fd, static_cast<uint8_t *>(buf) + total, count - total);
+        read(fd, static_cast<uint8_t *>(buf) + total, chunk_size);
+#endif
     if (n > 0) {
       total += static_cast<size_t>(n);
     } else if (n == 0) {
@@ -127,6 +147,36 @@ ssize_t read_all(int fd, void *buf, size_t count) {
     }
   }
   return static_cast<ssize_t>(total);
+}
+
+bool get_file_bounds(hsa_file_t file, size_t *saved_pos, size_t *file_size) {
+#ifdef _WIN32
+  const auto cur = _lseeki64(file, 0, SEEK_CUR);
+  const auto end = _lseeki64(file, 0, SEEK_END);
+#else
+  const auto cur = lseek(file, 0, SEEK_CUR);
+  const auto end = lseek(file, 0, SEEK_END);
+#endif
+  if (cur < 0 || end <= 0) {
+    return false;
+  }
+  const auto max_size = static_cast<unsigned long long>(
+      std::numeric_limits<size_t>::max());
+  if (static_cast<unsigned long long>(cur) > max_size ||
+      static_cast<unsigned long long>(end) > max_size) {
+    return false;
+  }
+  *saved_pos = static_cast<size_t>(cur);
+  *file_size = static_cast<size_t>(end);
+  return true;
+}
+
+void restore_file_pos(hsa_file_t file, size_t pos) {
+#ifdef _WIN32
+  _lseeki64(file, static_cast<long long>(pos), SEEK_SET);
+#else
+  lseek(file, static_cast<off_t>(pos), SEEK_SET);
+#endif
 }
 
 // Validate ELF64 header and return pointer, or nullptr on failure.
@@ -292,27 +342,25 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
   // Read file into memory so we can inspect/rewrite later.
   // NOTE: this converts the file-based reader to a memory-based reader,
   // which loses URI provenance metadata (affects profiler/debugger traces).
-  const off_t saved_pos = lseek(file, 0, SEEK_CUR);
-  const off_t file_size = lseek(file, 0, SEEK_END);
-  if (file_size <= 0) {
-    lseek(file, saved_pos, SEEK_SET);
+  size_t saved_pos = 0;
+  size_t file_size = 0;
+  if (!get_file_bounds(file, &saved_pos, &file_size)) {
     return g_orig_reader_create_from_file(file, code_object_reader);
   }
-  lseek(file, 0, SEEK_SET);
+  restore_file_pos(file, 0);
 
   hsa_code_object_reader_t reader = {};
   try {
-    auto vec = std::make_shared<std::vector<uint8_t>>(
-        static_cast<size_t>(file_size));
+    auto vec = std::make_shared<std::vector<uint8_t>>(file_size);
     const ssize_t bytes_read = read_all(file, vec->data(), vec->size());
     if (bytes_read != static_cast<ssize_t>(file_size)) {
-      lseek(file, saved_pos, SEEK_SET);
+      restore_file_pos(file, saved_pos);
       return g_orig_reader_create_from_file(file, code_object_reader);
     }
 
     const hsa_status_t status =
         g_orig_reader_create_from_memory(vec->data(), vec->size(), &reader);
-    lseek(file, saved_pos, SEEK_SET);
+    restore_file_pos(file, saved_pos);
     if (status != HSA_STATUS_SUCCESS) {
       return status;
     }
@@ -324,7 +372,7 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
     *code_object_reader = reader;
     return HSA_STATUS_SUCCESS;
   } catch (const std::bad_alloc &) {
-    lseek(file, saved_pos, SEEK_SET);
+    restore_file_pos(file, saved_pos);
     if (reader.handle != 0) {
       g_orig_reader_destroy(reader);
     }
@@ -391,11 +439,11 @@ hsa_status_t load_rewritten_reader(hsa_executable_t executable, hsa_agent_t agen
                                    const char *options,
                                    hsa_loaded_code_object_t *loaded_code_object,
                                    void *out_elf, size_t out_elf_size) {
+  OwnedElf owned_elf(out_elf, &std::free);
   hsa_code_object_reader_t new_reader = {};
   hsa_status_t status =
-      g_orig_reader_create_from_memory(out_elf, out_elf_size, &new_reader);
+      g_orig_reader_create_from_memory(owned_elf.get(), out_elf_size, &new_reader);
   if (status != HSA_STATUS_SUCCESS) {
-    std::free(out_elf);
     return status;
   }
 
@@ -406,9 +454,7 @@ hsa_status_t load_rewritten_reader(hsa_executable_t executable, hsa_agent_t agen
   if (status == HSA_STATUS_SUCCESS) {
     // ROCR's LoadedCodeObjectImpl holds a raw pointer to the ELF data for
     // debugger/profiler queries. The buffer must outlive the executable.
-    retain_rewritten_elf(out_elf);
-  } else {
-    std::free(out_elf);
+    retain_rewritten_elf(owned_elf.release());
   }
 
   return status;
