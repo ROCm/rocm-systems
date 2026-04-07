@@ -19,8 +19,10 @@ granularity.
 For VALU / VMEM / MFMA-style pipeline tables and MI-series diagrams, see
 :doc:`../cdna/compute-unit`.
 
-The sections below list **RDNA3.5 (gfx1151)** metric descriptions (same data as
-:ref:`RDNA3.5 (gfx1151) metrics <gfx1151-metrics-ref>`, grouped for this chapter).
+The sections below list **RDNA3.5 (gfx1151)** metric descriptions for this chapter,
+using the same analysis YAML sources as the profiler panels under
+``src/rocprof_compute_soc/analysis_configs/gfx1151/`` (see :doc:`rdna-performance-model`
+for the full RDNA block layout).
 
 Roofline
 ========
