@@ -103,6 +103,18 @@ set(DL_INCLUDE_DIRS
   -isystem${ROCM_PATH}/include
 )
 
+# fmt is needed by proxy_trace.h (included transitively from collectives.cc)
+if(fmt_SOURCE_DIR)
+  list(APPEND DL_INCLUDE_DIRS -isystem${fmt_SOURCE_DIR}/include)
+else()
+  get_target_property(_FMT_INC_DIRS fmt::fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)
+  if(_FMT_INC_DIRS)
+    foreach(_dir ${_FMT_INC_DIRS})
+      list(APPEND DL_INCLUDE_DIRS -isystem${_dir})
+    endforeach()
+  endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # Optimization / common flags
 # ---------------------------------------------------------------------------
