@@ -29,8 +29,8 @@
 
 #include <rocm-core/rocm_version.h>
 
-#include <cstdio>
 #include <cstring>
+#include <iomanip>
 #include <set>
 #include <sstream>
 #include <string>
@@ -41,9 +41,8 @@ static constexpr int NAME_COL = 28;
 static constexpr int INFO_COL = 47;
 
 static void print_entry(std::ostream& os, const char* name, const char* info) {
-  char buf[NAME_COL + INFO_COL + 8];
-  snprintf(buf, sizeof(buf), "# %-*s: %-*s#\n", NAME_COL, name, INFO_COL, info);
-  os << buf;
+  os << "# " << std::left << std::setw(NAME_COL) << name
+     << ": " << std::setw(INFO_COL) << info << "#\n";
 }
 
 static void print_arch_info(std::ostream& os) {
@@ -75,18 +74,18 @@ static void print_arch_info(std::ostream& os) {
 }
 
 static void print_rocm_info(std::ostream& os) {
-  char rocm_version[32];
-  snprintf(rocm_version, sizeof(rocm_version), "%d.%d.%d",
-           ROCM_VERSION_MAJOR, ROCM_VERSION_MINOR, ROCM_VERSION_PATCH);
-  print_entry(os, "ROCm", rocm_version);
+  std::string rocm_version = std::to_string(ROCM_VERSION_MAJOR) + "."
+                           + std::to_string(ROCM_VERSION_MINOR) + "."
+                           + std::to_string(ROCM_VERSION_PATCH);
+  print_entry(os, "ROCm", rocm_version.c_str());
 }
 
 static void print_mpi_info(std::ostream& os) {
 #ifdef OMPI_MAJOR_VERSION
-  char mpi_version[8];
-  snprintf(mpi_version, sizeof(mpi_version), "%d.%d.%d",
-           OMPI_MAJOR_VERSION, OMPI_MINOR_VERSION, OMPI_RELEASE_VERSION);
-  print_entry(os, "Open MPI", mpi_version);
+  std::string mpi_version = std::to_string(OMPI_MAJOR_VERSION) + "."
+                          + std::to_string(OMPI_MINOR_VERSION) + "."
+                          + std::to_string(OMPI_RELEASE_VERSION);
+  print_entry(os, "Open MPI", mpi_version.c_str());
 #else
   print_entry(os, "MPI", "Unsupported MPI Library");
 #endif
