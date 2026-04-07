@@ -1895,8 +1895,13 @@ VExpLegacyF32Vop1::VExpLegacyF32Vop1(const MachineInst *inst)
 }
 
 void VExpLegacyF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::exp_f32(s)));
+  }
 }
 
 VLogLegacyF32Vop1::VLogLegacyF32Vop1(const MachineInst *inst)
@@ -1915,8 +1920,13 @@ VLogLegacyF32Vop1::VLogLegacyF32Vop1(const MachineInst *inst)
 }
 
 void VLogLegacyF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(amdgpu::transcendental::log_f32(s)));
+  }
 }
 
 VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
@@ -2029,7 +2039,9 @@ VCvtF32Fp8Vop1::VCvtF32Fp8Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_cvt_f32_fp8_vop1(*this, wf);
+}
 
 VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
     : Vop1("v_cvt_f32_bf8_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2046,7 +2058,9 @@ VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_cvt_f32_bf8_vop1(*this, wf);
+}
 
 VCvtPkF32Fp8Vop1::VCvtPkF32Fp8Vop1(const MachineInst *inst)
     : Vop1("v_cvt_pk_f32_fp8_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2097,10 +2111,7 @@ VPrngB32Vop1::VPrngB32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VPrngB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPrngB32Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VPermlane16SwapB32Vop1::VPermlane16SwapB32Vop1(const MachineInst *inst)
     : Vop1("v_permlane16_swap_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2117,10 +2128,7 @@ VPermlane16SwapB32Vop1::VPermlane16SwapB32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VPermlane16SwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPermlane16SwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VPermlane32SwapB32Vop1::VPermlane32SwapB32Vop1(const MachineInst *inst)
     : Vop1("v_permlane32_swap_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2137,10 +2145,7 @@ VPermlane32SwapB32Vop1::VPermlane32SwapB32Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VPermlane32SwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPermlane32SwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VCvtF32Bf16Vop1::VCvtF32Bf16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_f32_bf16_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2158,8 +2163,13 @@ VCvtF32Bf16Vop1::VCvtF32Bf16Vop1(const MachineInst *inst)
 }
 
 void VCvtF32Bf16Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float r = util::bf16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane) & 0xFFFF));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+  }
 }
 
 } // namespace cdna4

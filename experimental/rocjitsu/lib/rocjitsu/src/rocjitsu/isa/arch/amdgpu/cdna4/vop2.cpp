@@ -646,8 +646,20 @@ VDot2cF32Bf16Vop2::VDot2cF32Bf16Vop2(const MachineInst *inst)
 }
 
 void VDot2cF32Bf16Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t a = src0.read_lane(wf, lane);
+    uint32_t b = vsrc1.read_lane(wf, lane);
+    float acc = std::bit_cast<float>(vdst.read_lane(wf, lane));
+    float a0 = util::bf16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
+    float a1 = util::bf16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
+    float b0 = util::bf16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
+    float b1 = util::bf16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
+    acc += a0 * b0 + a1 * b1;
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc));
+  }
 }
 
 VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst)
