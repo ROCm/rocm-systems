@@ -146,7 +146,10 @@ void TestCrossProcessSerialization::SetUp(void) {
     }
     // Phase 1: signal waiter that holder's amdsmi_init is complete.
     char ready = 1;
-    write(init_pipe_[1], &ready, 1);
+    if (write(init_pipe_[1], &ready, 1) < 0) {
+      std::cout << "write(init_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
     close(init_pipe_[1]);
 
     // Phase 2: wait for waiter to also finish amdsmi_init before entering
@@ -185,7 +188,10 @@ void TestCrossProcessSerialization::SetUp(void) {
     }
     // Phase 2: signal holder that waiter's amdsmi_init is also complete.
     char waiter_done = 1;
-    write(waiter_ready_pipe_[1], &waiter_done, 1);
+    if (write(waiter_ready_pipe_[1], &waiter_done, 1) < 0) {
+      std::cout << "write(waiter_ready_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
     close(waiter_ready_pipe_[1]);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   }
@@ -280,7 +286,8 @@ void TestCrossProcessSerialization::Run(void) {
     // mutex), then immediately call it. The waiter reads this signal and
     // pauses kWaiterMutexPauseNs before calling amdsmi_get_gpu_id.
     char run_ready = 1;
-    write(run_pipe_[1], &run_ready, 1);
+    ASSERT_GT(write(run_pipe_[1], &run_ready, 1), 0)
+        << "HOLDER: write(run_pipe_) failed: " << strerror(errno);
     close(run_pipe_[1]);
     amdsmi_status_t ret = rsmi_test_sleep(0, kHoldSeconds);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
@@ -312,7 +319,11 @@ void TestCrossProcessSerialization::Run(void) {
     // pause briefly so rsmi_test_sleep's pthread_mutex_lock completes
     // before we attempt to acquire the same lock via amdsmi_get_gpu_id.
     char run_ready = 0;
-    read(run_pipe_[0], &run_ready, 1);
+    ssize_t n = read(run_pipe_[0], &run_ready, 1);
+    if (n <= 0) {
+      const char* reason = (n == 0) ? "pipe closed (holder crashed?)" : strerror(errno);
+      fail_child(std::string("WAITER: read(run_pipe_) failed: ") + reason);
+    }
     close(run_pipe_[0]);
 
     // Print after the pipe read so this message always follows the holder's

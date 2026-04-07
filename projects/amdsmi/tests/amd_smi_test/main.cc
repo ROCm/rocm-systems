@@ -287,7 +287,6 @@ TEST(amdsmitstReadOnly, TestMutualExclusion) {
   SetFlags(&tst);
   tst.DisplayTestInfo();
   tst.SetUp();
-  PRINT_VERBOSITY();
   tst.Run();
   RunCustomTestEpilog(&tst);
 }

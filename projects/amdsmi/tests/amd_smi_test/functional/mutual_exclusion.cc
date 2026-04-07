@@ -77,41 +77,97 @@ void TestMutualExclusion::SetUp(void) {
   orig_cross_process_env_was_set_ = (orig != nullptr);
   setenv("AMDSMI_MUTEX_CROSS_PROCESS", "1", 1);
 
+  // Two pipes provide deterministic init ordering, replacing the previous
+  // sleep(1)/sleep(2) approach that was fragile under load with
+  // AMDSMI_MUTEX_CROSS_PROCESS=1 and RSMI_INIT_FLAG_RESRV_TEST1 (trylock mode):
+  //   init_pipe_:         sleeper → tester  (sleeper amdsmi_init complete)
+  //   tester_ready_pipe_: tester → sleeper  (tester amdsmi_init complete)
+  if (pipe(init_pipe_) < 0) {
+    std::cout << "pipe(init_pipe_) failed: " << strerror(errno) << std::endl;
+    setup_failed_ = true;
+    return;
+  }
+  if (pipe(tester_ready_pipe_) < 0) {
+    std::cout << "pipe(tester_ready_pipe_) failed: " << strerror(errno) << std::endl;
+    close(init_pipe_[0]);
+    close(init_pipe_[1]);
+    setup_failed_ = true;
+    return;
+  }
+
   child_ = fork();
   if (child_ < 0) {
     std::cout << "fork() failed: " << strerror(errno) << std::endl;
+    close(init_pipe_[0]);
+    close(init_pipe_[1]);
+    close(tester_ready_pipe_[0]);
+    close(tester_ready_pipe_[1]);
     setup_failed_ = true;
     return;
   }
 
   if (child_ != 0) {
     sleeper_process_ = true;  // sleeper_process is parent
+    // Sleeper: does not read init_pipe, does not write tester_ready_pipe.
+    close(init_pipe_[0]);
+    close(tester_ready_pipe_[1]);
 
     // AMD_SMI_INIT_FLAG_RESRV_TEST1 tells rsmi to fail immediately
     // if it can't get the mutex instead of waiting.
-    DISPLAY_AMDSMI_API("[before sleep] amdsmi_init(AMD_SMI_INIT_FLAG_RESRV_TEST1)", "",
-                       VERB(STANDARD));
+    DISPLAY_AMDSMI_API("[sleeper] amdsmi_init(AMD_SMI_INIT_AMD_GPUS|AMD_SMI_INIT_FLAG_RESRV_TEST1)",
+                       "", VERB(STANDARD));
     ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS | AMD_SMI_INIT_FLAG_RESRV_TEST1);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }
-    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
+    // Phase 1: signal tester that sleeper's amdsmi_init is complete.
+    // Always write even on failure so tester doesn't hang.
+    char ready = 1;
+    if (write(init_pipe_[1], &ready, 1) < 0) {
+      std::cout << "write(init_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
+    close(init_pipe_[1]);
 
-    sleep(2);  // Let both processes get through amdsmi_init
+    // Phase 2: wait for tester to also finish amdsmi_init before entering Run().
+    char tester_done = 0;
+    if (read(tester_ready_pipe_[0], &tester_done, 1) < 0) {
+      std::cout << "read(tester_ready_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
+    close(tester_ready_pipe_[0]);
+
+    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   } else {
-    sleep(1);  // Let the sleeper process get through amdsmi_init() before
-               // this one goes, so it doesn't fail.
-    DISPLAY_AMDSMI_API("[after sleep] amdsmi_init(AMD_SMI_INIT_FLAG_RESRV_TEST1)", "",
-                       VERB(STANDARD));
+    // Tester: does not write init_pipe, does not read tester_ready_pipe.
+    close(init_pipe_[1]);
+    close(tester_ready_pipe_[0]);
+
+    // Phase 1: block until sleeper's amdsmi_init is complete.
+    char ready = 0;
+    if (read(init_pipe_[0], &ready, 1) < 0) {
+      std::cout << "read(init_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
+    close(init_pipe_[0]);
+
+    DISPLAY_AMDSMI_API("[tester] amdsmi_init(AMD_SMI_INIT_AMD_GPUS|AMD_SMI_INIT_FLAG_RESRV_TEST1)",
+                       "", VERB(STANDARD));
     ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS | AMD_SMI_INIT_FLAG_RESRV_TEST1);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }
-    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
+    // Phase 2: signal sleeper that tester's amdsmi_init is also complete.
+    char tester_done = 1;
+    if (write(tester_ready_pipe_[1], &tester_done, 1) < 0) {
+      std::cout << "write(tester_ready_pipe_) failed: " << strerror(errno) << std::endl;
+      setup_failed_ = true;
+    }
+    close(tester_ready_pipe_[1]);
 
-    sleep(2);  // Let both processes get through amdsmi_init;
+    ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   }
 
   // Enumerate sockets and processor handles in each process after amdsmi_init()
@@ -181,10 +237,22 @@ void TestMutualExclusion::Run(void) {
 
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    if (!sleeper_process_) {
+      // Child (tester) process: exit immediately to avoid running GTest/AMDSMI
+      // cleanup that was never meant to run here.
+      std::cout.flush();
+      _exit(1);
+    }
+    // Sleeper (parent) process: reap the child to avoid leaving a zombie.
+    if (child_ > 0) {
+      int child_status = 0;
+      waitpid(child_, &child_status, 0);
+    }
     return;
   }
 
   if (sleeper_process_) {
+    PRINT_VERBOSITY();
     // Block SIGCHLD so that when the child exits, the signal does not interrupt
     // sleep() inside rsmi_test_sleep and cause the mutex to be released early.
     sigset_t sigchld_mask, old_mask;
