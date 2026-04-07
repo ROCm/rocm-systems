@@ -32,14 +32,14 @@ constexpr auto wait_ms = 500;
   HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,\
         hipDeviceAttributeMemoryPoolsSupported, device));\
   if (0 == deviceSupportsMemoryPools) {\
-    HipTest::HIP_SKIP_TEST("Memory Pool not supported. Skipping Test..");\
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);\
     return;\
   }\
 }
 
 #define checkIfMultiDev(numOfDev) {\
   if (numOfDev < 2) {\
-    HipTest::HIP_SKIP_TEST("Multiple GPUs not available. Skipping Test..");\
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);\
     return;\
   }\
 }
@@ -94,7 +94,7 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
   unsigned int *notified = nullptr;
@@ -154,7 +154,7 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
   unsigned int *notified = nullptr;
@@ -234,7 +234,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
   unsigned int *notified = nullptr;
