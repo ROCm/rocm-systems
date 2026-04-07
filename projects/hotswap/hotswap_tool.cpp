@@ -24,6 +24,7 @@
 #include <hsa_api_trace.h>
 #include <memory>
 #include <mutex>
+#include <limits>
 #include <string>
 #include <unistd.h>
 #include <unordered_map>
@@ -35,8 +36,14 @@ namespace {
 
 using ByteVec = std::shared_ptr<std::vector<uint8_t>>;
 
+struct ReaderEntry {
+  ByteVec bytes;
+  bool from_file = false;
+  bool keepalive_after_load = false;
+};
+
 std::mutex g_reader_map_mutex;
-std::unordered_map<uint64_t, ByteVec> g_reader_map;
+std::unordered_map<uint64_t, ReaderEntry> g_reader_map;
 
 // Rewritten ELF buffers must outlive the executable because ROCR's
 // LoadedCodeObjectImpl stores a raw pointer to the ELF data (used by
@@ -58,7 +65,41 @@ decltype(hsa_executable_load_agent_code_object) *g_orig_load_agent_code_object =
 void stash_bytes(uint64_t handle, const uint8_t *data, size_t size) {
   auto vec = std::make_shared<std::vector<uint8_t>>(data, data + size);
   std::scoped_lock lock(g_reader_map_mutex);
-  g_reader_map[handle] = std::move(vec);
+  g_reader_map[handle] = ReaderEntry{std::move(vec), false, false};
+}
+
+bool checked_add(size_t lhs, size_t rhs, size_t *out) {
+  if (lhs > std::numeric_limits<size_t>::max() - rhs) {
+    return false;
+  }
+  *out = lhs + rhs;
+  return true;
+}
+
+bool checked_mul(size_t lhs, size_t rhs, size_t *out) {
+  if (lhs != 0 && rhs > std::numeric_limits<size_t>::max() / lhs) {
+    return false;
+  }
+  *out = lhs * rhs;
+  return true;
+}
+
+void retain_rewritten_elf(void *elf_data) {
+  try {
+    std::scoped_lock lock(g_rewritten_elfs_mutex);
+    g_rewritten_elfs.push_back(elf_data);
+  } catch (const std::bad_alloc &) {
+    // Intentionally leak to preserve debugger/profiler correctness if the
+    // keepalive vector itself cannot grow.
+  }
+}
+
+void mark_reader_keepalive(uint64_t handle) {
+  std::scoped_lock lock(g_reader_map_mutex);
+  auto it = g_reader_map.find(handle);
+  if (it != g_reader_map.end()) {
+    it->second.keepalive_after_load = true;
+  }
 }
 
 ssize_t read_all(int fd, void *buf, size_t count) {
@@ -121,13 +162,18 @@ std::string read_elf_isa_note(const uint8_t *elf, size_t size) {
   const size_t phoff = ehdr->e_phoff;
   const uint16_t phnum = ehdr->e_phnum;
   const uint16_t phentsize = ehdr->e_phentsize;
-  if (phoff == 0 || phnum == 0 || phentsize < sizeof(Elf64_Phdr)) {
+  if (phoff == 0 || phoff > size || phnum == 0 ||
+      phentsize < sizeof(Elf64_Phdr)) {
     return {};
   }
 
   for (uint16_t i = 0; i < phnum; ++i) {
-    const size_t hdr_offset = phoff + static_cast<size_t>(i) * phentsize;
-    if (hdr_offset + sizeof(Elf64_Phdr) > size) {
+    size_t hdr_index_offset = 0;
+    size_t hdr_offset = 0;
+    if (!checked_mul(static_cast<size_t>(i), static_cast<size_t>(phentsize),
+                     &hdr_index_offset) ||
+        !checked_add(phoff, hdr_index_offset, &hdr_offset) ||
+        sizeof(Elf64_Phdr) > size - hdr_offset) {
       break;
     }
     const auto *phdr =
@@ -137,21 +183,35 @@ std::string read_elf_isa_note(const uint8_t *elf, size_t size) {
     }
 
     size_t note_offset = phdr->p_offset;
-    const size_t note_end = note_offset + phdr->p_filesz;
-    if (note_end > size) {
+    size_t note_end = 0;
+    if (note_offset > size || phdr->p_filesz > size - note_offset ||
+        !checked_add(note_offset, phdr->p_filesz, &note_end)) {
       continue;
     }
 
-    while (note_offset + sizeof(Elf64_Nhdr) <= note_end) {
+    while (note_offset <= note_end &&
+           sizeof(Elf64_Nhdr) <= note_end - note_offset) {
       const auto *nhdr =
           reinterpret_cast<const Elf64_Nhdr *>(elf + note_offset);
-      const size_t name_sz_aligned =
-          (static_cast<size_t>(nhdr->n_namesz) + 3) & ~size_t{3};
-      const size_t desc_off =
-          note_offset + sizeof(Elf64_Nhdr) + name_sz_aligned;
-      const size_t desc_sz_aligned =
-          (static_cast<size_t>(nhdr->n_descsz) + 3) & ~size_t{3};
-      const size_t next_note = desc_off + desc_sz_aligned;
+      size_t raw_name_size = 0;
+      size_t raw_desc_size = 0;
+      size_t name_sz_aligned = 0;
+      size_t desc_off = 0;
+      size_t desc_sz_aligned = 0;
+      size_t next_note = 0;
+      if (!checked_add(static_cast<size_t>(nhdr->n_namesz), 3,
+                       &raw_name_size) ||
+          !checked_add(static_cast<size_t>(nhdr->n_descsz), 3,
+                       &raw_desc_size)) {
+        break;
+      }
+      name_sz_aligned = raw_name_size & ~size_t{3};
+      desc_sz_aligned = raw_desc_size & ~size_t{3};
+      if (!checked_add(note_offset, sizeof(Elf64_Nhdr), &desc_off) ||
+          !checked_add(desc_off, name_sz_aligned, &desc_off) ||
+          !checked_add(desc_off, desc_sz_aligned, &next_note)) {
+        break;
+      }
 
       if (next_note > note_end) {
         break;
@@ -176,14 +236,19 @@ std::string read_elf_isa_note(const uint8_t *elf, size_t size) {
 hsa_status_t HSA_API hotswap_reader_create_from_memory(
     const void *code_object, size_t size,
     hsa_code_object_reader_t *code_object_reader) {
+  hsa_code_object_reader_t reader = {};
   const hsa_status_t status =
-      g_orig_reader_create_from_memory(code_object, size, code_object_reader);
+      g_orig_reader_create_from_memory(code_object, size, &reader);
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
 
-  stash_bytes(code_object_reader->handle,
-              static_cast<const uint8_t *>(code_object), size);
+  try {
+    stash_bytes(reader.handle, static_cast<const uint8_t *>(code_object), size);
+  } catch (const std::bad_alloc &) {
+    // Fall back to the original load path without rewrite support.
+  }
+  *code_object_reader = reader;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -200,54 +265,74 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
   }
   lseek(file, 0, SEEK_SET);
 
-  std::vector<uint8_t> buf(static_cast<size_t>(file_size));
-  const ssize_t bytes_read = read_all(file, buf.data(), buf.size());
-  if (bytes_read != static_cast<ssize_t>(file_size)) {
+  hsa_code_object_reader_t reader = {};
+  try {
+    auto vec = std::make_shared<std::vector<uint8_t>>(
+        static_cast<size_t>(file_size));
+    const ssize_t bytes_read = read_all(file, vec->data(), vec->size());
+    if (bytes_read != static_cast<ssize_t>(file_size)) {
+      lseek(file, saved_pos, SEEK_SET);
+      return g_orig_reader_create_from_file(file, code_object_reader);
+    }
+
+    const hsa_status_t status =
+        g_orig_reader_create_from_memory(vec->data(), vec->size(), &reader);
     lseek(file, saved_pos, SEEK_SET);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
+
+    {
+      std::scoped_lock lock(g_reader_map_mutex);
+      g_reader_map[reader.handle] = ReaderEntry{std::move(vec), true, false};
+    }
+    *code_object_reader = reader;
+    return HSA_STATUS_SUCCESS;
+  } catch (const std::bad_alloc &) {
+    lseek(file, saved_pos, SEEK_SET);
+    if (reader.handle != 0) {
+      g_orig_reader_destroy(reader);
+    }
     return g_orig_reader_create_from_file(file, code_object_reader);
   }
-
-  const hsa_status_t status = g_orig_reader_create_from_memory(
-      buf.data(), buf.size(), code_object_reader);
-  lseek(file, saved_pos, SEEK_SET);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  auto vec = std::make_shared<std::vector<uint8_t>>(std::move(buf));
-  std::scoped_lock lock(g_reader_map_mutex);
-  g_reader_map[code_object_reader->handle] = std::move(vec);
-  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API
 hotswap_reader_destroy(hsa_code_object_reader_t code_object_reader) {
-  // Do NOT erase from g_reader_map here. For file-converted readers, ROCR's
-  // LoadedCodeObjectImpl holds a raw pointer to our buffer (via SetMemory).
-  // The shared_ptr in g_reader_map keeps it alive until OnUnload.
-  // For memory-based readers, the app owns the original buffer and ROCR
-  // points to that, so our copy is redundant but harmless.
+  {
+    std::scoped_lock lock(g_reader_map_mutex);
+    auto it = g_reader_map.find(code_object_reader.handle);
+    if (it != g_reader_map.end() && !it->second.keepalive_after_load) {
+      g_reader_map.erase(it);
+    }
+  }
   return g_orig_reader_destroy(code_object_reader);
 }
 
 std::string get_agent_isa_name(hsa_agent_t agent) {
   auto cb = [](hsa_isa_t isa, void *data) -> hsa_status_t {
-    auto *name = static_cast<std::string *>(data);
-    uint32_t len = 0;
-    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
-        HSA_STATUS_SUCCESS) {
-      return HSA_STATUS_ERROR;
-    }
-    name->resize(len);
-    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name->data()) !=
-        HSA_STATUS_SUCCESS) {
+    try {
+      auto *name = static_cast<std::string *>(data);
+      uint32_t len = 0;
+      if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
+          HSA_STATUS_SUCCESS) {
+        return HSA_STATUS_ERROR;
+      }
+      name->resize(len);
+      if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name->data()) !=
+          HSA_STATUS_SUCCESS) {
+        name->clear();
+        return HSA_STATUS_ERROR;
+      }
+      if (!name->empty() && name->back() == '\0') {
+        name->pop_back();
+      }
+      return HSA_STATUS_INFO_BREAK;
+    } catch (const std::bad_alloc &) {
+      auto *name = static_cast<std::string *>(data);
       name->clear();
       return HSA_STATUS_ERROR;
     }
-    if (!name->empty() && name->back() == '\0') {
-      name->pop_back();
-    }
-    return HSA_STATUS_INFO_BREAK;
   };
   std::string name;
   hsa_agent_iterate_isas(agent, cb, &name);
@@ -258,68 +343,83 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent,
     hsa_code_object_reader_t code_object_reader, const char *options,
     hsa_loaded_code_object_t *loaded_code_object) {
-
   ByteVec local_bytes;
+  bool reader_from_file = false;
 
-  {
-    std::scoped_lock lock(g_reader_map_mutex);
-    const auto it = g_reader_map.find(code_object_reader.handle);
-    if (it != g_reader_map.end()) {
-      local_bytes = it->second;
+  auto load_original_reader = [&]() -> hsa_status_t {
+    const hsa_status_t status = g_orig_load_agent_code_object(
+        executable, agent, code_object_reader, options, loaded_code_object);
+    if (status == HSA_STATUS_SUCCESS && reader_from_file) {
+      mark_reader_keepalive(code_object_reader.handle);
     }
+    return status;
+  };
+
+  try {
+    {
+      std::scoped_lock lock(g_reader_map_mutex);
+      const auto it = g_reader_map.find(code_object_reader.handle);
+      if (it != g_reader_map.end()) {
+        local_bytes = it->second.bytes;
+        reader_from_file = it->second.from_file;
+      }
+    }
+
+    if (!local_bytes) {
+      return load_original_reader();
+    }
+
+    const std::string source_isa =
+        read_elf_isa_note(local_bytes->data(), local_bytes->size());
+    const std::string target_isa = get_agent_isa_name(agent);
+
+    if (source_isa.empty() || target_isa.empty()) {
+      return load_original_reader();
+    }
+
+    // Route through RetargetCodeObject for unified logging, validation,
+    // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
+    // patching uses the same ISA name on both sides.
+    void *out_elf = nullptr;
+    size_t out_elf_size = 0;
+    const int rc = rocr::hotswap::RetargetCodeObject(
+        local_bytes->data(), local_bytes->size(), source_isa.c_str(),
+        target_isa.c_str(), &out_elf, &out_elf_size);
+
+    if (rc != 0 || out_elf == local_bytes->data()) {
+      return load_original_reader();
+    }
+    if (!out_elf || out_elf_size == 0) {
+      if (out_elf) {
+        std::free(out_elf);
+      }
+      return load_original_reader();
+    }
+
+    hsa_code_object_reader_t new_reader;
+    hsa_status_t status =
+        g_orig_reader_create_from_memory(out_elf, out_elf_size, &new_reader);
+    if (status != HSA_STATUS_SUCCESS) {
+      std::free(out_elf);
+      return load_original_reader();
+    }
+
+    status = g_orig_load_agent_code_object(executable, agent, new_reader,
+                                           options, loaded_code_object);
+    g_orig_reader_destroy(new_reader);
+
+    if (status == HSA_STATUS_SUCCESS) {
+      // ROCR's LoadedCodeObjectImpl holds a raw pointer to the ELF data for
+      // debugger/profiler queries. The buffer must outlive the executable.
+      retain_rewritten_elf(out_elf);
+    } else {
+      std::free(out_elf);
+    }
+
+    return status;
+  } catch (const std::bad_alloc &) {
+    return load_original_reader();
   }
-
-  if (!local_bytes) {
-    return g_orig_load_agent_code_object(executable, agent, code_object_reader,
-                                         options, loaded_code_object);
-  }
-
-  const std::string source_isa =
-      read_elf_isa_note(local_bytes->data(), local_bytes->size());
-  const std::string target_isa = get_agent_isa_name(agent);
-
-  if (source_isa.empty() || target_isa.empty()) {
-    return g_orig_load_agent_code_object(executable, agent, code_object_reader,
-                                         options, loaded_code_object);
-  }
-
-  // Route through RetargetCodeObject for unified logging, validation,
-  // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
-  // patching uses the same ISA name on both sides.
-  void *out_elf = nullptr;
-  size_t out_elf_size = 0;
-  const int rc = rocr::hotswap::RetargetCodeObject(
-      local_bytes->data(), local_bytes->size(), source_isa.c_str(),
-      target_isa.c_str(), &out_elf, &out_elf_size);
-
-  if (rc != 0 || out_elf == local_bytes->data()) {
-    return g_orig_load_agent_code_object(executable, agent, code_object_reader,
-                                         options, loaded_code_object);
-  }
-
-  hsa_code_object_reader_t new_reader;
-  hsa_status_t status =
-      g_orig_reader_create_from_memory(out_elf, out_elf_size, &new_reader);
-  if (status != HSA_STATUS_SUCCESS) {
-    std::free(out_elf);
-    return g_orig_load_agent_code_object(executable, agent, code_object_reader,
-                                         options, loaded_code_object);
-  }
-
-  status = g_orig_load_agent_code_object(executable, agent, new_reader, options,
-                                         loaded_code_object);
-  g_orig_reader_destroy(new_reader);
-
-  if (status == HSA_STATUS_SUCCESS) {
-    // ROCR's LoadedCodeObjectImpl holds a raw pointer to the ELF data for
-    // debugger/profiler queries. The buffer must outlive the executable.
-    std::scoped_lock lock(g_rewritten_elfs_mutex);
-    g_rewritten_elfs.push_back(out_elf);
-  } else {
-    std::free(out_elf);
-  }
-
-  return status;
 }
 
 } // anonymous namespace
