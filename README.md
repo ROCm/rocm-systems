@@ -21,8 +21,9 @@ please install the ROCm package by following the official ROCm Installation Quic
 [ROCm Installation Quick Start](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html)
 
 > ***Note***
-> This step may take several minutes, depending on internet connection and system speed.
-> Follow the quick-start guide for package repository setup and ROCm package installation.
+> - This step may take several minutes, depending on internet connection and system speed.
+> - Follow the quick-start guide for package repository setup and ROCm package installation.
+> - **Important**: Post-installation validation of ROCm (Step 5) must only be performed after the successful completion of **Step 3** and **Step 4**. Executing the validation prior to this will lead to failure.
 
 ### 3. Build librocdxg
 Run the following commands in your WSL console:
