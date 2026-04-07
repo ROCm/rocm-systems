@@ -2781,9 +2781,9 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
                  [[maybe_unused]] void* tool_data)
 {
     static std::atomic<int> attach_count{ 0 };
-    auto                    current_count = attach_count.fetch_add(1) + 1;
+    auto                    current_count = attach_count.fetch_add(1);
 
-    if(current_count > 1)
+    if(current_count > 0)
     {
         LOG_INFO("Re-attaching to process {} (session {})", getpid(), current_count);
         rocprofsys_reset_for_reattach_hidden();

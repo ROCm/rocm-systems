@@ -270,16 +270,5 @@ main(int argc, char* argv[])
 
     LOG_INFO("Detached from process {}", pid);
 
-    if(!opts.profile_format.empty())
-    {
-        for(const auto& fmt : opts.profile_format)
-        {
-            if(fmt == "perfetto")
-                LOG_INFO("  - Perfetto trace: perfetto-trace-{}.proto", pid);
-            else if(fmt == "rocpd")
-                LOG_INFO("  - RocPD database: rocpd-{}.db", pid);
-        }
-    }
-
     return EXIT_SUCCESS;
 }
