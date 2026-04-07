@@ -29,8 +29,6 @@ set(RJ_OBJECT_LIBS
 
 # --- Unit / integration test suite ---
 
-enable_testing()
-
 add_executable(rocjitsu_tests
     rvsim_test.cpp
     amdgpu_vm_test.cpp
@@ -69,6 +67,54 @@ set(RJ_KMD_PRELOAD_ENV
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
     "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
 )
+
+# --- rocminfo test (requires rocminfo binary + HSA runtime + LD_PRELOAD) ---
+# Spawns rocminfo as a subprocess against the simulated GPU and validates output.
+
+find_program(ROCMINFO_EXECUTABLE NAMES rocminfo
+    HINTS ${CMAKE_SOURCE_DIR}/.venv ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES bin
+    DOC "Path to the rocminfo executable"
+)
+if(ROCMINFO_EXECUTABLE)
+    add_executable(rocminfo_test rocminfo_test.cpp)
+    target_compile_definitions(rocminfo_test PRIVATE
+        ROCMINFO_PATH="${ROCMINFO_EXECUTABLE}")
+    target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
+
+    add_test(NAME "RocminfoTest.ExitsSuccessfully"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ExitsSuccessfully
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.InterposerActive"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.InterposerActive
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.HsaSystemAttributes"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.HsaSystemAttributes
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.DetectsGpuAgent"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.DetectsGpuAgent
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.ReportsGfx950"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsGfx950
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.ReportsWavefrontSize"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsWavefrontSize
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(
+        "RocminfoTest.ExitsSuccessfully"
+        "RocminfoTest.InterposerActive"
+        "RocminfoTest.HsaSystemAttributes"
+        "RocminfoTest.DetectsGpuAgent"
+        "RocminfoTest.ReportsGfx950"
+        "RocminfoTest.ReportsWavefrontSize"
+        PROPERTIES
+            ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
+            TIMEOUT 30)
+    message(STATUS "rocminfo test enabled (found ${ROCMINFO_EXECUTABLE})")
+else()
+    message(STATUS "rocminfo test disabled (rocminfo not found)")
+endif()
+
 
 # --- HSA init test (requires ROCm HSA runtime + LD_PRELOAD at runtime) ---
 # Standalone binary (not gtest) to avoid library initialization order issues
