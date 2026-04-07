@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
@@ -150,5 +151,94 @@ INSTANTIATE_TEST_SUITE_P(AllIsas, CuFactoryTest,
                                            ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
                                            ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
                                            ROCJITSU_CODE_ARCH_RDNA4));
+
+// ---------------------------------------------------------------------------
+// Scratch address calculation tests
+// ---------------------------------------------------------------------------
+
+TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
+  // Verify that FLAT with seg==1 (SCRATCH) computes:
+  //   address = scratch_base + VGPR[lane] + offset
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("scratch_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 104, 16);
+  ASSERT_NE(wf, nullptr);
+
+  // Set scratch base to a known address.
+  constexpr uint64_t SCRATCH_BASE = 0x1'0000'0000ULL;
+  wf->set_scratch_base(SCRATCH_BASE);
+
+  // Write a 32-bit offset into VGPR[0] lane 0.
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_vgpr(vbase, 0, 0x100); // lane 0: offset 0x100
+
+  // Set EXEC so only lane 0 is active.
+  wf->set_exec(1ULL);
+
+  // Build a FlatMachineInst with seg=1 (SCRATCH), saddr=0x7F (no SADDR),
+  // offset=0x10.
+  cdna4::FlatMachineInst inst{};
+  inst.seg = 1;       // SCRATCH
+  inst.saddr = 0x7F;  // No SADDR
+  inst.addr = 0;      // VGPR index 0
+  inst.offset = 0x10; // 12-bit immediate offset
+  inst.pad_12 = 0;
+
+  std::array<uint64_t, 64> addrs{};
+  uint64_t lane_mask = 0;
+  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, addrs, lane_mask);
+
+  EXPECT_EQ(lane_mask, 1ULL);
+  // scratch_base (0x1_0000_0000) + VGPR (0x100) + offset (0x10) = 0x1_0000_0110
+  EXPECT_EQ(addrs[0], SCRATCH_BASE + 0x100 + 0x10);
+}
+
+TEST(ScratchAddrCalcTest, FlatGlobalDoesNotUseScratchBase) {
+  // Verify that FLAT with seg==2 (GLOBAL) does NOT add scratch_base.
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("global_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 104, 16);
+  ASSERT_NE(wf, nullptr);
+
+  // Set scratch base — should be ignored for GLOBAL.
+  wf->set_scratch_base(0xDEAD'0000ULL);
+
+  // Write a 64-bit address into VGPR[0:1] lane 0.
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_vgpr(vbase, 0, 0x2000);     // low 32
+  cu->write_vgpr(vbase + 1, 0, 0x0001); // high 32 → addr = 0x1_0000_2000
+  wf->set_exec(1ULL);
+
+  cdna4::FlatMachineInst inst{};
+  inst.seg = 2;      // GLOBAL
+  inst.saddr = 0x7F; // No SADDR → use 64-bit VGPR pair
+  inst.addr = 0;
+  inst.offset = 0;
+  inst.pad_12 = 0;
+
+  std::array<uint64_t, 64> addrs{};
+  uint64_t lane_mask = 0;
+  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, addrs, lane_mask);
+
+  EXPECT_EQ(addrs[0], 0x1'0000'2000ULL); // No scratch_base added.
+}
 
 } // namespace

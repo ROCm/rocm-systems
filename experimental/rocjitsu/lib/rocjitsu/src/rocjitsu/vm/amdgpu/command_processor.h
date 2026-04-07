@@ -174,9 +174,12 @@ private:
     uint64_t kernarg_addr = 0;
     uint32_t num_user_sgprs = 2;
     uint32_t workgroup_id_offset = 0;
-    uint64_t completion_signal = 0; ///< AQL completion signal handle (0 = none).
-    bool host_signal = false;       ///< True if signal is in host memory (KFD path).
-    bool ordered = false;           ///< True for KFD (host-accessible) queue dispatches.
+    uint64_t completion_signal = 0;    ///< AQL completion signal handle (0 = none).
+    uint64_t scratch_backing_addr = 0; ///< GPU VA of scratch backing memory (from amd_queue_t).
+    uint32_t private_segment_fixed_size =
+        0;                    ///< Per-lane scratch size in bytes (from kernel descriptor).
+    bool host_signal = false; ///< True if signal is in host memory (KFD path).
+    bool ordered = false;     ///< True for KFD (host-accessible) queue dispatches.
   };
 
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
@@ -194,7 +197,7 @@ private:
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and enqueue an
   /// InternalDispatch.
-  void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, bool host_accessible = false);
+  void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue);
 
   /// @brief Read a kernel descriptor from memory.
   rocr::llvm::amdhsa::kernel_descriptor_t read_kernel_descriptor(uint64_t kernel_object,
