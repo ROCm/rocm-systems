@@ -1,0 +1,11 @@
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+  - name: 123
+    description: Name is number not string
+    properties: []
+    definitions:
+    - architectures:
+      - gfx942
+      block: SQ
+      event: 256

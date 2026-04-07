@@ -1,0 +1,9 @@
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+  - name: MISSING_BOTH
+    description: Counter with no block/event and no expression
+    properties: []
+    definitions:
+    - architectures:
+      - gfx942

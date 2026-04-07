@@ -1,0 +1,10 @@
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+  - name: EMPTY_ARCH
+    description: Counter with empty architectures list
+    properties: []
+    definitions:
+    - architectures: []
+      block: SQ
+      event: 256

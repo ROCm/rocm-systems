@@ -1,0 +1,4 @@
+bad-key:
+  counters:
+  - name: TEST
+    description: test

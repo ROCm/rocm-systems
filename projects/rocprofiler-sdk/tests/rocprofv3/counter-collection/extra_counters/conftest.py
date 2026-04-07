@@ -42,6 +42,8 @@ def pytest_addoption(parser):
 @pytest.fixture
 def input_data(request):
     filename = request.config.getoption("--input")
+    if filename is None:
+        return None
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
@@ -49,5 +51,7 @@ def input_data(request):
 @pytest.fixture
 def json_data(request):
     filename = request.config.getoption("--json-input")
+    if filename is None:
+        return None
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))

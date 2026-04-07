@@ -93,7 +93,7 @@ get_constants(uint64_t starting_id)
     return constants;
 }
 
-static void
+void
 print_counter_yaml_schema_hint()
 {
     ROCP_ERROR << "Expected structure:\n"

@@ -1,0 +1,8 @@
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+  - name: TEST_COUNTER
+    description: test
+    definitions
+    - architectures:
+      - gfx942

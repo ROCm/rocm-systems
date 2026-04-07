@@ -1,0 +1,11 @@
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+  - name: SQC_LDS_BANK_CONFLICT
+    description: Number of cycles LDS is stalled by bank conflicts. (emulated, C1)
+    properties: []
+    definitions:
+    - architectures:
+      - gfx942
+      block: GL2A
+      event: 256
