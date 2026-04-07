@@ -60,6 +60,14 @@ target_link_libraries(scaling_test PRIVATE
 target_compile_options(scaling_test PRIVATE -O2)
 rj_configure_target(scaling_test TEST)
 
+# --- LD_PRELOAD test environment for KMD interposer tests ---
+
+set(RJ_KMD_PRELOAD_ENV
+    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
+    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
+    "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
+)
+
 # --- rocminfo test (requires rocminfo binary + HSA runtime + LD_PRELOAD) ---
 # Spawns rocminfo as a subprocess against the simulated GPU and validates output.
 
@@ -107,13 +115,6 @@ else()
     message(STATUS "rocminfo test disabled (rocminfo not found)")
 endif()
 
-# --- LD_PRELOAD test environment for KMD interposer tests ---
-
-set(RJ_KMD_PRELOAD_ENV
-    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
-    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
-    "RJ_SCHEMA=${CMAKE_SOURCE_DIR}/schemas/simulation_config.fbs"
-)
 
 # --- HSA init test (requires ROCm HSA runtime + LD_PRELOAD at runtime) ---
 # Standalone binary (not gtest) to avoid library initialization order issues
