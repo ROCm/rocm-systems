@@ -57,7 +57,7 @@ std::unordered_map<uint64_t, ReaderEntry> g_reader_map;
 // debuggers, profilers, and hsa_ven_amd_loader queries). We keep them
 // alive until OnUnload.
 std::mutex g_rewritten_elfs_mutex;
-std::vector<void *> g_rewritten_elfs;
+std::vector<OwnedElf> g_rewritten_elfs;
 
 CoreApiTable *g_core_table = nullptr;
 
@@ -102,13 +102,14 @@ bool try_get_reader_entry(uint64_t handle, ByteVec *bytes, bool *from_file) {
   return true;
 }
 
-void retain_rewritten_elf(void *elf_data) {
+void retain_rewritten_elf(OwnedElf elf) {
   try {
     std::scoped_lock lock(g_rewritten_elfs_mutex);
-    g_rewritten_elfs.push_back(elf_data);
+    g_rewritten_elfs.push_back(std::move(elf));
   } catch (const std::bad_alloc &) {
     // Intentionally leak to preserve debugger/profiler correctness if the
     // keepalive vector itself cannot grow.
+    (void)elf.release();
   }
 }
 
@@ -454,7 +455,7 @@ hsa_status_t load_rewritten_reader(hsa_executable_t executable, hsa_agent_t agen
   if (status == HSA_STATUS_SUCCESS) {
     // ROCR's LoadedCodeObjectImpl holds a raw pointer to the ELF data for
     // debugger/profiler queries. The buffer must outlive the executable.
-    retain_rewritten_elf(owned_elf.release());
+    retain_rewritten_elf(std::move(owned_elf));
   }
 
   return status;
@@ -485,15 +486,13 @@ hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agen
   if (rc != 0 || out_elf == local_bytes->data()) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
-  if (!out_elf || out_elf_size == 0) {
-    if (out_elf) {
-      std::free(out_elf);
-    }
+  OwnedElf owned_elf(out_elf, &std::free);
+  if (!owned_elf || out_elf_size == 0) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
   return load_rewritten_reader(executable, agent, options, loaded_code_object,
-                               out_elf, out_elf_size);
+                               owned_elf.release(), out_elf_size);
 }
 
 hsa_status_t HSA_API hotswap_load_agent_code_object(
@@ -598,9 +597,6 @@ void OnUnload() {
 
   {
     std::scoped_lock lock(g_rewritten_elfs_mutex);
-    for (void *p : g_rewritten_elfs) {
-      std::free(p);
-    }
     g_rewritten_elfs.clear();
   }
 
