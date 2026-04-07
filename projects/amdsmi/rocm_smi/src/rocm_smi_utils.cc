@@ -454,6 +454,7 @@ rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value
   }
   return RSMI_STATUS_SUCCESS;
 }
+
 rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err) {
   // Map KFD ioctl errno to RSMI status
   // See rocm_smi_kfd_data_manager.cc for error sources
