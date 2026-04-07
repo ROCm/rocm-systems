@@ -69,7 +69,6 @@ int main(int argc, char **argv) {
 
   std::cout << "\n";
   rocshmem::envvar::print_envvars(env_mode, std::cout);
-  std::cout << "################################################################################\n";
 
 #if defined(USE_GDA)
   std::cout << "\n################################################################################\n";

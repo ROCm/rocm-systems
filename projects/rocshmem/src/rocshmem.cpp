@@ -186,14 +186,15 @@ static void setFilesLimit() {
   }
   if (debug_val == debug_level::ENV ||
       debug_val == debug_level::ENV_ALL ||
-      debug_val == debug_level::ENV_FULL) {
+      debug_val == debug_level::ENV_FULL ||
+      debug_val >= debug_level::INFO) {
     envvar::print_mode mode;
-    if (debug_val == debug_level::ENV) {
-      mode = envvar::print_mode::MODIFIED;
-    } else if (debug_val == debug_level::ENV_ALL) {
+    if (debug_val == debug_level::ENV_ALL) {
       mode = envvar::print_mode::ALL_VALUES;
-    } else {
+    } else if (debug_val == debug_level::ENV_FULL) {
       mode = envvar::print_mode::FULL_DOCUMENTATION;
+    } else {
+      mode = envvar::print_mode::MODIFIED;
     }
     envvar::print_envvars(mode, std::cout);
   }
@@ -326,14 +327,15 @@ static void setFilesLimit() {
   }
   if (debug_val == debug_level::ENV ||
       debug_val == debug_level::ENV_ALL ||
-      debug_val == debug_level::ENV_FULL) {
+      debug_val == debug_level::ENV_FULL ||
+      debug_val >= debug_level::INFO) {
     envvar::print_mode mode;
-    if (debug_val == debug_level::ENV) {
-      mode = envvar::print_mode::MODIFIED;
-    } else if (debug_val == debug_level::ENV_ALL) {
+    if (debug_val == debug_level::ENV_ALL) {
       mode = envvar::print_mode::ALL_VALUES;
-    } else {
+    } else if (debug_val == debug_level::ENV_FULL) {
       mode = envvar::print_mode::FULL_DOCUMENTATION;
+    } else {
+      mode = envvar::print_mode::MODIFIED;
     }
     envvar::print_envvars(mode, std::cout);
   }

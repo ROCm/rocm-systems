@@ -329,6 +329,7 @@ namespace envvar {
       os << "# https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/api/env_variables.html\n";
       os << "#------------------------------------------------------------------------------#\n";
     }
+    os << "################################################################################\n";
   }
 
 }  // namespace envvar
