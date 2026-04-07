@@ -2,13 +2,6 @@
 /.azuredevops/                                                        @ROCm/external-ci
 /.github/                                                             @ROCm/rocm-systems-reviewers
 
-# Global documentation ownership
-/**/*.md                                                              @ROCm/rocm-documentation
-/**/*.rst                                                             @ROCm/rocm-documentation
-**/.readthedocs.yaml                                                  @ROCm/rocm-documentation
-**/docs/                                                              @ROCm/rocm-documentation
-**/library/include/                                                   @ROCm/rocm-documentation
-
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
 /projects/clr/                                                        @ROCm/clr-reviewers

@@ -210,16 +210,16 @@ HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    WARN("Number of GPUs insufficient for test");
-  } else {
-    for (int dev = 0; dev < numDevices; dev++) {
-      checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
-      // create a stream
-      hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
-      REQUIRE(true == checkhipMemPoolTrimTo(stream, N, dev));
-      HIP_CHECK(hipStreamDestroy(stream));
-    }
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
+  for (int dev = 0; dev < numDevices; dev++) {
+    checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
+    // create a stream
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    REQUIRE(true == checkhipMemPoolTrimTo(stream, N, dev));
+    HIP_CHECK(hipStreamDestroy(stream));
   }
 }
 

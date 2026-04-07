@@ -20,7 +20,8 @@ extend-exclude = [
     ".github",
     ".misc",
     "external",
-    "build-rocprof_compute"
+    "build-rocprof_compute",
+    "src/vendored",
 ]
 
 [tool.ruff.lint]

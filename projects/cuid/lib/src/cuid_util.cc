@@ -93,7 +93,8 @@ std::string CuidUtilities::readlink_bdf(const std::string &device_path) {
 }
 
 // Helper to get device path from BDF based on device type
-// For GPUs: returns /sys/class/drm/renderDXXX/device path
+// For GPUs: returns /sys/class/drm/renderDXXX/device or
+//           /sys/class/drm/cardN/device path
 // For NICs: returns /sys/class/net/<iface>/device path
 std::string
 CuidUtilities::bdf_to_device_path(const std::string &bdf,
@@ -109,16 +110,38 @@ CuidUtilities::bdf_to_device_path(const std::string &bdf,
     DIR *dir = opendir(subsystem_dir.c_str());
     if (dir) {
       struct dirent *entry;
+      std::string card_path;
       while ((entry = readdir(dir)) != nullptr) {
-        // Look for renderD* nodes
+        // Prefer renderD* nodes when available
         if (strncmp(entry->d_name, "renderD", 7) == 0) {
           std::string device_path =
               "/sys/class/drm/" + std::string(entry->d_name) + "/device";
           closedir(dir);
           return device_path;
         }
+        // Track card entries as fallback (e.g., card0, card1)
+        // Exclude connector entries like card0-DP-1
+        if (strncmp(entry->d_name, "card", 4) == 0 &&
+            isdigit(entry->d_name[4])) {
+          bool all_digits = true;
+          for (size_t i = 4; entry->d_name[i] != '\0'; ++i) {
+            if (!isdigit(entry->d_name[i])) {
+              all_digits = false;
+              break;
+            }
+          }
+          if (all_digits && card_path.empty()) {
+            card_path =
+                "/sys/class/drm/" + std::string(entry->d_name) + "/device";
+          }
+        }
       }
       closedir(dir);
+      // Fall back to card entry if no renderD node was found
+      // (e.g., when using GIM driver or for non-AMD GPUs)
+      if (!card_path.empty()) {
+        return card_path;
+      }
     }
   } else if (device_type == AMDCUID_DEVICE_TYPE_NIC) {
     subsystem_dir = pci_device_path + "/net";

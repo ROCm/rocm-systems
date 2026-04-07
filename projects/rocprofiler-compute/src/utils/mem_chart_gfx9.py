@@ -1,6 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+"""
+CDNA Memory Architecture Diagram - CLI/TUI Visualization
+=============================================================================
+Memory chart renderer for CDNA-class GPUs (MI200, MI300, MI350 series).
+For RDNA3.5 (gfx1151) see mem_chart_gfx11.py.
+"""
+
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
