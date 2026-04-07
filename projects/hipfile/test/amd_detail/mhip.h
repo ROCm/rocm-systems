@@ -51,5 +51,9 @@ struct MHip : Hip {
     MOCK_METHOD(void, hipInit, (), (const, override));
     MOCK_METHOD(int, hipGetDevice, (), (const, override));
     MOCK_METHOD(int, hipGetDeviceCount, (), (const, override));
+    MOCK_METHOD(void, hipSetDevice, (int device), (const, override));
+    MOCK_METHOD(void, hipHostRegister, (void *hostPtr, size_t sizeBytes, unsigned int flags),
+                (const, override));
+    MOCK_METHOD(void, hipHostUnregister, (void *hostPtr), (const, override));
 };
 }

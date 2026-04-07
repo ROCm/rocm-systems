@@ -214,4 +214,23 @@ Hip::hipGetDeviceCount() const
     (void)throwOnHipError<Hip::RuntimeError>(::hipGetDeviceCount(&device_count));
     return device_count;
 }
+
+void
+Hip::hipSetDevice(int device) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipSetDevice(device));
+}
+
+void
+Hip::hipHostRegister(void *hostPtr, size_t sizeBytes, unsigned int flags) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipHostRegister(hostPtr, sizeBytes, flags));
+}
+
+void
+Hip::hipHostUnregister(void *hostPtr) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipHostUnregister(hostPtr));
+}
+
 }

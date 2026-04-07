@@ -77,6 +77,9 @@ struct Hip {
     virtual void        hipInit() const;
     virtual int         hipGetDevice() const;
     virtual int         hipGetDeviceCount() const;
+    virtual void        hipSetDevice(int device) const;
+    virtual void        hipHostRegister(void *hostPtr, size_t sizeBytes, unsigned int flags) const;
+    virtual void        hipHostUnregister(void *hostPtr) const;
 
     struct RuntimeError : public std::runtime_error {
         hipError_t error;
