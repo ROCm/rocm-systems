@@ -85,10 +85,14 @@ class CounterSampler {
 
   static std::vector<std::shared_ptr<CounterSampler>>& get_samplers();
 
+  static void ptl_disable(uint32_t gpu_id);
+  static void ptl_enable(uint32_t gpu_id);
+
  private:
   rocprofiler_agent_id_t agent_ = {};
   rocprofiler_context_id_t ctx_ = {};
   rocprofiler_counter_config_id_t counter_ = {.handle = 0};
+
 
   std::map<std::vector<std::string>, rocprofiler_counter_config_id_t> cached_counter_;
   std::map<uint64_t, uint64_t> counter_sizes_;
@@ -111,6 +115,7 @@ class CounterSampler {
 
   // Create profiles using greedy packing algorithm
   ProfileSet create_profiles_for_counters(const std::vector<std::string>& counters);
+
 
   static std::vector<std::shared_ptr<CounterSampler>> samplers_;
 };

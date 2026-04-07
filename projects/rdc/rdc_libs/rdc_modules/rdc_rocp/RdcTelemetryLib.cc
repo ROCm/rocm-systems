@@ -155,8 +155,12 @@ rdc_status_t rdc_module_init(uint64_t /*flags*/) {
 
   // Use on-demand queue mode in rocprofiler-sdk to avoid persistent GPU queues
   // that cause runlist oversubscription and inference performance degradation.
+  // single-profile-per-cycle rotation this gives one clean PTL
   // Queues are created only during counter collection and destroyed immediately after.
   setenv("ROCPROFILER_ONDEMAND_QUEUE", "1", 0);
+
+  // RDC manages PTL externally: single PTL off/on per collection cycle instead of per-profile
+  setenv("ROCPROFILER_CALLER_MANAGES_PTL", "1", 0);
 
   rocp_p = std::make_unique<amd::rdc::RdcRocpBase>();
   return RDC_ST_OK;
@@ -182,6 +186,7 @@ rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS], uint
   return RDC_ST_OK;
 }
 
+
 // Fetch
 rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint32_t fields_count,
                                             rdc_field_value_f callback, void* user_data) {
@@ -204,6 +209,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
   rdc_gpu_field_value_t values[BULK_FIELDS_MAX];
   uint32_t bulk_count = 0;
   rdc_status_t status = RDC_ST_OK;
+
 
   for (const auto& [gpu_index, field_indices] : gpu_to_field_indices) {
     // Collect fields for this GPU
@@ -264,6 +270,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
       bulk_count++;
     }
   }
+
 
   // Flush remaining values
   if (bulk_count != 0) {

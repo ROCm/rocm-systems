@@ -25,6 +25,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -57,15 +59,85 @@ void RocprofilerCall(Callable&& callable, const std::string& msg, const char* fi
 
 // Per-instance counter maps are now used instead of global maps (see id_to_name_ member)
 
+namespace {
+
+#define RDC_AMDKFD_IOCTL_BASE 'K'
+#define RDC_AMDKFD_IOWR(nr, type) _IOWR(RDC_AMDKFD_IOCTL_BASE, nr, type)
+
+enum { RDC_KFD_IOC_PROFILER_PTL_CONTROL = 3 };
+
+struct rdc_kfd_pc_sample_args {
+  uint64_t sample_info_ptr;
+  uint32_t num_sample_info;
+  uint32_t op;
+  uint32_t gpu_id;
+  uint32_t trace_id;
+  uint32_t flags;
+  uint32_t version;
+};
+
+struct rdc_kfd_pmc_settings {
+  uint32_t gpu_id;
+  uint32_t lock;
+  uint32_t perfcount_enable;
+};
+
+struct rdc_kfd_ptl_control {
+  uint32_t gpu_id;
+  uint32_t enable;
+};
+
+struct rdc_kfd_profiler_args {
+  uint32_t op;
+  union {
+    rdc_kfd_pc_sample_args pc_sample;
+    rdc_kfd_pmc_settings pmc;
+    uint32_t version;
+    rdc_kfd_ptl_control ptl;
+  };
+};
+
+#define RDC_AMDKFD_IOC_PROFILER RDC_AMDKFD_IOWR(0x86, struct rdc_kfd_profiler_args)
+
+int rdc_get_kfd_fd() {
+  static int fd = open("/dev/kfd", O_RDWR | O_CLOEXEC);
+  return fd;
+}
+
+}  // anonymous namespace
+
 namespace amd {
 namespace rdc {
 
 std::vector<std::shared_ptr<CounterSampler>> CounterSampler::samplers_;
 
+void CounterSampler::ptl_disable(uint32_t gpu_id) {
+  int fd = rdc_get_kfd_fd();
+  if (fd < 0) return;
+  rdc_kfd_profiler_args args = {};
+  args.op = RDC_KFD_IOC_PROFILER_PTL_CONTROL;
+  args.ptl.gpu_id = gpu_id;
+  args.ptl.enable = 0;
+  if (ioctl(fd, RDC_AMDKFD_IOC_PROFILER, &args) != 0) {
+    RDC_LOG(RDC_DEBUG, "PTL disable failed for gpu_id " << gpu_id);
+  }
+}
+
+void CounterSampler::ptl_enable(uint32_t gpu_id) {
+  int fd = rdc_get_kfd_fd();
+  if (fd < 0) return;
+  rdc_kfd_profiler_args args = {};
+  args.op = RDC_KFD_IOC_PROFILER_PTL_CONTROL;
+  args.ptl.gpu_id = gpu_id;
+  args.ptl.enable = 1;
+  if (ioctl(fd, RDC_AMDKFD_IOC_PROFILER, &args) != 0) {
+    RDC_LOG(RDC_DEBUG, "PTL enable failed for gpu_id " << gpu_id);
+  }
+}
+
 std::vector<std::shared_ptr<CounterSampler>>& CounterSampler::get_samplers() { return samplers_; }
 
 CounterSampler::CounterSampler(rocprofiler_agent_id_t agent) : agent_(agent) {
-  // Setup context (should only be done once per agent)
   RocprofilerCall([&]() { return rocprofiler_create_context(&ctx_); }, "context creation failed",
                   __FILE__, __LINE__);
 
@@ -424,28 +496,19 @@ CounterSampler::ProfileSet CounterSampler::create_profiles_for_counters(
 void CounterSampler::sample_counters_with_packing(const std::vector<std::string>& counters,
                                                   std::map<std::string, double>& out_values,
                                                   uint64_t duration) {
-  // Sort counters for cache key
   std::vector<std::string> sorted_counters = counters;
   std::sort(sorted_counters.begin(), sorted_counters.end());
 
-  // Check if we have a cached profile set
   auto cached = cached_profile_sets_.find(sorted_counters);
   if (cached == cached_profile_sets_.end()) {
-    // Create new profile set with greedy packing
     RDC_LOG(RDC_DEBUG, "Creating new profile set for " << sorted_counters.size()
             << " counters on agent " << agent_.handle);
     ProfileSet profile_set = create_profiles_for_counters(sorted_counters);
     cached = cached_profile_sets_.emplace(sorted_counters, std::move(profile_set)).first;
   }
 
-  // Clear output
   out_values.clear();
 
-  // Statistics tracking (thread-safe)
-  static std::atomic<uint64_t> total_sample_calls{0};
-  static std::atomic<uint64_t> total_profiles_sampled{0};
-
-  // Sample from all profiles in the set
   for (const auto& profile : cached->second.profiles) {
     std::vector<rocprofiler_record_counter_t> records;
     records.resize(profile.expected_size);
@@ -454,31 +517,16 @@ void CounterSampler::sample_counters_with_packing(const std::vector<std::string>
 
     rocprofiler_start_context(ctx_);
     size_t out_size = records.size();
-
-    // Wait for sampling window
     usleep(duration);
-
     rocprofiler_sample_device_counting_service(ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE,
                                                records.data(), &out_size);
-    total_sample_calls++;
     rocprofiler_stop_context(ctx_);
     records.resize(out_size);
 
-    // Decode records and aggregate values
     for (const auto& record : records) {
       const std::string& name = decode_record_name(record);
       out_values[name] += record.counter_value;
     }
-  }
-
-  total_profiles_sampled += cached->second.profiles.size();
-
-  // Log statistics periodically (every 100 sample calls)
-  if (total_sample_calls % 100 == 0) {
-    RDC_LOG(RDC_DEBUG, "Greedy packed sampling statistics: "
-            << total_sample_calls << " total sample calls, "
-            << total_profiles_sampled << " total profiles sampled, "
-            << "avg " << (double)total_profiles_sampled / total_sample_calls << " profiles/sample");
   }
 }
 

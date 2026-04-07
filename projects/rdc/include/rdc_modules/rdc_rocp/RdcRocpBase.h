@@ -83,7 +83,7 @@ class RdcRocpBase {
   /**
    * @brief Tweak this to change for how long each metric is collected
    */
-  static const uint32_t collection_duration_us_k = 10000;
+  static const uint32_t collection_duration_us_k = 2000;
 
   /**
    * @brief By default all profiler values are read as doubles

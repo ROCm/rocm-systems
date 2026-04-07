@@ -114,6 +114,13 @@ use_device_lock_at_start()
     return value;
 }
 
+bool
+use_caller_manages_ptl()
+{
+    static bool value = rocprofiler::common::get_env("ROCPROFILER_CALLER_MANAGES_PTL", false);
+    return value;
+}
+
 uint16_t
 header_pkt(hsa_packet_type_t type)
 {
@@ -474,7 +481,8 @@ start_agent_ctx(const context::context* ctx)
 
         // Disable PTL (non-fatal if it fails)
         // Only disable here if using NEW behavior (at context start, not at configuration)
-        if(!use_device_lock_at_start())
+        // Skip if caller manages PTL externally (e.g. RDC wraps entire collection cycle)
+        if(!use_device_lock_at_start() && !use_caller_manages_ptl())
         {
             counters::counter_collection_ptl_disable(agent->get_rocp_agent());
         }
@@ -617,7 +625,8 @@ stop_agent_ctx(const context::context* ctx)
 
         // Re-enable PTL (non-fatal if it fails)
         // Only re-enable here if using NEW behavior (at context start, not at configuration)
-        if(!use_device_lock_at_start())
+        // Skip if caller manages PTL externally (e.g. RDC wraps entire collection cycle)
+        if(!use_device_lock_at_start() && !use_caller_manages_ptl())
         {
             counters::counter_collection_ptl_enable(agent->get_rocp_agent());
         }

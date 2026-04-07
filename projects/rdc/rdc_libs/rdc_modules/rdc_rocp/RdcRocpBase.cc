@@ -339,6 +339,9 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
 
   init_rocp_if_not();
 
+  uint32_t gpu_id = agents[agent_index].gpu_id;
+  CounterSampler::ptl_disable(gpu_id);
+
   const auto start_time = std::chrono::high_resolution_clock::now();
   // direct read from rocprofiler
   const double read_dbl = run_profiler(agent_index, field);
@@ -354,6 +357,8 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
       sampled_values[occ_field_it->second] = occupancy_val;
     }
   }
+
+  CounterSampler::ptl_enable(gpu_id);
 
   // Apply field transformations using the helper function
   return apply_field_transformation(field, agent_index, read_dbl, elapsed, sampled_values, data,
@@ -426,12 +431,16 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     return RDC_ST_BAD_PARAMETER;
   }
 
+  uint32_t gpu_id = agents[agent_index].gpu_id;
+  CounterSampler::ptl_disable(gpu_id);
+
   const auto start_time = std::chrono::high_resolution_clock::now();
   if (!metrics_to_sample.empty()) {
     try {
       counter_sampler->sample_counters_with_packing(metrics_to_sample, sampled_values,
                                                     collection_duration_us_k);
     } catch (const std::exception& e) {
+      CounterSampler::ptl_enable(gpu_id);
       RDC_LOG(RDC_ERROR, "Error while sampling counter values: " << e.what());
       for (size_t i = 0; i < fields.size(); i++) {
         statuses[i] = RDC_ST_BAD_PARAMETER;
@@ -441,6 +450,8 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
   }
   const auto stop_time = std::chrono::high_resolution_clock::now();
   const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
+
+  CounterSampler::ptl_enable(gpu_id);
 
   // Process results for each field
   for (size_t i = 0; i < fields.size(); i++) {
