@@ -30,9 +30,15 @@ else()
 endif()
 
 # Shared library for HSA_TOOLS_LIB usage — links COMGR directly
+set(HOTSWAP_PLATFORM_IO_SRC hotswap_platform_io_posix.cpp)
+if(WIN32)
+  set(HOTSWAP_PLATFORM_IO_SRC hotswap_platform_io_win.cpp)
+endif()
+
 add_library(hsa-hotswap SHARED
   hotswap_tool.cpp
   hotswap.cpp
+  ${HOTSWAP_PLATFORM_IO_SRC}
 )
 
 target_include_directories(hsa-hotswap PRIVATE
