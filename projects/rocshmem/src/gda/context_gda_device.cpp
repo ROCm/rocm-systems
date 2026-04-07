@@ -162,7 +162,7 @@ __device__ void GDAContext::quiet() {
   internal_quiet(wf_info);
 }
 
-__device__ void GDAContext::internal_quiet(ActiveWFInfo &wf_info) {
+__device__ void GDAContext::internal_quiet(const ActiveWFInfo& wf_info) {
   for (uint32_t i = 0; i < num_qps; i++) {
     qps[i].quiet(wf_info);
   }
@@ -450,7 +450,7 @@ __device__ uint64_t GDAContext::signal_fetch_wave(const uint64_t *sig_addr) {
 
 // internal functions used by collective operations
 __device__ void GDAContext::internal_putmem(void *dest, const void *source, size_t nelems,
-    int pe, int qp_index, ActiveWFInfo &wf_info) {
+    int pe, int qp_index, const ActiveWFInfo& wf_info) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
@@ -463,7 +463,7 @@ __device__ void GDAContext::internal_putmem(void *dest, const void *source, size
 }
 
 __device__ void GDAContext::internal_getmem(void *dest, const void *source, size_t nelems,
-    int pe, int qp_index, ActiveWFInfo &wf_info) {
+    int pe, int qp_index, const ActiveWFInfo& wf_info) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
@@ -477,7 +477,7 @@ __device__ void GDAContext::internal_getmem(void *dest, const void *source, size
 }
 
 __device__ void GDAContext::internal_putmem_wg(void *dest, const void *source,
-    size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, int qp_index, const ActiveWFInfo& wf_info) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
@@ -492,7 +492,7 @@ __device__ void GDAContext::internal_putmem_wg(void *dest, const void *source,
 }
 
 __device__ void GDAContext::internal_getmem_wg(void *dest, const void *source,
-    size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, int qp_index, const ActiveWFInfo& wf_info) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
@@ -508,7 +508,7 @@ __device__ void GDAContext::internal_getmem_wg(void *dest, const void *source,
 }
 
 __device__ void GDAContext::internal_putmem_wave(void *dest, const void *source,
-    size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, int qp_index, const ActiveWFInfo& wf_info) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
@@ -523,7 +523,7 @@ __device__ void GDAContext::internal_putmem_wave(void *dest, const void *source,
 }
 
 __device__ void GDAContext::internal_getmem_wave(void *dest, const void *source,
-    size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, int qp_index, const ActiveWFInfo& wf_info) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
@@ -539,7 +539,7 @@ __device__ void GDAContext::internal_getmem_wave(void *dest, const void *source,
 }
 
 __device__ void GDAContext::internal_putmem_nbi(void *dest, const void *source, size_t nelems,
-    int pe, int qp_index, ActiveWFInfo &wf_info) {
+    int pe, int qp_index, const ActiveWFInfo& wf_info) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
@@ -551,7 +551,7 @@ __device__ void GDAContext::internal_putmem_nbi(void *dest, const void *source, 
 }
 
 __device__ void GDAContext::internal_getmem_nbi(void *dest, const void *source, size_t nelems,
-    int pe, int qp_index, ActiveWFInfo &wf_info) {
+    int pe, int qp_index, const ActiveWFInfo& wf_info) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
@@ -564,7 +564,7 @@ __device__ void GDAContext::internal_getmem_nbi(void *dest, const void *source, 
 }
 
 __device__ void GDAContext::internal_putmem_nbi_wg(void *dest, const void *source,
-    size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, int qp_index, const ActiveWFInfo& wf_info) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
@@ -578,7 +578,7 @@ __device__ void GDAContext::internal_putmem_nbi_wg(void *dest, const void *sourc
 }
 
 __device__ void GDAContext::internal_getmem_nbi_wg(void *dest, const void *source,
-    size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, int qp_index, const ActiveWFInfo& wf_info) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
@@ -593,7 +593,7 @@ __device__ void GDAContext::internal_getmem_nbi_wg(void *dest, const void *sourc
 }
 
 __device__ void GDAContext::internal_putmem_nbi_wave(void *dest, const void *source,
-    size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, int qp_index, const ActiveWFInfo& wf_info) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
@@ -607,7 +607,7 @@ __device__ void GDAContext::internal_putmem_nbi_wave(void *dest, const void *sou
 }
 
 __device__ void GDAContext::internal_getmem_nbi_wave(void *dest, const void *source,
-    size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, int qp_index, const ActiveWFInfo& wf_info) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {

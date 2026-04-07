@@ -30,7 +30,7 @@
 
 namespace rocshmem {
 
-__device__ uint32_t QueuePair::reserve_sq(ActiveWFInfo &wf_info,
+__device__ uint32_t QueuePair::reserve_sq(const ActiveWFInfo& wf_info,
     uint32_t num_wqes) {
   uint32_t my_sq_prod = 0;
 
@@ -75,7 +75,7 @@ __device__ uint32_t QueuePair::commit_sq_single(uint32_t my_sq_prod, [[maybe_unu
   return dbprod;
 }
 
-__device__ uint32_t QueuePair::commit_sq(ActiveWFInfo &wf_info,
+__device__ uint32_t QueuePair::commit_sq(const ActiveWFInfo& wf_info,
     uint32_t my_sq_prod, [[maybe_unused]] uint32_t my_sq_pos,
     uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
@@ -155,7 +155,7 @@ __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
   sq_msn = msn;
 }
 
-__device__ void QueuePair::ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info,
+__device__ void QueuePair::ionic_quiet_internal_ccqe(const ActiveWFInfo& wf_info,
     uint32_t cons) {
   if (!wf_info.is_pe_group_first) {
     return;
@@ -220,7 +220,7 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe_single(uint32_t cons) {
   }
 }
 
-__device__ void QueuePair::ionic_quiet_internal(ActiveWFInfo &wf_info, uint32_t cons) {
+__device__ void QueuePair::ionic_quiet_internal(const ActiveWFInfo& wf_info, uint32_t cons) {
   uint32_t greed = 10;
 
   if (!cq_mask) {
@@ -280,7 +280,7 @@ __device__ void QueuePair::ionic_ring_doorbell_single(uint32_t pos) {
   __atomic_store_n(&sq_dbreg[8 * __lane_id()], sq_dbval | (sq_mask & pos), __ATOMIC_SEQ_CST);
 }
 
-__device__ void QueuePair::ionic_quiet(ActiveWFInfo &wf_info) {
+__device__ void QueuePair::ionic_quiet(const ActiveWFInfo& wf_info) {
   ionic_quiet_internal(wf_info, sq_prod);
 }
 
@@ -289,7 +289,7 @@ __device__ void QueuePair::ionic_quiet_single() {
 }
 
 __device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
+    uintptr_t raddr, uint8_t opcode, const ActiveWFInfo& wf_info) {
   uint32_t num_wqes = 1;
   if (wf_info.scope == ThreadScope::thread) {
     num_wqes = wf_info.num_pe_group_lanes;
@@ -400,7 +400,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
 
 __device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-    bool fetching, ActiveWFInfo &wf_info) {
+    bool fetching, const ActiveWFInfo& wf_info) {
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
   uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;

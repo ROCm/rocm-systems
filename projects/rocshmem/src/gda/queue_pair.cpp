@@ -130,7 +130,7 @@ __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
  ************************ PROVIDER-SPECIFIC HELPERS ***************************
  *****************************************************************************/
 __device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
+    uintptr_t raddr, uint8_t opcode, const ActiveWFInfo& wf_info) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -177,7 +177,7 @@ __device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, ui
 
 __device__ uint64_t QueuePair::post_wqe_amo(int32_t size, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-    bool fetching, ActiveWFInfo &wf_info) {
+    bool fetching, const ActiveWFInfo& wf_info) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -222,7 +222,7 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
   }
 }
 
-__device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
+__device__ void QueuePair::quiet([[maybe_unused]] const ActiveWFInfo& wf_info) {
   if(wf_info.is_pe_group_first) {
       switch (gda_provider_) {
     #if defined(GDA_IONIC)
@@ -272,7 +272,7 @@ __device__ void QueuePair::quiet_single() {
  ****************************** SHMEM INTERFACE *******************************
  *****************************************************************************/
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
-    size_t nelems, int pe, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, const ActiveWFInfo& wf_info) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, wf_info);
@@ -293,35 +293,35 @@ __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t
 }
 
 __device__ void QueuePair::get_nbi(void *dest, const void *source,
-    size_t nelems, int pe, ActiveWFInfo &wf_info) {
+    size_t nelems, int pe, const ActiveWFInfo& wf_info) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_rma(pe, nelems, dst, src, gda_op_rdma_read, wf_info);
 }
 
 __device__ int64_t QueuePair::atomic_cas(void *dest, int64_t atomic_data,
-    int64_t atomic_cmp, ActiveWFInfo &wf_info) {
+    int64_t atomic_cmp, const ActiveWFInfo& wf_info) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   return post_wqe_amo(sizeof(int64_t), dst, gda_op_atomic_cs, atomic_data,
                       atomic_cmp, true, wf_info);
 }
 
 __device__ int64_t QueuePair::atomic_cas_nofetch(void *dest,
-    int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info) {
+    int64_t atomic_data, int64_t atomic_cmp, const ActiveWFInfo& wf_info) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   return post_wqe_amo(sizeof(int64_t), dst, gda_op_atomic_cs, atomic_data,
                       atomic_cmp, false, wf_info);
 }
 
 __device__ int64_t QueuePair::atomic_fetch(void *dest, int64_t atomic_data,
-    int64_t atomic_cmp, ActiveWFInfo &wf_info) {
+    int64_t atomic_cmp, const ActiveWFInfo& wf_info) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   return post_wqe_amo(sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data,
                       atomic_cmp, true, wf_info);
 }
 
 __device__ void QueuePair::atomic_nofetch(void *dest, int64_t atomic_data,
-    int64_t atomic_cmp, ActiveWFInfo &wf_info) {
+    int64_t atomic_cmp, const ActiveWFInfo& wf_info) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_amo(sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data,
                atomic_cmp, false, wf_info);

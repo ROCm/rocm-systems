@@ -134,8 +134,12 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
        * The compare-and-swap loop will execute at least twice if wrong.
        * It may run additional times if contention on memory location.
        */
-      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, value, cond, wf_info)) != cond) {
+      while (true) {
+        ActiveWFInfo wf_info{pe};
+        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
+        if (ret_val == cond) {
+          break;
+        }
         cond = ret_val;
       }
       need_turn = false;
@@ -160,8 +164,12 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
+      while (true) {
+        ActiveWFInfo wf_info{pe};
+        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, cond, wf_info);
+        if (ret_val == cond) {
+          break;
+        }
         cond = ret_val;
         desired_val = ret_val & value;
       }
@@ -192,8 +200,12 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
+      while (true) {
+        ActiveWFInfo wf_info{pe};
+        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, cond, wf_info);
+        if (ret_val == cond) {
+          break;
+        }
         cond = ret_val;
         desired_val = ret_val | value;
       }
@@ -224,8 +236,12 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, desired_val, cond, wf_info)) != cond) {
+      while (true) {
+        ActiveWFInfo wf_info{pe};
+        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, cond, wf_info);
+        if (ret_val == cond) {
+          break;
+        }
         cond = ret_val;
         desired_val = ret_val ^ value;
       }
@@ -313,7 +329,7 @@ __device__ void gda_compute_reduce(T *src, T *dst, int size, int wg_id, int wg_s
 
 template <typename T, ROCSHMEM_OP Op>
 __device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
-    int nelems, GDATeam *team_obj, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
+    int nelems, GDATeam *team_obj, const ActiveWFInfo& wf_info) {  // NOLINT(runtime/int)
 
   int stride = team_obj->tinfo_wrt_world->stride;
   int PE_start = team_obj->tinfo_wrt_world->pe_start;
@@ -430,7 +446,7 @@ __device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
 template <typename T, ROCSHMEM_OP Op>
 __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
     int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
-    int n_seg, int seg_size, int chunk_size, ActiveWFInfo &wf_info) {
+    int n_seg, int seg_size, int chunk_size, const ActiveWFInfo& wf_info) {
 
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
@@ -573,7 +589,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
 template <typename T>
 __device__ void GDAContext::internal_put_broadcast(T *dst, const T *src,
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
-    ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
+    const ActiveWFInfo& wf_info) {  // NOLINT(runtime/int)
   if (my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
@@ -586,7 +602,7 @@ __device__ void GDAContext::internal_put_broadcast(T *dst, const T *src,
 
 template <typename T>
 __device__ void GDAContext::internal_get_broadcast(T *dst, const T *src,
-    int nelems, int pe_root, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
+    int nelems, int pe_root, const ActiveWFInfo& wf_info) {  // NOLINT(runtime/int)
   if (my_pe != pe_root) {
     internal_getmem_wg(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
   }
@@ -960,7 +976,7 @@ GDA_CONTEXT_PUT_SIGNAL_DEF(_wave)
 // Internal functions used by collective and signal operations
 template <typename T>
 __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
-    int qp_index, ActiveWFInfo &wf_info) {
+    int qp_index, const ActiveWFInfo& wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
@@ -978,7 +994,7 @@ __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
 
 template <typename T>
 __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
-    int qp_index, ActiveWFInfo &wf_info) {
+    int qp_index, const ActiveWFInfo& wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   T ret_val = 0;
@@ -998,7 +1014,7 @@ __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
 
 template <typename T>
 __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
-    int qp_index, ActiveWFInfo &wf_info) {
+    int qp_index, const ActiveWFInfo& wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
@@ -1014,8 +1030,12 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
        * The compare-and-swap loop will execute at least twice if wrong.
        * It may run additional times if contention on memory location.
        */
-      while (wf_info.update(pe), (ret_val = qps[qp_index].atomic_cas(
-             base_heap[pe] + L_offset, value, cond, wf_info)) != cond) {
+      while (true) {
+        ActiveWFInfo wf_info{pe};
+        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
+        if (ret_val == cond) {
+          break;
+        }
         cond = ret_val;
       }
       need_turn = false;
@@ -1055,12 +1075,10 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
  *    - QP[i,j]             →  i-th QP of PE j
  *    - **[ QP2,2 ]**       →  The 3rd QP (QP index 2) of PE2
  */
-__device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
-    ActiveWFInfo wf_info) {
-
+__device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe, const ActiveWFInfo& wf_info) {
   uint32_t qp_index   {0};
 
-  if(wf_info.pe_group_logical_lane_id == 0) {
+  if(wf_info.is_pe_group_first) {
     // Only the leader lane updates the counter (Does it require atomics?)
     // uint32_t local_qp_counter = __hip_atomic_fetch_add(&qp_counter[pe], 1,
     //                                        __ATOMIC_RELAXED,
