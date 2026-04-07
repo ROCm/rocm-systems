@@ -667,6 +667,12 @@ TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
   cq.CountedQueuesOverflowWrapAroundTest();
   RunCustomTestEpilog(&cq);
 }
+TEST(rocrtstFunc, CPQueue_OverSubscription) {
+    CountedQueuesTest cp;
+    RunCustomTestProlog(&cp);
+    cp.CPQueueOverSubscriptionTest();
+    RunCustomTestEpilog(&cp);
+}
 
 TEST(rocrtstFunc, Queue_Create_SystemMem_Test) {
   QueueCreateTest qt;
