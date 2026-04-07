@@ -1043,6 +1043,13 @@ For attachment profiling of running processes:
         help="Serialize all kernels, not just the traced ones.",
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-marker-trace",
+        default=False,
+        help="Enable marker-controlled device thread trace. Uses roctxProfilerResume(0)/roctxProfilerPause(0) to start/stop thread tracing. Implies --att and --marker-trace. Incompatible with --att-consecutive-kernels.",
+    )
+
     return (parser.parse_args(rocp_args), app_args)
 
 
@@ -1549,6 +1556,21 @@ def run(app_args, args, **kwargs):
     if args.kfd_trace:
         for itr in ("page_migration", "page_mapping", "queue", "dropped_events"):
             setattrifnone(args, f"kfd_{itr}_trace", True)
+
+    if args.att_marker_trace:
+        # att-marker-trace implies --att, --marker-trace, and --selected-regions
+        # selected-regions ensures the main client context starts stopped,
+        # so all pause_resume_contexts begin in the same (stopped) state.
+        setattrifnone(args, "advanced_thread_trace", True)
+        setattrifnone(args, "marker_trace", True)
+        setattrifnone(args, "selected_regions", True)
+
+        if args.att_consecutive_kernels:
+            fatal_error(
+                "--att-marker-trace cannot be combined with --att-consecutive-kernels"
+            )
+
+        update_env("ROCPROF_ATT_MARKER_TRACE", True, overwrite=True)
 
     trace_count = 0
     trace_opts = ["--hip-trace", "--hsa-trace", "--kfd-trace"]

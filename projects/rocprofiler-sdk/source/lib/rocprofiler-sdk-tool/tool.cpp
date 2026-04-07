@@ -271,6 +271,7 @@ auto  counter_collection_ctx = rocprofiler_context_id_t{0};
 auto  att_device_context     = rocprofiler_context_id_t{0};
 auto  att_consecutive_kernel_dispatch_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
+auto  att_marker_trace_id = std::atomic<uint64_t>{0};
 std::mutex att_shader_data;
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
@@ -1619,9 +1620,16 @@ att_shader_data_callback(rocprofiler_agent_id_t  agent,
     std::lock_guard<std::mutex> lock(att_shader_data);
     std::stringstream           filename;
     auto dispatch_id = static_cast<rocprofiler_dispatch_id_t>(userdata.value);
-    // If dispatch_id/userdata.value == 0, then we are in device mode and get dispatch id from
-    // global atomic
-    if(dispatch_id == 0) dispatch_id = att_consecutive_kernel_dispatch_id.load();
+    // If dispatch_id/userdata.value == 0, then we are in device mode.
+    // For marker-trace mode, use a monotonic counter as a trace-segment ID.
+    // For consecutive-kernels mode, use the stored lowest dispatch id.
+    if(dispatch_id == 0)
+    {
+        if(tool::get_config().att_marker_trace)
+            dispatch_id = att_marker_trace_id.fetch_add(1);
+        else
+            dispatch_id = att_consecutive_kernel_dispatch_id.load();
+    }
     filename << fmt::format("{}_shader_engine_{}_{}", agent.handle, se_id, dispatch_id);
 
     auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
@@ -2447,11 +2455,23 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
         const auto selecting_by_gpuid = !gpu_idx_set.empty();
 
-        // Use device_thread_trace_service when handling consecutive kernels
+        // Use device_thread_trace_service when handling consecutive kernels or marker trace
         const auto handle_consecutive_kernels = tool::get_config().att_consecutive_kernels >= 1;
+        const auto handle_marker_trace        = tool::get_config().att_marker_trace;
         rocprofiler_user_data_t user{.value = 0};
 
-        if(handle_consecutive_kernels)
+        ROCP_FATAL_IF(handle_consecutive_kernels && handle_marker_trace)
+            << "ATT marker trace and consecutive kernels modes are mutually exclusive";
+
+        if(handle_marker_trace)
+        {
+            // Marker-controlled device thread trace:
+            // Context is registered for pause/resume control and starts stopped.
+            // roctxProfilerResume(0) starts it, roctxProfilerPause(0) stops it.
+            // No KERNEL_TRACING overhead.
+            create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
+        }
+        else if(handle_consecutive_kernels)
         {
             // TODO: Fix DeviceThreadTracer to handle remaining thread traces before stopping
             // contexts so the following call can function correctly with marker trace:
@@ -2479,7 +2499,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             auto agent_params = global_parameters;
             for(auto& counter : get_att_perfcounter_params(id, att_perf))
                 agent_params.push_back(counter);
-            if(!handle_consecutive_kernels)
+            if(!handle_consecutive_kernels && !handle_marker_trace)
             {
                 ROCPROFILER_CALL(
                     rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
