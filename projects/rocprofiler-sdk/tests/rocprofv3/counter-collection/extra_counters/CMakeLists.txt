@@ -10,6 +10,21 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+rocprofiler_configure_pytest_files(
+    CONFIG pytest.ini
+    COPY validate.py
+         conftest.py
+         input.txt
+         extra_counters.yaml
+         duplicate_counters.yaml
+         invalid_block.yaml
+         missing_name.yaml
+         wrong_type.yaml
+         malformed.yaml
+         no_block_event.yaml
+         missing_top_key.yaml
+         empty_architectures.yaml)
+
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 # pmc1 with extra counters
@@ -29,7 +44,6 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-counter-collection-pmc1-extra-counters
     TEST_PATHS validate.py
-    COPY conftest.py input.txt extra_counters.yaml
     CONFIG pytest.ini
     DISCOVERY_ARGS -k test_validate_counter_collection_pmc1_extra_counters
     ARGS --input
