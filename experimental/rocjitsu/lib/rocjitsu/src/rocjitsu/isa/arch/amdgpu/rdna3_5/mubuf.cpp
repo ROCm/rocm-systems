@@ -1200,9 +1200,25 @@ BufferAtomicSwapB32Mubuf::BufferAtomicSwapB32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicSwapB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_SWAP_B32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicCmpswapB32Mubuf::BufferAtomicCmpswapB32Mubuf(const MachineInst *inst)
@@ -1224,9 +1240,27 @@ BufferAtomicCmpswapB32Mubuf::BufferAtomicCmpswapB32Mubuf(const MachineInst *inst
 }
 
 void BufferAtomicCmpswapB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_CMPSWAP_B32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicAddU32Mubuf::BufferAtomicAddU32Mubuf(const MachineInst *inst)
@@ -1248,9 +1282,25 @@ BufferAtomicAddU32Mubuf::BufferAtomicAddU32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicAddU32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_ADD_U32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicSubU32Mubuf::BufferAtomicSubU32Mubuf(const MachineInst *inst)
@@ -1272,9 +1322,25 @@ BufferAtomicSubU32Mubuf::BufferAtomicSubU32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicSubU32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_SUB_U32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicCsubU32Mubuf::BufferAtomicCsubU32Mubuf(const MachineInst *inst)
@@ -1296,9 +1362,25 @@ BufferAtomicCsubU32Mubuf::BufferAtomicCsubU32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicCsubU32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_CSUB_U32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMinI32Mubuf::BufferAtomicMinI32Mubuf(const MachineInst *inst)
@@ -1320,9 +1402,25 @@ BufferAtomicMinI32Mubuf::BufferAtomicMinI32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMinI32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MIN_I32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMinU32Mubuf::BufferAtomicMinU32Mubuf(const MachineInst *inst)
@@ -1344,9 +1442,25 @@ BufferAtomicMinU32Mubuf::BufferAtomicMinU32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMinU32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MIN_U32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMaxI32Mubuf::BufferAtomicMaxI32Mubuf(const MachineInst *inst)
@@ -1368,9 +1482,25 @@ BufferAtomicMaxI32Mubuf::BufferAtomicMaxI32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMaxI32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MAX_I32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMaxU32Mubuf::BufferAtomicMaxU32Mubuf(const MachineInst *inst)
@@ -1392,9 +1522,25 @@ BufferAtomicMaxU32Mubuf::BufferAtomicMaxU32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMaxU32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MAX_U32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicAndB32Mubuf::BufferAtomicAndB32Mubuf(const MachineInst *inst)
@@ -1416,9 +1562,25 @@ BufferAtomicAndB32Mubuf::BufferAtomicAndB32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicAndB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_AND_B32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::AND;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicOrB32Mubuf::BufferAtomicOrB32Mubuf(const MachineInst *inst)
@@ -1440,9 +1602,25 @@ BufferAtomicOrB32Mubuf::BufferAtomicOrB32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicOrB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_OR_B32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::OR;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicXorB32Mubuf::BufferAtomicXorB32Mubuf(const MachineInst *inst)
@@ -1464,9 +1642,25 @@ BufferAtomicXorB32Mubuf::BufferAtomicXorB32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicXorB32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_XOR_B32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicIncU32Mubuf::BufferAtomicIncU32Mubuf(const MachineInst *inst)
@@ -1488,9 +1682,25 @@ BufferAtomicIncU32Mubuf::BufferAtomicIncU32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicIncU32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_INC_U32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::INC;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicDecU32Mubuf::BufferAtomicDecU32Mubuf(const MachineInst *inst)
@@ -1512,9 +1722,25 @@ BufferAtomicDecU32Mubuf::BufferAtomicDecU32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicDecU32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_DEC_U32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicSwapB64Mubuf::BufferAtomicSwapB64Mubuf(const MachineInst *inst)
@@ -1536,9 +1762,25 @@ BufferAtomicSwapB64Mubuf::BufferAtomicSwapB64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicSwapB64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_SWAP_B64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicCmpswapB64Mubuf::BufferAtomicCmpswapB64Mubuf(const MachineInst *inst)
@@ -1560,9 +1802,27 @@ BufferAtomicCmpswapB64Mubuf::BufferAtomicCmpswapB64Mubuf(const MachineInst *inst
 }
 
 void BufferAtomicCmpswapB64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_CMPSWAP_B64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicAddU64Mubuf::BufferAtomicAddU64Mubuf(const MachineInst *inst)
@@ -1584,9 +1844,25 @@ BufferAtomicAddU64Mubuf::BufferAtomicAddU64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicAddU64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_ADD_U64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicSubU64Mubuf::BufferAtomicSubU64Mubuf(const MachineInst *inst)
@@ -1608,9 +1884,25 @@ BufferAtomicSubU64Mubuf::BufferAtomicSubU64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicSubU64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_SUB_U64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMinI64Mubuf::BufferAtomicMinI64Mubuf(const MachineInst *inst)
@@ -1632,9 +1924,27 @@ BufferAtomicMinI64Mubuf::BufferAtomicMinI64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMinI64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MIN_I64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMinU64Mubuf::BufferAtomicMinU64Mubuf(const MachineInst *inst)
@@ -1656,9 +1966,27 @@ BufferAtomicMinU64Mubuf::BufferAtomicMinU64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMinU64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MIN_U64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMaxI64Mubuf::BufferAtomicMaxI64Mubuf(const MachineInst *inst)
@@ -1680,9 +2008,27 @@ BufferAtomicMaxI64Mubuf::BufferAtomicMaxI64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMaxI64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MAX_I64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMaxU64Mubuf::BufferAtomicMaxU64Mubuf(const MachineInst *inst)
@@ -1704,9 +2050,27 @@ BufferAtomicMaxU64Mubuf::BufferAtomicMaxU64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMaxU64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MAX_U64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicAndB64Mubuf::BufferAtomicAndB64Mubuf(const MachineInst *inst)
@@ -1728,9 +2092,25 @@ BufferAtomicAndB64Mubuf::BufferAtomicAndB64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicAndB64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_AND_B64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::AND;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicOrB64Mubuf::BufferAtomicOrB64Mubuf(const MachineInst *inst)
@@ -1752,9 +2132,25 @@ BufferAtomicOrB64Mubuf::BufferAtomicOrB64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicOrB64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_OR_B64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::OR;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicXorB64Mubuf::BufferAtomicXorB64Mubuf(const MachineInst *inst)
@@ -1776,9 +2172,25 @@ BufferAtomicXorB64Mubuf::BufferAtomicXorB64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicXorB64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_XOR_B64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicIncU64Mubuf::BufferAtomicIncU64Mubuf(const MachineInst *inst)
@@ -1800,9 +2212,25 @@ BufferAtomicIncU64Mubuf::BufferAtomicIncU64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicIncU64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_INC_U64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::INC;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicDecU64Mubuf::BufferAtomicDecU64Mubuf(const MachineInst *inst)
@@ -1824,9 +2252,25 @@ BufferAtomicDecU64Mubuf::BufferAtomicDecU64Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicDecU64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_DEC_U64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicCmpswapF32Mubuf::BufferAtomicCmpswapF32Mubuf(const MachineInst *inst)
@@ -1848,9 +2292,27 @@ BufferAtomicCmpswapF32Mubuf::BufferAtomicCmpswapF32Mubuf(const MachineInst *inst
 }
 
 void BufferAtomicCmpswapF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_CMPSWAP_F32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMinF32Mubuf::BufferAtomicMinF32Mubuf(const MachineInst *inst)
@@ -1872,9 +2334,25 @@ BufferAtomicMinF32Mubuf::BufferAtomicMinF32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMinF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MIN_F32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicMaxF32Mubuf::BufferAtomicMaxF32Mubuf(const MachineInst *inst)
@@ -1896,9 +2374,25 @@ BufferAtomicMaxF32Mubuf::BufferAtomicMaxF32Mubuf(const MachineInst *inst)
 }
 
 void BufferAtomicMaxF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled buffer_atomic variant (BUFFER_ATOMIC_MAX_F32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)

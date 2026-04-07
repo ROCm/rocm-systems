@@ -999,6 +999,8 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'XOR': ('xor', 1),
     'INC': ('inc', 1),
     'DEC': ('dec', 1),
+    'CSUB': ('sub', 1),
+    'SUB_CLAMP': ('sub', 1),
     # Floating-point atomics.
     'ADD_F32': ('fadd', 1),
     'ADD_F64': ('fadd', 2),
@@ -1006,6 +1008,17 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'MAX_F64': ('fmax', 2),
     'FMIN': ('fmin', 1),
     'FMAX': ('fmax', 1),
+    'MIN_F32': ('fmin', 1), 'MAX_F32': ('fmax', 1),
+    'MIN_F64': ('fmin', 2), 'MAX_F64': ('fmax', 2),
+    'MIN_NUM_F32': ('fmin', 1), 'MAX_NUM_F32': ('fmax', 1),
+    'MIN_NUM_F64': ('fmin', 2), 'MAX_NUM_F64': ('fmax', 2),
+    'COND_SUB': ('sub', 1),
+    'ORDERED_ADD': ('add', 2),
+    # RDNA3+ typed MIN/MAX (suffix stripped from the full instruction name).
+    'MIN_I32': ('smin', 1), 'MIN_U32': ('umin', 1),
+    'MAX_I32': ('smax', 1), 'MAX_U32': ('umax', 1),
+    'MIN_I64': ('smin', 2), 'MIN_U64': ('umin', 2),
+    'MAX_I64': ('smax', 2), 'MAX_U64': ('umax', 2),
     # Packed FP atomics (treated as 32-bit fadd for now).
     'PK_ADD_F16': ('fadd', 1),
     'PK_ADD_BF16': ('fadd', 1),
@@ -1015,14 +1028,23 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
     """Derive semantics for a FLAT (Flat/Global/Scratch memory) instruction."""
     upper = name.upper()
     if '_ATOMIC_' in upper:
-        # Extract the operation suffix after _ATOMIC_ (strip prefix and _X2 suffix).
+        # Extract the operation suffix after _ATOMIC_.
+        # Strip _X2 (64-bit variant) and type suffixes (_B32, _U32, _I32, etc.).
         for prefix in ('FLAT_ATOMIC_', 'GLOBAL_ATOMIC_', 'SCRATCH_ATOMIC_'):
             if upper.startswith(prefix):
                 suffix = upper[len(prefix):]
                 is_x2 = suffix.endswith('_X2')
                 if is_x2:
                     suffix = suffix[:-3]
+                # Try exact match first (handles ADD_F32, PK_ADD_F16, etc.).
                 info = _FLAT_ATOMIC_OPS.get(suffix)
+                if not info:
+                    # Strip type suffix (_B32, _U32, _I32, _F32, _B64, etc.).
+                    for tsuf in ('_B32', '_U32', '_I32', '_F32', '_B64',
+                                 '_U64', '_I64', '_F64'):
+                        if suffix.endswith(tsuf):
+                            info = _FLAT_ATOMIC_OPS.get(suffix[:len(suffix) - len(tsuf)])
+                            break
                 if info:
                     op, data_dw = info
                     elem_size = 8 if is_x2 else 4
@@ -1070,6 +1092,12 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                 if is_x2:
                     suffix = suffix[:-3]
                 info = _FLAT_ATOMIC_OPS.get(suffix)
+                if not info:
+                    for tsuf in ('_B32', '_U32', '_I32', '_F32', '_B64',
+                                 '_U64', '_I64', '_F64'):
+                        if suffix.endswith(tsuf):
+                            info = _FLAT_ATOMIC_OPS.get(suffix[:len(suffix) - len(tsuf)])
+                            break
                 if info:
                     op, data_dw = info
                     elem_size = 8 if is_x2 else 4
@@ -1152,31 +1180,59 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                                             num_elems=ne, sign_extend=bool(se))
         return InstructionSemantics(name, 'ds_read', elem_size=4, num_elems=1)
     # DS atomic operations — extract the specific op and data width.
+    # RTN variants use the same operation; the codegen sets is_load based
+    # on whether vdst is an explicit destination (num_dst_ > 0).
     _DS_ATOMIC_MAP: dict[str, tuple[str, int, int]] = {
         # keyword -> (operation, elem_size, data_dwords)
         '_ADD_U32': ('add', 4, 1), '_ADD_U64': ('add', 8, 2),
+        '_ADD_RTN_U32': ('add', 4, 1), '_ADD_RTN_U64': ('add', 8, 2),
         '_SUB_U32': ('sub', 4, 1), '_SUB_U64': ('sub', 8, 2),
+        '_SUB_RTN_U32': ('sub', 4, 1), '_SUB_RTN_U64': ('sub', 8, 2),
         '_RSUB_U32': ('sub', 4, 1), '_RSUB_U64': ('sub', 8, 2),
+        '_RSUB_RTN_U32': ('sub', 4, 1), '_RSUB_RTN_U64': ('sub', 8, 2),
         '_MIN_I32': ('smin', 4, 1), '_MIN_I64': ('smin', 8, 2),
+        '_MIN_RTN_I32': ('smin', 4, 1), '_MIN_RTN_I64': ('smin', 8, 2),
         '_MIN_U32': ('umin', 4, 1), '_MIN_U64': ('umin', 8, 2),
+        '_MIN_RTN_U32': ('umin', 4, 1), '_MIN_RTN_U64': ('umin', 8, 2),
         '_MAX_I32': ('smax', 4, 1), '_MAX_I64': ('smax', 8, 2),
+        '_MAX_RTN_I32': ('smax', 4, 1), '_MAX_RTN_I64': ('smax', 8, 2),
         '_MAX_U32': ('umax', 4, 1), '_MAX_U64': ('umax', 8, 2),
+        '_MAX_RTN_U32': ('umax', 4, 1), '_MAX_RTN_U64': ('umax', 8, 2),
         '_AND_B32': ('and', 4, 1), '_AND_B64': ('and', 8, 2),
+        '_AND_RTN_B32': ('and', 4, 1), '_AND_RTN_B64': ('and', 8, 2),
         '_OR_B32': ('or', 4, 1), '_OR_B64': ('or', 8, 2),
+        '_OR_RTN_B32': ('or', 4, 1), '_OR_RTN_B64': ('or', 8, 2),
         '_XOR_B32': ('xor', 4, 1), '_XOR_B64': ('xor', 8, 2),
+        '_XOR_RTN_B32': ('xor', 4, 1), '_XOR_RTN_B64': ('xor', 8, 2),
         '_INC_U32': ('inc', 4, 1), '_INC_U64': ('inc', 8, 2),
+        '_INC_RTN_U32': ('inc', 4, 1), '_INC_RTN_U64': ('inc', 8, 2),
         '_DEC_U32': ('dec', 4, 1), '_DEC_U64': ('dec', 8, 2),
+        '_DEC_RTN_U32': ('dec', 4, 1), '_DEC_RTN_U64': ('dec', 8, 2),
         '_SWAP_B32': ('swap', 4, 1), '_SWAP_B64': ('swap', 8, 2),
+        '_SWAP_RTN_B32': ('swap', 4, 1), '_SWAP_RTN_B64': ('swap', 8, 2),
         '_WRXCHG_RTN_B32': ('swap', 4, 1), '_WRXCHG_RTN_B64': ('swap', 8, 2),
         '_WRXCHG2_RTN_B32': ('swap', 4, 1), '_WRXCHG2_RTN_B64': ('swap', 8, 2),
         '_STOREXCHG_RTN_B32': ('swap', 4, 1), '_STOREXCHG_RTN_B64': ('swap', 8, 2),
         '_CMPST_B32': ('cmpswap', 4, 2), '_CMPST_B64': ('cmpswap', 8, 4),
         '_CMPST_RTN_B32': ('cmpswap', 4, 2), '_CMPST_RTN_B64': ('cmpswap', 8, 4),
+        '_CMPST_F32': ('cmpswap', 4, 2), '_CMPST_F64': ('cmpswap', 8, 4),
+        '_CMPST_RTN_F32': ('cmpswap', 4, 2), '_CMPST_RTN_F64': ('cmpswap', 8, 4),
         '_CMPSTORE_B32': ('cmpswap', 4, 2), '_CMPSTORE_B64': ('cmpswap', 8, 4),
         '_CMPSTORE_RTN_B32': ('cmpswap', 4, 2), '_CMPSTORE_RTN_B64': ('cmpswap', 8, 4),
-        '_ADD_F32': ('fadd', 4, 1),
+        '_CONDXCHG32_RTN_B64': ('cmpswap', 8, 4),
+        '_ADD_F32': ('fadd', 4, 1), '_ADD_RTN_F32': ('fadd', 4, 1),
+        '_ADD_F64': ('fadd', 8, 2), '_ADD_RTN_F64': ('fadd', 8, 2),
         '_MIN_F32': ('fmin', 4, 1), '_MIN_F64': ('fmin', 8, 2),
+        '_MIN_RTN_F32': ('fmin', 4, 1), '_MIN_RTN_F64': ('fmin', 8, 2),
         '_MAX_F32': ('fmax', 4, 1), '_MAX_F64': ('fmax', 8, 2),
+        '_MAX_RTN_F32': ('fmax', 4, 1), '_MAX_RTN_F64': ('fmax', 8, 2),
+        '_MIN_NUM_F32': ('fmin', 4, 1), '_MIN_NUM_RTN_F32': ('fmin', 4, 1),
+        '_MAX_NUM_F32': ('fmax', 4, 1), '_MAX_NUM_RTN_F32': ('fmax', 4, 1),
+        '_MIN_NUM_F64': ('fmin', 8, 2), '_MIN_NUM_RTN_F64': ('fmin', 8, 2),
+        '_MAX_NUM_F64': ('fmax', 8, 2), '_MAX_NUM_RTN_F64': ('fmax', 8, 2),
+        '_SUB_CLAMP_U32': ('sub', 4, 1), '_SUB_CLAMP_RTN_U32': ('sub', 4, 1),
+        '_PK_ADD_F16': ('fadd', 4, 1), '_PK_ADD_RTN_F16': ('fadd', 4, 1),
+        '_PK_ADD_BF16': ('fadd', 4, 1), '_PK_ADD_RTN_BF16': ('fadd', 4, 1),
     }
     for suffix, (op, esz, dw) in _DS_ATOMIC_MAP.items():
         if suffix in upper:
