@@ -418,9 +418,14 @@ def pc_sampling_prof(
         )
     else:
         profiler_options_list = cast(list[str], profiler_options)
-        app_cmd_with_separator = profiler_options_list[
-            profiler_options_list.index("--") :
-        ]
+        try:
+            app_cmd_with_separator = profiler_options_list[
+                profiler_options_list.index("--") :
+            ]
+        except ValueError:
+            console_error("PC sampling failed.")
+            return
+
         options = [
             "--kernel-trace",
             "--pc-sampling-beta-enabled",

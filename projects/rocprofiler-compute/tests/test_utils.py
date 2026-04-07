@@ -5701,13 +5701,10 @@ def test_pc_sampling_prof_subprocess_fails(
         interval = 5000
         workload_dir = str(tmp_path)
         options = ["another_app"]
-        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
-
-        mock_capture_subprocess.return_value = (False, "Error output from subprocess")
 
         utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
-        mock_capture_subprocess.assert_called_once()
+        mock_capture_subprocess.assert_not_called()
         mock_console_error.assert_called_once_with("PC sampling failed.")
 
     mock_capture_subprocess.reset_mock()
@@ -5779,6 +5776,30 @@ def test_pc_sampling_prof_empty_appcmd(
 
         assert mock_capture_subprocess.called
         assert mock_capture_subprocess.call_args[0][0] == ""
+        mock_console_error.assert_not_called()
+
+
+@mock.patch("utils.utils_profile.capture_subprocess_output")
+@mock.patch("utils.utils_profile.console_error")
+@mock.patch("utils.utils_profile.console_debug")
+def test_pc_sampling_prof_multiarg_appcmd(
+    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
+):
+    """All arguments after '--' in profiler_options must appear in the subprocess call."""
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
+        method = "host_trap"
+        interval = 100
+        workload_dir = str(tmp_path)
+        options = ["--kernel-trace", "--", "./myapp", "arg1", "arg2"]
+
+        mock_capture_subprocess.return_value = (True, "Success")
+
+        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
+
+        assert mock_capture_subprocess.called
+        options_list = mock_capture_subprocess.call_args[0][0]
+        separator_index = options_list.index("--")
+        assert options_list[separator_index:] == ["--", "./myapp", "arg1", "arg2"]
         mock_console_error.assert_not_called()
 
 
