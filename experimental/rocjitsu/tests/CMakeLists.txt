@@ -22,8 +22,6 @@ set(RJ_OBJECT_LIBS
 
 # --- Unit / integration test suite ---
 
-enable_testing()
-
 add_executable(rocjitsu_tests
     rvsim_test.cpp
     amdgpu_vm_test.cpp
@@ -50,8 +48,12 @@ rj_configure_target(scaling_test TEST)
 # --- rocminfo test (requires rocminfo binary + HSA runtime + LD_PRELOAD) ---
 # Spawns rocminfo as a subprocess against the simulated GPU and validates output.
 
-find_program(ROCMINFO_EXECUTABLE rocminfo PATHS /opt/rocm/bin ENV ROCM_PATH PATH_SUFFIXES bin)
-if(ROCMINFO_EXECUTABLE AND HSA_RUNTIME64)
+find_program(ROCMINFO_EXECUTABLE NAMES rocminfo
+    HINTS ${CMAKE_SOURCE_DIR}/.venv ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES bin
+    DOC "Path to the rocminfo executable"
+)
+if(ROCMINFO_EXECUTABLE)
     add_executable(rocminfo_test rocminfo_test.cpp)
     target_compile_definitions(rocminfo_test PRIVATE
         ROCMINFO_PATH="${ROCMINFO_EXECUTABLE}")
@@ -87,6 +89,6 @@ if(ROCMINFO_EXECUTABLE AND HSA_RUNTIME64)
             TIMEOUT 30)
     message(STATUS "rocminfo test enabled (found ${ROCMINFO_EXECUTABLE})")
 else()
-    message(STATUS "rocminfo test disabled (rocminfo or libhsa-runtime64 not found)")
+    message(STATUS "rocminfo test disabled (rocminfo not found)")
 endif()
 

@@ -5,6 +5,8 @@ cmake_minimum_required(VERSION 3.28)
 
 project(rocm_jit_suite)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
@@ -214,4 +216,6 @@ if(RJ_BUILD_GUI)
 endif()
 
 # Tests and scaling tools.
-add_subdirectory(tests)
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()
