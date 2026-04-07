@@ -1,11 +1,11 @@
 System Speed-of-Light:
   VALU FLOPs (FP16):
-    plain: "Sixteen-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.\nTheoretical peak uses packed FP16 at 2× the FP32 per-CU rate:\nmax_sclk (MHz) × $cu_per_gpu × 256 / 1000 GFLOP/s.\nPublic RDNA 3 summaries (e.g. Wikipedia \"RDNA 3\") cite dual-CU WGPs, dual-issue\nVALU, and chip FP16 peak ~2× FP32; this formula is the same 2× relationship at\nthe per-CU model used here. $cu_per_gpu is total CU count, not WGP (1 WGP = 2 CUs on RDNA 3)."
-    rst: "Sixteen-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.\nTheoretical peak uses packed FP16 at 2× the FP32 per-CU rate:\nmax_sclk (MHz) × $cu_per_gpu × 256 / 1000 GFLOP/s.\nPublic RDNA 3 summaries (e.g. Wikipedia \"RDNA 3\") cite dual-CU WGPs, dual-issue\nVALU, and chip FP16 peak ~2× FP32; this formula is the same 2× relationship at\nthe per-CU model used here. $cu_per_gpu is total CU count, not WGP (1 WGP = 2 CUs on RDNA 3)."
+    plain: "Sixteen-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.\nTheoretical peak uses packed FP16 at 2× the FP32 per-CU rate:\nmax_sclk (MHz) × $cu_per_gpu × 256 / 1000 GFLOP/s.\nPublic RDNA 3.5 summaries cite dual-CU WGPs, dual-issue\nVALU, and chip FP16 peak ~2× FP32; this formula is the same 2× relationship at\nthe per-CU model used here. $cu_per_gpu is total CU count, not WGP (1 WGP = 2 CUs on RDNA 3.5)."
+    rst: "Sixteen-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.\nTheoretical peak uses packed FP16 at 2× the FP32 per-CU rate:\nmax_sclk (MHz) × $cu_per_gpu × 256 / 1000 GFLOP/s.\nPublic RDNA 3.5 summaries cite dual-CU WGPs, dual-issue\nVALU, and chip FP16 peak ~2× FP32; this formula is the same 2× relationship at\nthe per-CU model used here. $cu_per_gpu is total CU count, not WGP (1 WGP = 2 CUs on RDNA 3.5)."
     unit: GFLOP/s
   VALU FLOPs (FP32):
-    plain: "Thirty-two-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.\nTheoretical peak: max_sclk (MHz) × $cu_per_gpu × 128 / 1000 GFLOP/s\n(wave64 / dual-issue VALU class used for Navi3-style parts).\n$cu_per_gpu is the total number of Compute Units from system info, not WGP count\n(on RDNA 3, one WGP pairs two CUs)."
-    rst: "Thirty-two-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.\nTheoretical peak: max_sclk (MHz) × $cu_per_gpu × 128 / 1000 GFLOP/s\n(wave64 / dual-issue VALU class used for Navi3-style parts).\n$cu_per_gpu is the total number of Compute Units from system info, not WGP count\n(on RDNA 3, one WGP pairs two CUs)."
+    plain: "Thirty-two-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.\nTheoretical peak: max_sclk (MHz) × $cu_per_gpu × 128 / 1000 GFLOP/s\n(wave64 / dual-issue VALU class used for Navi3-style parts).\n$cu_per_gpu is the total number of Compute Units from system info, not WGP count\n(on RDNA 3.5, one WGP pairs two CUs)."
+    rst: "Thirty-two-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.\nTheoretical peak: max_sclk (MHz) × $cu_per_gpu × 128 / 1000 GFLOP/s\n(wave64 / dual-issue VALU class used for Navi3-style parts).\n$cu_per_gpu is the total number of Compute Units from system info, not WGP count\n(on RDNA 3.5, one WGP pairs two CUs)."
     unit: GFLOP/s
   IPC:
     plain: "Instructions Per Cycle — ratio of instructions executed over busy cycles.\nCalculated as (Total Instructions - Internal Instructions) / Busy Cycles.\nHigher IPC indicates better instruction throughput."
@@ -20,12 +20,12 @@ System Speed-of-Light:
     rst: "GL2C last-level cache hit rate (same as Memory Chart / GL2C panel).\nFormula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum) when the denominator is non-zero."
     unit: Percent
   L2-Fabric Read BW:
-    plain: "GL2C/EA read bandwidth from sized request counters (SPG GL2C_PERF_SEL_EA_RDREQ_32B/64B/96B/128B):\n32·GL2C_EA_RDREQ_32B_sum + 64·GL2C_EA_RDREQ_64B_sum + 96·GL2C_EA_RDREQ_96B_sum + 128·GL2C_EA_RDREQ_128B_sum,\ndivided by kernel wall time. Sums over GL2C instances. Peak / % of peak are N/A (no sysinfo memory BW)."
-    rst: "GL2C/EA read bandwidth from sized request counters (SPG GL2C_PERF_SEL_EA_RDREQ_32B/64B/96B/128B):\n32·GL2C_EA_RDREQ_32B_sum + 64·GL2C_EA_RDREQ_64B_sum + 96·GL2C_EA_RDREQ_96B_sum + 128·GL2C_EA_RDREQ_128B_sum,\ndivided by kernel wall time. Sums over GL2C instances. Peak / % of peak are N/A (no sysinfo memory BW)."
+    plain: "GL2C/EA read bandwidth from sized request counters (gl2c_perf_sel_ea_rdreq_32b/64B/96B/128B):\n32·GL2C_EA_RDREQ_32B_sum + 64·GL2C_EA_RDREQ_64B_sum + 96·GL2C_EA_RDREQ_96B_sum + 128·GL2C_EA_RDREQ_128B_sum,\ndivided by kernel wall time. Sums over GL2C instances. Peak / % of peak are N/A (no sysinfo memory BW)."
+    rst: "GL2C/EA read bandwidth from sized request counters (gl2c_perf_sel_ea_rdreq_32b/64B/96B/128B):\n32·GL2C_EA_RDREQ_32B_sum + 64·GL2C_EA_RDREQ_64B_sum + 96·GL2C_EA_RDREQ_96B_sum + 128·GL2C_EA_RDREQ_128B_sum,\ndivided by kernel wall time. Sums over GL2C instances. Peak / % of peak are N/A (no sysinfo memory BW)."
     unit: Bytes/s
   L2-Fabric Write BW:
-    plain: "GL2C/EA write bandwidth: GL2C_MC_WRREQ_sum is the EA write transaction count (32 B or 64 B per txn; SPG names this\npath MC_WRREQ). Bandwidth = 32·(GL2C_MC_WRREQ_sum − GL2C_EA_WRREQ_64B_sum) + 64·GL2C_EA_WRREQ_64B_sum, over time.\nPeak / % of peak are N/A (no sysinfo memory BW)."
-    rst: "GL2C/EA write bandwidth: GL2C_MC_WRREQ_sum is the EA write transaction count (32 B or 64 B per txn; SPG names this\npath MC_WRREQ). Bandwidth = 32·(GL2C_MC_WRREQ_sum − GL2C_EA_WRREQ_64B_sum) + 64·GL2C_EA_WRREQ_64B_sum, over time.\nPeak / % of peak are N/A (no sysinfo memory BW)."
+    plain: "GL2C/EA write bandwidth: GL2C_MC_WRREQ_sum is the EA write transaction count (32 B or 64 B per txn; the\nspec names this path MC_WRREQ). Bandwidth = 32·(GL2C_MC_WRREQ_sum − GL2C_EA_WRREQ_64B_sum) + 64·GL2C_EA_WRREQ_64B_sum, over time.\nPeak / % of peak are N/A (no sysinfo memory BW)."
+    rst: "GL2C/EA write bandwidth: GL2C_MC_WRREQ_sum is the EA write transaction count (32 B or 64 B per txn; the\nspec names this path MC_WRREQ). Bandwidth = 32·(GL2C_MC_WRREQ_sum − GL2C_EA_WRREQ_64B_sum) + 64·GL2C_EA_WRREQ_64B_sum, over time.\nPeak / % of peak are N/A (no sysinfo memory BW)."
     unit: Bytes/s
   LDS Bank Conflicts:
     plain: Number of LDS bank conflicts. Peak / % of Peak are N/A for raw counts.
@@ -270,48 +270,6 @@ Memory chart — GCEA to System Memory:
     plain: Valid write-return events on the GCEA return path per normalization unit (GCEA_WRET_VLD_sum / $denom).
     rst: Valid write-return events on the GCEA return path per normalization unit (GCEA_WRET_VLD_sum / $denom).
     unit: Count per Normalization Unit
-Memory chart — TCP-GL1 Interface:
-  TCP-GL1 Read Requests:
-    plain: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
-    rst: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
-    unit: Requests per Normalization Unit
-  TCP-GL1 Write Requests:
-    plain: Write-related requests from TCP toward GL1C, per normalization unit.
-    rst: Write-related requests from TCP toward GL1C, per normalization unit.
-    unit: Requests per Normalization Unit
-  TCP-GL1 Read Bandwidth:
-    plain: Bytes per second for TCP→GL1 read traffic (64 B per TCP_GL1_REQ_READ event).
-    rst: Bytes per second for TCP→GL1 read traffic (64 B per TCP_GL1_REQ_READ event).
-    unit: Bytes/s
-  TCP-GL1 Write Bandwidth:
-    plain: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
-    rst: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
-    unit: Bytes/s
-Memory chart — GL1C-GL2 Interface:
-  GL1-GL2 Read Requests:
-    plain: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
-    rst: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
-    unit: Requests per Normalization Unit
-  GL1-GL2 Write Requests:
-    plain: Write requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_WRITE_sum).
-    rst: Write requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_WRITE_sum).
-    unit: Requests per Normalization Unit
-  GL1-GL2 Read Bandwidth:
-    plain: Bytes per second on the GL1C→GL2C read interface (32/64/128 B request bins).
-    rst: Bytes per second on the GL1C→GL2C read interface (32/64/128 B request bins).
-    unit: Bytes/s
-  GL1-GL2 Write Bandwidth:
-    plain: Bytes per second on the GL1C→GL2C write interface (32/64 B request bins).
-    rst: Bytes per second on the GL1C→GL2C write interface (32/64 B request bins).
-    unit: Bytes/s
-  GL1-GL2 Read Latency:
-    plain: "Average cycles from GL1C read request to response (GL1C_GL2_REQ_READ_LATENCY_sum /\nGL1C_GL2_REQ_READ_sum) when the denominator is non-zero."
-    rst: "Average cycles from GL1C read request to response (GL1C_GL2_REQ_READ_LATENCY_sum /\nGL1C_GL2_REQ_READ_sum) when the denominator is non-zero."
-    unit: Cycles
-  GL1-GL2 Write Latency:
-    plain: "Average cycles from GL1C write request to completion (GL1C_GL2_REQ_WRITE_LATENCY_sum /\nGL1C_GL2_REQ_WRITE_sum) when the denominator is non-zero."
-    rst: "Average cycles from GL1C write request to completion (GL1C_GL2_REQ_WRITE_LATENCY_sum /\nGL1C_GL2_REQ_WRITE_sum) when the denominator is non-zero."
-    unit: Cycles
 Roofline Performance Rates:
   VALU FLOPs (F16):
     plain: The total 16-bit floating-point operations executed per second on the VALU. Theoretical FP16 throughput is 2× the FP32 FMA peak (packed half on Navi3 / RDNA3-class VALU). This is presented with the value of the peak empirical F16 FLOPs achievable on the specific accelerator.
@@ -386,20 +344,20 @@ CPC Interface Utilization:
     unit: Percent
 MEC Stall Cycles:
   ME1 Stall on RCIU Ready:
-    plain: "Cycles MEC Engine 1 was stalled waiting for RCIU (Register Cache Interface\nUnit) to be ready (CPC_ME1_STALL_WAIT_ON_RCIU_READY)."
-    rst: "Cycles MEC Engine 1 was stalled waiting for RCIU (Register Cache Interface\nUnit) to be ready (CPC_ME1_STALL_WAIT_ON_RCIU_READY)."
+    plain: "Cycles ME1 was stalled waiting for RCIU (Register Cache Interface\nUnit) to be ready (CPC_ME1_STALL_WAIT_ON_RCIU_READY)."
+    rst: "Cycles ME1 was stalled waiting for RCIU (Register Cache Interface\nUnit) to be ready (CPC_ME1_STALL_WAIT_ON_RCIU_READY)."
     unit: Cycles per Normalization Unit
   ME1 Stall on Memory Read:
-    plain: "Cycles MEC Engine 1 was stalled waiting for memory read completion\n(CPC_ME1_STALL_WAIT_ON_MEM_READ)."
-    rst: "Cycles MEC Engine 1 was stalled waiting for memory read completion\n(CPC_ME1_STALL_WAIT_ON_MEM_READ)."
+    plain: "Cycles ME1 was stalled waiting for memory read completion\n(CPC_ME1_STALL_WAIT_ON_MEM_READ)."
+    rst: "Cycles ME1 was stalled waiting for memory read completion\n(CPC_ME1_STALL_WAIT_ON_MEM_READ)."
     unit: Cycles per Normalization Unit
   ME1 Stall on Memory Write:
-    plain: "Cycles MEC Engine 1 was stalled waiting for memory write completion\n(CPC_ME1_STALL_WAIT_ON_MEM_WRITE)."
-    rst: "Cycles MEC Engine 1 was stalled waiting for memory write completion\n(CPC_ME1_STALL_WAIT_ON_MEM_WRITE)."
+    plain: "Cycles ME1 was stalled waiting for memory write completion\n(CPC_ME1_STALL_WAIT_ON_MEM_WRITE)."
+    rst: "Cycles ME1 was stalled waiting for memory write completion\n(CPC_ME1_STALL_WAIT_ON_MEM_WRITE)."
     unit: Cycles per Normalization Unit
   ME1 Stall on ROQ Data:
-    plain: "Cycles MEC Engine 1 was stalled waiting for data from the Ring Output Queue\n(CPC_ME1_STALL_ON_DATA_FROM_ROQ)."
-    rst: "Cycles MEC Engine 1 was stalled waiting for data from the Ring Output Queue\n(CPC_ME1_STALL_ON_DATA_FROM_ROQ)."
+    plain: "Cycles ME1 was stalled waiting for data from the Ring Output Queue\n(CPC_ME1_STALL_ON_DATA_FROM_ROQ)."
+    rst: "Cycles ME1 was stalled waiting for data from the Ring Output Queue\n(CPC_ME1_STALL_ON_DATA_FROM_ROQ)."
     unit: Cycles per Normalization Unit
 CPC Memory Requests:
   TCIU Read Requests:
@@ -447,8 +405,8 @@ Wave Dispatch Statistics:
     unit: Waves/cycle
 WGP Utilization:
   WGP Utilization:
-    plain: "To be fixed: Disabled — Avg / Min / Max are None until the utilization formula\nis validated for gfx1151. Intended meaning: WGP busy as a percent of GRBM\nGUI-active cycles (100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum when\nGRBM_GUI_ACTIVE_sum != 0). RDNA3.5 WGPs pair 2 CUs, each with 2 SIMD32 units."
-    rst: "To be fixed: Disabled — Avg / Min / Max are None until the utilization formula\nis validated for gfx1151. Intended meaning: WGP busy as a percent of GRBM\nGUI-active cycles (100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum when\nGRBM_GUI_ACTIVE_sum != 0). RDNA3.5 WGPs pair 2 CUs, each with 2 SIMD32 units."
+    plain: "WGP busy as a percent of GRBM GUI-active cycles. RDNA3.5 WGPs pair 2 CUs,\neach with 2 SIMD32 units."
+    rst: "WGP busy as a percent of GRBM GUI-active cycles. RDNA3.5 WGPs pair 2 CUs,\neach with 2 SIMD32 units."
     unit: Percent
 Wave Life:
   Wave Life:
@@ -528,64 +486,9 @@ WGP Scalar Data Cache:
     plain: "Scalar data cache hit percentage: 100 × SQC_DCACHE_HITS / (SQC_DCACHE_HITS +\nSQC_DCACHE_MISSES). Same rationale as Icache (HITS vs REQ can exceed 100%)."
     rst: "Scalar data cache hit percentage: 100 × SQC_DCACHE_HITS / (SQC_DCACHE_HITS +\nSQC_DCACHE_MISSES). Same rationale as Icache (HITS vs REQ can exceed 100%)."
     unit: Percent
-Wavefront Launch Stats:
-  Grid Size:
-    plain: "Number of work-items in the dispatch grid for the kernel (Grid_Size), averaged/min/maxed\nacross samples. Defines total parallel work launched."
-    rst: "Number of work-items in the dispatch grid for the kernel (Grid_Size), averaged/min/maxed\nacross samples. Defines total parallel work launched."
-    unit: Work-items
-  Workgroup Size:
-    plain: "Number of work-items per workgroup (Workgroup_Size). Together with grid size and resource\nlimits it determines wave/wavefront count."
-    rst: "Number of work-items per workgroup (Workgroup_Size). Together with grid size and resource\nlimits it determines wave/wavefront count."
-    unit: Work-items
-  VGPRs:
-    plain: "Vector general-purpose registers allocated per wave (Arch_VGPR). Limits occupancy when\nthe per-CU VGPR capacity is exhausted."
-    rst: "Vector general-purpose registers allocated per wave (Arch_VGPR). Limits occupancy when\nthe per-CU VGPR capacity is exhausted."
-    unit: Registers
-  SGPRs:
-    plain: "Scalar general-purpose registers allocated for the wave (SGPR). Uniform data and\nexecution state live in the scalar path."
-    rst: "Scalar general-purpose registers allocated for the wave (SGPR). Uniform data and\nexecution state live in the scalar path."
-    unit: Registers
-  LDS Allocation:
-    plain: "Local Data Share bytes reserved per workgroup (LDS_Per_Workgroup). High LDS per group\nreduces how many workgroups can run concurrently on a CU/WGP."
-    rst: "Local Data Share bytes reserved per workgroup (LDS_Per_Workgroup). High LDS per group\nreduces how many workgroups can run concurrently on a CU/WGP."
-    unit: Bytes
-  Scratch Allocation:
-    plain: "Scratch (private) memory bytes per work-item (Scratch_Per_Workitem). Backed by off-chip\nmemory when spill/stack exceeds limits."
-    rst: "Scratch (private) memory bytes per work-item (Scratch_Per_Workitem). Backed by off-chip\nmemory when spill/stack exceeds limits."
-    unit: Bytes per Work-item
-Wave Dispatch:
-  Dispatched Waves:
-    plain: "Number of shader waves launched (SQ_WAVES_sum), averaged/min/maxed. Each wave is a\nSIMD execution entity (typically wave32 on this configuration)."
-    rst: "Number of shader waves launched (SQ_WAVES_sum), averaged/min/maxed. Each wave is a\nSIMD execution entity (typically wave32 on this configuration)."
-    unit: Waves
-  Dispatched Threads:
-    plain: Number of work-items launched as attributed in SQ_ITEMS_sum (threads), averaged/min/maxed.
-    rst: Number of work-items launched as attributed in SQ_ITEMS_sum (threads), averaged/min/maxed.
-    unit: Threads
-VMEM Instruction Mix:
-  Instructions - VMEM Flat:
-    plain: "Flat-addressing vector memory instructions (SQ_INSTS_FLAT) per normalization unit.\nFlat can resolve to global, scratch, or LDS depending on address."
-    rst: "Flat-addressing vector memory instructions (SQ_INSTS_FLAT) per normalization unit.\nFlat can resolve to global, scratch, or LDS depending on address."
-    unit: Count per Normalization Unit
-  Instructions - TEX Load:
-    plain: Texture / image load instructions (SQ_INSTS_TEX_LOAD) per normalization unit.
-    rst: Texture / image load instructions (SQ_INSTS_TEX_LOAD) per normalization unit.
-    unit: Count per Normalization Unit
-  Instructions - TEX Store:
-    plain: Texture / image store instructions (SQ_INSTS_TEX_STORE) per normalization unit.
-    rst: Texture / image store instructions (SQ_INSTS_TEX_STORE) per normalization unit.
-    unit: Count per Normalization Unit
-  Instructions - Flat Load:
-    plain: Flat load instructions (SQ_INSTS_FLAT_LOAD) per normalization unit.
-    rst: Flat load instructions (SQ_INSTS_FLAT_LOAD) per normalization unit.
-    unit: Count per Normalization Unit
-  Instructions - Flat Store:
-    plain: Flat store instructions (SQ_INSTS_FLAT_STORE) per normalization unit.
-    rst: Flat store instructions (SQ_INSTS_FLAT_STORE) per normalization unit.
-    unit: Count per Normalization Unit
 TCP Utilization:
   TCP Busy:
-    plain: "Estimated TCP utilization: 100 × TCP_GATE_EN2 / (GRBM_GUI_ACTIVE × NUM_TCP), with\nNUM_TCP = max(1, ⌊$cu_per_gpu / 2⌋) (one TCP per WGP, 2 CUs per WGP on RDNA3.5).\nUses aggregate TCP_GATE_EN2 (not TCP_GATE_EN2_sum). GRBM_GUI_ACTIVE is scaled by\nNUM_TCP so the denominator matches multi-TCP capacity. GATE_EN2 is TCP_PERF_SEL_GATE_EN2\n(core clocks on, not windowed). If only per-instance counter sums (typically _sum\ncolumns) are available, align the numerator/denominator with your CSV layout."
+    plain: "Estimated TCP utilization: 100 × TCP_GATE_EN2 / (GRBM_GUI_ACTIVE × NUM_TCP), with\nNUM_TCP = max(1, ⌊$cu_per_gpu / 2⌋) (one TCP per WGP, 2 CUs per WGP on RDNA3.5).\nUses aggregate TCP_GATE_EN2 (not TCP_GATE_EN2_sum). GRBM_GUI_ACTIVE is scaled by\nNUM_TCP so the denominator matches multi-TCP capacity. GATE_EN2 is tcp_perf_sel_gate_en2\n(core clocks on, not windowed). If only per-instance *_sum is available, align the\nnumerator/denominator with your CSV layout."
     rst: "Estimated TCP utilization: 100 × TCP_GATE_EN2 / (GRBM_GUI_ACTIVE × NUM_TCP), with\nNUM_TCP = max(1, ⌊$cu_per_gpu / 2⌋) (one TCP per WGP, 2 CUs per WGP on RDNA3.5).\nUses aggregate TCP_GATE_EN2 (not TCP_GATE_EN2_sum). GRBM_GUI_ACTIVE is scaled by\nNUM_TCP so the denominator matches multi-TCP capacity. GATE_EN2 is TCP_PERF_SEL_GATE_EN2\n(core clocks on, not windowed). If only per-instance counter sums (typically ``_sum``\ncolumns) are available, align the numerator/denominator with your CSV layout."
     unit: Percent
 TCP Request Statistics:
@@ -720,12 +623,12 @@ GL2C Request Statistics:
     rst: Number of atomic requests at the GL2C cache (GL2C_ATOMIC).
     unit: Count per Normalization Unit
   EA Read Requests (DRAM):
-    plain: "Number of GL2C/EA read requests destined for DRAM (memory controller), per SPG\nGL2C_PERF_SEL_EA_RDREQ_DRAM (GL2C_EA_RDREQ_DRAM), summed over GL2C instances."
-    rst: "Number of GL2C/EA read requests destined for DRAM (memory controller), per SPG\nGL2C_PERF_SEL_EA_RDREQ_DRAM (GL2C_EA_RDREQ_DRAM), summed over GL2C instances."
+    plain: "Number of GL2C/EA read requests destined for DRAM (memory controller).\ngl2c_perf_sel_ea_rdreq_dram (GL2C_EA_RDREQ_DRAM). Reported values are summed over GL2C instances."
+    rst: "Number of GL2C/EA read requests destined for DRAM (memory controller).\ngl2c_perf_sel_ea_rdreq_dram (GL2C_EA_RDREQ_DRAM). Reported values are summed over GL2C instances."
     unit: Count per Normalization Unit
   EA Write Requests (DRAM):
-    plain: "Number of GL2C/EA write requests destined for DRAM (memory controller), per SPG\nGL2C_PERF_SEL_EA_WRREQ_DRAM (GL2C_EA_WRREQ_DRAM), summed over GL2C instances."
-    rst: "Number of GL2C/EA write requests destined for DRAM (memory controller), per SPG\nGL2C_PERF_SEL_EA_WRREQ_DRAM (GL2C_EA_WRREQ_DRAM), summed over GL2C instances."
+    plain: "Number of GL2C/EA write requests destined for DRAM (memory controller).\ngl2c_perf_sel_ea_wrreq_dram (GL2C_EA_WRREQ_DRAM). Reported values are summed over GL2C instances."
+    rst: "Number of GL2C/EA write requests destined for DRAM (memory controller).\ngl2c_perf_sel_ea_wrreq_dram (GL2C_EA_WRREQ_DRAM). Reported values are summed over GL2C instances."
     unit: Count per Normalization Unit
 GL2C Bandwidth:
   GL2C Read BW:
@@ -813,8 +716,109 @@ GPU Utilization:
     plain: "Percentage of GUI-active cycles the Command Processor was busy.\nPer sample: 100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).\nCP handles kernel dispatch and command stream processing."
     rst: "Percentage of GUI-active cycles the Command Processor was busy.\nPer sample: 100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).\nCP handles kernel dispatch and command stream processing."
     unit: Percent
+  GL2C Busy:
+    plain: "Percentage of GUI-active cycles the GL2 Cache was busy.\nPer sample: 100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).\nHigh utilization indicates memory-intensive workload."
+    rst: "Percentage of GUI-active cycles the GL2 Cache was busy.\nPer sample: 100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0).\nHigh utilization indicates memory-intensive workload."
+    unit: Percent
 Shader Engine Utilization:
   TA Busy:
     plain: "Percentage of GUI-active cycles the Texture Addresser was busy.\nPer sample: 100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0)."
     rst: "Percentage of GUI-active cycles the Texture Addresser was busy.\nPer sample: 100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0)."
     unit: Percent
+Memory chart — TCP-GL1 Interface:
+  TCP-GL1 Read Requests:
+    plain: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
+    rst: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
+    unit: Requests per Normalization Unit
+  TCP-GL1 Write Requests:
+    plain: Write-related requests from TCP toward GL1C, per normalization unit.
+    rst: Write-related requests from TCP toward GL1C, per normalization unit.
+    unit: Requests per Normalization Unit
+  TCP-GL1 Read Bandwidth:
+    plain: Bytes per second for TCP→GL1 read traffic (64 B per TCP_GL1_REQ_READ event).
+    rst: Bytes per second for TCP→GL1 read traffic (64 B per TCP_GL1_REQ_READ event).
+    unit: Bytes/s
+  TCP-GL1 Write Bandwidth:
+    plain: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
+    rst: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
+    unit: Bytes/s
+Memory chart — GL1C-GL2 Interface:
+  GL1-GL2 Read Requests:
+    plain: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
+    rst: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
+    unit: Requests per Normalization Unit
+  GL1-GL2 Write Requests:
+    plain: Write requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_WRITE_sum).
+    rst: Write requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_WRITE_sum).
+    unit: Requests per Normalization Unit
+  GL1-GL2 Read Bandwidth:
+    plain: Bytes per second on the GL1C→GL2C read interface (32/64/128 B request bins).
+    rst: Bytes per second on the GL1C→GL2C read interface (32/64/128 B request bins).
+    unit: Bytes/s
+  GL1-GL2 Write Bandwidth:
+    plain: Bytes per second on the GL1C→GL2C write interface (32/64 B request bins).
+    rst: Bytes per second on the GL1C→GL2C write interface (32/64 B request bins).
+    unit: Bytes/s
+  GL1-GL2 Read Latency:
+    plain: "Average cycles from GL1C read request to response (GL1C_GL2_REQ_READ_LATENCY_sum /\nGL1C_GL2_REQ_READ_sum) when the denominator is non-zero."
+    rst: "Average cycles from GL1C read request to response (GL1C_GL2_REQ_READ_LATENCY_sum /\nGL1C_GL2_REQ_READ_sum) when the denominator is non-zero."
+    unit: Cycles
+  GL1-GL2 Write Latency:
+    plain: "Average cycles from GL1C write request to completion (GL1C_GL2_REQ_WRITE_LATENCY_sum /\nGL1C_GL2_REQ_WRITE_sum) when the denominator is non-zero."
+    rst: "Average cycles from GL1C write request to completion (GL1C_GL2_REQ_WRITE_LATENCY_sum /\nGL1C_GL2_REQ_WRITE_sum) when the denominator is non-zero."
+    unit: Cycles
+Wavefront Launch Stats:
+  Grid Size:
+    plain: "Number of work-items in the dispatch grid for the kernel (Grid_Size), averaged/min/maxed\nacross samples. Defines total parallel work launched."
+    rst: "Number of work-items in the dispatch grid for the kernel (Grid_Size), averaged/min/maxed\nacross samples. Defines total parallel work launched."
+    unit: Work-items
+  Workgroup Size:
+    plain: "Number of work-items per workgroup (Workgroup_Size). Together with grid size and resource\nlimits it determines wave/wavefront count."
+    rst: "Number of work-items per workgroup (Workgroup_Size). Together with grid size and resource\nlimits it determines wave/wavefront count."
+    unit: Work-items
+  VGPRs:
+    plain: "Vector general-purpose registers allocated per wave (Arch_VGPR). Limits occupancy when\nthe per-CU VGPR capacity is exhausted."
+    rst: "Vector general-purpose registers allocated per wave (Arch_VGPR). Limits occupancy when\nthe per-CU VGPR capacity is exhausted."
+    unit: Registers
+  SGPRs:
+    plain: "Scalar general-purpose registers allocated for the wave (SGPR). Uniform data and\nexecution state live in the scalar path."
+    rst: "Scalar general-purpose registers allocated for the wave (SGPR). Uniform data and\nexecution state live in the scalar path."
+    unit: Registers
+  LDS Allocation:
+    plain: "Local Data Share bytes reserved per workgroup (LDS_Per_Workgroup). High LDS per group\nreduces how many workgroups can run concurrently on a CU/WGP."
+    rst: "Local Data Share bytes reserved per workgroup (LDS_Per_Workgroup). High LDS per group\nreduces how many workgroups can run concurrently on a CU/WGP."
+    unit: Bytes
+  Scratch Allocation:
+    plain: "Scratch (private) memory bytes per work-item (Scratch_Per_Workitem). Backed by off-chip\nmemory when spill/stack exceeds limits."
+    rst: "Scratch (private) memory bytes per work-item (Scratch_Per_Workitem). Backed by off-chip\nmemory when spill/stack exceeds limits."
+    unit: Bytes per Work-item
+Wave Dispatch:
+  Dispatched Waves:
+    plain: "Number of shader waves launched (SQ_WAVES_sum), averaged/min/maxed. Each wave is a\nSIMD execution entity (typically wave32 on this configuration)."
+    rst: "Number of shader waves launched (SQ_WAVES_sum), averaged/min/maxed. Each wave is a\nSIMD execution entity (typically wave32 on this configuration)."
+    unit: Waves
+  Dispatched Threads:
+    plain: Number of work-items launched as attributed in SQ_ITEMS_sum (threads), averaged/min/maxed.
+    rst: Number of work-items launched as attributed in SQ_ITEMS_sum (threads), averaged/min/maxed.
+    unit: Threads
+VMEM Instruction Mix:
+  Instructions - VMEM Flat:
+    plain: "Flat-addressing vector memory instructions (SQ_INSTS_FLAT) per normalization unit.\nFlat can resolve to global, scratch, or LDS depending on address."
+    rst: "Flat-addressing vector memory instructions (SQ_INSTS_FLAT) per normalization unit.\nFlat can resolve to global, scratch, or LDS depending on address."
+    unit: Count per Normalization Unit
+  Instructions - TEX Load:
+    plain: Texture / image load instructions (SQ_INSTS_TEX_LOAD) per normalization unit.
+    rst: Texture / image load instructions (SQ_INSTS_TEX_LOAD) per normalization unit.
+    unit: Count per Normalization Unit
+  Instructions - TEX Store:
+    plain: Texture / image store instructions (SQ_INSTS_TEX_STORE) per normalization unit.
+    rst: Texture / image store instructions (SQ_INSTS_TEX_STORE) per normalization unit.
+    unit: Count per Normalization Unit
+  Instructions - Flat Load:
+    plain: Flat load instructions (SQ_INSTS_FLAT_LOAD) per normalization unit.
+    rst: Flat load instructions (SQ_INSTS_FLAT_LOAD) per normalization unit.
+    unit: Count per Normalization Unit
+  Instructions - Flat Store:
+    plain: Flat store instructions (SQ_INSTS_FLAT_STORE) per normalization unit.
+    rst: Flat store instructions (SQ_INSTS_FLAT_STORE) per normalization unit.
+    unit: Count per Normalization Unit
