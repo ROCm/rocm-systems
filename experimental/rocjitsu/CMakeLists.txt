@@ -8,6 +8,8 @@ include(rj_default_compiler)
 
 project(rocm_jit_suite)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -225,4 +227,6 @@ if(RJ_BUILD_GUI)
 endif()
 
 # Tests and scaling tools.
-add_subdirectory(tests)
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()
