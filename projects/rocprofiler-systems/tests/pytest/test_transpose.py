@@ -217,10 +217,12 @@ class TestTransposeROCProfiler(RocprofsysTest):
             mpi_ranks=num_processes,
         )
         self.assert_regex(result)
-        counter_files = [result.output_dir / f for f in gpu_info.expected_counter_files]
-        self.assert_file_exists(
-            counter_files, subtest_name="ROCProfiler counter files existence validation"
-        )
+        # Counter file device ID depends on GPU topology, search across IDs 0-9
+        for pattern in gpu_info.expected_counter_files:
+            if not any(result.output_dir.glob(pattern)):
+                pytest.fail(
+                    f"No counter file matching '{pattern}' found in {result.output_dir}"
+                )
         if mode == "sampling":
             self.assert_perfetto(
                 result,

@@ -62,7 +62,7 @@ void* Os::loadLibrary(const char* libraryname) {
     std::string newPath;
     newPath = cszDllPath;
     newPath.replace(newPath.find(cszFileName), strlen(libraryname), libraryname);
-
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Loading lib: %s", newPath.c_str());
     handle = Os::loadLibrary_(newPath.c_str());
     if (handle != NULL) {
       return handle;

@@ -256,12 +256,14 @@ def check_non_pmc_files(output_dir, num_devices, num_kernels):
 def get_num_pmc_file(output_dir):
     """
     Returns:
-        int: number of pmc perf text files in perfmon dir
+        int: number of pmc perf yaml files in perfmon dir
     """
 
     perfmon_path = Path(output_dir) / "perfmon"
     return len([
-        f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"
+        f
+        for f in perfmon_path.iterdir()
+        if f.is_file() and f.name.startswith("pmc_perf_") and f.suffix == ".yaml"
     ])
 
 
@@ -1181,12 +1183,12 @@ def test_check_file_pattern_file_not_found():
 
 
 # =============================================================================
-# TEXT PARSING UTILITIES TESTS
+# PMC PERF PARSING UTILITIES TESTS
 # =============================================================================
 
 
-def test_parse_text_basic(tmp_path):
-    """Test parse_text with a simple valid input file.
+def test_parse_pmc_perf_basic(tmp_path):
+    """Test parse_pmc_perf with a simple valid YAML input file.
 
     Args:
         tmp_path (Path): Temporary path fixture provided by pytest.
@@ -1194,15 +1196,17 @@ def test_parse_text_basic(tmp_path):
     Returns:
         None: Asserts that counters are correctly extracted from a simple file.
     """
-    test_file = tmp_path / "test_counters.txt"
-    test_file.write_text("pmc: counter1 counter2 counter3")
+    test_file = tmp_path / "test_counters.yaml"
+    test_file.write_text(
+        "jobs:\n  - pmc:\n    - counter1\n    - counter2\n    - counter3\n"
+    )
 
-    result = utils_common.parse_text(str(test_file))
+    result = utils_common.parse_pmc_perf(str(test_file))
     assert result == ["counter1", "counter2", "counter3"]
 
 
-def test_parse_text_empty_file(tmp_path):
-    """Test parse_text with an empty file.
+def test_parse_pmc_perf_empty_file(tmp_path):
+    """Test parse_pmc_perf with an empty file.
 
     Args:
         tmp_path (Path): Temporary path fixture provided by pytest.
@@ -1210,130 +1214,69 @@ def test_parse_text_empty_file(tmp_path):
     Returns:
         None: Asserts that an empty file returns an empty list.
     """
-    test_file = tmp_path / "empty.txt"
+    test_file = tmp_path / "empty.yaml"
     test_file.write_text("")
 
-    result = utils_common.parse_text(str(test_file))
+    result = utils_common.parse_pmc_perf(str(test_file))
     assert result == []
 
 
-def test_parse_text_no_pmc_entries(tmp_path):
-    """Test parse_text with a file that doesn't contain any 'pmc:' entries.
+def test_parse_pmc_perf_no_pmc_entries(tmp_path):
+    """Test parse_pmc_perf with a YAML file that doesn't contain any 'pmc' entries.
 
     Args:
         tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
-        None: Asserts that a file without 'pmc:' returns an empty list.
+        None: Asserts that a file without 'pmc' returns an empty list.
     """
-    test_file = tmp_path / "no_pmc.txt"
-    test_file.write_text("line1\nline2\nline3")
+    test_file = tmp_path / "no_pmc.yaml"
+    test_file.write_text("jobs:\n  - other: value\n")
 
-    result = utils_common.parse_text(str(test_file))
+    result = utils_common.parse_pmc_perf(str(test_file))
     assert result == []
 
 
-def test_parse_text_with_comments(tmp_path):
-    """Test parse_text with lines that have comments after the counters.
+def test_parse_pmc_perf_no_jobs_key(tmp_path):
+    """Test parse_pmc_perf with missing jobs key.
 
     Args:
         tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
-        None: Asserts that comments are properly stripped from counter lines.
+        None: Asserts that missing jobs key returns an empty list.
     """
-    test_file = tmp_path / "comments.txt"
-    test_file.write_text("pmc: counter1 counter2 # This is a comment")
+    test_file = tmp_path / "no_jobs.yaml"
+    test_file.write_text("other_key: value\n")
 
-    result = utils_common.parse_text(str(test_file))
-    assert result == ["counter1", "counter2"]
+    result = utils_common.parse_pmc_perf(str(test_file))
+    assert result == []
 
 
-def test_parse_text_multiple_lines(tmp_path):
-    """Test parse_text with multiple 'pmc:' lines.
+def test_parse_pmc_perf_empty_pmc(tmp_path):
+    """Test parse_pmc_perf with empty pmc list.
 
     Args:
         tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
-        None: Asserts counters from multiple lines are correctly combined.
+        None: Asserts that empty pmc returns an empty list.
     """
-    test_file = tmp_path / "multiple_lines.txt"
-    test_file.write_text("pmc: counter1 counter2\npmc: counter3 counter4")
+    test_file = tmp_path / "empty_pmc.yaml"
+    test_file.write_text("jobs:\n  - pmc: []\n")
 
-    result = utils_common.parse_text(str(test_file))
-    assert result == ["counter1", "counter2", "counter3", "counter4"]
-
-
-def test_parse_text_mixed_lines(tmp_path):
-    """Test parse_text with a mix of 'pmc:' and non-'pmc:' lines.
-
-    Args:
-        tmp_path (Path): Temporary path fixture provided by pytest.
-
-    Returns:
-        None: Asserts that only counters from 'pmc:' lines are extracted.
-    """
-    test_file = tmp_path / "mixed_lines.txt"
-    test_file.write_text(
-        "line1\npmc: counter1 counter2\nline3\npmc: counter3 counter4\nline5"
-    )
-
-    result = utils_common.parse_text(str(test_file))
-    assert result == ["counter1", "counter2", "counter3", "counter4"]
+    result = utils_common.parse_pmc_perf(str(test_file))
+    assert result == []
 
 
-def test_parse_text_whitespace_handling(tmp_path):
-    """Test parse_text with various whitespace combinations.
-
-    Args:
-        tmp_path (Path): Temporary path fixture provided by pytest.
-
-    Returns:
-        None: Asserts that whitespace is properly handled in counter extraction.
-    """
-    test_file = tmp_path / "whitespace.txt"
-    test_file.write_text("pmc:    counter1\t\tcounter2   counter3")
-
-    result = utils_common.parse_text(str(test_file))
-
-    result = [item for item in result if item.strip()]
-
-    expected = ["counter1", "counter2", "counter3"]
-    assert result == expected
-
-    test_file.write_text("pmc: counter1 counter2\npmc: counter3 counter4")
-    result = utils_common.parse_text(str(test_file))
-    result = [item for item in result if item.strip()]
-    expected = ["counter1", "counter2", "counter3", "counter4"]
-    assert result == expected
-
-
-def test_parse_text_edge_cases(tmp_path):
-    """Test parse_text with edge cases like empty 'pmc:' lines.
-
-    Args:
-        tmp_path (Path): Temporary path fixture provided by pytest.
-
-    Returns:
-        None: Asserts that edge cases are handled correctly.
-    """
-    test_file = tmp_path / "edge_cases.txt"
-    test_file.write_text("pmc:\npmc: \npmc: counter1")
-
-    result = utils_common.parse_text(str(test_file))
-    result = [item for item in result if item.strip()]
-    assert result == ["counter1"]
-
-
-def test_parse_text_file_not_found():
-    """Test parse_text with a nonexistent file.
+def test_parse_pmc_perf_file_not_found():
+    """Test parse_pmc_perf with a nonexistent file.
 
     Returns:
         None: Asserts that FileNotFoundError is raised for nonexistent files.
     """
     with pytest.raises(FileNotFoundError):
-        utils_common.parse_text("nonexistent_file.txt")
+        utils_common.parse_pmc_perf("nonexistent_file.yaml")
 
 
 # =============================================================================
@@ -1352,8 +1295,8 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     Returns:
         None: Asserts successful execution and file creation.
     """
-    fname = tmp_path / "test.txt"
-    fname.write_text("pmc: SQ_WAVES")
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
 
@@ -1380,7 +1323,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
-    assert Path(workload_dir + "/test.csv").exists()
+    assert Path(workload_dir + "/pmc_perf_test.csv").exists()
 
 
 def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
@@ -1394,8 +1337,8 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     Returns:
         None: Asserts successful execution with v3 CSV processing.
     """
-    fname = tmp_path / "test.txt"
-    fname.write_text("pmc: SQ_WAVES")
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
 
@@ -1460,8 +1403,8 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     Returns:
         None: Asserts successful execution with SDK configuration.
     """
-    fname = tmp_path / "test.txt"
-    fname.write_text("pmc: SQ_WAVES")
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
 
     profiler_options = {
@@ -1477,7 +1420,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
         "utils.utils_profile.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils_common.parse_text", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
     monkeypatch.setattr(
         "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
     )
@@ -1501,10 +1444,10 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     Returns:
         None: Asserts YAML config is properly handled.
     """
-    fname = tmp_path / "test.txt"
-    fname.write_text("pmc: SQ_WAVES")
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text("counters:\n  - TCC_HIT")
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    yaml_file = tmp_path / "counter_def_test.yaml"
+    yaml_file.write_text("rocprofiler-sdk:\n  counters:\n    - TCC_HIT\n")
     workload_dir = str(tmp_path / "workload")
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
@@ -1518,10 +1461,6 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "utils.utils_profile.yaml.safe_load",
-        lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}},
-    )
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
@@ -1537,8 +1476,8 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     Returns:
         None: Asserts proper error handling on subprocess failure.
     """
-    fname = tmp_path / "test.txt"
-    fname.write_text("pmc: SQ_WAVES")
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
@@ -1570,8 +1509,8 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     Returns:
         None: Asserts MI300 environment variable is set correctly.
     """
-    fname = tmp_path / "test.txt"
-    fname.write_text("pmc: SQ_WAVES")
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
 
     captured_env = {}
@@ -1606,8 +1545,8 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     Returns:
         None: Asserts timestamps processing is handled correctly.
     """
-    fname = tmp_path / "timestamps.txt"
-    fname.write_text("pmc: SQ_WAVES")
+    fname = tmp_path / "pmc_perf_timestamps.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
 
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
@@ -1662,8 +1601,8 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     Returns:
         None: Asserts proper handling when no results are found.
     """
-    fname = tmp_path / "test.txt"
-    fname.write_text("pmc: SQ_WAVES")
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv2")
@@ -1689,8 +1628,8 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     Returns:
         None: Asserts CSV headers are standardized correctly.
     """
-    fname = tmp_path / "test.txt"
-    fname.write_text("pmc: SQ_WAVES")
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
     workload_dir = str(tmp_path / "workload")
 
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
@@ -1778,8 +1717,8 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     Returns:
         None: Asserts TCC flattening is applied for MI300 GPUs.
     """
-    fname = tmp_path / "test.txt"
-    fname.write_text("pmc: TCC_HIT[0]")
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - TCC_HIT[0]\n")
     workload_dir = str(tmp_path / "workload")
 
     # Mock functions
@@ -1811,8 +1750,8 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             when rocprof_cmd == "rocprofiler-sdk" and new_env was not previously set
             by the mspec.gpu_model check.
     """
-    fname_str = str(tmp_path / "counters.txt")
-    Path(fname_str).touch()
+    fname_str = str(tmp_path / "pmc_perf_counters.yaml")
+    Path(fname_str).write_text("jobs:\n  - pmc:\n    - COUNTER1\n")
     workload_dir_str = str(tmp_path)
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
@@ -1837,27 +1776,35 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error_no_exit)
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr(
-        "utils.utils_profile.parse_text", lambda *a, **k: ["COUNTER1", "COUNTER2"]
+        "utils.utils_profile.parse_pmc_perf", lambda *a, **k: ["COUNTER1", "COUNTER2"]
     )
 
     mock_fname_path_obj = mock.MagicMock(spec=Path)
-    mock_fname_path_obj.stem = "counters"
-    mock_fname_path_obj.name = "counters.txt"
-    mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
+    mock_fname_path_obj.stem = "pmc_perf_counters"
+    mock_fname_path_obj.name = "pmc_perf_counters.yaml"
+    mock_fname_path_obj.exists.return_value = False
 
     mock_out_path_obj = mock.Mock(spec=Path)
     mock_out_path_obj.exists.return_value = False
 
+    mock_counter_def_path_obj = mock.Mock(spec=Path)
+    mock_counter_def_path_obj.exists.return_value = False
+    mock_fname_path_obj.parent.__truediv__ = mock.Mock(
+        return_value=mock_counter_def_path_obj
+    )
+
     def path_side_effect(p_arg, *args):
         if isinstance(p_arg, Path):
-            if p_arg.name == "counters.txt":
+            if p_arg.name == "pmc_perf_counters.yaml":
                 return mock_fname_path_obj
             return p_arg
         if isinstance(p_arg, str):
             if p_arg.endswith("/out"):
                 return mock_out_path_obj
-            if p_arg.endswith("counters.txt"):
+            if p_arg.endswith("pmc_perf_counters.yaml"):
                 return mock_fname_path_obj
+            if "counter_def" in p_arg:
+                return mock_counter_def_path_obj
         if (
             p_arg == mock_fname_path_obj
             and args == ()
@@ -1998,9 +1945,9 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
     CLI: if "--kokkos-trace" in options:
         process_kokkos_trace_output(...)
     """
-    fname_str = str(tmp_path) + "/counters.txt"
-    Path(fname_str).touch()
-    fbase_str = "counters"
+    fname_str = str(tmp_path) + "/pmc_perf_counters.yaml"
+    Path(fname_str).write_text("jobs:\n  - pmc:\n    - C1\n")
+    fbase_str = "pmc_perf_counters"
     workload_dir_str = str(tmp_path)
     (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)
 
@@ -2027,7 +1974,7 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_common.parse_text", lambda *a, **k: ["C1"])
+    monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda *a, **k: ["C1"])
 
     # Mock csv_ops functions to avoid disk I/O
     mock_rows = [
@@ -6860,7 +6807,7 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     """Test GPU benchmark locking functions."""
     import fcntl
 
-    import utils.benchmark as benchmark
+    import roofline.benchmark.benchmark_base as benchmark_base
 
     # --- Setup: redirect lock directory to temp path ---
     lock_dir = tmp_path / "locks"
@@ -6868,7 +6815,7 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
 
     # Mock GPU UUID
     monkeypatch.setattr(
-        benchmark.hip,
+        benchmark_base.hip,
         "hipGetDeviceProperties",
         lambda d: mock.Mock(uuid=mock.Mock(uuid=bytes([0x01, 0x02, 0x03, 0x04]))),
     )
@@ -6881,16 +6828,21 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
             return lock_dir
         return original_path(p)
 
-    monkeypatch.setattr(benchmark, "Path", mock_path)
+    monkeypatch.setattr(benchmark_base, "Path", mock_path)
+
+    deviceID = 0
+    # Create Bench_base object in order to call gpu benchmark lock method
+    # Device ID list arg doesn't matter since we are just using the base class
+    testClass = benchmark_base.Bench_base([deviceID])
 
     # --- Test lock acquisition and lock file creation ---
-    with benchmark.gpu_benchmark_lock(0):
+    with testClass.gpu_benchmark_lock(deviceID):
         lock_file = lock_dir / "rocprof-compute-benchmark-01020304.lock"
         assert lock_file.exists()
 
     # --- Test no message when lock acquired immediately ---
     capsys.readouterr()  # Clear previous output
-    with benchmark.gpu_benchmark_lock(0):
+    with testClass.gpu_benchmark_lock(deviceID):
         pass
     output = capsys.readouterr().out
     assert "Waiting" not in output
@@ -6903,9 +6855,9 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
         if call_count["count"] == 1 and (op & fcntl.LOCK_NB):
             raise BlockingIOError("Lock held by another process")
 
-    monkeypatch.setattr(benchmark.fcntl, "flock", mock_flock)
+    monkeypatch.setattr(benchmark_base.fcntl, "flock", mock_flock)
 
-    with benchmark.gpu_benchmark_lock(0):
+    with testClass.gpu_benchmark_lock(deviceID):
         pass
 
     output = capsys.readouterr().out

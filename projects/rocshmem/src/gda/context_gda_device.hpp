@@ -27,6 +27,7 @@
 
 #include "context.hpp"
 #include "team.hpp"
+#include "queue_pair.hpp"
 
 namespace rocshmem {
 
@@ -59,11 +60,6 @@ class GDAContext : public Context {
   __device__ void fence(int pe);
 
   __device__ void quiet();
-
-  __device__ void quiet_wave();
-
-  __device__ void pe_quiet(size_t pe);
-  __device__ void pe_quiet_single(size_t pe);
 
   __device__ void *shmem_ptr(const void *dest, int pe);
 
@@ -259,57 +255,112 @@ class GDAContext : public Context {
 
   //internal functions used by collective operations
   template <typename T>
-  __device__ void internal_broadcast(T *dest, const T *source, int nelems, int pe_root,
-                                     int pe_start, int stride, int pe_size,
-                                     long *p_sync);  // NOLINT(runtime/int)
+  __device__ void internal_broadcast(T *dest, const T *source, int nelems,
+      int pe_root, int pe_start, int stride, int pe_size, long *p_sync);  // NOLINT(runtime/int)
 
   template <typename T>
   __device__ void internal_put_broadcast(T *dst, const T *src, int nelems,
-                                         int pe_root, int PE_start,
-                                         int logPE_stride, int PE_size);  // NOLINT(runtime/int)
+      int pe_root, int PE_start, int logPE_stride, int PE_size,
+      ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
   template <typename T>
   __device__ void internal_get_broadcast(T *dst, const T *src, int nelems,
-                                         int pe_root);  // NOLINT(runtime/int)
+      int pe_root, ActiveWFInfo &wf_info);  // NOLINT(runtime/int)
 
   template <typename T>
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems);
+      const T *source, int nelems);
 
   template <typename T>
   __device__ void alltoall_linear(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems);
+    const T *source, int nelems);
 
   template <typename T>
   __device__ void alltoall_linear_thread_puts(rocshmem_team_t team, T *dest,
                                               const T *source, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
-                                int64_t *pSync);
+      int64_t *pSync, ActiveWFInfo &wf_info);
 
-  __device__ void internal_sync_wave(int pe, int PE_start, int stride, int PE_size,
-                                int64_t *pSync);
+  __device__ void internal_sync_wave(int pe, int PE_start, int stride,
+      int PE_size, int64_t *pSync, ActiveWFInfo &wf_info);
 
-  __device__ void internal_sync_wg(int pe, int PE_start, int stride, int PE_size,
-                                int64_t *pSync);
+  __device__ void internal_sync_wg(int pe, int PE_start, int stride,
+    int PE_size, int64_t *pSync, ActiveWFInfo &wf_info);
 
   __device__ void internal_direct_barrier(int pe, int PE_start, int stride,
-                                          int n_pes, int64_t *pSync);
+      int n_pes, int64_t *pSync, ActiveWFInfo &wf_info);
 
   __device__ void internal_direct_barrier_wg(int pe, int PE_start, int stride,
-                                             int n_pes, int64_t *pSync);
+      int n_pes, int64_t *pSync, ActiveWFInfo &wf_info);
 
   __device__ void internal_atomic_barrier(int pe, int PE_start, int stride,
-                                          int n_pes, int64_t *pSync);
+      int n_pes, int64_t *pSync, ActiveWFInfo &wf_info);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_direct_allreduce(T *dst, const T *src,
-                                            int nelems, GDATeam *team_obj);
-  template <typename T, ROCSHMEM_OP Op>
-  __device__ void internal_ring_allreduce(T *dst, const T *src,
-                                          int nelems, GDATeam *team_obj,
-                                          int n_seg, int seg_size, int chunk_size);
+  __device__ void internal_direct_allreduce(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, ActiveWFInfo &wf_info);
 
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ void internal_ring_allreduce(T *dst, const T *src, int nelems,
+      GDATeam *team_obj, int n_seg, int seg_size, int chunk_size,
+      ActiveWFInfo &wf_info);
+
+  __device__ void internal_putmem(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_getmem(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_putmem_wg(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_getmem_wg(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_putmem_wave(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_getmem_wave(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_putmem_nbi(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_getmem_nbi(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_putmem_nbi_wg(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_getmem_nbi_wg(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_putmem_nbi_wave(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__ void internal_getmem_nbi_wave(void *dest, const void *source,
+      size_t nelems, int pe, int qp_index, ActiveWFInfo &wf_info);
+
+  __device__
+  void internal_quiet(ActiveWFInfo &wf_info);
+
+  template <typename T>
+  __device__ void internal_amo_add(void *dst, T value, int pe, int qp_index,
+      ActiveWFInfo &wf_info);
+
+  template <typename T>
+  __device__ T internal_amo_fetch_add(void *dst, T value, int pe, int qp_index,
+      ActiveWFInfo &wf_info);
+
+  template <typename T>
+  __device__ T internal_amo_swap(void *dst, T value, int pe, int qp_index,
+      ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Get the Queue Pair index to use for a given PE
+   */
+  __device__ __forceinline__ uint32_t get_qp_index(int pe, ActiveWFInfo wf_info);
 
   //Temporary scratchpad memory used by internal barrier algorithms.
   int64_t *barrier_sync{nullptr};
@@ -327,9 +378,27 @@ class GDAContext : public Context {
 
   int gda_provider_{0};
 
+  /**
+   * @brief Number of Queue Pairs allocated per PE
+   */
+  uint32_t num_qps_per_pe {1};
+
+  /**
+   * @brief Total number of Queue Pairs allocated = num_qps_per_pe * num_pes
+   */
+  uint32_t num_qps {1};
+
+  /**
+   * @brief Device pointer to the qp_counter variable to pick next qp index
+   */
+  uint32_t *qp_counter {nullptr};
+
  public:
   QueuePair *qps{nullptr};
 
+  /**
+   * @brief Base heap pointers of all PEs
+   */
   char *const *base_heap{nullptr};
 
   //TODO(Avinash):

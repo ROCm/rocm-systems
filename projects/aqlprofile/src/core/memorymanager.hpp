@@ -21,6 +21,13 @@
 // THE SOFTWARE.
 
 #pragma once
+// Undefine Windows macros that conflict with class method names
+#ifdef _WIN32
+#undef CopyMemory
+#undef FillMemory
+#undef ZeroMemory
+#undef MoveMemory
+#endif
 #include <vector>
 #include <atomic>
 #include <mutex>

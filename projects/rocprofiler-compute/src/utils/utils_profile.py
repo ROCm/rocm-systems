@@ -3,7 +3,6 @@
 
 import glob
 import importlib
-import logging
 import os
 import pkgutil
 import re
@@ -28,10 +27,27 @@ from utils.utils_common import (
     capture_subprocess_output,
     create_temp_rocprofiler_metrics_path,
     get_rocprof_cmd,
-    parse_text,
+    parse_pmc_perf,
     perform_attach_detach,
 )
 from vendored import yaml
+
+_PROFILER_INTERNAL_RE = re.compile(
+    r"^\[rocprofiler"  # rocprofiler-sdk and rocprofiler-compute tool messages
+    r"|^[WI]\d{8}\s"  # glog-style timestamps (W/I followed by YYYYMMDD)
+)
+
+
+def _classify_output_line(line: str) -> None:
+    """Log a subprocess output line at the appropriate level.
+
+    Profiler-internal messages go to DEBUG (visible with -v).
+    Everything else goes to ERROR (always visible on failure).
+    """
+    if _PROFILER_INTERNAL_RE.match(line):
+        console_debug(line)
+    else:
+        console_error(line, exit=False)
 
 
 def run_prof(
@@ -78,10 +94,10 @@ def run_prof(
         options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
         if multiple_files:
             options["ROCPROF_COUNTERS"] = ", ".join([
-                f"pmc: {' '.join(parse_text(fname))}" for fname in fnames
+                f"pmc: {' '.join(parse_pmc_perf(fname))}" for fname in fnames
             ])
         else:
-            options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_text(fnames))}"
+            options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_pmc_perf(fnames))}"
         options["ROCPROF_AGENT_INDEX"] = "absolute"
     else:
         if multiple_files:
@@ -106,8 +122,12 @@ def run_prof(
         sdk_config = yaml.safe_load(filename)
     # Extra counter definitions
     for fname in fnames if multiple_files else [fnames]:
-        if Path(fname).with_suffix(".yaml").exists():
-            with open(Path(fname).with_suffix(".yaml")) as file:
+        fname_path = Path(fname)
+        counter_def_fname = fname_path.parent / (
+            "counter_def_" + fname_path.name[len("pmc_perf_") :]
+        )
+        if counter_def_fname.exists():
+            with open(Path(counter_def_fname)) as file:
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
@@ -154,18 +174,28 @@ def run_prof(
 
     time_2 = time.time()
     console_debug(
-        f"Finishing subprocess of fname {fname}, the time taken is "
+        f"Finishing subprocess of pmc file(s), the time taken is "
         f"{int((time_2 - time_1) / 60)} m {str((time_2 - time_1) % 60)} sec "
     )
+
+    if get_rocprof_cmd() != "rocprofiler-sdk":
+        # rocprofv3 with yaml input file can write out/pass_1 instead of out/pmc_1
+        # Move files from out/pass_1 to out/pmc_1 if pass_1 exists
+        pass_1 = Path(workload_dir) / "out" / "pass_1"
+        if pass_1.exists():
+            shutil.copytree(
+                pass_1, Path(workload_dir) / "out" / "pmc_1", dirs_exist_ok=True
+            )
 
     # Delete counter definition temporary directory
     if new_env.get("ROCPROFILER_METRICS_PATH"):
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
     if (not is_mode_live_attach) and (not success):
-        if loglevel > logging.INFO:
-            for line in output.splitlines():
-                console_error(line, exit=False)
+        for line in output.splitlines():
+            stripped = line.strip()
+            if stripped:
+                _classify_output_line(stripped)
         console_error("Profiling execution failed.")
 
     results_files: list[str] = []
@@ -193,41 +223,54 @@ def run_prof(
             workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
             workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",
         )
-        # Read CSV as list of dicts
-        combined_rows, _ = csv_ops.read_csv_as_dicts(
-            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
-        )
-        # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
-        # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
-        csv_ops.assign_group_ids(
-            combined_rows,
-            [
-                "PID",
-                "Kernel_Name",
-                "Grid_Size",
-                "Workgroup_Size",
-                "LDS_Per_Workgroup",
-                "Start_Timestamp",
-                "End_Timestamp",
-            ],
-            "Dispatch_ID",
-        )
-        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
-        # Workgroup_Size, LDS_Per_Workgroup
-        csv_ops.assign_group_ids(
-            combined_rows,
-            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
-            "Kernel_ID",
-        )
-        # Drop PID since its not required
-        csv_ops.drop_column_from_rows(combined_rows, "PID")
-        # Write back to CSV
-        csv_ops.write_csv_from_dicts(
-            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv", combined_rows
-        )
-        csv_ops.write_csv_from_dicts(
-            workload_dir + f"/results_{fbase}.csv", combined_rows
-        )
+        # Subprocess succeeded but may have dispatched zero GPU kernels,
+        # in which case the CSV is missing or has no data rows.
+        try:
+            combined_rows, _ = csv_ops.read_csv_as_dicts(
+                workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
+            )
+        except (FileNotFoundError, ValueError):
+            combined_rows = []
+        if not combined_rows:
+            console_warning(
+                "No GPU kernel data collected. "
+                "The workload may not have dispatched any GPU kernels."
+            )
+            shutil.rmtree(f"{workload_dir}/out", ignore_errors=True)
+            return
+        else:
+            # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
+            # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
+            csv_ops.assign_group_ids(
+                combined_rows,
+                [
+                    "PID",
+                    "Kernel_Name",
+                    "Grid_Size",
+                    "Workgroup_Size",
+                    "LDS_Per_Workgroup",
+                    "Start_Timestamp",
+                    "End_Timestamp",
+                ],
+                "Dispatch_ID",
+            )
+            # Reset Kernel_ID based on Kernel_Name, Grid_Size,
+            # Workgroup_Size, LDS_Per_Workgroup
+            csv_ops.assign_group_ids(
+                combined_rows,
+                ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+                "Kernel_ID",
+            )
+            # Drop PID since its not required
+            csv_ops.drop_column_from_rows(combined_rows, "PID")
+            # Write back to CSV
+            csv_ops.write_csv_from_dicts(
+                workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
+                combined_rows,
+            )
+            csv_ops.write_csv_from_dicts(
+                workload_dir + f"/results_{fbase}.csv", combined_rows
+            )
         if torch_trace_enabled:
             # move counter collection and marker trace to workload dir
             save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)

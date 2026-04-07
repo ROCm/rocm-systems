@@ -79,6 +79,7 @@ inline int GetChromaPlaneCount(rocDecVideoSurfaceFormat surface_format) {
     switch (surface_format) {
     case rocDecVideoSurfaceFormat_NV12:
     case rocDecVideoSurfaceFormat_P016:
+    default:
         num_planes = 1;
         break;
     case rocDecVideoSurfaceFormat_YUV444:
@@ -101,6 +102,7 @@ inline float GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_format) {
     case rocDecVideoSurfaceFormat_P016:
     case rocDecVideoSurfaceFormat_YUV420:
     case rocDecVideoSurfaceFormat_YUV420_16Bit:
+    default:
         factor = 0.5;
         break;
     case rocDecVideoSurfaceFormat_YUV422:

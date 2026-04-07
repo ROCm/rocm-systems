@@ -10,7 +10,7 @@ subtree_to_project_map = {
     "projects/hip-tests": "runtimes",
     "projects/hipother": "runtimes",
     "projects/rdc": "dc_tools",
-    "projects/rocdbgapi": "debug_tools",
+    "projects/rocdbgapi": "debug_tools-dbgapi",
     # "projects/rocdecode": "media-libs",
     # "projects/rocjpeg": "media-libs",
     "projects/rocm-core": "core",
@@ -21,7 +21,7 @@ subtree_to_project_map = {
     "projects/rocprofiler-register": "profiler",
     "projects/rocprofiler-sdk": "profiler",
     "projects/rocprofiler-systems": "profiler",
-    "projects/rocr-debug-agent": "debug_tools",
+    "projects/rocr-debug-agent": "debug_tools-debug-agent",
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",
@@ -37,12 +37,21 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_DC_TOOLS=ON"],
         "projects_to_test": "",  # rdc-tests is not built by TheRock build system - TBD
     },
-    "debug_tools": {
+    # dbggapi changes need to exercise both ROCgdb and debug agent.
+    "debug_tools-dbgapi": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_ALL=OFF",
             "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
         ],
         "projects_to_test": "rocr-debug-agent, rocgdb",
+    },
+    # debug agent changes don't have to exercise ROCgdb.
+    "debug_tools-debug-agent": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON",
+        ],
+        "projects_to_test": "rocr-debug-agent",
     },
     # media libs to be enabled in following PR
     # "media-libs": {

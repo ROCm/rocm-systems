@@ -87,10 +87,10 @@ def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload
             Text(
                 x="386",
                 y="196",
-                id="mfma",
+                id="matrix_ops",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values.get("MFMA")),
+                children=format_value_for_display(memchart_values.get("Matrix Ops")),
             ),
             Text(
                 x="386",
@@ -1418,7 +1418,7 @@ def get_memchart(
                                                 fill="rgb(0, 0, 0)",
                                                 fontSize="12px",
                                                 textAnchor="end",
-                                                children="MFMA:",
+                                                children="Matrix Ops:",
                                             ),
                                             Text(
                                                 x="360",
