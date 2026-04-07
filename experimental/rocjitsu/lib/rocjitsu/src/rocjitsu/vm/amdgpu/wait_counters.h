@@ -59,6 +59,11 @@ struct WaitCounters {
   static constexpr uint8_t DSCNT_MAX = 63;
   static constexpr uint8_t KMCNT_MAX = 31;
 
+  bool empty() const {
+    return vmcnt == 0 && lgkmcnt == 0 && expcnt == 0 && vscnt == 0 && dscnt == 0 &&
+           kmcnt == 0;
+  }
+
   void increment(WaitCounterType type) {
     switch (type) {
     case WaitCounterType::VMCNT:

@@ -389,4 +389,33 @@ TEST(ScratchAddrCalcTest, FlatGlobalDoesNotUseScratchBase) {
   EXPECT_EQ(addrs[0], 0x1'0000'2000ULL); // No scratch_base added.
 }
 
+TEST(ComputeUnitRetireTest, KeepsHaltedWavefrontUntilVmcntDrains) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("retire_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  wf->wait_counters().increment(amdgpu::WaitCounterType::VMCNT);
+  wf->halt();
+
+  cu->retire_halted_wfs();
+  EXPECT_EQ(cu->num_wfs(), 1u);
+  EXPECT_EQ(wf->sgpr_alloc().count, cfg.sgprs_per_wf);
+
+  wf->wait_counters().decrement(amdgpu::WaitCounterType::VMCNT);
+  cu->retire_halted_wfs();
+  EXPECT_EQ(cu->num_wfs(), 0u);
+  EXPECT_EQ(wf->sgpr_alloc().count, 0u);
+}
+
 } // namespace

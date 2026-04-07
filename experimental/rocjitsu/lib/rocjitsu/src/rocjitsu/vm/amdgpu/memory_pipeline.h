@@ -72,6 +72,11 @@ public:
     }
   }
 
+  void reset() {
+    clear_queue(issued_);
+    clear_queue(returned_);
+  }
+
   bool empty() const { return issued_.empty() && returned_.empty(); }
 
   WaitCounterType counter_type() const { return counter_type_; }
@@ -83,6 +88,14 @@ protected:
   WaitCounterType counter_type_;
   std::queue<PipelineEntry> issued_;
   std::queue<PipelineEntry> returned_;
+
+private:
+  static void clear_queue(std::queue<PipelineEntry> &queue) {
+    while (!queue.empty()) {
+      delete queue.front().inst;
+      queue.pop();
+    }
+  }
 };
 
 /// @brief Scalar memory pipeline for SMEM instructions.

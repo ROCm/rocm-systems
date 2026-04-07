@@ -149,6 +149,13 @@ size_t ComputeUnitCore::num_wfs() const {
 }
 
 void ComputeUnitCore::reset_all_wf() {
+  // reset_all_wf() is used by tests and recovery paths that want to discard
+  // all outstanding execution state. Drop queued memory completions first so
+  // no later pipeline drain decrements counters on reset wavefronts.
+  scalar_mem_pipeline_.reset();
+  global_mem_pipeline_.reset();
+  local_mem_pipeline_.reset();
+
   for (auto &w : wfs_) {
     if (w->sgpr_alloc().count > 0) {
       sgpr_file_.free(w->sgpr_alloc().base);
@@ -161,6 +168,13 @@ void ComputeUnitCore::reset_all_wf() {
 void ComputeUnitCore::retire_halted_wfs() {
   for (auto &w : wfs_) {
     if (w->is_halted() && w->sgpr_alloc().count > 0) {
+      // A halted wavefront may still have deferred memory completions queued
+      // in a pipeline. Do not recycle the slot until all outstanding wait
+      // counters drain, otherwise a later completion can decrement counters on
+      // a reset or re-dispatched wavefront.
+      if (!w->wait_counters().empty())
+        continue;
+
       sgpr_file_.free(w->sgpr_alloc().base);
       free_vgprs(w->vgpr_alloc().base);
       w->reset();
