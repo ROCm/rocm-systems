@@ -20,6 +20,21 @@ namespace amdgpu {
 
 namespace {
 
+bool uses_split_vector_store_counter(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return true;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return true;
+  default:
+    return false;
+  }
+}
+
 /// Shared complete_access logic for vector/LDS loads (write VGPRs from
 /// response data). Used by both GlobalMemPipeline and LocalMemPipeline.
 ///
@@ -268,6 +283,22 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {
 
 void GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
   vector_complete(*inst.data_as<VectorMemState>(), wf.cu());
+}
+
+WaitCounterType GlobalMemPipeline::counter_type_for(const Instruction &inst,
+                                                    const Wavefront &wf) const {
+  const auto &mem_state = *inst.data_as<VectorMemState>();
+  if (mem_state.atomic_op != AtomicOp::NONE || mem_state.is_load)
+    return WaitCounterType::VMCNT;
+  if (!uses_split_vector_store_counter(wf.cu().arch()))
+    return WaitCounterType::VMCNT;
+  switch (wf.cu().arch()) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return WaitCounterType::VSCNT;
+  default:
+    return WaitCounterType::STORECNT;
+  }
 }
 
 void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {

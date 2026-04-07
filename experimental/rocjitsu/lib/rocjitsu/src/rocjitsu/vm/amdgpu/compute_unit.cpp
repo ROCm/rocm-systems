@@ -168,12 +168,7 @@ void ComputeUnitCore::reset_all_wf() {
 void ComputeUnitCore::retire_halted_wfs() {
   for (auto &w : wfs_) {
     if (w->is_halted() && w->sgpr_alloc().count > 0) {
-      // A halted wavefront may still have deferred memory completions queued
-      // in a pipeline. Do not recycle the slot until all outstanding wait
-      // counters drain, otherwise a later completion can decrement counters on
-      // a reset or re-dispatched wavefront.
-      if (!w->wait_counters().empty())
-        continue;
+      assert(w->wait_counters().empty() && "halted wavefront has pending wait counters");
 
       sgpr_file_.free(w->sgpr_alloc().base);
       free_vgprs(w->vgpr_alloc().base);
@@ -235,8 +230,8 @@ bool ComputeUnitCore::step() {
 
   if (!has_active_wfs()) {
     // Final pipeline drain: complete deferred load writebacks for wavefronts
-    // that halted on the previous step (after tick_pipelines ran but before
-    // the next tick could drain them).
+    // that reached HALTED on the previous step after their last outstanding
+    // memory operation retired.
     tick_pipelines();
     return false;
   }

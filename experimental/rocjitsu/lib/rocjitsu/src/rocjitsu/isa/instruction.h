@@ -182,6 +182,13 @@ public:
     return disassembly_;
   }
 
+  /// @brief Finalize ISA-specific decode state after construction.
+  ///
+  /// @details Decoders call this once after the concrete instruction object has
+  /// been fully constructed. Backends use it to patch up operand bindings for
+  /// encodings like SDWA that require information from extension words.
+  virtual void finalize_decode() {}
+
 protected:
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;

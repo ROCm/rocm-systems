@@ -40,14 +40,16 @@ public:
   struct PipelineEntry {
     Instruction *inst;
     Wavefront *wf;
+    WaitCounterType counter_type;
   };
 
   /// @brief Issue a memory instruction to this pipeline.
   /// @param inst Raw instruction pointer (caller transfers ownership).
   /// @param wf   The issuing wavefront.
   void issue(Instruction *inst, Wavefront &wf) {
-    wf.wait_counters().increment(counter_type_);
-    issued_.push({inst, &wf});
+    WaitCounterType counter_type = counter_type_for(*inst, wf);
+    wf.wait_counters().increment(counter_type);
+    issued_.push({inst, &wf, counter_type});
   }
 
   /// @brief Advance the pipeline by one cycle.
@@ -56,9 +58,11 @@ public:
     while (!returned_.empty()) {
       auto entry = returned_.front();
       returned_.pop();
-      entry.wf->wait_counters().decrement(counter_type_);
+      entry.wf->wait_counters().decrement(entry.counter_type);
       if (entry.wf->state() == WfState::WAITCNT && entry.wf->wait_satisfied())
         entry.wf->set_state(WfState::RUNNING);
+      else if (entry.wf->state() == WfState::ENDING && entry.wf->wait_counters().empty())
+        entry.wf->halt();
       complete_access(*entry.inst, *entry.wf);
       delete entry.inst;
     }
@@ -84,6 +88,9 @@ public:
 protected:
   virtual void initiate_access(Instruction &inst, Wavefront &wf) = 0;
   virtual void complete_access(Instruction &inst, Wavefront &wf) = 0;
+  virtual WaitCounterType counter_type_for(const Instruction & /*inst*/, const Wavefront & /*wf*/) const {
+    return counter_type_;
+  }
 
   WaitCounterType counter_type_;
   std::queue<PipelineEntry> issued_;
@@ -127,6 +134,7 @@ public:
 protected:
   void initiate_access(Instruction &inst, Wavefront &wf) override;
   void complete_access(Instruction &inst, Wavefront &wf) override;
+  WaitCounterType counter_type_for(const Instruction &inst, const Wavefront &wf) const override;
 
 private:
   L1VectorCache *l1_;

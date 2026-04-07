@@ -27,6 +27,7 @@ enum class WfState : uint8_t {
   HALTED,  ///< Slot is currently unused and is available for dispatch.
   RUNNING, ///< In a running state and can be considered for scheduling.
   WAITCNT, ///< Stalled at a waitcnt.
+  ENDING,  ///< s_endpgm issued; waiting for outstanding memory operations to retire.
   BARRIER, ///< Stalled at a barrier.
 };
 
@@ -281,8 +282,23 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
+  /// @brief Check whether this wavefront has executed s_endpgm and is draining.
+  bool is_ending() const { return state_ == WfState::ENDING; }
+
   /// @brief Halt this wavefront.
-  void halt() { state_ = WfState::HALTED; }
+  void halt() {
+    assert(wait_counters_.empty() && "halting wavefront with pending wait counters");
+    state_ = WfState::HALTED;
+  }
+
+  /// @brief Begin wave termination after s_endpgm.
+  void end() {
+    if (wait_counters_.empty()) {
+      state_ = WfState::HALTED;
+      return;
+    }
+    state_ = WfState::ENDING;
+  }
 
   /// @brief Reset dynamic dispatch state so this slot can be reused.
   ///

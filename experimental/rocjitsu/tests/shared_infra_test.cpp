@@ -389,7 +389,7 @@ TEST(ScratchAddrCalcTest, FlatGlobalDoesNotUseScratchBase) {
   EXPECT_EQ(addrs[0], 0x1'0000'2000ULL); // No scratch_base added.
 }
 
-TEST(ComputeUnitRetireTest, KeepsHaltedWavefrontUntilVmcntDrains) {
+TEST(ComputeUnitRetireTest, EndStateBlocksRetirementUntilVmcntDrains) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
@@ -406,13 +406,15 @@ TEST(ComputeUnitRetireTest, KeepsHaltedWavefrontUntilVmcntDrains) {
   ASSERT_NE(wf, nullptr);
 
   wf->wait_counters().increment(amdgpu::WaitCounterType::VMCNT);
-  wf->halt();
+  wf->end();
+  EXPECT_TRUE(wf->is_ending());
 
   cu->retire_halted_wfs();
   EXPECT_EQ(cu->num_wfs(), 1u);
   EXPECT_EQ(wf->sgpr_alloc().count, cfg.sgprs_per_wf);
 
   wf->wait_counters().decrement(amdgpu::WaitCounterType::VMCNT);
+  wf->halt();
   cu->retire_halted_wfs();
   EXPECT_EQ(cu->num_wfs(), 0u);
   EXPECT_EQ(wf->sgpr_alloc().count, 0u);

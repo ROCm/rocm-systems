@@ -978,6 +978,68 @@ TEST(AtomicStressTest, GlobalAtomicAdd_L2) {
   EXPECT_EQ(final_val, 192u) << "Global atomic add through L2 should be 192 (3 waves × 64 lanes)";
 }
 
+TEST(AtomicStressTest, GlobalAtomicAdd_ImplicitEndpgmWaitSingleSlot) {
+  VmFixture f("cdna4", 1, 1);
+
+  constexpr uint64_t TARGET_ADDR = 0x2800ULL;
+
+  using namespace enc;
+  const uint32_t code[] = {
+      s_mov_b32(SGPR(4), 255),
+      static_cast<uint32_t>(TARGET_ADDR),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      v_mov_b32(1, INLINE_CONST(1)),
+      v_mov_b32(4, INLINE_CONST(0)),
+      flat_lo(66, /*seg=*/2, /*sc0=*/1),
+      flat_hi(/*vdst=*/2, /*data=*/1, /*addr=*/4, /*saddr=*/4),
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  f.mem()->write32(TARGET_ADDR, 0);
+
+  // Two workgroups on a single slot force wavefront-slot reuse while VMEM
+  // completions are still outstanding unless s_endpgm waits implicitly.
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 128, 64);
+  f.engine->run();
+  f.cu()->flush_all();
+
+  uint32_t final_val = f.mem()->read32(TARGET_ADDR);
+  EXPECT_EQ(final_val, 128u) << "Implicit s_endpgm wait should drain VMEM atomics before reuse";
+}
+
+TEST(GlobalStoreStressTest, FlatStoreDword_ImplicitEndpgmWaitSingleSlot) {
+  VmFixture f("cdna4", 1, 1);
+
+  constexpr uint64_t TARGET_ADDR = 0x2C00ULL;
+
+  using namespace enc;
+  const uint32_t code[] = {
+      s_mov_b32(SGPR(4), 255),
+      static_cast<uint32_t>(TARGET_ADDR),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      v_mov_b32(1, INLINE_CONST(1)),
+      v_mov_b32(4, INLINE_CONST(0)),
+      flat_lo(28, /*seg=*/2, /*sc0=*/1),
+      flat_hi(/*vdst=*/0, /*data=*/1, /*addr=*/4, /*saddr=*/4),
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  f.mem()->write32(TARGET_ADDR, 0);
+
+  // Two workgroups on a single slot force wavefront-slot reuse while store
+  // completions are still outstanding unless s_endpgm waits on store-only VMEM.
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 128, 64);
+  f.engine->run();
+  f.cu()->flush_all();
+
+  uint32_t final_val = f.mem()->read32(TARGET_ADDR);
+  EXPECT_EQ(final_val, 1u) << "Implicit s_endpgm wait should drain store-only VMEM before reuse";
+}
+
 // Multiple workgroups all atomically add to the same global address.
 TEST(AtomicStressTest, GlobalAtomicAdd_MultiWorkgroup) {
   VmFixture f("cdna4", 1, 10);
