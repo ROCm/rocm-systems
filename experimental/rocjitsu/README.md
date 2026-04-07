@@ -79,6 +79,12 @@ scripts/                Utility scripts (clang_format.sh)
 Third-party dependencies (Google Test, FlatBuffers, GLFW, Dear ImGui, imnodes,
 ImPlot) are fetched automatically via CMake `FetchContent`.
 
+On Debian/Ubuntu systems, building the gui requires these development packages:
+
+```bash
+sudo apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+```
+
 ## Building
 
 ```bash
@@ -114,6 +120,13 @@ cmake -B build -G Ninja -DRJ_CLANG_TIDY=ON
 ```
 
 ## Running tests
+
+If CMake fails while configuring or building the test targets on Debian/Ubuntu,
+install the GLFW X11 development headers first:
+
+```bash
+sudo apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+```
 
 ```bash
 # Via CTest
