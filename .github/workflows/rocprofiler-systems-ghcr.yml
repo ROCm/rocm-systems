@@ -2,6 +2,17 @@ name: rocprofiler-systems GHCR Packages for CI Images
 
 on:
   workflow_dispatch:
+    inputs:
+      gpu:
+        description: 'GPU target(s) to publish'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - gfx94X
+          - gfx950
+          - gfx1151
   schedule:
     - cron: 0 5 * * *
   push:
@@ -63,7 +74,7 @@ jobs:
       fail-fast: false
       matrix:
         system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
-        gpu: [ 'gfx94X', 'gfx950' ]
+        gpu: [ 'gfx94X', 'gfx950', 'gfx1151' ]
 
     steps:
       - name: Checkout Repository
