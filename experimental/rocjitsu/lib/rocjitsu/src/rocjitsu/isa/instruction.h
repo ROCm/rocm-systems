@@ -177,8 +177,7 @@ public:
         disassembly_ += src_operands_[i]->name();
         first = false;
       }
-      if (!modifiers_.empty())
-        disassembly_ += modifiers_;
+      build_modifiers(disassembly_);
     }
     return disassembly_;
   }
@@ -192,8 +191,10 @@ protected:
   /// @brief Instruction's destination operands (max 2).
   std::array<Operand *, 2> dst_operands_{};
   uint8_t num_dst_ = 0;
-  /// @brief Modifier flags appended after operands (e.g. "offset:80 sc0 sc1").
-  std::string modifiers_;
+  /// @brief Append modifier flags to the disassembly string (e.g. " sc0 sc1").
+  /// Overridden by memory encoding bases that have flag bits to display.
+  /// Default: no modifiers. Called lazily by disassemble().
+  virtual void build_modifiers(std::string & /*out*/) const {}
   /// @brief Cached disassembly string.
   mutable std::string disassembly_;
   /// @brief Instruction property flags bitmask.
