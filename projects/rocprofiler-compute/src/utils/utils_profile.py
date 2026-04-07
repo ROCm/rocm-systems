@@ -417,6 +417,10 @@ def pc_sampling_prof(
             app_cmd, new_env=new_env, profileMode=True
         )
     else:
+        profiler_options_list = cast(list[str], profiler_options)
+        app_cmd_with_separator = profiler_options_list[
+            profiler_options_list.index("--") :
+        ]
         options = [
             "--kernel-trace",
             "--pc-sampling-beta-enabled",
@@ -433,8 +437,7 @@ def pc_sampling_prof(
             workload_dir,
             "-o",
             "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
-            "--",
-            cast(str, profiler_options[-1]),  # app command
+            *app_cmd_with_separator,
         ]
 
         console_debug(f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}")
