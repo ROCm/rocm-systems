@@ -84,6 +84,17 @@ bool checked_mul(size_t lhs, size_t rhs, size_t *out) {
   return true;
 }
 
+bool try_get_reader_entry(uint64_t handle, ByteVec *bytes, bool *from_file) {
+  std::scoped_lock lock(g_reader_map_mutex);
+  const auto it = g_reader_map.find(handle);
+  if (it == g_reader_map.end()) {
+    return false;
+  }
+  *bytes = it->second.bytes;
+  *from_file = it->second.from_file;
+  return true;
+}
+
 void retain_rewritten_elf(void *elf_data) {
   try {
     std::scoped_lock lock(g_rewritten_elfs_mutex);
@@ -133,6 +144,51 @@ const Elf64_Ehdr *validate_elf64(const uint8_t *elf, size_t size) {
   return ehdr;
 }
 
+bool validate_program_header_table(const Elf64_Ehdr *ehdr, size_t size) {
+  return ehdr->e_phoff != 0 && ehdr->e_phoff <= size && ehdr->e_phnum != 0 &&
+         ehdr->e_phentsize >= sizeof(Elf64_Phdr);
+}
+
+bool compute_program_header_offset(const Elf64_Ehdr *ehdr, size_t size,
+                                   uint16_t index, size_t *hdr_offset) {
+  size_t hdr_index_offset = 0;
+  if (!checked_mul(static_cast<size_t>(index),
+                   static_cast<size_t>(ehdr->e_phentsize),
+                   &hdr_index_offset) ||
+      !checked_add(ehdr->e_phoff, hdr_index_offset, hdr_offset) ||
+      sizeof(Elf64_Phdr) > size - *hdr_offset) {
+    return false;
+  }
+  return true;
+}
+
+bool compute_note_segment_bounds(const Elf64_Phdr *phdr, size_t size,
+                                 size_t *note_offset, size_t *note_end) {
+  *note_offset = phdr->p_offset;
+  return *note_offset <= size && phdr->p_filesz <= size - *note_offset &&
+         checked_add(*note_offset, phdr->p_filesz, note_end);
+}
+
+bool compute_note_layout(size_t note_offset, size_t note_end,
+                         const Elf64_Nhdr *nhdr, size_t *desc_off,
+                         size_t *next_note) {
+  size_t raw_name_size = 0;
+  size_t raw_desc_size = 0;
+  size_t name_sz_aligned = 0;
+  size_t desc_sz_aligned = 0;
+  if (!checked_add(static_cast<size_t>(nhdr->n_namesz), 3, &raw_name_size) ||
+      !checked_add(static_cast<size_t>(nhdr->n_descsz), 3, &raw_desc_size)) {
+    return false;
+  }
+
+  name_sz_aligned = raw_name_size & ~size_t{3};
+  desc_sz_aligned = raw_desc_size & ~size_t{3};
+  return checked_add(note_offset, sizeof(Elf64_Nhdr), desc_off) &&
+         checked_add(*desc_off, name_sz_aligned, desc_off) &&
+         checked_add(*desc_off, desc_sz_aligned, next_note) &&
+         *next_note <= note_end;
+}
+
 // Search a single NT_AMDGPU_METADATA note descriptor for the ISA triple.
 std::string find_isa_in_metadata(const char *desc, size_t desc_size) {
   const char prefix[] = "amdgcn-amd-amdhsa--";
@@ -151,29 +207,44 @@ std::string find_isa_in_metadata(const char *desc, size_t desc_size) {
   return {};
 }
 
+std::string read_elf_isa_from_note_segment(const uint8_t *elf, size_t note_offset,
+                                           size_t note_end) {
+  while (note_offset <= note_end &&
+         sizeof(Elf64_Nhdr) <= note_end - note_offset) {
+    const auto *nhdr = reinterpret_cast<const Elf64_Nhdr *>(elf + note_offset);
+    size_t desc_off = 0;
+    size_t next_note = 0;
+    if (!compute_note_layout(note_offset, note_end, nhdr, &desc_off,
+                             &next_note)) {
+      break;
+    }
+
+    constexpr uint32_t NT_AMDGPU_METADATA = 32;
+    if (nhdr->n_type == NT_AMDGPU_METADATA && nhdr->n_descsz > 0 &&
+        desc_off + nhdr->n_descsz <= note_end) {
+      const char *desc = reinterpret_cast<const char *>(elf + desc_off);
+      std::string result = find_isa_in_metadata(desc, nhdr->n_descsz);
+      if (!result.empty()) {
+        return result;
+      }
+    }
+
+    note_offset = next_note;
+  }
+  return {};
+}
+
 // Parse ELF PT_NOTE segments to find the AMDGPU ISA name from
 // NT_AMDGPU_METADATA (type 32) notes in v3+ code objects.
 std::string read_elf_isa_note(const uint8_t *elf, size_t size) {
   const Elf64_Ehdr *ehdr = validate_elf64(elf, size);
-  if (!ehdr) {
+  if (!ehdr || !validate_program_header_table(ehdr, size)) {
     return {};
   }
 
-  const size_t phoff = ehdr->e_phoff;
-  const uint16_t phnum = ehdr->e_phnum;
-  const uint16_t phentsize = ehdr->e_phentsize;
-  if (phoff == 0 || phoff > size || phnum == 0 ||
-      phentsize < sizeof(Elf64_Phdr)) {
-    return {};
-  }
-
-  for (uint16_t i = 0; i < phnum; ++i) {
-    size_t hdr_index_offset = 0;
+  for (uint16_t i = 0; i < ehdr->e_phnum; ++i) {
     size_t hdr_offset = 0;
-    if (!checked_mul(static_cast<size_t>(i), static_cast<size_t>(phentsize),
-                     &hdr_index_offset) ||
-        !checked_add(phoff, hdr_index_offset, &hdr_offset) ||
-        sizeof(Elf64_Phdr) > size - hdr_offset) {
+    if (!compute_program_header_offset(ehdr, size, i, &hdr_offset)) {
       break;
     }
     const auto *phdr =
@@ -182,52 +253,16 @@ std::string read_elf_isa_note(const uint8_t *elf, size_t size) {
       continue;
     }
 
-    size_t note_offset = phdr->p_offset;
+    size_t note_offset = 0;
     size_t note_end = 0;
-    if (note_offset > size || phdr->p_filesz > size - note_offset ||
-        !checked_add(note_offset, phdr->p_filesz, &note_end)) {
+    if (!compute_note_segment_bounds(phdr, size, &note_offset, &note_end)) {
       continue;
     }
 
-    while (note_offset <= note_end &&
-           sizeof(Elf64_Nhdr) <= note_end - note_offset) {
-      const auto *nhdr =
-          reinterpret_cast<const Elf64_Nhdr *>(elf + note_offset);
-      size_t raw_name_size = 0;
-      size_t raw_desc_size = 0;
-      size_t name_sz_aligned = 0;
-      size_t desc_off = 0;
-      size_t desc_sz_aligned = 0;
-      size_t next_note = 0;
-      if (!checked_add(static_cast<size_t>(nhdr->n_namesz), 3,
-                       &raw_name_size) ||
-          !checked_add(static_cast<size_t>(nhdr->n_descsz), 3,
-                       &raw_desc_size)) {
-        break;
-      }
-      name_sz_aligned = raw_name_size & ~size_t{3};
-      desc_sz_aligned = raw_desc_size & ~size_t{3};
-      if (!checked_add(note_offset, sizeof(Elf64_Nhdr), &desc_off) ||
-          !checked_add(desc_off, name_sz_aligned, &desc_off) ||
-          !checked_add(desc_off, desc_sz_aligned, &next_note)) {
-        break;
-      }
-
-      if (next_note > note_end) {
-        break;
-      }
-
-      constexpr uint32_t NT_AMDGPU_METADATA = 32;
-      if (nhdr->n_type == NT_AMDGPU_METADATA && nhdr->n_descsz > 0 &&
-          desc_off + nhdr->n_descsz <= note_end) {
-        const char *desc = reinterpret_cast<const char *>(elf + desc_off);
-        std::string result = find_isa_in_metadata(desc, nhdr->n_descsz);
-        if (!result.empty()) {
-          return result;
-        }
-      }
-
-      note_offset = next_note;
+    std::string result = read_elf_isa_from_note_segment(elf, note_offset,
+                                                        note_end);
+    if (!result.empty()) {
+      return result;
     }
   }
   return {};
@@ -339,6 +374,82 @@ std::string get_agent_isa_name(hsa_agent_t agent) {
   return name;
 }
 
+hsa_status_t load_original_reader(hsa_executable_t executable, hsa_agent_t agent,
+                                  hsa_code_object_reader_t code_object_reader,
+                                  const char *options,
+                                  hsa_loaded_code_object_t *loaded_code_object,
+                                  bool reader_from_file) {
+  const hsa_status_t status = g_orig_load_agent_code_object(
+      executable, agent, code_object_reader, options, loaded_code_object);
+  if (status == HSA_STATUS_SUCCESS && reader_from_file) {
+    mark_reader_keepalive(code_object_reader.handle);
+  }
+  return status;
+}
+
+hsa_status_t load_rewritten_reader(hsa_executable_t executable, hsa_agent_t agent,
+                                   const char *options,
+                                   hsa_loaded_code_object_t *loaded_code_object,
+                                   void *out_elf, size_t out_elf_size) {
+  hsa_code_object_reader_t new_reader = {};
+  hsa_status_t status =
+      g_orig_reader_create_from_memory(out_elf, out_elf_size, &new_reader);
+  if (status != HSA_STATUS_SUCCESS) {
+    std::free(out_elf);
+    return status;
+  }
+
+  status = g_orig_load_agent_code_object(executable, agent, new_reader, options,
+                                         loaded_code_object);
+  g_orig_reader_destroy(new_reader);
+
+  if (status == HSA_STATUS_SUCCESS) {
+    // ROCR's LoadedCodeObjectImpl holds a raw pointer to the ELF data for
+    // debugger/profiler queries. The buffer must outlive the executable.
+    retain_rewritten_elf(out_elf);
+  } else {
+    std::free(out_elf);
+  }
+
+  return status;
+}
+
+hsa_status_t try_retarget_and_load(hsa_executable_t executable, hsa_agent_t agent,
+                                   hsa_code_object_reader_t code_object_reader,
+                                   const char *options,
+                                   hsa_loaded_code_object_t *loaded_code_object,
+                                   const ByteVec &local_bytes) {
+  const std::string source_isa =
+      read_elf_isa_note(local_bytes->data(), local_bytes->size());
+  const std::string target_isa = get_agent_isa_name(agent);
+
+  if (source_isa.empty() || target_isa.empty()) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  // Route through RetargetCodeObject for unified logging, validation,
+  // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
+  // patching uses the same ISA name on both sides.
+  void *out_elf = nullptr;
+  size_t out_elf_size = 0;
+  const int rc = rocr::hotswap::RetargetCodeObject(
+      local_bytes->data(), local_bytes->size(), source_isa.c_str(),
+      target_isa.c_str(), &out_elf, &out_elf_size);
+
+  if (rc != 0 || out_elf == local_bytes->data()) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  if (!out_elf || out_elf_size == 0) {
+    if (out_elf) {
+      std::free(out_elf);
+    }
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  return load_rewritten_reader(executable, agent, options, loaded_code_object,
+                               out_elf, out_elf_size);
+}
+
 hsa_status_t HSA_API hotswap_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent,
     hsa_code_object_reader_t code_object_reader, const char *options,
@@ -346,79 +457,27 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
   ByteVec local_bytes;
   bool reader_from_file = false;
 
-  auto load_original_reader = [&]() -> hsa_status_t {
-    const hsa_status_t status = g_orig_load_agent_code_object(
-        executable, agent, code_object_reader, options, loaded_code_object);
-    if (status == HSA_STATUS_SUCCESS && reader_from_file) {
-      mark_reader_keepalive(code_object_reader.handle);
-    }
-    return status;
-  };
-
   try {
-    {
-      std::scoped_lock lock(g_reader_map_mutex);
-      const auto it = g_reader_map.find(code_object_reader.handle);
-      if (it != g_reader_map.end()) {
-        local_bytes = it->second.bytes;
-        reader_from_file = it->second.from_file;
-      }
-    }
+    try_get_reader_entry(code_object_reader.handle, &local_bytes,
+                         &reader_from_file);
 
     if (!local_bytes) {
-      return load_original_reader();
+      return load_original_reader(executable, agent, code_object_reader,
+                                  options, loaded_code_object,
+                                  reader_from_file);
     }
 
-    const std::string source_isa =
-        read_elf_isa_note(local_bytes->data(), local_bytes->size());
-    const std::string target_isa = get_agent_isa_name(agent);
-
-    if (source_isa.empty() || target_isa.empty()) {
-      return load_original_reader();
-    }
-
-    // Route through RetargetCodeObject for unified logging, validation,
-    // and COMGR interaction. Do NOT skip when source == target: B0-to-A0
-    // patching uses the same ISA name on both sides.
-    void *out_elf = nullptr;
-    size_t out_elf_size = 0;
-    const int rc = rocr::hotswap::RetargetCodeObject(
-        local_bytes->data(), local_bytes->size(), source_isa.c_str(),
-        target_isa.c_str(), &out_elf, &out_elf_size);
-
-    if (rc != 0 || out_elf == local_bytes->data()) {
-      return load_original_reader();
-    }
-    if (!out_elf || out_elf_size == 0) {
-      if (out_elf) {
-        std::free(out_elf);
-      }
-      return load_original_reader();
-    }
-
-    hsa_code_object_reader_t new_reader;
-    hsa_status_t status =
-        g_orig_reader_create_from_memory(out_elf, out_elf_size, &new_reader);
-    if (status != HSA_STATUS_SUCCESS) {
-      std::free(out_elf);
-      return load_original_reader();
-    }
-
-    status = g_orig_load_agent_code_object(executable, agent, new_reader,
-                                           options, loaded_code_object);
-    g_orig_reader_destroy(new_reader);
-
+    const hsa_status_t status = try_retarget_and_load(
+        executable, agent, code_object_reader, options, loaded_code_object,
+        local_bytes);
     if (status == HSA_STATUS_SUCCESS) {
-      // ROCR's LoadedCodeObjectImpl holds a raw pointer to the ELF data for
-      // debugger/profiler queries. The buffer must outlive the executable.
-      retain_rewritten_elf(out_elf);
-    } else {
-      std::free(out_elf);
+      return status;
     }
-
-    return status;
+    return load_original_reader(executable, agent, code_object_reader, options,
+                                loaded_code_object, reader_from_file);
   } catch (const std::bad_alloc &) {
-    return load_original_reader();
+    return load_original_reader(executable, agent, code_object_reader, options,
+                                loaded_code_object, reader_from_file);
   }
 }
 
