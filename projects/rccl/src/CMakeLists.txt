@@ -448,6 +448,11 @@ foreach(file ${GENERATED_FILES})
   list(APPEND HIP_SOURCES ${file})
 endforeach()
 
+# Specialized kernels are only used by the device linker pipeline;
+# always exclude them from the normal HIP compilation to avoid
+# duplicate symbols with the aggregate per-collective .cpp files.
+list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/specialized/")
+
 # Device Linker: filter out device sources that are built by the pipeline
 #==================================================================================================
 if(ENABLE_DEVICE_LINKER)
@@ -458,8 +463,6 @@ if(ENABLE_DEVICE_LINKER)
   if(EXISTS "${GEN_DIR}/device_table.cpp")
     list(APPEND HIP_SOURCES "${GEN_DIR}/device_table.cpp")
   endif()
-  # Remove specialized/ directory (compiled separately by the device pipeline)
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/specialized/")
   # Remove files compiled separately by the device pipeline
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
