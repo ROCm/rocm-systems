@@ -33,7 +33,7 @@ add_executable(rocjitsu_tests
     simdojo_sim_test.cpp
 )
 target_link_libraries(rocjitsu_tests PRIVATE
-    ${RJ_OBJECT_LIBS} util flatbuffers Threads::Threads GTest::gtest_main)
+    ${RJ_OBJECT_LIBS} util flatbuffers msgpack-cxx Threads::Threads GTest::gtest_main)
 rj_configure_target(rocjitsu_tests TEST)
 
 include(GoogleTest)

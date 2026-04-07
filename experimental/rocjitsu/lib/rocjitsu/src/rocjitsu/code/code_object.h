@@ -93,6 +93,12 @@ public:
   /// @returns Image size in bytes.
   std::size_t size() const { return image_.size(); }
 
+  /// @brief Raw ELF image data.
+  /// @returns Pointer to the ELF image bytes, or nullptr if empty.
+  const uint8_t *image_data() const {
+    return image_.empty() ? nullptr : reinterpret_cast<const uint8_t *>(image_.data());
+  }
+
   /// @brief .text sections containing executable machine code.
   /// @returns Vector of pointers to .text sections.
   const std::vector<const Section *> &text_sections() const { return text_sections_; }

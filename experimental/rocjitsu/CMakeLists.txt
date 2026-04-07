@@ -83,7 +83,17 @@ set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(FLATBUFFERS_INSTALL OFF CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(googletest flatbuffers)
+# msgpack-cxx - header-only msgpack parser for AMDGPU kernel metadata.
+FetchContent_Declare(
+    msgpack-cxx
+    GIT_REPOSITORY https://github.com/msgpack/msgpack-c.git
+    GIT_TAG cpp-7.0.0
+)
+set(MSGPACK_USE_BOOST OFF CACHE BOOL "" FORCE)
+set(MSGPACK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(MSGPACK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(googletest flatbuffers msgpack-cxx)
 
 # Compile FlatBuffers schemas into C++ headers.
 set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)

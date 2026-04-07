@@ -21,9 +21,9 @@ namespace {
 /// On gfx9+, the compiler implicitly places the kernarg pointer in s[0:1]
 /// regardless of kernel_code_properties flags. The system SGPR
 /// (workgroup_id_x) follows at `sbase + num_user_sgprs`.
-/// v0 is set to the lane index (workitem_id_x).
+/// v0 is set to the workitem ID (wf_index * wf_size + lane).
 void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchPacket &pkt,
-                         uint32_t global_wg_id) {
+                         uint32_t global_wg_id, uint32_t wf_index) {
   uint32_t sbase = wf->sgpr_alloc().base;
 
   // User SGPRs: kernarg pointer in s[0:1] (implicit gfx9+ ABI).
@@ -35,10 +35,12 @@ void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchPacke
   // System SGPR: workgroup_id_x after user SGPRs.
   cu->write_sgpr(sbase + pkt.num_user_sgprs, global_wg_id);
 
-  // Workitem ID: v0 = lane index within the wavefront.
+  // Workitem ID: v0 = global thread ID within the workgroup.
   uint32_t vbase = wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < cu->wf_size(); ++lane)
-    cu->write_vgpr(vbase, lane, lane);
+  uint32_t thread_offset = wf_index * cu->wf_size();
+  for (uint32_t lane = 0; lane < cu->wf_size(); ++lane) {
+    cu->write_vgpr(vbase, lane, thread_offset + lane);
+  }
 }
 
 } // namespace
@@ -103,7 +105,7 @@ bool CommandProcessor::step() {
       }
 
       if (wf && chosen_cu) {
-        init_wavefront_regs(chosen_cu, wf, pkt, global_wg_id);
+        init_wavefront_regs(chosen_cu, wf, pkt, global_wg_id, w);
       } else {
         // ALL CUs are full. Re-enqueue remaining workgroups for retry.
         util::debug::print(__func__, ": all CUs full at wg=", wg, " w=", w, " - re-enqueueing ",
