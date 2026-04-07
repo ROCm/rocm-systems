@@ -434,10 +434,11 @@ _VOP1_OP_MAP = {
     'V_SAT_PK_U8_I16': ('nop', None),
     'V_SCREEN_PARTITION_4SE': ('nop', None),
     'V_ACCVGPR_MOV': ('nop', None),
-    'V_CVT_F32_FP8': ('nop', None),
-    'V_CVT_F32_BF8': ('nop', None),
-    'V_CVT_PK_F32_FP8': ('nop', None),
-    'V_CVT_PK_F32_BF8': ('nop', None),
+    'V_CVT_F32_FP8': ('vector_unary', 'cvt_f32_fp8'),
+    'V_CVT_F32_BF8': ('vector_unary', 'cvt_f32_bf8'),
+    'V_CVT_F32_BF16': ('vector_unary', 'cvt_f32_bf16'),
+    'V_CVT_PK_F32_FP8': ('nop', None),  # TODO: needs dual-VGPR write
+    'V_CVT_PK_F32_BF8': ('nop', None),  # TODO: needs dual-VGPR write
     'V_CVT_OFF_F32_I4': ('nop', None),
     'V_CVT_NORM_I16': ('nop', None),
     'V_CVT_NORM_U16': ('nop', None),
@@ -460,7 +461,12 @@ _VOP1_OP_MAP = {
     'V_SIN': ('vector_unary', 'sin'),
     'V_COS': ('vector_unary', 'cos'),
     'V_LOG': ('vector_unary', 'log2'),
+    'V_LOG_LEGACY': ('vector_unary', 'log2'),
     'V_EXP': ('vector_unary', 'exp2'),
+    'V_EXP_LEGACY': ('vector_unary', 'exp2'),
+    'V_PRNG': ('nop', None),  # PRNG not simulated
+    'V_PERMLANE16_SWAP': ('nop', None),
+    'V_PERMLANE32_SWAP': ('nop', None),
     'V_FREXP_EXP_I32': ('vector_unary', 'frexp_exp_f32'),
     'V_FREXP_EXP_I16': ('vector_unary', 'frexp_exp_f16'),
     'V_FREXP_MANT': ('vector_unary', 'frexp_mant_f32'),
@@ -758,7 +764,33 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     if name == 'V_TRIG_PREOP_F64':
         return InstructionSemantics(name, 'nop')
 
-    # FP8/BF8 pack/convert → nop (specialized format)
+    # ── CDNA4 / RDNA4 new conversions ─────────────────────────────────
+    if name == 'V_CVT_F32_BF16':
+        return InstructionSemantics(name, 'vector_unary',
+                                   operation='cvt_f32_bf16', data_type='f32')
+    if name == 'V_CVT_PK_F16_F32':
+        return InstructionSemantics(name, 'vector_cvt_pk_f16_f32')
+    if name == 'V_CVT_PK_BF16_F32':
+        return InstructionSemantics(name, 'vector_cvt_pk_bf16_f32')
+    if name == 'V_CVT_SR_F16_F32':
+        return InstructionSemantics(name, 'vector_cvt_sr_f16_f32')
+    if name == 'V_CVT_SR_BF16_F32':
+        return InstructionSemantics(name, 'vector_cvt_sr_bf16_f32')
+    if name == 'V_DOT2C_F32_BF16':
+        return InstructionSemantics(name, 'vector_dot2c_bf16')
+    if name == 'V_MINIMUM3_F32':
+        return InstructionSemantics(name, 'vector_ternary',
+                                   operation='minimum3', data_type='f32')
+    if name == 'V_MAXIMUM3_F32':
+        return InstructionSemantics(name, 'vector_ternary',
+                                   operation='maximum3', data_type='f32')
+    if name in ('V_BITOP3_B32', 'V_BITOP3_B16'):
+        return InstructionSemantics(name, 'nop')  # TODO: needs truth table from VOP3 encoding
+    if name in ('V_ASHR_PK_I8_I32', 'V_ASHR_PK_U8_I32'):
+        return InstructionSemantics(name, 'nop')  # TODO: packed shift-right
+    # V_PK_MINIMUM3/MAXIMUM3 are VOP3P, handled in _derive_vop3p.
+
+    # FP8/BF8 pack/convert (non-scaled, CDNA3/4)
     _FP8_PATTERNS = (
         'V_CVT_PK_FP8_F32', 'V_CVT_PK_BF8_F32',
         'V_CVT_SR_FP8_F32', 'V_CVT_SR_BF8_F32',
@@ -767,6 +799,10 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     )
     if name in _FP8_PATTERNS:
         return InstructionSemantics(name, 'nop')
+
+    # CDNA4 scaled FP8/BF8/FP6/FP4 conversions
+    if 'CVT_SCALEF32' in name.upper():
+        return InstructionSemantics(name, 'nop')  # TODO: Phase 3 scaled conversions
 
     # PK_FMAC → nop (packed FP16 FMA)
     if name == 'V_PK_FMAC_F16':
@@ -853,6 +889,12 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
                                    operation='add', data_type='f32')
     if name == 'V_PK_MOV_B32':
         return InstructionSemantics(name, 'pk_mov_b32')
+
+    # Packed min3/max3 (CDNA4 / RDNA4)
+    if name in ('V_PK_MINIMUM3_F16', 'V_PK_MAXIMUM3_F16'):
+        op = 'minimum3' if 'MINIMUM' in name else 'maximum3'
+        return InstructionSemantics(name, 'pk_ternary',
+                                   operation=op, data_type='f16')
 
     # Mixed-precision MAD_MIX
     if name == 'V_MAD_MIX_F32':

@@ -1990,7 +1990,9 @@ VCvtF32Fp8Vop1::VCvtF32Fp8Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_cvt_f32_fp8_vop1(*this, wf);
+}
 
 VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
     : Vop1("v_cvt_f32_bf8_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2007,7 +2009,9 @@ VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_cvt_f32_bf8_vop1(*this, wf);
+}
 
 VCvtPkF32Fp8Vop1::VCvtPkF32Fp8Vop1(const MachineInst *inst)
     : Vop1("v_cvt_pk_f32_fp8_e32", reinterpret_cast<const OpEncoding *>(inst),

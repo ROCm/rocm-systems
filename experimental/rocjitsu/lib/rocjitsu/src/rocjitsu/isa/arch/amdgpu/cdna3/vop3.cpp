@@ -2144,7 +2144,9 @@ VCvtF32Fp8Vop3::VCvtF32Fp8Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VCvtF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_cvt_f32_fp8_vop3(*this, wf);
+}
 
 VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_bf8", reinterpret_cast<const OpEncoding *>(inst),
@@ -2157,7 +2159,9 @@ VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VCvtF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_cvt_f32_bf8_vop3(*this, wf);
+}
 
 VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pk_f32_fp8", reinterpret_cast<const OpEncoding *>(inst),

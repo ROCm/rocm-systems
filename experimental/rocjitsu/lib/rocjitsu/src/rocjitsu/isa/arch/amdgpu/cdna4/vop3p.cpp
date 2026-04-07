@@ -815,8 +815,48 @@ VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)
 }
 
 void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    uint32_t raw2 = src2.read_lane(wf, lane);
+    bool sel0_lo = (inst_.op_sel >> 0) & 1;
+    bool sel1_lo = (inst_.op_sel >> 1) & 1;
+    bool sel2_lo = (inst_.op_sel >> 2) & 1;
+    bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;
+    bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;
+    bool sel2_hi = inst_.pad_14;
+    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
+    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
+    float c_lo = util::f16_to_f32(static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2));
+    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
+    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
+    float c_hi = util::f16_to_f32(static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2));
+    if (inst_.neg & 1) {
+      a_lo = -a_lo;
+    }
+    if (inst_.neg & 2) {
+      b_lo = -b_lo;
+    }
+    if (inst_.neg & 4) {
+      c_lo = -c_lo;
+    }
+    if (inst_.neg_hi & 1) {
+      a_hi = -a_hi;
+    }
+    if (inst_.neg_hi & 2) {
+      b_hi = -b_hi;
+    }
+    if (inst_.neg_hi & 4) {
+      c_hi = -c_hi;
+    }
+    float rlo = std::fmin(std::fmin(a_lo, b_lo), c_lo);
+    float rhi = std::fmin(std::fmin(a_hi, b_hi), c_hi);
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));
+  }
 }
 
 VPkMaximum3F16Vop3p::VPkMaximum3F16Vop3p(const MachineInst *inst)
@@ -835,8 +875,48 @@ VPkMaximum3F16Vop3p::VPkMaximum3F16Vop3p(const MachineInst *inst)
 }
 
 void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t raw0 = src0.read_lane(wf, lane);
+    uint32_t raw1 = src1.read_lane(wf, lane);
+    uint32_t raw2 = src2.read_lane(wf, lane);
+    bool sel0_lo = (inst_.op_sel >> 0) & 1;
+    bool sel1_lo = (inst_.op_sel >> 1) & 1;
+    bool sel2_lo = (inst_.op_sel >> 2) & 1;
+    bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;
+    bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;
+    bool sel2_hi = inst_.pad_14;
+    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
+    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
+    float c_lo = util::f16_to_f32(static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2));
+    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
+    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
+    float c_hi = util::f16_to_f32(static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2));
+    if (inst_.neg & 1) {
+      a_lo = -a_lo;
+    }
+    if (inst_.neg & 2) {
+      b_lo = -b_lo;
+    }
+    if (inst_.neg & 4) {
+      c_lo = -c_lo;
+    }
+    if (inst_.neg_hi & 1) {
+      a_hi = -a_hi;
+    }
+    if (inst_.neg_hi & 2) {
+      b_hi = -b_hi;
+    }
+    if (inst_.neg_hi & 4) {
+      c_hi = -c_hi;
+    }
+    float rlo = std::fmax(std::fmax(a_lo, b_lo), c_lo);
+    float rhi = std::fmax(std::fmax(a_hi, b_hi), c_hi);
+    vdst.write_lane(wf, lane,
+                    util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));
+  }
 }
 
 VMadMixF32Vop3p::VMadMixF32Vop3p(const MachineInst *inst)
