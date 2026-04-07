@@ -454,6 +454,30 @@ constexpr uint32_t vopc(uint32_t op, uint32_t src0, uint32_t vsrc1) {
 }
 constexpr uint32_t v_cmp_eq_f32(uint32_t s0, uint32_t vs1) { return vopc(66, s0, vs1); }
 
+// DS: 64-bit instruction.
+// dword0: offset0[7:0], offset1[15:8], gds[16], op[24:17], acc[25], encoding[31:26]=0x36
+// dword1: addr[7:0], data0[15:8], data1[23:16], vdst[31:24]
+constexpr uint32_t ds_lo(uint32_t op, uint8_t offset0 = 0, uint8_t offset1 = 0) {
+  return (0x36u << 26) | (op << 17) | (static_cast<uint32_t>(offset1) << 8) | offset0;
+}
+constexpr uint32_t ds_hi(uint32_t vdst, uint32_t data0, uint32_t addr, uint32_t data1 = 0) {
+  return (vdst << 24) | (data1 << 16) | (data0 << 8) | addr;
+}
+
+// FLAT (64-bit): CDNA3/4 layout.
+// dword0: offset[11:0], pad_12[12], lds[13], seg[15:14], sc0[16], nt[17],
+//         op[24:18], sc1[25], encoding[31:26]=0x37
+// dword1: addr[7:0], data[15:8], saddr[22:16], acc[23], vdst[31:24]
+constexpr uint32_t flat_lo(uint32_t op, uint32_t seg = 0, uint32_t sc0 = 0) {
+  return (0x37u << 26) | (op << 18) | (sc0 << 16) | (seg << 14);
+}
+constexpr uint32_t flat_hi(uint32_t vdst, uint32_t data, uint32_t addr, uint32_t saddr = 0x7F) {
+  return (vdst << 24) | (saddr << 16) | (data << 8) | addr;
+}
+
+constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
+constexpr uint32_t S_ENDPGM = sopp(1, 0);
+
 } // namespace enc
 
 struct ExecFixture {
@@ -819,5 +843,171 @@ TEST_P(IsaTest, BranchLoop) {
 
 INSTANTIATE_TEST_SUITE_P(Cdna, IsaTest, ::testing::Values("cdna3", "cdna4"),
                          [](const auto &info) { return info.param; });
+
+// ---------------------------------------------------------------------------
+// Atomic stress tests
+// ---------------------------------------------------------------------------
+
+// Dispatches multiple wavefronts that all atomically add 1 to LDS[0].
+// If atomics are truly atomic, the final value must equal the total number
+// of active lanes across all wavefronts.
+TEST(AtomicStressTest, DsAddRtnU32_MultiWavefront) {
+  // 3 wavefronts × 64 lanes = 192 total atomic adds.
+  VmFixture f("cdna4", 1, 10);
+
+  // Kernel:
+  //   v_mov_b32 v1, 1           // data0 = 1
+  //   v_mov_b32 v3, 0           // addr = LDS offset 0
+  //   ds_add_rtn_u32 v2, v3, v1 // V2 = old LDS[0]; LDS[0] += 1
+  //   s_waitcnt lgkm:0
+  //   s_endpgm
+  using namespace enc;
+  const uint32_t code[] = {
+      v_mov_b32(1, INLINE_CONST(1)),              // v1 = 1
+      v_mov_b32(3, INLINE_CONST(0)),              // v3 = 0 (LDS addr)
+      ds_lo(32),                                  // ds_add_rtn_u32 (op=32), offset0=0
+      ds_hi(/*vdst=*/2, /*data0=*/1, /*addr=*/3), // v2=result, v1=data, v3=addr
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  // Initialize LDS[0] = 0.
+  f.cu()->lds().write32(0, 0);
+
+  // Dispatch 192 workitems = 3 wavefronts of 64 lanes.
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 192, 192); // 1 workgroup of 192 threads
+  f.engine->run();
+
+  // All 192 lanes should have atomically added 1.
+  uint32_t final_val = f.cu()->lds().read32(0);
+  EXPECT_EQ(final_val, 192u) << "LDS atomic add result should be 192 (3 waves × 64 lanes)";
+}
+
+// Same test but with 4 workgroups dispatched independently.
+// All share the same CU (and thus same LDS), so atomics must be correct
+// across workgroup boundaries within one CU.
+TEST(AtomicStressTest, DsAddRtnU32_MultiWorkgroup) {
+  VmFixture f("cdna4", 1, 10);
+
+  using namespace enc;
+  const uint32_t code[] = {
+      v_mov_b32(1, INLINE_CONST(1)),
+      v_mov_b32(3, INLINE_CONST(0)),
+      ds_lo(32),
+      ds_hi(2, 1, 3),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  f.cu()->lds().write32(0, 0);
+
+  // 4 workgroups × 64 threads each = 4 wavefronts = 256 atomic adds.
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 256, 64);
+  f.engine->run();
+
+  uint32_t final_val = f.cu()->lds().read32(0);
+  EXPECT_EQ(final_val, 256u) << "LDS atomic add across 4 workgroups should be 256";
+}
+
+// Non-RTN DS atomic add: verify LDS gets the correct sum even without
+// returning the old value.
+TEST(AtomicStressTest, DsAddU32_NoReturn) {
+  VmFixture f("cdna4", 1, 10);
+
+  using namespace enc;
+  const uint32_t code[] = {
+      v_mov_b32(1, INLINE_CONST(1)),
+      v_mov_b32(3, INLINE_CONST(0)),
+      ds_lo(0),       // ds_add_u32 (op=0), no return
+      ds_hi(0, 1, 3), // vdst unused, data0=v1, addr=v3
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  f.cu()->lds().write32(0, 100); // Start at 100.
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 128, 128); // 2 wavefronts = 128 lanes
+  f.engine->run();
+
+  uint32_t final_val = f.cu()->lds().read32(0);
+  EXPECT_EQ(final_val, 228u) << "100 + 128 atomic adds = 228";
+}
+
+// Global (L2) atomic add: multiple wavefronts atomically increment a global
+// memory location. Exercises the L2 cache's striped-mutex atomic_rmw path.
+// Global (L2) atomic add: multiple wavefronts atomically increment a global
+// memory location. Exercises the L2 cache's striped-mutex atomic_rmw path.
+// Uses SGPR pair s4:s5 as the base address (saddr) with VGPR v4=0 (offset).
+TEST(AtomicStressTest, GlobalAtomicAdd_L2) {
+  VmFixture f("cdna4", 1, 10);
+
+  constexpr uint64_t TARGET_ADDR = 0x2000ULL;
+
+  // Kernel uses literal constants (ssrc0=255 + next dword) to load the
+  // target address into s4:s5, since the address doesn't fit in an inline
+  // constant (0-64 range).
+  using namespace enc;
+  const uint32_t code[] = {
+      s_mov_b32(SGPR(4), 255),             // s4 = literal (next dword)
+      static_cast<uint32_t>(TARGET_ADDR),  // literal: 0x2000
+      s_mov_b32(SGPR(5), INLINE_CONST(0)), // s5 = 0 (high 32 bits)
+      v_mov_b32(1, INLINE_CONST(1)),       // v1 = 1
+      v_mov_b32(4, INLINE_CONST(0)),       // v4 = 0 (offset)
+      flat_lo(66, /*seg=*/2, /*sc0=*/1),   // flat_atomic_add, GLOBAL, return
+      flat_hi(/*vdst=*/2, /*data=*/1, /*addr=*/4, /*saddr=*/4),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  f.mem()->write32(TARGET_ADDR, 0);
+
+  // 3 wavefronts × 64 lanes = 192 global atomic adds through L2.
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 192, 192);
+  f.engine->run();
+  f.cu()->flush_all();
+
+  uint32_t final_val = f.mem()->read32(TARGET_ADDR);
+  EXPECT_EQ(final_val, 192u) << "Global atomic add through L2 should be 192 (3 waves × 64 lanes)";
+}
+
+// Multiple workgroups all atomically add to the same global address.
+TEST(AtomicStressTest, GlobalAtomicAdd_MultiWorkgroup) {
+  VmFixture f("cdna4", 1, 10);
+
+  constexpr uint64_t TARGET_ADDR = 0x3000ULL;
+
+  using namespace enc;
+  const uint32_t code[] = {
+      s_mov_b32(SGPR(4), 255),
+      static_cast<uint32_t>(TARGET_ADDR),
+      s_mov_b32(SGPR(5), INLINE_CONST(0)),
+      v_mov_b32(1, INLINE_CONST(1)),
+      v_mov_b32(4, INLINE_CONST(0)),
+      flat_lo(66, 2, 1),
+      flat_hi(2, 1, 4, 4),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  f.mem()->write32(TARGET_ADDR, 1000);
+
+  // 4 workgroups × 64 threads = 4 wavefronts = 256 atomic adds.
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 256, 64);
+  f.engine->run();
+  f.cu()->flush_all();
+
+  uint32_t final_val = f.mem()->read32(TARGET_ADDR);
+  EXPECT_EQ(final_val, 1256u) << "1000 + 256 global atomic adds = 1256";
+}
 
 } // namespace
