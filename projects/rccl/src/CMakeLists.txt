@@ -347,6 +347,8 @@ if(USE_AMDSMI)
   )
 else()
   set(SMI_SOURCES
+    src/include/amdsmi_wrap.h
+    src/misc/amdsmi_wrap.cc
     src/include/rocm_smi_wrap.h
     src/misc/rocm_smi_wrap.cc
   )
