@@ -183,8 +183,8 @@ ExecTest() {
   local -a cmd
   cmd=( "$LAUNCHER"
         -n "$NUM_RANKS"
-        -mca pml ucx
-        -mca osc ucx
+        -mca pml "${OMPI_MCA_pml:-ucx}"
+        -mca osc "${OMPI_MCA_osc:-ucx}"
         -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
         -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
