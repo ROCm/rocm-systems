@@ -205,6 +205,8 @@ void TestMutualExclusion::Run(void) {
     int child_status = 0;
     pid_t cpid = wait(&child_status);
     ASSERT_EQ(cpid, child_);
+    ASSERT_TRUE(WIFEXITED(child_status))
+        << "TESTER child process terminated by signal " << WTERMSIG(child_status);
     EXPECT_EQ(WEXITSTATUS(child_status), 0) << "TESTER child process reported CHECK_RET failure(s)";
   } else {
     // Both processes should have completed amdsmi_init().

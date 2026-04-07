@@ -31,13 +31,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
 #include <iostream>
 #include <string>
 #include <vector>
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 // How long the holder process holds the mutex (seconds).
 static constexpr unsigned int kHoldSeconds = 5;
@@ -75,6 +75,7 @@ void TestCrossProcessSerialization::SetUp(void) {
   }
 
   holder_process_ = false;
+  is_child_process_ = false;
   child_ = 0;
 
   // Cross-process shared memory mutex is required.
@@ -93,8 +94,24 @@ void TestCrossProcessSerialization::SetUp(void) {
   // This guarantees both processes finish amdsmi_init before the holder
   // calls rsmi_test_sleep, which would otherwise block the waiter's own
   // amdsmi_init (device enumeration acquires the shared device mutex).
-  if (pipe(init_pipe_) < 0 || pipe(waiter_ready_pipe_) < 0 || pipe(run_pipe_) < 0) {
-    std::cout << "pipe() failed: " << strerror(errno) << std::endl;
+  if (pipe(init_pipe_) < 0) {
+    std::cout << "pipe(init_pipe_) failed: " << strerror(errno) << std::endl;
+    setup_failed_ = true;
+    return;
+  }
+  if (pipe(waiter_ready_pipe_) < 0) {
+    std::cout << "pipe(waiter_ready_pipe_) failed: " << strerror(errno) << std::endl;
+    close(init_pipe_[0]);
+    close(init_pipe_[1]);
+    setup_failed_ = true;
+    return;
+  }
+  if (pipe(run_pipe_) < 0) {
+    std::cout << "pipe(run_pipe_) failed: " << strerror(errno) << std::endl;
+    close(init_pipe_[0]);
+    close(init_pipe_[1]);
+    close(waiter_ready_pipe_[0]);
+    close(waiter_ready_pipe_[1]);
     setup_failed_ = true;
     return;
   }
@@ -145,6 +162,7 @@ void TestCrossProcessSerialization::SetUp(void) {
     close(waiter_ready_pipe_[0]);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   } else {
+    is_child_process_ = true;
     // Waiter: does not write to init_pipe, does not read waiter_ready_pipe
     // read-end, does not write to run_pipe.
     close(init_pipe_[1]);
@@ -231,9 +249,9 @@ void TestCrossProcessSerialization::Close() {
 void TestCrossProcessSerialization::Run(void) {
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    if (!holder_process_) {
+    if (is_child_process_) {
       // In the child process, _exit() immediately to avoid running gtest/AMDSMI cleanup
-      // cleanup that was never meant to run here.
+      // that was never meant to run here.
       std::cout.flush();
       _exit(1);
     }
@@ -306,8 +324,9 @@ void TestCrossProcessSerialization::Run(void) {
                 << std::endl;
     }
 
-    struct timespec pause_ts = {0, kWaiterMutexPauseNs};
-    nanosleep(&pause_ts, nullptr);
+    // Pause for the full duration, retrying on EINTR, so the holder always
+    // holds the mutex before we attempt to acquire it.
+    amd::smi::sleep_interruptible({0, kWaiterMutexPauseNs});
 
     uint16_t gpu_id = 0;
     auto t0 = std::chrono::steady_clock::now();
