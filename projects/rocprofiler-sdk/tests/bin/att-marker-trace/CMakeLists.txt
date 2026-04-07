@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -55,7 +55,8 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(att-marker-trace.cpp PROPERTIES LANGUAGE HIP)
 add_executable(att-marker-trace)
 target_sources(att-marker-trace PRIVATE att-marker-trace.cpp)
-target_compile_options(att-marker-trace PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
+target_compile_options(att-marker-trace PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
+                                                -Werror)
 
 find_package(Threads REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)

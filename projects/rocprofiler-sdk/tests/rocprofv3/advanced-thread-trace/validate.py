@@ -499,9 +499,9 @@ def test_att_marker_trace(json_data, att_marker_trace_out_dir_path):
     # kernel entry points and the Source column holds the demangled name.
     traced_kernel_names = set()
     stats_files = list(Path(att_marker_trace_out_dir_path).glob("stats_*.csv"))
-    assert len(stats_files) > 0, (
-        f"No stats_*.csv files found in {att_marker_trace_out_dir_path}"
-    )
+    assert (
+        len(stats_files) > 0
+    ), f"No stats_*.csv files found in {att_marker_trace_out_dir_path}"
     for stats_file in stats_files:
         with open(stats_file, "r") as f:
             reader = csv.reader(f)
@@ -515,9 +515,7 @@ def test_att_marker_trace(json_data, att_marker_trace_out_dir_path):
                 if len(row) >= 8 and row[7].strip():
                     traced_kernel_names.add(row[7].strip())
 
-    assert len(traced_kernel_names) > 0, (
-        "No kernel names found in stats CSV files"
-    )
+    assert len(traced_kernel_names) > 0, "No kernel names found in stats CSV files"
 
     # Verify traced_kernel_first and traced_kernel_second were traced
     for expected in ("traced_kernel_first", "traced_kernel_second"):
