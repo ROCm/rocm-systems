@@ -1522,7 +1522,7 @@ class AMDSMIHelpers:
                     "\n  GPU 0: 0-255 or 0-100%\n  GPU 1: 20-100 or 0-100%"
         """
         # Use cached result if available to avoid repeated sysfs reads
-        if hasattr(self, '_fan_support_cache'):
+        if hasattr(self, "_fan_support_cache"):
             return self._fan_support_cache
 
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
