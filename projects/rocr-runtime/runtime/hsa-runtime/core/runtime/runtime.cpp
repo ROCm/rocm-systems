@@ -1398,12 +1398,14 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     hflags.ui32.IPCHandle = 1;
     hflags.ui32.SysMem = handle->handle[3];
     hflags.ui32.UpdateMetadata = 1;
-    HsaHandleImportResult res;
+    HsaHandleImportResult res = {};
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
-    if (status == HSAKMT_STATUS_ERROR) {
+    if (status != HSAKMT_STATUS_SUCCESS) {
       runtime_singleton_->DmaBufClose(dmabuf_fd);
       return HSA_STATUS_ERROR;
     }
+    // Reuse token already stored on the BO 
+    if (res.metadata != 0) handle->handle[7] = res.metadata;
     allocation_map_[ptr].thunk_bo = res.buf_handle;
   }
 

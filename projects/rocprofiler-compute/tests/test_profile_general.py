@@ -3390,3 +3390,141 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     assert "Application replay mode" not in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.torch_trace
+@pytest.mark.parametrize(
+    "workload_cmd, expected_exit",
+    [
+        pytest.param(
+            ["python3", "nonexistent_script_abc.py"],
+            1,
+            id="missing_script",
+        ),
+        pytest.param(
+            ["python3"],
+            1,
+            id="bare_interpreter",
+        ),
+        pytest.param(
+            ["python3", "-u", "-v"],
+            1,
+            id="flags_only",
+        ),
+        pytest.param(
+            ["python3", "-u", "nonexistent_script_abc.py"],
+            1,
+            id="missing_script_after_flags",
+        ),
+        pytest.param(
+            ["nonexistentpython3", "script.py"],
+            1,
+            id="nonexistent_executable",
+        ),
+        pytest.param(
+            ["./no_such_binary"],
+            1,
+            id="nonexistent_binary",
+        ),
+    ],
+)
+def test_profile_invalid_workloads_torch_trace(
+    binary_handler_profile_rocprof_compute,
+    workload_cmd,
+    expected_exit,
+    request,
+):
+    """Integration test: workload validation exit codes with --torch-trace."""
+    app_name = "test_invalid_workload"
+    test_config = {**config, app_name: workload_cmd}
+
+    workload_dir = test_utils.get_output_dir(
+        param_id=f"invalid_wl_{request.node.callspec.id}"
+    )
+
+    returncode, stdout, stderr = binary_handler_profile_rocprof_compute(
+        test_config,
+        workload_dir,
+        options=["--experimental", "--torch-trace"],
+        check_success=False,
+        app_name=app_name,
+        capture_output=True,
+    )
+
+    assert returncode == expected_exit, (
+        f"Expected exit code {expected_exit} for {workload_cmd}, "
+        f"got {returncode}.\nstdout: {stdout}\nstderr: {stderr}"
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.parametrize(
+    "workload_cmd, expected_exit",
+    [
+        pytest.param(
+            ["python3", "nonexistent_script_abc.py"],
+            1,
+            id="missing_script",
+        ),
+        pytest.param(
+            ["python3"],
+            1,
+            id="bare_interpreter",
+        ),
+        pytest.param(
+            ["python3", "-u", "-v"],
+            1,
+            id="flags_only",
+        ),
+        pytest.param(
+            ["python3", "-u", "nonexistent_script_abc.py"],
+            1,
+            id="missing_script_after_flags",
+        ),
+        pytest.param(
+            ["nonexistentpython3", "script.py"],
+            1,
+            id="nonexistent_executable",
+        ),
+        pytest.param(
+            ["./no_such_binary"],
+            1,
+            id="nonexistent_binary",
+        ),
+        pytest.param(
+            ["python3", "-c", "print('hello')"],
+            0,
+            id="non_gpu_workload",
+        ),
+    ],
+)
+def test_profile_invalid_workloads_no_torch_trace(
+    binary_handler_profile_rocprof_compute,
+    workload_cmd,
+    expected_exit,
+    request,
+):
+    """Integration test: workload validation exit codes without --torch-trace."""
+    app_name = "test_invalid_workload"
+    test_config = {**config, app_name: workload_cmd}
+
+    workload_dir = test_utils.get_output_dir(
+        param_id=f"invalid_wl_{request.node.callspec.id}"
+    )
+
+    returncode, stdout, stderr = binary_handler_profile_rocprof_compute(
+        test_config,
+        workload_dir,
+        options=[],
+        check_success=False,
+        app_name=app_name,
+        capture_output=True,
+    )
+
+    assert returncode == expected_exit, (
+        f"Expected exit code {expected_exit} for {workload_cmd}, "
+        f"got {returncode}.\nstdout: {stdout}\nstderr: {stderr}"
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)

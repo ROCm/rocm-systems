@@ -601,6 +601,18 @@ add_test(
 )
 
 # -----------------------------------
+# Profiler base unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_profiler_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_profiler_base.xml ${COV_OPTION} tests/test_profiler_base.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
