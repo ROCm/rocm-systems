@@ -93,7 +93,7 @@ And then run the test:
 
 ### Build Samples
 
-The CMakeLists.txt at hip-tests/samples folder can be used for building and packaging samples.
+The CMakeLists.txt file in the hip-tests/samples folder can be used to build and package samples.
 
 CMakeLists.txt can support shared and static libs of hip-rocclr runtime. The same steps can be followed for both.
 
