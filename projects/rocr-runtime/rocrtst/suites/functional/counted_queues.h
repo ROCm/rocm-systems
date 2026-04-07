@@ -10,6 +10,14 @@
 
 #include "suites/test_common/test_base.h"
 
+struct QueueTestData{
+    hsa_queue_t* queue = nullptr;
+    hsa_signal_t completion_signal = {};
+    void* src_buffer = nullptr;
+    void* dst_buffer = nullptr;
+    void* kernarg_address = nullptr;
+};
+
 class CountedQueuesTest : public TestBase {
  public:
   explicit CountedQueuesTest();
@@ -63,6 +71,15 @@ class CountedQueuesTest : public TestBase {
   /// @brief Test to verify ring buffer wrap around when more than queue_size number of 
   // AQL packets are enqueued
   void CountedQueuesOverflowWrapAroundTest();
+
+  /// @brief Test to create at least twice the amount of CP queues to force over-subscription
+  // AQL packets and signals are enqueued
+  void CPQueueOverSubscriptionTest();
+private:
+  std::vector<QueueTestData> data;
+  void FreeResources();
+  bool resources_free = false;
+
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_COUNTED_QUEUES_H
