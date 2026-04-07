@@ -229,7 +229,7 @@ TEST(VectorAddCodeObjectTest, LoadsAndDecodes) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   const auto *text = co->text_sections()[0];
   const auto *data = reinterpret_cast<const uint32_t *>(text->data());
-  auto inst = decoder->decode(data);
+  std::unique_ptr<Instruction> inst(decoder->decode(data));
   EXPECT_NE(inst, nullptr) << "Failed to decode first instruction";
 }
 

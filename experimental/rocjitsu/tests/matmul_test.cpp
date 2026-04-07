@@ -73,7 +73,7 @@ std::vector<std::unique_ptr<Instruction>> decode_all(const CodeObject &co) {
     size_t words = sec->size() / sizeof(uint32_t);
     size_t pc = 0;
     while (pc < words) {
-      auto inst = decoder->decode(&data[pc]);
+      std::unique_ptr<Instruction> inst(decoder->decode(&data[pc]));
       EXPECT_NE(inst, nullptr);
       ++pc;
       if (inst && inst->size() == 8)

@@ -17,6 +17,14 @@
 
 namespace rocjitsu {
 
+Decoder::~Decoder() {
+  // If this decoder's pool is still the active one, deactivate it so
+  // surviving instructions (held by callers in unique_ptr/vectors) fall
+  // back to ::operator delete instead of following a dangling pool pointer.
+  if (Instruction::alloc_pool_ == &pool_)
+    deactivate_pool();
+}
+
 std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -40,6 +48,18 @@ std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
   default:
     return nullptr;
   }
+}
+
+void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {
+  Instruction::alloc_fn_ = alloc;
+  Instruction::dealloc_fn_ = dealloc;
+  Instruction::alloc_pool_ = pool;
+}
+
+void Decoder::deactivate_pool() {
+  Instruction::alloc_fn_ = nullptr;
+  Instruction::dealloc_fn_ = nullptr;
+  Instruction::alloc_pool_ = nullptr;
 }
 
 } // namespace rocjitsu

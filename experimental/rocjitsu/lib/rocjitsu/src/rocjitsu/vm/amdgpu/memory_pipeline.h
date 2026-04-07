@@ -12,9 +12,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
-#include <memory>
 #include <queue>
-#include <utility>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -40,34 +38,37 @@ public:
   virtual ~MemoryPipeline() = default;
 
   struct PipelineEntry {
-    std::unique_ptr<Instruction> inst;
+    Instruction *inst;
     Wavefront *wf;
   };
 
   /// @brief Issue a memory instruction to this pipeline.
-  void issue(std::unique_ptr<Instruction> inst, Wavefront &wf) {
+  /// @param inst Raw instruction pointer (caller transfers ownership).
+  /// @param wf   The issuing wavefront.
+  void issue(Instruction *inst, Wavefront &wf) {
     wf.wait_counters().increment(counter_type_);
-    issued_.push({std::move(inst), &wf});
+    issued_.push({inst, &wf});
   }
 
   /// @brief Advance the pipeline by one cycle.
   void tick() {
     // Process returned instructions: decrement counters and complete.
     while (!returned_.empty()) {
-      auto entry = std::move(returned_.front());
+      auto entry = returned_.front();
       returned_.pop();
       entry.wf->wait_counters().decrement(counter_type_);
       if (entry.wf->state() == WfState::WAITCNT && entry.wf->wait_satisfied())
         entry.wf->set_state(WfState::RUNNING);
       complete_access(*entry.inst, *entry.wf);
+      delete entry.inst;
     }
 
     // Initiate access for newly issued instructions.
     while (!issued_.empty()) {
-      auto entry = std::move(issued_.front());
+      auto entry = issued_.front();
       issued_.pop();
       initiate_access(*entry.inst, *entry.wf);
-      returned_.push(std::move(entry));
+      returned_.push(entry);
     }
   }
 

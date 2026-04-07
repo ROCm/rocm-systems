@@ -94,9 +94,11 @@ std::vector<CorpusEntry> build_corpus(const TestEncEntry *encodings, size_t num_
 
     // Try decode — skip if the synthesized encoding doesn't decode.
     try {
-      auto inst = decoder.decode(te.words.data());
-      if (inst)
+      auto *inst = decoder.decode(te.words.data());
+      if (inst) {
         corpus.push_back({te.mnemonic, te.words, cat});
+        delete inst;
+      }
     } catch (...) {
     }
   }
@@ -174,7 +176,8 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
   auto decode_start = Clock::now();
   for (int iter = 0; iter < ITERATIONS; ++iter) {
     for (const auto &entry : corpus) {
-      auto inst = decoder->decode(entry.words.data());
+      auto *inst = decoder->decode(entry.words.data());
+      delete inst;
     }
   }
   auto decode_end = Clock::now();
@@ -185,12 +188,13 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
   auto full_start = Clock::now();
   for (int iter = 0; iter < ITERATIONS; ++iter) {
     for (const auto *entry : executable) {
-      auto inst = decoder->decode(entry->words.data());
+      auto *inst = decoder->decode(entry->words.data());
       if (inst) {
         try {
-          cu->execute_instruction(inst.get(), *wf);
+          cu->execute_instruction(inst, *wf);
         } catch (...) {
         }
+        delete inst;
       }
     }
   }
