@@ -30,6 +30,7 @@ target_sources(
   PRIVATE
     backend_bc.cpp
     backend_bc_device.cpp
+    build_info.cpp
     constmem.cpp
     envvar.cpp
     context_host.cpp

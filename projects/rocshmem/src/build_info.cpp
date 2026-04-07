@@ -1,0 +1,157 @@
+/******************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *****************************************************************************/
+
+#include "build_info.hpp"
+#include "rocshmem/rocshmem.hpp"
+#include "rocshmem_config_embedded.hpp"
+#include "util.hpp"
+
+#include <rocm-core/rocm_version.h>
+
+#include <cstdio>
+#include <cstring>
+#include <set>
+#include <sstream>
+#include <string>
+
+namespace rocshmem {
+
+static constexpr int NAME_COL = 28;
+static constexpr int INFO_COL = 47;
+
+static void print_entry(std::ostream& os, const char* name, const char* info) {
+  char buf[NAME_COL + INFO_COL + 8];
+  snprintf(buf, sizeof(buf), "# %-*s: %-*s#\n", NAME_COL, name, INFO_COL, info);
+  os << buf;
+}
+
+static void print_arch_info(std::ostream& os) {
+  hipDeviceProp_t prop;
+  std::string compiled_arch;
+  std::string system_arch;
+
+  int n_compiled_arch = 1;
+  bool supported_arch = false;
+  std::istringstream compiled_arch_list(ROCSHMEM_OFFLOAD_TARGETS);
+
+  CHECK_HIP(hipGetDeviceProperties(&prop, 0));
+
+  system_arch = std::string(prop.gcnArchName, strcspn(prop.gcnArchName, ":"));
+
+  while (compiled_arch_list >> compiled_arch) {
+    if (1 == n_compiled_arch) {
+      print_entry(os, "Compiled Arch(s)", compiled_arch.c_str());
+    } else {
+      print_entry(os, " ", compiled_arch.c_str());
+    }
+    if (compiled_arch.find(system_arch) != std::string::npos)
+      supported_arch = true;
+    n_compiled_arch++;
+  }
+
+  print_entry(os, "System Arch", prop.gcnArchName);
+  print_entry(os, "Supported System Arch", supported_arch ? "Yes" : "No");
+}
+
+static void print_rocm_info(std::ostream& os) {
+  char rocm_version[32];
+  snprintf(rocm_version, sizeof(rocm_version), "%d.%d.%d",
+           ROCM_VERSION_MAJOR, ROCM_VERSION_MINOR, ROCM_VERSION_PATCH);
+  print_entry(os, "ROCm", rocm_version);
+}
+
+static void print_mpi_info(std::ostream& os) {
+#ifdef OMPI_MAJOR_VERSION
+  char mpi_version[8];
+  snprintf(mpi_version, sizeof(mpi_version), "%d.%d.%d",
+           OMPI_MAJOR_VERSION, OMPI_MINOR_VERSION, OMPI_RELEASE_VERSION);
+  print_entry(os, "Open MPI", mpi_version);
+#else
+  print_entry(os, "MPI", "Unsupported MPI Library");
+#endif
+}
+
+static void parse_config(std::ostream& os) {
+  const std::string define     = "#define ";
+  const std::string undef_pre  = "/* #undef ";
+  const std::string undef_post = " */";
+
+  // Already printed at the top of the output; suppress duplicates here.
+  const std::set<std::string> skip = {
+    "ROCSHMEM_GIT_HASH",
+    "ROCSHMEM_INSTALL_PREFIX",
+    "ROCSHMEM_OFFLOAD_TARGETS",
+  };
+
+  os << "#------------------------------------------------------------------------------#\n";
+  os << "#                              Build Configuration                             #\n";
+  os << "#------------------------------------------------------------------------------#\n";
+
+  std::istringstream stream(rocshmem_config_h_content);
+  std::string line;
+  while (std::getline(stream, line)) {
+    if (line.find(undef_pre) != std::string::npos) {
+      line.replace(line.find(undef_pre), undef_pre.length(), "");
+      line.replace(line.find(undef_post), undef_post.length(), "");
+      print_entry(os, line.c_str(), "OFF");
+      continue;
+    }
+
+    size_t def_pos = line.find(define);
+    if (def_pos != std::string::npos) {
+      std::string rest = line.substr(def_pos + define.length());
+      size_t space = rest.find(' ');
+      if (space != std::string::npos) {
+        std::string name  = rest.substr(0, space);
+        if (skip.count(name)) continue;
+        std::string value = rest.substr(space + 1);
+        if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
+          value = value.substr(1, value.size() - 2);
+        print_entry(os, name.c_str(), value.c_str());
+      } else {
+        if (skip.count(rest)) continue;
+        print_entry(os, rest.c_str(), "ON");
+      }
+    }
+  }
+}
+
+void print_build_info(std::ostream& os) {
+  os << "################################################################################\n";
+  os << "#                                rocSHMEM Info                                 #\n";
+  os << "################################################################################\n";
+
+  print_entry(os, "Version", rocshmem::VERSION);
+  print_entry(os, "Git Hash", ROCSHMEM_GIT_HASH);
+  print_entry(os, "Install Prefix", ROCSHMEM_INSTALL_PREFIX);
+
+  print_arch_info(os);
+  print_rocm_info(os);
+  print_mpi_info(os);
+  parse_config(os);
+
+  os << "################################################################################\n";
+}
+
+}  // namespace rocshmem

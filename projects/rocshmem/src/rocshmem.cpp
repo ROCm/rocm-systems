@@ -34,6 +34,7 @@
 #include "rocshmem/rocshmem.hpp"
 
 #include "backend_bc.hpp"
+#include "build_info.hpp"
 #include "context_incl.hpp"
 #include "envvar.hpp"
 #if defined(USE_GDA)
@@ -177,9 +178,12 @@ static void setFilesLimit() {
   setFilesLimit();
   rocm_init();
 
-  // Print environment variables if DEBUG_LEVEL is set to ENV modes
+  // Print build info and/or environment variables based on DEBUG_LEVEL.
   using rocshmem::envvar::types::debug_level;
   auto debug_val = envvar::debug_level.get_value();
+  if (debug_val >= debug_level::INFO) {
+    print_build_info(std::cout);
+  }
   if (debug_val == debug_level::ENV ||
       debug_val == debug_level::ENV_ALL ||
       debug_val == debug_level::ENV_FULL) {
@@ -314,9 +318,12 @@ static void setFilesLimit() {
   setFilesLimit();
   rocm_init();
 
-  // Print environment variables if DEBUG_LEVEL is set to ENV modes
+  // Print build info and/or environment variables based on DEBUG_LEVEL.
   using rocshmem::envvar::types::debug_level;
   auto debug_val = envvar::debug_level.get_value();
+  if (debug_val >= debug_level::INFO) {
+    print_build_info(std::cout);
+  }
   if (debug_val == debug_level::ENV ||
       debug_val == debug_level::ENV_ALL ||
       debug_val == debug_level::ENV_FULL) {

@@ -24,29 +24,9 @@
 # SOURCES
 ###############################################################################
 
-# Embed rocshmem_config.h as a C++17 raw string literal at configure time so
-# rocshmem_info does not need to locate the file at runtime.
-set(_config_h "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config.h")
-file(READ "${_config_h}" _config_content)
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_config_embedded.hpp"
-  "// Auto-generated from rocshmem_config.h — do not edit.\n"
-  "#pragma once\n"
-  "static const char rocshmem_config_h_content[] = R\"ROCSHMEM_CFG_END(\n"
-  "${_config_content}"
-  ")ROCSHMEM_CFG_END\";\n"
-)
-
 add_executable(rocshmem_info rocshmem_info.cpp)
 
-target_include_directories(
-  rocshmem_info
-  PRIVATE
-    roc::rocshmem
-    "${CMAKE_CURRENT_BINARY_DIR}"
-)
-
-target_link_libraries(
-  rocshmem_info
+target_link_libraries(rocshmem_info
   PRIVATE
     roc::rocshmem
 )
