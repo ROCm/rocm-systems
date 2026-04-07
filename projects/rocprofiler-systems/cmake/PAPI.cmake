@@ -150,7 +150,8 @@ set(ROCPROFSYS_PAPI_EXTRA_ENV)
 
 foreach(_COMP ${ROCPROFSYS_PAPI_COMPONENTS})
     string(
-        REPLACE ";"
+        REPLACE
+        ";"
         ", "
         _ROCPROFSYS_VALID_PAPI_COMPONENTS_MSG
         "${ROCPROFSYS_VALID_PAPI_COMPONENTS}"
@@ -351,7 +352,8 @@ foreach(
             _HL_OUTPUT_WRITER
         )
         string(
-            REPLACE "#!/usr/bin/python\n"
+            REPLACE
+            "#!/usr/bin/python\n"
             "#!/usr/bin/python3\n"
             _HL_OUTPUT_WRITER
             "${_HL_OUTPUT_WRITER}"
