@@ -209,9 +209,10 @@ void ROBackend::team_destroy(rocshmem_team_t team) {
 }
 
 void ROBackend::create_new_team(Team *parent_team,
-                                TeamInfo *team_info_wrt_parent,
-                                TeamInfo *team_info_wrt_world, int num_pes,
-                                int my_pe_in_new_team, MPI_Comm team_comm,
+                                const TeamInfo& team_info_wrt_parent,
+                                const TeamInfo& team_info_wrt_world,
+                                int num_pes, int my_pe_in_new_team,
+                                MPI_Comm team_comm,
                                 rocshmem_team_t *new_team) {
   transport_->createNewTeam(this, parent_team, team_info_wrt_parent,
                             team_info_wrt_world, num_pes, my_pe_in_new_team,

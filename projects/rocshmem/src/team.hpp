@@ -45,6 +45,11 @@ class TeamInfo {
   __host__ __device__ TeamInfo() = default;
 
   /**
+   * @brief Copy constructor
+   */
+  __host__ __device__ TeamInfo(const TeamInfo&) = default;
+
+  /**
    * @brief Primary constructor
    */
   __host__ __device__ TeamInfo(Team* parent_team, int pe_start, int stride,
@@ -83,8 +88,8 @@ class Team {
    * @param _my_pe the index of this PE in the team
    * @param _mpi_comm MPI Communicator representing the team
    */
-  Team(Backend* handle, TeamInfo* team_info_wrt_parent,
-       TeamInfo* team_info_wrt_world, int num_pes, int my_pe,
+  Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
+       const TeamInfo& team_info_wrt_world, int num_pes, int my_pe,
        MPI_Comm mpi_comm);
 
   /**
@@ -151,6 +156,15 @@ class Team {
    * @note This is required to do some reinterpret_casts.
    */
   BackendType type{BackendType::RO_BACKEND};
+
+ private:
+  /**
+   * @brief Owns the device memory block for both TeamInfo objects.
+   *
+   * Layout: [tinfo_wrt_parent | tinfo_wrt_world] (contiguous).
+   * tinfo_wrt_parent and tinfo_wrt_world point into this block.
+   */
+  TeamInfo* team_info_block_{nullptr};
 };
 
 __host__ __device__ Team* get_internal_team(rocshmem_team_t team);

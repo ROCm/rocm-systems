@@ -46,7 +46,7 @@ class ROTeamProxy {
 
     mpilib_ftable_.Comm_dup(comm, &team_world_comm_);
 
-    new (proxy_.get()) ROTeam(backend, wrt_parent_.get(), wrt_world_.get(),
+    new (proxy_.get()) ROTeam(backend, *wrt_parent_.get(), *wrt_world_.get(),
                               team_size_, my_pe_, team_world_comm_);
   }
 
