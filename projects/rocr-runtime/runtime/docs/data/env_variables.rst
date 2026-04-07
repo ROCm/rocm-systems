@@ -28,7 +28,7 @@
         | Specifies the threshold for the amount of scratch memory allocated and reclaimed in kernel dispatches.
         | Enabling ``HSA_NO_SCRATCH_RECLAIM`` circumvents ``HSA_SCRATCH_SINGLE_LIMIT``, and treats ``HSA_SCRATCH_SINGLE_LIMIT`` as the maximum value.
         |
-        | **NOTE:** In the 7.0 release the developer can use the HIP enumerator ``hipExtLimitScratchCurrent`` to programmatically change the default scratch memory allocation size. For more information, see `Global enums and defines <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___global_defs.html>`_.
+        | **NOTE:** In the 7.0 release the developer can use the HIP enumerator ``hipExtLimitScratchCurrent`` to programmatically change the default scratch memory allocation size. For more information, see `Global enums and defines <https://rocm.docs.amd.com/projects/HIP/en/latest/reference/hip_runtime_api/global_defines_enums_structs_files.html>`_.
       - ``146800640``
       - 0 to 4GB per XCC
 

@@ -1,30 +1,15 @@
 /*
-    Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in
-    all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-    THE SOFTWARE.
-   */
 #include <hip/amd_detail/hip_api_trace.hpp>
 #include "hip_internal.hpp"
 #include "utils/flags.hpp"
 #include "utils/debug.hpp"
 #include <exception>
-#include <tuple> 
+#include <tuple>
 
 #if defined(__GNUC__)
 #define __forceinline __inline__ __attribute__((always_inline))
@@ -37,7 +22,7 @@ const HipToolsDispatchTable* GetHipToolsDispatchTable();
 
 // ================================================================================================
 // Generic exception handler - returns default value for non-hipError_t types
-template <typename T> 
+template <typename T>
 __forceinline T HandleException() {
   std::ignore = HandleException<hipError_t>();
   return T();
@@ -299,9 +284,9 @@ hipError_t hipCtxSetSharedMemConfig(hipSharedMemConfig config) {
   return hip::GetHipDispatchTable()->hipCtxSetSharedMemConfig_fn(config);
   CATCH;
 }
-hipError_t hipCtxSynchronize(void) { 
+hipError_t hipCtxSynchronize(void) {
   TRY;
-  return hip::GetHipDispatchTable()->hipCtxSynchronize_fn(); 
+  return hip::GetHipDispatchTable()->hipCtxSynchronize_fn();
   CATCH;
 }
 hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem) {
@@ -447,9 +432,9 @@ hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags) {
   return hip::GetHipDispatchTable()->hipDevicePrimaryCtxSetFlags_fn(dev, flags);
   CATCH;
 }
-hipError_t hipDeviceReset(void) { 
+hipError_t hipDeviceReset(void) {
   TRY;
-  return hip::GetHipDispatchTable()->hipDeviceReset_fn(); 
+  return hip::GetHipDispatchTable()->hipDeviceReset_fn();
   CATCH;
 }
 hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
@@ -614,9 +599,9 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
                                                                          bufferDesc);
   CATCH;
 }
-hipError_t hipFree(void* ptr) { 
+hipError_t hipFree(void* ptr) {
   TRY;
-  return hip::GetHipDispatchTable()->hipFree_fn(ptr); 
+  return hip::GetHipDispatchTable()->hipFree_fn(ptr);
   CATCH;
 }
 hipError_t hipFreeArray(hipArray_t array) {
@@ -629,9 +614,9 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   return hip::GetHipDispatchTable()->hipFreeAsync_fn(dev_ptr, stream);
   CATCH;
 }
-hipError_t hipFreeHost(void* ptr) { 
+hipError_t hipFreeHost(void* ptr) {
   TRY;
-  return hip::GetHipDispatchTable()->hipFreeHost_fn(ptr); 
+  return hip::GetHipDispatchTable()->hipFreeHost_fn(ptr);
   CATCH;
 }
 hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray) {
@@ -723,9 +708,9 @@ const char* hipGetErrorString(hipError_t hipError) {
   return hip::GetHipDispatchTable()->hipGetErrorString_fn(hipError);
   CATCHRET(const char*);
 }
-hipError_t hipGetLastError(void) { 
+hipError_t hipGetLastError(void) {
   TRY;
-  return hip::GetHipDispatchTable()->hipGetLastError_fn(); 
+  return hip::GetHipDispatchTable()->hipGetLastError_fn();
   CATCH;
 }
 hipError_t hipGetMipmappedArrayLevel(hipArray_t* levelArray,
@@ -1276,9 +1261,9 @@ hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
   return hip::GetHipDispatchTable()->hipHostAlloc_fn(ptr, size, flags);
   CATCH;
 }
-hipError_t hipHostFree(void* ptr) { 
+hipError_t hipHostFree(void* ptr) {
   TRY;
-  return hip::GetHipDispatchTable()->hipHostFree_fn(ptr); 
+  return hip::GetHipDispatchTable()->hipHostFree_fn(ptr);
   CATCH;
 }
 hipError_t hipHostGetDevicePointer(void** devPtr, void* hstPtr, unsigned int flags) {
@@ -1326,9 +1311,9 @@ hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGra
       phGraphNode, hGraph, dependencies, numDependencies, memsetParams, ctx);
   CATCH;
 }
-hipError_t hipInit(unsigned int flags) { 
+hipError_t hipInit(unsigned int flags) {
   TRY;
-  return hip::GetHipDispatchTable()->hipInit_fn(flags); 
+  return hip::GetHipDispatchTable()->hipInit_fn(flags);
   CATCH;
 }
 hipError_t hipIpcCloseMemHandle(void* devPtr) {
@@ -1620,6 +1605,15 @@ hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocat
   TRY;
   return hip::GetHipDispatchTable()->hipMemPrefetchAsync_v2_fn(dev_ptr, count, location, flags,
                                                                stream);
+  CATCH;
+}
+hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                    size_t num_prefetch_locs, unsigned long long flags,
+                                    hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemPrefetchBatchAsync_fn(
+      dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, flags, stream);
   CATCH;
 }
 hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
@@ -2098,9 +2092,9 @@ extern "C" hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* bloc
       gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit);
   CATCH;
 }
-hipError_t hipPeekAtLastError(void) { 
+hipError_t hipPeekAtLastError(void) {
   TRY;
-  return hip::GetHipDispatchTable()->hipPeekAtLastError_fn(); 
+  return hip::GetHipDispatchTable()->hipPeekAtLastError_fn();
   CATCH;
 }
 hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, hipDeviceptr_t ptr) {
@@ -2119,14 +2113,14 @@ hipError_t hipPointerSetAttribute(const void* value, hipPointer_attribute attrib
   return hip::GetHipDispatchTable()->hipPointerSetAttribute_fn(value, attribute, ptr);
   CATCH;
 }
-hipError_t hipProfilerStart() { 
+hipError_t hipProfilerStart() {
   TRY;
-  return hip::GetHipDispatchTable()->hipProfilerStart_fn(); 
+  return hip::GetHipDispatchTable()->hipProfilerStart_fn();
   CATCH;
 }
-hipError_t hipProfilerStop() { 
+hipError_t hipProfilerStop() {
   TRY;
-  return hip::GetHipDispatchTable()->hipProfilerStop_fn(); 
+  return hip::GetHipDispatchTable()->hipProfilerStop_fn();
   CATCH;
 }
 hipError_t hipRuntimeGetVersion(int* runtimeVersion) {
@@ -2764,9 +2758,9 @@ extern "C" int hipGetStreamDeviceId(hipStream_t stream) {
   return hip::GetHipDispatchTable()->hipGetStreamDeviceId_fn(stream);
   CATCHRET(int)
 }
-hipError_t hipExtGetLastError() { 
+hipError_t hipExtGetLastError() {
   TRY;
-  return hip::GetHipDispatchTable()->hipExtGetLastError_fn(); 
+  return hip::GetHipDispatchTable()->hipExtGetLastError_fn();
   CATCH;
 }
 hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* texRef) {

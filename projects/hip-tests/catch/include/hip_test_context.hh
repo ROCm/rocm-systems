@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 #include <hip/hip_runtime.h>
@@ -29,7 +13,6 @@ THE SOFTWARE.
 #include <vector>
 #include <iostream>
 #include <string>
-#include <set>
 #include <unordered_map>
 
 // OS Check
@@ -54,12 +37,6 @@ THE SOFTWARE.
 #error "Platform not recognized"
 #endif
 
-typedef struct Config_ {
-  std::vector<std::string> json_files;  // Json files
-  std::string platform;                 // amd/nvidia
-  std::string os;                       // windows/linux
-} Config;
-
 // Store Multi threaded results
 struct HCResult {
   size_t line;            // Line of check (HIP_CHECK_THREAD or REQUIRE_THREAD)
@@ -75,13 +52,6 @@ struct HCResult {
 class TestContext {
   bool p_windows = false, p_linux = false;  // OS
   bool amd = false, nvidia = false;         // HIP Platform
-  std::string exe_path;
-  std::string current_test;
-  std::set<std::string> skip_test;
-  std::string json_file_;
-  std::vector<std::string> platform_list_ = {"amd", "nvidia"};
-  std::vector<std::string> os_list_ = {"windows", "linux", "all"};
-  std::vector<std::string> amd_arch_list_ = {};
 
   struct rtcState {
     hipModule_t module;
@@ -90,21 +60,10 @@ class TestContext {
 
   std::unordered_map<std::string, rtcState> compiledKernels{};
 
-  Config config_;
-  std::string& getCommonJsonFile();
-  std::string substringFound(std::vector<std::string> list, std::string filename);
   void detectOS();
   void detectPlatform();
-  void getConfigFiles();
-  void setExePath(int, char**);
-  void parseOptions(int, char**);
-  bool parseJsonFiles();
-  std::string getMatchingConfigFile(std::string config_dir);
-  std::string getCurrentArch();
-  const Config& getConfig() const { return config_; }
 
-
-  TestContext(int argc, char** argv);
+  TestContext();
 
   // Multi threaded checks helpers
   std::mutex resultMutex;
@@ -112,8 +71,8 @@ class TestContext {
   std::atomic<bool> hasErrorOccured_{false};
 
  public:
-  static TestContext& get(int argc = 0, char** argv = nullptr) {
-    static TestContext instance(argc, argv);
+  static TestContext& get() {
+    static TestContext instance;
     return instance;
   }
 
@@ -141,9 +100,7 @@ class TestContext {
   bool isLinux() const;
   bool isNvidia() const;
   bool isAmd() const;
-  bool skipTest() const;
 
-  const std::string& getCurrentTest() const { return current_test; }
   std::string currentPath() const;
 
   // Multi threaded results helpers

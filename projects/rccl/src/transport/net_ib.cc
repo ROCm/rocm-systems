@@ -1278,7 +1278,8 @@ struct ncclIbGidInfo {
 #define NCCL_NET_IB_REQ_RECV 2
 #define NCCL_NET_IB_REQ_FLUSH 3
 #define NCCL_NET_IB_REQ_GIN_IPUT 4
-const char* reqTypeStr[] = { "Unused", "Send", "Recv", "Flush", "IPut" };
+#define NCCL_NET_IB_REQ_FAILED 5
+const char* reqTypeStr[] = { "Unused", "Send", "Recv", "Flush", "IPut", "Failed" };
 
 #define MAX_QPS_PER_REQ 8
 struct ncclProfilerInfo {

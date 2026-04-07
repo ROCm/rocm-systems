@@ -88,7 +88,6 @@ BackendType get_backend_type() { return backend->get_backend_type(); }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
-  BackendType type;
 
   /* Check whether the user explicitely requests a particular backend type */
   std::string envstr = envvar::backend;
@@ -159,6 +158,14 @@ static void setFilesLimit() {
 
 [[maybe_unused]] __host__ void inline library_init(MPI_Comm comm) {
   assert(!backend);
+
+#if defined(USE_HEAP_DEVICE_VMM_POSIX)
+  fprintf(stderr, "ROCSHMEM_ERROR: VMM POSIX allocator (USE_HEAP_DEVICE_VMM_POSIX) "
+          "is not compatible with MPI-based initialization. "
+          "Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or disable VMM POSIX allocator.\n");
+  exit(1);
+#endif
+
   int count = 0;
   CHECK_HIP(hipGetDeviceCount(&count));
 
@@ -169,6 +176,23 @@ static void setFilesLimit() {
 
   setFilesLimit();
   rocm_init();
+
+  // Print environment variables if DEBUG_LEVEL is set to ENV modes
+  using rocshmem::envvar::types::debug_level;
+  auto debug_val = envvar::debug_level.get_value();
+  if (debug_val == debug_level::ENV ||
+      debug_val == debug_level::ENV_ALL ||
+      debug_val == debug_level::ENV_FULL) {
+    envvar::print_mode mode;
+    if (debug_val == debug_level::ENV) {
+      mode = envvar::print_mode::MODIFIED;
+    } else if (debug_val == debug_level::ENV_ALL) {
+      mode = envvar::print_mode::ALL_VALUES;
+    } else {
+      mode = envvar::print_mode::FULL_DOCUMENTATION;
+    }
+    envvar::print_envvars(mode, std::cout);
+  }
 
   int ret;
   ret = MPIInstance::mpilib_dl_init();
@@ -217,7 +241,7 @@ static void setFilesLimit() {
   init_constant_memory();
 }
 
-[[maybe_unused]] __host__ static void inline library_init_subcomm(TcpBootstrap *bootstrap, int nranks, int rank) {
+[[maybe_unused]] __host__ static void inline library_init_subcomm([[maybe_unused]] TcpBootstrap *bootstrap, int nranks, int rank) {
   int initialized;
   int world_size = -1;
 
@@ -289,6 +313,23 @@ static void setFilesLimit() {
 
   setFilesLimit();
   rocm_init();
+
+  // Print environment variables if DEBUG_LEVEL is set to ENV modes
+  using rocshmem::envvar::types::debug_level;
+  auto debug_val = envvar::debug_level.get_value();
+  if (debug_val == debug_level::ENV ||
+      debug_val == debug_level::ENV_ALL ||
+      debug_val == debug_level::ENV_FULL) {
+    envvar::print_mode mode;
+    if (debug_val == debug_level::ENV) {
+      mode = envvar::print_mode::MODIFIED;
+    } else if (debug_val == debug_level::ENV_ALL) {
+      mode = envvar::print_mode::ALL_VALUES;
+    } else {
+      mode = envvar::print_mode::FULL_DOCUMENTATION;
+    }
+    envvar::print_envvars(mode, std::cout);
+  }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
   BackendType type = select_backend_type(MPI_COMM_NULL, bootstrap);

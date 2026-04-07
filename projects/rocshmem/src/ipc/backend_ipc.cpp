@@ -136,6 +136,10 @@ IPCBackend::~IPCBackend() {
    */
   teams_destroy();
   cleanup_wrk_sync_buffer();
+
+  // Close IPC handles for remote heap bases
+  ipcImpl.ipcHostStop();
+
   auto *team_world{team_tracker.get_team_world()};
   team_world->~Team();
   CHECK_HIP(hipFree(team_world));
@@ -177,7 +181,7 @@ void IPCBackend::setup_ctxs() {
   }
 }
 
-__device__ bool IPCBackend::create_ctx(int64_t options, rocshmem_ctx_t *ctx) {
+__device__ bool IPCBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
   IPCContext *ctx_{nullptr};
 
   auto pop_result = ctx_free_list.get()->pop_front();
@@ -256,7 +260,7 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
     abort();
   }
 
-  for (int i = 0; i < num_bytes; i++) {
+  for (size_t i = 0; i < num_bytes; i++) {
     outbuf[i] = tmp_buffer[i];
     for (int j = 1; j < num_pes; j++) {
       outbuf[i] &= tmp_buffer[j * num_bytes + i];
@@ -426,9 +430,8 @@ void IPCBackend::setup_wrk_sync_buffers() {
    * Allocate device-side fine grained memory to hold IPC addresses of
    * work/sync buffers
    */
-  psync_allocator_->allocate(
-    reinterpret_cast<void**>(&wrk_sync_pool_bases_),
-    num_pes * sizeof(char*));
+  psync_allocator_->allocate(reinterpret_cast<void**>(&wrk_sync_pool_bases_),
+			     num_pes * sizeof(char*));
   assert(wrk_sync_pool_bases_);
 
   /*
@@ -478,7 +481,7 @@ void IPCBackend::rocshmem_collective_init() {
   /*
    * Initialize the barrier synchronization array with default values.
    */
-  for (int i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
+  for (size_t i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
     barrier_sync[i] = ROCSHMEM_SYNC_VALUE;
   }
 

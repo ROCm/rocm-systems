@@ -55,6 +55,7 @@ else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-gpu-connect-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-selective-region-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
@@ -93,6 +94,7 @@ endif()
 # ------------------------------------------------------------------------------#
 
 set(ROCPROFSYS_PYTHON_VALIDATION_FILES
+    ${CMAKE_CURRENT_LIST_DIR}/check_amd_smi_metrics.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py

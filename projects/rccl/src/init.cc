@@ -739,6 +739,12 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->rank = rank;
   comm->nRanks = ndev;
 
+  comm->hierarchicalIntraComm = nullptr;
+  comm->hierarchicalInterComm = nullptr;
+  comm->hierarchicalCommsInitialized = false;
+  comm->hierarchicalAGTempBuffer = nullptr;
+  comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
+
   if (parent == NULL || !parent->shareResources) {
     struct ncclSharedResources* sharedRes = NULL;
     NCCLCHECK(ncclCalloc(&sharedRes, 1));

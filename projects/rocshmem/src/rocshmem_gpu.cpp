@@ -46,6 +46,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_bc.hpp"
+#include "constmem.hpp"
 #include "context_incl.hpp"
 #include "team.hpp"
 #include "templates.hpp"
@@ -76,13 +77,17 @@ namespace rocshmem {
 __device__  rocshmem_ctx_t
 __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
 
+__constant__  rocshmem_ctx_t *rocshmem_ctx_array;
+
 __constant__ Backend *device_backend_proxy;
+
+__constant__ constmem_t constmem;
 
 __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID = {nullptr, nullptr};
 
 namespace device {
-    __constant__ rocshmem_team_t
-    __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+    extern "C" __constant__ rocshmem_team_t
+    __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
 }
 
 #if defined(ENABLE_IPC_BITCODE)
@@ -591,7 +596,7 @@ __device__ void rocshmem_ctx_pe_quiet(rocshmem_ctx_t ctx, const int *target_pes,
 
   ContextTy *internal_ctx = get_internal_ctx(ctx);
 
-  for (int i = 0; i < npes;  i++) {
+  for (size_t i = 0; i < npes;  i++) {
     internal_ctx->pe_quiet(translate_pe(ctx, target_pes[i]));
   }
 }

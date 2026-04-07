@@ -247,6 +247,15 @@ link_directories(${HSAKMT_LIBRARY_DIRS})
 
 add_executable(kfdtest ${SRC_FILES})
 
+# Context-version test support
+if( ${HSAKMT_CTX} )
+    target_compile_definitions(kfdtest PRIVATE -DHSAKMT_CTX=1)
+    # Secondary context test support
+    if( ${HSAKMT_SECONDARY_CTX} )
+        target_compile_definitions(kfdtest PRIVATE -DHSAKMT_SECONDARY_CTX=1)
+    endif()
+endif()
+
 target_link_libraries(kfdtest ${HSAKMT_LIBRARIES} ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} ${llvm_libs} pthread m stdc++ rt numa)
 
 configure_file ( scripts/kfdtest.exclude kfdtest.exclude COPYONLY )
