@@ -1266,8 +1266,8 @@ enum class AMDGpuMetricVersionFlags_t : AMDGpuMetricVersionFlagId_t {
   kGpuXcpMetricV10 = (0x1 << 0),            // Added in v1.8 for partition metrics v1.0
   kGpuMetricDynV19Plus = (0x1 << 9),        // Dyn. GPU Metrics v1.9+
   kGpuXcpMetricDynV11Plus = (0x1 << 1),     // Added in v1.9 for Dyn. partition metrics v1.1+
-  kApuMetricV24 = (0x1 << 10),              // APU Metrics v2.4
-  kApuMetricV30 = (0x1 << 11),              // APU Metrics v3.0
+  kApuMetricV24 = (0x1 << 10),              // APU Metrics v2_4
+  kApuMetricV30 = (0x1 << 11),              // APU Metrics v3_0
 };
 using AMDGpuMetricVersionTranslationTbl_t = std::map<uint16_t, AMDGpuMetricVersionFlags_t>;
 using GpuMetricTypePtr_t = std::shared_ptr<void>;
