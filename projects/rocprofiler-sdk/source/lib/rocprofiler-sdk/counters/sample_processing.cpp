@@ -30,7 +30,6 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
-#include "lib/rocprofiler-sdk/counters/sample_consumer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
@@ -51,7 +50,7 @@ get_buffer_mut()
  * Callback called by HSA interceptor when the kernel has completed processing.
  */
 void
-proccess_completed_cb(completed_cb_params_t&& params)
+process_callback_data(completed_cb_params_t&& params)
 {
     auto&       info          = params.info;
     auto&       session       = *params.session;
@@ -154,32 +153,5 @@ proccess_completed_cb(completed_cb_params_t&& params)
         }
     }
 }
-
-auto&
-callback_thread_get()
-{
-    using consumer_t = consumer_thread_t<completed_cb_params_t>;
-    static auto*& _v = common::static_object<consumer_t>::construct(proccess_completed_cb);
-    return *CHECK_NOTNULL(_v);
-}
-
-void
-callback_thread_start()
-{
-    callback_thread_get().start();
-}
-
-void
-callback_thread_stop()
-{
-    callback_thread_get().exit();
-}
-
-void
-process_callback_data(completed_cb_params_t&& params)
-{
-    callback_thread_get().add(std::move(params));
-}
-
 }  // namespace counters
 }  // namespace rocprofiler
