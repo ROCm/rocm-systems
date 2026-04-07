@@ -28,6 +28,7 @@
 
 #include "logger/debug.hpp"
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -40,6 +41,7 @@ namespace
 using promise_t                                         = std::promise<void>;
 std::unique_ptr<promise_t>             polling_finished = {};
 std::vector<std::unique_ptr<instance>> instances        = {};
+std::atomic<bool>                      sampler_paused{ false };
 
 bool&
 is_initialized()
@@ -101,6 +103,7 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
         if(_state->load() != State::Active) continue;
         if(get_state() >= State::Finalized) break;
         if(get_state() != State::Active) continue;
+        if(sampler_paused.load(std::memory_order_relaxed)) continue;
         get_sampler_is_sampling().store(true);
         for(auto& itr : instances)
             itr->sample();
@@ -147,6 +150,7 @@ sampler::setup()
         _pmc->post_process = []() { pmc::post_process(); };
         _pmc->config       = []() { pmc::config(); };
         _pmc->sample       = []() { pmc::sample(); };
+        _pmc->pause        = []() { pmc::pause(); };
     }
 
     if(get_cpu_freq_enabled())
@@ -157,6 +161,7 @@ sampler::setup()
         _cpu_freq->post_process = []() { cpu_freq::post_process(); };
         _cpu_freq->config       = []() { cpu_freq::config(); };
         _cpu_freq->sample       = []() { cpu_freq::sample(); };
+        _cpu_freq->pause        = []() { cpu_freq::pause(); };
     }
 
     for(auto& itr : instances)
@@ -226,6 +231,23 @@ sampler::shutdown()
     }
 
     is_initialized() = false;
+}
+
+void
+sampler::pause()
+{
+    sampler_paused.store(true, std::memory_order_relaxed);
+
+    for(auto& itr : instances)
+    {
+        itr->pause();
+    }
+}
+
+void
+sampler::resume()
+{
+    sampler_paused.store(false, std::memory_order_relaxed);
 }
 
 void

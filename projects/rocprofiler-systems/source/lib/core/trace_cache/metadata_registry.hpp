@@ -115,6 +115,12 @@ struct thread
     {
         return lhs.thread_id < rhs.thread_id;
     }
+
+    friend bool operator==(const thread& lhs, const thread& rhs)
+    {
+        return lhs.parent_process_id == rhs.parent_process_id &&
+               lhs.process_id == rhs.process_id && lhs.thread_id == rhs.thread_id;
+    }
 };
 
 template <typename Category>

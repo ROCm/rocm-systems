@@ -14,6 +14,7 @@ import selectors
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 import time
@@ -608,33 +609,17 @@ def get_gpuid_dict(data: dict[str, Any]) -> dict[Any, int]:
     return gpu_map
 
 
-def parse_text(text_file: str) -> list[str]:
+def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     """
-    Parse the text file to get the pmc counters.
+    Parse the YAML file to get the pmc counters.
+    Assumes only one job per file.
     """
-
-    def process_line(line: str) -> list[str]:
-        if "pmc:" not in line:
-            return []
-        line = line.strip()
-        pos = line.find("#")
-        if pos >= 0:
-            line = line[0:pos]
-
-        def _dedup(_line: str, _sep: list[str]) -> str:
-            for itr in _sep:
-                _line = " ".join(_line.split(itr))
-            return _line.strip()
-
-        # remove tabs and duplicate spaces
-        return _dedup(line.replace("pmc:", ""), ["\n", "\t", " "]).split(" ")
-
-    with open(text_file) as file:
-        return [
-            counter
-            for litr in [process_line(itr) for itr in file.readlines()]
-            for counter in litr
-        ]
+    with open(pmc_perf_file) as file:
+        data = yaml.safe_load(file) or {}
+    jobs = data.get("jobs", [])
+    if not jobs:
+        return []
+    return jobs[0].get("pmc") or []
 
 
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
@@ -1023,6 +1008,47 @@ def print_status(msg: str) -> None:
     console_log(msg)
     console_log("~" * (msg_length + 1))
     console_log("")
+
+
+def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
+    """
+    Create temporary directory with rocprofiler metrics config files.
+
+    Writes two config files:
+    - counter_defs.yaml: For backward compatibility (excludes firmware restrictions)
+    - config.yaml: Current version with full config
+
+    Args:
+        sdk_config: The rocprofiler-sdk configuration dictionary.
+
+    Returns:
+        Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var).
+    """
+    tmpfile_parent = Path(
+        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir="/tmp")
+    )
+
+    # counter_defs.yaml is for backward compatibility with previous versions of sdk
+    tmpfile_path_old = tmpfile_parent / "counter_defs.yaml"
+    # Current version of sdk uses config.yaml instead of counter_defs.yaml
+    tmpfile_path_new = tmpfile_parent / "config.yaml"
+
+    with open(tmpfile_path_old, "w") as tmpfile:
+        # Old sdk does not support firmware restrictions
+        sdk_config_old = {
+            **sdk_config,
+            "rocprofiler-sdk": {
+                k: v
+                for k, v in sdk_config["rocprofiler-sdk"].items()
+                if k not in {"fw-restriction-schema-version", "firmware_restrictions"}
+            },
+        }
+        yaml.dump(sdk_config_old, tmpfile, default_flow_style=False, sort_keys=False)
+
+    with open(tmpfile_path_new, "w") as tmpfile:
+        yaml.dump(sdk_config, tmpfile, default_flow_style=False, sort_keys=False)
+
+    return str(tmpfile_parent)
 
 
 def set_locale_encoding() -> None:

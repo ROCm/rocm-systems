@@ -38,6 +38,7 @@ from utils.utils_common import (
     resolve_rocm_library_path,
     set_locale_encoding,
 )
+from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
 
 
@@ -497,7 +498,10 @@ class RocProfCompute:
 
         # instantiate desired profiler
         profiler = self.create_profiler()
-        profiler.sanitize()
+        try:
+            profiler.sanitize()
+        except WorkloadCommandError as e:
+            console_error(str(e))
 
         # Create workload directory if it does not exist
         p = Path(self.__args.path)

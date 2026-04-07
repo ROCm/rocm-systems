@@ -1,0 +1,694 @@
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// This file was automatically generated. Do not modify.
+
+#ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA3_VOP2_H_
+#define ROCJITSU_ISA_ARCH_AMDGPU_CDNA3_VOP2_H_
+
+#include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/operand.h"
+
+namespace rocjitsu {
+namespace cdna3 {
+
+class VCndmaskB32Vop2 : public Vop2 {
+public:
+  VCndmaskB32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VAddF32Vop2 : public Vop2 {
+public:
+  VAddF32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubF32Vop2 : public Vop2 {
+public:
+  VSubF32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubrevF32Vop2 : public Vop2 {
+public:
+  VSubrevF32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VFmacF64Vop2 : public Vop2 {
+public:
+  VFmacF64Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMulF32Vop2 : public Vop2 {
+public:
+  VMulF32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMulI32I24Vop2 : public Vop2 {
+public:
+  VMulI32I24Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMulHiI32I24Vop2 : public Vop2 {
+public:
+  VMulHiI32I24Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMulU32U24Vop2 : public Vop2 {
+public:
+  VMulU32U24Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMulHiU32U24Vop2 : public Vop2 {
+public:
+  VMulHiU32U24Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMinF32Vop2 : public Vop2 {
+public:
+  VMinF32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMaxF32Vop2 : public Vop2 {
+public:
+  VMaxF32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMinI32Vop2 : public Vop2 {
+public:
+  VMinI32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMaxI32Vop2 : public Vop2 {
+public:
+  VMaxI32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMinU32Vop2 : public Vop2 {
+public:
+  VMinU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMaxU32Vop2 : public Vop2 {
+public:
+  VMaxU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VLshrrevB32Vop2 : public Vop2 {
+public:
+  VLshrrevB32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VAshrrevI32Vop2 : public Vop2 {
+public:
+  VAshrrevI32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VLshlrevB32Vop2 : public Vop2 {
+public:
+  VLshlrevB32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VAndB32Vop2 : public Vop2 {
+public:
+  VAndB32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VOrB32Vop2 : public Vop2 {
+public:
+  VOrB32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VXorB32Vop2 : public Vop2 {
+public:
+  VXorB32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VFmamkF32Vop2 : public Vop2 {
+public:
+  VFmamkF32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand simm32;
+  Operand vsrc1;
+};
+
+class VFmaakF32Vop2 : public Vop2 {
+public:
+  VFmaakF32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+  Operand simm32;
+};
+
+class VAddCoU32Vop2 : public Vop2 {
+public:
+  VAddCoU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubCoU32Vop2 : public Vop2 {
+public:
+  VSubCoU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubrevCoU32Vop2 : public Vop2 {
+public:
+  VSubrevCoU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VAddcCoU32Vop2 : public Vop2 {
+public:
+  VAddcCoU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubbCoU32Vop2 : public Vop2 {
+public:
+  VSubbCoU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubbrevCoU32Vop2 : public Vop2 {
+public:
+  VSubbrevCoU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VAddF16Vop2 : public Vop2 {
+public:
+  VAddF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubF16Vop2 : public Vop2 {
+public:
+  VSubF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubrevF16Vop2 : public Vop2 {
+public:
+  VSubrevF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMulF16Vop2 : public Vop2 {
+public:
+  VMulF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMacF16Vop2 : public Vop2 {
+public:
+  VMacF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMadmkF16Vop2 : public Vop2 {
+public:
+  VMadmkF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand simm32;
+  Operand vsrc1;
+};
+
+class VMadakF16Vop2 : public Vop2 {
+public:
+  VMadakF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+  Operand simm32;
+};
+
+class VAddU16Vop2 : public Vop2 {
+public:
+  VAddU16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubU16Vop2 : public Vop2 {
+public:
+  VSubU16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubrevU16Vop2 : public Vop2 {
+public:
+  VSubrevU16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMulLoU16Vop2 : public Vop2 {
+public:
+  VMulLoU16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VLshlrevB16Vop2 : public Vop2 {
+public:
+  VLshlrevB16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VLshrrevB16Vop2 : public Vop2 {
+public:
+  VLshrrevB16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VAshrrevI16Vop2 : public Vop2 {
+public:
+  VAshrrevI16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMaxF16Vop2 : public Vop2 {
+public:
+  VMaxF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMinF16Vop2 : public Vop2 {
+public:
+  VMinF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMaxU16Vop2 : public Vop2 {
+public:
+  VMaxU16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMaxI16Vop2 : public Vop2 {
+public:
+  VMaxI16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMinU16Vop2 : public Vop2 {
+public:
+  VMinU16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VMinI16Vop2 : public Vop2 {
+public:
+  VMinI16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VLdexpF16Vop2 : public Vop2 {
+public:
+  VLdexpF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VAddU32Vop2 : public Vop2 {
+public:
+  VAddU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubU32Vop2 : public Vop2 {
+public:
+  VSubU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VSubrevU32Vop2 : public Vop2 {
+public:
+  VSubrevU32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VDot2cF32F16Vop2 : public Vop2 {
+public:
+  VDot2cF32F16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VDot2cI32I16Vop2 : public Vop2 {
+public:
+  VDot2cI32I16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VDot4cI32I8Vop2 : public Vop2 {
+public:
+  VDot4cI32I8Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VDot8cI32I4Vop2 : public Vop2 {
+public:
+  VDot8cI32I4Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VFmacF32Vop2 : public Vop2 {
+public:
+  VFmacF32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VPkFmacF16Vop2 : public Vop2 {
+public:
+  VPkFmacF16Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+class VXnorB32Vop2 : public Vop2 {
+public:
+  VXnorB32Vop2(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand vdst;
+  Operand src0;
+  Operand vsrc1;
+};
+
+} // namespace cdna3
+} // namespace rocjitsu
+
+#endif // ROCJITSU_ISA_ARCH_AMDGPU_CDNA3_VOP2_H_

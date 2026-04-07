@@ -184,7 +184,7 @@ ROBackend::~ROBackend() {
   CHECK_HIP(hipFree(ctx_array));
 }
 
-__device__ bool ROBackend::create_ctx(int64_t options, rocshmem_ctx_t *ctx) {
+__device__ bool ROBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
   ROContext *ctx_;
 
   auto pop_result = ctx_free_list.get()->pop_front();
@@ -248,7 +248,6 @@ void ROBackend::dump_backend_stats() {
   }
 
   int device_id;
-  hipDeviceProp_t device_props;
   CHECK_HIP(hipGetDevice(&device_id));
   int wallClockMhz;
   CHECK_HIP(hipDeviceGetAttribute(&wallClockMhz, hipDeviceAttributeWallClockRate, device_id));

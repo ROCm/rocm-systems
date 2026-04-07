@@ -3442,6 +3442,19 @@ typedef union rocprofiler_hip_api_args_t
         hipKernel_t    kernel;
     } hipKernelGetFunction;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
+    struct
+    {
+        void**             dev_ptrs;
+        size_t*            sizes;
+        size_t             count;
+        hipMemLocation*    prefetch_locs;
+        size_t*            prefetch_loc_idxs;
+        size_t             num_prefetch_locs;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipMemPrefetchBatchAsync;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

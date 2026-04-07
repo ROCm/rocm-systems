@@ -152,7 +152,7 @@ class Common:
         self.FAIL = "AMDSMI_STATUS_INVAL"
         self.ANY_FAIL = "ANY_FAIL"
 
-        # Tests marked wtih either of these flags will be skipped
+        # Tests marked with either of these flags will be skipped
         # and need to be implemented later.
         self.TODO_SKIP_FAIL = True
         self.TODO_SKIP_NOT_COMPLETE = True

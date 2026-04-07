@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <cassert>
 #include <cstring>
 #include <regex>
 #include <string>
@@ -1397,12 +1398,14 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     hflags.ui32.IPCHandle = 1;
     hflags.ui32.SysMem = handle->handle[3];
     hflags.ui32.UpdateMetadata = 1;
-    HsaHandleImportResult res;
+    HsaHandleImportResult res = {};
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
-    if (status == HSAKMT_STATUS_ERROR) {
+    if (status != HSAKMT_STATUS_SUCCESS) {
       runtime_singleton_->DmaBufClose(dmabuf_fd);
       return HSA_STATUS_ERROR;
     }
+    // Reuse token already stored on the BO 
+    if (res.metadata != 0) handle->handle[7] = res.metadata;
     allocation_map_[ptr].thunk_bo = res.buf_handle;
   }
 
@@ -3764,10 +3767,18 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
-  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
-
-  hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
-  assert(status == HSA_STATUS_SUCCESS);
+  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+#if defined(__linux__)
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
+#endif
+    /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
+    bool result = rocr::os::UncommitMemory(va, size);
+    assert(result && "Failed to remap VA to anonymous");
+  }
+  else {
+    hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
+    assert(status == HSA_STATUS_SUCCESS);
+  }
 }
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {

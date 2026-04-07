@@ -684,10 +684,10 @@ __host__ size_t HostInterface::wait_until_any_vector(T* ivars, size_t nelems,
 
 template <typename T>
 __host__ size_t HostInterface::wait_until_some_vector(T* ivars, size_t nelems,
-                                                    size_t* indices,
-                                                    const int *status,
-                                                    int cmp, T* vals,
-                                                    WindowInfo* window_info) {
+                                                      size_t* indices,
+                                                      const int *status,
+                                                      int cmp, T* vals,
+                                                      WindowInfo* window_info) {
   DPRINTF("Function: host_wait_until_some_vector\n");
 
   // zero nelems error condition

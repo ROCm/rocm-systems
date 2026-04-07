@@ -312,6 +312,44 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
 
+ROCPROFSYS_TRACE_REGION
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``ROCPROFSYS_TRACE_REGION`` setting limits tracing to activity that occurs inside
+specific roctx regions. When set, only GPU kernel dispatches, HIP API calls, and other
+traced events that occur while a matching roctx region is active are recorded.
+Regions are matched against the message passed to ``roctxRangeStartA()`` /
+``roctxRangeStop()`` (process-wide range markers).
+
+The value is a comma-separated list of region names:
+
+.. code-block:: shell
+
+   ROCPROFSYS_TRACE_REGION=Region1,Region2
+
+When this variable is empty (the default), all activity is traced regardless of roctx regions.
+
+Nested regions are supported. For example, if ``Region2`` is opened inside ``Region1``,
+filtering on ``Region1`` captures activity in both ``Region1`` and the nested ``Region2``.
+Filtering on ``Region2`` captures only activity inside the inner ``Region2`` scope.
+
+.. note::
+
+   ``ROCPROFSYS_TRACE_REGION`` uses process-wide ``roctxRangeStartA`` / ``roctxRangeStop``
+   markers, not thread-local ``roctxRangePush`` / ``roctxRangePop``.
+
+   When combined with ``roctxProfilerPause`` / ``roctxProfilerResume``, a pause issued
+   outside an active target region is ignored — each region entry resets the pause state.
+
+Example: trace only activity inside a region named ``Compute``:
+
+.. code-block:: shell
+
+   rocprof-sys-run \
+       -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
+       -e ROCPROFSYS_TRACE_REGION=Compute \
+       -- ./my_app
+
 rocprof-sys-avail examples
 -----------------------------------
 
@@ -483,6 +521,7 @@ Viewing the setting descriptions
    | ROCPROFSYS_TIMING_SCIENTIFIC             | Set the numerical reporting format f... |
    | ROCPROFSYS_TIMING_UNITS                  | Set the units for components with u...  |
    | ROCPROFSYS_TIMING_WIDTH                  | Set the output width for components ... |
+   | ROCPROFSYS_TRACE_REGION                  | Comma-separated list of roctx region... |
    | ROCPROFSYS_TRACE_THREAD_LOCKS            | Enable tracking calls to pthread_mut... |
    | ROCPROFSYS_TREE_OUTPUT                   | Write hierarchical json output files    |
    | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |
