@@ -303,9 +303,10 @@ TEST(codeobj_library, codeobj_table_test)
 
 /**
  * Verifies that DWARF inline annotation produces " -> " separators.
- * A __syncthreads() call always inlines through HIP headers, so the
- * instruction comment must contain at least two source locations
- * connected by " -> ".
+ * The test kernel calls a __device__ function that calls __syncthreads(),
+ * which inlines through HIP headers.  This guarantees at least 3 call stack
+ * levels (kernel -> device func -> HIP header), i.e. at least two " -> "
+ * separators in the comment of the s_barrier instruction.
  */
 TEST(codeobj_library, inline_annotation)
 {
@@ -320,7 +321,8 @@ TEST(codeobj_library, inline_annotation)
     CodeobjDecoderComponent comp(objdata.data(), objdata.size());
     ASSERT_FALSE(comp.m_symbol_map.empty());
 
-    bool found_inline_separator = false;
+    constexpr size_t min_depth = 3;  // kernel -> barrier_wrapper -> HIP header(s)
+    size_t           max_depth = 0;
     for(auto& [kaddr, sym] : comp.m_symbol_map)
     {
         size_t vaddr = kaddr;
@@ -333,13 +335,21 @@ TEST(codeobj_library, inline_annotation)
             ASSERT_NE(inst, nullptr);
             ASSERT_NE(inst->size, 0u);
 
-            if(inst->comment.find(disassembly::Instruction::separator) != std::string::npos)
-                found_inline_separator = true;
+            // Count separators to determine call stack depth
+            size_t depth = 1;
+            size_t pos   = 0;
+            while((pos = inst->comment.find(disassembly::Instruction::separator, pos)) !=
+                  std::string::npos)
+            {
+                depth++;
+                pos += disassembly::Instruction::separator.size();
+            }
+            max_depth = std::max(max_depth, depth);
 
             vaddr += inst->size;
         }
     }
-    EXPECT_TRUE(found_inline_separator)
-        << "No instruction had inline annotation (' -> ' separator). "
-           "DWARF inlined subroutine traversal may be broken.";
+    EXPECT_GE(max_depth, min_depth)
+        << "Deepest inline call stack was " << max_depth << " levels (expected >= " << min_depth
+        << "). DWARF inlined subroutine traversal may be broken.";
 }
