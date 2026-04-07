@@ -298,7 +298,7 @@ Use the following command to view the available domains:
 
    * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
    * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
-   * ``kfd_events`` which will enable all Kernel Fusion Driver (KFD) domains, ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``, ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1`` and an XNACK-capable GPU.
+   * ``kfd_events`` which will enable all Kernel Fusion Driver (KFD) domains, ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``, ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1`` and an XNACK-capable GPU and ROCm version 7.3 or above (ROCProfiler-SDK version 1.2.1 or above).
 
 For example, the following is a valid configuration:
 
