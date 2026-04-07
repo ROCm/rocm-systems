@@ -81,7 +81,6 @@ device:
   Unit_hipDeviceGetAttribute_NegTst:
     <<: *level_2
     tags: [query]
-  Print_Out_Attributes: *level_2
   Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported:
     <<: *level_2
     tags: [query]
@@ -91,15 +90,12 @@ device:
   Unit_hipGetDeviceCount_HideDevices:
     <<: *level_2
     tags: [query]
-  Print_Out_Device_Count: *level_2
   Unit_hipGetDeviceProperties_ArchPropertiesTst:
     <<: *level_2
     tags: [multigpu, query]
   Unit_hipGetDeviceProperties_NegTst:
     <<: *level_2
     tags: [query]
-  Print_Out_Properties: *level_2
-  Print_Out_Properties_6_0: *level_2
   Unit_hipRuntimeGetVersion_Positive:
     <<: *level_2
     tags: [init]
@@ -360,10 +356,6 @@ device:
   Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocations:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-207
-    disabled: [amd_wsl]
-  Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Reused_Memory:
-    <<: *level_2
-    # Note: hsa_amd_ipc_ is dummy
     disabled: [amd_wsl]
   Unit_hipIpcGetMemHandle_Negative_Handle_For_Freed_Memory: *level_2
   Unit_hipIpcGetMemHandle_Negative_Out_Of_Bound_Pointer: *level_2

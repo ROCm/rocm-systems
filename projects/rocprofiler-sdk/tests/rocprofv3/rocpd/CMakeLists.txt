@@ -126,8 +126,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-perfetto-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
+        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename --annotate-args
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
