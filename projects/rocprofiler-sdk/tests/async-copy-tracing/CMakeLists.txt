@@ -22,7 +22,7 @@ rocprofiler_add_integration_execute_test(
     async-copy-tracing
     TARGET transpose
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=async-copy-tracing-test.json"
     FIXTURES_SETUP async-copy-tracing)
@@ -32,7 +32,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     TIMEOUT 45
     FIXTURES_REQUIRED async-copy-tracing
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/async-copy-tracing-test.json)

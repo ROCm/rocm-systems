@@ -40,7 +40,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} out
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 60
-    LABELS "integration-tests;attachment;multi-gpu"
+    LABELS "integration-tests;attachment;exclusive-gpu"
     DISABLED ${IS_DISABLED}
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${attachment-env}"
@@ -55,7 +55,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 30
-    LABELS "integration-tests;attachment;multi-gpu"
+    LABELS "integration-tests;attachment;exclusive-gpu"
     DISABLED ${IS_DISABLED}
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once
@@ -76,7 +76,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 30
-    LABELS "integration-tests;attachment;multi-gpu"
+    LABELS "integration-tests;attachment;exclusive-gpu"
     DISABLED ${IS_DISABLED}
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-once

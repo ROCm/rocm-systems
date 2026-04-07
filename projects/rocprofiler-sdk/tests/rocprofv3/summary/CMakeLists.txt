@@ -38,7 +38,7 @@ rocprofiler_add_integration_execute_test(
         "KERNEL_DISPATCH|MEMORY_COPY" ".*_API" -- $<TARGET_FILE:transpose> 2 500 10
     DEPENDS transpose
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}" "ARBITRARY_ENV_VARIABLE=%tag%-trace-cmd-line"
     FIXTURES_SETUP rocprofv3-test-summary-cmd-line)
 
@@ -56,7 +56,7 @@ rocprofiler_add_integration_validate_test(
          --summary-input
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_summary.txt
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-summary-cmd-line)
 
 ##########################################################################################
@@ -74,7 +74,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/input-summary.yml -- $<TARGET_FILE:transpose> 2 500 10
     DEPENDS transpose
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ARBITRARY_ENV_VARIABLE=%tag%-trace-inp-yaml"
     FIXTURES_SETUP rocprofv3-test-summary-inp-yaml)
@@ -93,5 +93,5 @@ rocprofiler_add_integration_validate_test(
          --summary-input
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_summary.txt
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-summary-inp-yaml)

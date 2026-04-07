@@ -43,7 +43,7 @@ rocprofiler_add_integration_execute_test(
         --log-level env -- $<TARGET_FILE:hip-streams-per-thread> ${NUM_THREADS}
     DEPENDS hip-streams-per-thread
     TIMEOUT 60
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-hip-streams-per-thread
     DISABLED $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)
@@ -60,6 +60,6 @@ rocprofiler_add_integration_validate_test(
          --memory-copy-csv-input
          ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-per-thread-trace/out_memory_copy_trace.csv
     TIMEOUT 60
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-hip-streams-per-thread
     DISABLED $<NOT:$<TARGET_EXISTS:hip-streams-per-thread>>)

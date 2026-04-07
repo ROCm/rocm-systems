@@ -57,7 +57,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND $<TARGET_FILE:thread-trace-api-single-test>
     DEPENDS thread-trace-api-single-test
     TIMEOUT 10
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 # Multi dispatch test
 add_executable(thread-trace-api-multi-test)
@@ -74,7 +74,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND $<TARGET_FILE:thread-trace-api-multi-test>
     DEPENDS thread-trace-api-multi-test
     TIMEOUT 10
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
 # Agent profiling test
@@ -91,7 +91,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND $<TARGET_FILE:thread-trace-api-agent-test>
     DEPENDS thread-trace-api-agent-test
     TIMEOUT 10
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
 # Feature introduced in ROCm 7.1, however some pre-release CI builds for 7.1 dont have
@@ -112,7 +112,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND $<TARGET_FILE:thread-trace-api-agent-test>
     DEPENDS thread-trace-api-agent-test
     TIMEOUT 30
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ATT_LARGE_BUFFER_TEST=1"
     DISABLED ${IS_DISABLED})

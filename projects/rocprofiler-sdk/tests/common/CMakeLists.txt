@@ -5,9 +5,9 @@
 #   integration-tests  - added to all integration tests
 #   execution          - added to rocprofiler_add_integration_execute_test
 #   validation         - added to rocprofiler_add_integration_validate_test
-#   multi-gpu          - optional; use for tests that need multiple GPUs or exclusive
+#   exclusive-gpu          - optional; use for tests that need multiple GPUs or exclusive
 #                        device access (e.g. counter collection, PC sampling, attachment).
-#                        Filter with: ctest -L multi-gpu / ctest -LE multi-gpu
+#                        Filter with: ctest -L exclusive-gpu / ctest -LE exclusive-gpu
 
 include(FetchContent)
 include(CMakeParseArguments)

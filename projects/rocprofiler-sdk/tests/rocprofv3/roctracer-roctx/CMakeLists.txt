@@ -32,7 +32,7 @@ rocprofiler_add_integration_execute_test(
         ${TRANSPOSE_ROCTRACER_ROCTX_EXE}
     DEPENDS transpose-roctracer-roctx
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
     FIXTURES_SETUP rocprofv3-test-roctracer-roctx-trace)
@@ -49,6 +49,6 @@ rocprofiler_add_integration_validate_test(
          --otf2-input
          ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.otf2
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-roctracer-roctx-trace
     DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}")

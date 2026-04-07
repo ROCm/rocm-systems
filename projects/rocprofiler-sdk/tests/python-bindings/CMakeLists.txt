@@ -26,7 +26,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/marker.py
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
-    LABELS "integration-tests;python-bindings;multi-gpu"
+    LABELS "integration-tests;python-bindings"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT
         "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
@@ -37,7 +37,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py marker.py
     CONFIG pytest.ini
-    LABELS "integration-tests;python-bindings;multi-gpu"
+    LABELS "integration-tests;python-bindings"
     TIMEOUT 45
     FIXTURES_REQUIRED roctx-python-bindings
     ARGS --agent-input

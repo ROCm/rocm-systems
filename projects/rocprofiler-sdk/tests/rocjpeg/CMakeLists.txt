@@ -52,7 +52,7 @@ rocprofiler_add_integration_execute_test(
         -i ${rocJPEG_IMAGE_DIR}
     DEPENDS rocjpeg-demo
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=rocjpeg-tracing-test.json"
@@ -63,7 +63,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocjpeg-tracing

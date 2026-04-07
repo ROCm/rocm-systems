@@ -32,7 +32,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/marker.py
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT
         "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
@@ -52,6 +52,6 @@ rocprofiler_add_integration_validate_test(
          --pftrace-input
          ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_results.pftrace
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-trace-roctx-python-bindings
     DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}")

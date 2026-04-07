@@ -26,7 +26,7 @@ foreach(_XNACK on off)
     rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
     set(_kfd_labels "integration-tests")
     if(_XNACK STREQUAL "off")
-        set(_kfd_labels "integration-tests;multi-gpu")
+        set(_kfd_labels "integration-tests;exclusive-gpu")
     endif()
     add_test(
         NAME rocprofv3-test-kfd-xnack-${_XNACK}-execute

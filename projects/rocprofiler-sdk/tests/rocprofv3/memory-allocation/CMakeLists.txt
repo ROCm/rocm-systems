@@ -21,7 +21,7 @@ rocprofiler_add_integration_execute_test(
         --log-level env -- $<TARGET_FILE:hsa-memory-allocation>
     DEPENDS hsa-memory-allocation
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-memory-allocation-tracing)
 
@@ -37,5 +37,5 @@ rocprofiler_add_integration_validate_test(
          --csv-input
          ${CMAKE_CURRENT_BINARY_DIR}/hsa-memory-allocation-trace/out_memory_allocation_trace.csv
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-memory-allocation-tracing)

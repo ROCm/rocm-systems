@@ -47,7 +47,7 @@ rocprofiler_add_integration_execute_test(
         -- $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation
     TIMEOUT 90
-    LABELS "integration-tests;pc-sampling;stochastic;multi-gpu"
+    LABELS "integration-tests;pc-sampling;stochastic;exclusive-gpu"
     ENVIRONMENT "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-cmd
@@ -67,7 +67,7 @@ rocprofiler_add_integration_validate_test(
          --all-sampled
          False
     TIMEOUT 60
-    LABELS "integration-tests;pc-sampling;stochastic;multi-gpu"
+    LABELS "integration-tests;pc-sampling;stochastic;exclusive-gpu"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-cmd
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
@@ -82,7 +82,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation
     TIMEOUT 90
-    LABELS "integration-tests;pc-sampling;stochastic;multi-gpu"
+    LABELS "integration-tests;pc-sampling;stochastic;exclusive-gpu"
     ENVIRONMENT "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-json
@@ -102,7 +102,7 @@ rocprofiler_add_integration_validate_test(
          --all-sampled
          False
     TIMEOUT 60
-    LABELS "integration-tests;pc-sampling;stochastic;multi-gpu"
+    LABELS "integration-tests;pc-sampling;stochastic;exclusive-gpu"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-json
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
@@ -116,7 +116,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation
     TIMEOUT 90
-    LABELS "integration-tests;pc-sampling;stochastic;multi-gpu"
+    LABELS "integration-tests;pc-sampling;stochastic;exclusive-gpu"
     ENVIRONMENT "${PRELOAD_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-yaml
@@ -136,7 +136,7 @@ rocprofiler_add_integration_validate_test(
          --all-sampled
          False
     TIMEOUT 60
-    LABELS "integration-tests;pc-sampling;stochastic;multi-gpu"
+    LABELS "integration-tests;pc-sampling;stochastic;exclusive-gpu"
     FIXTURES_REQUIRED
         rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-yaml
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"

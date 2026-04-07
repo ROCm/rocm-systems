@@ -40,7 +40,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-kernel-rename-cmd-line)
 
@@ -56,7 +56,7 @@ rocprofiler_add_integration_validate_test(
          --otf2-input
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.otf2
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-kernel-rename-cmd-line)
 
 ##########################################################################################
@@ -72,7 +72,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-kernel-rename-inp-yaml)
 
@@ -88,5 +88,5 @@ rocprofiler_add_integration_validate_test(
          --otf2-input
          ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.otf2
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-kernel-rename-inp-yaml)

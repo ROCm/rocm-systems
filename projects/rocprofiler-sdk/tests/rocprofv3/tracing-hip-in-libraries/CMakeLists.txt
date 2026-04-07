@@ -28,7 +28,7 @@ foreach(_OUTPUT_FORMAT csv json pftrace otf2)
             -o out ${PRELOAD_ARGS} -- $<TARGET_FILE:hip-in-libraries>
         DEPENDS hip-in-libraries
         TIMEOUT 120
-        LABELS "integration-tests;multi-gpu"
+        LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries)
 endforeach()
@@ -65,5 +65,5 @@ rocprofiler_add_integration_validate_test(
          --otf2-input
          ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.otf2
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-trace-hip-in-libraries)

@@ -61,7 +61,7 @@ rocprofiler_add_integration_execute_test(
         ${rocJPEG_IMAGE_DIR}
     DEPENDS rocjpeg-demo
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocjpeg-tracing
     DISABLED "${IS_DISABLED}")
@@ -80,6 +80,6 @@ rocprofiler_add_integration_validate_test(
          --csv-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg-demo-trace/out_rocjpeg_api_trace.csv
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-rocjpeg-tracing
     DISABLED "${IS_DISABLED}")

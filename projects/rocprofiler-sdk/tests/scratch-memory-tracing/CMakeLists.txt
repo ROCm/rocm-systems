@@ -23,7 +23,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND $<TARGET_FILE:scratch-memory>
     DEPENDS scratch-memory
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=scratch-memory-tracing-test.json"
@@ -39,6 +39,6 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-tracing-test.json
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED test-scratch-memory-tracing
     UNSTABLE)

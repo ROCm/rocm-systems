@@ -28,7 +28,7 @@ rocprofiler_add_integration_execute_test(
         csv json rocpd --log-level ${LOG_LEVEL} -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-trace
     FAIL_REGULAR_EXPRESSION
@@ -57,7 +57,7 @@ rocprofiler_add_integration_validate_test(
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.db
     TIMEOUT 45
-    LABELS "integration-tests;rocpd;multi-gpu"
+    LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-trace)
 
 rocprofiler_add_integration_execute_test(
@@ -69,7 +69,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests;rocpd;multi-gpu"
+    LABELS "integration-tests;rocpd"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-trace-input-json
     FAIL_REGULAR_EXPRESSION
@@ -98,7 +98,7 @@ rocprofiler_add_integration_validate_test(
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.db
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-trace-input-json)
 
 # sys-trace test: tests --sys-trace command with mangled kernel names and validates
@@ -112,7 +112,7 @@ rocprofiler_add_integration_execute_test(
         pftrace csv json rocpd -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-systrace
     FAIL_REGULAR_EXPRESSION
@@ -142,7 +142,7 @@ rocprofiler_add_integration_validate_test(
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.db
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-systrace)
 
 rocprofiler_add_integration_execute_test(
@@ -153,7 +153,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -- $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-systrace-input-json
     FAIL_REGULAR_EXPRESSION
@@ -183,5 +183,5 @@ rocprofiler_add_integration_validate_test(
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.db
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-systrace-input-json)

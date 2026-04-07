@@ -33,7 +33,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} out
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;attachment;multi-gpu"
+    LABELS "integration-tests;attachment;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION "This test is skipped."
@@ -57,7 +57,7 @@ rocprofiler_add_integration_validate_test(
          --skip-if
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped
     TIMEOUT 30
-    LABELS "integration-tests;attachment;multi-gpu"
+    LABELS "integration-tests;attachment;exclusive-gpu"
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-twice
     DISABLED "${IS_DISABLED}")
@@ -78,7 +78,7 @@ rocprofiler_add_integration_validate_test(
          --skip-if
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped
     TIMEOUT 30
-    LABELS "integration-tests;attachment;multi-gpu"
+    LABELS "integration-tests;attachment;exclusive-gpu"
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-twice
     DISABLED "${IS_DISABLED}")

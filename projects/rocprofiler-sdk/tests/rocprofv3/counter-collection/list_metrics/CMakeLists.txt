@@ -25,7 +25,7 @@ rocprofiler_add_integration_execute_test(
             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2 -o metrics --list-avail
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 60
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPD_LOG_LEVEL=info")
 
@@ -36,7 +36,7 @@ rocprofiler_add_integration_execute_test(
             ${CMAKE_CURRENT_BINARY_DIR}/input.json
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPD_LOG_LEVEL=info"
     PASS_REGULAR_EXPRESSION
@@ -52,6 +52,6 @@ rocprofiler_add_integration_execute_test(
         --sys-trace --log-level warning -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 60
-    LABELS "integration-tests;multi-gpu"
+    LABELS "integration-tests;exclusive-gpu"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPD_LOG_LEVEL=info")
