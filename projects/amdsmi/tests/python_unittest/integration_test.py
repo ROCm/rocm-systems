@@ -646,7 +646,8 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name("")
 
         try:
-            cpu_processors = amdsmi.amdsmi_get_cpusocket_handles()
+            ret = amdsmi.amdsmi_get_cpu_handles()
+            cpu_processors = ret["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_processors = []
         if not cpu_processors:
@@ -701,7 +702,8 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name("")
 
         try:
-            cpu_processors = amdsmi.amdsmi_get_cpusocket_handles()
+            ret = amdsmi.amdsmi_get_cpu_handles()
+            cpu_processors = ret["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_processors = []
         if not cpu_processors:
