@@ -831,9 +831,11 @@ class CodeGenerator:
 
         if cls == 'scalar_wrexec':
             L.append(f'  uint64_t src = {src_ops[0]}.read_scalar64(wf);')
-            if op == 'andn1':
+            if op in ('andn1', 'and_not1'):
+                # EXEC = SRC & ~EXEC
                 L.append('  wf.set_exec(src & ~wf.exec());')
-            elif op == 'andn2':
+            elif op in ('andn2', 'and_not0'):
+                # EXEC = EXEC & ~SRC
                 L.append('  wf.set_exec(wf.exec() & ~src);')
             else:
                 L.append(f'  wf.set_exec(src); // TODO: {op}')
@@ -1630,6 +1632,26 @@ class CodeGenerator:
                 if op == 'brev':
                     L.append('  uint32_t result = 0;')
                     L.append('  for (int i = 0; i < 32; ++i) result |= ((val >> i) & 1) << (31 - i);')
+                elif op == 'ceil' and dtype == 'f32':
+                    L.append('  uint32_t result = std::bit_cast<uint32_t>(std::ceil(std::bit_cast<float>(val)));')
+                elif op == 'ceil' and dtype == 'f16':
+                    L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
+                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::ceil(f)));')
+                elif op == 'floor' and dtype == 'f32':
+                    L.append('  uint32_t result = std::bit_cast<uint32_t>(std::floor(std::bit_cast<float>(val)));')
+                elif op == 'floor' and dtype == 'f16':
+                    L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
+                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::floor(f)));')
+                elif op == 'trunc' and dtype == 'f32':
+                    L.append('  uint32_t result = std::bit_cast<uint32_t>(std::trunc(std::bit_cast<float>(val)));')
+                elif op == 'trunc' and dtype == 'f16':
+                    L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
+                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::trunc(f)));')
+                elif op == 'rndne' and dtype == 'f32':
+                    L.append('  uint32_t result = std::bit_cast<uint32_t>(std::nearbyint(std::bit_cast<float>(val)));')
+                elif op == 'rndne' and dtype == 'f16':
+                    L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
+                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::nearbyint(f)));')
                 elif op in op_map:
                     L.append(f'  uint32_t result = {op_map[op]};')
                 else:
@@ -1735,6 +1757,25 @@ class CodeGenerator:
             L.append(f'  uint64_t wide = (static_cast<uint64_t>(s0) << {shift}u) + static_cast<uint64_t>(s1);')
             L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
             L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
+        elif dtype == 'f32' and op in ('add', 'sub', 'mul', 'min', 'max', 'fma'):
+            fp_op = {
+                'add': 'f0 + f1', 'sub': 'f0 - f1', 'mul': 'f0 * f1',
+                'min': 'std::fmin(f0, f1)', 'max': 'std::fmax(f0, f1)',
+                'fma': 'std::fma(f0, f1, std::bit_cast<float>(static_cast<uint32_t>(wf.read_scc())))',
+            }
+            L.append('  float f0 = std::bit_cast<float>(s0);')
+            L.append('  float f1 = std::bit_cast<float>(s1);')
+            L.append(f'  float fr = {fp_op[op]};')
+            L.append(f'  {dst[0]}.write_scalar(wf, std::bit_cast<uint32_t>(fr));')
+        elif dtype == 'f16' and op in ('add', 'sub', 'mul', 'min', 'max'):
+            fp_op = {
+                'add': 'f0 + f1', 'sub': 'f0 - f1', 'mul': 'f0 * f1',
+                'min': 'std::fmin(f0, f1)', 'max': 'std::fmax(f0, f1)',
+            }
+            L.append('  float f0 = util::f16_to_f32(static_cast<uint16_t>(s0 & 0xFFFF));')
+            L.append('  float f1 = util::f16_to_f32(static_cast<uint16_t>(s1 & 0xFFFF));')
+            L.append(f'  float fr = {fp_op[op]};')
+            L.append(f'  {dst[0]}.write_scalar(wf, static_cast<uint32_t>(util::f32_to_f16(fr)));')
         elif op == 'pack_ll':
             L.append(f'  {dst[0]}.write_scalar(wf, (s0 & 0xFFFFu) | ((s1 & 0xFFFFu) << 16));')
         elif op == 'pack_lh':
