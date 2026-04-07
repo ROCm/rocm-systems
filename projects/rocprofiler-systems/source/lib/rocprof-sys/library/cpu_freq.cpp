@@ -282,6 +282,20 @@ void
 shutdown()
 {}
 
+void
+pause()
+{
+    if(get_state() >= State::Finalized) return;
+
+    auto current_timestamp = tim::get_clock_real_now<size_t, std::nano>();
+    const component::cpu_freq zero_freq;
+
+    trace_cache::get_buffer_storage().store(trace_cache::cpu_freq_sample{
+        current_timestamp, 0, 0, 0, 0, 0, 0, 0, serialize_freqs(zero_freq) });
+
+    data.emplace_back(current_timestamp, 0, 0, 0, 0, 0, 0, 0, zero_freq);
+}
+
 namespace
 {
 template <typename... Types, size_t N = sizeof...(Types)>

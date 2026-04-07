@@ -166,10 +166,6 @@ install(FILES
         DESTINATION ${INSTALL_DIR})
 # install catchinfo
 install(FILES ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt DESTINATION ${INSTALL_DIR})
-# install hip test config
-install(DIRECTORY
-        ${HIP_TEST_CONFIG_BINARY_DIR}
-        DESTINATION ${INSTALL_DIR_TESTS})
 # workaround to make the built test binaries portable
 # CPACK_GENERATOR executes this packaging/CMakeLists.txt multiple times
 # there is no way to check which generator is being used. 
