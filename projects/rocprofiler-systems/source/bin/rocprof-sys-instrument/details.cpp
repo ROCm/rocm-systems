@@ -376,7 +376,18 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
         auto _lines_beg = std::vector<statement_t>{};
         auto _lines_end = std::vector<statement_t>{};
 
-        if(module->getSourceLines(_base_addr, _lines_beg) && !_lines_beg.empty())
+        // Filter out DWARF line-0 entries ("no source statement") which some
+        // compilers (e.g. amdclang++) emit for compiler-generated basic blocks.
+        auto _remove_line_zero = [](std::vector<statement_t>& _lines) {
+            _lines.erase(
+                std::remove_if(_lines.begin(), _lines.end(),
+                               [](statement_t& stmt) { return stmt.lineNumber() == 0; }),
+                _lines.end());
+        };
+
+        if(module->getSourceLines(_base_addr, _lines_beg)) _remove_line_zero(_lines_beg);
+
+        if(!_lines_beg.empty())
         {
             int _row1 = _lines_beg.front().lineNumber();
             int _col1 = _lines_beg.front().lineOffset();
@@ -384,7 +395,10 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
             verbprintf(4, "size of _lines_end = %lu\n",
                        (unsigned long) _lines_end.size());
 
-            if(module->getSourceLines(_last_addr, _lines_end) && !_lines_end.empty())
+            if(module->getSourceLines(_last_addr, _lines_end))
+                _remove_line_zero(_lines_end);
+
+            if(!_lines_end.empty())
             {
                 int _row2 = _lines_end.back().lineNumber();
                 int _col2 = _lines_end.back().lineOffset();

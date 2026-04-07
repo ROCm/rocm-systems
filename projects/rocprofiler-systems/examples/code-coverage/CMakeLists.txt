@@ -18,12 +18,6 @@ add_executable(code-coverage code-coverage.cpp)
 target_link_libraries(code-coverage PRIVATE Threads::Threads)
 target_compile_options(code-coverage PRIVATE ${_FLAGS})
 
-# amdclang++ (LLVM) defaults to DWARF-5, which Dyninst may not fully support for
-# basic-block line tables. Force DWARF-4 to ensure basic-block code coverage works.
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(code-coverage PRIVATE -gdwarf-4)
-endif()
-
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS code-coverage
