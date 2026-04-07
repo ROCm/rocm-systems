@@ -137,6 +137,6 @@ While both ``hipInfo`` and ``rocminfo`` provide GPU device information, they ser
 * Reports hardware topology and NUMA relationships
 * Includes ISA details and agent characteristics
 
-Use ``hipInfo`` when you need to quickly assess GPU compute capabilities and memory, check device capabilities for HIP programming decisions, verify device properties available to your HIP applications. 
+Use ``hipInfo`` when you need to quickly assess GPU compute capabilities and memory, check device capabilities for HIP programming decisions, and verify device properties available to your HIP applications. 
 
 Use ``rocminfo`` to understand detailed system topology with comprehensive hardware specifications, verify HSA runtime functionality, or diagnose low-level hardware detection or configuration issues. For more information, see `ROCmInfo documentation <https://rocm.docs.amd.com/projects/rocminfo/en/latest/index.html>`__.
