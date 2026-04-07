@@ -343,11 +343,7 @@ if(NOT TARGET TBB::tbb AND NOT ROCPROFSYS_BUILD_TBB)
     endif()
 endif()
 
-# Create Dyninst::TBB target if building from source
-# --------------------------------------------------------------------------------------#
-# When TBB is built from source, Dyninst's find_package(TBB) would fail because the
-# bundled TBB isn't installed in standard locations. Creating this target causes
-# Dyninst to skip find_package(TBB) and use the bundled dependency instead.
+# Create Dyninst::TBB for Dyninst when it is not already defined.
 
 if(NOT TARGET Dyninst::TBB)
     add_library(Dyninst::TBB INTERFACE IMPORTED)
