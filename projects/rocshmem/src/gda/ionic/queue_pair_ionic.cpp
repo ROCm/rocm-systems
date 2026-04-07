@@ -259,18 +259,8 @@ __device__ void QueuePair::ionic_quiet_internal(ActiveWFInfo &wf_info, uint32_t 
 }
 
 __device__ void QueuePair::ionic_ring_doorbell(uint32_t pos) {
-  // When threads write at once to the same address, not all writes reach the bus.
-  // Take turns and insert a thread fence between writes to the same address.
-  uint32_t activemask = __activemask();
-  uint32_t lane_id    = get_active_lane_num(activemask);
-  uint32_t lane_count = get_active_lane_count(activemask);
-
-  for (uint32_t i = 0; i < lane_count; ++i) {
-    if (lane_id == i) {
-      __hip_atomic_store(sq_dbreg, sq_dbval | (sq_mask & pos),
-                         __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-    }
-  }
+  __hip_atomic_store(sq_dbreg, sq_dbval | (sq_mask & pos),
+                     __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
 __device__ void QueuePair::ionic_ring_doorbell_single(uint32_t pos) {
