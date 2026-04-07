@@ -3,6 +3,12 @@
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/amd_hsa_queue.h"
+RJ_DIAGNOSTIC_POP
+
 #include "simdojo/sim/message.h"
 #include "simdojo/sim/simulation.h"
 #include "util/debug_print.h"
@@ -38,6 +44,31 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   uint32_t workitem_base = wf_index_in_wg * cu->wf_size();
   for (uint32_t lane = 0; lane < cu->wf_size(); ++lane)
     cu->write_vgpr(vbase, lane, workitem_base + lane);
+
+  // Scratch (private segment) setup.
+  // Each wavefront gets a unique slice of scratch memory. The per-lane
+  // private size is private_segment_fixed_size; the per-wave region is
+  // that multiplied by wf_size. For KFD dispatches, scratch_backing_addr
+  // comes from amd_queue_t.scratch_backing_memory_location (set by the
+  // runtime via KFD). For internal test queues, we use a fallback base.
+  if (pkt.private_segment_fixed_size > 0) {
+    uint64_t scratch_pool = pkt.scratch_backing_addr;
+    if (scratch_pool == 0)
+      scratch_pool = 0x1'0000'0000ULL; // Fallback for internal test queues.
+    uint64_t per_wave_size = static_cast<uint64_t>(pkt.private_segment_fixed_size) * cu->wf_size();
+    // Unique wave index within the dispatch for non-overlapping scratch.
+    uint64_t wave_idx =
+        static_cast<uint64_t>(global_wg_id) * pkt.wfs_per_workgroup + wf_index_in_wg;
+    uint64_t wave_scratch = scratch_pool + wave_idx * per_wave_size;
+    wf->set_scratch_base(wave_scratch);
+
+    // Initialize FLAT_SCRATCH_LO/HI (architectural SGPRs s102/s103) so that
+    // instructions that read the FLAT_SCRATCH register pair get the base.
+    // On GFX9+ the hardware initialises these via the SPI; we do the same.
+    // The physical register index is sbase + architectural_index.
+    cu->write_sgpr(sbase + 102, static_cast<uint32_t>(wave_scratch));
+    cu->write_sgpr(sbase + 103, static_cast<uint32_t>(wave_scratch >> 32));
+  }
 }
 
 void CommandProcessor::startup() {
@@ -330,7 +361,8 @@ CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, bool host_acces
 }
 
 void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
-                                          bool host_accessible) {
+                                          const HwQueue &queue) {
+  bool host_accessible = queue.host_accessible;
   using namespace rocr::llvm::amdhsa;
   kernel_descriptor_t kd = read_kernel_descriptor(pkt.kernel_object, host_accessible);
   uint32_t vgpr_gran =
@@ -375,6 +407,18 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.vgprs_per_wf = vgprs > 0 ? vgprs : 256;
   dp.kernarg_addr = reinterpret_cast<uint64_t>(pkt.kernarg_address);
   dp.num_user_sgprs = user_sgprs;
+  dp.private_segment_fixed_size = kd.private_segment_fixed_size;
+
+  // Read scratch backing address from the amd_queue_t struct in host memory.
+  // The runtime writes scratch_backing_memory_location when scratch is allocated.
+  // read_ptr_va points to amd_queue_t.read_dispatch_id; we subtract the known
+  // offset to reach the struct base, then read scratch_backing_memory_location.
+  if (host_accessible && kd.private_segment_fixed_size > 0) {
+    auto *amd_queue = reinterpret_cast<const amd_queue_t *>(
+        queue.read_ptr_va - offsetof(amd_queue_t, read_dispatch_id));
+    dp.scratch_backing_addr = amd_queue->scratch_backing_memory_location;
+  }
+
   dp.workgroup_id_offset = workgroup_id_offset_;
   dp.completion_signal = pkt.completion_signal.handle;
   dp.host_signal = host_accessible;
@@ -428,7 +472,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue) {
 
     uint8_t pkt_type = pkt.header & 0xFF;
     if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      process_aql_packet(pkt, queue.host_accessible);
+      process_aql_packet(pkt, queue);
     } else if (pkt_type == HSA_PACKET_TYPE_BARRIER_AND || pkt_type == HSA_PACKET_TYPE_BARRIER_OR) {
       // Barriers must wait for all preceding packets to complete before
       // signaling. Enqueue a zero-workgroup dispatch entry so check_all_idle()

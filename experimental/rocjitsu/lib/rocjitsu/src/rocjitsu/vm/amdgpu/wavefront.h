@@ -135,6 +135,14 @@ public:
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
 
+  /// @brief Return the per-wavefront scratch (private segment) base address.
+  /// @returns Byte address in GPU memory where this wavefront's scratch starts.
+  uint64_t scratch_base() const { return scratch_base_; }
+
+  /// @brief Set the per-wavefront scratch base address.
+  /// @param val Scratch base byte address (set at dispatch by CP).
+  void set_scratch_base(uint64_t val) { scratch_base_ = val; }
+
   /// @brief Return the wait counters for outstanding memory operations.
   /// @returns Reference to the wait counters.
   WaitCounters &wait_counters() { return wait_counters_; }
@@ -291,6 +299,7 @@ public:
     exec_ = ~0ULL;
     vcc_ = 0;
     m0_ = 0;
+    scratch_base_ = 0;
     wait_counters_ = {};
     wait_target_ = {};
     state_ = WfState::HALTED;
@@ -324,6 +333,7 @@ private:
   uint64_t exec_ = ~0ULL;           ///< EXEC mask -- one bit per lane (1 = active).
   uint64_t vcc_ = 0;                ///< Vector condition code (per-lane comparison result).
   uint32_t m0_ = 0;                 ///< M0 special register (misc addressing).
+  uint64_t scratch_base_ = 0;       ///< Per-wavefront scratch (private segment) base address.
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
   WaitTarget wait_target_;          ///< Current s_waitcnt thresholds.
