@@ -70,6 +70,55 @@ _GFX1151_JINJA_TABLE_BINDINGS: tuple[tuple[str, str, str], ...] = (
 
 GFX1151_JINJA_CONTEXT_IDS: tuple[str, ...] = tuple(b[0] for b in _GFX1151_JINJA_TABLE_BINDINGS)
 
+# metric_table title in analysis YAML -> section key in gfx1151_metrics_description.yaml
+_TITLE_ALIASES: dict[str, str] = {
+    (
+        "Graphics Core Efficiency Arbiter (GCEA) to System Memory"
+    ): "Memory chart — GCEA to System Memory",
+}
+
+
+def _rocprof_compute_root(gfx1151_dir: Path) -> Path:
+    """``gfx1151_dir`` = ``.../analysis_configs/gfx1151``."""
+    return gfx1151_dir.parent.parent.parent.parent
+
+
+def _load_tools_nested_metric_sections(tools_yaml: Path) -> dict[str, dict[str, Any]]:
+    """Top-level keys whose values are ``{metric_name: {rst, plain, unit}}``."""
+    if not tools_yaml.is_file():
+        return {}
+    data = yaml.safe_load(tools_yaml.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return {}
+    return {
+        k: v
+        for k, v in data.items()
+        if isinstance(v, dict) and "rst" not in v and "plain" not in v
+    }
+
+
+def _tools_section_key(stem: str, title: str, nested: dict[str, Any]) -> str | None:
+    """Map ``metric_table`` title to a gfx1151_metrics_description.yaml section."""
+    if title in _TITLE_ALIASES:
+        alias = _TITLE_ALIASES[title]
+        if alias in nested:
+            return alias
+    candidates: list[str] = [title]
+    if stem == "0200_System_Speed_Of_Light":
+        candidates.append("System Speed-of-Light")
+    elif stem == "0300_Memory_Chart":
+        candidates.append(f"Memory chart — {title}")
+    elif stem == "0700_WGP":
+        candidates.append(f"WGP {title}")
+    elif stem == "0800_TCP_Cache":
+        candidates.append(f"TCP {title}")
+    elif stem == "1100_GL1C":
+        candidates.append(f"GL1C {title}")
+    for c in candidates:
+        if c in nested:
+            return c
+    return None
+
 
 def _metric_unit(spec: Any) -> str:
     if isinstance(spec, dict):
@@ -121,6 +170,12 @@ def _tables_by_title(panel: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def build_gfx1151_jinja_contexts(gfx1151_dir: Path) -> dict[str, dict[str, dict[str, dict[str, str]]]]:
     """Map each RDNA gfx1151 jinja id to ``{"data": {metric: {rst, unit}}}``."""
     cache: dict[str, dict[str, Any]] = {}
+    tools_nested = _load_tools_nested_metric_sections(
+        _rocprof_compute_root(gfx1151_dir)
+        / "tools"
+        / "per_arch_metric_definitions"
+        / "gfx1151_metrics_description.yaml"
+    )
 
     def panel_for_stem(stem: str) -> dict[str, Any]:
         if stem not in cache:
@@ -135,11 +190,18 @@ def build_gfx1151_jinja_contexts(gfx1151_dir: Path) -> dict[str, dict[str, dict[
         metrics_block = tables.get(title)
         raw_desc = panel.get("metrics_description") or {}
         descs: dict[str, Any] = raw_desc if isinstance(raw_desc, dict) else {}
+        tools_key = _tools_section_key(stem, title, tools_nested)
+        tools_table: dict[str, Any] = (
+            tools_nested.get(tools_key, {}) if tools_key else {}
+        )
         data: dict[str, dict[str, str]] = {}
         if metrics_block:
             for mname, mspec in metrics_block.items():
                 unit_tbl = _metric_unit(mspec)
-                rst_raw, unit_desc = _parse_description_entry(descs.get(mname))
+                entry = descs.get(mname)
+                if entry is None and isinstance(tools_table, dict):
+                    entry = tools_table.get(mname)
+                rst_raw, unit_desc = _parse_description_entry(entry)
                 rst = _rst_for_table_cell(rst_raw)
                 unit = unit_desc if unit_desc else unit_tbl
                 data[str(mname)] = {"rst": rst, "unit": unit}
