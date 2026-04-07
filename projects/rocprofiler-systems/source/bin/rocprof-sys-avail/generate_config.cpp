@@ -318,19 +318,19 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         }
 
         // Convert to hierarchical preset JSON schema (compatible with --preset)
-        auto j = rocprofsys::json_config::env_vars_to_json_schema(env_map);
+        auto preset_json = rocprofsys::json_config::env_vars_to_json_schema(env_map);
 
         // Add metadata
         auto preset_name = fmt_opts.preset_name;
         if(preset_name.empty()) preset_name = _config_file;
-        j["metadata"]["name"] = preset_name;
+        preset_json["metadata"]["name"] = preset_name;
         if(!fmt_opts.preset_description.empty())
-            j["metadata"]["description"] = fmt_opts.preset_description;
+            preset_json["metadata"]["description"] = fmt_opts.preset_description;
 
         auto _fname = settings::compose_output_filename(_config_file, ".json", false, -1,
                                                         true, _output_dir);
         std::ofstream ofs{};
-        _open(ofs, _fname, "JSON") << j.dump(4) << "\n";
+        _open(ofs, _fname, "JSON") << preset_json.dump(4) << "\n";
     }
 
     if(_fmts.count("xml") > 0)

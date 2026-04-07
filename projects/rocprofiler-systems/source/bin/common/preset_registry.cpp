@@ -11,6 +11,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fstream>
+#include <memory>
 #include <sstream>
 
 namespace rocprofsys
@@ -21,7 +22,7 @@ namespace
 std::string
 find_preset_directory()
 {
-    const auto* preset_dir_env = std::getenv(std::string{ env_vars::PRESET_DIR }.c_str());
+    const auto* preset_dir_env = std::getenv(env_vars::PRESET_DIR.data());
     if(preset_dir_env && std::strlen(preset_dir_env) > 0)
     {
         auto dir = std::string{ preset_dir_env };
@@ -46,6 +47,40 @@ find_preset_directory()
 
     return {};
 }
+
+/// Collect names of enabled items from a JSON object (items with "enabled": true).
+std::string
+collect_enabled_names(const nlohmann::json& obj)
+{
+    std::string result;
+    for(const auto& [name, val] : obj.items())
+    {
+        if(val.value("enabled", false))
+        {
+            if(!result.empty()) result += ", ";
+            result += name;
+        }
+    }
+    return result;
+}
+
+preset_registry::preset_info
+extract_metadata(const nlohmann::json& content)
+{
+    preset_registry::preset_info info;
+    if(content.contains("metadata"))
+    {
+        const auto& meta = content["metadata"];
+        if(meta.contains("name")) info.name = meta["name"].get<std::string>();
+        if(meta.contains("cli_flag")) info.cli_flag = meta["cli_flag"].get<std::string>();
+        if(meta.contains("description"))
+            info.description = meta["description"].get<std::string>();
+        if(meta.contains("use_case")) info.use_case = meta["use_case"].get<std::string>();
+        if(meta.contains("category")) info.category = meta["category"].get<std::string>();
+    }
+    info.settings = json_config::resolve_config(content);
+    return info;
+}
 }  // namespace
 
 preset_registry::preset_registry()
@@ -62,26 +97,10 @@ preset_registry::load_embedded()
         const auto& entry = embedded_presets::presets[i];
         try
         {
-            auto        j = nlohmann::json::parse(entry.json);
-            preset_info info;
+            auto       j    = nlohmann::json::parse(entry.json);
+            auto       info = extract_metadata(j);
+            const auto name = std::string{ entry.name };
 
-            if(j.contains("metadata"))
-            {
-                const auto& meta = j["metadata"];
-                if(meta.contains("name")) info.name = meta["name"].get<std::string>();
-                if(meta.contains("cli_flag"))
-                    info.cli_flag = meta["cli_flag"].get<std::string>();
-                if(meta.contains("description"))
-                    info.description = meta["description"].get<std::string>();
-                if(meta.contains("use_case"))
-                    info.use_case = meta["use_case"].get<std::string>();
-                if(meta.contains("category"))
-                    info.category = meta["category"].get<std::string>();
-            }
-
-            info.settings = json_config::resolve_config(j);
-
-            auto name          = std::string{ entry.name };
             m_json_cache[name] = std::move(j);
             m_presets[name]    = std::move(info);
         } catch(const nlohmann::json::exception& e)
@@ -96,7 +115,7 @@ std::string
 preset_registry::translate_legacy_flag(std::string_view arg) const
 {
     // Must start with "--" and not contain "="
-    if(arg.size() <= 2 || arg.substr(0, 2) != "--" ||
+    if(arg.size() <= 2 || arg.compare(0, 2, "--") != 0 ||
        arg.find('=') != std::string_view::npos)
         return {};
 
@@ -116,28 +135,13 @@ preset_registry::load_file(const std::string& filepath)
 
     try
     {
-        auto        j = nlohmann::json::parse(ifs);
-        preset_info info;
+        auto j    = nlohmann::json::parse(ifs);
+        auto info = extract_metadata(j);
 
-        if(j.contains("metadata"))
-        {
-            const auto& meta = j["metadata"];
-            if(meta.contains("name")) info.name = meta["name"].get<std::string>();
-            if(meta.contains("cli_flag"))
-                info.cli_flag = meta["cli_flag"].get<std::string>();
-            if(meta.contains("description"))
-                info.description = meta["description"].get<std::string>();
-            if(meta.contains("use_case"))
-                info.use_case = meta["use_case"].get<std::string>();
-            if(meta.contains("category"))
-                info.category = meta["category"].get<std::string>();
-        }
-
-        info.settings = json_config::resolve_config(j);
-
-        // Cache the raw JSON by preset name (if available) and by filepath
-        if(!info.name.empty()) m_json_cache[info.name] = j;
+        // Cache the raw JSON — move into primary key, copy to secondary if needed
         m_json_cache[filepath] = std::move(j);
+        if(!info.name.empty() && info.name != filepath)
+            m_json_cache[info.name] = m_json_cache[filepath];
 
         return info;
     } catch(const nlohmann::json::exception& e)
@@ -151,30 +155,39 @@ preset_registry::load_file(const std::string& filepath)
 std::string
 preset_registry::resolve_filepath(const std::string& name_or_path)
 {
-    // If it looks like a path, return as-is
-    if(name_or_path.find('/') != std::string::npos ||
-       (name_or_path.size() > 5 &&
-        name_or_path.compare(name_or_path.size() - 5, 5, ".json") == 0))
-    {
-        return name_or_path;
-    }
-
-    // Reject bare preset names containing ".."
+    // Reject any input containing ".." to prevent path traversal
     if(name_or_path.find("..") != std::string::npos)
     {
-        std::cerr << "[rocprof-sys] WARNING: Preset name '" << name_or_path
+        std::cerr << "[rocprof-sys] WARNING: Preset path '" << name_or_path
                   << "' contains '..'. Ignoring.\n";
         return {};
     }
 
+    const bool is_path = name_or_path.find('/') != std::string::npos ||
+                         (name_or_path.size() > 5 &&
+                          name_or_path.compare(name_or_path.size() - 5, 5, ".json") == 0);
+
+    if(is_path)
+    {
+        // Explicit file path — validate existence via realpath
+        auto resolved = common::path::realpath(name_or_path);
+        if(resolved.empty())
+        {
+            std::cerr << "[rocprof-sys] WARNING: Preset file '" << name_or_path
+                      << "' not found.\n";
+            return {};
+        }
+        return resolved;
+    }
+
+    // Bare preset name — resolve within the preset directory
     if(m_directory.empty()) return {};
 
-    auto filepath = common::join('/', m_directory, name_or_path + ".json");
-
+    auto filepath  = common::join('/', m_directory, name_or_path + ".json");
     auto resolved  = common::path::realpath(filepath);
     auto canon_dir = common::path::realpath(m_directory);
     if(resolved.empty() || canon_dir.empty() ||
-       resolved.substr(0, canon_dir.size()) != canon_dir)
+       resolved.compare(0, canon_dir.size(), canon_dir) != 0)
     {
         std::cerr << "[rocprof-sys] WARNING: Preset path '" << filepath
                   << "' resolves outside preset directory. Ignoring.\n";
@@ -184,21 +197,28 @@ preset_registry::resolve_filepath(const std::string& name_or_path)
     return filepath;
 }
 
-const preset_registry::preset_info*
+std::optional<preset_registry::preset_info>
 preset_registry::find(const std::string& name_or_path)
 {
-    // Check if is cached first
     auto it = m_presets.find(name_or_path);
-    if(it != m_presets.end()) return &it->second;
+    if(it != m_presets.end()) return it->second;
 
     auto filepath = resolve_filepath(name_or_path);
-    if(filepath.empty()) return nullptr;
+    if(filepath.empty()) return std::nullopt;
 
     auto info = load_file(filepath);
-    if(!info) return nullptr;
+    if(!info) return std::nullopt;
 
     m_presets[name_or_path] = std::move(*info);
-    return &m_presets[name_or_path];
+    return m_presets[name_or_path];
+}
+
+std::optional<env_settings>
+preset_registry::get_settings(const std::string& name_or_path)
+{
+    auto info = find(name_or_path);
+    if(!info) return std::nullopt;
+    return info->settings;
 }
 
 void
@@ -209,28 +229,31 @@ preset_registry::ensure_all_loaded()
 
     if(m_directory.empty()) return;
 
-    auto* dir = opendir(m_directory.c_str());
-    if(!dir) return;
+    auto dir_closer = [](DIR* d) { closedir(d); };
+    auto dir_guard  = std::unique_ptr<DIR, decltype(dir_closer)>(
+        opendir(m_directory.c_str()), dir_closer);
+    if(!dir_guard) return;
 
     errno = 0;
-    while(auto* entry = readdir(dir))
+    while(auto* entry = readdir(dir_guard.get()))
     {
         std::string_view filename{ entry->d_name };
 
         constexpr std::string_view json_ext = ".json";
         if(filename.size() <= json_ext.size() ||
-           filename.substr(filename.size() - json_ext.size()) != json_ext)
+           filename.compare(filename.size() - json_ext.size(), json_ext.size(),
+                            json_ext) != 0)
             continue;
 
         if(filename == "schema.json") continue;
 
-        auto preset_name =
+        const auto preset_name =
             std::string{ filename.substr(0, filename.size() - json_ext.size()) };
 
         // Skip if preset is already cached (e.g. from embedded presets)
         if(m_presets.count(preset_name) > 0) continue;
 
-        auto filepath = common::join('/', m_directory, std::string{ filename });
+        const auto filepath = common::join('/', m_directory, std::string{ filename });
         if(auto info = load_file(filepath)) m_presets[preset_name] = std::move(*info);
 
         errno = 0;
@@ -242,7 +265,11 @@ preset_registry::ensure_all_loaded()
                   << m_directory << "': " << std::strerror(errno) << '\n';
     }
 
-    closedir(dir);
+    if(errno != 0)
+    {
+        std::cerr << "[rocprof-sys] WARNING: Error reading preset directory '"
+                  << m_directory << "': " << std::strerror(errno) << "\n";
+    }
 }
 
 const std::map<std::string, preset_registry::preset_info>&
@@ -252,19 +279,16 @@ preset_registry::all()
     return m_presets;
 }
 
-const nlohmann::json*
-preset_registry::raw_json(const std::string& name)
+bool
+preset_registry::is_section_enabled(std::string_view preset_name,
+                                    std::string_view section, bool default_value) const
 {
-    auto it = m_json_cache.find(name);
-    if(it != m_json_cache.end()) return &it->second;
+    auto it = m_json_cache.find(std::string{ preset_name });
+    if(it == m_json_cache.end()) return default_value;
 
-    // Trigger a load (which populates both m_presets and m_json_cache)
-    if(find(name) != nullptr)
-    {
-        it = m_json_cache.find(name);
-        if(it != m_json_cache.end()) return &it->second;
-    }
-    return nullptr;
+    const auto& json = it->second;
+    if(!json.contains(section)) return default_value;
+    return json[std::string{ section }].value("enabled", default_value);
 }
 
 void
@@ -309,7 +333,7 @@ bool
 preset_registry::explain(std::string_view preset_name, std::string_view tool_name,
                          std::ostream& os)
 {
-    const auto* info = find(std::string{ preset_name });
+    auto info = find(std::string{ preset_name });
     if(!info)
     {
         std::cerr << "[rocprof-sys] Preset '" << preset_name
@@ -337,54 +361,63 @@ preset_registry::explain(std::string_view preset_name, std::string_view tool_nam
 std::string
 preset_registry::describe(std::string_view preset_name)
 {
-    const auto* j = raw_json(std::string{ preset_name });
-    if(!j) return "";
+    auto cache_it = m_json_cache.find(std::string{ preset_name });
+    if(cache_it == m_json_cache.end())
+    {
+        // Trigger load
+        if(!find(std::string{ preset_name }).has_value()) return "";
+        cache_it = m_json_cache.find(std::string{ preset_name });
+        if(cache_it == m_json_cache.end()) return "";
+    }
+    const auto& preset_json = cache_it->second;
 
-    auto meta        = json_config::get_config_metadata(*j);
+    auto meta        = json_config::get_config_metadata(preset_json);
     auto description = meta ? meta->description : "";
 
     std::vector<std::string> lines;
 
     // Tracing
-    if(j->contains("tracing"))
+    if(preset_json.contains("tracing"))
     {
-        const auto& t     = (*j)["tracing"];
-        bool        on    = t.value("enabled", false);
-        std::string entry = std::string("Tracing:         ") + (on ? "ON" : "OFF");
-        if(on && t.contains("buffer_size_kb"))
+        const auto& tracing = preset_json["tracing"];
+        bool        enabled = tracing.value("enabled", false);
+        std::string entry   = std::string("Tracing:         ") + (enabled ? "ON" : "OFF");
+        if(enabled && tracing.contains("buffer_size_kb"))
         {
-            auto kb = t["buffer_size_kb"].value("value", 0);
-            if(kb >= 1024000)
-                entry += " (buffer: " + std::to_string(kb / 1024000) + " GB)";
-            else if(kb > 0)
-                entry += " (buffer: " + std::to_string(kb) + " KB)";
+            constexpr int KB_PER_GB = 1024 * 1024;
+            auto          buffer_kb = tracing["buffer_size_kb"].value("value", 0);
+            if(buffer_kb >= KB_PER_GB)
+                entry += " (buffer: " + std::to_string(buffer_kb / KB_PER_GB) + " GB)";
+            else if(buffer_kb > 0)
+                entry += " (buffer: " + std::to_string(buffer_kb) + " KB)";
         }
         lines.push_back(entry);
     }
 
     // Profiling
-    if(j->contains("profiling"))
+    if(preset_json.contains("profiling"))
     {
-        const auto& p     = (*j)["profiling"];
-        bool        on    = p.value("enabled", false);
-        std::string entry = std::string("Profiling:       ") + (on ? "ON" : "OFF");
-        if(on && p.contains("flat_profile") && p["flat_profile"].value("enabled", false))
+        const auto& profiling = preset_json["profiling"];
+        bool        enabled   = profiling.value("enabled", false);
+        std::string entry = std::string("Profiling:       ") + (enabled ? "ON" : "OFF");
+        if(enabled && profiling.contains("flat_profile") &&
+           profiling["flat_profile"].value("enabled", false))
             entry += " (flat profile)";
         lines.push_back(entry);
     }
 
     // Sampling
-    if(j->contains("sampling"))
+    if(preset_json.contains("sampling"))
     {
-        const auto& s     = (*j)["sampling"];
-        bool        on    = s.value("enabled", false);
-        std::string entry = std::string("CPU Sampling:    ") + (on ? "ON" : "OFF");
-        if(on && s.contains("frequency_hz"))
+        const auto& sampling = preset_json["sampling"];
+        bool        enabled  = sampling.value("enabled", false);
+        std::string entry = std::string("CPU Sampling:    ") + (enabled ? "ON" : "OFF");
+        if(enabled && sampling.contains("frequency_hz"))
         {
-            auto freq = s["frequency_hz"].value("value", 0);
+            auto freq = sampling["frequency_hz"].value("value", 0);
             if(freq > 0) entry += " @ " + std::to_string(freq) + " Hz";
         }
-        if(s.contains("cpus") && s["cpus"].value("value", "") == "none")
+        if(sampling.contains("cpus") && sampling["cpus"].value("value", "") == "none")
         {
             entry = "CPU Sampling:    Disabled (none)";
         }
@@ -392,102 +425,66 @@ preset_registry::describe(std::string_view preset_name)
     }
 
     // Domains: GPU
-    if(j->contains("domains") && (*j)["domains"].contains("gpu"))
+    if(preset_json.contains("domains") && preset_json["domains"].contains("gpu"))
     {
-        const auto& gpu = (*j)["domains"]["gpu"];
+        const auto& gpu = preset_json["domains"]["gpu"];
         if(gpu.value("enabled", false))
         {
             std::string entry = "GPU Metrics:     ON";
             if(gpu.contains("metrics"))
             {
-                std::vector<std::string> names;
-                for(const auto& [name, m] : gpu["metrics"].items())
-                {
-                    if(m.value("enabled", false)) names.push_back(name);
-                }
-                if(!names.empty())
-                {
-                    entry += " (";
-                    for(size_t i = 0; i < names.size(); ++i)
-                    {
-                        if(i > 0) entry += ", ";
-                        entry += names[i];
-                    }
-                    entry += ")";
-                }
+                auto names = collect_enabled_names(gpu["metrics"]);
+                if(!names.empty()) entry += " (" + names + ")";
             }
             lines.push_back(entry);
         }
     }
 
     // Domains: ROCm
-    if(j->contains("domains") && (*j)["domains"].contains("rocm"))
+    if(preset_json.contains("domains") && preset_json["domains"].contains("rocm"))
     {
-        const auto& rocm = (*j)["domains"]["rocm"];
+        const auto& rocm = preset_json["domains"]["rocm"];
         if(rocm.value("enabled", false) && rocm.contains("api_domains"))
         {
-            std::vector<std::string> apis;
-            for(const auto& [name, api] : rocm["api_domains"].items())
-            {
-                if(api.value("enabled", false)) apis.push_back(name);
-            }
-            if(!apis.empty())
-            {
-                std::string entry = "ROCm Domains:    ";
-                for(size_t i = 0; i < apis.size(); ++i)
-                {
-                    if(i > 0) entry += ", ";
-                    entry += apis[i];
-                }
-                lines.push_back(entry);
-            }
+            auto apis = collect_enabled_names(rocm["api_domains"]);
+            if(!apis.empty()) lines.push_back("ROCm Domains:    " + apis);
         }
     }
 
     // Domains: Parallel runtimes
-    if(j->contains("domains") && (*j)["domains"].contains("parallel"))
+    if(preset_json.contains("domains") && preset_json["domains"].contains("parallel"))
     {
-        const auto& par = (*j)["domains"]["parallel"];
-        if(par.contains("runtimes"))
+        const auto& parallel = preset_json["domains"]["parallel"];
+        if(parallel.contains("runtimes"))
         {
-            std::vector<std::string> runtimes;
-            for(const auto& [name, rt] : par["runtimes"].items())
-            {
-                if(rt.value("enabled", false)) runtimes.push_back(name);
-            }
-            if(!runtimes.empty())
-            {
-                std::string entry = "Parallel:        ";
-                for(size_t i = 0; i < runtimes.size(); ++i)
-                {
-                    if(i > 0) entry += ", ";
-                    entry += runtimes[i];
-                }
-                lines.push_back(entry);
-            }
+            auto runtime_names = collect_enabled_names(parallel["runtimes"]);
+            if(!runtime_names.empty())
+                lines.push_back("Parallel:        " + runtime_names);
         }
     }
 
     // Hardware counters
-    if(j->contains("hardware_counters") &&
-       (*j)["hardware_counters"].value("enabled", false))
+    if(preset_json.contains("hardware_counters") &&
+       preset_json["hardware_counters"].value("enabled", false))
     {
-        const auto& hw = (*j)["hardware_counters"];
-        if(hw.contains("papi_events"))
+        const auto& counters = preset_json["hardware_counters"];
+        if(counters.contains("papi_events"))
         {
-            auto val = json_config::json_value_to_string(hw["papi_events"]["value"]);
-            lines.push_back("PAPI Events:     " + val);
+            auto events =
+                json_config::json_value_to_string(counters["papi_events"]["value"]);
+            lines.push_back("PAPI Events:     " + events);
         }
-        if(hw.contains("rocm_events"))
+        if(counters.contains("rocm_events"))
         {
-            auto val = json_config::json_value_to_string(hw["rocm_events"]["value"]);
-            lines.push_back("ROCm Events:     " + val);
+            auto events =
+                json_config::json_value_to_string(counters["rocm_events"]["value"]);
+            lines.push_back("ROCm Events:     " + events);
         }
     }
 
     // Output: rocPD
-    if(j->contains("output") && (*j)["output"].contains("rocpd_output") &&
-       (*j)["output"]["rocpd_output"].value("enabled", false))
+    if(preset_json.contains("output") && preset_json["output"].contains("rocpd_output") &&
+       preset_json["output"]["rocpd_output"].value("enabled", false))
     {
         lines.emplace_back("rocPD Output:    ON");
     }

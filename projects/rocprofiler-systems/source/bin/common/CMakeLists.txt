@@ -9,15 +9,11 @@
 #
 # ------------------------------------------------------------------------------#
 
-# ------------------------------------------------------------------------------#
-# Embed preset JSON files into a generated header
-# Follows the same pattern as ROCPROFSYS_CONFIGURE_ROCPD_SCHEMA_FILES()
-# in cmake/Packages.cmake for SQL schema embedding.
-# ------------------------------------------------------------------------------#
-
 set(PRESET_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/presets")
 set(EMBEDDED_PRESET_ENTRIES "constexpr entry presets[] = {\n")
 
+# GLOB is acceptable here: these are data files embedded at configure time,
+# not compiled sources. Adding a new preset requires re-running cmake anyway.
 file(GLOB PRESET_JSON_FILES "${PRESET_SOURCE_DIR}/*.json")
 list(SORT PRESET_JSON_FILES)
 foreach(PRESET_FILE ${PRESET_JSON_FILES})

@@ -5,8 +5,6 @@
 
 #include "common/preset_registry.hpp"
 
-#include <nlohmann/json.hpp>
-
 #include <iostream>
 #include <map>
 #include <sstream>
@@ -19,95 +17,39 @@ namespace rocprofsys
 {
 namespace common_utils
 {
-
-// ============================================================================
-// Output directory utilities
-// ============================================================================
-
 /**
- * Gets the output directory from environment or returns default.
+ * Thrown by argument actions that require immediate program termination
+ * (e.g., --list-presets, --explain, --help). Caught at the parse_args
+ * call site to exit gracefully with proper RAII cleanup.
  */
-std::string
-get_output_directory(const char* env_var = "ROCPROFSYS_OUTPUT_PATH");
-
-/**
- * Checks if a directory is writable.
- */
-bool
-check_directory_writable(const std::string& dir);
-
-// ============================================================================
-// Pre-execution info
-// ============================================================================
-
-/**
- * Prints pre-execution information including preset details and output location.
- * All output goes to stderr to keep stdout clean for structured output (--export-config).
- * Uses the registry from domain_flag_state to avoid re-reading JSON files.
- */
-void
-print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode,
-                         preset_registry& registry);
-
-// ============================================================================
-// Utility functions
-// ============================================================================
-
-/**
- * Strips a leading "--" prefix from a preset name if present.
- * Provides backwards compatibility with old --preset-name style flags.
- */
-inline std::string
-strip_flag_prefix(std::string_view name)
+struct cli_done
 {
-    if(name.size() > 2 && name.compare(0, 2, "--") == 0)
-        return std::string{ name.substr(2) };
-    return std::string{ name };
-}
-
-// ============================================================================
-// Validation functions
-// ============================================================================
+    int exit_code;
+    explicit cli_done(int code) noexcept
+    : exit_code(code)
+    {}
+};
 
 /**
- * Warns if the output directory is not writable.
+ * Result of translating command-line arguments for the argument parser.
+ * Owns any translated strings so their lifetime covers the parse_args call.
  */
-void
-warn_if_output_not_writable(std::string_view tool_name);
+struct translated_args
+{
+    std::vector<char*>       argv_ptrs;  // non-owning pointers for parser
+    std::vector<char*>       command;    // args after "--"
+    std::vector<std::string> owned;      // RAII ownership of translated strings
+};
 
 /**
- * Validates the configuration for common issues.
+ * Translate legacy preset flags (e.g., --balanced -> --preset=balanced)
+ * and split argv into parser args and command args (separated by "--").
  */
-void
-validate_configuration();
-
-/**
- * Validate domain flag combinations and print warnings for potential conflicts.
- * @param gpu_enabled Whether --gpu flag was used
- * @param rocm_enabled Whether --rocm flag was used
- * @param cpu_enabled Whether --cpu flag was used
- * @param parallel_enabled Whether --parallel flag was used
- * @param preset_name The active preset name (empty if none)
- */
-void
-validate_domain_flags(bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
-                      bool parallel_enabled, std::string_view preset_name);
-
-// ============================================================================
-// Shared functions used by both rocprof-sys-run and rocprof-sys-sample
-// ============================================================================
-
-/**
- * Collect resolved ROCPROFSYS_* settings by comparing current env against initial env.
- * Returns only variables that were added or changed.
- */
-std::map<std::string, std::string>
-collect_resolved_settings(const std::vector<char*>&              current_env,
-                          const std::unordered_set<std::string>& initial_envs);
+[[nodiscard]] translated_args
+translate_arguments(int argc, char** argv, preset_registry& registry);
 
 /**
  * Export configuration to JSON file or stdout.
- * @param tool_name The tool name (e.g., "run", "sample") for metadata description.
  */
 void
 export_config(const std::vector<char*>&              current_env,
@@ -125,71 +67,48 @@ run_post_parse_validation(std::string_view tool_name, std::string_view preset_na
                           bool parallel_enabled, int verbose_level,
                           preset_registry& registry);
 
-// ============================================================================
-// Topic-based help system
-// ============================================================================
-
 using help_group_names = std::vector<std::string>;
 using help_topic_map   = std::map<std::string, help_group_names>;
 
 struct domain_help_entry
 {
     std::string              description;
-    std::vector<std::string> flag_patterns;  // e.g. "--gpu", "--gpus", "-G"
+    std::vector<std::string> flag_patterns;
 };
 
 using domain_help_map = std::map<std::string, domain_help_entry>;
 
-/**
- * Returns the topic-to-group-name map for group-based help filtering.
- */
 const help_topic_map&
 get_help_topic_map();
 
-/**
- * Returns the domain-to-flags map for domain-based help filtering.
- */
 const domain_help_map&
 get_domain_help_map();
 
-/**
- * Print the compact help summary for bare --help.
- */
 void
 print_compact_help(std::string_view tool_name, std::ostream& os = std::cout);
 
-/**
- * Extract and print sections matching a group-based topic from captured help text.
- * @return true if the topic was valid (even if no sections matched this tool)
- */
 bool
 print_help_for_topic(const std::string& captured_help, std::string_view topic,
                      std::string_view tool_name, std::ostream& os = std::cout);
 
-/**
- * Extract and print argument lines matching a domain topic from captured help text.
- * @return true if the domain was valid
- */
 bool
 print_help_for_domain(const std::string& captured_help, std::string_view domain,
                       std::string_view tool_name, std::ostream& os = std::cout);
 
-/**
- * Capture full help text from the parser into a string.
- */
 template <typename ParserT>
 std::string
 capture_help_text(ParserT& parser)
 {
-    std::ostringstream ss;
-    auto*              old = parser.set_ostream(&ss);
+    std::ostringstream oss;
+    auto*              old_stream = parser.set_ostream(&oss);
     parser.print_help();
-    parser.set_ostream(old);
-    return ss.str();
+    parser.set_ostream(old_stream);
+    return oss.str();
 }
 
 /**
  * Shared help dispatch: handles --help (compact), --help=<topic>, --help=all.
+ * @throws cli_done after printing help output.
  */
 template <typename ParserT>
 void
@@ -203,7 +122,7 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
             topic = parser.template get<std::string>("help");
         } catch(...)
         {
-            // no value provided -bare --help
+            // no value provided — bare --help
         }
     }
 
@@ -219,7 +138,6 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
     {
         auto captured = capture_help_text(parser);
 
-        // Try domain-based first, then group-based
         if(!print_help_for_domain(captured, topic, tool_name) &&
            !print_help_for_topic(captured, topic, tool_name))
         {
@@ -227,17 +145,17 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
                       << "Available topics (use --help=<topic>):\n";
 
             std::cerr << "\n  Group topics:\n";
-            for(const auto& [t, _] : get_help_topic_map())
-                std::cerr << "    " << t << "\n";
+            for(const auto& [name, _] : get_help_topic_map())
+                std::cerr << "    " << name << "\n";
 
             std::cerr << "\n  Domain topics:\n";
-            for(const auto& [d, info] : get_domain_help_map())
-                std::cerr << "    " << d << "  - " << info.description << "\n";
+            for(const auto& [name, info] : get_domain_help_map())
+                std::cerr << "    " << name << "  - " << info.description << "\n";
 
             std::cerr << "\n  --help=all  Show all options\n";
         }
     }
-    exit(exit_code);
+    throw cli_done{ exit_code };
 }
 
 }  // namespace common_utils

@@ -95,105 +95,88 @@ constexpr auto invalid_json = R"({ this is not valid json })";
 class preset_registry_test : public ::testing::Test
 {};
 
-TEST_F(preset_registry_test, find_file_by_path)
+TEST_F(preset_registry_test, get_settings_loads_metadata_and_settings)
 {
     temp_dir dir;
     auto     filepath = dir.write_file("balanced.json", balanced_json);
 
     preset_registry registry;
-    const auto*     info = registry.find(filepath);
+    auto            settings = registry.get_settings(filepath);
 
-    ASSERT_NE(info, nullptr);
-    EXPECT_EQ(info->name, "balanced");
-    EXPECT_EQ(info->cli_flag, "--balanced");
-    EXPECT_EQ(info->description, "Balanced profiling mode");
-    EXPECT_EQ(info->use_case, "General-purpose profiling");
-    EXPECT_EQ(info->category, "general");
+    ASSERT_TRUE(settings.has_value());
+    EXPECT_EQ(settings->at("ROCPROFSYS_TRACE"), "true");
+    EXPECT_EQ(settings->at("ROCPROFSYS_PROFILE"), "true");
+    EXPECT_EQ(settings->at("ROCPROFSYS_USE_SAMPLING"), "true");
+    EXPECT_EQ(settings->at("ROCPROFSYS_SAMPLING_FREQ"), "50");
+
+    // Verify metadata via explain
+    std::ostringstream oss;
+    EXPECT_TRUE(registry.explain("balanced", "run", oss));
+    auto output = oss.str();
+    EXPECT_NE(output.find("balanced"), std::string::npos);
+    EXPECT_NE(output.find("Balanced profiling mode"), std::string::npos);
+    EXPECT_NE(output.find("General-purpose profiling"), std::string::npos);
 }
 
-TEST_F(preset_registry_test, find_resolves_settings)
-{
-    temp_dir dir;
-    auto     filepath = dir.write_file("balanced.json", balanced_json);
-
-    preset_registry registry;
-    const auto*     info = registry.find(filepath);
-
-    ASSERT_NE(info, nullptr);
-    EXPECT_EQ(info->settings.at("ROCPROFSYS_TRACE"), "true");
-    EXPECT_EQ(info->settings.at("ROCPROFSYS_PROFILE"), "true");
-    EXPECT_EQ(info->settings.at("ROCPROFSYS_USE_SAMPLING"), "true");
-    EXPECT_EQ(info->settings.at("ROCPROFSYS_SAMPLING_FREQ"), "50");
-}
-
-TEST_F(preset_registry_test, find_resolves_gpu_domain)
+TEST_F(preset_registry_test, get_settings_resolves_gpu_domain)
 {
     temp_dir dir;
     auto     filepath = dir.write_file("gpu-trace.json", gpu_preset_json);
 
     preset_registry registry;
-    const auto*     info = registry.find(filepath);
+    auto            settings = registry.get_settings(filepath);
 
-    ASSERT_NE(info, nullptr);
-    EXPECT_EQ(info->settings.at("ROCPROFSYS_USE_AMD_SMI"), "true");
-    EXPECT_EQ(info->settings.at("ROCPROFSYS_USE_PROCESS_SAMPLING"), "true");
-    auto metrics = info->settings.at("ROCPROFSYS_AMD_SMI_METRICS");
+    ASSERT_TRUE(settings.has_value());
+    EXPECT_EQ(settings->at("ROCPROFSYS_USE_AMD_SMI"), "true");
+    EXPECT_EQ(settings->at("ROCPROFSYS_USE_PROCESS_SAMPLING"), "true");
+    auto metrics = settings->at("ROCPROFSYS_AMD_SMI_METRICS");
     EXPECT_NE(metrics.find("temp"), std::string::npos);
     EXPECT_NE(metrics.find("power"), std::string::npos);
 }
 
-TEST_F(preset_registry_test, find_returns_nullptr_for_missing_file)
+TEST_F(preset_registry_test, get_settings_returns_nullopt_for_missing_file)
 {
     preset_registry registry;
-    const auto*     info = registry.find("/nonexistent/path/missing.json");
-    EXPECT_EQ(info, nullptr);
+    auto            settings = registry.get_settings("/nonexistent/path/missing.json");
+    EXPECT_FALSE(settings.has_value());
 }
 
-TEST_F(preset_registry_test, find_returns_nullptr_for_invalid_json)
+TEST_F(preset_registry_test, get_settings_returns_nullopt_for_invalid_json)
 {
     temp_dir dir;
     auto     filepath = dir.write_file("invalid.json", invalid_json);
 
     preset_registry registry;
-    const auto*     info = registry.find(filepath);
-    EXPECT_EQ(info, nullptr);
+    auto            settings = registry.get_settings(filepath);
+    EXPECT_FALSE(settings.has_value());
 }
 
-TEST_F(preset_registry_test, find_by_name)
+TEST_F(preset_registry_test, explain_finds_by_name)
 {
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
     ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
-    preset_registry registry;
-    const auto*     info = registry.find("balanced");
+    preset_registry    registry;
+    std::ostringstream oss;
+    bool               found = registry.explain("balanced", "run", oss);
     ::unsetenv("ROCPROFSYS_PRESET_DIR");
 
-    ASSERT_NE(info, nullptr);
-    EXPECT_EQ(info->name, "balanced");
+    EXPECT_TRUE(found);
+    EXPECT_NE(oss.str().find("balanced"), std::string::npos);
 }
 
-TEST_F(preset_registry_test, find_by_name_returns_nullptr_for_unknown_preset)
+TEST_F(preset_registry_test, explain_returns_false_for_unknown_preset)
 {
     temp_dir dir;
 
     ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
-    preset_registry registry;
-    const auto*     info = registry.find("nonexistent-preset");
+    preset_registry    registry;
+    std::ostringstream oss;
+    bool               found = registry.explain("nonexistent-preset", "run", oss);
     ::unsetenv("ROCPROFSYS_PRESET_DIR");
 
-    EXPECT_EQ(info, nullptr);
-}
-
-TEST_F(preset_registry_test, directory_from_environment)
-{
-    temp_dir dir;
-
-    ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
-    preset_registry registry;
-    ::unsetenv("ROCPROFSYS_PRESET_DIR");
-
-    EXPECT_EQ(registry.directory(), dir.path());
+    EXPECT_FALSE(found);
 }
 
 TEST_F(preset_registry_test, load_all_from_directory)
@@ -202,66 +185,48 @@ TEST_F(preset_registry_test, load_all_from_directory)
     dir.write_file("balanced.json", balanced_json);
 
     ::setenv("ROCPROFSYS_PRESET_DIR", dir.path().c_str(), 1);
-    preset_registry registry;
-    const auto&     presets = registry.all();
+    preset_registry    registry;
+    std::ostringstream oss;
+    registry.list("run", oss);
     ::unsetenv("ROCPROFSYS_PRESET_DIR");
 
-    ASSERT_EQ(presets.count("balanced"), 1u);
-    EXPECT_EQ(presets.at("balanced").name, "balanced");
+    auto output = oss.str();
+    EXPECT_NE(output.find("balanced"), std::string::npos);
 }
 
-TEST_F(preset_registry_test, caching_found_presets)
+TEST_F(preset_registry_test, get_settings_returns_consistent_results)
 {
     temp_dir dir;
     auto     filepath = dir.write_file("balanced.json", balanced_json);
 
     preset_registry registry;
-    const auto*     first  = registry.find(filepath);
-    const auto*     second = registry.find(filepath);
+    auto            first  = registry.get_settings(filepath);
+    auto            second = registry.get_settings(filepath);
 
-    ASSERT_NE(first, nullptr);
-    EXPECT_EQ(first, second);  // Same pointer, but cached
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(*first, *second);
 }
 
-TEST_F(preset_registry_test, apply_calls_callbacks)
-{
-    temp_dir dir;
-    auto     filepath = dir.write_file("balanced.json", balanced_json);
-
-    preset_registry                    registry;
-    std::map<std::string, std::string> applied;
-    bool                               result = registry.apply(
-        filepath, [&](const std::string& k, const std::string& v) { applied[k] = v; });
-
-    EXPECT_TRUE(result);
-    EXPECT_EQ(applied.at("ROCPROFSYS_TRACE"), "true");
-    EXPECT_EQ(applied.at("ROCPROFSYS_PROFILE"), "true");
-}
-
-TEST_F(preset_registry_test, apply_retuns_false_for_missing_file)
-{
-    preset_registry registry;
-    bool            result = registry.apply("/nonexistent.json", [](auto&, auto&) {});
-    EXPECT_FALSE(result);
-}
-
-TEST_F(preset_registry_test, caching_raw_json)
+TEST_F(preset_registry_test, is_section_enabled_checks)
 {
     temp_dir dir;
     auto     filepath = dir.write_file("balanced.json", balanced_json);
 
     preset_registry registry;
-    // triggers load + JSON cache. Voiding it since we
-    // wnat to test caching of found json
-    (void) registry.find(filepath);
+    // Trigger load via get_settings
+    (void) registry.get_settings(filepath);
 
-    const auto* j = registry.raw_json(filepath);
-    ASSERT_NE(j, nullptr);
-    EXPECT_TRUE(j->contains("metadata"));
-    EXPECT_TRUE(j->contains("tracing"));
+    EXPECT_TRUE(registry.is_section_enabled(filepath, "tracing"));
+    EXPECT_TRUE(registry.is_section_enabled(filepath, "profiling"));
+    // Non-existent section returns default
+    EXPECT_TRUE(registry.is_section_enabled(filepath, "nonexistent", true));
+    EXPECT_FALSE(registry.is_section_enabled(filepath, "nonexistent", false));
+    // Non-existent preset returns default
+    EXPECT_TRUE(registry.is_section_enabled("missing", "tracing", true));
 }
 
-TEST_F(preset_registry_test, handling_empty_metadata)
+TEST_F(preset_registry_test, get_settings_handles_empty_metadata)
 {
     constexpr auto minimal_json = R"({
         "tracing": {"enabled": true}
@@ -271,12 +236,10 @@ TEST_F(preset_registry_test, handling_empty_metadata)
     auto     filepath = dir.write_file("minimal.json", minimal_json);
 
     preset_registry registry;
-    const auto*     info = registry.find(filepath);
+    auto            settings = registry.get_settings(filepath);
 
-    ASSERT_NE(info, nullptr);
-    EXPECT_TRUE(info->name.empty());
-    EXPECT_TRUE(info->cli_flag.empty());
-    EXPECT_EQ(info->settings.at("ROCPROFSYS_TRACE"), "true");
+    ASSERT_TRUE(settings.has_value());
+    EXPECT_EQ(settings->at("ROCPROFSYS_TRACE"), "true");
 }
 
 TEST_F(preset_registry_test, list_output_content)

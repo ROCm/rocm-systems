@@ -6,6 +6,7 @@
 #include "common/env_vars.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <fstream>
 #include <iostream>
@@ -15,6 +16,32 @@ namespace rocprofsys
 {
 namespace json_config
 {
+
+namespace
+{
+/// Split a comma-separated string, trimming whitespace and lowercasing each token.
+std::vector<std::string>
+split_csv_lowercase(const std::string& input)
+{
+    std::vector<std::string> tokens;
+    std::string              token;
+    std::istringstream       ss(input);
+
+    while(std::getline(ss, token, ','))
+    {
+        auto start = token.find_first_not_of(" \t");
+        auto end   = token.find_last_not_of(" \t");
+        if(start != std::string::npos)
+        {
+            token = token.substr(start, end - start + 1);
+            for(auto& c : token)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            tokens.push_back(std::move(token));
+        }
+    }
+    return tokens;
+}
+}  // namespace
 
 std::string
 json_value_to_string(const nlohmann::json& val)
@@ -79,14 +106,14 @@ resolve_value(std::map<std::string, std::string>& result, const nlohmann::json& 
 }
 
 std::map<std::string, std::string>
-resolve_schema_config(const nlohmann::json& j)
+resolve_schema_config(const nlohmann::json& config)
 {
     std::map<std::string, std::string> result;
 
     // --- Tracing section ---
-    if(j.contains("tracing"))
+    if(config.contains("tracing"))
     {
-        const auto& tracing = j["tracing"];
+        const auto& tracing = config["tracing"];
         resolve_enabled(result, tracing, "enabled", env_vars::TRACE);
         if(tracing.contains("legacy"))
             resolve_enabled(result, tracing["legacy"], "enabled", env_vars::TRACE_LEGACY);
@@ -100,9 +127,9 @@ resolve_schema_config(const nlohmann::json& j)
     }
 
     // --- Profiling section ---
-    if(j.contains("profiling"))
+    if(config.contains("profiling"))
     {
-        const auto& profiling = j["profiling"];
+        const auto& profiling = config["profiling"];
         resolve_enabled(result, profiling, "enabled", env_vars::PROFILE);
         if(profiling.contains("flat_profile"))
         {
@@ -112,9 +139,9 @@ resolve_schema_config(const nlohmann::json& j)
     }
 
     // --- Sampling section ---
-    if(j.contains("sampling"))
+    if(config.contains("sampling"))
     {
-        const auto& sampling = j["sampling"];
+        const auto& sampling = config["sampling"];
         resolve_enabled(result, sampling, "enabled", env_vars::USE_SAMPLING);
         resolve_value(result, sampling, "timer", env_vars::SAMPLING_TIMER);
         resolve_value(result, sampling, "frequency_hz", env_vars::SAMPLING_FREQ);
@@ -128,9 +155,9 @@ resolve_schema_config(const nlohmann::json& j)
     }
 
     // --- Domains section ---
-    if(j.contains("domains"))
+    if(config.contains("domains"))
     {
-        const auto& domains = j["domains"];
+        const auto& domains = config["domains"];
 
         // GPU domain (AMD SMI metrics)
         if(domains.contains("gpu"))
@@ -282,9 +309,9 @@ resolve_schema_config(const nlohmann::json& j)
     }
 
     // --- Output section ---
-    if(j.contains("output"))
+    if(config.contains("output"))
     {
-        const auto& output = j["output"];
+        const auto& output = config["output"];
         resolve_value(result, output, "path", env_vars::OUTPUT_PATH);
         if(output.contains("time_output"))
             resolve_enabled(result, output["time_output"], "enabled",
@@ -300,9 +327,9 @@ resolve_schema_config(const nlohmann::json& j)
     }
 
     // --- Causal profiling section ---
-    if(j.contains("causal"))
+    if(config.contains("causal"))
     {
-        const auto& causal = j["causal"];
+        const auto& causal = config["causal"];
         resolve_enabled(result, causal, "enabled", env_vars::USE_CAUSAL);
         resolve_value(result, causal, "mode", env_vars::CAUSAL_MODE);
         resolve_value(result, causal, "backend", env_vars::CAUSAL_BACKEND);
@@ -322,9 +349,9 @@ resolve_schema_config(const nlohmann::json& j)
     }
 
     // --- Hardware counters section ---
-    if(j.contains("hardware_counters"))
+    if(config.contains("hardware_counters"))
     {
-        const auto& hw = j["hardware_counters"];
+        const auto& hw = config["hardware_counters"];
         if(hw.contains("enabled") && hw["enabled"].get<bool>())
         {
             resolve_value(result, hw, "rocm_events", env_vars::ROCM_EVENTS);
@@ -336,9 +363,9 @@ resolve_schema_config(const nlohmann::json& j)
     }
 
     // --- Advanced section ---
-    if(j.contains("advanced"))
+    if(config.contains("advanced"))
     {
-        const auto& adv = j["advanced"];
+        const auto& adv = config["advanced"];
         if(adv.contains("cpu_affinity"))
             resolve_enabled(result, adv["cpu_affinity"], "enabled",
                             env_vars::CPU_AFFINITY);
@@ -362,9 +389,9 @@ resolve_schema_config(const nlohmann::json& j)
 }
 
 std::map<std::string, std::string>
-resolve_config(const nlohmann::json& j)
+resolve_config(const nlohmann::json& config)
 {
-    return resolve_schema_config(j);
+    return resolve_schema_config(config);
 }
 
 std::optional<std::map<std::string, std::string>>
@@ -375,8 +402,8 @@ load_and_resolve(const std::string& filepath)
 
     try
     {
-        auto j = nlohmann::json::parse(ifs);
-        return resolve_config(j);
+        auto config = nlohmann::json::parse(ifs);
+        return resolve_config(config);
     } catch(const nlohmann::json::exception& e)
     {
         std::cerr << "[rocprof-sys] WARNING: Failed to parse config '" << filepath
@@ -386,11 +413,11 @@ load_and_resolve(const std::string& filepath)
 }
 
 std::optional<config_metadata>
-get_config_metadata(const nlohmann::json& j)
+get_config_metadata(const nlohmann::json& config)
 {
-    if(!j.contains("metadata")) return std::nullopt;
+    if(!config.contains("metadata")) return std::nullopt;
 
-    const auto&     meta = j["metadata"];
+    const auto&     meta = config["metadata"];
     config_metadata result;
     if(meta.contains("name")) result.name = meta["name"].get<std::string>();
     if(meta.contains("description"))
@@ -409,8 +436,8 @@ load_config_metadata(const std::string& filepath)
 
     try
     {
-        auto j = nlohmann::json::parse(ifs);
-        return get_config_metadata(j);
+        auto config = nlohmann::json::parse(ifs);
+        return get_config_metadata(config);
     } catch(const nlohmann::json::exception&)
     {
         return std::nullopt;
@@ -420,7 +447,8 @@ load_config_metadata(const std::string& filepath)
 std::string
 expand_rocm_domain_shorthand(const std::string& shorthand)
 {
-    static const std::map<std::string, std::string> shortcuts = {
+    using entry = std::pair<std::string_view, std::string_view>;
+    static constexpr std::array<entry, 12> shortcuts = { {
         { "hip", "hip_runtime_api" },
         { "hip_runtime", "hip_runtime_api" },
         { "hip_compiler", "hip_compiler_api" },
@@ -433,37 +461,25 @@ expand_rocm_domain_shorthand(const std::string& shorthand)
         { "marker", "marker_api" },
         { "roctx", "marker_api" },
         { "rccl", "rccl_api" },
-    };
+    } };
 
-    auto it = shortcuts.find(shorthand);
-    if(it != shortcuts.end()) return it->second;
-    return shorthand;  // Return as-is if no mapping
+    auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
+                           [&](const entry& e) { return e.first == shorthand; });
+    if(it != shortcuts.end()) return std::string{ it->second };
+    return shorthand;
 }
 
 std::string
 expand_rocm_domains(const std::string& domains_str)
 {
-    std::string              result;
-    std::string              token;
-    std::istringstream       ss(domains_str);
-    std::vector<std::string> expanded;
+    auto tokens = split_csv_lowercase(domains_str);
 
-    while(std::getline(ss, token, ','))
+    std::string result;
+    for(const auto& t : tokens)
     {
-        // Trim whitespace
-        auto start = token.find_first_not_of(" \t");
-        auto end   = token.find_last_not_of(" \t");
-        if(start != std::string::npos)
-        {
-            token = token.substr(start, end - start + 1);
-            expanded.push_back(expand_rocm_domain_shorthand(token));
-        }
-    }
-
-    for(const auto& d : expanded)
-    {
+        auto expanded = expand_rocm_domain_shorthand(t);
         if(!result.empty()) result += ',';
-        result += d;
+        result += expanded;
     }
     return result;
 }
@@ -483,34 +499,24 @@ expand_parallel_runtimes(const std::string& runtimes_str)
         return result;
     }
 
-    static const std::map<std::string, std::string> shortcuts = {
-        { "mpi", std::string{ env_vars::USE_MPIP } },
-        { "mpip", std::string{ env_vars::USE_MPIP } },
-        { "openmp", std::string{ env_vars::USE_OMPT } },
-        { "ompt", std::string{ env_vars::USE_OMPT } },
-        { "omp", std::string{ env_vars::USE_OMPT } },
-        { "kokkos", std::string{ env_vars::USE_KOKKOSP } },
-        { "kokkosp", std::string{ env_vars::USE_KOKKOSP } },
-        { "rccl", std::string{ env_vars::USE_RCCLP } },
-        { "rcclp", std::string{ env_vars::USE_RCCLP } },
-    };
+    using entry = std::pair<std::string_view, std::string_view>;
+    static constexpr std::array<entry, 9> shortcuts = { {
+        { "mpi", env_vars::USE_MPIP },
+        { "mpip", env_vars::USE_MPIP },
+        { "openmp", env_vars::USE_OMPT },
+        { "ompt", env_vars::USE_OMPT },
+        { "omp", env_vars::USE_OMPT },
+        { "kokkos", env_vars::USE_KOKKOSP },
+        { "kokkosp", env_vars::USE_KOKKOSP },
+        { "rccl", env_vars::USE_RCCLP },
+        { "rcclp", env_vars::USE_RCCLP },
+    } };
 
-    std::string        token;
-    std::istringstream ss(runtimes_str);
-    while(std::getline(ss, token, ','))
+    for(const auto& token : split_csv_lowercase(runtimes_str))
     {
-        // Trim and lowercase
-        auto start = token.find_first_not_of(" \t");
-        auto end   = token.find_last_not_of(" \t");
-        if(start != std::string::npos)
-        {
-            token = token.substr(start, end - start + 1);
-            for(auto& c : token)
-                c = std::tolower(c);
-
-            auto it = shortcuts.find(token);
-            if(it != shortcuts.end()) result[it->second] = "true";
-        }
+        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
+                               [&](const entry& e) { return e.first == token; });
+        if(it != shortcuts.end()) result[std::string{ it->second }] = "true";
     }
     return result;
 }
@@ -520,37 +526,21 @@ expand_gpu_metrics(const std::string& metrics_str)
 {
     if(metrics_str.empty()) return "";  // Use default
 
-    static const std::map<std::string, std::string> shortcuts = {
+    using entry = std::pair<std::string_view, std::string_view>;
+    static constexpr std::array<entry, 4> shortcuts = { {
         { "temperature", "temp" },
         { "usage", "busy" },
         { "utilization", "busy" },
         { "memory", "mem_usage" },
-    };
+    } };
 
-    std::string              result;
-    std::string              token;
-    std::istringstream       ss(metrics_str);
-    std::vector<std::string> expanded;
-
-    while(std::getline(ss, token, ','))
+    std::string result;
+    for(const auto& token : split_csv_lowercase(metrics_str))
     {
-        auto start = token.find_first_not_of(" \t");
-        auto end   = token.find_last_not_of(" \t");
-        if(start != std::string::npos)
-        {
-            token = token.substr(start, end - start + 1);
-            for(auto& c : token)
-                c = std::tolower(c);
-
-            auto it = shortcuts.find(token);
-            expanded.push_back(it != shortcuts.end() ? it->second : token);
-        }
-    }
-
-    for(const auto& m : expanded)
-    {
+        auto it = std::find_if(shortcuts.begin(), shortcuts.end(),
+                               [&](const entry& e) { return e.first == token; });
         if(!result.empty()) result += ',';
-        result += m;
+        result += (it != shortcuts.end()) ? std::string{ it->second } : token;
     }
     return result;
 }
@@ -622,57 +612,61 @@ is_truthy(const std::string& v)
 }
 
 void
-export_enabled(nlohmann::json& j, const std::map<std::string, std::string>& env_map,
+export_enabled(nlohmann::json& config, const std::map<std::string, std::string>& env_map,
                std::string_view env_var, const std::string& json_path_section,
                const std::string& json_path_key)
 {
     auto it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
-        j[json_path_section][json_path_key]["enabled"] = is_truthy(it->second);
+        config[json_path_section][json_path_key]["enabled"] = is_truthy(it->second);
 }
 
 void
-export_section_enabled(nlohmann::json&                           j,
+export_section_enabled(nlohmann::json&                           config,
                        const std::map<std::string, std::string>& env_map,
                        std::string_view env_var, const std::string& json_path_section)
 {
     auto it = env_map.find(std::string{ env_var });
-    if(it != env_map.end()) j[json_path_section]["enabled"] = is_truthy(it->second);
+    if(it != env_map.end()) config[json_path_section]["enabled"] = is_truthy(it->second);
 }
 
 void
-export_string_value(nlohmann::json& j, const std::map<std::string, std::string>& env_map,
+export_string_value(nlohmann::json&                           config,
+                    const std::map<std::string, std::string>& env_map,
                     std::string_view env_var, const std::string& json_path_section,
                     const std::string& json_path_key)
 {
     auto it = env_map.find(std::string{ env_var });
-    if(it != env_map.end()) j[json_path_section][json_path_key]["value"] = it->second;
+    if(it != env_map.end())
+        config[json_path_section][json_path_key]["value"] = it->second;
 }
 
 void
-export_int_value(nlohmann::json& j, const std::map<std::string, std::string>& env_map,
+export_int_value(nlohmann::json&                           config,
+                 const std::map<std::string, std::string>& env_map,
                  std::string_view env_var, const std::string& json_path_section,
                  const std::string& json_path_key)
 {
     auto it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
-        set_json_int(j[json_path_section][json_path_key]["value"], it->second);
+        set_json_int(config[json_path_section][json_path_key]["value"], it->second);
 }
 
 void
-export_double_value(nlohmann::json& j, const std::map<std::string, std::string>& env_map,
+export_double_value(nlohmann::json&                           config,
+                    const std::map<std::string, std::string>& env_map,
                     std::string_view env_var, const std::string& json_path_section,
                     const std::string& json_path_key)
 {
     auto it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
-        set_json_double(j[json_path_section][json_path_key]["value"], it->second);
+        set_json_double(config[json_path_section][json_path_key]["value"], it->second);
 }
 
 nlohmann::json
 env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
 {
-    nlohmann::json j;
+    nlohmann::json config;
 
     // Helper to check if env var exists and get value
     auto get_val = [&](std::string_view key) -> std::optional<std::string> {
@@ -682,40 +676,43 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     };
 
     // --- Tracing ---
-    export_section_enabled(j, env_map, env_vars::TRACE, "tracing");
-    export_enabled(j, env_map, env_vars::TRACE_LEGACY, "tracing", "legacy");
-    export_int_value(j, env_map, env_vars::PERFETTO_BUFFER_SIZE_KB, "tracing",
+    export_section_enabled(config, env_map, env_vars::TRACE, "tracing");
+    export_enabled(config, env_map, env_vars::TRACE_LEGACY, "tracing", "legacy");
+    export_int_value(config, env_map, env_vars::PERFETTO_BUFFER_SIZE_KB, "tracing",
                      "buffer_size_kb");
-    export_string_value(j, env_map, env_vars::PERFETTO_FILL_POLICY, "tracing",
+    export_string_value(config, env_map, env_vars::PERFETTO_FILL_POLICY, "tracing",
                         "fill_policy");
-    export_string_value(j, env_map, env_vars::PERFETTO_BACKEND, "tracing", "backend");
-    export_int_value(j, env_map, env_vars::PERFETTO_FLUSH_PERIOD, "tracing",
+    export_string_value(config, env_map, env_vars::PERFETTO_BACKEND, "tracing",
+                        "backend");
+    export_int_value(config, env_map, env_vars::PERFETTO_FLUSH_PERIOD, "tracing",
                      "flush_period_ms");
-    export_string_value(j, env_map, env_vars::TRACE_REGION, "tracing", "region");
+    export_string_value(config, env_map, env_vars::TRACE_REGION, "tracing", "region");
 
     // --- Profiling ---
-    export_section_enabled(j, env_map, env_vars::PROFILE, "profiling");
-    export_enabled(j, env_map, env_vars::FLAT_PROFILE, "profiling", "flat_profile");
+    export_section_enabled(config, env_map, env_vars::PROFILE, "profiling");
+    export_enabled(config, env_map, env_vars::FLAT_PROFILE, "profiling", "flat_profile");
 
     // --- Sampling ---
-    export_section_enabled(j, env_map, env_vars::USE_SAMPLING, "sampling");
-    export_int_value(j, env_map, env_vars::SAMPLING_FREQ, "sampling", "frequency_hz");
-    export_string_value(j, env_map, env_vars::SAMPLING_TIMER, "sampling", "timer");
-    export_double_value(j, env_map, env_vars::SAMPLING_DELAY, "sampling", "delay_sec");
-    export_double_value(j, env_map, env_vars::SAMPLING_DURATION, "sampling",
+    export_section_enabled(config, env_map, env_vars::USE_SAMPLING, "sampling");
+    export_int_value(config, env_map, env_vars::SAMPLING_FREQ, "sampling",
+                     "frequency_hz");
+    export_string_value(config, env_map, env_vars::SAMPLING_TIMER, "sampling", "timer");
+    export_double_value(config, env_map, env_vars::SAMPLING_DELAY, "sampling",
+                        "delay_sec");
+    export_double_value(config, env_map, env_vars::SAMPLING_DURATION, "sampling",
                         "duration_sec");
-    export_string_value(j, env_map, env_vars::SAMPLING_CPUS, "sampling", "cpus");
-    export_string_value(j, env_map, env_vars::SAMPLING_GPUS, "sampling", "gpus");
-    export_string_value(j, env_map, env_vars::SAMPLING_AINICS, "sampling", "ainics");
-    export_string_value(j, env_map, env_vars::SAMPLING_OVERFLOW_EVENT, "sampling",
+    export_string_value(config, env_map, env_vars::SAMPLING_CPUS, "sampling", "cpus");
+    export_string_value(config, env_map, env_vars::SAMPLING_GPUS, "sampling", "gpus");
+    export_string_value(config, env_map, env_vars::SAMPLING_AINICS, "sampling", "ainics");
+    export_string_value(config, env_map, env_vars::SAMPLING_OVERFLOW_EVENT, "sampling",
                         "overflow_event");
 
     // --- Domains: GPU ---
     if(auto v = get_val(env_vars::USE_PROCESS_SAMPLING))
-        j["domains"]["gpu"]["process_sampling"]["enabled"] = is_truthy(*v);
+        config["domains"]["gpu"]["process_sampling"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_AMD_SMI))
     {
-        j["domains"]["gpu"]["enabled"] = is_truthy(*v);
+        config["domains"]["gpu"]["enabled"] = is_truthy(*v);
         if(auto metrics = get_val(env_vars::AMD_SMI_METRICS))
         {
             std::istringstream ss(*metrics);
@@ -727,25 +724,26 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
                 if(start != std::string::npos)
                 {
                     token = token.substr(start, end - start + 1);
-                    j["domains"]["gpu"]["metrics"][token]["enabled"] = true;
+                    config["domains"]["gpu"]["metrics"][token]["enabled"] = true;
                 }
             }
         }
         if(auto freq = get_val(env_vars::AMD_SMI_FREQ))
-            set_json_int(j["domains"]["gpu"]["sampling_rate_hz"]["value"], *freq);
+            set_json_int(config["domains"]["gpu"]["sampling_rate_hz"]["value"], *freq);
         if(auto freq = get_val(env_vars::PROCESS_SAMPLING_FREQ))
-            set_json_double(j["domains"]["gpu"]["process_sampling_freq"]["value"], *freq);
+            set_json_double(config["domains"]["gpu"]["process_sampling_freq"]["value"],
+                            *freq);
         if(auto dur = get_val(env_vars::PROCESS_SAMPLING_DURATION))
-            set_json_double(j["domains"]["gpu"]["process_sampling_duration"]["value"],
-                            *dur);
+            set_json_double(
+                config["domains"]["gpu"]["process_sampling_duration"]["value"], *dur);
         if(auto v = get_val(env_vars::USE_AINIC))
-            j["domains"]["gpu"]["ainic"]["enabled"] = is_truthy(*v);
+            config["domains"]["gpu"]["ainic"]["enabled"] = is_truthy(*v);
     }
 
     // --- Domains: ROCm ---
     if(auto v = get_val(env_vars::ROCM_DOMAINS))
     {
-        j["domains"]["rocm"]["enabled"] = true;
+        config["domains"]["rocm"]["enabled"] = true;
         std::istringstream ss(*v);
         std::string        token;
         while(std::getline(ss, token, ','))
@@ -755,17 +753,17 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
             if(start != std::string::npos)
             {
                 token = token.substr(start, end - start + 1);
-                j["domains"]["rocm"]["api_domains"][token]["enabled"] = true;
+                config["domains"]["rocm"]["api_domains"][token]["enabled"] = true;
             }
         }
     }
 
     if(auto v = get_val(env_vars::ROCM_GROUP_BY_QUEUE))
-        j["domains"]["rocm"]["group_by_queue"]["enabled"] = is_truthy(*v);
+        config["domains"]["rocm"]["group_by_queue"]["enabled"] = is_truthy(*v);
 
     // --- Domains: CPU ---
     if(auto v = get_val(env_vars::CPU_FREQ_ENABLED))
-        j["domains"]["cpu"]["cpu_freq_enabled"]["enabled"] = is_truthy(*v);
+        config["domains"]["cpu"]["cpu_freq_enabled"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_PROCESS_SAMPLING))
     {
         if(is_truthy(*v))
@@ -774,8 +772,8 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
             {
                 if(is_truthy(*freq))
                 {
-                    j["domains"]["cpu"]["enabled"]                    = true;
-                    j["domains"]["cpu"]["metrics"]["freq"]["enabled"] = true;
+                    config["domains"]["cpu"]["enabled"]                    = true;
+                    config["domains"]["cpu"]["metrics"]["freq"]["enabled"] = true;
                 }
             }
         }
@@ -783,76 +781,80 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
 
     // --- Domains: Parallel ---
     if(auto v = get_val(env_vars::USE_MPIP))
-        j["domains"]["parallel"]["runtimes"]["mpi"]["enabled"] = is_truthy(*v);
+        config["domains"]["parallel"]["runtimes"]["mpi"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_OMPT))
-        j["domains"]["parallel"]["runtimes"]["openmp"]["enabled"] = is_truthy(*v);
+        config["domains"]["parallel"]["runtimes"]["openmp"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_KOKKOSP))
-        j["domains"]["parallel"]["runtimes"]["kokkos"]["enabled"] = is_truthy(*v);
+        config["domains"]["parallel"]["runtimes"]["kokkos"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_RCCLP))
-        j["domains"]["parallel"]["runtimes"]["rccl"]["enabled"] = is_truthy(*v);
+        config["domains"]["parallel"]["runtimes"]["rccl"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_SHMEM))
-        j["domains"]["parallel"]["runtimes"]["shmem"]["enabled"] = is_truthy(*v);
+        config["domains"]["parallel"]["runtimes"]["shmem"]["enabled"] = is_truthy(*v);
     if(auto v = get_val(env_vars::USE_UCX))
-        j["domains"]["parallel"]["runtimes"]["ucx"]["enabled"] = is_truthy(*v);
+        config["domains"]["parallel"]["runtimes"]["ucx"]["enabled"] = is_truthy(*v);
 
     // --- Output ---
-    export_string_value(j, env_map, env_vars::OUTPUT_PATH, "output", "path");
-    export_enabled(j, env_map, env_vars::TIME_OUTPUT, "output", "time_output");
-    export_enabled(j, env_map, env_vars::FILE_OUTPUT, "output", "file_output");
-    export_enabled(j, env_map, env_vars::USE_ROCPD, "output", "rocpd_output");
-    export_enabled(j, env_map, env_vars::USE_PID, "output", "use_pid");
+    export_string_value(config, env_map, env_vars::OUTPUT_PATH, "output", "path");
+    export_enabled(config, env_map, env_vars::TIME_OUTPUT, "output", "time_output");
+    export_enabled(config, env_map, env_vars::FILE_OUTPUT, "output", "file_output");
+    export_enabled(config, env_map, env_vars::USE_ROCPD, "output", "rocpd_output");
+    export_enabled(config, env_map, env_vars::USE_PID, "output", "use_pid");
 
     // --- Hardware counters ---
     if(auto v = get_val(env_vars::ROCM_EVENTS))
     {
-        j["hardware_counters"]["enabled"]              = true;
-        j["hardware_counters"]["rocm_events"]["value"] = *v;
+        config["hardware_counters"]["enabled"]              = true;
+        config["hardware_counters"]["rocm_events"]["value"] = *v;
     }
     if(auto v = get_val(env_vars::PAPI_EVENTS))
     {
-        j["hardware_counters"]["enabled"]              = true;
-        j["hardware_counters"]["papi_events"]["value"] = *v;
+        config["hardware_counters"]["enabled"]              = true;
+        config["hardware_counters"]["papi_events"]["value"] = *v;
     }
-    export_enabled(j, env_map, env_vars::PAPI_MULTIPLEXING, "hardware_counters",
+    export_enabled(config, env_map, env_vars::PAPI_MULTIPLEXING, "hardware_counters",
                    "papi_multiplexing");
 
     // --- Causal profiling ---
-    export_section_enabled(j, env_map, env_vars::USE_CAUSAL, "causal");
-    export_string_value(j, env_map, env_vars::CAUSAL_MODE, "causal", "mode");
-    export_string_value(j, env_map, env_vars::CAUSAL_BACKEND, "causal", "backend");
-    export_string_value(j, env_map, env_vars::CAUSAL_BINARY_SCOPE, "causal",
+    export_section_enabled(config, env_map, env_vars::USE_CAUSAL, "causal");
+    export_string_value(config, env_map, env_vars::CAUSAL_MODE, "causal", "mode");
+    export_string_value(config, env_map, env_vars::CAUSAL_BACKEND, "causal", "backend");
+    export_string_value(config, env_map, env_vars::CAUSAL_BINARY_SCOPE, "causal",
                         "binary_scope");
-    export_string_value(j, env_map, env_vars::CAUSAL_BINARY_EXCLUDE, "causal",
+    export_string_value(config, env_map, env_vars::CAUSAL_BINARY_EXCLUDE, "causal",
                         "binary_exclude");
-    export_string_value(j, env_map, env_vars::CAUSAL_FUNCTION_SCOPE, "causal",
+    export_string_value(config, env_map, env_vars::CAUSAL_FUNCTION_SCOPE, "causal",
                         "function_scope");
-    export_string_value(j, env_map, env_vars::CAUSAL_FUNCTION_EXCLUDE, "causal",
+    export_string_value(config, env_map, env_vars::CAUSAL_FUNCTION_EXCLUDE, "causal",
                         "function_exclude");
-    export_string_value(j, env_map, env_vars::CAUSAL_SOURCE_SCOPE, "causal",
+    export_string_value(config, env_map, env_vars::CAUSAL_SOURCE_SCOPE, "causal",
                         "source_scope");
-    export_string_value(j, env_map, env_vars::CAUSAL_SOURCE_EXCLUDE, "causal",
+    export_string_value(config, env_map, env_vars::CAUSAL_SOURCE_EXCLUDE, "causal",
                         "source_exclude");
-    export_enabled(j, env_map, env_vars::CAUSAL_END_TO_END, "causal", "end_to_end");
-    export_double_value(j, env_map, env_vars::CAUSAL_DELAY, "causal", "delay_sec");
-    export_double_value(j, env_map, env_vars::CAUSAL_DURATION, "causal", "duration_sec");
-    export_int_value(j, env_map, env_vars::CAUSAL_RANDOM_SEED, "causal", "random_seed");
+    export_enabled(config, env_map, env_vars::CAUSAL_END_TO_END, "causal", "end_to_end");
+    export_double_value(config, env_map, env_vars::CAUSAL_DELAY, "causal", "delay_sec");
+    export_double_value(config, env_map, env_vars::CAUSAL_DURATION, "causal",
+                        "duration_sec");
+    export_int_value(config, env_map, env_vars::CAUSAL_RANDOM_SEED, "causal",
+                     "random_seed");
 
     // --- Advanced ---
-    export_int_value(j, env_map, env_vars::VERBOSE, "advanced", "verbose");
-    export_enabled(j, env_map, env_vars::DEBUG, "advanced", "debug");
-    export_int_value(j, env_map, env_vars::MAX_DEPTH, "advanced", "max_depth");
-    export_double_value(j, env_map, env_vars::TRACE_DELAY, "advanced", "trace_delay_sec");
-    export_double_value(j, env_map, env_vars::TRACE_DURATION, "advanced",
+    export_int_value(config, env_map, env_vars::VERBOSE, "advanced", "verbose");
+    export_enabled(config, env_map, env_vars::DEBUG, "advanced", "debug");
+    export_int_value(config, env_map, env_vars::MAX_DEPTH, "advanced", "max_depth");
+    export_double_value(config, env_map, env_vars::TRACE_DELAY, "advanced",
+                        "trace_delay_sec");
+    export_double_value(config, env_map, env_vars::TRACE_DURATION, "advanced",
                         "trace_duration_sec");
-    export_enabled(j, env_map, env_vars::CPU_AFFINITY, "advanced", "cpu_affinity");
-    export_enabled(j, env_map, env_vars::COLLAPSE_THREADS, "advanced",
+    export_enabled(config, env_map, env_vars::CPU_AFFINITY, "advanced", "cpu_affinity");
+    export_enabled(config, env_map, env_vars::COLLAPSE_THREADS, "advanced",
                    "collapse_threads");
-    export_string_value(j, env_map, env_vars::TIMEMORY_COMPONENTS, "advanced",
+    export_string_value(config, env_map, env_vars::TIMEMORY_COMPONENTS, "advanced",
                         "timemory_components");
-    export_string_value(j, env_map, env_vars::NETWORK_INTERFACE, "advanced",
+    export_string_value(config, env_map, env_vars::NETWORK_INTERFACE, "advanced",
                         "network_interface");
-    export_string_value(j, env_map, env_vars::TRACE_PERIODS, "advanced", "trace_periods");
-    export_string_value(j, env_map, env_vars::TRACE_PERIOD_CLOCK_ID, "advanced",
+    export_string_value(config, env_map, env_vars::TRACE_PERIODS, "advanced",
+                        "trace_periods");
+    export_string_value(config, env_map, env_vars::TRACE_PERIOD_CLOCK_ID, "advanced",
                         "trace_period_clock_id");
 
     // ========================================================================
@@ -885,7 +887,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     //                                        file handling.
     //   ROCPROFSYS_CI                      - Internal CI mode flag.
 
-    return j;
+    return config;
 }
 
 std::string
@@ -893,21 +895,21 @@ export_config_as_json(const std::map<std::string, std::string>& env_vars,
                       const std::string& preset_name, std::string_view tool_name,
                       int indent)
 {
-    auto j = env_vars_to_json_schema(env_vars);
+    auto config = env_vars_to_json_schema(env_vars);
 
     if(!preset_name.empty())
     {
-        j["metadata"]["name"] = preset_name;
-        std::string desc      = "Exported configuration from rocprof-sys";
+        config["metadata"]["name"] = preset_name;
+        std::string desc           = "Exported configuration from rocprof-sys";
         if(!tool_name.empty())
         {
             desc += '-';
             desc += tool_name;
         }
-        j["metadata"]["description"] = desc;
+        config["metadata"]["description"] = desc;
     }
 
-    return j.dump(indent);
+    return config.dump(indent);
 }
 
 }  // namespace json_config

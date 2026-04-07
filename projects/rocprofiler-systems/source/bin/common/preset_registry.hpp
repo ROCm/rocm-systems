@@ -24,43 +24,30 @@ namespace rocprofsys
  * presets to avoid redundant I/O.  Provides higher-level operations such as
  * apply, list.
  */
+using env_settings = std::map<std::string, std::string>;
+
 class preset_registry
 {
 public:
     struct preset_info
     {
-        std::string                        name;
-        std::string                        cli_flag;
-        std::string                        description;
-        std::string                        use_case;
-        std::string                        category;
-        std::map<std::string, std::string> settings;  // Resolved ROCPROFSYS_* env vars
+        std::string  name;
+        std::string  cli_flag;
+        std::string  description;
+        std::string  use_case;
+        std::string  category;
+        env_settings settings;
     };
 
     preset_registry();
 
     /**
-     * The discovered preset directory (empty if not found).
+     * Check if a top-level section (e.g., "tracing", "profiling") is enabled in a preset.
+     * Returns the default_value if the preset or section is not found.
      */
-    [[nodiscard]] const std::string& directory() const noexcept { return m_directory; }
-
-    /**
-     * Find a preset by name or file path.  Results are cached.
-     * @return Pointer to cached preset_info, or nullptr if not found.
-     */
-    [[nodiscard]] const preset_info* find(const std::string& name_or_path);
-
-    /**
-     * Load and return all available presets.
-     * Cached after first call.
-     */
-    [[nodiscard]] const std::map<std::string, preset_info>& all();
-
-    /**
-     * Get the raw parsed JSON for a preset by name.  Cached.
-     * @return Pointer to cached JSON, or nullptr if not found.
-     */
-    [[nodiscard]] const nlohmann::json* raw_json(const std::string& name);
+    [[nodiscard]] bool is_section_enabled(std::string_view preset_name,
+                                          std::string_view section,
+                                          bool             default_value = true) const;
 
     /**
      * Translate a legacy preset flag (e.g., "--balanced") to new syntax
@@ -70,18 +57,11 @@ public:
     [[nodiscard]] std::string translate_legacy_flag(std::string_view arg) const;
 
     /**
-     * Apply a preset's settings using a caller-provided callback.
-     * @return true if the preset was found and applied.
+     * Load a preset and return its resolved environment settings.
+     * @return The settings map if the preset was found, std::nullopt otherwise.
      */
-    template <typename EnvUpdaterFn>
-    bool apply(const std::string& name_or_path, EnvUpdaterFn&& update_fn)
-    {
-        const auto* info = find(name_or_path);
-        if(!info) return false;
-        for(const auto& [key, val] : info->settings)
-            update_fn(key, val);
-        return true;
-    }
+    [[nodiscard]] std::optional<env_settings> get_settings(
+        const std::string& name_or_path);
 
     /**
      * Print a list of all available presets grouped by category.
@@ -96,16 +76,17 @@ public:
                  std::ostream& os = std::cout);
 
     /**
-     * Generate a tree-formatted description of a preset from its JSON.
-     * Uses the raw_json() cache to avoid re-reading files.
+     * Generate a tree-formatted description of a preset from its cached JSON.
      */
     [[nodiscard]] std::string describe(std::string_view preset_name);
 
 private:
-    std::optional<preset_info> load_file(const std::string& filepath);
-    std::string                resolve_filepath(const std::string& name_or_path);
-    void                       ensure_all_loaded();
-    void                       load_embedded();
+    std::optional<preset_info>                find(const std::string& name_or_path);
+    const std::map<std::string, preset_info>& all();
+    std::optional<preset_info>                load_file(const std::string& filepath);
+    std::string resolve_filepath(const std::string& name_or_path);
+    void        ensure_all_loaded();
+    void        load_embedded();
 
     std::string                           m_directory;
     std::map<std::string, preset_info>    m_presets;

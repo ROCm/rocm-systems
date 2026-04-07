@@ -8,6 +8,10 @@
 #include "common/json_config.hpp"
 #include "common/preset_registry.hpp"
 
+#include <timemory/utility/argparse.hpp>
+
+#include <cstdlib>
+#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -33,17 +37,14 @@ struct domain_flag_state
     bool            parallel_domain_enabled = false;
 };
 
+using argument_parser = tim::argparse::argument_parser;
+
 /**
  * Registers all preset and domain arguments on an argument parser.
  *
- * This template function extracts the ~180 lines of duplicated argument
- * registration code from rocprof-sys-run and rocprof-sys-sample.
+ * @note Terminal argument actions (--list-presets, --explain) throw
+ *       cli_done to exit gracefully with proper cleanup.
  *
- * @note This function is intended for CLI tools only. Some argument actions
- *       call exit() directly (--list-presets, --explain) as these are
- *       terminal operations that print output and stop execution.
- *
- * @tparam ParserT The argument parser type (tim::argparse::argument_parser)
  * @tparam EnvUpdater Callable with signature void(std::string_view key, std::string_view
  * val)
  *
@@ -52,9 +53,9 @@ struct domain_flag_state
  * @param state domain_flag_state struct to track which options were specified
  * @param update_env Callback to update environment variable
  */
-template <typename ParserT, typename EnvUpdater>
+template <typename EnvUpdater>
 void
-register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name,
+register_preset_and_domain_arguments(argument_parser& parser, std::string_view tool_name,
                                      domain_flag_state& state, EnvUpdater&& update_env)
 {
     namespace env = rocprofsys::env_vars;
@@ -74,11 +75,17 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
             "For custom configs, provide a path containing '/' or ending with '.json'")
         .max_count(1)
         .dtype("string")
-        .action([&state, env_updater](ParserT& p) mutable {
-            auto preset = p.template get<std::string>("preset");
+        .action([&state, env_updater](argument_parser& parser_ref) mutable {
+            auto preset = parser_ref.get<std::string>("preset");
             if(preset.empty()) return;
             state.active_preset_name = preset;
-            if(!state.registry.apply(preset, env_updater))
+            auto settings            = state.registry.get_settings(preset);
+            if(settings)
+            {
+                for(const auto& [key, val] : *settings)
+                    env_updater(key, val);
+            }
+            else
             {
                 std::cerr << "[rocprof-sys] WARNING: Could not load preset '" << preset
                           << "'. Check preset name or file path.\n";
@@ -89,9 +96,9 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .add_argument({ "--list-presets" },
                       "List all available presets with descriptions and exit")
         .max_count(0)
-        .action([&state, tool_name](ParserT&) {
+        .action([&state, tool_name](argument_parser&) {
             state.registry.list(tool_name);
-            exit(EXIT_SUCCESS);
+            throw common_utils::cli_done{ EXIT_SUCCESS };
         });
 
     parser
@@ -99,18 +106,18 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
                       "Show detailed information about a preset and exit")
         .max_count(1)
         .dtype("string")
-        .action([&state, tool_name](ParserT& p) {
-            auto preset_name = p.template get<std::string>("explain");
+        .action([&state, tool_name](argument_parser& parser_ref) {
+            auto preset_name = parser_ref.get<std::string>("explain");
             if(preset_name.empty())
             {
                 std::cerr << "[rocprof-sys] --explain requires a preset name\n";
-                exit(EXIT_FAILURE);
+                throw common_utils::cli_done{ EXIT_FAILURE };
             }
             if(!state.registry.explain(preset_name, tool_name))
             {
-                exit(EXIT_FAILURE);
+                throw common_utils::cli_done{ EXIT_FAILURE };
             }
-            exit(EXIT_SUCCESS);
+            throw common_utils::cli_done{ EXIT_SUCCESS };
         });
 
     parser.start_group("DOMAIN OPTIONS", "High-level domain flags for composable "
@@ -123,14 +130,14 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .min_count(0)
         .max_count(1)
         .dtype("string")
-        .action([&state, env_updater](ParserT& p) mutable {
+        .action([&state, env_updater](argument_parser& parser_ref) mutable {
             state.gpu_domain_enabled = true;
             env_updater(env::USE_AMD_SMI, "true");
             env_updater(env::USE_PROCESS_SAMPLING, "true");
 
-            if(p.exists("gpu"))
+            if(parser_ref.exists("gpu"))
             {
-                auto metrics_str = p.template get<std::string>("gpu");
+                auto metrics_str = parser_ref.get<std::string>("gpu");
                 if(!metrics_str.empty())
                 {
                     auto expanded =
@@ -153,14 +160,14 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .min_count(0)
         .max_count(1)
         .dtype("string")
-        .action([&state, env_updater](ParserT& p) mutable {
+        .action([&state, env_updater](argument_parser& parser_ref) mutable {
             state.rocm_domain_enabled = true;
             std::string domains_str =
                 "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory";
 
-            if(p.exists("rocm"))
+            if(parser_ref.exists("rocm"))
             {
-                auto input = p.template get<std::string>("rocm");
+                auto input = parser_ref.get<std::string>("rocm");
                 if(!input.empty())
                 {
                     domains_str = rocprofsys::json_config::expand_rocm_domains(input);
@@ -177,22 +184,26 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .min_count(0)
         .max_count(1)
         .dtype("string")
-        .action([&state, env_updater](ParserT& p) mutable {
+        .action([&state, env_updater](argument_parser& parser_ref) mutable {
             state.cpu_domain_enabled = true;
             env_updater(env::USE_SAMPLING, "true");
 
             std::string freq = "100";  // default
-            if(p.exists("cpu"))
+            if(parser_ref.exists("cpu"))
             {
-                auto input = p.template get<std::string>("cpu");
+                auto input = parser_ref.get<std::string>("cpu");
                 if(!input.empty())
                 {
-                    if(auto parsed = rocprofsys::json_config::safe_stoi(input))
+                    try
+                    {
+                        std::stoi(input);
                         freq = input;
-                    else
+                    } catch(...)
+                    {
                         std::cerr
                             << "[rocprof-sys] WARNING: Invalid CPU sampling frequency '"
                             << input << "', using default 100 Hz\n";
+                    }
                 }
             }
             env_updater(env::SAMPLING_FREQ, freq);
@@ -206,13 +217,13 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .min_count(0)
         .max_count(1)
         .dtype("string")
-        .action([&state, env_updater](ParserT& p) mutable {
+        .action([&state, env_updater](argument_parser& parser_ref) mutable {
             state.parallel_domain_enabled = true;
             std::string runtimes_str;
 
-            if(p.exists("parallel"))
+            if(parser_ref.exists("parallel"))
             {
-                runtimes_str = p.template get<std::string>("parallel");
+                runtimes_str = parser_ref.get<std::string>("parallel");
             }
 
             auto env_vars =
@@ -233,11 +244,11 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .min_count(0)
         .max_count(1)
         .dtype("filepath")
-        .action([&state](ParserT& p) {
+        .action([&state](argument_parser& parser_ref) {
             state.export_config_requested = true;
-            if(p.exists("export-config"))
+            if(parser_ref.exists("export-config"))
             {
-                state.export_config_file = p.template get<std::string>("export-config");
+                state.export_config_file = parser_ref.get<std::string>("export-config");
             }
         });
 }

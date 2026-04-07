@@ -812,7 +812,7 @@ PROFILING WORKFLOW:
                                                "mutex-locks", "spin-locks", "rw-locks",
                                                "rocm" };
 
-#if (!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                         \
+#if(!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                          \
     (!defined(ROCPROFSYS_USE_MPI_HEADERS) || ROCPROFSYS_USE_MPI_HEADERS == 0)
     _backend_choices.erase("mpip");
 #endif
@@ -919,30 +919,10 @@ PROFILING WORKFLOW:
 
     parser.end_group();
 
-    auto _inpv = std::vector<char*>{};
-    auto _outv = std::vector<char*>{};
-    bool _hash = false;
-    for(int i = 0; i < argc; ++i)
-    {
-        if(_hash)
-        {
-            _outv.emplace_back(argv[i]);
-        }
-        else if(std::string_view{ argv[i] } == "--")
-        {
-            _hash = true;
-        }
-        else
-        {
-            auto translated = domain_state.registry.translate_legacy_flag(argv[i]);
-            if(!translated.empty())
-                _inpv.emplace_back(strdup(translated.c_str()));
-            else
-                _inpv.emplace_back(argv[i]);
-        }
-    }
+    auto args =
+        rocprofsys::common_utils::translate_arguments(argc, argv, domain_state.registry);
 
-    auto _cerr = parser.parse_args(_inpv.size(), _inpv.data());
+    auto _cerr = parser.parse_args(args.argv_ptrs.size(), args.argv_ptrs.data());
     if(help_check(parser, argc, argv))
         help_action(parser);
     else if(_cerr)
@@ -962,7 +942,7 @@ PROFILING WORKFLOW:
         rocprofsys::common_utils::export_config(_env, original_envs,
                                                 domain_state.active_preset_name, "sample",
                                                 domain_state.export_config_file);
-        exit(EXIT_SUCCESS);
+        throw rocprofsys::common_utils::cli_done{ EXIT_SUCCESS };
     }
 
     rocprofsys::common_utils::run_post_parse_validation(
@@ -970,7 +950,7 @@ PROFILING WORKFLOW:
         domain_state.rocm_domain_enabled, domain_state.cpu_domain_enabled,
         domain_state.parallel_domain_enabled, verbose, domain_state.registry);
 
-    return _outv;
+    return args.command;
 }
 
 void

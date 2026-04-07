@@ -249,59 +249,6 @@ TEST_F(json_config_test, empty_json_returns_empty_map)
     EXPECT_TRUE(result.empty());
 }
 
-// Test load_and_resolve for schema format file
-TEST_F(json_config_test, load_and_resolve_schema_format)
-{
-    auto content = R"({
-        "metadata": {"name": "test-preset"},
-        "tracing": {"enabled": true},
-        "profiling": {"enabled": false}
-    })";
-
-    char tmpl[]   = "/tmp/config_test_XXXXXX";
-    auto tmpdir   = std::string{ ::mkdtemp(tmpl) };
-    auto filepath = tmpdir + "/preset.json";
-    {
-        std::ofstream ofs{ filepath };
-        ofs << content;
-    }
-
-    auto result = load_and_resolve(filepath);
-
-    std::remove(filepath.c_str());
-    ::rmdir(tmpdir.c_str());
-
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->at("ROCPROFSYS_TRACE"), "true");
-    EXPECT_EQ(result->at("ROCPROFSYS_PROFILE"), "false");
-}
-
-// Test load_and_resolve returns nullopt for missing file
-TEST_F(json_config_test, load_and_resolve_nullopt_when_missing_file)
-{
-    auto result = load_and_resolve("/nonexistent/config.json");
-    EXPECT_FALSE(result.has_value());
-}
-
-// Test load_and_resolve returns nullopt for invalid JSON
-TEST_F(json_config_test, load_and_resolve_nullopt_when_invalid_json)
-{
-    char tmpl[]   = "/tmp/config_test_XXXXXX";
-    auto tmpdir   = std::string{ ::mkdtemp(tmpl) };
-    auto filepath = tmpdir + "/bad.json";
-    {
-        std::ofstream ofs{ filepath };
-        ofs << "{ not valid json }";
-    }
-
-    auto result = load_and_resolve(filepath);
-
-    std::remove(filepath.c_str());
-    ::rmdir(tmpdir.c_str());
-
-    EXPECT_FALSE(result.has_value());
-}
-
 // Test get_config_metadata extraction
 TEST_F(json_config_test, extract_configuration_metadata)
 {
@@ -335,22 +282,6 @@ TEST_F(json_config_test, json_values_to_sting_types)
 
     auto arr = nlohmann::json::array({ "a", "b", "c" });
     EXPECT_EQ(json_value_to_string(arr), "a,b,c");
-}
-
-// Test extract_setting_value helper
-TEST_F(json_config_test, handle_format_in_extract_setting_value)
-{
-    auto val_obj = nlohmann::json::parse(R"({"value": 100})");
-    EXPECT_EQ(extract_setting_value(val_obj), "100");
-
-    auto enabled_obj = nlohmann::json::parse(R"({"enabled": true})");
-    EXPECT_EQ(extract_setting_value(enabled_obj), "true");
-
-    auto disabled_obj = nlohmann::json::parse(R"({"enabled": false})");
-    EXPECT_EQ(extract_setting_value(disabled_obj), "false");
-
-    auto bool_val = nlohmann::json(true);
-    EXPECT_EQ(extract_setting_value(bool_val), "true");
 }
 
 // Test output.rocpd_output resolution
@@ -426,28 +357,6 @@ TEST_F(json_config_test, resolves_rocm_enabled_flag)
     EXPECT_EQ(result.at("ROCPROFSYS_TRACE"), "true");
 }
 
-// Test safe_stoi with valid and invalid inputs
-TEST_F(json_config_test, stoi_handles_invalid_input)
-{
-    EXPECT_EQ(safe_stoi("42"), 42);
-    EXPECT_EQ(safe_stoi("0"), 0);
-    EXPECT_EQ(safe_stoi("-1"), -1);
-    EXPECT_FALSE(safe_stoi("abc").has_value());
-    EXPECT_FALSE(safe_stoi("").has_value());
-    // Partial parses are rejected -"12.5" is not a valid integer
-    EXPECT_FALSE(safe_stoi("12.5").has_value());
-}
-
-// Test safe_stod with valid and invalid inputs
-TEST_F(json_config_test, stod_handles_invalid_input)
-{
-    EXPECT_DOUBLE_EQ(*safe_stod("3.14"), 3.14);
-    EXPECT_DOUBLE_EQ(*safe_stod("0"), 0.0);
-    EXPECT_DOUBLE_EQ(*safe_stod("42"), 42.0);
-    EXPECT_FALSE(safe_stod("abc").has_value());
-    EXPECT_FALSE(safe_stod("").has_value());
-}
-
 // Test env_vars_to_json_schema with non-numeric env var values
 TEST_F(json_config_test, handling_non_numeric_values_for_json_schema)
 {
@@ -485,34 +394,6 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
     EXPECT_EQ(j["advanced"]["network_interface"]["value"], "ib0");
     EXPECT_EQ(j["advanced"]["trace_periods"]["value"], "1:5,10:20");
     EXPECT_EQ(j["hardware_counters"]["papi_multiplexing"]["enabled"], true);
-}
-
-// Test resolve_enabled and resolve_value helpers with edge cases
-TEST_F(json_config_test, handle_edge_cases_in_resolve_helper)
-{
-    std::map<std::string, std::string> result;
-
-    // Missing field - should not add to result
-    auto j_empty = nlohmann::json::parse("{}");
-    resolve_enabled(result, j_empty, "enabled", rocprofsys::env_vars::TRACE);
-    resolve_value(result, j_empty, "missing_key", rocprofsys::env_vars::VERBOSE);
-    EXPECT_TRUE(result.empty());
-
-    // Null field value - resolve_value should skip null
-    auto j_null = nlohmann::json::parse(R"({"some_key": null})");
-    resolve_value(result, j_null, "some_key", rocprofsys::env_vars::VERBOSE);
-    EXPECT_TRUE(result.empty());
-
-    // Non-bool "enabled" via resolve_enabled - should throw (or handle based on JSON lib)
-    // resolve_enabled expects a bool, so test a valid bool false
-    auto j_false = nlohmann::json::parse(R"({"enabled": false})");
-    resolve_enabled(result, j_false, "enabled", rocprofsys::env_vars::TRACE);
-    EXPECT_EQ(result.at(std::string{ rocprofsys::env_vars::TRACE }), "false");
-
-    // resolve_value with a direct scalar (non-object)
-    auto j_scalar = nlohmann::json::parse(R"({"freq": 42})");
-    resolve_value(result, j_scalar, "freq", rocprofsys::env_vars::SAMPLING_FREQ);
-    EXPECT_EQ(result.at(std::string{ rocprofsys::env_vars::SAMPLING_FREQ }), "42");
 }
 
 // Test env_vars constants match expected string values

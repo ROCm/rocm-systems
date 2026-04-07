@@ -355,31 +355,11 @@ INSTRUMENTATION WORKFLOW:
         .dtype("boolean")
         .action([&](parser_t& p) { _fork_exec = p.get<bool>("fork"); });
 
-    auto  _inpv = std::vector<char*>{};
-    auto& _outv = _parser_data.command;
-    bool  _hash = false;
-    for(int i = 0; i < argc; ++i)
-    {
-        if(argv[i] == nullptr)
-        {
-            continue;
-        }
-        else if(_hash)
-        {
-            _outv.emplace_back(strdup(argv[i]));
-        }
-        else if(std::string_view{ argv[i] } == "--")
-        {
-            _hash = true;
-        }
-        else
-        {
-            auto translated = domain_state.registry.translate_legacy_flag(argv[i]);
-            _inpv.emplace_back(strdup(translated.empty() ? argv[i] : translated.c_str()));
-        }
-    }
+    auto args =
+        rocprofsys::common_utils::translate_arguments(argc, argv, domain_state.registry);
+    _parser_data.command = std::move(args.command);
 
-    auto _cerr = parser.parse_args(_inpv.size(), _inpv.data());
+    auto _cerr = parser.parse_args(args.argv_ptrs.size(), args.argv_ptrs.data());
     if(help_check(parser, argc, argv))
         help_action(parser);
     else if(_cerr)
@@ -392,7 +372,7 @@ INSTRUMENTATION WORKFLOW:
     {
         export_config(_parser_data, domain_state.active_preset_name,
                       domain_state.export_config_file);
-        exit(EXIT_SUCCESS);
+        throw rocprofsys::common_utils::cli_done{ EXIT_SUCCESS };
     }
 
     rocprofsys::common_utils::run_post_parse_validation(

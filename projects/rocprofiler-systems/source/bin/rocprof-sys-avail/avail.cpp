@@ -516,20 +516,20 @@ main(int argc, char** argv)
         .action(
             [&fmt_opts](parser_t& p) { fmt_opts.force_config = p.get<bool>("force"); });
     parser
-        .add_argument({ "--config-name" },
+        .add_argument({ "--preset-name" },
                       "Set the preset name in metadata (used with -F json)")
         .max_count(1)
         .dtype("string")
         .action([&fmt_opts](parser_t& p) {
-            fmt_opts.preset_name = p.get<std::string>("config-name");
+            fmt_opts.preset_name = p.get<std::string>("preset-name");
         });
     parser
-        .add_argument({ "--config-description" },
+        .add_argument({ "--preset-description" },
                       "Set the preset description in metadata (used with -F json)")
         .max_count(1)
         .dtype("string")
         .action([&fmt_opts](parser_t& p) {
-            fmt_opts.preset_description = p.get<std::string>("config-description");
+            fmt_opts.preset_description = p.get<std::string>("preset-description");
         });
 
     parser.end_group();

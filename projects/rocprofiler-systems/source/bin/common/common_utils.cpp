@@ -6,6 +6,7 @@
 #include "common/env_vars.hpp"
 #include "common/json_config.hpp"
 
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -21,11 +22,55 @@ namespace rocprofsys
 namespace common_utils
 {
 
-std::string
-get_output_directory(const char* env_var)
+static std::string
+strip_flag_prefix(std::string_view name)
 {
-    const char* output_path = std::getenv(env_var);
-    if(output_path && strlen(output_path) > 0) return std::string(output_path);
+    if(name.size() > 2 && name.compare(0, 2, "--") == 0)
+        return std::string{ name.substr(2) };
+    return std::string{ name };
+}
+
+translated_args
+translate_arguments(int argc, char** argv, preset_registry& registry)
+{
+    translated_args result;
+    bool            past_separator = false;
+
+    for(int i = 0; i < argc; ++i)
+    {
+        if(argv[i] == nullptr) continue;
+
+        if(past_separator)
+        {
+            result.command.emplace_back(argv[i]);
+        }
+        else if(std::string_view{ argv[i] } == "--")
+        {
+            past_separator = true;
+        }
+        else
+        {
+            auto translated = registry.translate_legacy_flag(argv[i]);
+            if(!translated.empty())
+            {
+                result.owned.push_back(std::move(translated));
+                result.argv_ptrs.emplace_back(result.owned.back().data());
+            }
+            else
+            {
+                result.argv_ptrs.emplace_back(argv[i]);
+            }
+        }
+    }
+    return result;
+}
+
+std::string
+get_output_directory(const char* env_var = nullptr)
+{
+    const char* output_path =
+        std::getenv(env_var ? env_var : env_vars::OUTPUT_PATH.data());
+    if(output_path && std::strlen(output_path) > 0) return std::string(output_path);
 
     return "rocprof-sys-output";
 }
@@ -60,24 +105,14 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 {
     auto output_dir = get_output_directory();
 
-    // Load the preset JSON once for description + conditional output listing
-    nlohmann::json preset_json;
-    bool           tracing_on   = true;  // assume on unless preset says otherwise
-    bool           profiling_on = true;
+    bool tracing_on   = true;
+    bool profiling_on = true;
 
     if(!preset_mode.empty() && !tool_name.empty())
     {
-        auto        normalized  = strip_flag_prefix(preset_mode);
-        const auto* cached_json = registry.raw_json(normalized);
-        if(cached_json) preset_json = *cached_json;
-
-        if(!preset_json.is_null())
-        {
-            if(preset_json.contains("tracing"))
-                tracing_on = preset_json["tracing"].value("enabled", true);
-            if(preset_json.contains("profiling"))
-                profiling_on = preset_json["profiling"].value("enabled", true);
-        }
+        auto normalized = strip_flag_prefix(preset_mode);
+        tracing_on      = registry.is_section_enabled(normalized, "tracing", true);
+        profiling_on    = registry.is_section_enabled(normalized, "profiling", true);
 
         constexpr size_t box_width       = 60;
         constexpr size_t box_inner_width = box_width - 2;
@@ -101,13 +136,10 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 
         std::cerr << "Preset:        " << preset_mode << "\n";
 
-        if(!preset_json.is_null())
+        auto description = registry.describe(normalized);
+        if(!description.empty())
         {
-            auto description = registry.describe(normalized);
-            if(!description.empty())
-            {
-                std::cerr << "\n" << description << "\n";
-            }
+            std::cerr << "\n" << description << "\n";
         }
     }
 
@@ -157,31 +189,26 @@ void
 validate_configuration()
 {
     // Check for conflicting ENABLE/DISABLE categories (causes std::abort() at runtime)
-    const char* enable_cats =
-        std::getenv(std::string{ rocprofsys::env_vars::ENABLE_CATEGORIES }.c_str());
-    const char* disable_cats =
-        std::getenv(std::string{ rocprofsys::env_vars::DISABLE_CATEGORIES }.c_str());
+    const char* enable_cats  = std::getenv(env_vars::ENABLE_CATEGORIES.data());
+    const char* disable_cats = std::getenv(env_vars::DISABLE_CATEGORIES.data());
     if(enable_cats && std::strlen(enable_cats) > 0 && disable_cats &&
        std::strlen(disable_cats) > 0)
     {
-        std::cerr << "[rocprof-sys][warning] Both "
-                  << rocprofsys::env_vars::ENABLE_CATEGORIES << " and "
-                  << rocprofsys::env_vars::DISABLE_CATEGORIES << " are set.\n"
+        std::cerr << "[rocprof-sys][warning] Both " << env_vars::ENABLE_CATEGORIES
+                  << " and " << env_vars::DISABLE_CATEGORIES << " are set.\n"
                   << "  This will cause an abort at runtime. Use only one.\n"
-                  << "  " << rocprofsys::env_vars::ENABLE_CATEGORIES << "=" << enable_cats
-                  << "\n"
-                  << "  " << rocprofsys::env_vars::DISABLE_CATEGORIES << "="
-                  << disable_cats << "\n";
+                  << "  " << env_vars::ENABLE_CATEGORIES << "=" << enable_cats << "\n"
+                  << "  " << env_vars::DISABLE_CATEGORIES << "=" << disable_cats << "\n";
     }
 
     // Check ROCPROFSYS_TMPDIR writability
-    const char* tmpdir = std::getenv(std::string{ rocprofsys::env_vars::TMPDIR }.c_str());
+    const char* tmpdir     = std::getenv(env_vars::TMPDIR.data());
     auto        tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
     if(!check_directory_writable(tmpdir_str))
     {
         std::cerr << "[rocprof-sys][WARNING] Temp directory '" << tmpdir_str
                   << "' is not writable!\n"
-                  << "  Try: export " << rocprofsys::env_vars::TMPDIR << "=/tmp\n";
+                  << "  Try: export " << env_vars::TMPDIR << "=/tmp\n";
     }
 }
 
@@ -191,7 +218,7 @@ validate_domain_flags(bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
 {
     if(cpu_enabled && !preset_name.empty())
     {
-        static const std::vector<std::string> no_sampling_presets = {
+        static constexpr std::array<std::string_view, 4> no_sampling_presets = {
             "trace-gpu", "trace-openmp", "workload-trace", "trace-hpc"
         };
         for(const auto& preset : no_sampling_presets)
@@ -581,9 +608,9 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     bool in_match  = false;
     for(size_t idx = options_start; idx < lines.size(); ++idx)
     {
-        const auto& l        = lines[idx];
-        auto        stripped = strip_ansi(l);
-        auto        first    = stripped.find_first_not_of(" \t");
+        const auto& current_line = lines[idx];
+        auto        stripped     = strip_ansi(current_line);
+        auto        first        = stripped.find_first_not_of(" \t");
 
         // Skip separators and empty lines at the top
         if(first == std::string::npos)
@@ -609,7 +636,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
             in_match = false;
             for(const auto& flag : entry.flag_patterns)
             {
-                if(line_contains_flag(l, flag))
+                if(line_contains_flag(current_line, flag))
                 {
                     in_match  = true;
                     found_any = true;
@@ -621,7 +648,7 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
 
         if(in_match)
         {
-            os << l << '\n';
+            os << current_line << '\n';
         }
     }
 
