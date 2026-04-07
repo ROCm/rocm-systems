@@ -45,9 +45,7 @@
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <rocprofiler-sdk/context.h>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace
 {
@@ -1280,5 +1278,4 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
     }
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

@@ -1200,6 +1200,12 @@ rocprofsys_finalize_hidden(void)
                tim::cereal::make_nvp("memory_maps", _maps));
         });
 
+        static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
+        static auto  session_id            = 0;
+
+        if(attach_add_session_id)
+            settings::default_process_suffix() = fmt::format("%pid%-{}", session_id++);
+
         LOG_DEBUG("Finalizing timemory...");
         tim::timemory_finalize(_timemory_manager.get());
 
