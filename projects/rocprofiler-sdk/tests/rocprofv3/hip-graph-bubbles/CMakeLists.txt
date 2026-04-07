@@ -25,7 +25,7 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
     rocprofiler_add_integration_execute_test(
         ${TEST_NAME}
         COMMAND
-            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace -d ${OUTPUT_DIR} -o
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace -d ${OUTPUT_DIR} -o
             out --output-format csv -- $<TARGET_FILE:hip-graph-bubbles> ${NUM_KERNELS}
             ${NUM_ITERATIONS} 256 25
         DEPENDS hip-graph-bubbles
@@ -33,7 +33,9 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
         LABELS "integration-tests"
         ENVIRONMENT ${HIP_GRAPH_BUBBLES_ENVIRONMENT}
         FIXTURES_SETUP ${TEST_NAME}
-        FAIL_REGULAR_EXPRESSION "KERNEL_DISPATCH|CODE_OBJECT")
+        FAIL_REGULAR_EXPRESSION
+            "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
+        )
 
     rocprofiler_add_integration_validate_test(
         ${TEST_NAME}

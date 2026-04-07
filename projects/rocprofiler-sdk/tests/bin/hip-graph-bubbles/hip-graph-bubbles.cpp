@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip/hip_runtime.h>
-#include <rocprofiler-sdk-roctx/roctx.h>
 
 #include <chrono>
 #include <cstdlib>
@@ -29,23 +28,27 @@ THE SOFTWARE.
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(cmd)                                                                             \
-    {                                                                                              \
-        hipError_t error = cmd;                                                                    \
-        if(error != hipSuccess)                                                                    \
-        {                                                                                          \
-            std::cerr << "HIP error: " << hipGetErrorString(error) << " at " << __FILE__ << ":"    \
-                      << __LINE__ << std::endl;                                                    \
-            exit(EXIT_FAILURE);                                                                    \
-        }                                                                                          \
+#define HIP_CHECK(cmd)                                                         \
+    {                                                                          \
+        hipError_t error = cmd;                                                \
+        if(error != hipSuccess)                                                \
+        {                                                                      \
+            std::cerr << "HIP error: '" << #cmd << "' returned "               \
+                      << hipGetErrorString(error) << " (" << error << ") at " \
+                      << __FILE__ << ":" << __LINE__ << std::endl;             \
+            exit(EXIT_FAILURE);                                                \
+        }                                                                      \
     }
 
 // Simple kernel that does minimal work
 __global__ void
-simpleKernel(int* data, int value)
+simpleKernel(int* data, int value, int size)
 {
-    int idx   = blockIdx.x * blockDim.x + threadIdx.x;
-    data[idx] = value + idx;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx < size)
+    {
+        data[idx] = value + idx;
+    }
 }
 
 namespace
@@ -134,12 +137,16 @@ main(int argc, char** argv)
     HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
 
     // Launch many kernels
-    dim3 blockSize(256);
-    dim3 gridSize(1);
+    // Use fixed block size and derive grid size from array_size to prevent out-of-bounds access
+    constexpr int BLOCK_SIZE = 256;
+    dim3          blockSize(BLOCK_SIZE);
+    dim3          gridSize((cfg.array_size + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
     for(int i = 0; i < cfg.num_kernels; i++)
     {
-        hipLaunchKernelGGL(simpleKernel, gridSize, blockSize, 0, stream, d_data, i);
+        hipLaunchKernelGGL(
+            simpleKernel, gridSize, blockSize, 0, stream, d_data, i, cfg.array_size);
+        HIP_CHECK(hipGetLastError());
     }
 
     // End graph capture
@@ -158,9 +165,7 @@ main(int argc, char** argv)
     // Execute the graph multiple times
     for(int iter = 0; iter < cfg.num_iterations; iter++)
     {
-        roctxRangePush("graph_launch");
         HIP_CHECK(hipGraphLaunch(graphExec, stream));
-        roctxRangePop();
 
         if((iter + 1) % cfg.progress_interval == 0 || (iter + 1) == cfg.num_iterations)
         {

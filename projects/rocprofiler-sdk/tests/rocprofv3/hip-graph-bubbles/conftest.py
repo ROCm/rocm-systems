@@ -55,12 +55,14 @@ def pytest_addoption(parser):
 @pytest.fixture
 def kernel_input_data(request):
     filename = request.config.getoption("--kernel-input")
+    if filename is None:
+        pytest.fail("--kernel-input argument is required but was not provided")
     data = []
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
-
+    assert len(data) > 0, f"CSV file '{filename}' contained no data rows. The profiler may have failed to produce output."
     return data
 
 
