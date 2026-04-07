@@ -1402,13 +1402,14 @@ class MemObjMap : public AllStatic {
   static void AddMemObj(const void* k, amd::Memory* v);
 
   //!< add the hostcall mem pointer and buffer in the container
-  static void AddHostcallMemObj(const void* k, amd::Memory* v, amd::Device* dev);
+  static void AddHostcallMemObj(const void* k, amd::Memory* v, amd::Device& dev);
 
   //!< Remove an entry of mem object from the container
   static void RemoveMemObj(const void* k);
 
-  //!< Remove an entry of hostcall mem object from the container
-  static void RemoveHostcallMemObj(const void* k, amd::Device* dev);
+  //!< Remove an entry of hostcall mem object from the container.
+  //!< Returns true if the entry is found and removed, false otherwise.
+  static bool RemoveHostcallMemObj(const void* k, amd::Device& dev, bool releaseMemory = true);
 
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
@@ -2246,7 +2247,7 @@ class Device : public RuntimeObject {
   struct HostcallMemObjTracker {
    public:
     // Releases all memory objects allocated via hostcall for the parent device.
-    // THis should only be called from either the parent device's destructor or from MemObjMap under
+    // This should only be called from either the parent device's destructor or from MemObjMap under
     // the same protection as the other members of this class.
     void ReleaseAll(amd::Device* dev);
 

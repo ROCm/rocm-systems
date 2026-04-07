@@ -58,7 +58,7 @@ static uint32_t resetReadyFlag(uint32_t control) {
 typedef void (*HostcallFunctionCall)(uint64_t* output, const uint64_t* input);
 
 static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* payload,
-                          const amd::Device& dev) {
+                          amd::Device& dev) {
   switch (service) {
     case SERVICE_FUNCTION_CALL: {
       uint64_t output[2];
@@ -77,12 +77,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
     case SERVICE_DEVMEM: {
       guarantee(payload[0] != 0 || payload[1] != 0, "Both payloads cannot be 0 \n");
       if (payload[0]) {
-        amd::Memory* mem = amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(payload[0]));
-        if (mem) {
-          amd::MemObjMap::RemoveHostcallMemObj(reinterpret_cast<void*>(payload[0]),
-                                               const_cast<amd::Device*>(&dev));
-          mem->release();
-        } else {
+        if (!amd::MemObjMap::RemoveHostcallMemObj(reinterpret_cast<void*>(payload[0]), dev)) {
           ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, "Hostcall: Unknown pointer %p in devmem service",
                   payload[0]);
         }
@@ -95,8 +90,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
           if (buf->create()) {
             device::Memory* dm = buf->getDeviceMemory(dev);
             va = dm->virtualAddress();
-            amd::MemObjMap::AddHostcallMemObj(reinterpret_cast<void*>(va), buf,
-                                              const_cast<amd::Device*>(&dev));
+            amd::MemObjMap::AddHostcallMemObj(reinterpret_cast<void*>(va), buf, dev);
           } else {
             buf->release();
           }
@@ -393,7 +387,7 @@ bool HostcallListener::initDevice(const amd::Device& dev) {
   return true;
 }
 
-bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
+bool enableHostcalls(amd::Device& dev, void* bfr, uint32_t numPackets) {
   auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
   buffer->initialize(numPackets);
   buffer->setDevice(&dev);

@@ -357,10 +357,10 @@ void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
   LockfreeAddMemObj(k, v);
 }
 
-void MemObjMap::AddHostcallMemObj(const void* k, amd::Memory* v, amd::Device* dev) {
+void MemObjMap::AddHostcallMemObj(const void* k, amd::Memory* v, amd::Device& dev) {
   std::unique_lock lock(AllocatedLock_);
   LockfreeAddMemObj(k, v);
-  dev->hostcallMemObjTracker_.TrackHostcallMemory(v);
+  dev.hostcallMemObjTracker_.TrackHostcallMemory(v);
 }
 
 void MemObjMap::RemoveMemObj(const void* k) {
@@ -369,13 +369,14 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
-void MemObjMap::RemoveHostcallMemObj(const void* k, amd::Device* dev) {
+bool MemObjMap::RemoveHostcallMemObj(const void* k, amd::Device& dev, bool releaseMemory) {
   std::unique_lock lock(AllocatedLock_);
-  auto it = MemObjMap_.find(reinterpret_cast<uintptr_t>(k));
-  guarantee(it != MemObjMap_.end(), "Memobj map does not have ptr: 0x%x",
-            reinterpret_cast<uintptr_t>(k));
-  dev->hostcallMemObjTracker_.RemoveHostcallMemory(it->second);
-  MemObjMap_.erase(it);
+  amd::Memory* Mem = FindMemObj(k, 0, &dev);
+  if (!Mem) return false;
+  dev.hostcallMemObjTracker_.RemoveHostcallMemory(Mem);
+  if (releaseMemory) Mem->release();
+  MemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
+  return true;
 }
 
 amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {

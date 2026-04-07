@@ -71,7 +71,7 @@ size_t getHostcallBufferSize(uint32_t num_packets);
  */
 uint32_t getHostcallBufferAlignment(void);
 
-bool enableHostcalls(const amd::Device& dev, void* buffer, uint32_t numPackets);
+bool enableHostcalls(amd::Device& dev, void* buffer, uint32_t numPackets);
 void disableHostcalls(void* buffer);
 
 enum SignalValue { SIGNAL_DONE = 0, SIGNAL_INIT = 1 };
@@ -141,7 +141,7 @@ class HostcallBuffer {
   /** Mask for accessing the packet index in the tagged pointer. */
   uint64_t index_mask_;
   /** Some services need a device**/
-  const amd::Device* device_;
+  amd::Device* device_;
 
   PacketHeader* getHeader(uint64_t ptr) const;
   Payload* getPayload(uint64_t ptr) const;
@@ -150,7 +150,7 @@ class HostcallBuffer {
   void processPackets(MessageHandler& messages);
   void initialize(uint32_t num_packets);
   void setDoorbell(void* doorbell) { doorbell_ = doorbell; };
-  void setDevice(const amd::Device* dptr) { device_ = dptr; };
+  void setDevice(amd::Device* dptr) { device_ = dptr; };
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
