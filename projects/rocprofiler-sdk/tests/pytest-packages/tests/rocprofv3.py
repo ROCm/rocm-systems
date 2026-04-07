@@ -575,6 +575,8 @@ def test_summary_region_category_filtering(
                 f"Unexpected file '{filename}' found. "
                 f"Does not match any expected category: {expected_categories}"
             )
+
+
 def test_perfetto_arg_annotations(pftrace_reader):
     """
     Test that function argument annotations are available in perfetto with --annotate-args.
