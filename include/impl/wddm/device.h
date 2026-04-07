@@ -50,11 +50,11 @@
 #include <memory>
 #include <vector>
 
-#include "impl/wddm/types.h"
-#include "impl/thunk_proxy/thunk_proxy.h"
+#include "d3dkmt_types.h"
+#include "thunk_proxy/thunk_proxy.h"
 #include "impl/wddm/va_mgr.h"
-#include "impl/wddm/status.h"
-#include "impl/wddm/types.h"
+#include "status.h"
+#include "d3dkmt_types.h"
 #include "impl/wddm/gpu_memory.h"
 #include "impl/wddm/cmd_util.h"
 

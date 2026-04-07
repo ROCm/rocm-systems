@@ -3,7 +3,6 @@
  */
 
 #include "dxcore_loader.h"
-#include "librocdxg.h"
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -59,11 +58,10 @@ bool DxcoreLoader::Initialize() {
     dxcore_handle_ = dlopen("libdxcore.so", RTLD_LAZY);
 
     if (!dxcore_handle_) {
-        pr_err("[DxcoreLoader] Cannot load libdxcore.so: %s\n", dlerror());
+        std::cerr << "[DxcoreLoader] Cannot load libdxcore.so: " << dlerror() << std::endl;
         return false;
     }
 
-    pr_info("[DxcoreLoader] libdxcore.so loaded successfully\n");
     if (!LoadDxcoreApis()) {
         // If API loading failed, close the handle to indicate failure
         dlclose(dxcore_handle_);
@@ -77,9 +75,7 @@ bool DxcoreLoader::Initialize() {
 void DxcoreLoader::Shutdown() {
     if (dxcore_handle_) {
         if (dlclose(dxcore_handle_) != 0) {
-            pr_err("[DxcoreLoader] Cannot unload libdxcore.so: %s\n", dlerror());
-        } else {
-            pr_info("[DxcoreLoader] libdxcore.so unloaded successfully\n");
+            std::cerr << "[DxcoreLoader] Cannot unload libdxcore.so: " << dlerror() << std::endl;
         }
         dxcore_handle_ = nullptr;
     }
@@ -87,7 +83,7 @@ void DxcoreLoader::Shutdown() {
 
 bool DxcoreLoader::LoadDxcoreApis() {
     if (!dxcore_handle_) {
-        pr_err("[DxcoreLoader] Error: dxcore_handle_ is null\n");
+        std::cerr << "[DxcoreLoader] Error: dxcore_handle_ is null" << std::endl;
         return false;
     }
 
@@ -97,7 +93,7 @@ bool DxcoreLoader::LoadDxcoreApis() {
     #define LOAD_DXCORE_API(func_name) \
         DXCORE_PFN(func_name) = (DXCORE_DEF(func_name)*)dlsym(dxcore_handle_, #func_name); \
         if (!DXCORE_PFN(func_name)) { \
-            pr_err("[DxcoreLoader] Failed to load " #func_name ": %s\n", dlerror()); \
+            std::cerr << "[DxcoreLoader] Failed to load " #func_name ": " << dlerror() << std::endl; \
             goto ERROR; \
         }
 
@@ -136,10 +132,9 @@ bool DxcoreLoader::LoadDxcoreApis() {
 
     #undef LOAD_DXCORE_API
 
-    pr_info("[DxcoreLoader] All DXCore APIs loaded successfully\n");
     return true;
 ERROR:
-    pr_err("[DxcoreLoader] Failed to load DXCore APIs\n");
+    std::cerr << "[DxcoreLoader] Failed to load DXCore APIs" << std::endl;
     return false;
 }
 

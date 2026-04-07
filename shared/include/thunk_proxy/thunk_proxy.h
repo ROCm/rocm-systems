@@ -1,5 +1,5 @@
-#ifndef _WSL_INC_THUNK_PROXY_H_
-#define _WSL_INC_THUNK_PROXY_H_
+#ifndef SHARED_THUNK_PROXY_H
+#define SHARED_THUNK_PROXY_H
 
 #include <vector>
 

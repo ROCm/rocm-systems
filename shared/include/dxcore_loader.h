@@ -20,10 +20,10 @@
  * SOFTWARE.
  */
 
-#ifndef LIBROCDXG_DXCORE_LOADER_H
-#define LIBROCDXG_DXCORE_LOADER_H
+#ifndef DXG_SHARED_DXCORE_LOADER_H
+#define DXG_SHARED_DXCORE_LOADER_H
 
-#include "impl/wddm/types.h"
+#include "d3dkmt_types.h"
 #include <dlfcn.h>
 #include <mutex>
 
@@ -145,4 +145,4 @@ private:
 } // namespace thunk
 } // namespace wsl
 
-#endif // LIBROCDXG_DXCORE_LOADER_H
+#endif // DXG_SHARED_DXCORE_LOADER_H

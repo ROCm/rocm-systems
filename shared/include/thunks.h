@@ -40,11 +40,11 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _WSL_INC_WDDM_THUNKS_H
-#define _WSL_INC_WDDM_THUNKS_H
+#ifndef SHARED_THUNKS_H
+#define SHARED_THUNKS_H
 
-#include "impl/wddm/status.h"
-#include "impl/wddm/types.h"
+#include "status.h"
+#include "d3dkmt_types.h"
 #include "dxcore_loader.h"
 
 namespace wsl {

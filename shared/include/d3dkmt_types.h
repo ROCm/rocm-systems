@@ -40,12 +40,12 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _WSL_INC_WDDM_TYPES_H_
-#define _WSL_INC_WDDM_TYPES_H_
+#ifndef SHARED_D3DKMT_TYPES_H
+#define SHARED_D3DKMT_TYPES_H
 
 #include <cstdint>
 #include <ntstatus.h>
-#include "impl/thunk_proxy/wddm_types.h"
+#include "wddm_types.h"
 // windows wchar is 16bit, but linux is 32bit
 // seems libdxcore (not dxgkrnl.ko) convert thunk windows wchar to linux one
 // so only accept 32bit wchar args. note driver private data structure still

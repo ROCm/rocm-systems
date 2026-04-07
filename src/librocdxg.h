@@ -33,7 +33,7 @@
 #include "hsakmt/hsakmt_drm.h"
 
 #include "impl/wddm/va_mgr.h"
-#include "impl/wddm/types.h"
+#include "d3dkmt_types.h"
 #include "impl/wddm/device.h"
 #include "dxcore_loader.h"
 

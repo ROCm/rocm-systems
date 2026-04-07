@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _WSL_INC_WDDM_STATUS_H
-#define _WSL_INC_WDDM_STATUS_H
+#ifndef SHARED_STATUS_H
+#define SHARED_STATUS_H
 
 enum class ErrorCode {
   Success,

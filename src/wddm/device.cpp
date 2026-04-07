@@ -49,8 +49,8 @@
 #include <linux/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include "impl/wddm/status.h"
-#include "impl/wddm/types.h"
+#include "status.h"
+#include "d3dkmt_types.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
 
