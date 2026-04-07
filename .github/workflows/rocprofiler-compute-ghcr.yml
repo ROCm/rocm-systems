@@ -31,7 +31,7 @@ jobs:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
-      matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
+      containers_list: ${{ steps.generate_matrix_ci.outputs.containers_list }}
       gpu_list: ${{ steps.generate_gpu_list.outputs.gpu_list }}
 
     steps:
@@ -39,21 +39,21 @@ jobs:
         with:
           sparse-checkout: projects/rocprofiler-compute/docker
 
-      - name: Output data for containers matrix
+      - name: Generate containers list
         working-directory: projects/rocprofiler-compute/docker
-        id: generate_matrix_ci
+        id: generate_containers_list
         run: |
-          MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
-          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+          CONTAINERS_LIST=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
+          echo "containers_list=$CONTAINERS_LIST" >> $GITHUB_OUTPUT
 
       - name: Generate GPU list
         id: generate_gpu_list
         run: |
-          INPUT="${{ github.event.inputs.gpu }}"
-          if [ -z "$INPUT" ] || [ "$INPUT" = "all" ]; then
+          GPU_INPUT="${{ github.event.inputs.gpu }}"
+          if [ -z "$GPU_INPUT" ] || [ "$GPU_INPUT" = "all" ]; then
             echo 'gpu_list=["gfx94X","gfx950","gfx1151"]' >> $GITHUB_OUTPUT
           else
-            echo "gpu_list=[\"$INPUT\"]" >> $GITHUB_OUTPUT
+            echo "gpu_list=[\"$GPU_INPUT\"]" >> $GITHUB_OUTPUT
           fi
 
   rocprofiler-compute-ci-gfx:
@@ -66,7 +66,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
+        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.containers_list) }}
         gpu: ${{ fromJSON(needs.prepare_matrix_ci.outputs.gpu_list) }}
 
     steps:
