@@ -23,79 +23,59 @@ static void check(bool cond, const char *name) {
   }
 }
 
-static void test_ComgrAvailability() {
-  printf("TEST ComgrAvailability...\n");
-  bool available = rocr::hotswap::ComgrHotswapAvailable();
-  if (available) {
-    printf("  (COMGR found via dlopen)\n");
-    check(true, "ComgrHotswapAvailable returns true with COMGR present");
-  } else {
-    printf("  (COMGR not found — dlopen tests will be skipped)\n");
-    check(true, "ComgrHotswapAvailable returns false when unbound");
-  }
+static void test_ComgrAvailable() {
+  printf("TEST ComgrAvailable...\n");
+  check(rocr::hotswap::ComgrHotswapAvailable(),
+        "ComgrHotswapAvailable returns true");
 }
 
-static void test_RetargetWithComgr() {
-  if (!rocr::hotswap::ComgrHotswapAvailable()) {
-    printf("TEST RetargetWithComgr... SKIPPED (no COMGR)\n");
-    return;
-  }
-  printf("TEST RetargetWithComgr...\n");
-  const unsigned char fake_elf[] = {0x7f, 'E',  'L',  'F',  0x02, 0x01,
-                                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                    0x00, 0x00, 0x00, 0x00};
+static void test_RetargetPassthrough() {
+  printf("TEST RetargetPassthrough...\n");
+  const unsigned char fake_elf[] = {0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01,
+                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                    0x00, 0x00};
   void *out_data = nullptr;
   size_t out_size = 0;
-  int rc = rocr::hotswap::RetargetCodeObject(
+  const int rc = rocr::hotswap::RetargetCodeObject(
       fake_elf, sizeof(fake_elf), "amdgcn-amd-amdhsa--gfx1250",
       "amdgcn-amd-amdhsa--gfx1250", &out_data, &out_size);
 
-  check(rc == 0, "RetargetCodeObject succeeds with COMGR");
+  check(rc == 0, "RetargetCodeObject succeeds");
   check(out_size == sizeof(fake_elf), "output size matches input");
   if (out_data && out_data != fake_elf) {
     check(memcmp(out_data, fake_elf, sizeof(fake_elf)) == 0,
           "output bytes match input (passthrough)");
     std::free(out_data);
   } else {
-    check(out_data != nullptr, "out_data is non-null");
+    check(out_data != nullptr && out_data != fake_elf,
+          "out_data is a new allocation");
   }
-}
-
-static void test_RetargetReturnsInputWhenComgrUnavailable() {
-  if (rocr::hotswap::ComgrHotswapAvailable()) {
-    printf("TEST RetargetReturnsInputWhenComgrUnavailable... SKIPPED (COMGR "
-           "present)\n");
-    return;
-  }
-  printf("TEST RetargetReturnsInputWhenComgrUnavailable...\n");
-  const unsigned char fake_elf[] = {0x7f, 'E',  'L',  'F',  0x02, 0x01,
-                                    0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                    0x00, 0x00, 0x00, 0x00};
-  void *out_data = nullptr;
-  size_t out_size = 0;
-  int rc = rocr::hotswap::RetargetCodeObject(
-      fake_elf, sizeof(fake_elf), "amdgcn-amd-amdhsa--gfx1250",
-      "amdgcn-amd-amdhsa--gfx1250", &out_data, &out_size);
-
-  check(rc != 0, "RetargetCodeObject fails without COMGR");
-  check(out_data == fake_elf, "out_data points to original input");
-  check(out_size == sizeof(fake_elf), "out_size matches original size");
 }
 
 static void test_RetargetNullOutputPointers() {
   printf("TEST RetargetNullOutputPointers...\n");
   const unsigned char fake_elf[] = {0x7f, 'E', 'L', 'F'};
-  int rc = rocr::hotswap::RetargetCodeObject(
+  const int rc = rocr::hotswap::RetargetCodeObject(
       fake_elf, sizeof(fake_elf), "amdgcn-amd-amdhsa--gfx1250",
       "amdgcn-amd-amdhsa--gfx1250", nullptr, nullptr);
   check(rc != 0, "RetargetCodeObject rejects null output pointers");
 }
 
+static void test_RetargetNullInputs() {
+  printf("TEST RetargetNullInputs...\n");
+  void *out_data = nullptr;
+  size_t out_size = 0;
+  const int rc = rocr::hotswap::RetargetCodeObject(
+      nullptr, 0, "amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx1250",
+      &out_data, &out_size);
+  check(rc != 0, "RetargetCodeObject rejects null elf_data");
+}
+
 int main() {
-  test_ComgrAvailability();
-  test_RetargetWithComgr();
-  test_RetargetReturnsInputWhenComgrUnavailable();
+  test_ComgrAvailable();
+  test_RetargetPassthrough();
   test_RetargetNullOutputPointers();
+  test_RetargetNullInputs();
 
   printf("\n%d passed, %d failed\n", tests_passed, tests_failed);
   return tests_failed ? EXIT_FAILURE : EXIT_SUCCESS;

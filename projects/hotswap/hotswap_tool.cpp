@@ -14,7 +14,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "hotswap.hpp"
-#include "hotswap_comgr_client.hpp"
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -271,7 +270,7 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     }
   }
 
-  if (!local_bytes || !rocr::hotswap::ComgrHotswapAvailable()) {
+  if (!local_bytes) {
     return g_orig_load_agent_code_object(executable, agent, code_object_reader,
                                          options, loaded_code_object);
   }

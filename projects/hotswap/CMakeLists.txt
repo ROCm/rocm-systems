@@ -8,21 +8,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(HSA_RUNTIME_INC "${CMAKE_CURRENT_SOURCE_DIR}/../rocr-runtime/runtime/hsa-runtime/inc"
     CACHE PATH "Path to HSA runtime include directory")
 
-# Static library for standalone testing
-add_library(hotswap-static STATIC
-  hotswap.cpp
-  hotswap_comgr_client.cpp
-)
+# Mock COMGR library (exports amd_comgr_hotswap_rewrite as passthrough)
+add_library(mock-comgr SHARED tests/mock_comgr.cpp)
+set_target_properties(mock-comgr PROPERTIES
+  OUTPUT_NAME "amd_comgr"
+  POSITION_INDEPENDENT_CODE ON)
 
-target_include_directories(hotswap-static PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-if(UNIX)
-  target_link_libraries(hotswap-static PUBLIC ${CMAKE_DL_LIBS})
+# Find real COMGR or fall back to mock for all targets
+find_library(AMD_COMGR_LIB NAMES amd_comgr)
+if(AMD_COMGR_LIB)
+  set(COMGR_LINK_LIB ${AMD_COMGR_LIB})
+  message(STATUS "Found COMGR: ${AMD_COMGR_LIB}")
+else()
+  set(COMGR_LINK_LIB mock-comgr)
+  message(STATUS "COMGR not found, using mock for build/test")
 endif()
 
-# Shared library for HSA_TOOLS_LIB usage
+# Shared library for HSA_TOOLS_LIB usage — links COMGR directly
 add_library(hsa-hotswap SHARED
   hotswap_tool.cpp
   hotswap.cpp
@@ -35,29 +37,17 @@ target_include_directories(hsa-hotswap PRIVATE
   ${HSA_RUNTIME_INC}/..
 )
 
-if(UNIX)
-  target_link_libraries(hsa-hotswap PRIVATE ${CMAKE_DL_LIBS})
-  set_target_properties(hsa-hotswap PROPERTIES
-    POSITION_INDEPENDENT_CODE ON)
-endif()
-
-# Mock COMGR library for testing the dlopen path
-add_library(mock-comgr SHARED tests/mock_comgr.cpp)
-set_target_properties(mock-comgr PROPERTIES
-  OUTPUT_NAME "amd_comgr"
+target_link_libraries(hsa-hotswap PRIVATE ${COMGR_LINK_LIB})
+set_target_properties(hsa-hotswap PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
 
-# Test executable (without mock — tests the "COMGR unavailable" paths)
-add_executable(hotswap_test tests/hotswap_test.cpp)
-target_link_libraries(hotswap_test PRIVATE hotswap-static)
-
-# Test with mock COMGR (tests the dlopen/rewrite paths)
-add_executable(hotswap_test_with_comgr tests/hotswap_test.cpp)
-target_link_libraries(hotswap_test_with_comgr PRIVATE hotswap-static)
-add_dependencies(hotswap_test_with_comgr mock-comgr)
+# Test executable — links COMGR directly (mock or real)
+add_executable(hotswap_test tests/hotswap_test.cpp
+  hotswap.cpp
+  hotswap_comgr_client.cpp
+)
+target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(hotswap_test PRIVATE ${COMGR_LINK_LIB})
 
 enable_testing()
 add_test(NAME hotswap_test COMMAND hotswap_test)
-add_test(NAME hotswap_test_with_comgr COMMAND hotswap_test_with_comgr)
-set_tests_properties(hotswap_test_with_comgr PROPERTIES
-  ENVIRONMENT "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:mock-comgr>:$ENV{LD_LIBRARY_PATH}")
