@@ -178,27 +178,6 @@ static void setFilesLimit() {
   setFilesLimit();
   rocm_init();
 
-  // Print build info and/or environment variables based on DEBUG_LEVEL.
-  using rocshmem::envvar::types::debug_level;
-  auto debug_val = envvar::debug_level.get_value();
-  if (debug_val >= debug_level::INFO) {
-    print_build_info(std::cout);
-  }
-  if (debug_val == debug_level::ENV ||
-      debug_val == debug_level::ENV_ALL ||
-      debug_val == debug_level::ENV_FULL ||
-      debug_val >= debug_level::INFO) {
-    envvar::print_mode mode;
-    if (debug_val == debug_level::ENV_ALL) {
-      mode = envvar::print_mode::ALL_VALUES;
-    } else if (debug_val == debug_level::ENV_FULL) {
-      mode = envvar::print_mode::FULL_DOCUMENTATION;
-    } else {
-      mode = envvar::print_mode::MODIFIED;
-    }
-    envvar::print_envvars(mode, std::cout);
-  }
-
   int ret;
   ret = MPIInstance::mpilib_dl_init();
   if (ret != ROCSHMEM_SUCCESS) {
@@ -206,7 +185,32 @@ static void setFilesLimit() {
             "rocSHMEM requires MPI library to be loaded at runtime. Aborting.\n");
     exit(1);
   }
+
   mpi_instance = new MPIInstance(comm);
+
+  // Print build info and/or environment variables based on DEBUG_LEVEL.
+  // Only PE 0 prints to avoid duplicated output.
+  if (mpi_instance->get_rank() == 0) {
+    using rocshmem::envvar::types::debug_level;
+    auto debug_val = envvar::debug_level.get_value();
+    if (debug_val >= debug_level::INFO) {
+      print_build_info(std::cout);
+    }
+    if (debug_val == debug_level::ENV ||
+        debug_val == debug_level::ENV_ALL ||
+        debug_val == debug_level::ENV_FULL ||
+        debug_val >= debug_level::INFO) {
+      envvar::print_mode mode;
+      if (debug_val == debug_level::ENV_ALL) {
+        mode = envvar::print_mode::ALL_VALUES;
+      } else if (debug_val == debug_level::ENV_FULL) {
+        mode = envvar::print_mode::FULL_DOCUMENTATION;
+      } else {
+        mode = envvar::print_mode::MODIFIED;
+      }
+      envvar::print_envvars(mode, std::cout);
+    }
+  }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
   BackendType type = select_backend_type(comm, nullptr);
@@ -320,24 +324,27 @@ static void setFilesLimit() {
   rocm_init();
 
   // Print build info and/or environment variables based on DEBUG_LEVEL.
-  using rocshmem::envvar::types::debug_level;
-  auto debug_val = envvar::debug_level.get_value();
-  if (debug_val >= debug_level::INFO) {
-    print_build_info(std::cout);
-  }
-  if (debug_val == debug_level::ENV ||
-      debug_val == debug_level::ENV_ALL ||
-      debug_val == debug_level::ENV_FULL ||
-      debug_val >= debug_level::INFO) {
-    envvar::print_mode mode;
-    if (debug_val == debug_level::ENV_ALL) {
-      mode = envvar::print_mode::ALL_VALUES;
-    } else if (debug_val == debug_level::ENV_FULL) {
-      mode = envvar::print_mode::FULL_DOCUMENTATION;
-    } else {
-      mode = envvar::print_mode::MODIFIED;
+  // Only PE 0 prints to avoid duplicated output.
+  if (bootstrap->getRank() == 0) {
+    using rocshmem::envvar::types::debug_level;
+    auto debug_val = envvar::debug_level.get_value();
+    if (debug_val >= debug_level::INFO) {
+      print_build_info(std::cout);
     }
-    envvar::print_envvars(mode, std::cout);
+    if (debug_val == debug_level::ENV ||
+        debug_val == debug_level::ENV_ALL ||
+        debug_val == debug_level::ENV_FULL ||
+        debug_val >= debug_level::INFO) {
+      envvar::print_mode mode;
+      if (debug_val == debug_level::ENV_ALL) {
+        mode = envvar::print_mode::ALL_VALUES;
+      } else if (debug_val == debug_level::ENV_FULL) {
+        mode = envvar::print_mode::FULL_DOCUMENTATION;
+      } else {
+        mode = envvar::print_mode::MODIFIED;
+      }
+      envvar::print_envvars(mode, std::cout);
+    }
   }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
