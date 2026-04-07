@@ -3773,8 +3773,26 @@ static void gfxhub_init_system_aperture(struct WddmLiteDevice *dev)
     gfxhub_wreg(dev, regGCMC_VM_AGP_BOT, 0xFFFFFF);
     gfxhub_wreg(dev, regGCMC_VM_AGP_TOP, 0);
 
-    gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR,
-                (ULONG)(gmc->vram_start >> 18));
+    /* Extend system aperture to include TMR region below VRAM.
+     * After AUTOLOAD, MES IC_BASE points to firmware in TMR at addresses
+     * like 0x7_f469d000, which is ~192MB below VRAM start (0x8000000000).
+     * If the system aperture only covers [vram_start, vram_end], MES
+     * instruction fetches from IC_BASE fail because the address falls
+     * outside the aperture and VMID 0 has no page table for it.
+     *
+     * Solution: extend LOW to cover 256MB below VRAM start for TMR.
+     * amdgpu does something similar in gmc_v12_0_gart_enable. */
+    {
+        ULONGLONG aperture_low = gmc->vram_start;
+        /* TMR can be several GB below VRAM start (e.g. 0x7f469d000
+         * with VRAM at 0x8000000000 = 2.9GB gap). Extend by 4GB. */
+        if (aperture_low >= (4ULL * 1024 * 1024 * 1024))
+            aperture_low -= (4ULL * 1024 * 1024 * 1024);
+        else
+            aperture_low = 0;
+        gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR,
+                    (ULONG)(aperture_low >> 18));
+    }
     gfxhub_wreg(dev, regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR,
                 (ULONG)(gmc->vram_end >> 18));
 
@@ -4244,9 +4262,25 @@ int gpu_gmc_init(struct WddmLiteDevice *dev)
                             (cntl & ~(1 << 0)) | (1 << 1));
             }
 
-            /* Enable GFXHUB GART */
-            gfxhub_gart_enable(dev);
-            flush_gpu_tlb(dev, 0, 1);
+            /* Check if CONTEXT0 has RLC/VBIOS page directory config.
+             * After AUTOLOAD, RLC sets CONTEXT0_CNTL=0x03fffc0x with page
+             * directory bits that map firmware VA (0x7000000003000) → TMR.
+             * gfxhub_gart_enable() overwrites this to 0x1, destroying the
+             * firmware mappings. MES needs these mappings for IC_BASE access.
+             *
+             * If CONTEXT0 already has page dir config (upper bits non-zero),
+             * use gfxhub_enable_compute_context which only touches VMID 1+
+             * and preserves CONTEXT0. */
+            if (gc_test & 0xFFFFFFFE) {
+                pr_info("gpu_gmc: CONTEXT0 has page dir config (0x%08x), "
+                        "preserving for MES firmware access\n", gc_test);
+                gfxhub_enable_compute_context(dev);
+                flush_gpu_tlb(dev, 1, 1);
+            } else {
+                /* No page dir config — fresh init or VBIOS minimal state */
+                gfxhub_gart_enable(dev);
+                flush_gpu_tlb(dev, 0, 1);
+            }
             pr_info("gpu_gmc: GFXHUB GART enabled\n");
 
             /* Check for new faults */
@@ -6336,29 +6370,96 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
 #define MES_PIPE1_ACTIVE       (1 << 27)
 #define MES_HALT               (1 << 30)
 
-        /* Enable pipe 1 (KIQ) ONLY first — matching amdgpu mes_v12_0_enable.
-         * Do NOT enable pipe 0 (SCHED) until KIQ is set up. */
-        {
-            /* Reset pipe 1 */
-            grbm_select(dev, 3, 1, 0, 0);
-            ULONG cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
-            cntl |= MES_PIPE1_RESET;
-            gc1_wreg(dev, regCP_MES_CNTL_MES, cntl);
+/* MES IC/MD register offsets (BASE_IDX=1) — from gc_12_0_0_offset.h */
+#define regCP_MES_IC_BASE_LO     0x5850
+#define regCP_MES_IC_BASE_HI     0x5851
+#define regCP_MES_IC_BASE_CNTL   0x5852
+#define regCP_MES_MDBASE_LO_REG  0x5854
+#define regCP_MES_MDBASE_HI_REG  0x5855
+#define regCP_MES_MIBOUND_LO     0x585b
+#define regCP_MES_MDBOUND_LO     0x585d
 
-            /* Set PC_START for pipe 1 */
+        /* Enable MES — matching amdgpu mes_v12_0_enable() sequence.
+         * amdgpu loops over both pipes: pipe 0 first, then pipe 1.
+         * For each pipe:
+         *   1. grbm_select(3, pipe, 0, 0)
+         *   2. Assert pipe reset
+         *   3. Set PC_START
+         *   4. Write CNTL with active bits (deassert reset + activate)
+         *
+         * Before enable, mes_v12_0_load_microcode sets IC_BASE_CNTL=0,
+         * IC_BASE, MIBOUND, MDBASE, MDBOUND per pipe.
+         * With AUTOLOAD, RLC sets IC_BASE/MDBASE but may not set
+         * MIBOUND/MDBOUND. We set them explicitly here.
+         *
+         * CRITICAL: amdgpu's set_ucode_start_addr calls enable(false) first,
+         * which does HALT + INVALIDATE_ICACHE + RESET on ALL pipes. Without
+         * icache invalidation, MES reads stale cache data and never executes. */
+
+        /* Step 1: Disable MES — matching mes_v12_0_enable(adev, false) */
+        {
+            ULONG cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
+            cntl &= ~(MES_PIPE0_ACTIVE | MES_PIPE1_ACTIVE);
+            cntl |= MES_INVALIDATE_ICACHE | MES_PIPE0_RESET | MES_PIPE1_RESET | MES_HALT;
+            gc1_wreg(dev, regCP_MES_CNTL_MES, cntl);
+            pr_info("gpu_gfx: MES disabled (HALT+ICACHE_INVALIDATE+RESET): CNTL=0x%08x\n", cntl);
+        }
+
+        /* Step 2: Set PC_START for both pipes (matching set_ucode_start_addr) */
+        for (ULONG mes_pipe = 0; mes_pipe < 2; mes_pipe++) {
+            grbm_select(dev, 3, mes_pipe, 0, 0);
             gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_MES, mes_pc_lo);
             gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES, mes_pc_hi);
             grbm_select_reset(dev);
+        }
 
-            pr_info("gpu_gfx: MES pipe 1 (KIQ): PC_START=0x%08x_%08x, resetting\n",
-                    mes_pc_hi, mes_pc_lo);
+        /* Step 3: Enable MES — matching mes_v12_0_enable(adev, true) */
+        for (ULONG mes_pipe = 0; mes_pipe < 2; mes_pipe++) {
+            grbm_select(dev, 3, mes_pipe, 0, 0);
 
-            /* Activate: amdgpu sets BOTH pipe0+pipe1 active for KIQ init.
-             * MES_PIPE0_ACTIVE=1 is always set (matching amdgpu mes_v12_0_enable). */
-            grbm_select(dev, 3, 1, 0, 0);
-            gc1_wreg(dev, regCP_MES_CNTL_MES, MES_PIPE0_ACTIVE | MES_PIPE1_ACTIVE);
+            /* Diagnostic: read IC_BASE/MDBASE/MIBOUND set by RLC AUTOLOAD */
+            ULONG ic_lo = gc1_rreg(dev, regCP_MES_IC_BASE_LO);
+            ULONG ic_hi = gc1_rreg(dev, regCP_MES_IC_BASE_HI);
+            ULONG md_lo = gc1_rreg(dev, regCP_MES_MDBASE_LO_REG);
+            ULONG md_hi = gc1_rreg(dev, regCP_MES_MDBASE_HI_REG);
+            ULONG mibound = gc1_rreg(dev, regCP_MES_MIBOUND_LO);
+            ULONG mdbound = gc1_rreg(dev, regCP_MES_MDBOUND_LO);
+
+            pr_info("gpu_gfx: MES pipe%u BEFORE enable: IC_BASE=0x%08x_%08x "
+                    "MDBASE=0x%08x_%08x MIBOUND=0x%08x MDBOUND=0x%08x\n",
+                    mes_pipe, ic_hi, ic_lo, md_hi, md_lo, mibound, mdbound);
+
+            /* Set IC_BASE_CNTL=0 (matching mes_v12_0_load_microcode) */
+            gc1_wreg(dev, regCP_MES_IC_BASE_CNTL, 0);
+
+            /* Set MIBOUND=0x1FFFFF and MDBOUND=0x7FFFF (matching amdgpu) */
+            gc1_wreg(dev, regCP_MES_MIBOUND_LO, 0x1FFFFF);
+            gc1_wreg(dev, regCP_MES_MDBOUND_LO, 0x7FFFF);
+
+            /* Assert pipe reset (matching mes_v12_0_enable per-pipe) */
+            ULONG cntl = gc1_rreg(dev, regCP_MES_CNTL_MES);
+            if (mes_pipe == 0)
+                cntl |= MES_PIPE0_RESET;
+            else
+                cntl |= MES_PIPE1_RESET;
+            gc1_wreg(dev, regCP_MES_CNTL_MES, cntl);
+
+            /* Set PC_START (redundant but matches amdgpu enable sequence) */
+            gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_MES, mes_pc_lo);
+            gc1_wreg(dev, regCP_MES_PRGRM_CNTR_START_HI_MES, mes_pc_hi);
+
+            /* Activate: pipe 0 alone first, then pipe 0+1 together
+             * (matching amdgpu mes_v12_0_enable loop behavior) */
+            ULONG activate = MES_PIPE0_ACTIVE;
+            if (mes_pipe == 1)
+                activate |= MES_PIPE1_ACTIVE;
+            gc1_wreg(dev, regCP_MES_CNTL_MES, activate);
+
+            pr_info("gpu_gfx: MES pipe%u enabled (PC_START=0x%08x_%08x, "
+                    "CNTL=0x%08x)\n",
+                    mes_pipe, mes_pc_hi, mes_pc_lo, activate);
+
             grbm_select_reset(dev);
-            pr_info("gpu_gfx: MES pipes 0+1 enabled (matching amdgpu)\n");
         }
 
         /* Wait 500ms for MES KIQ to initialize */
