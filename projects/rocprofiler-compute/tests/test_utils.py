@@ -40,6 +40,7 @@ SUPPORTED_ARCHS = {
     "gfx941": {"mi300": ["MI300X_A0"]},
     "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
     "gfx950": {"mi350": ["MI350"]},
+    "gfx1151": {"strix_halo": ["STRIX_HALO"]},
 }
 
 
@@ -279,11 +280,11 @@ def gpu_soc():
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
     if not devices:
-        return None
+        return ""
     gpu_arch = devices[0].split()[1]
 
     if gpu_arch not in SUPPORTED_ARCHS.keys():
-        return None
+        return ""
 
     gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
 

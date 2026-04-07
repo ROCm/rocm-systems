@@ -494,6 +494,15 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+# RDNA3.5 memory chart CLI (Rich) — no GPU required
+add_test(
+    NAME test_mem_chart_gfx11
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_mem_chart_gfx11.xml ${COV_OPTION}
+        tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+)
+
 add_test(
     NAME test_roofline_calc_ai_analyze
     COMMAND
@@ -613,6 +622,18 @@ add_test(
 )
 
 # -----------------------------------
+# SoC base counter allocation tests
+# -----------------------------------
+
+add_test(
+    NAME test_soc_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_soc_base.xml ${COV_OPTION} tests/test_soc_base.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
@@ -635,6 +656,7 @@ if(${ENABLE_COVERAGE})
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
+        test_mem_chart_gfx11
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config
