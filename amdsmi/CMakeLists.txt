@@ -145,47 +145,11 @@ generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
-pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
-pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
-# Configuration
-function(get_imported_target_info target out_soname out_include_dirs)
-    # Resolve include directories.
-    get_target_property(include_dirs "${target}" INTERFACE_INCLUDE_DIRECTORIES)
-    set("${out_include_dirs}" "${include_dirs}" PARENT_SCOPE)
 
-    # Resolve the soname of the link library so that it can be opened with dlopen.
-    get_target_property(link_libs "${target}" INTERFACE_LINK_LIBRARIES)
-    set(soname)
-    foreach(link_lib ${link_libs})
-        if(soname)
-            message(FATAL_ERROR "Target ${target} has multiple link libraries: ${link_libs}")
-        endif()
-        execute_process(
-            COMMAND objdump -p "${link_lib}"
-            OUTPUT_VARIABLE OBJDUMP_OUTPUT
-            RESULT_VARIABLE OBJDUMP_RESULT
-        )
-        if(OBJDUMP_RESULT EQUAL 0)
-            string(REGEX MATCH "SONAME +([^ \n]+)" SONAME_MATCH "${OBJDUMP_OUTPUT}")
-            if(SONAME_MATCH)
-                set(SONAME_OF_MY_PKG "${CMAKE_MATCH_1}")
-                message(STATUS "SONAME of my_package_name: ${SONAME_OF_MY_PKG}")
-            else()
-                message(FATAL_ERROR "Could not find SONAME in objdump output for ${link_lib}")
-            endif()
-            set(soname "${SONAME_OF_MY_PKG}")
-        else()
-            message(FATAL_ERROR "objdump failed for ${link_lib}")
-        endif()
-    endforeach()
-    if(NOT soname)
-        message(FATAL_ERROR "Could not find SONAME for target ${target} libs: ${link_libs}")
-    endif()
-    set("${out_soname}" "${soname}" PARENT_SCOPE)
-endfunction()
-
-get_imported_target_info(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME LIBDRM_AMDGPU_INCLUDES)
+# libdrm not used; thunk_proxy provides DRM access
+set(LIBDRM_AMDGPU_SONAME "")
+set(LIBDRM_AMDGPU_INCLUDES "")
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/config/amd_smi_config.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/include/config/amd_smi_config.h"

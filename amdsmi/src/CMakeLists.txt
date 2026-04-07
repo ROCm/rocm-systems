@@ -112,6 +112,7 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 add_subdirectory(nic/ai-nic/amdsmi_unified)
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
 target_link_libraries(${AMD_SMI} PRIVATE
+    -Wl,--whole-archive thunk_proxy dxg_shared -Wl,--no-whole-archive
     rt
     Threads::Threads
     ${CMAKE_DL_LIBS}
@@ -127,10 +128,15 @@ target_include_directories(${AMD_SMI} PRIVATE
     ${PROJECT_SOURCE_DIR}/rocm_smi/include
     ${PROJECT_SOURCE_DIR}/common/shared_mutex
     ${RAS_DECODE_INC_DIR}
+    ${PROJECT_SOURCE_DIR}/../include
     ${DRM_INCLUDE_DIRS}
     ${DRM_AMDGPU_INCLUDE_DIRS}
     ${NIC_INCLUDE_DIRS}
+    ${WIN_SDK}
 )
+if(WIN_SDK)
+    add_compile_definitions(LINUX __AMD64__)
+endif()
 
 # use the target_include_directories() command to specify the include directories for the target
 target_include_directories(${AMD_SMI} PUBLIC 

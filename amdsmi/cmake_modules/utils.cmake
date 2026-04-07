@@ -234,21 +234,21 @@ function(
         )
 
         # Create debian directory in build tree
-        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN")
+        file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN")
 
         # Configure the changelog file
         set(CHANGELOG_DATA_FILES
-            "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in"
-            "${CMAKE_SOURCE_DIR}/CHANGELOG.md"
+            "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/changelog.in"
+            "${CMAKE_CURRENT_SOURCE_DIR}/CHANGELOG.md"
         )
-        set(CHANGELOG_DATA_APPENDED "${CMAKE_BINARY_DIR}/DEBIAN/changelog.in")
+        set(CHANGELOG_DATA_APPENDED "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/changelog.in")
         file(WRITE "${CHANGELOG_DATA_APPENDED}" "")
         foreach(changelog_data ${CHANGELOG_DATA_FILES})
             append_file("${changelog_data}" "${CHANGELOG_DATA_APPENDED}")
         endforeach()
         configure_file(
             "${CHANGELOG_DATA_APPENDED}"
-            "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+            "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/changelog.Debian"
             @ONLY
         )
 
@@ -260,12 +260,12 @@ function(
                 "gzip command not found: Failed to compress the changelog"
             )
         endif()
-        if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian")
+        if(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/changelog.Debian")
             execute_process(
                 COMMAND
                     ${DEB_GZIP_EXEC} -f -n -9
-                    "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
-                WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
+                    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/changelog.Debian"
+                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN"
                 RESULT_VARIABLE result
                 OUTPUT_VARIABLE output
                 ERROR_VARIABLE error
@@ -275,7 +275,7 @@ function(
             endif()
             install(
                 FILES
-                    "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
+                    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
                 DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${PACKAGE_NAME_T}
                 COMPONENT ${COMPONENT_NAME_T}
             )
@@ -295,8 +295,8 @@ function(
             endif()
             # Configure the Lintian Overrides file
             configure_file(
-                "${CMAKE_SOURCE_DIR}/DEBIAN/overrides.in"
-                "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/overrides.in"
+                "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
                 FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
                 @ONLY
             )
