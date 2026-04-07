@@ -9,6 +9,8 @@
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -65,14 +67,14 @@ struct cache_policy
 
         for(const auto cpu_id : monitored_cpus)
         {
-            const auto freq_name = "cpu" + std::to_string(cpu_id) + "_frequency";
+            const auto freq_name = fmt::format("cpu{}_frequency", cpu_id);
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   freq_name.c_str(), freq_name.c_str(), "CPU Core Frequency",
                   LONG_DESCRIPTION, COMPONENT, "MHz", rocprofsys::trace_cache::ABSOLUTE,
                   BLOCK, EXPRESSION, 0, 0 });
 
-            const auto load_name = "cpu" + std::to_string(cpu_id) + "_load";
+            const auto load_name = fmt::format("cpu{}_load", cpu_id);
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::CPU, socket_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   load_name.c_str(), load_name.c_str(), "CPU Core Load Percentage",

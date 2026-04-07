@@ -24,12 +24,14 @@ class cpu_device_test : public ::testing::Test
 protected:
     std::shared_ptr<MockDriver> mock_driver;
     std::set<size_t>            monitored_cpus;
+    enabled_metrics             all_enabled{};
 
     void SetUp() override
     {
         mock_driver = std::make_shared<MockDriver>();
         mock_driver->set_up_defaults();
-        monitored_cpus = { 0, 1, 2, 3 };
+        monitored_cpus    = { 0, 1, 2, 3 };
+        all_enabled.value = ALL_CPU_METRICS;
     }
 
     std::map<size_t, cpu_jiffies> make_jiffies(uint64_t user, uint64_t idle)
@@ -119,7 +121,7 @@ TEST_F(cpu_device_test, device_interface_methods)
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
     EXPECT_EQ(dev.get_index(), 0u);
-    EXPECT_EQ(dev.get_name(), "CPU");
+    EXPECT_EQ(dev.get_name(), "CPU 0");
     EXPECT_FALSE(dev.get_product_name().empty());
     EXPECT_FALSE(dev.get_vendor_name().empty());
     EXPECT_EQ(dev.get_monitored_cpus().size(), 4u);
@@ -131,7 +133,7 @@ TEST_F(cpu_device_test, frequencies_collected)
         .WillByDefault(Return(make_freqs(3500.0f)));
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
-    auto               result = dev.get_cpu_metrics();
+    auto               result = dev.get_cpu_metrics(all_enabled);
 
     for(const auto& cpu : result.cpu_data)
     {
@@ -143,7 +145,7 @@ TEST_F(cpu_device_test, frequencies_filtered_by_monitored_set)
 {
     std::set<size_t>   subset = { 1, 3 };
     device<MockDriver> dev(mock_driver, 0, subset);
-    auto               result = dev.get_cpu_metrics();
+    auto               result = dev.get_cpu_metrics(all_enabled);
 
     std::set<size_t> collected_ids;
     for(const auto& cpu : result.cpu_data)
@@ -159,7 +161,7 @@ TEST_F(cpu_device_test, frequencies_filtered_by_monitored_set)
 TEST_F(cpu_device_test, first_sample_returns_zero_load)
 {
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
-    auto               result = dev.get_cpu_metrics();
+    auto               result = dev.get_cpu_metrics(all_enabled);
 
     for(const auto& cpu : result.cpu_data)
     {
@@ -181,9 +183,9 @@ TEST_F(cpu_device_test, load_calculation_with_increasing_jiffies)
         .WillOnce(Return(after));    // second sample (delta computed)
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
-    (void) dev.get_cpu_metrics();  // baseline
+    (void) dev.get_cpu_metrics(all_enabled);  // baseline
 
-    auto result = dev.get_cpu_metrics();
+    auto result = dev.get_cpu_metrics(all_enabled);
     for(const auto& cpu : result.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 10.0, 0.001);
@@ -202,9 +204,9 @@ TEST_F(cpu_device_test, full_load_calculation)
         .WillOnce(Return(after));
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
-    (void) dev.get_cpu_metrics();
+    (void) dev.get_cpu_metrics(all_enabled);
 
-    auto result = dev.get_cpu_metrics();
+    auto result = dev.get_cpu_metrics(all_enabled);
     for(const auto& cpu : result.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 100.0, 0.001);
@@ -223,9 +225,9 @@ TEST_F(cpu_device_test, zero_load_when_idle)
         .WillOnce(Return(after));
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
-    (void) dev.get_cpu_metrics();
+    (void) dev.get_cpu_metrics(all_enabled);
 
-    auto result = dev.get_cpu_metrics();
+    auto result = dev.get_cpu_metrics(all_enabled);
     for(const auto& cpu : result.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 0.0, 0.001);
@@ -238,7 +240,7 @@ TEST_F(cpu_device_test, process_metrics_collected)
     ON_CALL(*mock_driver, read_rusage()).WillByDefault(Return(snap));
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
-    auto               result = dev.get_cpu_metrics();
+    auto               result = dev.get_cpu_metrics(all_enabled);
 
     EXPECT_EQ(result.process_data.page_rss, 50 * 1024 * 1024);
     EXPECT_EQ(result.process_data.virt_mem, 200 * 1024 * 1024);
@@ -263,7 +265,7 @@ TEST_F(cpu_device_test, empty_monitored_set_produces_no_per_cpu_data)
 {
     std::set<size_t>   empty_set;
     device<MockDriver> dev(mock_driver, 0, empty_set);
-    auto               result = dev.get_cpu_metrics();
+    auto               result = dev.get_cpu_metrics(all_enabled);
 
     EXPECT_TRUE(result.cpu_data.empty());
     EXPECT_GT(result.process_data.page_rss, 0);
@@ -273,7 +275,7 @@ TEST_F(cpu_device_test, single_cpu_monitored)
 {
     std::set<size_t>   single = { 2 };
     device<MockDriver> dev(mock_driver, 0, single);
-    auto               result = dev.get_cpu_metrics();
+    auto               result = dev.get_cpu_metrics(all_enabled);
 
     size_t cpu2_count = 0;
     for(const auto& cpu : result.cpu_data)
@@ -283,13 +285,19 @@ TEST_F(cpu_device_test, single_cpu_monitored)
     EXPECT_EQ(cpu2_count, 1u);
 }
 
-TEST_F(cpu_device_test, nonexistent_cpu_id_skipped)
+TEST_F(cpu_device_test, nonexistent_cpu_id_has_zero_metrics)
 {
     std::set<size_t>   nonexistent = { 99 };
     device<MockDriver> dev(mock_driver, 0, nonexistent);
-    auto               result = dev.get_cpu_metrics();
+    auto               result = dev.get_cpu_metrics(all_enabled);
 
-    EXPECT_TRUE(result.cpu_data.empty());
+    // make_empty_metrics pre-populates zero entries for all monitored CPUs,
+    // even if they don't appear in /proc/stat. This ensures Perfetto tracks
+    // show zero rather than retaining stale values.
+    ASSERT_EQ(result.cpu_data.size(), 1u);
+    EXPECT_EQ(result.cpu_data[0].cpu_id, 99u);
+    EXPECT_DOUBLE_EQ(result.cpu_data[0].load, 0.0);
+    EXPECT_FLOAT_EQ(result.cpu_data[0].frequency, 0.0f);
 }
 
 TEST_F(cpu_device_test, multiple_samples_accumulate_correctly)
@@ -308,15 +316,15 @@ TEST_F(cpu_device_test, multiple_samples_accumulate_correctly)
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
 
-    (void) dev.get_cpu_metrics();  // baseline
+    (void) dev.get_cpu_metrics(all_enabled);  // baseline
 
-    auto result2 = dev.get_cpu_metrics();  // 10%
+    auto result2 = dev.get_cpu_metrics(all_enabled);  // 10%
     for(const auto& cpu : result2.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 10.0, 0.001);
     }
 
-    auto result3 = dev.get_cpu_metrics();  // 50%
+    auto result3 = dev.get_cpu_metrics(all_enabled);  // 50%
     for(const auto& cpu : result3.cpu_data)
     {
         EXPECT_NEAR(cpu.load, 50.0, 0.001);
@@ -340,9 +348,9 @@ TEST_F(cpu_device_test, all_metrics_combined_in_single_sample)
     ON_CALL(*mock_driver, read_rusage()).WillByDefault(Return(snap));
 
     device<MockDriver> dev(mock_driver, 0, monitored_cpus);
-    (void) dev.get_cpu_metrics();  // baseline
+    (void) dev.get_cpu_metrics(all_enabled);  // baseline
 
-    auto result = dev.get_cpu_metrics();
+    auto result = dev.get_cpu_metrics(all_enabled);
 
     EXPECT_EQ(result.cpu_data.size(), 4u);
     for(const auto& cpu : result.cpu_data)
@@ -353,6 +361,116 @@ TEST_F(cpu_device_test, all_metrics_combined_in_single_sample)
 
     EXPECT_EQ(result.process_data.page_rss, 100 * 1024 * 1024);
     EXPECT_EQ(result.process_data.virt_mem, 500 * 1024 * 1024);
+}
+
+TEST_F(cpu_device_test, only_frequency_enabled_skips_load_and_process)
+{
+    enabled_metrics freq_only{};
+    freq_only.bits.frequency = 1;
+
+    ON_CALL(*mock_driver, read_cpu_frequencies())
+        .WillByDefault(Return(make_freqs(2400.0f)));
+
+    // read_proc_stat should NOT be called when load is disabled
+    EXPECT_CALL(*mock_driver, read_proc_stat())
+        .Times(1);  // only the init probe in constructor
+
+    // read_rusage should NOT be called when all process metrics are disabled
+    EXPECT_CALL(*mock_driver, read_rusage())
+        .Times(1);  // only the init probe in constructor
+
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
+    auto               result = dev.get_cpu_metrics(freq_only);
+
+    for(const auto& cpu : result.cpu_data)
+    {
+        EXPECT_FLOAT_EQ(cpu.frequency, 2400.0f);
+        EXPECT_DOUBLE_EQ(cpu.load, 0.0);
+    }
+    EXPECT_EQ(result.process_data.page_rss, 0);
+    EXPECT_EQ(result.process_data.virt_mem, 0);
+}
+
+TEST_F(cpu_device_test, only_load_enabled_skips_frequency_and_process)
+{
+    enabled_metrics load_only{};
+    load_only.bits.load = 1;
+
+    auto baseline = make_jiffies(100, 900);
+    auto after    = make_jiffies(200, 1800);
+
+    EXPECT_CALL(*mock_driver, read_proc_stat())
+        .WillOnce(Return(baseline))  // init probe
+        .WillOnce(Return(baseline))  // first sample (baseline)
+        .WillOnce(Return(after));    // second sample
+
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies())
+        .Times(1);  // only the init probe in constructor
+
+    EXPECT_CALL(*mock_driver, read_rusage())
+        .Times(1);  // only the init probe in constructor
+
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
+    (void) dev.get_cpu_metrics(load_only);  // baseline
+
+    auto result = dev.get_cpu_metrics(load_only);
+
+    for(const auto& cpu : result.cpu_data)
+    {
+        EXPECT_NEAR(cpu.load, 10.0, 0.001);
+        EXPECT_FLOAT_EQ(cpu.frequency, 0.0f);
+    }
+    EXPECT_EQ(result.process_data.page_rss, 0);
+}
+
+TEST_F(cpu_device_test, only_process_metrics_enabled)
+{
+    enabled_metrics process_only{};
+    process_only.bits.page_rss  = 1;
+    process_only.bits.peak_rss  = 1;
+    process_only.bits.user_time = 1;
+
+    auto snap = make_rusage();
+    EXPECT_CALL(*mock_driver, read_rusage())
+        .WillOnce(Return(snap))   // init probe
+        .WillOnce(Return(snap));  // sample
+
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(1);  // only the init probe
+
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(1);  // only the init probe
+
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
+    auto               result = dev.get_cpu_metrics(process_only);
+
+    EXPECT_EQ(result.process_data.page_rss, 50 * 1024 * 1024);
+    EXPECT_EQ(result.process_data.peak_rss, 60 * 1024 * 1024);
+    EXPECT_EQ(result.process_data.user_mode_time, 5000000);
+    // Disabled process metrics should remain zero
+    EXPECT_EQ(result.process_data.virt_mem, 0);
+    EXPECT_EQ(result.process_data.context_switches, 0);
+    EXPECT_EQ(result.process_data.kernel_mode_time, 0);
+}
+
+TEST_F(cpu_device_test, no_metrics_enabled_skips_all_reads)
+{
+    enabled_metrics none{};
+
+    EXPECT_CALL(*mock_driver, read_proc_stat()).Times(1);        // only the init probe
+    EXPECT_CALL(*mock_driver, read_cpu_frequencies()).Times(1);  // only the init probe
+    EXPECT_CALL(*mock_driver, read_rusage()).Times(1);           // only the init probe
+
+    device<MockDriver> dev(mock_driver, 0, monitored_cpus);
+    auto               result = dev.get_cpu_metrics(none);
+
+    // Per-CPU entries exist (from make_empty_metrics) but all values are zero
+    EXPECT_EQ(result.cpu_data.size(), 4u);
+    for(const auto& cpu : result.cpu_data)
+    {
+        EXPECT_FLOAT_EQ(cpu.frequency, 0.0f);
+        EXPECT_DOUBLE_EQ(cpu.load, 0.0);
+    }
+    EXPECT_EQ(result.process_data.page_rss, 0);
+    EXPECT_EQ(result.process_data.virt_mem, 0);
 }
 
 }  // namespace rocprofsys::pmc::collectors::cpu::testing

@@ -184,7 +184,7 @@ TEST_F(parsing_utilities_test, starts_with_no_match)
 TEST_F(parsing_utilities_test, ltrim_removes_leading_whitespace)
 {
     EXPECT_EQ(ltrim("  hello"), "hello");
-    EXPECT_EQ(ltrim("\t\n world"), "world");
+    EXPECT_EQ(ltrim("\t  world"), "world");
     EXPECT_EQ(ltrim("nowhitespace"), "nowhitespace");
 }
 

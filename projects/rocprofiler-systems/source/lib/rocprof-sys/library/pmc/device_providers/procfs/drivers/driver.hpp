@@ -3,12 +3,14 @@
 
 #pragma once
 
+#include "logger/debug.hpp"
+
+#include <spdlog/fmt/fmt.h>
+
 #include <algorithm>
-#include <cctype>
 #include <charconv>
 #include <cstdint>
-#include <cstdlib>
-#include <fcntl.h>
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <optional>
@@ -41,74 +43,39 @@ static constexpr std::string_view PROC_STAT_CPU_PREFIX = "cpu";
 // Number of jiffies fields per CPU line in /proc/stat.
 static constexpr size_t JIFFIES_FIELD_COUNT = 7;
 
-class unique_fd
+struct file_closer
 {
-public:
-    unique_fd() noexcept = default;
-    explicit unique_fd(int fd) noexcept
-    : m_fd(fd)
-    {}
-    ~unique_fd() noexcept
+    void operator()(FILE* fd) const noexcept
     {
-        if(m_fd >= 0) ::close(m_fd);
+        if(fd) std::fclose(fd);
     }
-
-    unique_fd(unique_fd&& other) noexcept
-    : m_fd(std::exchange(other.m_fd, -1))
-    {}
-
-    unique_fd& operator=(unique_fd&& other) noexcept
-    {
-        if(this != &other)
-        {
-            if(m_fd >= 0) ::close(m_fd);
-            m_fd = std::exchange(other.m_fd, -1);
-        }
-        return *this;
-    }
-
-    unique_fd(const unique_fd&)            = delete;
-    unique_fd& operator=(const unique_fd&) = delete;
-
-    [[nodiscard]] int      get() const noexcept { return m_fd; }
-    [[nodiscard]] explicit operator bool() const noexcept { return m_fd >= 0; }
-
-    void reset(int fd = -1) noexcept
-    {
-        if(m_fd >= 0) ::close(m_fd);
-        m_fd = fd;
-    }
-
-private:
-    int m_fd = -1;
 };
+using unique_file = std::unique_ptr<FILE, file_closer>;
 
 constexpr bool
 starts_with(std::string_view str, std::string_view prefix) noexcept
 {
-    return str.size() >= prefix.size() && str.substr(0, prefix.size()) == prefix;
+    if(str.size() < prefix.size()) return false;
+    return prefix == std::string_view{ str.data(), prefix.size() };
 }
 
 inline std::string_view
 ltrim(std::string_view str) noexcept
 {
-    const auto* const it = std::find_if_not(
-        str.begin(), str.end(), [](unsigned char c) { return std::isspace(c); });
-    return str.substr(static_cast<size_t>(it - str.begin()));
+    const auto pos = str.find_first_not_of(" \t");
+    return pos == std::string_view::npos ? std::string_view{} : str.substr(pos);
 }
 
 inline std::vector<std::string_view>
 split_lines(std::string_view content)
 {
     std::vector<std::string_view> lines;
-    size_t                        pos = 0;
-    while(pos < content.size())
+    const auto*                   line_begin = content.begin();
+    while(line_begin < content.end())
     {
-        const auto end = content.find('\n', pos);
-        const auto len =
-            (end == std::string_view::npos) ? content.size() - pos : end - pos;
-        lines.push_back(content.substr(pos, len));
-        pos += len + 1;
+        const auto* line_end = std::find(line_begin, content.end(), '\n');
+        lines.emplace_back(line_begin, static_cast<size_t>(line_end - line_begin));
+        line_begin = line_end + 1;
     }
     return lines;
 }
@@ -175,27 +142,25 @@ read_socket_topology(size_t cpu_count)
 
     for(size_t cpu = 0; cpu < cpu_count; ++cpu)
     {
-        const auto path = "/sys/devices/system/cpu/cpu" + std::to_string(cpu) +
-                          "/topology/physical_package_id";
-        const int fd = ::open(path.c_str(), O_RDONLY);
-        if(fd < 0)
+        const auto path = fmt::format(
+            "/sys/devices/system/cpu/cpu{}/topology/physical_package_id", cpu);
+        unique_file fd{ std::fopen(path.c_str(), "r") };
+        if(!fd)
+        {
+            LOG_DEBUG("Could not read CPU {} topology, defaulting to socket 0", cpu);
+            topology[0].insert(cpu);
+            continue;
+        }
+
+        const auto bytes = std::fread(buf, 1, sizeof(buf) - 1, fd.get());
+        if(bytes == 0)
         {
             topology[0].insert(cpu);
             continue;
         }
 
-        const auto bytes = ::read(fd, buf, sizeof(buf) - 1);
-        ::close(fd);
-
-        if(bytes <= 0)
-        {
-            topology[0].insert(cpu);
-            continue;
-        }
-
-        size_t socket_id  = 0;
-        const auto [p, e] = std::from_chars(buf, buf + bytes, socket_id);
-        if(e != std::errc()) socket_id = 0;
+        size_t socket_id = 0;
+        std::from_chars(buf, buf + bytes, socket_id);
 
         topology[socket_id].insert(cpu);
     }
@@ -211,7 +176,7 @@ parse_proc_stat(std::string_view content)
     std::map<size_t, cpu_jiffies> result;
     const auto                    lines = split_lines(content);
 
-    std::for_each(lines.begin(), lines.end(), [&](std::string_view line) {
+    const auto parse_cpu_line = [&](std::string_view line) {
         if(!starts_with(line, PROC_STAT_CPU_PREFIX) ||
            line.size() <= PROC_STAT_CPU_PREFIX.size() ||
            !std::isdigit(static_cast<unsigned char>(line[PROC_STAT_CPU_PREFIX.size()])))
@@ -225,9 +190,10 @@ parse_proc_stat(std::string_view content)
                                                line.data() + space, cpu_id);
         if(ec != std::errc()) return;
 
-        cpu_jiffies j;
-        uint64_t*   fields[]  = { &j.user,   &j.nice, &j.system, &j.idle,
-                                  &j.iowait, &j.irq,  &j.softirq };
+        cpu_jiffies jiffies;
+        uint64_t*   fields[]  = { &jiffies.user,   &jiffies.nice,   &jiffies.system,
+                                  &jiffies.idle,   &jiffies.iowait, &jiffies.irq,
+                                  &jiffies.softirq };
         auto        remaining = ltrim(line.substr(space));
 
         for(size_t i = 0; i < JIFFIES_FIELD_COUNT && !remaining.empty(); ++i)
@@ -238,8 +204,10 @@ parse_proc_stat(std::string_view content)
             remaining = ltrim(
                 { p, static_cast<size_t>(remaining.data() + remaining.size() - p) });
         }
-        result[cpu_id] = j;
-    });
+        result[cpu_id] = jiffies;
+    };
+
+    std::for_each(lines.begin(), lines.end(), parse_cpu_line);
 
     return result;
 }
@@ -271,35 +239,34 @@ parse_statm(std::string_view content)
 /**
  * @brief Driver wrapping Linux procfs/sysfs and getrusage for CPU metrics.
  *
- * Persistent file descriptors via unique_fd (RAII), lseek+read,
- * pre-allocated buffers, zero-copy string_view parsing.
- * CPU frequency read from sysfs scaling_cur_freq (per-CPU FDs).
+ * Persistent file handles via unique_file (std::unique_ptr<FILE, file_closer>),
+ * rewind+fread, pre-allocated buffers, zero-copy string_view parsing.
+ * CPU frequency read from sysfs scaling_cur_freq (per-CPU file handles).
  */
 class driver
 {
 public:
     /**
      * @param cpu_count Number of online CPUs. Sizes buffers and opens
-     *        per-CPU sysfs FDs for frequency reading.
+     *        per-CPU sysfs file handles for frequency reading.
      */
     explicit driver(size_t cpu_count)
-    : m_stat_buffer(
+    : m_cpu_count(cpu_count)
+    , m_stat_buffer(
           std::max(DEFAULT_STAT_BUFFER_SIZE, (cpu_count * BYTES_PER_STAT_LINE) + 256))
     , m_statm_buffer(STATM_BUFFER_SIZE)
     , m_freq_buffer(SYSFS_FREQ_BUFFER_SIZE)
     {
         for(size_t i = 0; i < cpu_count; ++i)
         {
-            const auto path = "/sys/devices/system/cpu/cpu" + std::to_string(i) +
-                              "/cpufreq/scaling_cur_freq";
-            unique_fd fd{ ::open(path.c_str(), O_RDONLY) };
+            const auto path =
+                fmt::format("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_cur_freq", i);
+            unique_file fd{ std::fopen(path.c_str(), "r") };
             if(fd) m_sysfs_freq_fds.emplace(i, std::move(fd));
         }
         m_use_sysfs_freq  = !m_sysfs_freq_fds.empty();
         m_socket_topology = read_socket_topology(cpu_count);
     }
-
-    // Rule of Zero: unique_fd and map<.., unique_fd> handle cleanup.
 
     [[nodiscard]] const socket_topology_t& get_socket_topology() const noexcept
     {
@@ -360,20 +327,24 @@ public:
     [[nodiscard]] size_t get_cpu_count() const noexcept { return m_cpu_count; }
 
 private:
-    [[nodiscard]] static std::string_view read_file(unique_fd& fd, const char* path,
+    [[nodiscard]] static std::string_view read_file(unique_file& fd, const char* path,
                                                     std::vector<char>& buffer)
     {
         if(!fd)
         {
-            fd.reset(::open(path, O_RDONLY));
-            if(!fd) return {};
+            fd.reset(std::fopen(path, "r"));
+            if(!fd)
+            {
+                LOG_DEBUG("Failed to open {}", path);
+                return {};
+            }
         }
-        if(::lseek(fd.get(), 0, SEEK_SET) == static_cast<off_t>(-1)) return {};
+        std::rewind(fd.get());
 
-        const auto bytes = ::read(fd.get(), buffer.data(), buffer.size());
-        if(bytes <= 0) return {};
+        const auto bytes = std::fread(buffer.data(), 1, buffer.size(), fd.get());
+        if(bytes == 0) return {};
 
-        return { buffer.data(), static_cast<size_t>(bytes) };
+        return { buffer.data(), bytes };
     }
 
     [[nodiscard]] std::map<size_t, float> read_sysfs_frequencies()
@@ -381,10 +352,10 @@ private:
         std::map<size_t, float> result;
         for(auto& [cpu_id, fd] : m_sysfs_freq_fds)
         {
-            if(::lseek(fd.get(), 0, SEEK_SET) == static_cast<off_t>(-1)) continue;
+            std::rewind(fd.get());
             const auto bytes =
-                ::read(fd.get(), m_freq_buffer.data(), m_freq_buffer.size());
-            if(bytes <= 0) continue;
+                std::fread(m_freq_buffer.data(), 1, m_freq_buffer.size(), fd.get());
+            if(bytes == 0) continue;
 
             unsigned long khz = 0;
             const auto [p, e] =
@@ -394,15 +365,15 @@ private:
         return result;
     }
 
-    unique_fd                   m_proc_stat_fd;
-    unique_fd                   m_proc_statm_fd;
-    std::map<size_t, unique_fd> m_sysfs_freq_fds;
-    bool                        m_use_sysfs_freq = false;
-    size_t                      m_cpu_count      = 0;
-    socket_topology_t           m_socket_topology;
-    std::vector<char>           m_stat_buffer;
-    std::vector<char>           m_statm_buffer;
-    std::vector<char>           m_freq_buffer;
+    size_t                        m_cpu_count = 0;
+    unique_file                   m_proc_stat_fd;
+    unique_file                   m_proc_statm_fd;
+    std::map<size_t, unique_file> m_sysfs_freq_fds;
+    bool                          m_use_sysfs_freq = false;
+    socket_topology_t             m_socket_topology;
+    std::vector<char>             m_stat_buffer;
+    std::vector<char>             m_statm_buffer;
+    std::vector<char>             m_freq_buffer;
 };
 
 /**

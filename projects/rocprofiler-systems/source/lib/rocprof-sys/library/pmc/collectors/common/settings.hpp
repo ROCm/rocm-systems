@@ -146,7 +146,7 @@ struct settings_policy
      * Parses token list (e.g., "frequency,load,memory") or "all"/"none".
      * Cached on first call.
      */
-    static cpu::enabled_metrics get_cpu_enabled_metrics() noexcept
+    static cpu::enabled_metrics get_cpu_enabled_metrics()
     {
         static auto _result = []() {
             auto       setting = get_setting_value<std::string>("ROCPROFSYS_CPU_METRICS");

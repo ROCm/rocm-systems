@@ -6,6 +6,8 @@
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/device_providers/procfs/drivers/driver.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 #include <map>
 #include <memory>
 #include <set>
@@ -40,8 +42,8 @@ public:
     : m_driver(std::move(driver))
     , m_socket_id(socket_id)
     , m_monitored_cpus(std::move(monitored_cpus))
-    , m_device_name("CPU" + std::to_string(socket_id))
-    , m_product_name("CPU" + std::to_string(socket_id))
+    , m_device_name(fmt::format("CPU {}", socket_id))
+    , m_product_name(fmt::format("CPU {}", socket_id))
     {
         initialize_supported_metrics();
     }
@@ -82,19 +84,17 @@ public:
      * for process metrics. On the first call, load entries will have 0.0 because
      * there is no previous baseline for delta computation.
      *
-     * @param enabled Enabled metrics bitfield (unused — filtering done at storage).
+     * @param enabled Enabled metrics bitfield — skips collection for disabled metrics.
      * @param timestamp Current timestamp in nanoseconds (unused by CPU).
      * @return Combined CPU metrics snapshot.
      */
-    [[nodiscard]] metrics get_cpu_metrics(
-        [[maybe_unused]] const enabled_metrics& enabled   = {},
-        [[maybe_unused]] uint64_t               timestamp = 0)
+    [[nodiscard]] metrics get_cpu_metrics(const enabled_metrics& enabled)
     {
         metrics result = make_empty_metrics();
 
-        collect_load_metrics(result);
-        collect_frequency_metrics(result);
-        collect_process_metrics(result);
+        if(enabled.bits.load) collect_load_metrics(result);
+        if(enabled.bits.frequency) collect_frequency_metrics(result);
+        collect_process_metrics(result, enabled);
 
         return result;
     }
@@ -197,23 +197,29 @@ private:
         }
     }
 
-    void collect_process_metrics(metrics& result)
+    void collect_process_metrics(metrics& result, const enabled_metrics& enabled)
     {
+        const bool any_process_metric =
+            enabled.bits.page_rss || enabled.bits.virt_mem || enabled.bits.peak_rss ||
+            enabled.bits.ctx_switches || enabled.bits.page_faults ||
+            enabled.bits.user_time || enabled.bits.kernel_time;
+        if(!any_process_metric) return;
+
         auto snap = m_driver->read_rusage();
 
-        if(m_supported_metrics.bits.page_rss)
+        if(m_supported_metrics.bits.page_rss && enabled.bits.page_rss)
             result.process_data.page_rss = snap.page_rss;
-        if(m_supported_metrics.bits.virt_mem)
+        if(m_supported_metrics.bits.virt_mem && enabled.bits.virt_mem)
             result.process_data.virt_mem = snap.virt_mem;
-        if(m_supported_metrics.bits.peak_rss)
+        if(m_supported_metrics.bits.peak_rss && enabled.bits.peak_rss)
             result.process_data.peak_rss = snap.peak_rss;
-        if(m_supported_metrics.bits.ctx_switches)
+        if(m_supported_metrics.bits.ctx_switches && enabled.bits.ctx_switches)
             result.process_data.context_switches = snap.context_switches;
-        if(m_supported_metrics.bits.page_faults)
+        if(m_supported_metrics.bits.page_faults && enabled.bits.page_faults)
             result.process_data.page_faults = snap.page_faults;
-        if(m_supported_metrics.bits.user_time)
+        if(m_supported_metrics.bits.user_time && enabled.bits.user_time)
             result.process_data.user_mode_time = snap.user_mode_time;
-        if(m_supported_metrics.bits.kernel_time)
+        if(m_supported_metrics.bits.kernel_time && enabled.bits.kernel_time)
             result.process_data.kernel_mode_time = snap.kernel_mode_time;
     }
 

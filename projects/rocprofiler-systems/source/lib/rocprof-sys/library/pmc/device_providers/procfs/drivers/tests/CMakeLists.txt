@@ -1,10 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-add_library(pmc-cpu-collector-tests OBJECT test_device.cpp test_sample.cpp)
+add_library(procfs-driver-tests OBJECT test_driver.cpp test_driver_parsing.cpp)
 
 target_link_libraries(
-    pmc-cpu-collector-tests
+    procfs-driver-tests
     PUBLIC
         rocprofiler-systems-pmc-library
         rocprofiler-systems-googletest-library
@@ -12,6 +12,6 @@ target_link_libraries(
 )
 
 target_include_directories(
-    pmc-cpu-collector-tests
+    procfs-driver-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
 )
