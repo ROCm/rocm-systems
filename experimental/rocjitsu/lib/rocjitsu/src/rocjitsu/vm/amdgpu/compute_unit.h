@@ -193,12 +193,13 @@ public:
   /// @brief Set (or replace) the L2 cache pointer.
   ///
   /// Used by the config loader for deferred initialization.
-  /// Also updates the L1 caches' backing store to the new L2.
+  /// Also updates the L1 caches' backing store and global memory pipeline.
   /// @param l2 New L2 cache (not owned).
   void set_l2(L2Cache *l2) {
     l2_ = l2;
     l1_scalar_.set_l2(l2);
     l1_vector_.set_l2(l2);
+    global_mem_pipeline_.set_l2(l2);
   }
 
   // -----------------------------------------------------------------------

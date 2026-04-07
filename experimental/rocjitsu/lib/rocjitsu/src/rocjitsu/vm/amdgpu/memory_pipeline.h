@@ -109,6 +109,8 @@ public:
   GlobalMemPipeline(L1VectorCache *l1, L2Cache *l2)
       : MemoryPipeline(WaitCounterType::VMCNT), l1_(l1), l2_(l2) {}
 
+  void set_l2(L2Cache *l2) { l2_ = l2; }
+
 protected:
   void initiate_access(Instruction &inst, Wavefront &wf) override;
   void complete_access(Instruction &inst, Wavefront &wf) override;
