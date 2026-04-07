@@ -20,7 +20,7 @@
 
 #define NCCL_DEBUG_RESET_TRIGGERED (-2)
 
-int ncclDebugLevel = -1;
+__attribute__((visibility("default"))) int ncclDebugLevel = -1;
 static uint32_t ncclDebugTimestampLevels = 0;     // bitmaps of levels that have timestamps turned on
 static char ncclDebugTimestampFormat[256];        // with space for subseconds
 static int ncclDebugTimestampSubsecondsStart;     // index where the subseconds starts
@@ -30,7 +30,7 @@ static int pid = -1;
 static char hostname[1024];
 thread_local int ncclDebugNoWarn = 0;
 char ncclLastError[1024] = ""; // Global string for the last error in human readable form
-uint64_t ncclDebugMask = 0;
+__attribute__((visibility("default"))) uint64_t ncclDebugMask = 0;
 FILE *ncclDebugFile = stdout;
 static pthread_mutex_t ncclDebugLock = PTHREAD_MUTEX_INITIALIZER;
 static std::chrono::steady_clock::time_point ncclEpoch;
