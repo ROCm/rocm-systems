@@ -269,9 +269,8 @@ auto  target_kernels         = common::Synchronized<targeted_kernels_map_t>{};
 auto* execution_profile      = as_pointer<common::Synchronized<tool::execution_profile_data>>();
 auto  counter_collection_ctx = rocprofiler_context_id_t{0};
 auto  att_device_context     = rocprofiler_context_id_t{0};
-auto  att_consecutive_kernel_dispatch_id =
+auto  att_device_trace_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
-auto       att_marker_trace_id = std::atomic<uint64_t>{0};
 std::mutex att_shader_data;
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
@@ -658,7 +657,10 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 (tool::get_config().selected_regions_ref_count) ? pause_resume_count++ : int64_t{0};
             // only resume if there are no active contexts and the ref count was zero
             if(_active_contexts == 0 && _ref_count == 0)
+            {
+                if(tool::get_config().att_marker_trace) att_device_trace_id++;
                 set_contexts_active(*ctxs, true);
+            }
             else if(_ref_count < 0)
             {
                 ROCP_WARNING << fmt::format(
@@ -1620,16 +1622,9 @@ att_shader_data_callback(rocprofiler_agent_id_t  agent,
     std::lock_guard<std::mutex> lock(att_shader_data);
     std::stringstream           filename;
     auto dispatch_id = static_cast<rocprofiler_dispatch_id_t>(userdata.value);
-    // If dispatch_id/userdata.value == 0, then we are in device mode.
-    // For marker-trace mode, use a monotonic counter as a trace-segment ID.
-    // For consecutive-kernels mode, use the stored lowest dispatch id.
-    if(dispatch_id == 0)
-    {
-        if(tool::get_config().att_marker_trace)
-            dispatch_id = att_marker_trace_id.fetch_add(1);
-        else
-            dispatch_id = att_consecutive_kernel_dispatch_id.load();
-    }
+    // If dispatch_id/userdata.value == 0, then we are in device mode and get the trace id
+    // from the global atomic (set by consecutive-kernels or marker-trace logic)
+    if(dispatch_id == 0) dispatch_id = att_device_trace_id.load();
     filename << fmt::format("{}_shader_engine_{}_{}", agent.handle, se_id, dispatch_id);
 
     auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
@@ -1707,8 +1702,8 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
                     // Keep track of launched dispatch ids
                     _data.emplace(_dispatch_id);
                     // Store lowest dispatch id for shader callback function
-                    if(att_consecutive_kernel_dispatch_id.load() > _dispatch_id)
-                        att_consecutive_kernel_dispatch_id.store(_dispatch_id);
+                    if(att_device_trace_id.load() > _dispatch_id)
+                        att_device_trace_id.store(_dispatch_id);
                 }
                 if(local_count >= _consecutive_kernels) stop_profiling = true;
             },
@@ -1736,7 +1731,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
 
             ROCPROFILER_CALL(rocprofiler_stop_context(att_device_context), "context stop");
             stop_profiling = false;
-            att_consecutive_kernel_dispatch_id.store(std::numeric_limits<uint64_t>::max());
+            att_device_trace_id.store(std::numeric_limits<uint64_t>::max());
         },
         dispatch_id);
 }
@@ -2469,6 +2464,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             // Context is registered for pause/resume control and starts stopped.
             // roctxProfilerResume(0) starts it, roctxProfilerPause(0) stops it.
             // No KERNEL_TRACING overhead.
+            // Initialize trace ID counter to 0 (default is UINT64_MAX for consecutive-kernels
+            // min-tracking).
+            att_device_trace_id.store(0);
             create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
         }
         else if(handle_consecutive_kernels)
