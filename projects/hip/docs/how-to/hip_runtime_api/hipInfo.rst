@@ -116,7 +116,7 @@ Example Output
    memInfo.total:                    31.98 GB
    memInfo.free:                     31.96 GB (100%)
 
-Comparison with rocminfo
+Comparing hipinfo and rocminfo
 -------------------------
 
 While both ``hipInfo`` and ``rocminfo`` provide GPU device information, they serve different purposes:
