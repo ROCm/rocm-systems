@@ -31,7 +31,7 @@
 namespace rocshmem {
 
 __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
-    int stride, int n_pes, int64_t *pSync, ActiveWFInfo &wf_info) {
+    int stride, int n_pes, int64_t *pSync, const ActiveWFInfo& wf_info) {
   int64_t flag_val{1};
   if (pe == PE_start) {
     // Go through all PE offsets (except current offset = 0)
@@ -71,7 +71,7 @@ __device__ void GDAContext::internal_direct_barrier(int pe, int PE_start,
 }
 
 __device__ void GDAContext::internal_direct_barrier_wg(int pe, int PE_start,
-    int stride, int n_pes, int64_t *pSync, ActiveWFInfo &wf_info) {
+    int stride, int n_pes, int64_t *pSync, const ActiveWFInfo& wf_info) {
   int64_t flag_val{1};
 
   if (pe == PE_start) {
@@ -123,7 +123,7 @@ __device__ void GDAContext::internal_direct_barrier_wg(int pe, int PE_start,
 }
 
 __device__ void GDAContext::internal_atomic_barrier(int pe, int PE_start,
-    int stride, int n_pes, int64_t *pSync, ActiveWFInfo &wf_info) {
+    int stride, int n_pes, int64_t *pSync, const ActiveWFInfo& wf_info) {
   int64_t flag_val{1};
   if (pe == PE_start) {
     wait_until(&pSync[0], ROCSHMEM_CMP_EQ, (int64_t)(n_pes - 1));
@@ -146,7 +146,7 @@ __device__ void GDAContext::internal_atomic_barrier(int pe, int PE_start,
 }
 
 __device__ void GDAContext::internal_sync(int pe, int PE_start, int stride,
-    int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
+    int PE_size, int64_t *pSync, const ActiveWFInfo& wf_info) {
   if (PE_size < 64) {
     internal_direct_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
   } else {
@@ -155,7 +155,7 @@ __device__ void GDAContext::internal_sync(int pe, int PE_start, int stride,
 }
 
 __device__ void GDAContext::internal_sync_wave(int pe, int PE_start,
-    int stride, int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
+    int stride, int PE_size, int64_t *pSync, const ActiveWFInfo& wf_info) {
   if (is_thread_zero_in_wave()) {
     if (PE_size < 64) {
       internal_direct_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
@@ -166,7 +166,7 @@ __device__ void GDAContext::internal_sync_wave(int pe, int PE_start,
 }
 
 __device__ void GDAContext::internal_sync_wg(int pe, int PE_start, int stride,
-    int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
+    int PE_size, int64_t *pSync, const ActiveWFInfo& wf_info) {
   __syncthreads();
   if (PE_size < 64) {
     internal_direct_barrier_wg(pe, PE_start, stride, PE_size, pSync, wf_info);
