@@ -4,9 +4,9 @@
 
 .. _gfx1151-metrics-ref:
 
-*****************************************
+**********************************
 RDNA3.5 (gfx1151) metric reference
-*****************************************
+**********************************
 
 This page lists **metric descriptions** for the RDNA3.5 analysis configuration
 (``gfx1151``) shipped with ROCm Compute Profiler — for example AMD Ryzen AI Max+ 395

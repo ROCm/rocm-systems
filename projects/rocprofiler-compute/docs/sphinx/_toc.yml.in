@@ -82,5 +82,7 @@ subtrees:
   - caption: Reference
     entries:
     - file: reference/compatible-accelerators.rst
+    - file: reference/gfx1151-metrics.rst
+      title: RDNA3.5 (gfx1151) metrics
     - file: reference/faq.rst
     - file: license.rst

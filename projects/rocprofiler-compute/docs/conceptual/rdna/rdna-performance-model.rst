@@ -4,8 +4,6 @@
 
 .. _rdna-performance-model:
 
-.. _gfx1151-metrics-ref:
-
 =====
 RDNA3
 =====
