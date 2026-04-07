@@ -17,10 +17,7 @@ LrWInst::LrWInst(uint32_t raw)
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 1;
   num_dst_ = 1;
 }
@@ -40,10 +37,7 @@ ScWInst::ScWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -66,10 +60,7 @@ AmoswapWInst::AmoswapWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -90,10 +81,7 @@ AmoaddWInst::AmoaddWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -114,10 +102,7 @@ AmoxorWInst::AmoxorWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -138,10 +123,7 @@ AmoandWInst::AmoandWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -162,10 +144,7 @@ AmoorWInst::AmoorWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -186,10 +165,7 @@ AmominWInst::AmominWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -210,10 +186,7 @@ AmomaxWInst::AmomaxWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -234,10 +207,7 @@ AmominuWInst::AmominuWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -259,10 +229,7 @@ AmomaxuWInst::AmomaxuWInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -283,10 +250,7 @@ LrDInst::LrDInst(uint32_t raw)
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 1;
   num_dst_ = 1;
 }
@@ -306,10 +270,7 @@ ScDInst::ScDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -332,10 +293,7 @@ AmoswapDInst::AmoswapDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -356,10 +314,7 @@ AmoaddDInst::AmoaddDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -380,10 +335,7 @@ AmoxorDInst::AmoxorDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -404,10 +356,7 @@ AmoandDInst::AmoandDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -428,10 +377,7 @@ AmoorDInst::AmoorDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -452,10 +398,7 @@ AmominDInst::AmominDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -476,10 +419,7 @@ AmomaxDInst::AmomaxDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -500,10 +440,7 @@ AmominuDInst::AmominuDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -525,10 +462,7 @@ AmomaxuDInst::AmomaxuDInst(uint32_t raw)
   dst_operands_[0] = &rd;
   src_operands_[0] = &rs1;
   src_operands_[1] = &rs2;
-  if (inst_.funct7 & 0x02)
-    modifiers_ += " aq";
-  if (inst_.funct7 & 0x01)
-    modifiers_ += " rl";
+
   num_src_ = 2;
   num_dst_ = 1;
 }
@@ -543,6 +477,40 @@ void AmomaxuDInst::execute_impl(HartState &ctx) {
   m->write64(addr, static_cast<uint64_t>(new_val));
   h->write_xreg(rd.encoding_value_, old_val);
 }
+
+// All A-extension atomics share the same aq/rl modifier pattern.
+#define RV_ATOMIC_BUILD_MODIFIERS(cls)                                                             \
+  void cls::build_modifiers(std::string &out) const {                                              \
+    if (inst_.funct7 & 0x02)                                                                       \
+      out += " aq";                                                                                \
+    if (inst_.funct7 & 0x01)                                                                       \
+      out += " rl";                                                                                \
+  }
+
+RV_ATOMIC_BUILD_MODIFIERS(LrWInst)
+RV_ATOMIC_BUILD_MODIFIERS(ScWInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoswapWInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoaddWInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoxorWInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoandWInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoorWInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmominWInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmomaxWInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmominuWInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmomaxuWInst)
+RV_ATOMIC_BUILD_MODIFIERS(LrDInst)
+RV_ATOMIC_BUILD_MODIFIERS(ScDInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoswapDInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoaddDInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoxorDInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoandDInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmoorDInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmominDInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmomaxDInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmominuDInst)
+RV_ATOMIC_BUILD_MODIFIERS(AmomaxuDInst)
+
+#undef RV_ATOMIC_BUILD_MODIFIERS
 
 } // namespace detail
 } // namespace risc_v

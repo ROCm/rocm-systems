@@ -86,6 +86,7 @@ private:
 class Smem : public IsaInstruction<Isa> {
 public:
   Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = SmemMachineInst;
 
 public:
@@ -196,6 +197,7 @@ private:
 class Mubuf : public IsaInstruction<Isa> {
 public:
   Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = MubufMachineInst;
 
 public:
@@ -207,6 +209,7 @@ private:
 class Mtbuf : public IsaInstruction<Isa> {
 public:
   Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = MtbufMachineInst;
 
 public:
@@ -243,6 +246,7 @@ private:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = FlatMachineInst;
 
 public:
