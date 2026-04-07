@@ -10865,6 +10865,32 @@ inline void execute_v_cvt_f16_u16_vop3([[maybe_unused]] Inst &inst,
   }
 }
 
+/// @brief Shared execute() for v_cvt_f32_bf8_vop1 (vector_unary).
+template <typename Inst>
+inline void execute_v_cvt_f32_bf8_vop1([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>(inst.src0.read_lane(wf, lane) & 0xFF));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+  }
+}
+
+/// @brief Shared execute() for v_cvt_f32_bf8_vop3 (vector_unary).
+template <typename Inst>
+inline void execute_v_cvt_f32_bf8_vop3([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>(inst.src0.read_lane(wf, lane) & 0xFF));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+  }
+}
+
 /// @brief Shared execute() for v_cvt_f32_f16_vop1 (vector_unary).
 template <typename Inst>
 inline void execute_v_cvt_f32_f16_vop1([[maybe_unused]] Inst &inst,
@@ -10916,6 +10942,32 @@ inline void execute_v_cvt_f32_f64_vop3([[maybe_unused]] Inst &inst,
       continue;
     double s = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
     inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(static_cast<float>(s)));
+  }
+}
+
+/// @brief Shared execute() for v_cvt_f32_fp8_vop1 (vector_unary).
+template <typename Inst>
+inline void execute_v_cvt_f32_fp8_vop1([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>(inst.src0.read_lane(wf, lane) & 0xFF));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+  }
+}
+
+/// @brief Shared execute() for v_cvt_f32_fp8_vop3 (vector_unary).
+template <typename Inst>
+inline void execute_v_cvt_f32_fp8_vop3([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>(inst.src0.read_lane(wf, lane) & 0xFF));
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
   }
 }
 

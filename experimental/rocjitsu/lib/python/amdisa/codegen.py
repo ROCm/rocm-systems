@@ -1042,8 +1042,16 @@ class CodeGenerator:
             return self._gen_vector_dot(dst_ops, src_ops, op, dtype)
 
         if cls in ('vector_cvt_pk_u8_f32', 'vector_cvt_pknorm',
-                    'vector_cvt_pkrtz_f16_f32', 'vector_cvt_pk'):
+                    'vector_cvt_pkrtz_f16_f32', 'vector_cvt_pk',
+                    'vector_cvt_pk_f16_f32', 'vector_cvt_pk_bf16_f32',
+                    'vector_cvt_sr_f16_f32', 'vector_cvt_sr_bf16_f32'):
             return self._gen_vector_cvt_pk(dst_ops, src_ops, cls, op)
+
+        if cls == 'vector_dot2c_bf16':
+            return self._gen_vector_dot2c_bf16(dst_ops, src_ops)
+
+        if cls == 'vector_bitop3':
+            return self._gen_vector_bitop3(dst_ops, src_ops, dtype)
 
         # ----- VOP3P: packed / dot / mix / MFMA -----
         if cls == 'pk_binop':
@@ -1488,6 +1496,49 @@ class CodeGenerator:
         L.append('  }')
         return '\n'.join(L)
 
+    def _gen_vector_dot2c_bf16(self, dst: list[str], src: list[str]) -> str:
+        """Generate V_DOT2C_F32_BF16 body: D.f32 += A.bf16[0]*B.bf16[0] + A.bf16[1]*B.bf16[1]."""
+        L = []
+        d = dst[0] if dst else src[0]
+        s0, s1 = (src[0], src[1]) if dst else (src[1], src[2])
+        L.append('  uint64_t exec = wf.exec();')
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append(f'    uint32_t a = {s0}.read_lane(wf, lane);')
+        L.append(f'    uint32_t b = {s1}.read_lane(wf, lane);')
+        L.append(f'    float acc = std::bit_cast<float>({d}.read_lane(wf, lane));')
+        L.append('    float a0 = util::bf16_to_f32(static_cast<uint16_t>(a & 0xFFFF));')
+        L.append('    float a1 = util::bf16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));')
+        L.append('    float b0 = util::bf16_to_f32(static_cast<uint16_t>(b & 0xFFFF));')
+        L.append('    float b1 = util::bf16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));')
+        L.append('    acc += a0 * b0 + a1 * b1;')
+        L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(acc));')
+        L.append('  }')
+        return '\n'.join(L)
+
+    def _gen_vector_bitop3(self, dst: list[str], src: list[str], dtype: str | None) -> str:
+        """Generate V_BITOP3_B32/B16 body: 3-input LUT-based bitwise operation."""
+        L = []
+        L.append('  uint64_t exec = wf.exec();')
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append(f'    uint32_t a = {src[0]}.read_lane(wf, lane);')
+        L.append(f'    uint32_t b = {src[1]}.read_lane(wf, lane);')
+        L.append(f'    uint32_t c = {src[2]}.read_lane(wf, lane);')
+        # The truth table (LUT) is the third source operand (typically an inline
+        # constant). For each bit position, index = {c_bit, b_bit, a_bit} selects
+        # the output bit from the 8-bit LUT.
+        nbits = '16' if dtype == 'b16' else '32'
+        L.append(f'    uint32_t lut = c & 0xFF;')
+        L.append(f'    uint32_t result = 0;')
+        L.append(f'    for (int i = 0; i < {nbits}; ++i) {{')
+        L.append('      uint32_t idx = ((a >> i) & 1) | (((b >> i) & 1) << 1) | (((c >> i) & 1) << 2);')
+        L.append('      result |= ((lut >> idx) & 1) << i;')
+        L.append('    }')
+        L.append(f'    {dst[0]}.write_lane(wf, lane, result);')
+        L.append('  }')
+        return '\n'.join(L)
+
     def _gen_vector_cvt_pk(self, dst: list[str], src: list[str], cls: str, op: str | None) -> str:
         """Generate pack/convert instructions."""
         L = []
@@ -1537,6 +1588,25 @@ class CodeGenerator:
                 L.append('    int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));')
                 L.append('    int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));')
             L.append(f'    {dst[0]}.write_lane(wf, lane, (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) | static_cast<uint32_t>(static_cast<uint16_t>(lo)));')
+        elif cls == 'vector_cvt_pk_f16_f32':
+            L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
+            L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
+            L.append(f'    uint32_t lo = util::f32_to_f16(s0);')
+            L.append(f'    uint32_t hi = util::f32_to_f16(s1);')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, lo | (hi << 16));')
+        elif cls == 'vector_cvt_pk_bf16_f32':
+            L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
+            L.append(f'    float s1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
+            L.append(f'    uint32_t lo = util::f32_to_bf16(s0);')
+            L.append(f'    uint32_t hi = util::f32_to_bf16(s1);')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, lo | (hi << 16));')
+        elif cls == 'vector_cvt_sr_f16_f32':
+            # Stochastic rounding: use src1 as random bits for rounding
+            L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(util::f32_to_f16(s0)));')
+        elif cls == 'vector_cvt_sr_bf16_f32':
+            L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, static_cast<uint32_t>(util::f32_to_bf16(s0)));')
         L.append('  }')
         return '\n'.join(L)
 
@@ -2100,6 +2170,28 @@ class CodeGenerator:
             else:
                 L.append(f'    // TODO: cvt {dtype}')
                 L.append(f'    {dst[0]}.write_lane(wf, lane, {src[0]}.read_lane(wf, lane));')
+        elif op == 'cvt_f32_bf16':
+            L.append(f'    float r = util::bf16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane) & 0xFFFF));')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
+        elif op == 'cvt_f32_fp8':
+            L.append(f'    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
+        elif op == 'cvt_f32_bf8':
+            L.append(f'    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
+        elif op == 'cvt_pk_f32_fp8':
+            # Unpack two FP8 values into two F32s in dst[0] and dst[0]+1
+            L.append(f'    uint32_t raw = {src[0]}.read_lane(wf, lane);')
+            L.append(f'    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFF));')
+            L.append(f'    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(lo));')
+            L.append(f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));')
+        elif op == 'cvt_pk_f32_bf8':
+            L.append(f'    uint32_t raw = {src[0]}.read_lane(wf, lane);')
+            L.append(f'    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFF));')
+            L.append(f'    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(lo));')
+            L.append(f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));')
         elif op in ('not', 'bfrev', 'ffbh_u32', 'ffbl', 'ffbh_i32', 'bcnt', 'mbcnt_lo', 'mbcnt_hi'):
             L.append(f'    uint32_t s = {src[0]}.read_lane(wf, lane);')
             int_op_map = {
@@ -2540,6 +2632,8 @@ class CodeGenerator:
                 'fma': 'std::fma(a, b, c)',
                 'min3': 'std::fmin(std::fmin(a, b), c)',
                 'max3': 'std::fmax(std::fmax(a, b), c)',
+                'minimum3': 'std::fmin(std::fmin(a, b), c)',
+                'maximum3': 'std::fmax(std::fmax(a, b), c)',
                 'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
             }
             # Cube map operations: inputs are (x, y, z)
@@ -2602,6 +2696,8 @@ class CodeGenerator:
                 'fma': 'std::fma(a, b, c)',
                 'min3': 'std::fmin(std::fmin(a, b), c)',
                 'max3': 'std::fmax(std::fmax(a, b), c)',
+                'minimum3': 'std::fmin(std::fmin(a, b), c)',
+                'maximum3': 'std::fmax(std::fmax(a, b), c)',
                 'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
             }
             expr = f_map.get(op, f'a /* unhandled: {op} */')
@@ -2624,6 +2720,8 @@ class CodeGenerator:
                 'fma': 'std::fma(a, b, c)',
                 'min3': 'std::fmin(std::fmin(a, b), c)',
                 'max3': 'std::fmax(std::fmax(a, b), c)',
+                'minimum3': 'std::fmin(std::fmin(a, b), c)',
+                'maximum3': 'std::fmax(std::fmax(a, b), c)',
                 'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
             }
             expr = f_map.get(op, f'a /* unhandled: {op} */')
@@ -3067,6 +3165,12 @@ class CodeGenerator:
             if op == 'fma':
                 L.append('    float rlo = std::fma(a_lo, b_lo, c_lo);')
                 L.append('    float rhi = std::fma(a_hi, b_hi, c_hi);')
+            elif op in ('minimum3', 'min3'):
+                L.append('    float rlo = std::fmin(std::fmin(a_lo, b_lo), c_lo);')
+                L.append('    float rhi = std::fmin(std::fmin(a_hi, b_hi), c_hi);')
+            elif op in ('maximum3', 'max3'):
+                L.append('    float rlo = std::fmax(std::fmax(a_lo, b_lo), c_lo);')
+                L.append('    float rhi = std::fmax(std::fmax(a_hi, b_hi), c_hi);')
             else:  # mad
                 L.append('    float rlo = a_lo * b_lo + c_lo;')
                 L.append('    float rhi = a_hi * b_hi + c_hi;')
@@ -3371,7 +3475,9 @@ class CodeGenerator:
             r'V_(?:S?MFMA[C]?|S?WMMA[C]?)_(F32|I32|F64|F16|BF16|BF8|FP8)_(\d+)X(\d+)X(\d+)'
             r'(?:_\d+B)?_?(F32|XF32|F16|BF16|I8|IU8|IU4|F64|FP8|BF8'
             r'|BF8_BF8|BF8_FP8|FP8_BF8|FP8_FP8'
-            r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8)?$',
+            r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8'
+            r'|F8_F6_F4)?'
+            r'(?:_1K)?$',
             name)
 
         if not m:
@@ -3448,6 +3554,7 @@ class CodeGenerator:
             'FP8': 8, 'BF8': 8,
             'FP8_FP8': 8, 'FP8_BF8': 8, 'BF8_FP8': 8, 'BF8_BF8': 8,
             'F16_FP8': 8, 'F16_BF8': 8, 'BF16_FP8': 8, 'BF16_BF8': 8,
+            'F8_F6_F4': 8,
         }
         in_bits = _INPUT_BITS.get(input_type, 32)
 
@@ -3457,12 +3564,14 @@ class CodeGenerator:
             'F16': 'mfma::extract_f16', 'BF16': 'mfma::extract_bf16',
             'FP8_FP8': 'mfma::extract_fp8', 'FP8_BF8': 'mfma::extract_fp8',
             'BF8_FP8': 'mfma::extract_bf8', 'BF8_BF8': 'mfma::extract_bf8',
+            'F8_F6_F4': 'mfma::extract_fp8',  # flexible format, treat as FP8
         }
         _EXTRACT_B = {
             'F32': 'mfma::extract_f32', 'XF32': 'mfma::extract_f32',
             'F16': 'mfma::extract_f16', 'BF16': 'mfma::extract_bf16',
             'FP8_FP8': 'mfma::extract_fp8', 'FP8_BF8': 'mfma::extract_bf8',
             'BF8_FP8': 'mfma::extract_fp8', 'BF8_BF8': 'mfma::extract_bf8',
+            'F8_F6_F4': 'mfma::extract_fp8',
         }
 
         L = []
