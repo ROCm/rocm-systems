@@ -46,3 +46,47 @@ target_link_libraries(scaling_test PRIVATE
     ${RJ_OBJECT_LIBS} util flatbuffers Threads::Threads)
 target_compile_options(scaling_test PRIVATE -O2)
 rj_configure_target(scaling_test TEST)
+
+# --- rocminfo test (requires rocminfo binary + HSA runtime + LD_PRELOAD) ---
+# Spawns rocminfo as a subprocess against the simulated GPU and validates output.
+
+find_program(ROCMINFO_EXECUTABLE rocminfo PATHS /opt/rocm/bin ENV ROCM_PATH PATH_SUFFIXES bin)
+if(ROCMINFO_EXECUTABLE AND HSA_RUNTIME64)
+    add_executable(rocminfo_test rocminfo_test.cpp)
+    target_compile_definitions(rocminfo_test PRIVATE
+        ROCMINFO_PATH="${ROCMINFO_EXECUTABLE}")
+    target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
+
+    add_test(NAME "RocminfoTest.ExitsSuccessfully"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ExitsSuccessfully
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.InterposerActive"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.InterposerActive
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.HsaSystemAttributes"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.HsaSystemAttributes
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.DetectsGpuAgent"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.DetectsGpuAgent
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.ReportsGfx950"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsGfx950
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_test(NAME "RocminfoTest.ReportsWavefrontSize"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsWavefrontSize
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(
+        "RocminfoTest.ExitsSuccessfully"
+        "RocminfoTest.InterposerActive"
+        "RocminfoTest.HsaSystemAttributes"
+        "RocminfoTest.DetectsGpuAgent"
+        "RocminfoTest.ReportsGfx950"
+        "RocminfoTest.ReportsWavefrontSize"
+        PROPERTIES
+            ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
+            TIMEOUT 30)
+    message(STATUS "rocminfo test enabled (found ${ROCMINFO_EXECUTABLE})")
+else()
+    message(STATUS "rocminfo test disabled (rocminfo or libhsa-runtime64 not found)")
+endif()
+
