@@ -205,7 +205,7 @@ void ROBackend::team_destroy(rocshmem_team_t team) {
   ROTeam *team_obj{get_internal_ro_team(team)};
 
   team_obj->~ROTeam();
-  // CHECK_HIP(hipFree(team_obj));
+  CHECK_HIP(hipFree(team_obj));
 }
 
 void ROBackend::create_new_team(Team *parent_team,
