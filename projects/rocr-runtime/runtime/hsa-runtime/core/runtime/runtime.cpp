@@ -3562,8 +3562,6 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   void *mem;
 
-  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
-
   hsa_status_t status = region->Allocate(size, alloc_flags, &mem, 0);
   if (status == HSA_STATUS_SUCCESS) {
     uint64_t offset;
@@ -3571,20 +3569,27 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     core::ShareableHandle shareable_handle = {};
     auto agentOwner = region->owner();
     int dmabuf_fd;
-    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
     auto ret = agentOwner->driver().CreateShareableHandle(nullptr, mem, size, *agentOwner, &shareable_handle, &offset, &dmabuf_fd, &mmap_offset);
     if (ret != HSA_STATUS_SUCCESS) {
-      printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+      region->Free(mem, size);
       return ret;
     }
+
+    void* kmt_alloc_ptr = nullptr;
+#if !defined(__linux__)
+    kmt_alloc_ptr = mem;
+#else
+    if (thunkLoader()->IsDXG()) {
+      kmt_alloc_ptr = mem;
+    }
+#endif
 
     memory_handle_map_.emplace(std::piecewise_construct,
                                std::forward_as_tuple(shareable_handle),
                                std::forward_as_tuple(region, size, flags_unused, shareable_handle,
-                                                     dmabuf_fd, mmap_offset, false, alloc_flags));
+                                                     dmabuf_fd, mmap_offset, kmt_alloc_ptr, false, alloc_flags));
 
     *memoryOnlyHandle = MemoryHandle::Convert(shareable_handle);
-    printf("DYSDEBUG status:%lx (%s:%s:%d)\n", status, __FILE__, __func__, __LINE__);
   }
   return status;
 }
@@ -3715,22 +3720,22 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
     : va(va), size(size), targetAgent(targetAgent), permissions(perms),
       mappedHandle(_mappedHandle) {
 
-  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
-
   // CPU agents have access as the memory is already mapped to the host.
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
 
   MemoryHandle *memHandle = mappedHandle->mem_handle;
 
-  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
-
-  size_t alloc_size = 0; //Unused
-  auto status = targetAgent->driver().ImportDMABuf(memHandle->dmabuf_fd, *targetAgent, &shareable_handle, &alloc_size);
-  if (status != HSA_STATUS_SUCCESS) {
-    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
-    throw AMD::hsa_exception(status, "Failed to import dma-buf");
+  void* reuse_handle = nullptr;
+  // Same device as owner: pass existing allocation so thunk can bypass dma-buf import (WSL/DXG/Windows).
+  if (targetAgent->public_handle().handle == memHandle->agentOwner()->public_handle().handle) {
+    reuse_handle = memHandle->kmt_alloc_ptr;
   }
-  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+
+  size_t alloc_size = 0;
+  auto status = targetAgent->driver().ImportDMABuf(memHandle->dmabuf_fd, *targetAgent, &shareable_handle,
+                                                   &alloc_size, reuse_handle);
+  if (status != HSA_STATUS_SUCCESS)
+    throw AMD::hsa_exception(status, "Failed to import dma-buf");
 }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
@@ -3795,10 +3800,6 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
   #if defined(__linux__)
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
   #endif
-/* 
-DYSDEBUG here, previously we used call CreateShareableHandle.., but now we call 
-CreateShareableHandle when creating the MemoryHandle
-*/
 
   if (!mem_handle->imported) {
     /*
@@ -3821,7 +3822,7 @@ CreateShareableHandle when creating the MemoryHandle
 
 Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
                  ShareableHandle /* DriverHandle */ shareable_handle, int dmabuf_fd, uint64_t mmap_offset,
-                 bool imported, MemoryRegion::AllocateFlags alloc_flag)
+                 void* kmt_alloc_ptr, bool imported, MemoryRegion::AllocateFlags alloc_flag)
           : region(region),
           size(size),
           ref_count(1),
@@ -3829,6 +3830,7 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, size_t size, uin
           shareable_handle(shareable_handle),
           dmabuf_fd(dmabuf_fd),
           mmap_offset(mmap_offset),
+          kmt_alloc_ptr(kmt_alloc_ptr),
           imported(imported),
           alloc_flag(alloc_flag) {
 
@@ -3839,6 +3841,10 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, size_t size, uin
 Runtime::MemoryHandle::~MemoryHandle() {
   agentOwner()->driver().DestroyShareableHandle(&shareable_handle);
   core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+  if (kmt_alloc_ptr) {
+    region->Free(kmt_alloc_ptr, size);
+    kmt_alloc_ptr = nullptr;
+  }
 }
 
 
@@ -4072,7 +4078,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
 
   memory_handle_map_.emplace(std::piecewise_construct,
           std::forward_as_tuple(shareable_handle),
-          std::forward_as_tuple(region, size, 0, shareable_handle, dmabuf_fd, 0, true, core::MemoryRegion::AllocateNoFlags));
+          std::forward_as_tuple(region, size, 0, shareable_handle, dmabuf_fd, 0, nullptr, true,
+                                 core::MemoryRegion::AllocateNoFlags));
 
   *memoryOnlyHandle = MemoryHandle::Convert(shareable_handle);
   return HSA_STATUS_SUCCESS;

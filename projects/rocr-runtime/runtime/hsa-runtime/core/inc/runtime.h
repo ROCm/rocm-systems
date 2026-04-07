@@ -946,7 +946,7 @@ class Runtime {
   struct MemoryHandle {
     MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
                  ShareableHandle shareable_handle, int dmabuf_fd, uint64_t mmap_offset,
-                 bool imported, MemoryRegion::AllocateFlags alloc_flag);
+                 void* kmt_alloc_ptr, bool imported, MemoryRegion::AllocateFlags alloc_flag);
     ~MemoryHandle();
 
     static __forceinline hsa_amd_vmem_alloc_handle_t Convert(ShareableHandle handle) {
@@ -968,6 +968,9 @@ class Runtime {
     ShareableHandle shareable_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
     HSAint64 dmabuf_fd;
     uint64_t mmap_offset;
+    /// Original KMT allocation VA when it must outlive CreateShareableHandle (Windows / DXG).
+    /// nullptr on Linux KFD where the allocation is released inside CreateShareableHandle.
+    void* kmt_alloc_ptr;
     bool imported; /* True is this BO belongs to another process */
     MemoryRegion::AllocateFlags alloc_flag;
   };

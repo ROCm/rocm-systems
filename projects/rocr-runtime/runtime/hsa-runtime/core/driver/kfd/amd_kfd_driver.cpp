@@ -554,9 +554,13 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 
   /*
    * We converted mem into a shareable_handle. The shareable_handle will keep the reference count inside
-   * so we can free new_alloc Kernel-Mode-Drivers
+   * so we can free new_alloc Kernel-Mode-Drivers.
+   * On DXG (WSL GPU), the allocation must stay registered so hsaKmtHandleImport can bypass import
+   * using import_desc->mem (same-GPU path). Runtime frees kmt_alloc_ptr in MemoryHandle::~MemoryHandle.
    */
-  hsaKmtFreeMemory(mem, size);
+  if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+    hsaKmtFreeMemory(mem, size);
+  }
 
   // Get address that memory is mapped to.
   auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
@@ -570,37 +574,38 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   handle->handle = targetHandle.handle;
   *handle_fd = target_fd;
 #else
-  // Export memory.
+  // Export from KMT allocation, import to GPU memory object, then export again so we keep an open
+  // shareable fd (same pattern as Linux). The first fd is closed after import.
   int dmabuf_fd = 0;
   core::ShareableHandle targetHandle = {};
-  targetHandle.handle = reinterpret_cast<uint64>(mem);
-  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
-  hsa_status_t err = ExportDMABuf(agent, &targetHandle, size, &dmabuf_fd, offset);
+  targetHandle.handle = reinterpret_cast<uint64_t>(mem);
+  hsa_status_t err =
+      ExportDMABuf(agent, &targetHandle, size, &dmabuf_fd, reinterpret_cast<size_t*>(offset));
   if (err != HSA_STATUS_SUCCESS) {
-    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
     return err;
   }
 
-  // Import memory.
   size_t imported_size;
   err = ImportDMABuf(dmabuf_fd, agent, handle, &imported_size, mem);
   core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
   if (err != HSA_STATUS_SUCCESS) {
-    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
     return err;
   }
 
-  // Get address that memory is mapped to.
+  int share_fd = -1;
+  size_t share_off = 0;
+  err = ExportDMABuf(agent, handle, size, &share_fd, &share_off);
+  if (err != HSA_STATUS_SUCCESS) return err;
+  *handle_fd = share_fd;
+
   auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
   HSAKMT_STATUS hsakmt_err =
       HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle,
                                          reinterpret_cast<HSAuint64*>(mmap_offset)));
   if (hsakmt_err != HSAKMT_STATUS_SUCCESS) {
-    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
     return HSA_STATUS_ERROR;
   }
-  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
 #endif
   return HSA_STATUS_SUCCESS;
 }
