@@ -36,6 +36,9 @@
 static char ncclIbIfName[MAX_IF_NAME_SIZE+1];
 static union ncclSocketAddress ncclIbIfAddr;
 
+	
+static ncclNetCommConfig_t ibContext;
+
 struct ncclIbMr {
   uintptr_t addr;
   size_t pages;
@@ -539,7 +542,7 @@ static int ncclIbMatchVfPath(char* path1, char* path2) {
 /**
  * Assumes PCIe path ends with xxxx:xx:xx.x 
  */
-static void ncclIbNormalizePciPath(const char* in, char* out, size_t out_size) {
+ static void ncclIbNormalizePciPath(const char* in, char* out, size_t out_size) {
   if (!in || !out || out_size == 0) return;
   // Safe copy with truncation
   size_t len = strnlen(in, out_size - 1);
@@ -2141,7 +2144,7 @@ ib_recv:
       rCommDev->gpuFlush.dmabuf_fd = -1;
 
       if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        #if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
         if (ncclCuMemEnable()) {
           NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, fail);
           CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&rCommDev->gpuFlush.dmabuf_fd,
@@ -2183,15 +2186,14 @@ peermem_flush:
             rCommDev->gpuFlush.dmabuf_fd = -1;
           }
         }
-#endif
-flush_reg_done:
-        if (!gpuFlushRegistered) {
-          if (rCommDev->gpuFlush.gpuFlushGpuMem) {
-            ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem);
-            rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
-          }
-          rCommDev->gpuFlush.gpuMr = nullptr;
-          rCommDev->gpuFlush.dmabuf_fd = -1;
+        #endif
+        flush_reg_done:
+                if (!gpuFlushRegistered) {
+                  if (rCommDev->gpuFlush.gpuFlushGpuMem) {
+                    ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem);
+                    rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
+                  }
+                  rCommDev->gpuFlush.gpuMr = nullptr;
         }
       }
       NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->gpuFlush.hostMr, rCommDev->base.pd, &rComm->gpuFlushHostMem, sizeof(int), IBV_ACCESS_LOCAL_WRITE), ret, fail);

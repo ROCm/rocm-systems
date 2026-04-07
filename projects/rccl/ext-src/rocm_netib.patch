@@ -426,9 +426,7 @@
        struct ncclIbDevInfo devInfo;
        devInfo.lid         = ibDev->portAttr.lid;
        devInfo.link_layer  = ibDev->portAttr.link_layer;
-@@ -2356,11 +2503,16 @@
- NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
- RCCL_PARAM(IbSplitDataThreshold, "IB_SPLIT_DATA_THRESHOLD", 128);
+@@ -2295,9 +2439,14 @@
  
 -ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 +ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot, bool use_write_op) {
@@ -527,9 +525,7 @@
        // Also make sure lastWr writes remote sizes using the right lkey
        comm->remSizesFifo.sge.lkey = comm->remSizesFifo.mrs[devIndex]->lkey;
        lastWr->wr.rdma.rkey = comm->remSizesFifo.rkeys[devIndex];
-@@ -2516,6 +2678,11 @@
-   ncclResult_t ret = ncclSuccess;
-   struct ncclIbRequest* req = NULL;
+@@ -2589,4 +2748,9 @@
    struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandle;
 +  bool use_write_op = false;
 +  if (rcclAinicRoce) {
@@ -539,8 +535,7 @@
    int nreqs = 0;
    volatile struct ncclIbSendFifo* slots = NULL;
    int slot = (comm->fifoHead) % MAX_REQUESTS;
-@@ -2529,26 +2696,36 @@
-   }
+@@ -2601,25 +2765,35 @@
    NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__), ret, fail);
  
 +  if (comm->useCtsOffload) {
@@ -555,8 +550,8 @@
 -  // Wait until all data has arrived
 -  for (int r=1; r<nreqs; r++) while(slots[r].idx != idx);
 -  __sync_synchronize(); // order the nreqsPtr load against tag/rkey/addr loads below
-+  if (!comm->useCtsOffload) {
-+      slots = comm->fifo[slot];
++  if (!rcclCtsOffloadEnabled) {
++    slots = comm->fifo[slot];
 +    idx = comm->fifoHead+1;
 +    if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
 +    nreqs = slots[0].nreqs;
@@ -593,7 +588,7 @@
      }
  
      NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, fail);
-@@ -2591,10 +2768,12 @@
+@@ -2505,10 +2678,12 @@
      }
  
      TIME_START(0);

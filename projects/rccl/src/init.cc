@@ -736,6 +736,13 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->rank = rank;
   comm->nRanks = ndev;
 
+  comm->hierarchicalIntraComm = nullptr;
+  comm->hierarchicalInterComm = nullptr;
+  comm->hierarchicalCommsInitialized = false;
+  comm->hierarchicalAGTempBuffer = nullptr;
+  // Enable PAT for interComm hierarchical AG
+  comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
+
   if (parent == NULL || !parent->shareResources) {
     struct ncclSharedResources* sharedRes = NULL;
     NCCLCHECK(ncclCalloc(&sharedRes, 1));
@@ -1149,7 +1156,7 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
            info->fabricInfo.cliqueId, info->fabricInfo.state, info->fabricInfo.healthMask);
     }
   }
-#else
+  #else
     char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
     NCCLCHECK(int64ToBusId(info->busId, busId));
     uint32_t deviceIndex = -1;
@@ -2429,7 +2436,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
     }
   }
-
   timers[TIMER_INIT_TOTAL] = clockNano() - timers[TIMER_INIT_TOTAL];
 
   // Trace this call for replay tool
