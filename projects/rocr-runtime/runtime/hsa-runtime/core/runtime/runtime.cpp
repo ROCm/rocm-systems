@@ -3562,6 +3562,8 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   void *mem;
 
+  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+
   hsa_status_t status = region->Allocate(size, alloc_flags, &mem, 0);
   if (status == HSA_STATUS_SUCCESS) {
     uint64_t offset;
@@ -3569,8 +3571,12 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     core::ShareableHandle shareable_handle = {};
     auto agentOwner = region->owner();
     int dmabuf_fd;
+    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
     auto ret = agentOwner->driver().CreateShareableHandle(nullptr, mem, size, *agentOwner, &shareable_handle, &offset, &dmabuf_fd, &mmap_offset);
-    if (ret != HSA_STATUS_SUCCESS) return ret;
+    if (ret != HSA_STATUS_SUCCESS) {
+      printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+      return ret;
+    }
 
     memory_handle_map_.emplace(std::piecewise_construct,
                                std::forward_as_tuple(shareable_handle),
@@ -3578,6 +3584,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
                                                      dmabuf_fd, mmap_offset, false, alloc_flags));
 
     *memoryOnlyHandle = MemoryHandle::Convert(shareable_handle);
+    printf("DYSDEBUG status:%lx (%s:%s:%d)\n", status, __FILE__, __func__, __LINE__);
   }
   return status;
 }
@@ -3708,15 +3715,22 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
     : va(va), size(size), targetAgent(targetAgent), permissions(perms),
       mappedHandle(_mappedHandle) {
 
+  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+
   // CPU agents have access as the memory is already mapped to the host.
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
 
   MemoryHandle *memHandle = mappedHandle->mem_handle;
 
+  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+
   size_t alloc_size = 0; //Unused
   auto status = targetAgent->driver().ImportDMABuf(memHandle->dmabuf_fd, *targetAgent, &shareable_handle, &alloc_size);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
+    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
     throw AMD::hsa_exception(status, "Failed to import dma-buf");
+  }
+  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
 }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
@@ -3736,13 +3750,12 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    int mmap_fd = -1;
 #if defined(__linux__)
     if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
-#endif
     auto agentOwner = mappedHandle->mem_handle->agentOwner();
-    int mmap_fd = -1;
     if (agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-
+#endif
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
                              mappedHandle->mem_handle->mmap_offset)) {
       return HSA_STATUS_ERROR;
@@ -3782,6 +3795,10 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
   #if defined(__linux__)
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
   #endif
+/* 
+DYSDEBUG here, previously we used call CreateShareableHandle.., but now we call 
+CreateShareableHandle when creating the MemoryHandle
+*/
 
   if (!mem_handle->imported) {
     /*

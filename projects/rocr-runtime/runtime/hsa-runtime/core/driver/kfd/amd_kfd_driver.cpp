@@ -445,6 +445,7 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 
 hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent, core::ShareableHandle *handle, size_t size, int *dmabuf_fd,
                                      size_t *offset) {
+#if defined(__linux__)
   const auto &gpu_agent = static_cast<const GpuAgent &>(agent);
 
   HsaHandleExportDesc desc = {};
@@ -461,6 +462,21 @@ hsa_status_t KfdDriver::ExportDMABuf(const core::Agent& agent, core::ShareableHa
   }
   *dmabuf_fd = res.dmabuf_fd;
   *offset = 0;
+
+  #else
+  int dmabuf_fd_res = -1;
+  size_t offset_res = 0;
+  HSAKMT_STATUS status =
+      HSAKMT_CALL(hsaKmtExportDMABufHandle(reinterpret_cast<void*>(handle->handle), size, &dmabuf_fd_res, &offset_res));
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  *dmabuf_fd = dmabuf_fd_res;
+  *offset = offset_res;
+  #endif
 
   return HSA_STATUS_SUCCESS;
 }
@@ -518,6 +534,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                               int* handle_fd, uint64_t* mmap_offset) {
   // Create handle by exporting and importing the memory from the owning agent.
 
+#if defined(__linux__)
   // Export memory from KFD
   int kfd_dmabuf_fd = 0;
   auto hsakmt_err = hsaKmtExportDMABufHandle(mem, size, &kfd_dmabuf_fd, offset);
@@ -552,6 +569,39 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 
   handle->handle = targetHandle.handle;
   *handle_fd = target_fd;
+#else
+  // Export memory.
+  int dmabuf_fd = 0;
+  core::ShareableHandle targetHandle = {};
+  targetHandle.handle = reinterpret_cast<uint64>(mem);
+  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+  hsa_status_t err = ExportDMABuf(agent, &targetHandle, size, &dmabuf_fd, offset);
+  if (err != HSA_STATUS_SUCCESS) {
+    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+    return err;
+  }
+
+  // Import memory.
+  size_t imported_size;
+  err = ImportDMABuf(dmabuf_fd, agent, handle, &imported_size, mem);
+  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+  if (err != HSA_STATUS_SUCCESS) {
+    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+    return err;
+  }
+
+  // Get address that memory is mapped to.
+  auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
+  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
+  HSAKMT_STATUS hsakmt_err =
+      HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle,
+                                         reinterpret_cast<HSAuint64*>(mmap_offset)));
+  if (hsakmt_err != HSAKMT_STATUS_SUCCESS) {
+    printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+    return HSA_STATUS_ERROR;
+  }
+  printf("DYSDEBUG (%s:%s:%d)\n", __FILE__, __func__, __LINE__);
+#endif
   return HSA_STATUS_SUCCESS;
 }
 

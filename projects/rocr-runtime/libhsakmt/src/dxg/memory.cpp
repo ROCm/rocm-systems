@@ -1221,3 +1221,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
   cpu_addr =  static_cast<HSAuint64*>(gpu_mem->CpuAddress());
   return HSAKMT_STATUS_SUCCESS;
 }
+
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHandle, int *fd) {
+	// TODO: Implement me
+  return HSAKMT_STATUS_ERROR;
+}
