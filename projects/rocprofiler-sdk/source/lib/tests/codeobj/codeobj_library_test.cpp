@@ -300,3 +300,46 @@ TEST(codeobj_library, codeobj_table_test)
     ASSERT_EQ(map.removeDecoderbyId(3), true);
     ASSERT_EQ(map.removeDecoderbyId(1), false);
 }
+
+/**
+ * Verifies that DWARF inline annotation produces " -> " separators.
+ * A __syncthreads() call always inlines through HIP headers, so the
+ * instruction comment must contain at least two source locations
+ * connected by " -> ".
+ */
+TEST(codeobj_library, inline_annotation)
+{
+    std::string path = codeobjhelper::get_data_file_path("syncthreads_kernel.bin");
+    ASSERT_FALSE(path.empty()) << "syncthreads_kernel.bin not found";
+
+    std::ifstream file(path, std::ios::binary);
+    using iterator_t = std::istreambuf_iterator<char>;
+    std::vector<char> objdata{iterator_t(file), iterator_t{}};
+    ASSERT_FALSE(objdata.empty());
+
+    CodeobjDecoderComponent comp(objdata.data(), objdata.size());
+    ASSERT_FALSE(comp.m_symbol_map.empty());
+
+    bool found_inline_separator = false;
+    for(auto& [kaddr, sym] : comp.m_symbol_map)
+    {
+        size_t vaddr = kaddr;
+        while(vaddr < kaddr + sym.mem_size)
+        {
+            auto faddr = comp.va2fo(vaddr);
+            ASSERT_TRUE(faddr.has_value());
+
+            auto inst = comp.disassemble_instruction(*faddr, vaddr);
+            ASSERT_NE(inst, nullptr);
+            ASSERT_NE(inst->size, 0u);
+
+            if(inst->comment.find(disassembly::Instruction::separator) != std::string::npos)
+                found_inline_separator = true;
+
+            vaddr += inst->size;
+        }
+    }
+    EXPECT_TRUE(found_inline_separator)
+        << "No instruction had inline annotation (' -> ' separator). "
+           "DWARF inlined subroutine traversal may be broken.";
+}

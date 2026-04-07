@@ -570,8 +570,7 @@ inline DIEInfo::DIEInfo(Dwarf_Die* die)
                 {
                     if(const char* filename = dwarf_filesrc(files, call_file, nullptr, nullptr))
                     {
-                        file_and_line =
-                            std::string(filename) + ":" + std::to_string(call_line);
+                        file_and_line = std::string(filename) + ":" + std::to_string(call_line);
                     }
                 }
             }
