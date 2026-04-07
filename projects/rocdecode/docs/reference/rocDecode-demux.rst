@@ -6,7 +6,7 @@
 The rocDecode VideoDemuxer utility class
 ********************************************************************
 
-The rocDecode FFMpeg demuxer utility class, `VideoDemuxer <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/video_demuxer.h>`_, is used to demultiplex (demux) frames that can then be consumed by the :doc:`FFMpeg decoder <./rocDecode-ffmpeg-decoder>`. 
+The rocDecode FFMpeg demuxer utility class, `VideoDemuxer <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/video_demuxer.h>`_, is used to demultiplex (demux) frames that can then be consumed by the :doc:`FFMpeg decoder <./rocDecode-ffmpeg-decoder>` or the :doc:`hardware decoder <./rocDecode-hw-decoder>`. 
 
 The ``VideoDemuxer()`` constructor takes either a file path or a StreamProvider object. The StreamProvider class is an abstract class that feeds a stream of packets to the demuxer. The StreamProvider ``GetData()`` and ``GetBufferSize()`` functions must be implemented to use a StreamProvider.
 

@@ -48,13 +48,15 @@ The ``RocVideoDecoder`` constructor instantiates a parser and a decoder, and ini
 
 ``DecodeFrame()``, ``GetFrame()``, and ``ReleaseFrame()`` should be called in a loop that fetches the available frames for decoding.
 
-The decoder instance is reused when there is a change to the video resolution without a change in the codec. The decoder maintains a pool of frame buffers for decoded images that haven't yet been displayed or processed. When the video stream resolution changes, the decoder is reconfigured for the new resolution and the pool of frame buffers that the decoder maintains is deleted.
+The decoder instance is reused when there's a video resolution change, bit depth change, display size change, or decode buffer pool size change, without a change in the codec.
 
-Reconfiguration parameters define how to handle the flushed frames. ``SetReconfigParams()`` sets these reconfiguration parameters.
+The decoder maintains a decode buffer pool of images that haven't yet been displayed or processed. When the the decoder is reconfigured, the current decode buffer pool is deleted and a new decode buffer pool is created. 
 
 ``WaitForDecodeCompletion()`` waits for the last submitted picture to be decoded.
 
 ``ReconfigureDecoder()`` reconfigures the decoder.
+
+``SetReconfigParams()`` sets the reconfiguration parameters.
 
 ``GetNumOfFlushedFrames()`` returns the number of frames that were flushed during the reconfiguration. 
 
