@@ -60,7 +60,7 @@ TEST_P(DecoderSmokeTest, DecodesCorrectly) {
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr) << "Decoder::create() returned nullptr for arch=" << tc.arch_name;
 
-  auto inst = decoder->decode(&tc.word);
+  std::unique_ptr<Instruction> inst(decoder->decode(&tc.word));
   ASSERT_NE(inst, nullptr) << "decode() returned nullptr for arch=" << tc.arch_name << " word=0x"
                            << std::hex << tc.word;
 
