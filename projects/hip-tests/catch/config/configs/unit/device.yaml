@@ -84,6 +84,9 @@ device:
   Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported:
     <<: *level_2
     tags: [query]
+  Unit_hipGetDeviceAttribute_hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+    <<: *level_2
+    tags: [query]
   Unit_hipGetDeviceCount_NegTst:
     <<: *level_2
     tags: [query]
