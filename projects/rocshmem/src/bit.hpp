@@ -94,6 +94,23 @@ namespace _template_builtin {
       return fallback;
     return _ctzT(val);
   }
+
+  template <typename T> constexpr inline __host__ __device__
+  int _popcountT(T val) noexcept {
+    if constexpr (std::is_same_v<T, unsigned long long>) {
+      return __builtin_popcountll(val);
+    } else if constexpr (std::is_same_v<T, unsigned long>) {
+      return __builtin_popcountl(val);
+    } else if constexpr (std::is_same_v<T, unsigned int>) {
+      return __builtin_popcount(val);
+    } else if constexpr (std::is_same_v<T, unsigned short> ||
+                         std::is_same_v<T, unsigned char>) {
+      return __builtin_popcount(static_cast<unsigned int>(val));
+    } else {
+      // sizeof(T) to force this to be instantiation-dependent
+      static_assert(sizeof(T) == 0, "popcount not implemented for this type");
+    }
+  }
 }  // namespace _template_builtin
 
 template <typename T>
@@ -152,6 +169,13 @@ constexpr inline __host__ __device__
 std::enable_if_t<is_standard_unsigned_integer_v<T>, T>
 bit_floor(T val) noexcept {
   return val == 0 ? 0 : T{1} << bit_log2(val);
+}
+
+template <typename T>
+constexpr inline __host__ __device__
+std::enable_if_t<is_standard_unsigned_integer_v<T>, int>
+popcount(T val) noexcept {
+  return _template_builtin::_popcountT(val);
 }
 
 }  // namespace rocshmem

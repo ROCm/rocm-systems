@@ -23,9 +23,9 @@
  *****************************************************************************/
 
 #include "log.hpp"
+#include "bit.hpp"
 #include "util.hpp"
 
-#include "gda/bit.hpp"
 #include "gda/endian.hpp"
 #include "gda/queue_pair.hpp"
 
@@ -43,33 +43,6 @@ __device__ static inline void amdgcn_s_wakeup() {
   asm volatile("s_wakeup");
 }
 #endif
-
-inline namespace {
-struct ActiveWFPostInfo {
-  // True if this thread is the leader of the group of threads with the same PE.
-  bool is_pe_group_leader{false};
-  // Physical lane id of the leader of the group of threads with the same PE.
-  int  pe_group_leader_phys_lane_id{0};
-
-  __device__ ActiveWFPostInfo(const ActiveWFInfo& wf_info) {
-    if (wf_info.scope == ThreadScope::thread) {
-      /**
-       * since the leader needs to write the first 8 bytes of the LAST WQE
-       * to the doorbell register, it's much simpler if the LAST thread is the leader,
-       * rather than the first thread as is usually the case
-       * TODO: does this have any performance implications?
-       */
-      is_pe_group_leader = (wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1);
-      // leader physical lane id is the index of the highest set bit in the mask, i.e. bit_log2
-      pe_group_leader_phys_lane_id = bit_log2(wf_info.pe_group_mask);
-    } else {
-      // wavefront and workgroup scope: only one thread is active and it is the leader
-      is_pe_group_leader           = wf_info.is_pe_group_leader;
-      pe_group_leader_phys_lane_id = wf_info.pe_group_leader_phys_lane_id;
-    }
-  }
-};
-}  // inline namespace
 
 __device__ static inline void acquire_lock(uint32_t *lock) {
   /* acquire lock when new value 1 (locked) is exchanged with prior value 0 (unlocked)
@@ -282,9 +255,7 @@ __device__ void QueuePair::mlx5_quiet_single() {
 // can be called with all active lanes using any number of different QPs, don't assume anything
 __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr,
                                              uint8_t opcode, ActiveWFInfo &wf_info) {
-  ActiveWFPostInfo wf_post_info{wf_info};
-
-  if (wf_post_info.is_pe_group_leader) {
+  if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
     // poll until we have enough WQEBB for all lanes using this QP
@@ -305,7 +276,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
 
-  if (wf_post_info.is_pe_group_leader) {
+  if (wf_info.is_pe_group_last) {
     // increment post counter
     mlx5_sq.post += wf_info.num_pe_group_lanes;
     // we are the last thread in the wavefront, so we have the last WQE posted
@@ -356,9 +327,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
                                                  uintptr_t raddr, uint8_t opcode,
                                                  int64_t atomic_data, int64_t atomic_cmp,
                                                  bool fetching, ActiveWFInfo &wf_info) {
-  ActiveWFPostInfo wf_post_info{wf_info};
-
-  if (wf_post_info.is_pe_group_leader) {
+  if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
     // poll until we have enough WQEBB for all lanes using this QP
@@ -386,7 +355,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
 
-  if (wf_post_info.is_pe_group_leader) {
+  if (wf_info.is_pe_group_last) {
     // increment post and fetching atomic counters
     mlx5_sq.post += wf_info.num_pe_group_lanes;
     if (fetching) {

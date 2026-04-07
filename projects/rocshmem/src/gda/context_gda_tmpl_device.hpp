@@ -1072,8 +1072,7 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
 
   // Broadcast the qp_index value to other lanes in the wavefront
   // that are targeting the same PE
-  qp_index = __shfl_sync(wf_info.pe_group_mask, qp_index,
-                wf_info.pe_group_leader_phys_lane_id);
+  qp_index = __shfl_sync(wf_info.pe_group_mask, qp_index, wf_info.pe_group_first_phys_lane_id);
 
   return qp_index;
 }
