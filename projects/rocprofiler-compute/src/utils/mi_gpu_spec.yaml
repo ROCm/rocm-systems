@@ -359,7 +359,7 @@ mi_gpu_spec:
               virtual: 30136
 
   #########################################################
-  #Note: in the future, we might set a seperate file for NAVI
+  # Note: in the future, we might set a separate file for NAVI
   - gpu_series: navi3
     gpu_archs:
       - gpu_arch: gfx1151
