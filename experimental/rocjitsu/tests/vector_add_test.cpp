@@ -54,25 +54,49 @@ constexpr uint64_t C_ADDR = 0x300000;
 constexpr uint64_t KERNARG_ADDR = 0x400000;
 
 /// Write a kernel argument to the kernarg segment.
-/// Returns false if the argument is not found in the map.
+/// Write a kernel argument to the kernarg segment in GPU memory.
+///
+/// Looks up @p name in @p args to find the byte offset and size, then writes
+/// the low bits of @p value at that offset. Handles sub-dword sizes (1 and
+/// 2 bytes) via read-modify-write to avoid clobbering adjacent fields.
+///
+/// @returns false if @p name is not found in @p args.
 bool write_kernarg(amdgpu::GpuMemory *memory, uint64_t kernarg_addr,
                    const KernelArgMap &args, const std::string &name,
-                   uint32_t value) {
+                   uint64_t value) {
   auto it = args.find(name);
   if (it == args.end()) {
     return false;
   }
   uint64_t addr = kernarg_addr + it->second.offset;
-  if (it->second.size == 2) {
-    // uint16: read-modify-write to preserve adjacent half.
+  switch (it->second.size) {
+  case 1: {
+    uint64_t aligned = addr & ~3ULL;
+    uint32_t dword = memory->read32(aligned);
+    uint32_t shift = (addr & 3) * 8;
+    dword &= ~(0xFFu << shift);
+    dword |= (static_cast<uint32_t>(value) & 0xFF) << shift;
+    memory->write32(aligned, dword);
+    break;
+  }
+  case 2: {
     uint64_t aligned = addr & ~3ULL;
     uint32_t dword = memory->read32(aligned);
     uint32_t shift = (addr & 2) * 8;
     dword &= ~(0xFFFFu << shift);
-    dword |= (value & 0xFFFF) << shift;
+    dword |= (static_cast<uint32_t>(value) & 0xFFFF) << shift;
     memory->write32(aligned, dword);
-  } else {
-    memory->write32(addr, value);
+    break;
+  }
+  case 4:
+    memory->write32(addr, static_cast<uint32_t>(value));
+    break;
+  case 8:
+    memory->write32(addr, static_cast<uint32_t>(value));
+    memory->write32(addr + 4, static_cast<uint32_t>(value >> 32));
+    break;
+  default:
+    return false;
   }
   return true;
 }
