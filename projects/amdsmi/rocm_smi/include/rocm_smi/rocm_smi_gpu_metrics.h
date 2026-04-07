@@ -1131,6 +1131,15 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricTempVrSoc,
   kMetricTempVrMem,
   kMetricTempHbm,
+  kMetricTempGfx,      // APU: v2_4, v3_0
+  kMetricTempSoc,      // APU: v2_4, v3_0
+  kMetricTempCore,     // APU: v2_4[8], v3_0[16]
+  kMetricTempL3,       // APU: v2_4
+  kMetricTempSkin,     // APU: v3_0
+  kMetricAvgTempGfx,   // APU: v2_4
+  kMetricAvgTempSoc,   // APU: v2_4
+  kMetricAvgTempCore,  // APU: v2_4[8]
+  kMetricAvgTempL3,    // APU: v2_4[2]
 
   // kGpuMetricUtilization counters
   kMetricAvgGfxActivity,
@@ -1140,6 +1149,12 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricMemActivityAccumulator,
   kMetricVcnActivity,   // v1.4
   kMetricJpegActivity,  // v1.5
+  kMetricAvgIpuActivity,     // APU: v3_0[8]
+  kMetricAvgCoreC0Activity,  // APU: v3_0[16]
+  kMetricAvgDramReads,       // APU: v3_0
+  kMetricAvgDramWrites,      // APU: v3_0
+  kMetricAvgIpuReads,        // APU: v3_0
+  kMetricAvgIpuWrites,       // APU: v3_0
 
   // kGpuMetricAverageClock counters
   kMetricAvgGfxClockFrequency,
@@ -1149,6 +1164,10 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricAvgDClock0Frequency,
   kMetricAvgVClock1Frequency,
   kMetricAvgDClock1Frequency,
+  kMetricAvgFClockFrequency,      // APU: v2_4, v3_0
+  kMetricAvgVpeClockFrequency,    // APU: v3_0
+  kMetricAvgIpuClockFrequency,    // APU: v3_0
+  kMetricAvgMpIpuClockFrequency,  // APU: v3_0
 
   // kGpuMetricCurrentClock counters
   kMetricCurrGfxClock,  // v1.4: Changed to multi-valued
@@ -1158,6 +1177,11 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricCurrDClock0,  // v1.4: Changed to multi-valued
   kMetricCurrVClock1,
   kMetricCurrDClock1,
+  kMetricCurrFClock,             // APU: v2_4
+  kMetricCurrCoreClock,          // APU: v2_4[8], v3_0[16]
+  kMetricCurrL3Clock,            // APU: v2_4[2]
+  kMetricCurrCoreMaxFrequency,   // APU: v3_0
+  kMetricCurrGfxMaxFrequency,    // APU: v3_0
 
   // kGpuMetricThrottleStatus counters
   kMetricThrottleStatus,
@@ -1168,6 +1192,7 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
 
   // kGpuMetricCurrentFanSpeed counters
   kMetricCurrFanSpeed,
+  kMetricFanPwm,  // APU: v2_4
 
   // kGpuMetricLinkWidthSpeed counters
   kMetricPcieLinkWidth,
@@ -1188,15 +1213,33 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricAvgSocketPower,
   kMetricCurrSocketPower,    // v1.4
   kMetricEnergyAccumulator,  // v1.4
+  kMetricAvgCpuPower,             // APU: v2_4
+  kMetricAvgSocPower,             // APU: v2_4
+  kMetricAvgGfxPower,             // APU: v2_4, v3_0
+  kMetricAvgCorePower,            // APU: v2_4[8], v3_0[16]
+  kMetricAvgIpuPower,             // APU: v3_0
+  kMetricAvgApuPower,             // APU: v3_0
+  kMetricAvgDgpuPower,            // APU: v3_0
+  kMetricAvgAllCorePower,         // APU: v3_0
+  kMetricAvgSysPower,             // APU: v3_0
+  kMetricStapmPowerLimit,         // APU: v3_0
+  kMetricCurrentStapmPowerLimit,  // APU: v3_0
 
   // kGpuMetricVoltage counters
   kMetricVoltageSoc,  // v1.3
   kMetricVoltageGfx,  // v1.3
   kMetricVoltageMem,  // v1.3
+  kMetricAvgCpuVoltage,  // APU: v2_4
+  kMetricAvgSocVoltage,  // APU: v2_4
+  kMetricAvgGfxVoltage,  // APU: v2_4
+  kMetricAvgCpuCurrent,  // APU: v2_4
+  kMetricAvgSocCurrent,  // APU: v2_4
+  kMetricAvgGfxCurrent,  // APU: v2_4
 
   // kGpuMetricTimestamp counters
   kMetricTSClockCounter,
   kMetricTSFirmware,
+  kMetricTimeFilterAlphaValue,  // APU: v3_0
 
   // kMetricAccumulationCounter counters
   kMetricAccumulationCounter,            // v1.6
@@ -1205,6 +1248,13 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricSocketThmResidencyAccumulator,  // v1.6
   kMetricVRThmResidencyAccumulator,      // v1.6
   kMetricHBMThmResidencyAccumulator,     // v1.6
+  kMetricThrottleResidencyProchot,  // APU: v3_0
+  kMetricThrottleResidencySpl,      // APU: v3_0
+  kMetricThrottleResidencyFppt,     // APU: v3_0
+  kMetricThrottleResidencySppt,     // APU: v3_0
+  kMetricThrottleResidencyThmCore,  // APU: v3_0
+  kMetricThrottleResidencyThmGfx,   // APU: v3_0
+  kMetricThrottleResidencyThmSoc,   // APU: v3_0
 
   // kGpuMetricPartition
   kGpuMetricNumPartition,  // v1.6

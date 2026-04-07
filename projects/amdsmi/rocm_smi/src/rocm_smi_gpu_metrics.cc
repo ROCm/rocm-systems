@@ -187,6 +187,15 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
     {AMDGpuMetricsUnitType_t::kMetricTempVrSoc, "TempVrSoc"},
     {AMDGpuMetricsUnitType_t::kMetricTempVrMem, "TempVrMem"},
     {AMDGpuMetricsUnitType_t::kMetricTempHbm, "TempHbm"},
+    {AMDGpuMetricsUnitType_t::kMetricTempGfx, "TempGfx"},
+    {AMDGpuMetricsUnitType_t::kMetricTempSoc, "TempSoc"},
+    {AMDGpuMetricsUnitType_t::kMetricTempCore, "TempCore"},
+    {AMDGpuMetricsUnitType_t::kMetricTempL3, "TempL3"},
+    {AMDGpuMetricsUnitType_t::kMetricTempSkin, "TempSkin"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgTempGfx, "AvgTempGfx"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgTempSoc, "AvgTempSoc"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgTempCore, "AvgTempCore"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgTempL3, "AvgTempL3"},
 
     // kGpuMetricUtilization counters
     {AMDGpuMetricsUnitType_t::kMetricAvgGfxActivity, "AvgGfxActivity"},
@@ -196,6 +205,12 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
     {AMDGpuMetricsUnitType_t::kMetricMemActivityAccumulator, "MemActivityAcc"},
     {AMDGpuMetricsUnitType_t::kMetricVcnActivity, "VcnActivity"},   /* v1.4 */
     {AMDGpuMetricsUnitType_t::kMetricJpegActivity, "JpegActivity"}, /* v1.5 */
+    {AMDGpuMetricsUnitType_t::kMetricAvgIpuActivity, "AvgIpuActivity"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgCoreC0Activity, "AvgCoreC0Activity"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgDramReads, "AvgDramReads"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgDramWrites, "AvgDramWrites"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgIpuReads, "AvgIpuReads"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgIpuWrites, "AvgIpuWrites"},
 
     // kGpuMetricAverageClock counters
     {AMDGpuMetricsUnitType_t::kMetricAvgGfxClockFrequency, "AvgGfxClockFrequency"},
@@ -205,6 +220,10 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
     {AMDGpuMetricsUnitType_t::kMetricAvgDClock0Frequency, "AvgDClock0Frequency"},
     {AMDGpuMetricsUnitType_t::kMetricAvgVClock1Frequency, "AvgVClock1Frequency"},
     {AMDGpuMetricsUnitType_t::kMetricAvgDClock1Frequency, "AvgDClock1Frequency"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgFClockFrequency, "AvgFClockFrequency"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgVpeClockFrequency, "AvgVpeClockFrequency"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgIpuClockFrequency, "AvgIpuClockFrequency"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgMpIpuClockFrequency, "AvgMpIpuClockFrequency"},
 
     // kGpuMetricCurrentClock counters
     {AMDGpuMetricsUnitType_t::kMetricCurrGfxClock, "CurrGfxClock"}, /* v1.4: Changed to array */
@@ -214,6 +233,11 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
     {AMDGpuMetricsUnitType_t::kMetricCurrDClock0, "CurrDClock0"}, /* v1.4: Changed to array */
     {AMDGpuMetricsUnitType_t::kMetricCurrVClock1, "CurrVClock1"},
     {AMDGpuMetricsUnitType_t::kMetricCurrDClock1, "CurrDClock1"},
+    {AMDGpuMetricsUnitType_t::kMetricCurrFClock, "CurrFClock"},
+    {AMDGpuMetricsUnitType_t::kMetricCurrCoreClock, "CurrCoreClock"},
+    {AMDGpuMetricsUnitType_t::kMetricCurrL3Clock, "CurrL3Clock"},
+    {AMDGpuMetricsUnitType_t::kMetricCurrCoreMaxFrequency, "CurrCoreMaxFrequency"},
+    {AMDGpuMetricsUnitType_t::kMetricCurrGfxMaxFrequency, "CurrGfxMaxFrequency"},
 
     // kGpuMetricThrottleStatus counters
     {AMDGpuMetricsUnitType_t::kMetricThrottleStatus, "ThrottleStatus"},
@@ -224,6 +248,7 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
 
     // kGpuMetricCurrentFanSpeed counters
     {AMDGpuMetricsUnitType_t::kMetricCurrFanSpeed, "CurrFanSpeed"},
+    {AMDGpuMetricsUnitType_t::kMetricFanPwm, "FanPwm"},
 
     // kGpuMetricLinkWidthSpeed counters
     {AMDGpuMetricsUnitType_t::kMetricPcieLinkWidth, "PcieLinkWidth"},
@@ -246,15 +271,33 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
     {AMDGpuMetricsUnitType_t::kMetricAvgSocketPower, "AvgSocketPower"},
     {AMDGpuMetricsUnitType_t::kMetricCurrSocketPower, "CurrSocketPower"}, /* v1.4 */
     {AMDGpuMetricsUnitType_t::kMetricEnergyAccumulator, "EnergyAcc"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgCpuPower, "AvgCpuPower"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgSocPower, "AvgSocPower"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgGfxPower, "AvgGfxPower"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgCorePower, "AvgCorePower"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgIpuPower, "AvgIpuPower"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgApuPower, "AvgApuPower"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgDgpuPower, "AvgDgpuPower"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgAllCorePower, "AvgAllCorePower"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgSysPower, "AvgSysPower"},
+    {AMDGpuMetricsUnitType_t::kMetricStapmPowerLimit, "StapmPowerLimit"},
+    {AMDGpuMetricsUnitType_t::kMetricCurrentStapmPowerLimit, "CurrentStapmPowerLimit"},
 
     // kGpuMetricVoltage counters
     {AMDGpuMetricsUnitType_t::kMetricVoltageSoc, "VoltageSoc"},
     {AMDGpuMetricsUnitType_t::kMetricVoltageGfx, "VoltageGfx"},
     {AMDGpuMetricsUnitType_t::kMetricVoltageMem, "VoltageMem"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgCpuVoltage, "AvgCpuVoltage"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgSocVoltage, "AvgSocVoltage"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgGfxVoltage, "AvgGfxVoltage"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgCpuCurrent, "AvgCpuCurrent"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgSocCurrent, "AvgSocCurrent"},
+    {AMDGpuMetricsUnitType_t::kMetricAvgGfxCurrent, "AvgGfxCurrent"},
 
     // kGpuMetricTimestamp counters
     {AMDGpuMetricsUnitType_t::kMetricTSClockCounter, "TSClockCounter"},
     {AMDGpuMetricsUnitType_t::kMetricTSFirmware, "TSFirmware"},
+    {AMDGpuMetricsUnitType_t::kMetricTimeFilterAlphaValue, "TimeFilterAlphaValue"},
 
     // kGpuMetricThrottleResidency counters
     {AMDGpuMetricsUnitType_t::kMetricAccumulationCounter, "AccumulationCounter"}, /* v1.6 */
@@ -267,6 +310,13 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
      "VRThmResidencyAccumulator"}, /* v1.6 */
     {AMDGpuMetricsUnitType_t::kMetricHBMThmResidencyAccumulator,
      "HBMThmResidencyAccumulator"}, /* v1.6 */
+    {AMDGpuMetricsUnitType_t::kMetricThrottleResidencyProchot, "ThrottleResidencyProchot"},
+    {AMDGpuMetricsUnitType_t::kMetricThrottleResidencySpl, "ThrottleResidencySpl"},
+    {AMDGpuMetricsUnitType_t::kMetricThrottleResidencyFppt, "ThrottleResidencyFppt"},
+    {AMDGpuMetricsUnitType_t::kMetricThrottleResidencySppt, "ThrottleResidencySppt"},
+    {AMDGpuMetricsUnitType_t::kMetricThrottleResidencyThmCore, "ThrottleResidencyThmCore"},
+    {AMDGpuMetricsUnitType_t::kMetricThrottleResidencyThmGfx, "ThrottleResidencyThmGfx"},
+    {AMDGpuMetricsUnitType_t::kMetricThrottleResidencyThmSoc, "ThrottleResidencyThmSoc"},
 
     // kGpuMetricPartition
     {AMDGpuMetricsUnitType_t::kGpuMetricNumPartition, "numPartition"}, /* v1.6 */
@@ -817,18 +867,73 @@ rsmi_status_t ApuMetricsBase_v30_t::populate_metrics_dynamic_tbl() {
     m_metrics_dynamic_tbl[class_id].insert(
         std::make_pair(unit_type, format_metric_row(metric, metric_name)));
   };
+  auto populate_metrics_array_table = [&](AMDGpuMetricsClassId_t class_id,
+                                          AMDGpuMetricsUnitType_t unit_type,
+                                          const auto& metric, const std::string& metric_name) {
+    using value_type = std::remove_cv_t<std::remove_reference_t<decltype(metric[0])>>;
+    AMDGpuDynamicMetricTblValues_t values;
+    values.reserve(std::size(metric));
+    const auto original_type = []() {
+      if constexpr (std::is_same_v<value_type, uint8_t>) {
+        return AMDGpuMetricsDataType_t::kUInt8;
+      } else if constexpr (std::is_same_v<value_type, uint16_t>) {
+        return AMDGpuMetricsDataType_t::kUInt16;
+      } else if constexpr (std::is_same_v<value_type, uint32_t>) {
+        return AMDGpuMetricsDataType_t::kUInt32;
+      } else {
+        return AMDGpuMetricsDataType_t::kUInt64;
+      }
+    }();
+    for (size_t idx = 0; idx < std::size(metric); ++idx) {
+      AMDGpuDynamicMetricsValue_t value{};
+      value.m_value = safe_way_to_uint64(metric[idx]);
+      value.m_info = metric_name + " : " + std::to_string(idx);
+      value.m_original_type = original_type;
+      values.emplace_back(std::move(value));
+    }
+    m_metrics_dynamic_tbl[class_id].insert(
+        std::make_pair(unit_type, std::move(values)));
+  };
 
   if (get_gpu_metrics_version_used() == AMDGpuMetricVersionFlags_t::kApuMetricV24) {
     const auto& metrics = m_apu_metrics_v24_tbl;
+    // APU v2_4 temperature fields
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                           AMDGpuMetricsUnitType_t::kMetricTempGfx, metrics.m_temperature_gfx,
+                           "temperature_gfx");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                           AMDGpuMetricsUnitType_t::kMetricTempSoc, metrics.m_temperature_soc,
+                           "temperature_soc");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                                 AMDGpuMetricsUnitType_t::kMetricTempCore,
+                                 metrics.m_temperature_core, "temperature_core");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                                 AMDGpuMetricsUnitType_t::kMetricTempL3, metrics.m_temperature_l3,
+                                 "temperature_l3");
+    // APU v2_4 utilization fields
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
                            AMDGpuMetricsUnitType_t::kMetricAvgGfxActivity,
                            metrics.m_average_gfx_activity, "average_gfx_activity");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
                            AMDGpuMetricsUnitType_t::kMetricAvgMmActivity,
                            metrics.m_average_mm_activity, "average_mm_activity");
+    // APU v2_4 power fields
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
                            AMDGpuMetricsUnitType_t::kMetricAvgSocketPower,
                            metrics.m_average_socket_power, "average_socket_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricAvgCpuPower,
+                           metrics.m_average_cpu_power, "average_cpu_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricAvgSocPower,
+                           metrics.m_average_soc_power, "average_soc_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricAvgGfxPower,
+                           metrics.m_average_gfx_power, "average_gfx_power");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                                 AMDGpuMetricsUnitType_t::kMetricAvgCorePower,
+                                 metrics.m_average_core_power, "average_core_power");
+    // APU v2_4 average clock fields
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
                            AMDGpuMetricsUnitType_t::kMetricAvgGfxClockFrequency,
                            metrics.m_average_gfxclk_frequency, "average_gfxclk_frequency");
@@ -839,11 +944,15 @@ rsmi_status_t ApuMetricsBase_v30_t::populate_metrics_dynamic_tbl() {
                            AMDGpuMetricsUnitType_t::kMetricAvgUClockFrequency,
                            metrics.m_average_uclk_frequency, "average_uclk_frequency");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
+                           AMDGpuMetricsUnitType_t::kMetricAvgFClockFrequency,
+                           metrics.m_average_fclk_frequency, "average_fclk_frequency");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
                            AMDGpuMetricsUnitType_t::kMetricAvgVClock0Frequency,
                            metrics.m_average_vclk_frequency, "average_vclk_frequency");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
                            AMDGpuMetricsUnitType_t::kMetricAvgDClock0Frequency,
                            metrics.m_average_dclk_frequency, "average_dclk_frequency");
+    // APU v2_4 current clock fields
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock,
                            AMDGpuMetricsUnitType_t::kMetricCurrGfxClock,
                            metrics.m_current_gfxclk, "current_gfxclk");
@@ -854,31 +963,137 @@ rsmi_status_t ApuMetricsBase_v30_t::populate_metrics_dynamic_tbl() {
                            AMDGpuMetricsUnitType_t::kMetricCurrUClock,
                            metrics.m_current_uclk, "current_uclk");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock,
+                           AMDGpuMetricsUnitType_t::kMetricCurrFClock,
+                           metrics.m_current_fclk, "current_fclk");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock,
                            AMDGpuMetricsUnitType_t::kMetricCurrVClock0,
                            metrics.m_current_vclk, "current_vclk");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock,
                            AMDGpuMetricsUnitType_t::kMetricCurrDClock0,
                            metrics.m_current_dclk, "current_dclk");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock,
+                                 AMDGpuMetricsUnitType_t::kMetricCurrCoreClock,
+                                 metrics.m_current_coreclk, "current_coreclk");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock,
+                                 AMDGpuMetricsUnitType_t::kMetricCurrL3Clock,
+                                 metrics.m_current_l3clk, "current_l3clk");
+    // APU v2_4 throttle / fan / average temperature / voltage-current fields
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricThrottleStatus,
                            AMDGpuMetricsUnitType_t::kMetricThrottleStatus,
                            metrics.m_throttle_status, "throttle_status");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricThrottleStatus,
                            AMDGpuMetricsUnitType_t::kMetricIndepThrottleStatus,
                            metrics.m_indep_throttle_status, "indep_throttle_status");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentFanSpeed,
+                           AMDGpuMetricsUnitType_t::kMetricFanPwm, metrics.m_fan_pwm, "fan_pwm");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                           AMDGpuMetricsUnitType_t::kMetricAvgTempGfx,
+                           metrics.m_average_temperature_gfx, "average_temperature_gfx");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                           AMDGpuMetricsUnitType_t::kMetricAvgTempSoc,
+                           metrics.m_average_temperature_soc, "average_temperature_soc");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                                 AMDGpuMetricsUnitType_t::kMetricAvgTempCore,
+                                 metrics.m_average_temperature_core,
+                                 "average_temperature_core");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                                 AMDGpuMetricsUnitType_t::kMetricAvgTempL3,
+                                 metrics.m_average_temperature_l3, "average_temperature_l3");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricVoltage,
+                           AMDGpuMetricsUnitType_t::kMetricAvgCpuVoltage,
+                           metrics.m_average_cpu_voltage, "average_cpu_voltage");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricVoltage,
+                           AMDGpuMetricsUnitType_t::kMetricAvgSocVoltage,
+                           metrics.m_average_soc_voltage, "average_soc_voltage");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricVoltage,
+                           AMDGpuMetricsUnitType_t::kMetricAvgGfxVoltage,
+                           metrics.m_average_gfx_voltage, "average_gfx_voltage");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricVoltage,
+                           AMDGpuMetricsUnitType_t::kMetricAvgCpuCurrent,
+                           metrics.m_average_cpu_current, "average_cpu_current");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricVoltage,
+                           AMDGpuMetricsUnitType_t::kMetricAvgSocCurrent,
+                           metrics.m_average_soc_current, "average_soc_current");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricVoltage,
+                           AMDGpuMetricsUnitType_t::kMetricAvgGfxCurrent,
+                           metrics.m_average_gfx_current, "average_gfx_current");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTimestamp,
                            AMDGpuMetricsUnitType_t::kMetricTSClockCounter,
                            metrics.m_system_clock_counter, "system_clock_counter");
   } else {
     const auto& metrics = m_apu_metrics_v30_tbl;
+    // APU v3_0 temperature fields
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                           AMDGpuMetricsUnitType_t::kMetricTempGfx, metrics.m_temperature_gfx,
+                           "temperature_gfx");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                           AMDGpuMetricsUnitType_t::kMetricTempSoc, metrics.m_temperature_soc,
+                           "temperature_soc");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                                 AMDGpuMetricsUnitType_t::kMetricTempCore,
+                                 metrics.m_temperature_core, "temperature_core");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTemperature,
+                           AMDGpuMetricsUnitType_t::kMetricTempSkin, metrics.m_temperature_skin,
+                           "temperature_skin");
+    // APU v3_0 utilization and bandwidth fields
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
                            AMDGpuMetricsUnitType_t::kMetricAvgGfxActivity,
                            metrics.m_average_gfx_activity, "average_gfx_activity");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
                            AMDGpuMetricsUnitType_t::kMetricVcnActivity,
                            metrics.m_average_vcn_activity, "average_vcn_activity");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
+                                 AMDGpuMetricsUnitType_t::kMetricAvgIpuActivity,
+                                 metrics.m_average_ipu_activity, "average_ipu_activity");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
+                                 AMDGpuMetricsUnitType_t::kMetricAvgCoreC0Activity,
+                                 metrics.m_average_core_c0_activity,
+                                 "average_core_c0_activity");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
+                           AMDGpuMetricsUnitType_t::kMetricAvgDramReads,
+                           metrics.m_average_dram_reads, "average_dram_reads");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
+                           AMDGpuMetricsUnitType_t::kMetricAvgDramWrites,
+                           metrics.m_average_dram_writes, "average_dram_writes");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
+                           AMDGpuMetricsUnitType_t::kMetricAvgIpuReads,
+                           metrics.m_average_ipu_reads, "average_ipu_reads");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricUtilization,
+                           AMDGpuMetricsUnitType_t::kMetricAvgIpuWrites,
+                           metrics.m_average_ipu_writes, "average_ipu_writes");
+    // APU v3_0 power fields
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
                            AMDGpuMetricsUnitType_t::kMetricAvgSocketPower,
                            metrics.m_average_socket_power, "average_socket_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricAvgIpuPower,
+                           metrics.m_average_ipu_power, "average_ipu_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricAvgApuPower,
+                           metrics.m_average_apu_power, "average_apu_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricAvgGfxPower,
+                           metrics.m_average_gfx_power, "average_gfx_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricAvgDgpuPower,
+                           metrics.m_average_dgpu_power, "average_dgpu_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricAvgAllCorePower,
+                           metrics.m_average_all_core_power, "average_all_core_power");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                                 AMDGpuMetricsUnitType_t::kMetricAvgCorePower,
+                                 metrics.m_average_core_power, "average_core_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricAvgSysPower,
+                           metrics.m_average_sys_power, "average_sys_power");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricStapmPowerLimit,
+                           metrics.m_stapm_power_limit, "stapm_power_limit");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy,
+                           AMDGpuMetricsUnitType_t::kMetricCurrentStapmPowerLimit,
+                           metrics.m_current_stapm_power_limit,
+                           "current_stapm_power_limit");
+    // APU v3_0 average and current clock fields
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
                            AMDGpuMetricsUnitType_t::kMetricAvgGfxClockFrequency,
                            metrics.m_average_gfxclk_frequency, "average_gfxclk_frequency");
@@ -889,11 +1104,61 @@ rsmi_status_t ApuMetricsBase_v30_t::populate_metrics_dynamic_tbl() {
                            AMDGpuMetricsUnitType_t::kMetricAvgUClockFrequency,
                            metrics.m_average_uclk_frequency, "average_uclk_frequency");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
+                           AMDGpuMetricsUnitType_t::kMetricAvgFClockFrequency,
+                           metrics.m_average_fclk_frequency, "average_fclk_frequency");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
                            AMDGpuMetricsUnitType_t::kMetricAvgVClock0Frequency,
                            metrics.m_average_vclk_frequency, "average_vclk_frequency");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
+                           AMDGpuMetricsUnitType_t::kMetricAvgVpeClockFrequency,
+                           metrics.m_average_vpeclk_frequency, "average_vpeclk_frequency");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
+                           AMDGpuMetricsUnitType_t::kMetricAvgIpuClockFrequency,
+                           metrics.m_average_ipuclk_frequency, "average_ipuclk_frequency");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricAverageClock,
+                           AMDGpuMetricsUnitType_t::kMetricAvgMpIpuClockFrequency,
+                           metrics.m_average_mpipu_frequency, "average_mpipu_frequency");
+    populate_metrics_array_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock,
+                                 AMDGpuMetricsUnitType_t::kMetricCurrCoreClock,
+                                 metrics.m_current_coreclk, "current_coreclk");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock,
+                           AMDGpuMetricsUnitType_t::kMetricCurrCoreMaxFrequency,
+                           metrics.m_current_core_maxfreq, "current_core_maxfreq");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricCurrentClock,
+                           AMDGpuMetricsUnitType_t::kMetricCurrGfxMaxFrequency,
+                           metrics.m_current_gfx_maxfreq, "current_gfx_maxfreq");
+    // APU v3_0 throttle residency and filter fields
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency,
+                           AMDGpuMetricsUnitType_t::kMetricThrottleResidencyProchot,
+                           metrics.m_throttle_residency_prochot,
+                           "throttle_residency_prochot");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency,
+                           AMDGpuMetricsUnitType_t::kMetricThrottleResidencySpl,
+                           metrics.m_throttle_residency_spl, "throttle_residency_spl");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency,
+                           AMDGpuMetricsUnitType_t::kMetricThrottleResidencyFppt,
+                           metrics.m_throttle_residency_fppt, "throttle_residency_fppt");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency,
+                           AMDGpuMetricsUnitType_t::kMetricThrottleResidencySppt,
+                           metrics.m_throttle_residency_sppt, "throttle_residency_sppt");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency,
+                           AMDGpuMetricsUnitType_t::kMetricThrottleResidencyThmCore,
+                           metrics.m_throttle_residency_thm_core,
+                           "throttle_residency_thm_core");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency,
+                           AMDGpuMetricsUnitType_t::kMetricThrottleResidencyThmGfx,
+                           metrics.m_throttle_residency_thm_gfx,
+                           "throttle_residency_thm_gfx");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency,
+                           AMDGpuMetricsUnitType_t::kMetricThrottleResidencyThmSoc,
+                           metrics.m_throttle_residency_thm_soc,
+                           "throttle_residency_thm_soc");
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTimestamp,
                            AMDGpuMetricsUnitType_t::kMetricTSClockCounter,
                            metrics.m_system_clock_counter, "system_clock_counter");
+    populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricTimestamp,
+                           AMDGpuMetricsUnitType_t::kMetricTimeFilterAlphaValue,
+                           metrics.m_time_filter_alphavalue, "time_filter_alphavalue");
   }
 
   {
