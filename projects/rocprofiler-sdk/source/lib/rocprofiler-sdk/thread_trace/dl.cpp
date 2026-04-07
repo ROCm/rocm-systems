@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
 
 #include <dlfcn.h>
 #include <cassert>
@@ -50,6 +52,45 @@ DL::DL(const char* libpath)
 DL::~DL()
 {
     if(handle) dlclose(handle);
+}
+
+AQLProfileDL::AQLProfileDL()
+{
+    // Try to load libhsa-amd-aqlprofile64.so.1
+    const char* lib_names[] = {
+        "libhsa-amd-aqlprofile64.so.1",
+        "libhsa-amd-aqlprofile64.so",
+    };
+
+    for(const char* lib_name : lib_names)
+    {
+        handle = dlopen(lib_name, RTLD_LAZY | RTLD_LOCAL);
+        if(handle) break;
+    }
+
+    if(!handle)
+    {
+        ROCP_WARNING << "Failed to load libhsa-amd-aqlprofile64.so.1: " << dlerror();
+        return;
+    }
+
+    get_buffer_packets_fn =
+        reinterpret_cast<GetBufferPacketsFn*>(dlsym(handle, "aqlprofile_att_get_buffer_packets"));
+    update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
+        dlsym(handle, "aqlprofile_att_update_buffer_status"));
+}
+
+AQLProfileDL::~AQLProfileDL()
+{
+    if(handle) dlclose(handle);
+}
+
+std::shared_ptr<AQLProfileDL>
+get_aqlprofile_dl()
+{
+    static auto& instance = common::static_object<std::shared_ptr<AQLProfileDL>>::construct(
+        std::make_shared<AQLProfileDL>());
+    return *instance;
 }
 
 }  // namespace thread_trace
