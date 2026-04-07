@@ -56,5 +56,6 @@ looping_lds_kernel(float* __restrict__ a,
     a[index] = interm[threadIdx.x % SHM_SIZE] + c[index];
 
     asm volatile("s_mov_b32 m0, %0" : : "r"(ttracedata));
-    asm volatile("s_nop 1; s_ttracedata;");
+    asm volatile("s_nop 1");
+    asm volatile("s_ttracedata");
 }
