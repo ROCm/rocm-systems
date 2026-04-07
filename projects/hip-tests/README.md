@@ -18,7 +18,7 @@ The `rocm-systems/projects/hip-tests` repository maintains several branches. The
 
 ## Building HIP Catch tests
 
-To build HIP from source, please check instructions on the [HIP page](https://rocm.docs.amd.com/projects/HIP/en/latest/install/build.html).  
+To build HIP from source, review instructions on the [HIP page](https://rocm.docs.amd.com/projects/HIP/en/latest/install/build.html).  
 
 `rocm-systems/projects/hip-tests` can be built using the following instructions. To start you must setup the environment needed to build the HIP tests by setting the ``ROCM_PATH`` environent variable to point to the current installation of ROCm:
 
