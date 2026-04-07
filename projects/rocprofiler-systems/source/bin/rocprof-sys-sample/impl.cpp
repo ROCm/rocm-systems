@@ -79,7 +79,10 @@ get_updated_envs()
 int
 get_verbose_level()
 {
-    return get_env<int>("ROCPROFSYS_VERBOSE", verbose, false);
+    verbose     = get_env<int>("ROCPROFSYS_VERBOSE", verbose, false);
+    auto _debug = get_env<bool>("ROCPROFSYS_DEBUG", false, false);
+    if(_debug) verbose += rocprofsys::common::debug_verbose_boost;
+    return verbose;
 }
 
 std::vector<char*>

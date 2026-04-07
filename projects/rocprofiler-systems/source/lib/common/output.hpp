@@ -61,8 +61,9 @@ print_environment(const std::vector<char*>& _env, const UpdatedEnvsT& _updated_e
 
     auto is_updated = [&](const char* entry) {
         auto sv = std::string_view{ entry };
-        return std::any_of(_updated_envs.begin(), _updated_envs.end(),
-                           [sv](const auto& key) { return sv.find(key) == 0; });
+        return std::any_of(
+            _updated_envs.begin(), _updated_envs.end(),
+            [sv](const auto& key) { return sv.substr(0, key.size()) == key; });
     };
 
     auto partition_point =
@@ -76,7 +77,9 @@ print_environment(const std::vector<char*>& _env, const UpdatedEnvsT& _updated_e
         constexpr std::string_view rocprofsys_prefix = "ROCPROFSYS";
         std::copy_if(partition_point, valid_end, std::back_inserter(_general_vars),
                      [rocprofsys_prefix](const char* entry) {
-                         return std::string_view{ entry }.find(rocprofsys_prefix) == 0;
+                         auto sv = std::string_view{ entry };
+                         return sv.substr(0, rocprofsys_prefix.size()) ==
+                                rocprofsys_prefix;
                      });
     }
 

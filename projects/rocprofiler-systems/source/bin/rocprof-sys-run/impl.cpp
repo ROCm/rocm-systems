@@ -40,12 +40,6 @@ using namespace ::timemory::join;
 using ::tim::get_env;
 using ::tim::log::stream;
 
-namespace
-{
-using rocprofsys::common::update_mode;
-
-auto original_envs = std::unordered_set<std::string>{};
-
 int
 get_verbose(parser_data_t& _data)
 {
@@ -55,6 +49,12 @@ get_verbose(parser_data_t& _data)
     if(_debug) verbose += rocprofsys::common::debug_verbose_boost;
     return verbose;
 }
+
+namespace
+{
+using rocprofsys::common::update_mode;
+
+auto original_envs = std::unordered_set<std::string>{};
 
 parser_data_t&
 get_initial_environment(parser_data_t& _data)
