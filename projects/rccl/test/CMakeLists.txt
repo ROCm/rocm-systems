@@ -181,7 +181,6 @@ if(BUILD_TESTS)
   # to the unit tests to ensure it is included for the existing rccl-UnitTests execution
   if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
     list(APPEND TEST_SOURCE_FILES
-      common/debug_stub.cc
       ../src/misc/recorder.cc
       ../src/misc/proxy_trace/proxy_trace.cc
     )

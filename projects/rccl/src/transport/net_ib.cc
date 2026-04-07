@@ -36,6 +36,9 @@
 static char ncclIbIfName[MAX_IF_NAME_SIZE+1];
 static union ncclSocketAddress ncclIbIfAddr;
 
+	
+static ncclNetCommConfig_t ibContext;
+
 struct ncclIbMr {
   uintptr_t addr;
   size_t pages;
@@ -526,7 +529,7 @@ NCCL_PARAM(IbDisable, "IB_DISABLE", 0);
 NCCL_PARAM(IbMergeVfs, "IB_MERGE_VFS", 1);
 NCCL_PARAM(IbMergeNics, "IB_MERGE_NICS", 1);
 
-// Returns 0 if this is the path of two VFs of the same physical device
+// Returns 1 if this is the path of two VFs of the same physical device
 static int ncclIbMatchVfPath(char* path1, char* path2) {
   // Merge multi-port NICs into the same PCI device
   if (ncclParamIbMergeVfs()) {
@@ -536,24 +539,46 @@ static int ncclIbMatchVfPath(char* path1, char* path2) {
   }
 }
 
+/**
+ * Assumes PCIe path ends with xxxx:xx:xx.x 
+ */
+ static void ncclIbNormalizePciPath(const char* in, char* out, size_t out_size) {
+  if (!in || !out || out_size == 0) return;
+  // Safe copy with truncation
+  size_t len = strnlen(in, out_size - 1);
+  memmove(out, in, len);
+  out[len] = '\0';
+  if (len < 4) return;
+  // Merge multi-port NICs (.1/.2/.3 -> .0)
+  out[len - 1] = '0';
+  // Merge VFs if enabled
+  if (ncclParamIbMergeVfs()) {
+    out[len - 3] = '0';
+    out[len - 4] = '0';
+  }
+}
+
 static ncclResult_t ncclIbGetPciPath(char* devName, char** path, int* realPort) {
   char devicePath[PATH_MAX];
   snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
   char* p = realpath(devicePath, NULL);
+  // Keep real path unchanged
+  *path = p;
   if (p == NULL) {
     WARN("Could not find real path of %s (%s)", devName, devicePath);
   } else {
-    // Merge multi-port NICs into the same PCI device
-    p[strlen(p)-1] = '0';
-    // Also merge virtual functions (VF) into the same device
-    if (ncclParamIbMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
+    char normalized[PATH_MAX];
+    ncclIbNormalizePciPath(p, normalized, PATH_MAX);
     // Keep the real port aside (the ibv port is always 1 on recent cards)
     *realPort = 0;
-    for (int d=0; d<ncclNIbDevs; d++) {
-      if (ncclIbMatchVfPath(p, ncclIbDevs[d].pciPath)) (*realPort)++;
+    for (int d = 0; d < ncclNIbDevs; d++) {
+      char otherNorm[PATH_MAX];
+      ncclIbNormalizePciPath(ncclIbDevs[d].pciPath, otherNorm, PATH_MAX);
+      if (ncclIbMatchVfPath(normalized, otherNorm)) {
+        (*realPort)++;
+      }
     }
   }
-  *path = p;
   return ncclSuccess;
 }
 
@@ -1315,6 +1340,14 @@ struct ncclIbRequest {
     } iput;
   };
 };
+
+// Check if request has any pending events (IBV operations in flight)
+static inline bool ncclIbRequestHasEvents(struct ncclIbRequest* r) {
+  for (int i = 0; i < NCCL_IB_MAX_DEVS_PER_NIC; i++) {
+    if (r->events[i] != 0) return true;
+  }
+  return false;
+}
 
 struct ncclIbNetCommDevBase {
   int ibDevN;
@@ -2106,7 +2139,31 @@ ib_recv:
 
     // Allocate Flush dummy buffer for GPU Direct RDMA
     if (rComm->flushEnabled) {
+      bool gpuFlushRegistered = false;
+      rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
+      rCommDev->gpuFlush.gpuMr = nullptr;
+      rCommDev->gpuFlush.dmabuf_fd = -1;
+
       if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+        #if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        if (ncclCuMemEnable()) {
+          NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, fail);
+          CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&rCommDev->gpuFlush.dmabuf_fd,
+                      (CUdeviceptr)rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int),
+                      CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0), ret, cumem_flush_hsa);
+          NCCLCHECKGOTO(wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd,
+                        0, sizeof(int), (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem,
+                        rCommDev->gpuFlush.dmabuf_fd,
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, cumem_flush_hsa);
+          gpuFlushRegistered = true;
+          goto flush_reg_done;
+cumem_flush_hsa:
+          if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
+            close(rCommDev->gpuFlush.dmabuf_fd);
+            rCommDev->gpuFlush.dmabuf_fd = -1;
+          }
+        }
+#else
 #if defined(HIP_UNCACHED_MEMORY)
         NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocUncached), ret, fail);
 #else
@@ -2117,24 +2174,28 @@ ib_recv:
           uint64_t export_offset = 0;
           void *aligned_ptr = NULL;
           size_t aligned_size = 0;
-          get_aligned_ptr_and_size(rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int) /*devicebuffersize*/, &aligned_ptr, &aligned_size);
-          hsa_status_t export_status = pfn_hsa_amd_portable_export_dmabuf(aligned_ptr, aligned_size, &rCommDev->gpuFlush.dmabuf_fd, &export_offset);
-          if (rCommDev->gpuFlush.dmabuf_fd < 0 || export_status != HSA_STATUS_SUCCESS)
-          {
-            WARN("Failed to export DMA BUF");
-            goto fail;
+          get_aligned_ptr_and_size(rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), &aligned_ptr, &aligned_size);
+          HSACHECKGOTO(hsa_amd_portable_export_dmabuf(aligned_ptr, aligned_size, &rCommDev->gpuFlush.dmabuf_fd, &export_offset), ret, peermem_flush);
+          if (wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int),
+                        (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem, rCommDev->gpuFlush.dmabuf_fd,
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) != ncclSuccess) goto peermem_flush;
+          gpuFlushRegistered = true;
+          goto flush_reg_done;
+peermem_flush:
+          if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
+            close(rCommDev->gpuFlush.dmabuf_fd);
+            rCommDev->gpuFlush.dmabuf_fd = -1;
           }
-          NCCLCHECKGOTO(wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int), (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem /*iova*/, rCommDev->gpuFlush.dmabuf_fd, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, fail);
         }
-        else
-        {
-          rCommDev->gpuFlush.dmabuf_fd = -1;
-          NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, fail);
+        #endif
+        flush_reg_done:
+                if (!gpuFlushRegistered) {
+                  if (rCommDev->gpuFlush.gpuFlushGpuMem) {
+                    ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem);
+                    rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
+                  }
+                  rCommDev->gpuFlush.gpuMr = nullptr;
         }
-      } else {
-        rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
-        rCommDev->gpuFlush.gpuMr = nullptr;
-        rCommDev->gpuFlush.dmabuf_fd = -1;
       }
       NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->gpuFlush.hostMr, rCommDev->base.pd, &rComm->gpuFlushHostMem, sizeof(int), IBV_ACCESS_LOCAL_WRITE), ret, fail);
       rCommDev->gpuFlush.sge.addr = (uint64_t)&rComm->gpuFlushHostMem;
@@ -2365,10 +2426,12 @@ ncclResult_t ncclIbDeregMr(void* comm, void* mhandle) {
 }
 
 NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
+RCCL_PARAM(IbSplitDataThreshold, "IB_SPLIT_DATA_THRESHOLD", 128);
 
 ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->fifo[slot];
+  ncclResult_t ret = ncclSuccess;
   int nreqs = slots[0].nreqs;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
@@ -2424,6 +2487,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   // Multi-QP: make sure IB writes are multiples of 128B so that LL and LL128 protocols still work
   const int align = 128;
   int nqps = ncclParamIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps;
+
+  // For small messages (< splitDataThreshold) with multiple QPs, avoid splitting:
+  // send the entire payload through one QP selected via round-robin, post zero-length WRs on the rest.
+  int smallMsgActiveQp = comm->fifoHead % nqps;
+  int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
+
   for (int i = 0; i < nqps; i++) {
     int qpIndex = comm->base.qpIndex;
     ncclIbQp* qp = comm->base.qps + qpIndex;
@@ -2435,7 +2504,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // Select proper rkey (needed even for 0-size send)
       comm->wrs[r].wr.rdma.rkey = slots[r].rkeys[qp->remDevIdx];
 
-      int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      int chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == smallMsgActiveQp) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      }
       int length = std::min(reqs[r]->send.size-reqs[r]->send.offset, chunkSize);
       if (length <= 0) {
         comm->wrs[r].sg_list = NULL;
@@ -2476,10 +2550,22 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       reqs[r]->pInfo[0].nEventHandles++;
     }
 #endif
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
+    ret = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
+    if (ret != ncclSuccess) {
+      // Mark connection as fatal. DO NOT free requests here - the caller
+      // (ncclIbIsend) owns the requests and will handle cleanup.
+      // Some requests may have events from earlier QP iterations.
+      ncclIbStatsFatalError(&comm->base.stats);
+      return ret;
+    }
 
     for (int r=0; r<nreqs; r++) {
-      int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      int chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == smallMsgActiveQp) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      }
       reqs[r]->send.offset += chunkSize;
       comm->sges[r].addr += chunkSize;
       comm->wrs[r].wr.rdma.remote_addr += chunkSize;
@@ -2499,23 +2585,25 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
 ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  ncclResult_t ret = ncclSuccess;
+  struct ncclIbRequest* req = NULL;
+  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandle;
+  int nreqs = 0;
+  volatile struct ncclIbSendFifo* slots = NULL;
+  int slot = (comm->fifoHead) % MAX_REQUESTS;
+  struct ncclIbRequest** reqs = comm->fifoReqs[slot];
+  uint64_t idx = 0;
+
   if (comm->base.ready == 0) {
     WARN("NET/IB: ncclIbIsend() called when comm->base.ready == 0");
     *request = NULL;
     return ncclInternalError;
   }
-  NCCLCHECK(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__));
-
-  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandle;
+  NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__), ret, fail);
 
   // Wait for the receiver to have posted the corresponding receive
-  int nreqs = 0;
-  volatile struct ncclIbSendFifo* slots;
-
-  int slot = (comm->fifoHead) % MAX_REQUESTS;
-  struct ncclIbRequest** reqs = comm->fifoReqs[slot];
   slots = comm->fifo[slot];
-  uint64_t idx = comm->fifoHead+1;
+  idx = comm->fifoHead+1;
   if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
   nreqs = slots[0].nreqs;
   // Wait until all data has arrived
@@ -2535,8 +2623,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
       return ncclInternalError;
     }
 
-    struct ncclIbRequest* req;
-    NCCLCHECK(ncclIbGetRequest(&comm->base, &req));
+    NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, fail);
     req->type = NCCL_NET_IB_REQ_SEND;
     req->sock = &comm->base.sock;
     req->base = &comm->base;
@@ -2576,7 +2663,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     }
 
     TIME_START(0);
-    NCCLCHECK(ncclIbMultiSend(comm, slot));
+    NCCLCHECKGOTO(ncclIbMultiSend(comm, slot), ret, fail);
 
     // Clear slots[0]->nreqs, as well as other fields to help debugging and sanity checks
     memset((void*)slots, 0, sizeof(struct ncclIbSendFifo));
@@ -2588,6 +2675,28 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
 
   *request = NULL;
   return ncclSuccess;
+
+fail:
+  ncclIbStatsFatalError(&comm->base.stats);
+  if (req) {
+    // If events were added (IBV ops posted), we can't free immediately -
+    // completions may still arrive. Mark as failed and return it so
+    // caller can call Test to drain completions.
+    if (ncclIbRequestHasEvents(req)) {
+      req->type = NCCL_NET_IB_REQ_FAILED;
+      *request = req;
+      // Return success so caller proceeds to call Test() which will drain
+      // completions. The fatal error is recorded in stats and will be
+      // caught on the next operation.
+      return ncclSuccess;
+    } else {
+      ncclIbFreeRequest(req);
+      *request = NULL;
+    }
+  } else {
+    *request = NULL;
+  }
+  return ret;
 }
 
 ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, size_t* sizes, int* tags, void** mhandles, struct ncclIbRequest* req) {
@@ -2757,9 +2866,14 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
   // We don't know which devIndex the recv was on, so we flush on all devices
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     struct ibv_send_wr wr;
+    // Check if GPU flush buffer was successfully registered
+    // If not, fall back to using user data buffer for flush
+    bool useGpuFlushMem = rcclParamIbGdrFlushGpuMemNoRelaxedOrdering() &&
+                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr &&
+                          comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = req - comm->base.reqs;
-    if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+    if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
       wr.sg_list = &comm->devs[i].gpuFlush.sge;
@@ -2771,7 +2885,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     }
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = req - comm->base.reqs;
-    if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+    if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {

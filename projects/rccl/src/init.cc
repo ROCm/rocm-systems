@@ -92,7 +92,7 @@
 #define NCCL_GROUP_CUDA_STREAM 1 // CGMD: CUDA 9.0,9.1 Need to use an internal CUDA stream
 #endif
 
-#define TEMP_BUFF_SIZE (4 * 1024 * 1024) // Define Size for Temporary Buffer for Direct RS
+#define TEMP_BUFF_SIZE (16 * 1024 * 1024) // Define Size for Temporary Buffer for Direct RS
 
 using namespace rccl;
 
@@ -106,7 +106,7 @@ NCCL_PARAM(GroupCudaStream, "GROUP_CUDA_STREAM", NCCL_GROUP_CUDA_STREAM);
 
 NCCL_PARAM(CheckPointers, "CHECK_POINTERS", 0);
 NCCL_PARAM(CommBlocking, "COMM_BLOCKING", NCCL_CONFIG_UNDEF_INT);
-NCCL_PARAM(RuntimeConnect, "RUNTIME_CONNECT", 1);
+NCCL_PARAM(RuntimeConnect, "RUNTIME_CONNECT", 0);
 NCCL_PARAM(WinEnable, "WIN_ENABLE", 1);
 NCCL_PARAM(CollnetEnable, "COLLNET_ENABLE", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(CtaPolicy, "CTA_POLICY", NCCL_CONFIG_UNDEF_INT);
@@ -511,6 +511,21 @@ static ncclResult_t commFree(ncclComm_t comm) {
     comm->tempBuff = nullptr;
   }
 
+  // Free hierarchical AG resources
+  if (comm->hierarchicalAGTempBuffer) {
+    NCCLCHECK(ncclCudaFree(comm->hierarchicalAGTempBuffer));
+    comm->hierarchicalAGTempBuffer = nullptr;
+  }
+  if (comm->hierarchicalIntraComm) {
+    NCCLCHECK(ncclCommDestroy(comm->hierarchicalIntraComm));
+    comm->hierarchicalIntraComm = nullptr;
+  }
+  if (comm->hierarchicalInterComm) {
+    NCCLCHECK(ncclCommDestroy(comm->hierarchicalInterComm));
+    comm->hierarchicalInterComm = nullptr;
+  }
+  comm->hierarchicalCommsInitialized = false;
+
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclSymkFinalize(comm));
     NCCLCHECK(ncclDevrFinalize(comm));
@@ -740,6 +755,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalInterComm = nullptr;
   comm->hierarchicalCommsInitialized = false;
   comm->hierarchicalAGTempBuffer = nullptr;
+  // Enable PAT for interComm hierarchical AG
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
 
   if (parent == NULL || !parent->shareResources) {
@@ -1155,6 +1171,32 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
            info->fabricInfo.cliqueId, info->fabricInfo.state, info->fabricInfo.healthMask);
     }
   }
+  #else
+    char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+    NCCLCHECK(int64ToBusId(info->busId, busId));
+    uint32_t deviceIndex = -1;
+    (void) amd_smi_getDeviceIndexByPciBusId(busId, &deviceIndex);
+    if(deviceIndex != -1) {
+      info->fabricInfo.fabricSupported = false;
+      (void) amd_smi_getFabricDeviceInfo(deviceIndex, &info->fabricInfo);
+      if (info->fabricInfo.fabricSupported) {
+        uint64_t uuid0 = 0;
+        uint64_t uuid1 = 0;
+        memcpy(&uuid0, info->fabricInfo.clusterUuid, sizeof(uuid0));
+        memcpy(&uuid1, info->fabricInfo.clusterUuid + sizeof(uuid0), sizeof(uuid1));
+        INFO(NCCL_INIT, "UALoE-enabled (aka MNNVL) device busId 0x%lx fabricType %d state %d acceleratorId %d bandwidth %u Mb/s latency %u ns UUID %lx.%lx ppodSize %u cliqueId %u clique size %u",
+             info->busId,
+             info->fabricInfo.fabricType,
+             info->fabricInfo.state,
+             info->fabricInfo.acceleratorId,
+             info->fabricInfo.bandwidth,
+             info->fabricInfo.latency,
+             uuid0, uuid1,
+             info->fabricInfo.ppodSize,
+             info->fabricInfo.cliqueId,
+             info->fabricInfo.vpodSize);
+      }
+    }
 #endif
 
   return ncclSuccess;
@@ -2365,6 +2407,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
     comm->enableRocshmem = rcclParamRocshmemEnabled();
     comm->rocshmemThreshold = rcclParamRocshmemThreshold();
+    if (comm->proxyState && comm->nNodes > 1 && (comm->nRanks / comm->nNodes == 8))
+      comm->proxyState->rocshmemEnabled = true;
     comm->numSymBuf = NUM_SYM_BUF;
     comm->symId = 0;
     comm->bufThreshold = rocshmemHeapSize/2;
@@ -2442,6 +2486,25 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
   // update communicator state
   comm->initState = ncclSuccess;
+
+  // Initialize hierarchical sub-communicators and temp buffer
+  if (!job->parent && comm->nNodes >= 8 && rcclParamHierarchicalAllGather() == 1) {
+    if (comm->minLocalRanks != comm->maxLocalRanks) {
+      INFO(NCCL_INIT, "Hierarchical AllGather: non-uniform GPU count per node, skipping hierarchical allgather");
+    } else {
+      int node_id = comm->rankToNode[comm->rank];
+      int local_rank = comm->rankToLocalRank[comm->rank];
+      NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
+      comm->forcePatEnable = true;
+      NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
+      comm->forcePatEnable = false;
+      size_t tempBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+      NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize), res, fail);
+      comm->hierarchicalCommsInitialized = true;
+      INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
+        comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+    }
+  }
   timers[TIMER_INIT_TOTAL] = clockNano() - timers[TIMER_INIT_TOTAL];
 
   // Trace this call for replay tool
