@@ -24,7 +24,6 @@
 #define AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 
 #include <dirent.h>
-#include <pthread.h>
 
 #include <limits>
 #include <string>
