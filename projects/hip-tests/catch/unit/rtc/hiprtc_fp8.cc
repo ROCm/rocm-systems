@@ -32,10 +32,18 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
   size_t i = threadIdx.x;
   if (i < size) {
     if (e4m3) {
+#ifdef __gfx942__
+      __hip_fp8_e4m3_fnuz tmp = in[i];
+#else
       __hip_fp8_e4m3 tmp = in[i];
+#endif
       out[i] = tmp;
     } else {
+#ifdef __gfx942__
+      __hip_fp8_e5m2_fnuz tmp = in[i];
+#else
       __hip_fp8_e5m2 tmp = in[i];
+#endif
       out[i] = tmp;
     }
   }
