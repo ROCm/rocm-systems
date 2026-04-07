@@ -353,10 +353,15 @@ if(NOT TARGET Dyninst::TBB)
     add_library(Dyninst::TBB INTERFACE IMPORTED)
 
     if(TARGET TBB::tbb)
-        target_link_libraries(
-            Dyninst::TBB
-            INTERFACE TBB::tbb TBB::tbbmalloc TBB::tbbmalloc_proxy
-        )
+        target_link_libraries(Dyninst::TBB INTERFACE TBB::tbb)
+
+        if(TARGET TBB::tbbmalloc)
+            target_link_libraries(Dyninst::TBB INTERFACE TBB::tbbmalloc)
+        endif()
+
+        if(TARGET TBB::tbbmalloc_proxy)
+            target_link_libraries(Dyninst::TBB INTERFACE TBB::tbbmalloc_proxy)
+        endif()
     else()
         target_link_libraries(Dyninst::TBB INTERFACE ${TBB_LIBRARIES})
     endif()
