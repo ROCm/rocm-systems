@@ -81,9 +81,11 @@ __host__ Team::Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
       my_pe_in_world(handle->getMyPE()),
       num_pes(_num_pes),
       my_pe(_my_pe) {
-  CHECK_HIP(hipMalloc(&team_info_block_, 2 * sizeof(TeamInfo)));
+  TeamInfo* block = nullptr;
+  CHECK_HIP(hipMalloc(&block, 2 * sizeof(TeamInfo)));
+  team_info_block_ = block;
   tinfo_wrt_parent = &team_info_block_[0];
-  tinfo_wrt_world = &team_info_block_[1];
+  tinfo_wrt_world  = &team_info_block_[1];
   new (tinfo_wrt_parent) TeamInfo(team_info_wrt_parent);
   new (tinfo_wrt_world) TeamInfo(team_info_wrt_world);
 
