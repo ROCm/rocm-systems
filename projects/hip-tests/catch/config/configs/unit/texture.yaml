@@ -233,6 +233,8 @@ texture:
     tags: [texobj]
   Unit_TexObjectCreate_TypePitch2D_EdgeCases:
     <<: *level_2
+    # === the runtime is not really able to detect invalid device pointers a.t.m. ===
+    disabled: [amd_windows]
     tags: [texobj]
   Unit_hipGetTexObjectResourceDesc_positive:
     <<: *level_2
@@ -420,16 +422,10 @@ texture:
   Unit_hipTextureMipmapObj1D_Check_hipReadModeElementType_float_only: *level_2
   Unit_hipTextureMipmapObj2D_Check_hipReadModeElementType:
     <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_wsl]
   Unit_hipTextureMipmapObj2D_Check_hipReadModeNormalizedFloat:
     <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_wsl]
   Unit_hipTextureMipmapObj2D_Check_hipReadModeElementType_float_only:
     <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_wsl]
   Unit_hipTextureMipmapObj3D_Check_hipReadModeElementType: *level_2
   Unit_hipTextureMipmapObj3D_Check_hipReadModeNormalizedFloat: *level_2
   Unit_hipTextureMipmapObj3D_Check_hipReadModeElementType_float_only: *level_2

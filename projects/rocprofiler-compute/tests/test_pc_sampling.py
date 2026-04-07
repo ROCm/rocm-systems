@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import os
+from pathlib import Path
 
 import pytest
 import test_utils
@@ -52,8 +53,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     Test that PC sampling works with --block 21 and --pc-sampling-method host_trap.
     """
     if soc == "MI100":
-        assert True
-        return
+        pytest.skip("PC sampling is not supported on MI 100")
 
     options = [
         "--block",
@@ -86,8 +86,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
     Test that PC sampling works with --block 21 and --pc-sampling-method stochastic.
     """
     if soc == "MI100" or soc == "MI200":
-        assert True
-        return
+        pytest.skip("PC sampling is not supported")
 
     options = [
         "--block",
@@ -129,11 +128,21 @@ def test_multi_rank_pc_sampling_only(
     Test that no multi-rank warning is printed when running with only
     --block 21 (PC sampling only mode requires a single pass) with multi-rank.
     """
+    if soc == "MI100":
+        pytest.skip("PC sampling is not supported on MI 100")
+
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
 
     workload_dir = test_utils.get_output_dir()
 
-    options = ["--block", "21"]
+    options = [
+        "--block",
+        "21",
+        "--pc-sampling-method",
+        "host_trap",
+        "--pc-sampling-interval",
+        "256",
+    ]
 
     _, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
@@ -158,11 +167,22 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     and another block (PC sampling with counters mode requires multiple passes)
     with multi-rank.
     """
+    if soc == "MI100":
+        pytest.skip("PC sampling is not supported on MI 100")
+
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
 
     workload_dir = test_utils.get_output_dir()
 
-    options = ["--block", "21", "2"]
+    options = [
+        "--block",
+        "21",
+        "2",
+        "--pc-sampling-method",
+        "host_trap",
+        "--pc-sampling-interval",
+        "256",
+    ]
 
     _, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
@@ -183,14 +203,100 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+def test_pc_sampling_profile_then_analyze(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    """
+    End-to-end: profile with PC sampling (host_trap), then
+    run analysis on the profiling output.
+    """
+    if soc == "MI100":
+        pytest.skip("PC sampling is not supported on MI 100")
+
+    options = [
+        "--block",
+        "21",
+        "--pc-sampling-method",
+        "host_trap",
+        "--pc-sampling-interval",
+        "256",
+    ]
+
+    workload_dir = test_utils.get_output_dir()
+
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_mat_mul_max",
+    )
+
+    file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
+    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
+
+    code = binary_handler_analyze_rocprof_compute(
+        [
+            "analyze",
+            "--path",
+            workload_dir,
+            "--block",
+            "21",
+        ],
+    )
+    assert code == 0
+
+    captured = capsys.readouterr()
+    assert "0.1 Top Kernels" in captured.out
+    assert "0.2 Dispatch List" in captured.out
+
+    workload_path = Path(workload_dir)
+
+    kernel_top_csv = workload_path / "pmc_kernel_top.csv"
+    assert kernel_top_csv.exists()
+    kernel_top_header = kernel_top_csv.read_text().splitlines()[0]
+    assert "Kernel_Name" in kernel_top_header
+    assert "Count" in kernel_top_header
+    assert "Percent" in kernel_top_header
+
+    dispatch_info_csv = workload_path / "pmc_dispatch_info.csv"
+    assert dispatch_info_csv.exists()
+    dispatch_info_header = dispatch_info_csv.read_text().splitlines()[0]
+    assert "Dispatch_ID" in dispatch_info_header
+    assert "Kernel_Name" in dispatch_info_header
+    assert "GPU_ID" in dispatch_info_header
+
+    code = binary_handler_analyze_rocprof_compute(
+        [
+            "analyze",
+            "--path",
+            workload_dir,
+            "--block",
+            "21",
+            "--kernel",
+            "0",
+        ],
+    )
+    assert code == 0
+
+    captured = capsys.readouterr()
+    assert "0.1 Top Kernels" in captured.out
+    assert "0.2 Dispatch List" in captured.out
+    assert "21. PC Sampling" in captured.out
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
 def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
     """
     Test that PC sampling works with --block 21 and --block 2
     (PC sampling with counter collection)
     """
     if soc == "MI100":
-        assert True
-        return
+        pytest.skip("PC sampling is not supported on MI 100")
 
     options = [
         "--block",

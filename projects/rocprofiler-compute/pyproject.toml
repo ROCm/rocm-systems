@@ -71,6 +71,7 @@ pythonpath = [
     "src",
     "src/rocprof_compute_soc",
     "src/utils",
+    "src/roofline",
     "src/rocprof_compute_analyze/utils",
     "tests"
 ]

@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.selective_regions, pytest.mark.ci_enable]
+pytestmark = [pytest.mark.gpu, pytest.mark.selective_regions]
 
 # =============================================================================
 # Fixtures

@@ -505,8 +505,6 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
   if (access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
-    err = hsa_amd_memory_unlock(gpuRefData);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     // Destroy the copy signal
     err = hsa_signal_destroy(copy_signal);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
