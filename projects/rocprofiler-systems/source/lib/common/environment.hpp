@@ -5,62 +5,29 @@
 
 #include "common/defines.h"
 
-#include "common/join.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <timemory/utility/filepath.hpp>
 #include <type_traits>
-#include <unistd.h>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
-#if !defined(ROCPROFSYS_ENVIRON_LOG_NAME)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
-#        define ROCPROFSYS_ENVIRON_LOG_NAME "[" ROCPROFSYS_COMMON_LIBRARY_NAME "]"
-#    else
-#        define ROCPROFSYS_ENVIRON_LOG_NAME
-#    endif
-#endif
+#include <timemory/utility/filepath.hpp>
 
-#if !defined(ROCPROFSYS_ENVIRON_LOG_START)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_START)
-#        define ROCPROFSYS_ENVIRON_LOG_START ROCPROFSYS_COMMON_LIBRARY_LOG_START
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_ENVIRON_LOG_START                                             \
-            fprintf(stderr, "%s", ::tim::log::color::info());
-#    else
-#        define ROCPROFSYS_ENVIRON_LOG_START
-#    endif
-#endif
-
-#if !defined(ROCPROFSYS_ENVIRON_LOG_END)
-#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_END)
-#        define ROCPROFSYS_ENVIRON_LOG_END ROCPROFSYS_COMMON_LIBRARY_LOG_END
-#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define ROCPROFSYS_ENVIRON_LOG_END                                               \
-            fprintf(stderr, "%s", ::tim::log::color::end());
-#    else
-#        define ROCPROFSYS_ENVIRON_LOG_END
-#    endif
-#endif
-
-#define ROCPROFSYS_ENVIRON_LOG(CONDITION, ...)                                           \
-    if(CONDITION)                                                                        \
-    {                                                                                    \
-        fflush(stderr);                                                                  \
-        ROCPROFSYS_ENVIRON_LOG_START                                                     \
-        fprintf(stderr, "[rocprof-sys]" ROCPROFSYS_ENVIRON_LOG_NAME "[%i] ", getpid());  \
-        fprintf(stderr, __VA_ARGS__);                                                    \
-        ROCPROFSYS_ENVIRON_LOG_END                                                       \
-        fflush(stderr);                                                                  \
-    }
+#include "logger/debug.hpp"
+#include <spdlog/fmt/fmt.h>
 
 namespace rocprofsys
 {
@@ -69,85 +36,90 @@ inline namespace common
 namespace
 {
 
-inline std::string
-get_env_impl(std::string_view env_id, std::string_view _default)
+inline bool
+parse_bool(std::string_view val)
 {
-    if(env_id.empty()) return std::string{ _default };
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var) return std::string{ env_var };
-    return std::string{ _default };
+    if(val.empty()) throw std::runtime_error(fmt::format("No boolean value provided"));
+
+    const std::array<const char*, 6> falsy  = { "off", "false", "no", "n", "f", "0" };
+    const std::array<const char*, 6> truthy = { "on", "true", "yes", "y", "t", "1" };
+
+    std::string lower(val);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    const auto is_falsy  = std::any_of(falsy.begin(), falsy.end(),
+                                       [&](const char* value) { return value == lower; });
+    const auto is_truthy = std::any_of(truthy.begin(), truthy.end(),
+                                       [&](const char* value) { return value == lower; });
+
+    if(!is_truthy && !is_falsy)
+        throw std::runtime_error(fmt::format("Invalid boolean value: {}", val));
+
+    return is_truthy;
 }
 
-inline std::string
-get_env_impl(std::string_view env_id, const char* _default)
+template <typename T, typename Fn>
+inline T
+try_parse_value(std::string_view env_id, const char* env_var, T _default,
+                Fn&& parse_fn) noexcept
 {
-    return get_env_impl(env_id, std::string_view{ _default });
-}
-
-inline int
-get_env_impl(std::string_view env_id, int _default)
-{
-    if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var)
+    if(!env_var) return _default;
+    try
     {
-        try
-        {
-            return std::stoi(env_var);
-        } catch(std::exception& _e)
-        {
-            fprintf(stderr,
-                    "[rocprof-sys][get_env] Exception thrown converting getenv(\"%s\") = "
-                    "%s to integer :: %s. Using default value of %i\n",
-                    env_id.data(), env_var, _e.what(), _default);
-        }
+        return parse_fn(env_var);
+    } catch(const std::exception& _e)
+    {
+        LOG_ERROR("Exception thrown converting getenv(\"{}\") = {} :: {}. "
+                  "Using default value of {}",
+                  env_id, env_var, _e.what(), _default);
         return _default;
     }
-    return _default;
 }
 
-inline bool
-get_env_impl(std::string_view env_id, bool _default)
-{
-    if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var)
-    {
-        if(std::string_view{ env_var }.empty())
-            throw std::runtime_error(std::string{ "No boolean value provided for " } +
-                                     std::string{ env_id });
-
-        if(std::string_view{ env_var }.find_first_not_of("0123456789") ==
-           std::string_view::npos)
-        {
-            return static_cast<bool>(std::stoi(env_var));
-        }
-        else
-        {
-            for(size_t i = 0; i < strlen(env_var); ++i)
-                env_var[i] = tolower(env_var[i]);
-            for(const auto& itr : { "off", "false", "no", "n", "f", "0" })
-                if(strcmp(env_var, itr) == 0) return false;
-        }
-        return true;
-    }
-    return _default;
-}
 }  // namespace
 
 template <typename Tp>
 inline auto
-get_env(std::string_view env_id, Tp&& _default)
+get_env(std::string_view env_id, Tp&& _default) noexcept
 {
-    if constexpr(std::is_enum<Tp>::value)
+    using T = std::decay_t<Tp>;
+
+    static_assert(std::is_enum_v<T> || std::is_same_v<T, bool> ||
+                      std::is_same_v<T, int> || std::is_convertible_v<T, std::string>,
+                  "get_env: unsupported type");
+
+    if(env_id.empty())
     {
-        using Up = std::underlying_type_t<Tp>;
-        // cast to underlying type -> get_env -> cast to enum type
-        return static_cast<Tp>(get_env_impl(env_id, static_cast<Up>(_default)));
+        if constexpr(std::is_convertible_v<T, std::string>)
+            return std::string{ _default };
+        else
+            return static_cast<T>(_default);
     }
-    else
+
+    if constexpr(std::is_enum_v<T>)
     {
-        return get_env_impl(env_id, std::forward<Tp>(_default));
+        using Up = std::underlying_type_t<T>;
+        return static_cast<T>(get_env(env_id, static_cast<Up>(_default)));
+    }
+
+    const char* env_var = ::std::getenv(env_id.data());
+
+    if constexpr(std::is_same_v<T, bool>)
+    {
+        return try_parse_value(env_id, env_var, _default,
+                               [](const char* v) { return parse_bool(v); });
+    }
+
+    if constexpr(std::is_same_v<T, int>)
+    {
+        return try_parse_value(env_id, env_var, _default,
+                               [](const char* v) { return std::stoi(v); });
+    }
+
+    if constexpr(std::is_convertible_v<T, std::string>)
+    {
+        return env_var ? std::string{ env_var } : std::string{ _default };
     }
 }
 
@@ -160,8 +132,8 @@ struct ROCPROFSYS_INTERNAL_API env_config
     auto operator()(bool _verbose = false) const
     {
         if(env_name.empty()) return -1;
-        ROCPROFSYS_ENVIRON_LOG(_verbose, "setenv(\"%s\", \"%s\", %i)\n", env_name.c_str(),
-                               env_value.c_str(), override);
+        if(_verbose)
+            LOG_INFO("setenv(\"{}\", \"{}\", {})", env_name, env_value, override);
         return setenv(env_name.c_str(), env_value.c_str(), override);
     }
 };
@@ -170,7 +142,7 @@ inline void
 remove_env(std::vector<char*>& _environ, std::string_view _env_var,
            const std::unordered_set<std::string>& _original_envs)
 {
-    auto key = join("", _env_var, "=");
+    auto key = fmt::format("{}=", _env_var);
 
     auto match = [&key](auto itr) -> bool {
         return itr && std::string_view{ itr }.find(key) == 0;
@@ -241,12 +213,11 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
     auto it = std::find_if(candidates.begin(), candidates.end(), has_libomptarget);
     if(it != candidates.end())
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "Using LLVM libdir: %s\n", it->c_str());
+        if(verbose) LOG_INFO("Using LLVM libdir: {}", *it);
         return *it;
     }
 
-    ROCPROFSYS_ENVIRON_LOG(verbose,
-                           "libomptarget.so not found in candidate LLVM libdirs\n");
+    if(verbose) LOG_INFO("libomptarget.so not found in candidate LLVM libdirs");
     return {};
 }
 
@@ -283,7 +254,7 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
     const auto is_safe_executable_path = [](const std::string& path) {
         // Allow only a conservative set of characters in the executable path to
         // avoid injection when used in a shell command.
-        for(unsigned char c : path)
+        for(const unsigned char c : path)
         {
             if(std::isalnum(c) != 0) continue;
             switch(c)
@@ -301,9 +272,9 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 
     if(!is_safe_executable_path(python_binary))
     {
-        ROCPROFSYS_ENVIRON_LOG(
-            verbose, "Unsafe characters detected in Python interpreter path: %s\n",
-            python_binary.c_str());
+        if(verbose)
+            LOG_INFO("Unsafe characters detected in Python interpreter path: {}",
+                     python_binary);
         return {};
     }
 
@@ -313,7 +284,7 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
     FILE* pipe = popen(cmd.c_str(), "r");
     if(!pipe)
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "Failed to execute command: %s\n", cmd.c_str());
+        if(verbose) LOG_INFO("Failed to execute command: {}", cmd);
         return {};
     }
 
@@ -326,12 +297,11 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
         if(!result.empty() && result.back() == '\n') break;
     }
 
-    int status = pclose(pipe);
+    const int status = pclose(pipe);
 
     if(status != 0 || result.empty())
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "torch not found for Python interpreter: %s\n",
-                               python_binary.c_str());
+        if(verbose) LOG_INFO("torch not found for Python interpreter: {}", python_binary);
         return {};
     }
 
@@ -347,13 +317,11 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 
     if(!::tim::filepath::direxists(torch_libdir))
     {
-        ROCPROFSYS_ENVIRON_LOG(verbose, "torch lib directory does not exist: %s\n",
-                               torch_libdir.c_str());
+        if(verbose) LOG_INFO("torch lib directory does not exist: {}", torch_libdir);
         return {};
     }
 
-    ROCPROFSYS_ENVIRON_LOG(verbose, "Discovered torch library path: %s\n",
-                           torch_libdir.c_str());
+    if(verbose) LOG_INFO("Discovered torch library path: {}", torch_libdir);
     return torch_libdir;
 }
 
@@ -400,8 +368,9 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
     const bool _replace  = (_mode == update_mode::REPLACE);
 
     auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
-    auto _new_entry   = join('=', _env_var, _env_val_str);
-    auto _key         = join("", _env_var, "=");
+    auto _new_entry   = fmt::format("{}={}", _env_var, _env_val_str);
+    auto _key         = fmt::format("{}=", _env_var);
+
     bool _found_match = false;
 
     for(auto it = _environ.begin(); it != _environ.end();)
@@ -425,10 +394,10 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
             {
                 auto _val = std::string{ itr }.substr(_key.length());
                 free(itr);
-                *it = strdup(join('=', _env_var,
-                                  _prepend ? join(_join_delim, _env_val_str, _val)
-                                           : join(_join_delim, _val, _env_val_str))
-                                 .c_str());
+                auto _merged =
+                    _prepend ? fmt::format("{}{}{}", _env_val_str, _join_delim, _val)
+                             : fmt::format("{}{}{}", _val, _join_delim, _env_val_str);
+                *it = strdup(fmt::format("{}={}", _env_var, _merged).c_str());
             }
             ++it;
         }
@@ -436,15 +405,18 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
         {
             // REPLACE or WEAK: overwrite with new value
             std::free(itr);
-            *it = strdup(_new_entry.c_str());
-            if(_weak_upd) return;
+            if(_weak_upd)
+            {
+                *it = strdup(_new_entry.c_str());
+                return;
+            }
 
-            // REPLACE: remove subsequent duplicate entries (first is already replaced)
             if(_replace && _found_match)
             {
                 it = _environ.erase(it);
                 continue;
             }
+            *it          = strdup(_new_entry.c_str());
             _found_match = true;
             ++it;
         }
@@ -489,7 +461,7 @@ add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
     }
 
     envp.erase(std::remove(envp.begin(), envp.end(), nullptr), envp.end());
-    envp.emplace_back(strdup(join("", ld_prefix, result).c_str()));
+    envp.emplace_back(strdup(fmt::format("{}{}", ld_prefix, result).c_str()));
 
     updated_envs.emplace(ld_prefix.substr(0, ld_prefix.length() - 1));
 }

@@ -50,6 +50,11 @@ target_include_directories(
         $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/timemory/source>
 )
 
+target_link_libraries(
+    rocprofiler-systems-common-library
+    INTERFACE $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
+)
+
 target_compile_definitions(
     rocprofiler-systems-common-library
     INTERFACE $<BUILD_INTERFACE:ROCPROFSYS_INTERNAL_BUILD=1>

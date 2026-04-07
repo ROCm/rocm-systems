@@ -23,12 +23,19 @@ if(ROCPROFSYS_BUILD_SPDLOG)
     set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
     set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
-
     # Spdlog workaround for building static library
     set(_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF)
 
     FetchContent_MakeAvailable(spdlog)
+
+    # spdlog v1.16.0 sets DEBUG_POSTFIX to "d" by default, which produces
+    # libspdlogd.a in Debug builds. However, CMake's generated build rules for
+    # targets that link spdlog via a different CMAKE_BUILD_TYPE (e.g.
+    # rocprof-sys-dl forces Release) resolve the non-suffixed filename
+    # libspdlog.a, causing a "missing and no known rule" linker error. Remove
+    # the postfix so the output name is always libspdlog.a.
+    set_target_properties(spdlog PROPERTIES DEBUG_POSTFIX "")
 
     set(BUILD_SHARED_LIBS ${_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP})
     unset(_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP)
