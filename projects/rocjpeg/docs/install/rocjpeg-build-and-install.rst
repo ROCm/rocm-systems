@@ -6,13 +6,19 @@
 Building and installing rocJPEG from source code
 ********************************************************************
 
-These instructions are for building rocJPEG from its source code. If you will not be contributing to the rocJPEG code base or previewing features,  `package installers <https://rocm.docs.amd.com/projects/rocJPEG/en/latest/install/rocjpeg-package-install.html>`_ are available.
+These instructions are for building rocJPEG from its source code. If you will not be contributing to the rocJPEG code base or previewing features, :doc:`package installers <./rocjpeg-package-install>` are available.
 
 .. note::
 
   ROCm must be installed before installing rocJPEG. See `Quick start installation guide <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html>`_ for detailed ROCm installation instructions.
 
-Use `rocJPEG-setup.py <https://github.com/ROCm/rocJPEG/blob/develop/rocJPEG-setup.py>`_ available from the rocJPEG GitHub repo to install the prerequisites:
+:doc:`Clone the rocJPEG project <./rocjpeg-clone-repo>`. Change directory to ``projects/rocjpeg``:
+
+.. code:: shell
+
+  cd rocm-systems/projects/rocjpeg
+
+Use `rocJPEG-setup.py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg/rocJPEG-setup.py>`_ to install prerequisites:
 
 .. code:: shell
 
@@ -22,8 +28,6 @@ Build and install rocJPEG using the following commands:
 
 .. code:: shell
 
-  git clone https://github.com/ROCm/rocJPEG.git
-  cd rocJPEG
   mkdir build && cd build
   cmake ../
   make -j8

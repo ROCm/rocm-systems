@@ -56,6 +56,7 @@
 
 #include "logger/debug.hpp"
 
+#include <nlohmann/json.hpp>
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
@@ -343,10 +344,6 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
-                              "Enable ROCm API and kernel tracing", true, "backend",
-                              "rocm");
-
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AMD_SMI",
                               "Enable sampling GPU power, temp, utilization, "
                               "vcn_activity, jpeg_activity and memory usage",
@@ -383,6 +380,10 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_UCX",
                               "Enable support for UCX functions", false, "ucx", "backend",
                               "parallelism");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_SHMEM",
+                              "Enable support for OpenSHMEM functions", false, "shmem",
+                              "backend", "parallelism");
 
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_RCCLP",
@@ -428,6 +429,14 @@ configure_settings(bool _init)
         "If > 0.0, time (in seconds) to collect trace/profile data. If multiple delays + "
         "durations are needed, see ROCPROFSYS_TRACE_PERIODS.",
         0.0, "trace", "profile", "perfetto", "timemory");
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_TRACE_REGION",
+        "Comma-separated list of roctx region names. When set, only "
+        "activity inside roctx regions matching one of these names "
+        "(matched against roctxRangeStartA message). Uses process-wide "
+        "roctxRangeStart/roctxRangeStop markers.",
+        std::string{}, "trace", "profile", "perfetto", "rocpd", "timemory", "rocm");
 
     auto _clock_choices = std::vector<std::string>{};
     for(const auto& itr : constraint::get_valid_clock_ids())
@@ -1199,10 +1208,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(gpu::device_count() == 0)
     {
-#if ROCPROFSYS_ROCM_VERSION > 0
-        LOG_WARNING("No ROCm devices were found: disabling rocm and amd_smi...");
-#endif
-        _set("ROCPROFSYS_USE_ROCM", false);
+        LOG_WARNING("No ROCm devices were found: disabling amd_smi...");
         _set("ROCPROFSYS_USE_AMD_SMI", false);
     }
 
@@ -1234,7 +1240,6 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("ROCPROFSYS_USE_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
-        _set("ROCPROFSYS_USE_ROCM", false);
         _set("ROCPROFSYS_USE_AMD_SMI", false);
         _set("ROCPROFSYS_USE_KOKKOSP", false);
         _set("ROCPROFSYS_USE_RCCLP", false);
@@ -1419,21 +1424,6 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     _handle_use_option("ROCPROFSYS_USE_OMPT", "ompt");
     _handle_use_option("ROCPROFSYS_USE_RCCLP", "rcclp");
     _handle_use_option("ROCPROFSYS_USE_AMD_SMI", "amd_smi");
-    _handle_use_option("ROCPROFSYS_USE_ROCM", "rocm");
-
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-    _config->find("ROCPROFSYS_USE_AMD_SMI")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("amd_smi"))
-        _config->find(itr)->second->set_hidden(true);
-
-    _config->find("ROCPROFSYS_USE_RCCLP")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("rcclp"))
-        _config->find(itr)->second->set_hidden(true);
-
-    _config->find("ROCPROFSYS_USE_ROCM")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("rocm"))
-        _config->find(itr)->second->set_hidden(true);
-#endif
 
 #if defined(ROCPROFSYS_USE_OMPT) || ROCPROFSYS_USE_OMPT == 0
     _config->find("ROCPROFSYS_USE_OMPT")->second->set_hidden(true);
@@ -1708,6 +1698,22 @@ print_settings(
 }
 
 void
+print_settings_json(std::ostream& _output_stream)
+{
+    nlohmann::json _config_result = {};
+
+    for(const auto& [key, setting] : *get_config())
+    {
+        if(setting->get_hidden() || !setting->get_enabled()) continue;
+        auto value = setting->as_string();
+        if(value.empty()) continue;
+        _config_result[setting->get_env_name()] = value;
+    }
+
+    _output_stream << _config_result.dump() << std::flush;
+}
+
+void
 print_settings(bool _include_env)
 {
     if(dmp::rank() > 0) return;
@@ -1896,23 +1902,8 @@ get_use_causal()
 bool
 get_use_amd_smi()
 {
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_USE_AMD_SMI");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
-}
-
-bool
-get_use_rocm()
-{
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-    static auto _v = get_config()->find("ROCPROFSYS_USE_ROCM");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
 }
 
 bool&
@@ -1972,6 +1963,13 @@ get_use_ucx()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
+bool&
+get_use_shmem()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_USE_SHMEM");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
 bool
 get_use_kokkosp()
 {
@@ -1990,7 +1988,6 @@ get_use_kokkosp_kernel_logger()
 bool
 get_use_vaapi_tracing()
 {
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_ROCM_DOMAINS");
     if(_v == get_config()->end())
     {
@@ -2002,9 +1999,6 @@ get_use_vaapi_tracing()
                domain_list.end() ||
            std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
                domain_list.end();  // Check rocdecode_api or rocjpeg_api is present
-#else
-    return false;
-#endif
 }
 
 bool
@@ -2087,12 +2081,8 @@ get_perfetto_flush_period()
 bool
 get_perfetto_combined_traces()
 {
-#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
 }
 
 std::string
@@ -2383,12 +2373,8 @@ get_process_sampling_duration()
 std::string
 get_sampling_gpus()
 {
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_GPUS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-#else
-    return std::string{};
-#endif
 }
 
 bool
@@ -2424,6 +2410,13 @@ get_trace_thread_join()
 {
     static auto _v = get_config()->find("ROCPROFSYS_TRACE_THREAD_JOIN");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+std::string
+get_trace_region()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_TRACE_REGION");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
 bool

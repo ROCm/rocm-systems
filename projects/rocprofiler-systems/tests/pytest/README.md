@@ -50,6 +50,8 @@ A standalone `.pyz` package is included at `<install-dir>/share/rocprofiler-syst
 python3 <install-dir>/share/rocprofiler-systems/tests/rocprofsys-tests.pyz
 ```
 
+> **Note:** Parallel execution (`-n`) is not supported when using the standalone binary (`rocprofsys-tests`).
+
 All standard pytest flags work with the standalone package.
 
 ### Environment Variables
@@ -104,10 +106,12 @@ and `<pyz-path>` is `<install-dir>/share/rocprofiler-systems/tests/rocprofsys-te
 Tests can be run in parallel using `pytest-xdist`:
 
 ```bash
-pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n auto  # Use all available cores
-pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n 4     # Use 4 workers
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n auto --dist=loadgroup  # Use all available cores
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n 4 --dist=loadgroup     # Use 4 workers
 ```
 
+> **Note:** You must use `--dist=loadgroup` to ensure test ordering is respected.
+>
 > **Warning:** Running tests in parallel can cause timeouts due to resource contention, especially for `runtime_instrument` tests. If you experience unexpected timeouts, try reducing the number of workers or running sequentially.
 
 ### Custom Flags
@@ -117,10 +121,16 @@ pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n 4     # Use 4 work
 | `--show-config` | Show test configuration in the pytest header |
 | `--show-output` | Show runner output when tests **pass** |
 | `--show-output-on-subtest-fail` | Show runner output only when **subtests** fail |
-| `--output-dir=<path>` | Set the test output directory (default: `<build_dir>/pytest-output`) |
-| `--output-log=<path>` | Write pytest output to the specified file (default: `<output_dir>/pytest-output.txt`) |
+| `--output-dir=<path>` | Set the test output directory (default: `<build_dir>/rocprof-sys-pytest-output` in build mode, `/tmp/<user>/rocprof-sys-pytest-output` in install mode) |
+| `--output-log=<path>` | Write pytest output to the specified file (default: `<output_dir>/pytest-output.txt`; use `none` to disable) |
+| `--group-by-module` | Group test outputs by module name (default off) |
+| `--parallelize` | Enable certain tests to be parallelized (default off) |
+| `--num-processes=<n>` | Number of processes for transpose MPI tests (default 2) |
 | `--monochrome` | Disable colored output and set `ROCPROFSYS_MONOCHROME=ON` for runners |
+| `--ci-mode` | Enable CI mode (developer flag; default off) |
 | `--allow-disabled` | Run tests with `@pytest.mark.disable` in CI mode (developer flag) |
+| `--ctest-mode` | Enable CTest integration mode (developer flag; default off) |
+| `--dev` | Enable QOL flags (developer flag; default off) |
 
 **Tip:** Use `--tb=short` to hide source code in tracebacks, or `--tb=no` for no output.
 

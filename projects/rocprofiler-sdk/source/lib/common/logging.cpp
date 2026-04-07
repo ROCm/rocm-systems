@@ -58,7 +58,7 @@ struct log_level_info
 env_store
 get_glog_env_config(const logging_config& cfg)
 {
-    auto as_env_config = [](std::string_view _var, auto _val) {
+    auto as_env_config = [](std::string_view _var, const auto& _val) {
         return env_config{std::string{_var}, fmt::format("{}", _val), 1};
     };
 

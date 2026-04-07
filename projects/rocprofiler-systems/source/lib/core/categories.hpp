@@ -129,11 +129,13 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_width, ROCPROFSYS_CATEGOR
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_speed, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_LINK_SPEED, "device_pcie_link_speed", "PCIe Link Speed")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_acc, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_ACC, "device_pcie_bandwidth_acc", "PCIe Bandwidth Accumulated")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_inst, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_INST, "device_pcie_bandwidth_inst", "PCIe Bandwidth Instantaneous")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_sdma_usage, ROCPROFSYS_CATEGORY_AMD_SMI_SDMA_USAGE, "device_sdma_usage", "SDMA Utilization percentage of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, mpi, ROCPROFSYS_CATEGORY_MPI, "mpi", "MPI regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, ucx, ROCPROFSYS_CATEGORY_UCX, "ucx", "UCX regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, shmem, ROCPROFSYS_CATEGORY_SHMEM, "shmem", "OpenSHMEM regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_sampling, ROCPROFSYS_CATEGORY_PROCESS_SAMPLING, "process_sampling", "Process-level data")
 ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL/UCX counters for tracking amount of data sent or received")
 ROCPROFSYS_DEFINE_CATEGORY(category, causal, ROCPROFSYS_CATEGORY_CAUSAL, "causal", "Causal profiling data")
@@ -217,11 +219,13 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_link_speed),                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_acc),              \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_inst),             \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_sdma_usage),                      \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \
         ROCPROFSYS_PERFETTO_CATEGORY(category::mpi),                                     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::ucx),                                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::shmem),                                   \
         ROCPROFSYS_PERFETTO_CATEGORY(category::sampling),                                \
         ROCPROFSYS_PERFETTO_CATEGORY(category::process_sampling),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::comm_data),                               \

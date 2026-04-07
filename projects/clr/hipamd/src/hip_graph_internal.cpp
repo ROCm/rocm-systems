@@ -1,22 +1,8 @@
-/* Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip_graph_internal.hpp"
 
@@ -62,10 +48,10 @@ amd::Monitor Graph::graphSetLock_{};
 std::unordered_set<GraphExec*> GraphExec::graphExecSet_;
 // Guards global exec graph set
 // we have graphExec object as part of child graph and we need recursive lock
-amd::Monitor GraphExec::graphExecSetLock_(true);
+std::recursive_mutex GraphExec::graphExecSetLock_;
 // Serialize the creation of internal streams from multiple threads, ensuring that each stream is
 // mapped to different HSA queues.
-amd::Monitor GraphExec::graphExecStreamCreateLock_(true);
+std::recursive_mutex GraphExec::graphExecStreamCreateLock_;
 std::unordered_set<UserObject*> UserObject::ObjectSet_;
 // Guards global user object
 amd::Monitor UserObject::UserObjectLock_{};
@@ -184,27 +170,55 @@ std::vector<std::pair<Node, Node>> Graph::GetEdges() const {
 }
 
 // ================================================================================================
-void Graph::ScheduleOneNode(Node node, int stream_id) {
-  if (node->stream_id_ == -1) {
-    // Assign active stream to the current node
-    node->stream_id_ = stream_id;
-    max_streams_ = std::max(max_streams_, (stream_id + 1));
-    // Track which devices are used by each stream for multi-device graph execution
-    streams_dev_ids_[stream_id].insert(node->dev_id_);
-    // Process child graph separately, since, there is no connection
-    if (node->GetType() == hipGraphNodeTypeGraph) {
-      auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
-      hipError_t status = child->ScheduleNodes();
-      max_streams_ = std::max(max_streams_, child->max_streams_);
-      reinterpret_cast<hip::ChildGraphNode*>(node)->GraphExec::TopologicalOrder();
+void Graph::ScheduleOneNode(Node start, int stream_id) {
+  if (!start) return;
+
+  // stack of pending nodes for DFS
+  std::vector<Node> pending;
+  pending.push_back(start);
+
+  int sid = stream_id;
+
+  while (!pending.empty()) {
+    Node cur = pending.back();
+    pending.pop_back();
+
+    // Skip if already scheduled
+    if (cur->stream_id_ != -1) {
+      continue;
     }
-    for (auto edge : node->GetEdges()) {
-      if (edge->stream_id_ == -1) {
-        ScheduleOneNode(edge, stream_id);
-        // 1. Each extra edge will get a new stream from the pool
-        // 2. Streams will be reused if the number of edges > streams
-        stream_id = (stream_id + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
-      }
+   
+    // Schedule current node on this branch's stream
+    cur->stream_id_ = sid;
+
+    max_streams_ = std::max(max_streams_, sid + 1);
+    streams_dev_ids_[sid].insert(cur->dev_id_);
+
+    // Process child graph separately, since, there is no connection
+    if (cur->GetType() == hipGraphNodeTypeGraph) {
+      auto cgn   = reinterpret_cast<hip::ChildGraphNode*>(cur);
+      auto child = cgn->GetChildGraph();
+      hipError_t status = child->ScheduleNodes();
+      (void)status;
+      max_streams_ = std::max(max_streams_, child->max_streams_);
+      cgn->GraphExec::TopologicalOrder();
+    }
+
+    const auto& edges = cur->GetEdges();
+    bool end_of_branch = true;
+
+    // To preserve left-to-right behavior, push siblings in reverse so the earlier
+    // edges get processed first.
+    for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
+      Node e = edges[static_cast<size_t>(i)];
+      if (e->stream_id_ != -1) continue;
+      pending.push_back(e);
+      end_of_branch = false;
+    }
+
+    if (end_of_branch) {
+      // Finished one depth traversal (one branch). Rotate for the next sibling/branch.
+      sid = (sid + 1) % DEBUG_HIP_FORCE_GRAPH_QUEUES;
     }
   }
 }
@@ -465,156 +479,169 @@ hip::Graph::GraphExecutionPaths Graph::FindExecutionPathsHierarchical() {
   for (const auto& root : root_nodes) {
     // For each root, find all possible paths starting from it
     std::vector<Node> current_path;
-    FindPathsRecursiveHierarchical(root, current_path, visited, graph_paths);
+    FindPathsDFS(root, current_path, visited, graph_paths);
   }
   return graph_paths;
 }
 
 // ================================================================================================
-void Graph::FindPathsRecursiveHierarchical(Node node,
-                                           std::vector<Node>& current_path,
-                                           std::unordered_set<unsigned int>& visited,
-                                           hip::Graph::GraphExecutionPaths& graph_paths) {
+void Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
+                         std::unordered_set<unsigned int>& visited,
+                         hip::Graph::GraphExecutionPaths& graph_paths) {
   // Lambda to save current path as a HierarchicalPath
-  auto savePath = [&graph_paths](const std::vector<Node>& path, int device_id,
+  auto savePath = [&graph_paths](std::vector<Node> path, int device_id,
                                   Node child_node = nullptr, int child_index = -1) {
     hip::Graph::HierarchicalPath h_path;
-    h_path.nodes = path;
+    h_path.nodes = std::move(path);
     h_path.device_id = device_id;
     h_path.child_graph_node = child_node;
     h_path.child_graph_paths_index = child_index;
     graph_paths.paths.push_back(std::move(h_path));
   };
 
-  // Check if already visited
-  if (visited.find(node->GetID()) != visited.end()) {
-    return;
-  }
+  if (!start) return;
 
-  // Mark regular nodes as visited
-  visited.insert(node->GetID());
+  // Stack of nodes to process.
+  std::vector<Node> st;
+  st.push_back(start);
 
-  // Check if device ID changed from previous node in path
-  bool device_changed = false;
-  int current_device_id = node->GetDeviceId();
-  if (!current_path.empty()) {
-    int prev_device_id = current_path.back()->GetDeviceId();
-    if (prev_device_id != current_device_id) {
-      device_changed = true;
-      // Save current path before device change
-      savePath(current_path, prev_device_id);
-      current_path.clear();
+  while (!st.empty()) {
+    Node node = st.back();
+    st.pop_back();
+    if (!node) continue;
+
+    // Check if already visited
+    if (visited.find(node->GetID()) != visited.end()) {
+      // Save any remaining path (treat visited as a branch end)
+      if (!current_path.empty()) {
+        int dev = current_path.back()->GetDeviceId();
+        savePath(std::move(current_path), dev);
+        current_path.clear();
+      }
+      continue;
     }
-  }
 
-  // Handle child graph nodes specially
-  if (node->GetType() == hipGraphNodeTypeGraph) {
-    // Save path before child graph node (if any)
+    // Mark regular nodes as visited
+    visited.insert(node->GetID());
+
+    // Check if device ID changed from previous node in path
+    bool device_changed = false;
+    int current_device_id = node->GetDeviceId();
     if (!current_path.empty()) {
-      savePath(current_path, current_path.back()->GetDeviceId());
-      current_path.clear();
-    }
-
-    // Get the child graph and recursively process it
-    auto childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(node);
-    auto childGraph = childGraphNode->GetChildGraph();
-
-    if (childGraph != nullptr) {
-      // Create a new GraphExecutionPaths for this child graph
-      hip::Graph::GraphExecutionPaths child_graph_exec_paths;
-      child_graph_exec_paths.graph_ptr = childGraph;
-
-      // Find all root nodes in the child graph
-      const auto& child_root_nodes = childGraph->GetRootNodes();
-      std::unordered_set<unsigned int> child_visited;
-
-      for (const auto& child_root : child_root_nodes) {
-        std::vector<Node> child_current_path;
-        childGraph->FindPathsRecursiveHierarchical(child_root, child_current_path,
-                                                   child_visited, child_graph_exec_paths);
-      }
-
-      // Store the child graph paths
-      int child_graph_index = graph_paths.child_graph_paths.size();
-      graph_paths.child_graph_paths.push_back(std::move(child_graph_exec_paths));
-
-      // Create a path containing just the child graph node
-      std::vector<Node> child_node_path = {childGraphNode};
-      savePath(child_node_path, current_device_id, childGraphNode, child_graph_index);
-    }
-
-    // Clear current path and continue with edges from the child graph node
-    current_path.clear();
-    const auto& edges = node->GetEdges();
-    for (const auto& edge : edges) {
-      FindPathsRecursiveHierarchical(edge, current_path, visited, graph_paths);
-    }
-
-    return;
-  }
-
-  // Regular node - add to current path
-  current_path.push_back(node);
-
-  // Edges are out degrees, Dependencies are in degrees
-  const auto& edges = node->GetEdges();
-  const auto& dependencies = node->GetDependencies();
-
-  // Check if this is a fork node (multiple outgoing edges)
-  bool is_fork = edges.size() > 1;
-  // Check if this is a join node (multiple incoming dependencies)
-  bool is_join = dependencies.size() > 1;
-
-  if (is_fork || is_join) {
-    // Save current path as a separate segment
-    if (!current_path.empty()) {
-      std::vector<Node> path_to_save = current_path;
-      Node saved_join_node = nullptr;
-
-      // For join nodes, save path without the join node itself
-      // For fork nodes, save the complete path
-      if (is_join) {
-        saved_join_node = path_to_save.back();
-        path_to_save.pop_back();
-      }
-
-      if (!path_to_save.empty()) {
-        savePath(path_to_save, path_to_save.back()->GetDeviceId());
-      }
-      current_path.clear();
-
-      // For nodes that are both fork and join, save them as their own segment
-      if (saved_join_node != nullptr && is_fork) {
-        std::vector<Node> fork_join_segment = {saved_join_node};
-        savePath(fork_join_segment, saved_join_node->GetDeviceId());
-      }
-
-      // Put the join node back in current_path for further traversal
-      // But not if it's also a fork node, because we'll traverse branches separately
-      if (saved_join_node != nullptr && !is_fork) {
-        current_path.push_back(saved_join_node);
-      }
-    }
-
-    // Traverse each branch until it hits a join
-    for (const auto& edge : edges) {
-      FindPathsRecursiveHierarchical(edge, current_path, visited, graph_paths);
-
-      // Save the path if it's not empty and this was a fork/join boundary
-      if (!current_path.empty() && (is_fork || is_join)) {
-        savePath(current_path, current_path.back()->GetDeviceId());
+      int prev_device_id = current_path.back()->GetDeviceId();
+      if (prev_device_id != current_device_id) {
+        device_changed = true;
+        // Save current path before device change
+        savePath(std::move(current_path), prev_device_id);
         current_path.clear();
       }
     }
-  } else if (edges.size() == 1) {
-    // Single edge - continue on same path
-    FindPathsRecursiveHierarchical(edges[0], current_path, visited, graph_paths);
-  }
 
-  // Save any remaining path (handles leaf nodes and leaf join nodes)
-  if (!current_path.empty()) {
-    savePath(current_path, current_path.back()->GetDeviceId());
-    current_path.clear();
+    // Handle child graph nodes specially
+    if (node->GetType() == hipGraphNodeTypeGraph) {
+      // Save path before child graph node (if any)
+      if (!current_path.empty()) {
+        int dev = current_path.back()->GetDeviceId();
+        savePath(std::move(current_path), dev);
+        current_path.clear();
+      }
+
+      // Get the child graph and recursively process it
+      auto childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(node);
+      auto childGraph = childGraphNode->GetChildGraph();
+
+      if (childGraph != nullptr) {
+        // Create a new GraphExecutionPaths for this child graph
+        hip::Graph::GraphExecutionPaths child_graph_exec_paths;
+        child_graph_exec_paths.graph_ptr = childGraph;
+
+        // Find all root nodes in the child graph
+        const auto& child_root_nodes = childGraph->GetRootNodes();
+        std::unordered_set<unsigned int> child_visited;
+
+        for (const auto& child_root : child_root_nodes) {
+          std::vector<Node> child_current_path;
+          childGraph->FindPathsDFS(child_root, child_current_path, child_visited,
+                                   child_graph_exec_paths);
+        }
+
+        // Store the child graph paths
+        int child_graph_index = static_cast<int>(graph_paths.child_graph_paths.size());
+        graph_paths.child_graph_paths.push_back(std::move(child_graph_exec_paths));
+
+        // Create a path containing just the child graph node
+        std::vector<Node> child_node_path = {childGraphNode};
+        savePath(child_node_path, current_device_id, childGraphNode, child_graph_index);
+      }
+
+      // Clear current path and continue with edges from the child graph node
+      current_path.clear();
+      const auto& edges = node->GetEdges();
+      for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
+        st.push_back(edges[static_cast<size_t>(i)]);
+      }
+
+      continue;
+    }
+
+    // Regular node - add to current path
+    current_path.push_back(node);
+
+    // Edges are out degrees, Dependencies are in degrees
+    const auto& edges = node->GetEdges();
+    const auto& dependencies = node->GetDependencies();
+
+    // Check if this is a fork node (multiple outgoing edges)
+    bool is_fork = edges.size() > 1;
+    // Check if this is a join node (multiple incoming dependencies)
+    bool is_join = dependencies.size() > 1;
+
+    if (is_fork || is_join) {
+      // Save current path as a separate segment
+      if (!current_path.empty()) {
+        Node saved_join_node = nullptr;
+
+        // For join nodes, save path without the join node itself
+        // For fork nodes, save the complete path
+        if (is_join) {
+          saved_join_node = current_path.back();
+          current_path.pop_back();
+        }
+
+        if (!current_path.empty()) {
+          int dev = current_path.back()->GetDeviceId();
+          savePath(current_path, dev);
+        }
+        current_path.clear();
+
+        // For nodes that are both fork and join, save them as their own segment
+        if (saved_join_node != nullptr && is_fork) {
+          std::vector<Node> fork_join_segment = {saved_join_node};
+          savePath(std::move(fork_join_segment), saved_join_node->GetDeviceId());
+        }
+
+        // Put the join node back in current_path for further traversal
+        // But not if it's also a fork node, because we'll traverse branches separately
+        if (saved_join_node != nullptr && !is_fork) {
+          current_path.push_back(saved_join_node);
+        }
+      }
+
+      // Traverse each branch until it hits a join
+      for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
+        st.push_back(edges[static_cast<size_t>(i)]);
+      }
+    } else if (edges.size() == 1) {
+      // Single edge - continue on same path
+      st.push_back(edges[0]);
+    }
+
+    // Save any remaining path (handles leaf nodes and leaf join nodes)
+    if (!current_path.empty() && edges.size() == 0) {
+      int dev = current_path.back()->GetDeviceId();
+      savePath(std::move(current_path), dev);
+      current_path.clear();
+    }
   }
 }
 
@@ -767,7 +794,7 @@ Graph* Graph::clone() const {
 
 // ================================================================================================
 bool GraphExec::isGraphExecValid(GraphExec* pGraphExec) {
-  amd::ScopedLock lock(graphExecSetLock_);
+  std::scoped_lock lock(graphExecSetLock_);
   if (graphExecSet_.find(pGraphExec) == graphExecSet_.end()) {
     return false;
   }
@@ -776,7 +803,7 @@ bool GraphExec::isGraphExecValid(GraphExec* pGraphExec) {
 
 // ================================================================================================
 hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
-  amd::ScopedLock lock(graphExecStreamCreateLock_);
+  std::scoped_lock lock(graphExecStreamCreateLock_);
 
   if (num_streams == 0) {
     ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
@@ -1089,7 +1116,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           auto& currentNode = segment.nodes[j];
           // Capture packets for this node
           std::vector<uint8_t*> nodePackets;
-          std::vector<std::string> nodeKernelNames;
+          std::vector<const std::string*> nodeKernelNames;
           status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &nodePackets,
                                                      &nodeKernelNames);
 
@@ -1233,7 +1260,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
 
       // Capture new packets for this node
       std::vector<uint8_t*> newPackets;
-      std::vector<std::string> newKernelNames;
+      std::vector<const std::string*> newKernelNames;
       hipError_t status = node->CaptureAndFormPacket(kernArgManager_, &newPackets,
                                                                       &newKernelNames);
       if (status != hipSuccess) {
@@ -1260,7 +1287,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
                                              static_cast<size_t>(packetDelta), nullptr);
           packetBatch.dispatchKernelNames.insert(
               packetBatch.dispatchKernelNames.begin() + insertPos,
-              static_cast<size_t>(packetDelta), std::string());
+              static_cast<size_t>(packetDelta), nullptr);
         } else {
           // Negative packetDelta, remove excess packet slots from the end of this node's range
           const size_t removePos = range.startIndex + newPacketCount;
@@ -1660,7 +1687,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
         // Select which vectors to dispatch based on whether nodes are disabled
         const std::vector<uint8_t*>* packetsToDispatch;
-        const std::vector<std::string>* kernelNamesToDispatch;
+        const std::vector<const std::string*>* kernelNamesToDispatch;
 
         if (packetBatch.disabledNodeCount == 0) {
           // No disabled nodes - use full batch

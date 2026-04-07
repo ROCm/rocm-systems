@@ -36,7 +36,6 @@
 #include <dlfcn.h>
 
 #include "rocshmem/rocshmem.hpp"
-#include "atomic_return.hpp"
 #include "backend_type.hpp"
 #include "context_incl.hpp"
 #include "envvar.hpp"
@@ -108,8 +107,9 @@ ROBackend::ROBackend(MPI_Comm comm)
       this, transport_->get_world_comm(), my_pe, num_pes);
   team_tracker.set_team_world(team_world_proxy_->get());
 
-  ROCSHMEM_TEAM_WORLD =
+  host::ROCSHMEM_TEAM_WORLD =
       reinterpret_cast<rocshmem_team_t>(team_world_proxy_->get());
+  set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 
   default_block_handle_proxy_ = DefaultBlockHandleProxyT(
                                 g_ret_buffer_.get(),
@@ -184,7 +184,7 @@ ROBackend::~ROBackend() {
   CHECK_HIP(hipFree(ctx_array));
 }
 
-__device__ bool ROBackend::create_ctx(int64_t options, rocshmem_ctx_t *ctx) {
+__device__ bool ROBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
   ROContext *ctx_;
 
   auto pop_result = ctx_free_list.get()->pop_front();
@@ -248,7 +248,6 @@ void ROBackend::dump_backend_stats() {
   }
 
   int device_id;
-  hipDeviceProp_t device_props;
   CHECK_HIP(hipGetDevice(&device_id));
   int wallClockMhz;
   CHECK_HIP(hipDeviceGetAttribute(&wallClockMhz, hipDeviceAttributeWallClockRate, device_id));

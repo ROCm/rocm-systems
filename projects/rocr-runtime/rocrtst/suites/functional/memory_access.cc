@@ -58,7 +58,6 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
-
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
     const char* msg = 0; \
@@ -394,6 +393,10 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
       auto gran_sz = pool_i.alloc_granule;
       auto pool_sz = pool_i.size / gran_sz;
       auto max_alloc_size = pool_sz/2;
+#ifdef ROCRTST_ASAN
+      // Under ASAN use kMaxTestAllocAsan to avoid shadow-memory OOM on large-VRAM GPUs
+      max_alloc_size = std::min(max_alloc_size, rocrtst::kMaxTestAllocAsan / gran_sz);
+#endif
       unsigned int max_element = max_alloc_size/sizeof(unsigned int);
       unsigned int *gpu_data;
       unsigned int *sys_data;

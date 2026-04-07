@@ -116,7 +116,7 @@ void test_get_handle_by_bdf() {
     amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_GPU;
     amdcuid_id_t handle;
 
-    amdcuid_status_t status = amdcuid_get_handle_by_dev_path(test_bdf, device_type, &handle);
+    amdcuid_status_t status = amdcuid_get_handle_by_bdf(test_bdf, device_type, &handle);
     if (status == AMDCUID_STATUS_SUCCESS) {
         const char* id_str = amdcuid_id_to_string(handle);
         EXPECT_NE(id_str, nullptr);
@@ -173,11 +173,15 @@ void test_refresh() {
 }
 
 void test_query_device_property() {
+    uint32_t count = 0;
+    amdcuid_status_t status = amdcuid_get_all_handles(nullptr, &count);
+    EXPECT_TRUE(status == AMDCUID_STATUS_INSUFFICIENT_SIZE || status == AMDCUID_STATUS_SUCCESS);
+    ASSERT_GT(count, 0u);
 
-    uint32_t count = 100;
-    amdcuid_id_t* handles = new amdcuid_id_t[count];
-    amdcuid_status_t status = amdcuid_get_all_handles(handles, &count);
+    std::vector<amdcuid_id_t> handles(count);
+    status = amdcuid_get_all_handles(handles.data(), &count);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
+    ASSERT_GT(count, 0u);
 
     // Query device type for the first handle
     amdcuid_device_type_t device_type;
@@ -185,8 +189,6 @@ void test_query_device_property() {
     status = amdcuid_query_device_property(handles[0], AMDCUID_QUERY_DEVICE_TYPE, &device_type, &length);
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(length, sizeof(device_type));
-
-    delete[] handles;
 }
 
 void test_set_hash_key() {

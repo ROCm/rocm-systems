@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include <hip/texture_types.h>
@@ -620,7 +606,8 @@ hipError_t hipBindTexture2D(size_t* offset, const textureReference* texref, cons
   size_t refDevSize = 0;
 
   HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
+      PlatformState::Instance().StatCO().GetGlobalVar(
+          texref, ihipGetDevice(), &refDevPtr, &refDevSize));
 
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTexture2D(offset, texref, devPtr, desc, width, height, pitch);
@@ -659,13 +646,14 @@ hipError_t hipBindTextureToArray(const textureReference* texref, hipArray_const_
   HIP_INIT_API(hipBindTextureToArray, texref, array, desc);
 
   if ((texref == nullptr) || (array == nullptr) || (desc == nullptr)) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
   HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
+      PlatformState::Instance().StatCO().GetGlobalVar(
+          texref, ihipGetDevice(), &refDevPtr, &refDevSize));
 
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTextureToArray(texref, array, desc);
@@ -713,7 +701,8 @@ hipError_t hipBindTextureToMipmappedArray(const textureReference* texref,
   size_t refDevSize = 0;
 
   HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
+      PlatformState::Instance().StatCO().GetGlobalVar(
+          texref, ihipGetDevice(), &refDevPtr, &refDevSize));
 
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTextureToMipmappedArray(texref, mipmappedArray, desc);
@@ -738,7 +727,8 @@ hipError_t hipBindTexture(size_t* offset, const textureReference* texref, const 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
   HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
+      PlatformState::Instance().StatCO().GetGlobalVar(
+          texref, ihipGetDevice(), &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTexture(offset, texref, devPtr, desc, size);
   if (err != hipSuccess) {
@@ -982,7 +972,7 @@ hipError_t hipTexRefSetArray(textureReference* texRef, hipArray_const_t array, u
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
 
-  HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().GetDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
   // Any previous address or HIP array state associated with the texture reference is superseded by
@@ -1062,7 +1052,7 @@ hipError_t hipTexRefSetAddress(size_t* ByteOffset, textureReference* texRef, hip
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
-  HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().GetDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
   // Any previous address or HIP array state associated with the texture reference is superseded by
@@ -1105,7 +1095,7 @@ hipError_t hipTexRefSetAddress2D(textureReference* texRef, const HIP_ARRAY_DESCR
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
-  HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().GetDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
   // Any previous address or HIP array state associated with the texture reference is superseded by
@@ -1453,7 +1443,7 @@ hipError_t hipTexRefSetMipmappedArray(textureReference* texRef, hipMipmappedArra
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
-  HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().GetDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
   // Any previous address or HIP array state associated with the texture reference is superseded by

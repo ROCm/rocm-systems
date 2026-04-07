@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2022 - Present Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #include "hip_comgr_helper.hpp"
 #if defined(_WIN32)
 #include <io.h>
@@ -64,7 +49,7 @@ struct __ClangOffloadBundleHeader {
 // Consumes the string 'consume_' from the starting of the given input
 // eg: input = amdgcn-amd-amdhsa--gfx908 and consume_ is amdgcn-amd-amdhsa--
 // input will become gfx908.
-static bool consume(std::string& input, std::string consume_) {
+static bool consume(std::string& input, const std::string &consume_) {
   if (input.substr(0, consume_.size()) != consume_) {
     return false;
   }
@@ -772,7 +757,7 @@ std::vector<std::string> getLinkOptions(const LinkArguments& args) {
 }
 
 // RTC Program Member Functions
-RTCProgram::RTCProgram(std::string name) : name_(name) {
+RTCProgram::RTCProgram(const std::string &name) : name_(name) {
   constexpr bool kComgrVersioned = true;
   std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
   if (exec_input_.Create() != AMD_COMGR_STATUS_SUCCESS) {
@@ -859,7 +844,7 @@ bool RTCProgram::findIsa() {
 }
 
 // RTC Program Member Functions
-void RTCProgram::AppendOptions(const std::string app_env_var, std::vector<std::string>* options) {
+void RTCProgram::AppendOptions(const std::string &app_env_var, std::vector<std::string>* options) {
   if (options == nullptr) {
     LogError("Append options passed is nullptr.");
     return;
@@ -871,18 +856,18 @@ void RTCProgram::AppendOptions(const std::string app_env_var, std::vector<std::s
 }
 
 // HIPRTC Program lock
-amd::Monitor RTCProgram::lock_(true);
+std::recursive_mutex RTCProgram::lock_;
 
-LinkProgram::LinkProgram(std::string name) : RTCProgram(name) {
+LinkProgram::LinkProgram(const std::string &name) : RTCProgram(name) {
   if (link_input_.Create() != AMD_COMGR_STATUS_SUCCESS) {
     guarantee(false, "Failed to allocate internal comgr structure");
   }
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   linker_set_.insert(this);
 }
 
 bool LinkProgram::isLinkerValid(LinkProgram* link_program) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   if (linker_set_.find(link_program) == linker_set_.end()) {
     return false;
   }
@@ -1038,7 +1023,7 @@ amd_comgr_data_kind_t LinkProgram::GetCOMGRDataKind(hipJitInputType input_type) 
 
 
 bool LinkProgram::AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputType input_type,
-                                    std::string& link_file_name) {
+                                    const std::string& link_file_name) {
   std::vector<char> llvm_code_object;
   is_bundled_ = helpers::CheckIfBundled(link_data);
 
@@ -1081,7 +1066,7 @@ bool LinkProgram::AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputTyp
 }
 
 
-bool LinkProgram::AddLinkerFile(std::string file_path, hipJitInputType input_type) {
+bool LinkProgram::AddLinkerFile(const std::string &file_path, hipJitInputType input_type) {
   std::ifstream file_stream{file_path, std::ios_base::in | std::ios_base::binary};
   if (!file_stream.good()) {
     return false;
@@ -1102,7 +1087,7 @@ bool LinkProgram::AddLinkerFile(std::string file_path, hipJitInputType input_typ
   return AddLinkerDataImpl(link_file_info, input_type, link_file_name);
 }
 
-bool LinkProgram::AddLinkerData(void* image_ptr, size_t image_size, std::string link_file_name,
+bool LinkProgram::AddLinkerData(void* image_ptr, size_t image_size, const std::string &link_file_name,
                                 hipJitInputType input_type) {
   char* image_char_buf = reinterpret_cast<char*>(image_ptr);
   std::vector<char> llvm_code_object(image_char_buf, image_char_buf + image_size);

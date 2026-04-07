@@ -1,29 +1,6 @@
 # ruff: noqa
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
-
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 """
 ROCTX Injection Wrapper - Auto-discovers and intercepts ALL PyTorch operators
@@ -51,12 +28,15 @@ for candidate in candidate_paths:
 
 from utils.logger import console_error, console_log, console_warning
 
-console_log("torch trace", f"Python version: {python_version}")
+console_log("torch trace", f"Workload Python Version: {python_version}")
 
 try:
     from roctx import rangePop, rangePush
 
-    roctx_path = Path(rangePush.__code__.co_filename).parent
+    if hasattr(rangePush, "__code__") and hasattr(rangePush.__code__, "co_filename"):
+        roctx_path = Path(rangePush.__code__.co_filename).parent
+    else:
+        roctx_path = "<unknown>"
 
     console_log(
         "torch trace",
@@ -64,12 +44,10 @@ try:
     )
 except ImportError:
     console_error(
-        f"Looked for Roctx in :{candidate_paths}"
-        "ROCTX Python module not found.\n"
-        "Please ensure that the rocprofiler-sdk is installed"
-        " and that the roctx Python bindings are available for your Python version."
-        "You may need to reinstall or rebuild ROCm for your current Python environment.\n"
-        "The --torch-trace option requires a valid roctx installation.\n",
+        f"Looked for roctx in: {candidate_paths}\n"
+        "ROCTX not found. --torch-trace requires roctx from rocprofiler-sdk. "
+        "Ensure your workload uses a Python version for which "
+        "roctx bindings are available in your ROCm installation.\n",
     )
     sys.exit(1)
 
@@ -527,10 +505,14 @@ def instrument_all_torch_ops():
                         marker_stack = get_marker_stack()
                         context_stack = get_context_stack()
                         marker_stack.append(marker_name)
+                        # Filter empty strings from context_stack; always add context
+                        # suffix so downstream parsing (expecting ":" and Context_Id) works.
                         filtered_context = [c for c in context_stack if c]
-                        full_marker_name = "/".join(marker_stack) + (
-                            ":" + "/".join(filtered_context) if filtered_context else ""
-                        )
+                        if filtered_context:
+                            context_suffix = ":" + "/".join(filtered_context)
+                        else:
+                            context_suffix = ":#0@unknown:0"
+                        full_marker_name = "/".join(marker_stack) + context_suffix
 
                         rangePush(full_marker_name)
                         try:

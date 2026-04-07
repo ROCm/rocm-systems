@@ -92,6 +92,12 @@ get_size(Type&& val)
 
         return total_size + sizeof(size_t);
     }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
+        return sizeof(uint8_t) + (val.has_value() ? get_size(val.value()) : 0);
+    }
     else
     {
         return sizeof(DecayedType);
@@ -125,6 +131,17 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
         *reinterpret_cast<size_t*>(dest) = data_size;
         std::memcpy(dest + sizeof(size_t), value.data(), data_size);
         position += total_size;
+    }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
+        buffer[position++] = value.has_value() ? 1 : 0;
+
+        if(value.has_value())
+        {
+            store_value(*value, buffer, position);
+        }
     }
     else
     {
@@ -167,6 +184,21 @@ parse_value(uint8_t*& data_pos, Type& arg)
         std::copy_n(reinterpret_cast<const typename ContainerType::value_type*>(data_pos),
                     total_size / item_size, std::back_inserter(arg));
         data_pos += total_size;
+    }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
+        const bool has_value = *data_pos++;
+        if(has_value)
+        {
+            arg.emplace();
+            parse_value<typename DecayedType::value_type>(data_pos, *arg);
+        }
+        else
+        {
+            arg.reset();
+        }
     }
     else
     {

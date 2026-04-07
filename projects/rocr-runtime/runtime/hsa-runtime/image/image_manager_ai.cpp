@@ -534,6 +534,7 @@ uint32_t ImageManagerAi::GetAddrlibSurfaceInfoAi(
   in.height = height;
   in.numSlices = num_slice;
   in.numMipLevels = num_mipmap_levels;
+  in.pitchInElement = image_data_row_pitch / image_prop.element_size;
 
   switch(desc.geometry) {
   case HSA_EXT_IMAGE_GEOMETRY_1D:

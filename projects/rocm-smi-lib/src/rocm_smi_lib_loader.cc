@@ -20,55 +20,51 @@
  * THE SOFTWARE.
  */
 
-#include <iostream>
-
 #include "rocm_smi/rocm_smi_lib_loader.h"
+
+#include <iostream>
 
 namespace amd {
 namespace smi {
 
-ROCmSmiLibraryLoader::ROCmSmiLibraryLoader(): libHandler_(nullptr) {
-}
+ROCmSmiLibraryLoader::ROCmSmiLibraryLoader() : libHandler_(nullptr) {}
 
 rsmi_status_t ROCmSmiLibraryLoader::load(const char* filename) {
-    if (filename == nullptr) {
-        return RSMI_STATUS_FAIL_LOAD_MODULE;
-    }
-    if (libHandler_ || library_loaded_) {
-        unload();
-    }
+  if (filename == nullptr) {
+    return RSMI_STATUS_FAIL_LOAD_MODULE;
+  }
+  if (libHandler_ || library_loaded_) {
+    unload();
+  }
 
-    std::lock_guard<std::mutex> guard(library_mutex_);
-    // check if already loaded, return success if it is
-    // dlopen(filename, RTLD_NOLOAD) == null only IFF library is not loaded
-    void* isLibOpen = dlopen(filename, RTLD_NOLOAD);
-    if (isLibOpen == nullptr) {
-      libHandler_ = dlopen(filename, RTLD_LAZY);
-      if (!libHandler_) {
-          char* error = dlerror();
-          std::cerr << "Fail to open " << filename <<": " << error
-                    << std::endl;
-          return RSMI_STATUS_FAIL_LOAD_MODULE;
-      }
+  std::lock_guard<std::mutex> guard(library_mutex_);
+  // check if already loaded, return success if it is
+  // dlopen(filename, RTLD_NOLOAD) == null only IFF library is not loaded
+  void* isLibOpen = dlopen(filename, RTLD_NOLOAD);
+  if (isLibOpen == nullptr) {
+    libHandler_ = dlopen(filename, RTLD_LAZY);
+    if (!libHandler_) {
+      char* error = dlerror();
+      std::cerr << "Fail to open " << filename << ": " << error << std::endl;
+      return RSMI_STATUS_FAIL_LOAD_MODULE;
     }
-    library_loaded_ = true;
+  }
+  library_loaded_ = true;
 
-    return RSMI_STATUS_SUCCESS;
+  return RSMI_STATUS_SUCCESS;
 }
 
 rsmi_status_t ROCmSmiLibraryLoader::unload() {
-        std::lock_guard<std::mutex> guard(library_mutex_);
-        if (libHandler_) {
-            dlclose(libHandler_);
-            libHandler_ = nullptr;
-            library_loaded_ = false;
-        }
-        return RSMI_STATUS_SUCCESS;
+  std::lock_guard<std::mutex> guard(library_mutex_);
+  if (libHandler_) {
+    dlclose(libHandler_);
+    libHandler_ = nullptr;
+    library_loaded_ = false;
+  }
+  return RSMI_STATUS_SUCCESS;
 }
 
-ROCmSmiLibraryLoader::~ROCmSmiLibraryLoader() {
-        unload();
-}
+ROCmSmiLibraryLoader::~ROCmSmiLibraryLoader() { unload(); }
 
 }  // namespace smi
 }  // namespace amd

@@ -278,6 +278,11 @@ class Backend {
 
   BackendType get_backend_type() { return type; }
 
+  /**
+   * Fine grained memory allocator for buffers used in collectives Routines
+   */
+  HIPAllocator *psync_allocator_{nullptr};
+
  protected:
   /**
    * @brief Required to support static inheritance for device calls.

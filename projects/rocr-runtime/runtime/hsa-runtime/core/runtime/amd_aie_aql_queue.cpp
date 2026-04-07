@@ -124,14 +124,13 @@ AieAqlQueue::~AieAqlQueue() {
 }
 
 hsa_status_t AieAqlQueue::Inactivate() {
-  bool active(active_.exchange(false, std::memory_order_relaxed));
-  hsa_status_t status(HSA_STATUS_SUCCESS);
-
+  bool active = active_.exchange(false, std::memory_order_relaxed);
   if (active) {
-    agent_.driver().DestroyQueue(queue_id_);
+    auto err = agent_.driver().DestroyQueue(queue_id_);
+    assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+    atomic::Fence(std::memory_order_acquire);
   }
-
-  return status;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t AieAqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
@@ -216,11 +215,14 @@ void AieAqlQueue::SubmitPackets() {
 
   auto& driver = static_cast<XdnaDriver&>(agent_.driver());
   void* queue_base = amd_queue_.hsa_queue.base_address;
+  const uint32_t queue_size = amd_queue_.hsa_queue.size;
 
   uint64_t cur_id = LoadReadIndexRelaxed();
   const uint64_t end = LoadWriteIndexAcquire();
   while (cur_id < end) {
-    auto* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + cur_id;
+    // Use modulo to properly index into the ring buffer
+    const uint64_t pkt_idx = cur_id % queue_size;
+    auto* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + pkt_idx;
 
     // Get the packet header information
     if (pkt->header.header != HSA_PACKET_TYPE_VENDOR_SPECIFIC ||
@@ -235,7 +237,8 @@ void AieAqlQueue::SubmitPackets() {
         // packets there are. All can be combined into a single chain.
         uint64_t num_cont_start_cu_pkts = 1;
         for (uint64_t peak_pkt_id = cur_id + 1; peak_pkt_id < end; peak_pkt_id++) {
-          auto* peak_pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_id;
+          const uint64_t peak_pkt_idx = peak_pkt_id % queue_size;
+          auto* peak_pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_idx;
           if (peak_pkt->opcode != HSA_AMD_AIE_ERT_START_CU) {
             break;
           }
@@ -266,8 +269,7 @@ void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {
   StoreRelaxed(value);
 }
 
-hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute,
-                                  void *value) {
+hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
       *static_cast<hsa_agent_t*>(value) = agent_.public_handle();
@@ -289,22 +291,16 @@ hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AieAqlQueue::GetCUMasking(uint32_t num_cu_mask_count,
-                                       uint32_t *cu_mask) {
-  assert(false && "AIE AQL queue does not support CU masking.");
-  return HSA_STATUS_ERROR;
+hsa_status_t AieAqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) {
+  return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-hsa_status_t AieAqlQueue::SetCUMasking(uint32_t num_cu_mask_count,
-                                       const uint32_t *cu_mask) {
-  assert(false && "AIE AQL queue does not support CU masking.");
-  return HSA_STATUS_ERROR;
+hsa_status_t AieAqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) {
+  return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-void AieAqlQueue::ExecutePM4(uint32_t *cmd_data, size_t cmd_size_b,
-                             hsa_fence_scope_t acquireFence,
-                             hsa_fence_scope_t releaseFence,
-                             hsa_signal_t *signal) {
+void AieAqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
+                             hsa_fence_scope_t releaseFence, hsa_signal_t* signal) {
   assert(false && "AIE AQL queue does not support PM4 packets.");
 }
 

@@ -24,12 +24,9 @@
  */
 
 #include "kfdcontext.h"
-#include "libhsakmt.h"
 #include <stdlib.h>
 #include <stddef.h>
 #include <assert.h>
-#include <stdio.h>
-#include <errno.h>
 
 void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx)
 {

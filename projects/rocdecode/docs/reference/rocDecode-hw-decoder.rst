@@ -44,19 +44,19 @@ type is ``OUT_SURFACE_MEM_DEV_COPIED`` or ``OUT_SURFACE_MEM_HOST_COPIED``, the i
 Once decoding is complete, ``rocDecDestroyVideoParser()`` and ``rocDecDestroyDecoder()`` must be called to destroy the parser and the decoding session, and free resources.
 
 .. |apifolder| replace:: ``api/rocdecode``
-.. _apifolder: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode
+.. _apifolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode
 
 .. |rocparser| replace:: ``api/rocdecode/rocparser.h``
-.. _rocparser: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocparser.h
+.. _rocparser: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocparser.h
 
 .. |rocdecode| replace:: ``api/rocDecode/rocdecode.h``
-.. _rocdecode: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocdecode.h
+.. _rocdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocdecode.h
 
 .. |rocdecodehost| replace:: ``api/rocDecode/rocdecode_host.h``
-.. _rocdecodehost: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocdecode_host.h
+.. _rocdecodehost: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocdecode_host.h
 
 .. |bitstreamreader| replace:: ``api/rocDecode/roc_bitstream_reader.h``
-.. _bitstreamreader: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/roc_bitstream_reader.h
+.. _bitstreamreader: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/roc_bitstream_reader.h
 
 .. |utilsfolder| replace:: ``utils`` folder
-.. _utilsfolder: https://github.com/ROCm/rocDecode/tree/develop/utils
+.. _utilsfolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils

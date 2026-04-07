@@ -1,0 +1,16 @@
+Domain,Function,Process_Id,Thread_Id,Correlation_Id,GUID,Start_Timestamp,End_Timestamp
+MARKER_CORE_RANGE_API,torch.empty:#1@linear.py:109,734790,734790,1,0000140b-e68a-768a-b265-805fcfdc4a36,336325904769408,336325904971344
+MARKER_CORE_RANGE_API,torch.empty:#2@linear.py:112,734790,734790,2,0000140b-e68a-768a-b265-805fcfdc4a36,336325905741960,336325905745609
+MARKER_CORE_RANGE_API,torch.empty:#3@linear.py:109,734790,734790,3,0000140b-e68a-768a-b265-805fcfdc4a36,336325907382188,336325907385618
+MARKER_CORE_RANGE_API,torch.empty:#4@linear.py:112,734790,734790,4,0000140b-e68a-768a-b265-805fcfdc4a36,336325907397028,336325907398138
+MARKER_CORE_RANGE_API,torch.randn:#1@simple_net.py:69,734790,734790,9,0000140b-e68a-768a-b265-805fcfdc4a36,336325933992803,336325934116501
+MARKER_CORE_RANGE_API,nn.Module.SimpleNet.forward:#1@simple_net.py:72,734790,734790,11,0000140b-e68a-768a-b265-805fcfdc4a36,336325934491404,336326800150566
+MARKER_CORE_RANGE_API,nn.Module.SimpleNet.forward/nn.Module.Linear.forward:#1@simple_net.py:72/#1@simple_net.py:57,734790,734790,12,0000140b-e68a-768a-b265-805fcfdc4a36,336325934519553,336326766255439
+MARKER_CORE_RANGE_API,nn.Module.SimpleNet.forward/nn.Module.Linear.forward/torch.nn.functional.linear:#1@simple_net.py:72/#1@simple_net.py:57/#1@linear.py:134,734790,734790,13,0000140b-e68a-768a-b265-805fcfdc4a36,336325934537513,336326766238160
+MARKER_CORE_RANGE_API,nn.Module.SimpleNet.forward/torch.nn.functional.relu:#1@simple_net.py:72/#1@simple_net.py:58,734790,734790,14,0000140b-e68a-768a-b265-805fcfdc4a36,336326766374497,336326799665325
+MARKER_CORE_RANGE_API,nn.Module.SimpleNet.forward/torch.nn.functional.relu/torch.nn.functional.has_torch_function_unary:#1@simple_net.py:72/#1@simple_net.py:58/#1@functional.py:1718,734790,734790,15,0000140b-e68a-768a-b265-805fcfdc4a36,336326766397397,336326766402287
+MARKER_CORE_RANGE_API,nn.Module.SimpleNet.forward/torch.nn.functional.relu/torch.relu:#1@simple_net.py:72/#1@simple_net.py:58/#1@functional.py:1723,734790,734790,16,0000140b-e68a-768a-b265-805fcfdc4a36,336326766417486,336326799656745
+MARKER_CORE_RANGE_API,nn.Module.SimpleNet.forward/nn.Module.Linear.forward:#1@simple_net.py:72/#1@simple_net.py:59,734790,734790,17,0000140b-e68a-768a-b265-805fcfdc4a36,336326799790083,336326800147756
+MARKER_CORE_RANGE_API,nn.Module.SimpleNet.forward/nn.Module.Linear.forward/torch.nn.functional.linear:#1@simple_net.py:72/#1@simple_net.py:59/#2@linear.py:134,734790,734790,18,0000140b-e68a-768a-b265-805fcfdc4a36,336326799839532,336326800146516
+MARKER_CORE_RANGE_API,torch.Tensor.backward:#1@simple_net.py:74,734790,734790,20,0000140b-e68a-768a-b265-805fcfdc4a36,336326807640183,336328268375254
+MARKER_CORE_RANGE_API,torch.Tensor.backward/torch.ones_like:#1@simple_net.py:74/#1@__init__.py:231,734790,734790,21,0000140b-e68a-768a-b265-805fcfdc4a36,336326807722052,336326814800378

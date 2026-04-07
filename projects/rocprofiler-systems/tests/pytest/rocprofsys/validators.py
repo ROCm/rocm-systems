@@ -18,11 +18,28 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
+
+def _python_for_validation_scripts() -> str:
+    """Return the Python executable to use when running validation scripts.
+
+    When running inside a PyInstaller/frozen binary, sys.executable is the
+    binary itself, which does not accept script paths and validation args.
+    Use system Python instead.
+    """
+    if getattr(sys, "frozen", False):
+        env_py = os.environ.get("ROCPROFSYS_VALIDATION_PYTHON")
+        if env_py:
+            return env_py
+        path = shutil.which("python3") or shutil.which("python")
+        return path or "python3"
+    return sys.executable
 
 
 @dataclass
@@ -59,17 +76,16 @@ ROCPROFSYS_ABORT_FAIL_REGEX = [
 from rocprofsys.runners import TestResult
 
 
-def validate_regex(
-    test_result: TestResult,
+def _validate_regex(
+    text: str,
     pass_regex: Optional[list[str]] = None,
     fail_regex: Optional[list[str]] = None,
-    use_abort_fail_regex: bool = True,
+    use_abort_fail_regex: bool = False,
 ) -> ValidationResult:
-    """Validate the regex patterns in the test result.
-    Does not check for result return code.
+    """Validate the regex patterns in some given text.
 
     Args:
-        test_result: TestResult object (after test execution)
+        text: Text to validate
         pass_regex: Optional list of regex patterns that must be found for success
         fail_regex: Optional list of regex patterns that must NOT be found
         use_abort_fail_regex: Whether to validate against ROCPROFSYS_ABORT_FAIL_REGEX (default: True)
@@ -77,8 +93,6 @@ def validate_regex(
     Returns:
         ValidationResult with is_valid=True if all patterns pass, False otherwise
     """
-    # Do not check for result return code
-
     # Build fail regex list
     fail_patterns: list[str] = []
     if fail_regex:
@@ -104,11 +118,11 @@ def validate_regex(
     if not all_patterns:
         return ValidationResult(is_valid=True, message="No patterns to validate")
 
-    # Single scan with combined regex
-    combined_regex = re.compile("|".join(all_patterns))
+    # Use re.DOTALL so '.' matches newlines (like CMake regex behavior)
+    combined_regex = re.compile("|".join(all_patterns), re.DOTALL)
     found_pass: set[str] = set()
 
-    for match in combined_regex.finditer(test_result.test_output):
+    for match in combined_regex.finditer(text):
         matched_group = match.lastgroup
 
         if matched_group in fail_indices:
@@ -132,6 +146,30 @@ def validate_regex(
             )
 
     return ValidationResult(is_valid=True, message="All patterns validated successfully")
+
+
+def validate_regex(
+    test_result: TestResult,
+    pass_regex: Optional[list[str]] = None,
+    fail_regex: Optional[list[str]] = None,
+    use_abort_fail_regex: bool = True,
+) -> ValidationResult:
+    return _validate_regex(
+        test_result.test_output, pass_regex, fail_regex, use_abort_fail_regex
+    )
+
+
+def validate_file_regex(
+    file_path: Path,
+    pass_regex: Optional[list[str]] = None,
+    fail_regex: Optional[list[str]] = None,
+    use_abort_fail_regex: bool = True,
+) -> ValidationResult:
+    if not file_path.exists():
+        return ValidationResult(False, f"File not found: {file_path}")
+    with open(file_path, "r") as f:
+        text = f.read()
+    return _validate_regex(text, pass_regex, fail_regex, use_abort_fail_regex)
 
 
 def validate_file_exists(path: Path, description: str = "File") -> ValidationResult:
@@ -176,7 +214,8 @@ def _run_validation_script(
     if not script_path.exists():
         return ValidationResult(False, f"Validation script not found: {script_path}")
 
-    cmd = [sys.executable, str(script_path)] + args
+    python_exe = _python_for_validation_scripts()
+    cmd = [python_exe, str(script_path)] + args
     cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
 
     try:
@@ -406,7 +445,7 @@ def validate_causal_json(
     if not json_path.exists():
         return ValidationResult(False, f"JSON file not found: {json_path}")
 
-    args = [str(json_path)]
+    args = ["-i", str(json_path)]
 
     if ci_mode:
         args.append("--ci")

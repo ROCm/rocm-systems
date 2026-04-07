@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -144,8 +130,7 @@ class DmaBlitManager : public device::HostBlitManager {
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
-      std::vector<amd::BatchCopyOp>& copyOps,  //!< Batch of copy operations
-      bool entire = false                      //!< Entire buffers will be updated
+      std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
 
   //! Copies an image object to a buffer object
@@ -229,6 +214,12 @@ class DmaBlitManager : public device::HostBlitManager {
                              size_t& partial       //!< Extra offset for memory alignment
   ) const;
 
+  //! Resolves the real HSA agents for a src/dst memory pair.
+  //! Handles IPC shared memory where dev() may not reflect the true owning agent.
+  inline void resolveAgents(const Memory& srcMem, const Memory& dstMem,
+                            address srcAddr, address dstAddr,
+                            hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const;
+
   //! Assits in transferring data from Host to Local or vice versa
   //! taking into account the Hsail profile supported by Hsa Agent
   bool hsaCopy(const Memory& srcMemory, const Memory& dstMemory, const amd::Coord3D& srcOrigin,
@@ -238,6 +229,17 @@ class DmaBlitManager : public device::HostBlitManager {
   inline bool rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, const_address src,
                              hsa_agent_t& srcAgent, size_t size,
                              amd::CopyMetadata& copyMetadata) const;
+
+  //! Batch version of hsaCopy - resolves multiple Memory objects to addresses/agents
+  bool hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
+                    const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+                    std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
+
+  //! Batch version of rocrCopyBuffer
+  bool rocrCopyBufferBatch(
+      const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
+      const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+      std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
 
   // Get Pinned Host Memory or Staging Buffer
   void getBuffer(const_address hostMem,  //!< Host Mem Address
@@ -361,6 +363,11 @@ class KernelBlitManager : public DmaBlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
+
+  //! Copies multiple buffer objects in a batch
+  virtual bool copyBufferBatch(
+      std::vector<amd::BatchCopyOp>& copyOps                //!< Batch of copy operations
   ) const;
 
   //! Copies a buffer object to an image object
@@ -506,7 +513,7 @@ class KernelBlitManager : public DmaBlitManager {
   //! Batch memory ops- Submits batch of streamWaits and streamWrite operations.
   virtual bool batchMemOps(const void* paramArray, size_t paramSize, uint32_t count) const;
 
-  virtual amd::Monitor* lockXfer() const { return &lockXferOps_; }
+  virtual std::recursive_mutex* lockXfer() const { return &lockXferOps_; }
 
   virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
                         uint heap_size, uint number_of_initial_blocks) const;
@@ -581,7 +588,7 @@ class KernelBlitManager : public DmaBlitManager {
   amd::Program* program_;             //!< GPU program object
   amd::Kernel* kernels_[BlitTotal];   //!< GPU kernels for blit
   size_t xferBufferSize_;             //!< Transfer buffer size
-  mutable amd::Monitor lockXferOps_;  //!< Lock transfer operation
+  mutable std::recursive_mutex lockXferOps_;  //!< Lock transfer operation
 };
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {

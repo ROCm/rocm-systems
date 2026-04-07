@@ -733,6 +733,7 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -750,6 +751,7 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_page_fault_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -762,6 +764,7 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_queue_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -773,6 +776,7 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -786,6 +790,7 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(pid);
@@ -797,6 +802,7 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_page_migrate_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
@@ -815,6 +821,7 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_page_fault_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
@@ -828,6 +835,7 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_kfd_queue_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
     ROCP_SDK_SAVE_DATA_FIELD(operation);
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);

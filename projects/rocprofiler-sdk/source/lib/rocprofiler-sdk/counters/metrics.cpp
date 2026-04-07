@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include "glog/logging.h"
 #include "yaml-cpp/exceptions.h"
@@ -46,6 +47,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <system_error>
 #include <vector>
 
 namespace rocprofiler
@@ -250,11 +252,23 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 std::string
 findViaInstallPath(const std::string& filename)
 {
+    namespace fs = common::filesystem;
+
     Dl_info dl_info = {};
     ROCP_INFO << filename << " is being looked up via install path";
-    if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0)
+    if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0 &&
+       dl_info.dli_fname != nullptr)
     {
-        return common::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
+        // Resolve symlinks to get the absolute physical path of the .so file.
+        auto     ec            = std::error_code{};
+        auto     lib_path      = fs::path{dl_info.dli_fname};
+        fs::path real_lib_path = fs::canonical(lib_path, ec);
+        if(!ec)
+        {
+            lib_path = real_lib_path;
+        }
+
+        return lib_path.parent_path().parent_path() /
                fmt::format("share/rocprofiler-sdk/{}", filename);
     }
     return filename;
@@ -265,17 +279,24 @@ locateMetricsFile(std::string_view name)
 {
     namespace fs = common::filesystem;
 
+    auto metric_env_path = std::string{"not set"};
+
     // 1) Try env var
     if(const char* env = std::getenv("ROCPROFILER_METRICS_PATH"))
     {
-        fs::path candidate = fs::path{env} / std::string{name};
-        if(fs::exists(candidate))
+        metric_env_path = env;
+        auto env_paths = sdk::parse::tokenize<std::vector<std::string>>(env, std::string_view{":"});
+        for(const auto& path : env_paths)
         {
-            ROCP_INFO << name << " found via ROCPROFILER_METRICS_PATH: " << candidate.string();
-            return candidate.string();
+            fs::path candidate = fs::path{path} / std::string{name};
+            if(fs::exists(candidate))
+            {
+                ROCP_INFO << name << " found via ROCPROFILER_METRICS_PATH: " << candidate.string();
+                return candidate.string();
+            }
         }
-        ROCP_WARNING << name << " not found at ROCPROFILER_METRICS_PATH (" << env
-                     << "). Falling back to install path.";
+        ROCP_INFO << name << " not found at ROCPROFILER_METRICS_PATH (" << env
+                  << "). Falling back to install path.";
     }
 
     // 2) Fall back to install path
@@ -286,9 +307,9 @@ locateMetricsFile(std::string_view name)
         return install_candidate;
     }
 
-    // 3) Neither found -> fatal
     ROCP_FATAL << "Metric file '" << name << "' not found.\n"
-               << "  Tried: ROCPROFILER_METRICS_PATH/" << name << " and " << install_candidate;
+               << "  Tried: ROCPROFILER_METRICS_PATH (" << metric_env_path << "), and"
+               << install_candidate;
     return {};
 }
 
@@ -318,7 +339,7 @@ loadMetrics(bool reload, const std::optional<ArchMetric> add_metric)
     }
 
     auto reload_func = [&]() {
-        auto counters_path = locateMetricsFile("counter_defs.yaml");
+        auto counters_path = locateMetricsFile("config.yaml");
         ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
             << "metric xml file '" << counters_path << "' does not exist";
         return std::make_shared<counter_metrics_t>(loadYAML(counters_path, add_metric));

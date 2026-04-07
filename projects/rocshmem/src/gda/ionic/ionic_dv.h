@@ -7,7 +7,7 @@
 #define IONIC_DV_H
 
 #include <stdbool.h>
-#include <infiniband/verbs.h>
+#include "gda/ibv_core.hpp"
 
 struct ibv_cq;
 struct ibv_qp;

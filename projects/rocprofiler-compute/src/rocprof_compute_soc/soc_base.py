@@ -1,43 +1,18 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import math
 import os
 import re
+import shutil
 import sys
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
-
 import config
-from roofline import Roofline
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
-from utils.file_io import create_df_pmc, load_profiling_config
 from utils.logger import (
     console_debug,
     console_error,
@@ -46,21 +21,22 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM, apply_filters
-from utils.roofline_calc import validate_roofline_csv
-from utils.schema import Workload
 from utils.specs import MachineSpecs
-from utils.utils import (
+from utils.utils_common import (
+    BUILD_IN_VARS,
     METRIC_ID_RE,
+    SUPPORTED_DENOM,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
+    create_temp_rocprofiler_metrics_path,
     get_panel_alias,
-    impute_counters_iteration_multiplex,
+    is_only_pc_sampling,
     is_tcc_channel_counter,
-    merge_counters_spatial_multiplex,
     parse_sets_yaml,
     resolve_rocm_library_path,
+    validate_roofline_csv,
 )
+from vendored import yaml
 
 
 class OmniSoC_Base:
@@ -74,9 +50,6 @@ class OmniSoC_Base:
         self.__perfmon_config: dict[str, int] = {}
         self.__compatible_profilers: list[str] = []  # Store SoC compatible profilers
         self.populate_mspec()
-        # Create roofline object if mode is provided; skip for --specs
-        if hasattr(self.__args, "mode") and self.__args.mode:
-            self.roofline_obj = Roofline(args, self._mspec)
 
     def __hash__(self) -> int:
         return hash(self.__arch)
@@ -357,6 +330,13 @@ class OmniSoC_Base:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
 
+        if is_only_pc_sampling(filter_blocks):
+            console_log(
+                "profiling",
+                "PC sampling only mode -- skipping counter collection setup",
+            )
+            return filter_blocks
+
         # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
         counters = counters - {"SQ_ACCUM_PREV_HIRES"}
 
@@ -420,8 +400,15 @@ class OmniSoC_Base:
 
         # Point to counter definition
         old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
-        os.environ["ROCPROFILER_METRICS_PATH"] = str(
-            config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
+        with open(
+            config.rocprof_compute_home
+            / "rocprof_compute_soc"
+            / "profile_configs"
+            / "sdk_config.yaml",
+        ) as filename:
+            sdk_config = yaml.safe_load(filename)
+        os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
+            sdk_config
         )
 
         # Backward compatibility support for sdk avail module moved from
@@ -446,18 +433,32 @@ class OmniSoC_Base:
             except ImportError:
                 console_error("Failed to import rocprofiler-sdk avail module.")
 
-        avail.loadLibrary.libname = resolve_rocm_library_path(
-            str(
-                Path(args.rocprofiler_sdk_tool_path).parent
-                / "librocprofv3-list-avail.so"
-            )
+        # librocprofv3-list-avail.so location varies by ROCm version:
+        #   ROCm >= 7.1: <rocm_path>/lib/rocprofiler-sdk/
+        #   ROCm 7.0.x:  <rocm_path>/libexec/rocprofiler-sdk/
+        avail_lib_name = "librocprofv3-list-avail.so"
+        avail_lib_path = resolve_rocm_library_path(
+            str(Path(args.rocprofiler_sdk_tool_path).parent / avail_lib_name)
         )
+        if not Path(avail_lib_path).exists():
+            avail_lib_path = resolve_rocm_library_path(
+                str(
+                    Path(args.rocprofiler_sdk_tool_path).parents[2]
+                    / "libexec"
+                    / "rocprofiler-sdk"
+                    / avail_lib_name
+                )
+            )
+        avail.loadLibrary.libname = avail_lib_path
         counters = avail.get_counters()
         rocprof_counters = {
             counter.name
             for counter in counters[list(counters.keys())[0]]
             if hasattr(counter, "block") or hasattr(counter, "expression")
         }
+        # Delete counter definition temporary directory
+        if os.environ.get("ROCPROFILER_METRICS_PATH"):
+            shutil.rmtree(os.environ["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
         # Reset env. var.
         if old_rocprofiler_metrics_path is None:
             del os.environ["ROCPROFILER_METRICS_PATH"]
@@ -515,9 +516,7 @@ class OmniSoC_Base:
                 and not is_tcc_channel_counter(counter)
             ):
                 counters.remove(counter)
-                output_files.append(
-                    CounterFile(counter + ".txt", self.__perfmon_config)
-                )
+                output_files.append(CounterFile(counter, self.__perfmon_config))
                 output_files[-1].add(counter)
                 output_files[-1].add(f"{counter}_ACCUM")
                 accu_file_count += 1
@@ -546,9 +545,7 @@ class OmniSoC_Base:
 
             # All files are full, create a new file
             if not added:
-                output_files.append(
-                    CounterFile(f"pmc_perf_{file_count}.txt", self.__perfmon_config)
-                )
+                output_files.append(CounterFile(str(file_count), self.__perfmon_config))
                 file_count += 1
                 output_files[-1].add(ctr)
 
@@ -589,7 +586,8 @@ class OmniSoC_Base:
 
             for f_idx in range(groups_per_bucket):
                 file_name = (
-                    Path(workload_perfmon_dir) / f"pmc_perf_node_{node_idx}_{f_idx}.txt"
+                    Path(workload_perfmon_dir)
+                    / f"pmc_perf_node_{node_idx}_{f_idx}.yaml"
                 )
 
                 pmc = []
@@ -604,12 +602,12 @@ class OmniSoC_Base:
 
                 # Write counters to file
                 with open(file_name, "w") as fd:
-                    fd.write(f"pmc: {' '.join(pmc)}\n\n")
+                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
         else:
             # Output to files
             for f in output_files:
-                file_name_txt = workload_perfmon_dir / f.file_name_txt
-                file_name_yaml = workload_perfmon_dir / f.file_name_yaml
+                pmc_filename = workload_perfmon_dir / f.pmc_filename
+                counter_def_filename = workload_perfmon_dir / f.counter_def_filename
 
                 pmc = []
                 counter_def: dict[str, Any] = {}
@@ -644,15 +642,12 @@ class OmniSoC_Base:
                         )
 
                 # Write counters to file
-                with open(file_name_txt, "w") as fd:
-                    fd.write(f"pmc: {' '.join(pmc)}\n\n")
-                    fd.write("gpu:\n")
-                    fd.write("range:\n")
-                    fd.write("kernel:\n")
+                with open(pmc_filename, "w") as fd:
+                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
 
                 # Write counter definitions to file
                 if counter_def:
-                    with open(file_name_yaml, "w") as fp:
+                    with open(counter_def_filename, "w") as fp:
                         fp.write(yaml.dump(counter_def, sort_keys=False))
 
     # ----------------------------------------------------
@@ -682,23 +677,16 @@ class OmniSoC_Base:
             console_log("roofline", "Skipping roofline")
         else:
             # Dynamic import to isolate hip dependency during profile time only
-            from utils import benchmark
+            from roofline.run_benchmark import load_bench
 
-            pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
-            if not pmc_path.is_file():
-                console_error(
-                    "roofline",
-                    "Incomplete or missing profiling data. Skipping roofline.",
-                    exit=False,
-                )
-                return
             console_log(
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
                 try:
-                    result = benchmark.run_on_devices([self.get_args().device])
-                    benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                    bench = load_bench([self.get_args().device])
+                    result = bench.run_on_devices([self.get_args().device])
+                    bench.dump_csv(result, f"{self.get_args().path}/roofline.csv")
                 except Exception as e:
                     console_error(
                         "roofline",
@@ -707,61 +695,20 @@ class OmniSoC_Base:
                     )
                     return
 
-            # Validate roofline.csv before post-processing
             is_valid, error_msg = validate_roofline_csv(self.get_args().path)
             if not is_valid:
                 console_error(
                     "roofline",
-                    f"Roofline post-processing skipped: {error_msg}",
+                    f"Invalid roofline.csv: {error_msg}",
                     exit=False,
                 )
                 return
 
-            console_warning(
+            console_log(
                 "roofline",
-                (
-                    "Deprecation warning: Standalone Roofline "
-                    "Analysis plot output "
-                    "``empirRoof_gpu-<device ID><datatypes><kernels>.html`` "
-                    "will be auto-generated in analyze mode instead of profile "
-                    "mode in a future release."
-                ),
-            )
-
-            args = self.get_args()
-            workload = Workload()
-            workload.path = self.__args.path
-            profiling_config = load_profiling_config(workload.path)
-            workload.raw_pmc = create_df_pmc(
-                raw_data_root_dir=workload.path,
-                nodes=None,
-                spatial_multiplexing=args.spatial_multiplexing,
-                kernel_verbose=-1,
-                verbose=args.verbose,
-                config_dict=profiling_config,
-            )
-
-            if args.spatial_multiplexing:
-                workload.raw_pmc = merge_counters_spatial_multiplex(workload.raw_pmc)
-
-            if profiling_config["iteration_multiplexing"] is not None:
-                workload.raw_pmc = impute_counters_iteration_multiplex(
-                    workload.raw_pmc,
-                    policy=profiling_config["iteration_multiplexing"],
-                )
-            filtered_pmc = apply_filters(
-                workload, workload.path, is_gui=False, debug=False
-            )
-
-            self.roofline_obj.post_processing(filtered_pmc)
-
-    @abstractmethod
-    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]) -> None:
-        """Perform any SoC-specific setup prior to analysis."""
-        console_debug("analysis", f"perform SoC analysis setup for {self.__arch}")
-        if roofline_parameters:
-            self.roofline_obj = Roofline(
-                self.get_args(), self._mspec, roofline_parameters
+                f"Roofline data saved to {self.get_args().path}/roofline.csv\n"
+                f"  Run 'rocprof-compute analyze -p {self.get_args().path}' "
+                f"for charts",
             )
 
 
@@ -789,9 +736,8 @@ class LimitedSet:
 # block limited according to perfmon config.
 class CounterFile:
     def __init__(self, name: str, perfmon_config: dict[str, int]) -> None:
-        name_no_extension = name.split(".")[0]
-        self.file_name_txt: str = name_no_extension + ".txt"
-        self.file_name_yaml: str = name_no_extension + ".yaml"
+        self.pmc_filename: str = f"pmc_perf_{name}.yaml"
+        self.counter_def_filename: str = f"counter_def_{name}.yaml"
         self.blocks: dict[str, LimitedSet] = {
             block: LimitedSet(capacity) for block, capacity in perfmon_config.items()
         }

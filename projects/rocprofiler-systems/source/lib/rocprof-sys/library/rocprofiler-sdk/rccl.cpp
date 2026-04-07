@@ -217,7 +217,7 @@ cache_rccl_comm_data_events(uint32_t rccl_device_idx, size_t bytes, uint64_t tim
         static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
         timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
         call_stack, line_info, rccl_device_idx, static_cast<uint8_t>(agent_type::GPU),
-        pmc_label.c_str(), static_cast<double>(cumulative) });
+        pmc_label.c_str(), static_cast<double>(cumulative), std::nullopt });
 }
 
 rccl_gpu_tracking_state&

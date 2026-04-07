@@ -70,6 +70,9 @@ hsa_status_t
     hsa_amd_profiling_async_copy_enable(bool enable);
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags);
+
+// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_profiling_get_dispatch_time(
     hsa_agent_t agent, hsa_signal_t signal,
     hsa_amd_profiling_dispatch_time_t* time);
@@ -160,6 +163,13 @@ hsa_status_t
                               hsa_signal_t completion_signal,
                               hsa_amd_sdma_engine_id_t engine_id,
                               bool force_copy_on_sdma);
+
+// Mirrors Amd Extension Apis
+hsa_status_t
+    hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* copy_ops,
+                              uint32_t num_copy_ops,
+                              uint32_t num_dep_signals,
+                              const hsa_signal_t* dep_signals);
 
 // Mirrors Amd Extension Apis
 hsa_status_t

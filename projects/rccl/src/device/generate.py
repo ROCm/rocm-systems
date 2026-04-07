@@ -6,7 +6,8 @@ from dataclasses import dataclass
 import shutil
 
 # Order of colls, redops, tys, protos, algos must match src/include/device.h
-all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "AlltoAllPivot", "AllToAllGda"]
+# The empty entries are for collectives like Gather, Scatter, etc.
+all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]
 all_redops    = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
 all_tys       = ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]
 all_protos    = ["LL","LL128","SIMPLE"]
@@ -78,12 +79,18 @@ is_ifc             = 1 if sys.argv[2] == "ON" else 0
 is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_msccl_kernels   = 1 if sys.argv[4] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
+is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
 
-func_pattern = sys.argv[6:7]
+func_pattern = sys.argv[7:8]
+
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
 else:
-  func_pattern = "AllGather|AllReduce|AlltoAllPivot|AllToAllGda|Broadcast|Reduce|ReduceScatter|SendRecv"
+  # GDA (rocSHMEM-based) kernels only when rocshmem build requested
+  if is_rocshmem:
+    func_pattern = "AllGather|AllReduce|AlltoAllPivot|AlltoAllGda|AlltoAllvGda|Broadcast|Reduce|ReduceScatter|SendRecv"
+  else:
+    func_pattern = "AllGather|AllReduce|AlltoAllPivot|Broadcast|Reduce|ReduceScatter|SendRecv"
 
 ################################################################################
 
@@ -91,7 +98,8 @@ algos_of_coll = {
   "AllGather":             ["RING", "PAT"],
   "AllReduce":             ["RING", "TREE"],
   "AlltoAllPivot":         ["RING"],
-  "AllToAllGda":           ["RING"],
+  "AlltoAllGda":           ["RING"],
+  "AlltoAllvGda":          ["RING"],
   "Broadcast":             ["RING"],
   "Reduce":                ["RING"],
   "ReduceScatter":         ["RING", "PAT"],
@@ -102,7 +110,8 @@ protos_of_coll = {
   "AllGather":              all_protos,
   "AllReduce":              all_protos,
   "AlltoAllPivot":          ["SIMPLE"],
-  "AllToAllGda":            ["SIMPLE"],
+  "AlltoAllGda":            ["SIMPLE"],
+  "AlltoAllvGda":           ["SIMPLE"],
   "Broadcast":              all_protos,
   "Reduce":                 all_protos,
   "ReduceScatter":          all_protos,
@@ -113,7 +122,8 @@ redops_of_coll = {
   "AllGather":            ["Sum"],
   "AllReduce":            all_redops,
   "AlltoAllPivot":        ["Sum"],
-  "AllToAllGda":          ["Sum"],
+  "AlltoAllGda":          ["Sum"],
+  "AlltoAllvGda":         ["Sum"],
   "Broadcast":            ["Sum"],
   "Reduce":               all_redops,
   "ReduceScatter":        all_redops,
@@ -124,7 +134,8 @@ tys_of_coll = {
   "AllGather":             ["i8"],
   "AllReduce":             all_tys,
   "AlltoAllPivot":         ["i8"],
-  "AllToAllGda":           ["i8"],
+  "AlltoAllGda":           ["i8"],
+  "AlltoAllvGda":          ["i8"],
   "Broadcast":             ["i8"],
   "Reduce":                all_tys,
   "ReduceScatter":         all_tys,
@@ -135,7 +146,8 @@ acc_of_coll = {
   "AllGather":             ["0"],
   "AllReduce":             all_accs,
   "AlltoAllPivot":         ["0"],
-  "AllToAllGda":           ["0"],
+  "AlltoAllGda":           ["0"],
+  "AlltoAllvGda":          ["0"],
   "Broadcast":             ["0"],
   "Reduce":                ["0"],
   "ReduceScatter":         ["0"],
@@ -146,7 +158,8 @@ pipelines_of_coll = {
   "AllGather":             ["0"],
   "AllReduce":             all_pipelines,
   "AlltoAllPivot":         ["0"],
-  "AllToAllGda":           ["0"],
+  "AlltoAllGda":           ["0"],
+  "AlltoAllvGda":          ["0"],
   "Broadcast":             ["0"],
   "Reduce":                all_pipelines,
   "ReduceScatter":         all_pipelines,
@@ -158,7 +171,8 @@ coll_camel_to_lower = {
   "AllGather":             "all_gather",
   "AllReduce":             "all_reduce",
   "AlltoAllPivot":         "alltoall_pivot",
-  "AllToAllGda":           "alltoall_gda",
+  "AlltoAllGda":           "alltoall_gda",
+  "AlltoAllvGda":          "alltoallv_gda",
   "Broadcast":             "broadcast",
   "Reduce":                "reduce",
   "ReduceScatter":         "reduce_scatter",
@@ -226,11 +240,16 @@ def calc_unroll_and_pipeline_for_local_arch():
 # except for gfx950. For gfx950, we also disable pipelining.
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 
+# rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested
+gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
+
 # Helper function to check if the conditions for the collective is being met
 def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll):
   if redop == "SumPostDiv" and ty[0] not in ("i","u"):
     return False
   if coll == "" or algo == "":
+    return False
+  if not is_rocshmem and coll in gda_colls:
     return False
   if (algo not in algos_of_coll[coll] or
       proto not in protos_of_coll[coll] or
@@ -514,7 +533,7 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       )
       if fn.coll == "Broadcast":
         key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8))
-      if fn.coll in ["SendRecv", "AlltoAllPivot", "AllToAllGda"]:
+      if fn.coll in ["SendRecv", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
         key = ((coll_idx & 0x3F))
       
       out(f'  {{{key}, {fn_id}}}, {comment}\n')

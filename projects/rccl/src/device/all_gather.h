@@ -78,8 +78,8 @@ namespace {
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, isNetOffload> prims
-        (tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work, NULL, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
+      Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0, isNetOffload> prims
+        (tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work, nullptr, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
 
 #if defined(ENABLE_NPKIT)
       if (tid == 0) {
@@ -280,7 +280,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
       int nGroups = nworkers / groupSize;
       int tidInGroup = tid - group*groupSize;
       // We don't use recvPeers/sendPeers so let's pass shmem structs instead
-      Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0> prims
+      Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0> prims
         (tidInGroup, groupSize, (int*)shmem->recvDims, (int*)shmem->sendDims, inputBuf, outputBuf, work->redOpArg, group, 0, 0, nullptr, nullptr, 0, primsModePatAg);
 
       int step = group;
@@ -392,7 +392,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
         if (tid < tidEndGather) {
           // Gather
           using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-          Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/0, Proto, 0>
+          Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/1, Proto, 0>
             prims(tid, nThreadsGather, nvls->up, NULL, NULL, work->recvbuff,
               work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
           for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {

@@ -14,24 +14,17 @@
     "NCCL_DEBUG": "INFO"
   },
   "build_configuration": {
-    "cmake_options": {
-      "CMAKE_BUILD_TYPE": "Debug",
-      "ENABLE_CODE_COVERAGE": "ON",
-      "BUILD_TESTS": "ON",
-      "BUILD_LOCAL_GPU_TARGET_ONLY": "ON",
-      "TRACE": "ON",
-      "COLLTRACE": "ON"
-    },
-    "env_variables": {
-      "HIPCC_COMPILE_FLAGS_APPEND": "-g -Wno-format-nonliteral -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping -parallel-jobs=16"
-    },
-    "parallel_jobs": 64,
-    "generator": "Unix Makefiles"
+    "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-code-coverage", "--enable-mpi-tests", "--no_clean"],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "parallel_jobs": 64
   },
   "test_configurations": {
     "default": {
       "env_variables": {
         "NCCL_LAUNCH_MODE": "GROUP"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
       }
     },
     "shm_comprehensive": {
@@ -166,6 +159,7 @@
           "test_filter": "NetTransportMPITest.NetGraphRegisterBufferTest",
           "timeout": 120,
           "env_variables": {
+            "NCCL_LEGACY_CUDA_REGISTER": "1",
             "NCCL_GRAPH_REGISTER": "1"
           }
         }
@@ -267,26 +261,92 @@
       "num_nodes": 1,
       "num_gpus": 8,
       "timeout": 0,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
       "tests": [
         {
-          "name": "NetIb_Debug",
-          "description": "InfiniBand unit tests with debug output using test fixtures",
-          "test_filter": "NetIbTests.*",
-          "env_variables": {
-            "NCCL_SOCKET_IFNAME": "eth1"
-          }
+          "name": "BitOps",
+          "description": "Bit operation utility tests",
+          "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"
         },
         {
-          "name": "Rcclwrap_All",
-          "description": "RCCL wrapper API unit tests with trace-level debugging",
-          "test_filter": "Rcclwrap.*",
-          "env_variables": {
-            "NCCL_DEBUG": "TRACE"
-	  }
+          "name": "CommTests",
+          "description": "Communicator unit tests",
+          "test_filter": "CommTests.*"
+        },
+        {
+          "name": "EnqueueCountTests",
+          "description": "Enqueue count operation tests",
+          "test_filter": "EnqueueCountTests.*"
         },
         {
           "name": "Fixtures_All",
-          "description": "All Fixtures tests",
+          "description": "All release fixture tests"
+        }
+      ]
+    },
+    "unit_tests_fixtures_debug": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 0,
+      "tests": [
+        {
+          "name": "Alloc",
+          "description": "Memory allocation tests",
+          "test_filter": "Alloc.*"
+        },
+        {
+          "name": "ParamTests",
+          "description": "Parameter handling tests",
+          "test_filter": "ParamTests.*"
+        },
+        {
+          "name": "ArgCheck",
+          "description": "Argument validation tests",
+          "test_filter": "ArgCheckTest.*"
+        },
+        {
+          "name": "Enqueue",
+          "description": "Enqueue operation tests",
+          "test_filter": "EnqueueTests.*"
+        },
+        {
+          "name": "Ipcsocket",
+          "description": "IPC socket tests",
+          "test_filter": "Ipcsocket.*"
+        },
+        {
+          "name": "NetSocket",
+          "description": "Network socket tests",
+          "test_filter": "NetSocketTests.*"
+        },
+        {
+          "name": "ProxyTests",
+          "description": "Proxy service tests",
+          "test_filter": "ProxyTests.*"
+        },
+        {
+          "name": "Rcclwrap",
+          "description": "RCCL wrapper API unit tests",
+          "test_filter": "Rcclwrap.*"
+        },
+        {
+          "name": "TransportTest",
+          "description": "Transport layer tests",
+          "test_filter": "TransportTest.*"
+        },
+        {
+          "name": "XmlTest",
+          "description": "XML topology parsing tests",
+          "test_filter": "XmlTest.*"
+        },
+        {
+          "name": "FixturesDebug_All",
+          "description": "All debug fixture tests",
           "env_variables": {
             "NCCL_DEBUG": "TRACE"
           }
@@ -302,6 +362,9 @@
       "timeout": 0,
       "env_variables": {
         "NCCL_DEBUG": ""
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
       },
       "tests": [
         {"name": "AllReduce.OutOfPlace", "description": "AllReduce out-of-place", "test_filter": "AllReduce.OutOfPlace"},
@@ -366,18 +429,6 @@
         {"name": "GroupCall.MixedDataType", "description": "GroupCall mixed data type", "test_filter": "GroupCall.MixedDataType"},
         {"name": "GroupCall.MultiGroupCall", "description": "GroupCall multi group call", "test_filter": "GroupCall.MultiGroupCall"},
         {"name": "NonBlocking.SingleCalls", "description": "NonBlocking single calls", "test_filter": "NonBlocking.SingleCalls"},
-        {"name": "CommTests.Sorter", "description": "CommTests sorter", "test_filter": "CommTests.Sorter"},
-        {"name": "Enqueue", "description": "Enqueue operation tests", "test_filter": "Enqueue.*"},
-        {"name": "Alloc", "description": "Memory allocation tests", "test_filter": "Alloc.*"},
-        {"name": "ParamTests", "description": "Parameter handling tests", "test_filter": "ParamTests.*"},
-        {"name": "ProxyTests", "description": "Proxy service tests", "test_filter": "ProxyTests.*"},
-        {"name": "Rcclwrap", "description": "RCCL wrapper tests", "test_filter": "Rcclwrap.*"},
-        {"name": "TransportTest", "description": "Transport layer tests", "test_filter": "TransportTest.*"},
-        {"name": "ArgCheck", "description": "Argument validation tests", "test_filter": "ArgCheck.*"},
-        {"name": "BitOps", "description": "Bit operation utility tests", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash"},
-        {"name": "AltRsmi", "description": "Alternative RSMI tests", "test_filter": "AltRsmi.*"},
-        {"name": "NetSocket", "description": "Network socket tests", "test_filter": "NetSocket.*"},
-        {"name": "Ipcsocket", "description": "IPC socket tests", "test_filter": "Ipcsocket.*"},
         {"name": "Standalone.SplitComms_RankCheck", "description": "Verify device assignment for each rank using ncclCommSplit API", "test_filter": "Standalone.SplitComms_RankCheck"},
         {"name": "Standalone.SplitComms_OneColor", "description": "Creates communicator for each device with same color", "test_filter": "Standalone.SplitComms_OneColor"},
         {"name": "Standalone.SplitComms_Reduce", "description": "Reduces communicators into fewer ranks", "test_filter": "Standalone.SplitComms_Reduce"},
@@ -421,16 +472,214 @@
     },
     "alt_rsmi_tests": {
       "is_gtest": true,
-      "binary": "rccl-UnitTestsFixtures",
+      "binary": "rccl-UnitTestsAltRsmi",
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 120,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
       "tests": [
         {
           "name": "AltRsmi_AllTests",
           "description": "All Alternative RSMI implementation tests using public API only",
           "test_filter": "AltRsmiTest.*"
+        }
+      ]
+    },
+    "implicit_launch_order": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_LAUNCH_ORDER_IMPLICIT": "1"
+      },
+      "tests": [
+        {
+          "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
+          "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
+          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+        }
+      ]
+    },
+    "ubr_multi_node": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_LEGACY_CUDA_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_AllReduce_OutOfPlace_MultiNode",
+          "description": "AllReduce out-of-place with UBR on multi-node (IPC registration)",
+          "test_filter": "UBR_AllReduce.OutOfPlace_MultiNode"
+        },
+        {
+          "name": "UBR_AllGather_OutOfPlace_MultiNode",
+          "description": "AllGather out-of-place with UBR on multi-node",
+          "test_filter": "UBR_AllGather.OutOfPlace_MultiNode"
+        },
+        {
+          "name": "UBR_ReduceScatter_OutOfPlace_MultiNode",
+          "description": "ReduceScatter out-of-place with UBR on multi-node",
+          "test_filter": "UBR_ReduceScatter.OutOfPlace_MultiNode"
+        },
+        {
+          "name": "UBR_Broadcast_NonZeroRoot_MultiNode",
+          "description": "Broadcast with non-zero root on multi-node",
+          "test_filter": "UBR_Broadcast.NonZeroRoot_MultiNode"
+        },
+        {
+          "name": "UBR_AllToAll_OutOfPlace_MultiNode",
+          "description": "AllToAll out-of-place with UBR on multi-node",
+          "test_filter": "UBR_AllToAll.OutOfPlace_MultiNode"
+        },
+        {
+          "name": "UBR_SendRecv_RingPattern_MultiNode",
+          "description": "SendRecv with UBR in ring pattern on multi-node",
+          "test_filter": "UBR_SendRecv.RingPattern_MultiNode"
+        },
+        {
+          "name": "UBR_AllToAllStress_InterleavedMultiSize",
+          "description": "Stress test with interleaved AllToAll/AllToAllv across small/medium/large sizes",
+          "test_filter": "UBR_AllToAllStress.InterleavedMultiSize_MultiNode",
+          "timeout": 120
+        },
+        {
+          "name": "UBR_AllToAllStress_SplitComm",
+          "description": "Stress test with interleaved AllToAll/AllToAllv using split communicators",
+          "test_filter": "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode",
+          "timeout": 120
+        },
+        {
+          "name": "UBR_AllToAllStress_ConcurrentMultiComm",
+          "description": "Concurrent AllToAll on multiple communicators with separate streams",
+          "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
+          "timeout": 120
+        },
+        {
+          "name": "UBR_ConcurrentRegHang_ContiguousBuffer_Grouped",
+          "description": "Grouped send/recv with contiguous buffer views (should pass)",
+          "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
+        },
+        {
+          "name": "UBR_ConcurrentRegHang_AllToAll_Contiguous",
+          "description": "ncclAllToAll with contiguous registered buffers (should pass)",
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
+        },
+        {
+          "name": "UBR_ConcurrentRegHang_AllToAll_Stress",
+          "description": "Stress test: 50 iterations of ncclAllToAll with contiguous buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "timeout": 300
+        },
+        {
+          "name": "UBR_ConcurrentRegHang_Comparison",
+          "description": "Side-by-side comparison of contiguous vs separate buffer patterns",
+          "test_filter": "UBR_ConcurrentRegHang.ContiguousVsSeparate_Comparison_SHOULD_WORK"
+        },
+        {
+          "name": "UBR_ConcurrentRegHang_NoRegistration",
+          "description": "Baseline: separate buffers without UBR registration (should pass)",
+          "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_NoRegistration_SHOULD_WORK"
+        }
+      ]
+    },
+    "ubr_concurrent_reg_hang": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 60,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_LEGACY_CUDA_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_SeparateBuffers_Hang_Test",
+          "description": "EXPECTED TO HANG: Reproduces UBR concurrent registration deadlock with separate buffers. Run with timeout to detect hang.",
+          "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_Grouped_EXPECTED_HANG",
+          "timeout": 30
+        },
+        {
+          "name": "UBR_ContiguousBuffer_Success",
+          "description": "Demonstrates fix: Grouped send/recv with contiguous buffer views",
+          "test_filter": "UBR_ConcurrentRegHang.ContiguousBuffer_Grouped_SHOULD_WORK"
+        },
+        {
+          "name": "UBR_AllToAll_Contiguous_Success",
+          "description": "ncclAllToAll with contiguous registered buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
+        },
+        {
+          "name": "UBR_AllToAll_Stress_Success",
+          "description": "Stress test: 50 iterations of ncclAllToAll with contiguous buffers",
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "timeout": 300
+        },
+        {
+          "name": "UBR_ContiguousVsSeparate_Comparison",
+          "description": "Side-by-side comparison showing contiguous pattern works",
+          "test_filter": "UBR_ConcurrentRegHang.ContiguousVsSeparate_Comparison_SHOULD_WORK"
+        },
+        {
+          "name": "UBR_NoRegistration_Baseline",
+          "description": "Baseline: separate buffers work when not registered",
+          "test_filter": "UBR_ConcurrentRegHang.SeparateBuffers_NoRegistration_SHOULD_WORK"
+        },
+        {
+          "name": "UBR_ConcurrentRegHang_AllWorkingTests",
+          "description": "Run all tests that should work (excludes the hang test)",
+          "test_filter": "UBR_ConcurrentRegHang.*SHOULD_WORK"
+        }
+      ]
+    },
+    "graph_capture_multi_node": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_GRAPH_REGISTER": "1",
+        "NCCL_LEGACY_CUDA_REGISTER": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "GraphCapture_AllToAll_MultiNode",
+          "description": "AllToAll graph capture with IPC registration on multi-node",
+          "test_filter": "GraphCapture_AllToAll.MultiNode"
+        },
+        {
+          "name": "GraphCapture_AllReduce_MultiNode",
+          "description": "AllReduce graph capture with buffer registration on multi-node",
+          "test_filter": "GraphCapture_AllReduce.MultiNode"
         }
       ]
     }
@@ -479,9 +728,15 @@
       "enabled": true
     },
     {
-      "name": "Unit Tests - Fixtures",
-      "description": "Non-MPI unit tests using fixtures",
+      "name": "Unit Tests - Fixtures (Release)",
+      "description": "Non-MPI unit tests using header-only fixtures (Release and Debug)",
       "config": "unit_tests_fixtures",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - Fixtures (Debug)",
+      "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
+      "config": "unit_tests_fixtures_debug",
       "enabled": true
     },
     {
@@ -500,6 +755,30 @@
       "name": "AltRsmi Tests - Complete Suite",
       "description": "All Alternative RSMI tests using public API only",
       "config": "alt_rsmi_tests",
+      "enabled": true
+    },
+    {
+      "name": "Implicit Launch Order Tests",
+      "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT for multi-communicator serialization",
+      "config": "implicit_launch_order",
+      "enabled": true
+    },
+    {
+      "name": "UBR Tests - Multi Node",
+      "description": "User Buffer Registration tests on multi-node (requires 2+ nodes)",
+      "config": "ubr_multi_node",
+      "enabled": true
+    },
+    {
+      "name": "UBR Concurrent Registration Hang Tests",
+      "description": "Tests demonstrating UBR concurrent registration hang with separate buffers and fix with contiguous buffers. Includes one test expected to hang (run with timeout).",
+      "config": "ubr_concurrent_reg_hang",
+      "enabled": true
+    },
+    {
+      "name": "Graph Capture Tests - Multi Node",
+      "description": "Graph capture with buffer registration on multi-node (requires 2+ nodes)",
+      "config": "graph_capture_multi_node",
       "enabled": true
     }
   ]

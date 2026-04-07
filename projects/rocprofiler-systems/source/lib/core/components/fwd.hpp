@@ -128,8 +128,7 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_cpu_clock, fa
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_percent, false_type)
 #endif
 
-#if(!defined(TIMEMORY_USE_LIBUNWIND) || TIMEMORY_USE_LIBUNWIND == 0) ||                  \
-    (!defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0)
+#if(!defined(TIMEMORY_USE_LIBUNWIND) || TIMEMORY_USE_LIBUNWIND == 0)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_busy_gfx,
                                  false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_busy_umc,

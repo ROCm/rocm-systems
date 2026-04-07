@@ -60,11 +60,25 @@ removeNull(std::string_view s)
 static std::string
 get_data_file_path(const char* name)
 {
+    const auto try_path = [&](const fs::path& base) -> std::string {
+        std::error_code ec;
+        fs::path        p = base / name;
+        if(fs::exists(p, ec) && fs::is_regular_file(p, ec)) return p.string();
+        return {};
+    };
+
     for(const char* base : {CODEOBJ_BINARY_DIR, CODEOBJ_INSTALL_DIR})
     {
-        std::error_code ec;
-        fs::path        p = fs::path(base) / name;
-        if(fs::exists(p, ec) && fs::is_regular_file(p, ec)) return p.string();
+        if(auto found = try_path(fs::path(base)); !found.empty()) return found;
+    }
+
+    if(std::error_code ec{}; true)
+    {
+        fs::path exe_dir = fs::read_symlink("/proc/self/exe", ec).parent_path();
+        if(!ec)
+        {
+            if(auto found = try_path(exe_dir); !found.empty()) return found;
+        }
     }
     return {};  // not found
 }

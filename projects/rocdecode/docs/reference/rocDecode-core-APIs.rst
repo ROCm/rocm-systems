@@ -8,7 +8,7 @@ The rocDecode core APIs
 
 The rocDecode core APIs are intended for users who want to have full control of the decoding pipeline and interact with the core components instead of the utility classes. The :doc:`Using the rocDecode videodecode sample <../how-to/using-rocDecode-videodecode-sample>` provides an introduction to using the utility classes.
 
-The rocDecode core APIs are exposed in header files in the |apifolder|_ folder of the `rocDecode GitHub repository <https://github.com/ROCm/rocDecode>`_. 
+The rocDecode core APIs are exposed in header files in the |apifolder|_ folder of the `rocDecode project <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode>`_. 
 
 :doc:`The rocDecode parser API <./rocDecode-parser>` is exposed in |rocparser|_. It contains functions that create and destroy the parser, as well as functions that parse the bitstream.
 
@@ -19,19 +19,19 @@ The rocDecode core APIs are exposed in header files in the |apifolder|_ folder o
 :doc:`The bitstream reader API <../how-to/using-rocDecode-bitstream>` is exposed in |bitstreamreader|_. It provides an alternative to the FFMpeg demuxer and contains a simple stream file parser that can read elementary files and IVF container files.
 
 .. |apifolder| replace:: ``api/rocdecode``
-.. _apifolder: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode
+.. _apifolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode
 
 .. |rocparser| replace:: ``api/rocdecode/rocparser.h``
-.. _rocparser: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocparser.h
+.. _rocparser: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocparser.h
 
 .. |rocdecode| replace:: ``api/rocDecode/rocdecode.h``
-.. _rocdecode: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocdecode.h
+.. _rocdecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocdecode.h
 
 .. |rocdecodehost| replace:: ``api/rocDecode/rocdecode_host.h``
-.. _rocdecodehost: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/rocdecode_host.h
+.. _rocdecodehost: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/rocdecode_host.h
 
 .. |bitstreamreader| replace:: ``api/rocDecode/roc_bitstream_reader.h``
-.. _bitstreamreader: https://github.com/ROCm/rocDecode/tree/develop/api/rocdecode/roc_bitstream_reader.h
+.. _bitstreamreader: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api/rocdecode/roc_bitstream_reader.h
 
 .. |utilsfolder| replace:: ``utils`` folder
-.. _utilsfolder: https://github.com/ROCm/rocDecode/tree/develop/utils
+.. _utilsfolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils

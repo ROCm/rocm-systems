@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "utils/flags.hpp"
@@ -24,6 +10,7 @@
 
 #include <unordered_map>
 #include <string>
+#include <string_view>
 #include <cstdlib>
 #include <cstring>
 
@@ -93,7 +80,7 @@ void Flag::tearDown() {
 }
 
 bool Flag::init() {
-  typedef std::unordered_map<std::string, const char*> vars_type;
+  typedef std::unordered_map<std::string_view, const char*> vars_type;
   vars_type vars;
 
 #ifdef _WIN32
@@ -102,13 +89,13 @@ bool Flag::init() {
 
   for (; *str != '\0'; str += strlen(str) + 1) {
     // For all environment variables:
-    std::string var = str;
+    std::string_view var = str;
     size_t pos = var.find('=');
     if ((pos == std::string::npos) || ((pos + 1) > var.size())) {
       continue;
     }
 
-    std::string name = var.substr(0, pos);
+    std::string_view name = var.substr(0, pos);
     if ((pos + 1) == var.size()) {
       vars.insert(std::make_pair(name, " "));
     } else {
@@ -124,13 +111,13 @@ bool Flag::init() {
 #endif  // __APPLE__
 
   for (const char** p = const_cast<const char**>(environ); *p != NULL; ++p) {
-    std::string var = *p;
+    std::string_view var = *p;
     size_t pos = var.find('=');
     if ((pos == std::string::npos) || ((pos + 1) > var.size())) {
       continue;
     }
 
-    std::string name = var.substr(0, pos);
+    std::string_view name = var.substr(0, pos);
     if ((pos + 1) == var.size()) {
       vars.insert(std::make_pair(name, " "));
     } else {
@@ -156,6 +143,10 @@ bool Flag::init() {
       if (outFile == NULL) {
         outFile = fopen(("clr_logs_" + pid + ".txt").c_str(), "a");
       }
+    }
+    // Enable async logging if configured
+    if (!flagIsDefault(AMD_LOG_ASYNC) && AMD_LOG_ASYNC) {
+      EnableAsyncLogging(true);
     }
   }
 

@@ -296,7 +296,8 @@ DispatchThreadTracer::resource_init()
         auto cache = rocprofiler::agent::get_hsa_agent(rocp_agent);
         if(!cache.has_value())
         {
-            ROCP_CI_LOG(TRACE) << "Could not find HSA Agent for " << rocp_agent->id.handle;
+            ROCP_TRACE << "Could not find HSA Agent for " << rocp_agent->id.handle
+                       << ". This agent maybe isolated by ROCR_VISIBLE_DEVICES env variable";
             continue;
         }
         agents[*cache] = std::make_unique<ThreadTracerQueue>(it->second, rocp_agent->id);
@@ -442,6 +443,13 @@ DeviceThreadTracer::resource_init()
     {
         auto it = params.find(CHECK_NOTNULL(rocp_agent)->id);
         if(it == params.end()) continue;
+
+        if(!rocprofiler::agent::get_hsa_agent(rocp_agent).has_value())
+        {
+            ROCP_TRACE << "Could not find HSA Agent for " << rocp_agent->id.handle
+                       << ". This agent maybe isolated by ROCR_VISIBLE_DEVICES env variable";
+            continue;
+        }
 
         agents[it->first] = std::make_unique<ThreadTracerQueue>(it->second, rocp_agent->id);
     }

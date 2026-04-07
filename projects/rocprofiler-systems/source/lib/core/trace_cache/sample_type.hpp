@@ -43,11 +43,11 @@ enum class type_identifier_t : uint32_t
     kernel_dispatch         = 0x0003,
     memory_copy             = 0x0004,
     memory_alloc            = 0x0005,
-    amd_smi_sample          = 0x0006,
+    gpu_pmc_sample          = 0x0006,
     cpu_freq_sample         = 0x0007,
     backtrace_region_sample = 0x0008,
     scratch_memory          = 0x0009,
-    ainic_sample            = 0x000A,
+    ainic_pmc_sample        = 0x000A,
     fragmented_space        = 0xFFFF
 };
 
@@ -541,7 +541,8 @@ struct pmc_event_with_sample : in_time_sample
                           size_t _stack_id, size_t _parent_stack_id,
                           size_t _correlation_id, std::string _call_stack,
                           std::string _line_info, uint32_t _device_id,
-                          uint8_t _device_type, std::string _pmc_info_name, double _value)
+                          uint8_t _device_type, std::string _pmc_info_name, double _value,
+                          std::optional<int64_t> _system_tid)
     : in_time_sample(_category_enum_id, std::move(_track_name), _timestamp_ns,
                      std::move(_event_metadata), _stack_id, _parent_stack_id,
                      _correlation_id, std::move(_call_stack), std::move(_line_info))
@@ -549,12 +550,14 @@ struct pmc_event_with_sample : in_time_sample
     , device_type(_device_type)
     , pmc_info_name(std::move(_pmc_info_name))
     , value(_value)
+    , system_tid(_system_tid)
     {}
 
-    uint32_t    device_id;
-    uint8_t     device_type;
-    std::string pmc_info_name;
-    double      value;
+    uint32_t               device_id;
+    uint8_t                device_type;
+    std::string            pmc_info_name;
+    double                 value;
+    std::optional<int64_t> system_tid;
 };
 
 template <>
@@ -567,7 +570,7 @@ serialize(uint8_t* buffer, const pmc_event_with_sample& item)
         static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
         static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value);
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
 }
 
 template <>
@@ -582,7 +585,8 @@ deserialize(uint8_t*& buffer)
     utility::parse_value(buffer, category_enum_id, track_name_view, timestamp_ns,
                          event_metadata_view, stack_id, parent_stack_id, correlation_id,
                          call_stack_view, line_info_view, item.device_id,
-                         item.device_type, pmc_info_name_view, item.value);
+                         item.device_type, pmc_info_name_view, item.value,
+                         item.system_tid);
     item.category_enum_id = category_enum_id;
     item.track_name       = std::string(track_name_view);
     item.timestamp_ns     = timestamp_ns;
@@ -606,149 +610,7 @@ get_size(const pmc_event_with_sample& item)
         static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
         static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value);
-}
-
-struct amd_smi_sample : cacheable_t
-{
-    static constexpr type_identifier_t type_identifier =
-        type_identifier_t::amd_smi_sample;
-
-    amd_smi_sample() = default;
-    amd_smi_sample(uint64_t _settings, uint32_t _device_id, size_t _timestamp,
-                   uint32_t _gfx_activity, uint32_t _umc_activity, uint32_t _mm_activity,
-                   uint32_t _power, int64_t _temperature, size_t _mem_usage,
-                   std::vector<uint8_t> _gpu_activity)
-    : settings(_settings)
-    , device_id(_device_id)
-    , timestamp(_timestamp)
-    , gfx_activity(_gfx_activity)
-    , umc_activity(_umc_activity)
-    , mm_activity(_mm_activity)
-    , power(_power)
-    , temperature(_temperature)
-    , mem_usage(_mem_usage)
-    , gpu_activity(std::move(_gpu_activity))
-    {}
-
-    enum class settings_positions : uint8_t
-    {
-        busy = 0,
-        temp,
-        power,
-        mem_usage,
-        vcn_activity,
-        jpeg_activity,
-        xgmi,
-        pcie
-    };
-
-    uint64_t             settings;  // bitfield
-    uint32_t             device_id;
-    size_t               timestamp;
-    uint32_t             gfx_activity;
-    uint32_t             umc_activity;
-    uint32_t             mm_activity;
-    uint32_t             power;
-    int64_t              temperature;
-    size_t               mem_usage;
-    std::vector<uint8_t> gpu_activity;
-};
-
-template <>
-inline void
-serialize(uint8_t* buffer, const amd_smi_sample& item)
-{
-    utility::store_value(
-        buffer, item.settings, item.device_id, static_cast<uint64_t>(item.timestamp),
-        item.gfx_activity, item.umc_activity, item.mm_activity, item.power,
-        item.temperature, static_cast<uint64_t>(item.mem_usage), item.gpu_activity);
-}
-
-template <>
-inline amd_smi_sample
-deserialize(uint8_t*& buffer)
-{
-    amd_smi_sample item;
-    uint64_t       timestamp, mem_usage;
-    utility::parse_value(buffer, item.settings, item.device_id, timestamp,
-                         item.gfx_activity, item.umc_activity, item.mm_activity,
-                         item.power, item.temperature, mem_usage, item.gpu_activity);
-    item.timestamp = timestamp;
-    item.mem_usage = mem_usage;
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const amd_smi_sample& item)
-{
-    return utility::get_size(
-        item.settings, item.device_id, static_cast<uint64_t>(item.timestamp),
-        item.gfx_activity, item.umc_activity, item.mm_activity, item.power,
-        item.temperature, static_cast<uint64_t>(item.mem_usage), item.gpu_activity);
-}
-
-struct ainic_sample : cacheable_t
-{
-    static constexpr type_identifier_t type_identifier = type_identifier_t::ainic_sample;
-
-    ainic_sample() = default;
-    ainic_sample(size_t _timestamp, uint32_t _nic_index, uint64_t _rx_rdma_cnp_pkts,
-                 uint64_t _tx_rdma_cnp_pkts, uint64_t _rx_ucast_bytes,
-                 uint64_t _tx_ucast_bytes, uint64_t _rx_ucast_pkts,
-                 uint64_t _tx_ucast_pkts)
-    : timestamp(_timestamp)
-    , nic_index(_nic_index)
-    , rx_rdma_cnp_pkts(_rx_rdma_cnp_pkts)
-    , tx_rdma_cnp_pkts(_tx_rdma_cnp_pkts)
-    , rx_ucast_bytes(_rx_ucast_bytes)
-    , tx_ucast_bytes(_tx_ucast_bytes)
-    , rx_ucast_pkts(_rx_ucast_pkts)
-    , tx_ucast_pkts(_tx_ucast_pkts)
-    {}
-
-    size_t   timestamp;
-    uint32_t nic_index;
-    uint64_t rx_rdma_cnp_pkts;
-    uint64_t tx_rdma_cnp_pkts;
-    uint64_t rx_ucast_bytes;
-    uint64_t tx_ucast_bytes;
-    uint64_t rx_ucast_pkts;
-    uint64_t tx_ucast_pkts;
-};
-
-template <>
-inline void
-serialize(uint8_t* buffer, const ainic_sample& item)
-{
-    utility::store_value(buffer, static_cast<uint64_t>(item.timestamp), item.nic_index,
-                         item.rx_rdma_cnp_pkts, item.tx_rdma_cnp_pkts,
-                         item.rx_ucast_bytes, item.tx_ucast_bytes, item.rx_ucast_pkts,
-                         item.tx_ucast_pkts);
-}
-
-template <>
-inline ainic_sample
-deserialize(uint8_t*& buffer)
-{
-    ainic_sample item;
-    uint64_t     timestamp;
-    utility::parse_value(buffer, timestamp, item.nic_index, item.rx_rdma_cnp_pkts,
-                         item.tx_rdma_cnp_pkts, item.rx_ucast_bytes, item.tx_ucast_bytes,
-                         item.rx_ucast_pkts, item.tx_ucast_pkts);
-    item.timestamp = timestamp;
-    return item;
-}
-
-template <>
-inline size_t
-get_size(const ainic_sample& item)
-{
-    return utility::get_size(static_cast<uint64_t>(item.timestamp), item.nic_index,
-                             item.rx_rdma_cnp_pkts, item.tx_rdma_cnp_pkts,
-                             item.rx_ucast_bytes, item.tx_ucast_bytes, item.rx_ucast_pkts,
-                             item.tx_ucast_pkts);
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
 }
 
 struct cpu_freq_sample : cacheable_t

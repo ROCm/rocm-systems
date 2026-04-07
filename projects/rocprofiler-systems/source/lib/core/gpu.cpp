@@ -33,10 +33,6 @@
 
 #include "common/defines.h"
 
-#if !defined(ROCPROFSYS_USE_ROCM)
-#    define ROCPROFSYS_USE_ROCM 0
-#endif
-
 #include "defines.hpp"
 #include "gpu.hpp"
 
@@ -46,12 +42,10 @@
 
 #include "core/agent_manager.hpp"
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include "core/amd_smi.hpp"
-#    include <rocprofiler-sdk/agent.h>
-#    include <rocprofiler-sdk/cxx/serialization.hpp>
-#    include <rocprofiler-sdk/fwd.h>
-#endif
+#include "core/amd_smi.hpp"
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/cxx/serialization.hpp>
+#include <rocprofiler-sdk/fwd.h>
 
 #include "logger/debug.hpp"
 
@@ -61,9 +55,8 @@ namespace gpu
 {
 namespace
 {
-#if ROCPROFSYS_USE_ROCM > 0
-#    define ROCPROFSYS_AMD_SMI_CALL(ERROR_CODE)                                          \
-        ::rocprofsys::gpu::check_amdsmi_error(ERROR_CODE, __FILE__, __LINE__)
+#define ROCPROFSYS_AMD_SMI_CALL(ERROR_CODE)                                              \
+    ::rocprofsys::gpu::check_amdsmi_error(ERROR_CODE, __FILE__, __LINE__)
 
 void
 check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
@@ -103,9 +96,9 @@ amdsmi_init()
             // supported
             uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
 
-#    ifdef AINIC_SUPPORTED
+#ifdef AINIC_SUPPORTED
             init_flags |= AMDSMI_INIT_AMD_NICS;
-#    endif
+#endif
 
             ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(init_flags));
             get_processor_handles();
@@ -121,14 +114,12 @@ amdsmi_init()
 
     return _amdsmi_init;
 }
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 size_t
 query_rocm_agents()
 {
     size_t _dev_cnt = 0;
-#if ROCPROFSYS_USE_ROCM > 0
-    auto iterator = []([[maybe_unused]] rocprofiler_agent_version_t version,
+    auto   iterator = []([[maybe_unused]] rocprofiler_agent_version_t version,
                        const void** agents, size_t num_agents,
                        [[maybe_unused]] void* user_data) -> rocprofiler_status_t {
         auto& _agent_manager = get_agent_manager_instance();
@@ -138,7 +129,7 @@ query_rocm_agents()
             agent       cur_agent;
             cur_agent.type =
                 (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::GPU
-                                                            : agent_type::CPU);
+                                                              : agent_type::CPU);
             cur_agent.handle               = _agent->id.handle;
             cur_agent.device_id            = _agent->device_id;
             cur_agent.node_id              = _agent->node_id;
@@ -166,7 +157,6 @@ query_rocm_agents()
                   _dev_cnt);
     }
     _dev_cnt = get_agent_manager_instance().get_gpu_agents_count();
-#endif
     return _dev_cnt;
 }
 }  // namespace
@@ -174,24 +164,16 @@ query_rocm_agents()
 int
 device_count()
 {
-#if ROCPROFSYS_USE_ROCM > 0
     static int _num_devices = query_rocm_agents();
     return _num_devices;
-#else
-    return 0;
-#endif
 }
 
 bool
 initialize_amdsmi()
 {
-#if ROCPROFSYS_USE_ROCM > 0
     // Ensure initialization happens only once
     std::call_once(amdsmi_once, amdsmi_init);
     return _amdsmi_is_initialized();
-#else
-    return false;
-#endif
 }
 
 template <typename ArchiveT>
@@ -201,7 +183,6 @@ add_device_metadata(ArchiveT& ar)
     namespace cereal = tim::cereal;
     using cereal::make_nvp;
 
-#if ROCPROFSYS_USE_ROCM > 0
     using agent_vec_t = std::vector<rocprofiler_agent_v0_t>;
 
     auto iterator_cb = []([[maybe_unused]] rocprofiler_agent_version_t version,
@@ -230,9 +211,6 @@ add_device_metadata(ArchiveT& ar)
     }
 
     ar(make_nvp("rocm_agents", _agents_vec));
-#else
-    (void) ar;
-#endif
 }
 
 void
@@ -251,7 +229,6 @@ add_device_metadata()
     });
 }
 
-#if ROCPROFSYS_USE_ROCM > 0
 /*
  * Required amdsmi methods to get processors and handles
  */
@@ -306,13 +283,13 @@ get_processor_handles()
         {
             processor_type_t processor_type = {};
             ret = amdsmi_get_processor_type(processor, &processor_type);
-#    ifdef AINIC_SUPPORTED
+#ifdef AINIC_SUPPORTED
             if(processor_type == AMDSMI_PROCESSOR_TYPE_AMD_NIC)
             {
                 processors::ainic_list.push_back(processor);
                 continue;
             }
-#    endif  // AINIC_SUPPORTED
+#endif  // AINIC_SUPPORTED
             if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
             {
                 throw std::runtime_error("Not AMD_GPU device type!");
@@ -432,7 +409,6 @@ get_handle_from_id(uint32_t dev_id)
 {
     return processors::processors_list[dev_id];
 }
-#endif
 
 }  // namespace gpu
 }  // namespace rocprofsys

@@ -10,7 +10,15 @@ If you will be contributing to the rocDecode code base, or if you want to previe
 
 If you will not be previewing features or contributing to the code base, use the :doc:`package installers <./rocDecode-package-install>` to install rocDecode. 
 
-Before building rocDecode, use `rocDecode-setup.py <https://github.com/ROCm/rocDecode/blob/develop/rocDecode-setup.py>`_ to install all the required prerequisites:
+:doc:`Clone the rocDecode project <./rocDecode-clone-project>`.
+
+Change directory to the rocDecode project directory.
+
+.. code:: shell
+
+  cd rocm-systems/projects/rocdecode
+
+Use `rocDecode-setup.py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/rocDecode-setup.py>`_ to install the required prerequisites:
 
 .. code:: shell
 
@@ -28,8 +36,6 @@ Build and install rocDecode using the following commands:
 
 .. code:: shell
 
-  git clone https://github.com/ROCm/rocDecode.git
-  cd rocDecode
   mkdir build && cd build
   cmake ../
   make -j8

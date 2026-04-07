@@ -43,6 +43,7 @@ Parallelism API support
 * MPI
 * RCCL
 * UCX (Unified Communication X)
+* OpenSHMEM (SHMEM)
 * Kokkos-Tools (KokkosP)
 * OpenMP-Tools (OMPT)
 

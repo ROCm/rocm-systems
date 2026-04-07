@@ -15,6 +15,11 @@
 #include "collectives.h"
 #include "msccl/msccl_parser.h"
 
+#define NODE_TYPE_NONE 0
+#define NODE_TYPE_OPEN 1
+#define NODE_TYPE_CLOSE 2
+#define NODE_TYPE_SINGLE 3
+
 ncclResult_t mscclXmlGetChar(FILE* file, char* c) {
   if (fread(c, 1, 1, file) == 0) {
     WARN("XML Parse : Unexpected EOF");
@@ -66,9 +71,9 @@ ncclResult_t mscclXmlGetToken(FILE* file, char* name, char* value, char* last) {
       return mscclXmlGetValue(file, value, last);
     }
     ptr[o] = c;
-    if (o == MAX_STR_LEN-1) {
+    if (o == MSCCL_MAX_STR_LEN-1) {
       ptr[o] = '\0';
-      WARN("Error : name %s too long (max %d)", ptr, MAX_STR_LEN);
+      WARN("Error : name %s too long (max %d)", ptr, MSCCL_MAX_STR_LEN);
       return ncclInternalError;
     }
     o++;
@@ -138,15 +143,15 @@ ncclResult_t mscclXmlGetNode(FILE* file, struct mscclXmlNode* node) {
   int a = 0;
   while (c == ' ') {
     NCCLCHECK(mscclXmlGetToken(file, node->attrs[a].key, node->attrs[a].value, &c));
-    if (a == MAX_ATTR_COUNT) {
-      INFO(NCCL_GRAPH, "XML Parse : Ignoring extra attributes (max %d)", MAX_ATTR_COUNT);
+    if (a == MSCCL_MAX_ATTR_COUNT) {
+      INFO(NCCL_GRAPH, "XML Parse : Ignoring extra attributes (max %d)", MSCCL_MAX_ATTR_COUNT);
       // Actually we need to still consume the extra attributes so we have an extra one.
     } else a++;
   }
   node->nAttrs = a;
   if (c == '/') {
     node->type = NODE_TYPE_SINGLE;
-    char str[MAX_STR_LEN];
+    char str[MSCCL_MAX_STR_LEN];
     NCCLCHECK(mscclXmlGetToken(file, str, NULL, &c));
   }
   if (c != '>') {
@@ -166,7 +171,7 @@ struct mscclXmlHandler {
 ncclResult_t mscclXmlLoadSub(FILE* file, struct mscclXml* xml, struct mscclXmlNode* head, struct mscclXmlHandler handlers[], int nHandlers) {
   if (head && head->type == NODE_TYPE_SINGLE) return ncclSuccess;
   while (1) {
-    if (xml->maxIndex == MAX_NODES) {
+    if (xml->maxIndex == MSCCL_MAX_NODES) {
       WARN("Error : XML parser is limited to 1024 nodes");
       return ncclInternalError;
     }

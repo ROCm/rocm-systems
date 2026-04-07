@@ -11,7 +11,7 @@ import shutil
 from subprocess import Popen, PIPE, CalledProcessError, run
 import signal
 
-DEFAULT_TIMEOUT = 30
+DEFAULT_TIMEOUT = 60
 
 
 def run_and_communicate(
@@ -278,7 +278,7 @@ def check_test_4():
         run_and_communicate(
             test_name="4: save code objects",
             args="4",
-            debug_agent_options=f"-p --save-code-objects={tmpdir}",
+            debug_agent_options=f"--save-code-objects={tmpdir} --load-all-code-objects",
         )
 
         try:
@@ -501,9 +501,9 @@ def check_test_9():
             if not kernel_started and "Kernel started" in s:
                 kernel_started = True
                 os.kill(p.pid, signal.SIGQUIT)
-                # We give our program 30 secs to start the kernel.
+                # We give our program LOOP_TIMEOUT secs to start the kernel.
                 # Once we know that the kernel is running, we give it
-                # extra 30 seconds to process SIGQUIT.
+                # an extra LOOP_TIMEOUT seconds to process SIGQUIT.
                 deadline = deadline + LOOP_TIMEOUT
 
             if kernel_started:
@@ -602,6 +602,57 @@ def check_test_10():
     return found_in_debug and not found_in_no_debug
 
 
+def check_eager_code_object_save():
+    print('Starting rocm-gdb-agent test "Check default lazy code object"')
+    with tempfile.TemporaryDirectory() as tmpdir:
+        run_and_communicate(
+            test_name="eager code object save: no event, no code object",
+            args="4",
+            debug_agent_options=f"--save-code-objects={tmpdir}",
+        )
+
+        if len(os.listdir(tmpdir)) != 0:
+            print("Code object saved, while code object saving should have been lazy")
+            return False
+
+        run_and_communicate(
+            test_name="eager code object save: no event, no code object",
+            args="4",
+            debug_agent_options=f"--save-code-objects={tmpdir} -c",
+        )
+
+        if len(os.listdir(tmpdir)) == 0:
+            print("Missing saved code objects")
+            return False
+    return True
+
+
+def check_lazy_loading_and_eager_incompatible():
+    print('Starting rocm-gdb-agent test "Check -c -z incompatible"')
+    out, err, success = run_and_communicate(
+        test_name="eager code object save: no event, no code object",
+        args="4",
+        debug_agent_options=f"--load-all-code-objects --lazy",
+    )
+    check_list = [
+        re.compile(s)
+        for s in ['"--load-all-code-objects" and "--lazy" are mutually exclusive']
+    ]
+    if not success or not check_errors(check_list, out, err):
+        print("Failed to detect -c and -z incompatibility")
+        return False
+
+    out, err, success = run_and_communicate(
+        test_name="eager code object save: no event, no code object",
+        args="4",
+        debug_agent_options=f"--lazy --load-all-code-objects",
+    )
+    if not success or not check_errors(check_list, out, err):
+        print("Failed to detect -c and -z incompatibility")
+        return False
+    return True
+
+
 test_success = True
 unsupported_tests = []
 
@@ -627,6 +678,8 @@ for deferred_loading in (None, "1", "0"):
             check_test_8,
             check_test_9,
             check_test_10,
+            check_eager_code_object_save,
+            check_lazy_loading_and_eager_incompatible,
         ]
 
         for i, test in enumerate(test_list, start=0):

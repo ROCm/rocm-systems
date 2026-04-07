@@ -124,7 +124,14 @@ include(rocprofiler_config_install_rocpd)
 include(rocprofiler_config_install_rocattach)
 include(rocprofiler_config_install_tests)
 
-if(ROCPROFILER_BUILD_TESTS)
+# ROCPROFILER_BUILD_INTEGRATION_TESTS is not a standard option. If not defined, set it as
+# a local (non-cached) variable equal to ROCPROFILER_BUILD_TESTS. If one only wants to
+# build and install unit tests, they can use -DROCPROFILER_BUILD_INTEGRATION_TESTS=OFF.
+if(NOT DEFINED ROCPROFILER_BUILD_INTEGRATION_TESTS)
+    set(ROCPROFILER_BUILD_INTEGRATION_TESTS ${ROCPROFILER_BUILD_TESTS})
+endif()
+
+if(ROCPROFILER_BUILD_TESTS AND ROCPROFILER_BUILD_INTEGRATION_TESTS)
     add_subdirectory(tests)
 endif()
 

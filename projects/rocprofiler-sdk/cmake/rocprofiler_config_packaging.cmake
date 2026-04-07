@@ -2,6 +2,8 @@
 # configure packaging settings
 #
 
+include(CPackComponent)
+
 function(rocprofiler_set_package_depends _VARIABLE _VALUE _INFO _REPLACE_PARENTHESIS)
     string(REPLACE ";" ", " _DEPENDS "${_VALUE}")
     if(_REPLACE_PARENTHESIS)
@@ -134,6 +136,8 @@ endif()
 # support general cache variables
 list(APPEND _DEB_PACKAGE_DEPENDS ${ROCPROFILER_CPACK_DEBIAN_PACKAGE_DEPENDS})
 list(APPEND _RPM_PACKAGE_REQUIRES ${ROCPROFILER_CPACK_RPM_PACKAGE_REQUIRES})
+
+include(CPackComponent)
 
 foreach(COMPONENT_GROUP ${ROCPROFILER_COMPONENT_GROUPS})
     set(_DEP "${COMPONENT_DEP_${COMPONENT_GROUP}}")
