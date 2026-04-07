@@ -33,6 +33,7 @@ class TestRCCL:
         if gpu_count < 2:
             pytest.skip("Skipping RCCL unit tests: <2 GPUs visible")
         environ_vars["HIP_VISIBLE_DEVICES"] = "2,3"
+        environ_vars["HSA_NO_SCRATCH_RECLAIM"] = "1"
         environ_vars["UT_MIN_GPUS"] = "2"
         environ_vars["UT_MAX_GPUS"] = "2"
         environ_vars["UT_POW2_GPUS"] = "1"
