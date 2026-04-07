@@ -6,6 +6,7 @@ import os
 from ctypes import (
     POINTER,
     Structure,
+    Union,
     byref,
     c_char,
     c_char_p,
@@ -14,10 +15,86 @@ from ctypes import (
     c_size_t,
     c_uint,
     c_uint8,
+    c_ulonglong,
     c_void_p,
 )
 
 _lib = ctypes.CDLL(f"{os.getenv('ROCM_PATH', '/opt/rocm')}/lib/libamdhip64.so")
+
+# hipResourceType / hipChannelFormatKind / texture enums
+# (aligned with hip_runtime_api.h)
+HIP_RESOURCE_TYPE_LINEAR = 2
+HIP_CHANNEL_FORMAT_KIND_FLOAT = 2
+HIP_FILTER_MODE_POINT = 0
+HIP_ADDRESS_MODE_CLAMP = 0
+
+
+class HIPChannelFormatDesc(Structure):
+    _fields_ = [
+        ("x", c_int),
+        ("y", c_int),
+        ("z", c_int),
+        ("w", c_int),
+        ("f", c_int),
+    ]
+
+
+class HIPResourceArray(Structure):
+    _fields_ = [("array", c_void_p)]
+
+
+class HIPResourceMipmap(Structure):
+    _fields_ = [("mipmap", c_void_p)]
+
+
+class HIPResourceLinear(Structure):
+    _fields_ = [
+        ("devPtr", c_void_p),
+        ("desc", HIPChannelFormatDesc),
+        ("sizeInBytes", c_size_t),
+    ]
+
+
+class HIPResourcePitch2D(Structure):
+    _fields_ = [
+        ("devPtr", c_void_p),
+        ("desc", HIPChannelFormatDesc),
+        ("width", c_size_t),
+        ("pitch", c_size_t),
+        ("height", c_size_t),
+    ]
+
+
+class HIPResourceUnion(Union):
+    _fields_ = [
+        ("array", HIPResourceArray),
+        ("mipmap", HIPResourceMipmap),
+        ("linear", HIPResourceLinear),
+        ("pitch2D", HIPResourcePitch2D),
+    ]
+
+
+class HIPResourceDesc(Structure):
+    _fields_ = [
+        ("resType", c_int),
+        ("res", HIPResourceUnion),
+    ]
+
+
+class HIPTextureDesc(Structure):
+    _fields_ = [
+        ("addressMode", c_int * 3),
+        ("filterMode", c_int),
+        ("readMode", c_int),
+        ("normalizedCoords", c_int),
+        ("maxAnisotropy", c_uint),
+        ("mipmapFilterMode", c_int),
+        ("mipmapLevelBias", c_float),
+        ("minMipmapLevelClamp", c_float),
+        ("maxMipmapLevelClamp", c_float),
+        ("borderColor", c_float * 4),
+        ("sRGB", c_int),
+    ]
 
 
 # Mirrors struct hipUUID_t
@@ -240,6 +317,26 @@ _lib.hipEventRecord.argtypes = [c_void_p, c_void_p]
 _lib.hipEventElapsedTime.restype = c_int
 _lib.hipEventElapsedTime.argtypes = [POINTER(c_float), c_void_p, c_void_p]
 
+_lib.hipMemset.restype = c_int
+_lib.hipMemset.argtypes = [c_void_p, c_int, c_size_t]
+
+_lib.hipCreateTextureObject.restype = c_int
+_lib.hipCreateTextureObject.argtypes = [
+    POINTER(c_ulonglong),
+    POINTER(HIPResourceDesc),
+    POINTER(HIPTextureDesc),
+    c_void_p,
+]
+
+_lib.hipDestroyTextureObject.restype = c_int
+_lib.hipDestroyTextureObject.argtypes = [c_ulonglong]
+
+_lib.hipCreateSurfaceObject.restype = c_int
+_lib.hipCreateSurfaceObject.argtypes = [POINTER(c_ulonglong), POINTER(HIPResourceDesc)]
+
+_lib.hipDestroySurfaceObject.restype = c_int
+_lib.hipDestroySurfaceObject.argtypes = [c_ulonglong]
+
 
 class HIPError(Exception):
     def __init__(self, code: int) -> None:
@@ -253,9 +350,12 @@ class HIPError(Exception):
 class HIPDeviceMemory:
     def __init__(self, ptr: POINTER) -> None:
         self.ptr = ptr
+        self._freed = False
 
     def __del__(self) -> None:
-        _lib.hipFree(self.ptr)
+        if not self._freed and self.ptr and getattr(self.ptr, "value", 0):
+            _lib.hipFree(self.ptr)
+            self._freed = True
 
 
 class HIPEvent:
@@ -417,3 +517,47 @@ def hipEventElapsedTime(start: HIPEvent, stop: HIPEvent) -> float:
         raise HIPError(res)
 
     return ms.value
+
+
+def hipMemset(dst: HIPDeviceMemory, value: int, size: int) -> None:
+    res = _lib.hipMemset(dst.ptr, value, c_size_t(size))
+    if res != 0:
+        raise HIPError(res)
+
+
+def hipFree(mem: HIPDeviceMemory) -> None:
+    if mem._freed:
+        return
+    res = _lib.hipFree(mem.ptr)
+    if res != 0:
+        raise HIPError(res)
+    mem._freed = True
+    mem.ptr = c_void_p()
+
+
+def hipCreateTextureObject(res_desc: HIPResourceDesc, tex_desc: HIPTextureDesc) -> int:
+    h = c_ulonglong(0)
+    res = _lib.hipCreateTextureObject(byref(h), byref(res_desc), byref(tex_desc), None)
+    if res != 0:
+        raise HIPError(res)
+    return h.value
+
+
+def hipDestroyTextureObject(tex_object: int) -> None:
+    res = _lib.hipDestroyTextureObject(c_ulonglong(tex_object))
+    if res != 0:
+        raise HIPError(res)
+
+
+def hipCreateSurfaceObject(res_desc: HIPResourceDesc) -> int:
+    h = c_ulonglong(0)
+    res = _lib.hipCreateSurfaceObject(byref(h), byref(res_desc))
+    if res != 0:
+        raise HIPError(res)
+    return h.value
+
+
+def hipDestroySurfaceObject(surf_object: int) -> None:
+    res = _lib.hipDestroySurfaceObject(c_ulonglong(surf_object))
+    if res != 0:
+        raise HIPError(res)
