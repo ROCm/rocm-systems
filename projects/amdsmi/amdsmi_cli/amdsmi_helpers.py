@@ -2139,7 +2139,15 @@ class AMDSMIHelpers:
             print(header)
 
     def dump_cper_entries(
-        self, folder, entries, cper_data, device_handle, file_limit=None, logger=None, emit=True
+        self,
+        folder,
+        entries,
+        cper_data,
+        device_handle,
+        file_limit=None,
+        cper_file=None,
+        logger=None,
+        emit=True,
     ):
         """
         Dump CPER entries to files in the specified folder. Handles batch deletion if file limit is exceeded.
@@ -2534,7 +2542,7 @@ class AMDSMIHelpers:
                             cper_data,
                             device_handle,
                             args.file_limit,
-                            os.path.basename(args.cper_file),
+                            cper_file=os.path.basename(args.cper_file),
                         )
 
             # When a file destination is set, temporarily redirect stdout
@@ -2555,7 +2563,7 @@ class AMDSMIHelpers:
                                 cper_data,
                                 device_handle,
                                 args.file_limit,
-                                logger,
+                                logger=logger,
                                 emit=emit_json,
                             )
                             collected_json_rows.extend(cper_rows)
@@ -2571,7 +2579,7 @@ class AMDSMIHelpers:
                         cper_data,
                         device_handle,
                         args.file_limit,
-                        logger,
+                        logger=logger,
                         emit=emit_json,
                     )
                     collected_json_rows.extend(cper_rows)
@@ -2597,7 +2605,7 @@ class AMDSMIHelpers:
                                 cper_data,
                                 device_handle,
                                 args.file_limit,
-                                logger,
+                                logger=logger,
                                 emit=emit_json,
                             )
                             collected_json_rows.extend(cper_rows)
@@ -2613,7 +2621,7 @@ class AMDSMIHelpers:
                         cper_data,
                         device_handle,
                         args.file_limit,
-                        logger,
+                        logger=logger,
                         emit=emit_json,
                     )
                     collected_json_rows.extend(cper_rows)
