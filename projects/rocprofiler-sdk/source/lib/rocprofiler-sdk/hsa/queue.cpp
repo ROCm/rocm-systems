@@ -928,7 +928,7 @@ Queue::sync() const
     if(_active_kernels.handle != 0u)
     {
         constexpr auto timeout_hint =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{5});
         auto _value = _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
                                                            HSA_SIGNAL_CONDITION_EQ,
                                                            0,
