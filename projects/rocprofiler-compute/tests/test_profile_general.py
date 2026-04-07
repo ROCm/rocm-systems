@@ -2144,7 +2144,9 @@ class TestSetsIntegration:
 
         assert test_utils.get_num_pmc_file(workload_dir) == 1
 
-        memory_metrics = ["16.1.2", "17.1.0"]
+        memory_metrics = (
+            ["2.1.18", "17.1.0"] if is_strix_halo_soc() else ["16.1.2", "17.1.0"]
+        )
         for metric_id in memory_metrics:
             assert metric_id in open(Path(workload_dir) / "log.txt").read(), (
                 f"Expected memory metric {metric_id} not found"
