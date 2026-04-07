@@ -20,10 +20,12 @@
  * THE SOFTWARE.
  */
 
-#ifndef AMD_SMI_INCLUDE_AMD_SMI_TEST_FLAGS_H_
-#define AMD_SMI_INCLUDE_AMD_SMI_TEST_FLAGS_H_
+#ifndef AMD_SMI_INCLUDE_AMD_SMI_TEST_INTERNAL_H_
+#define AMD_SMI_INCLUDE_AMD_SMI_TEST_INTERNAL_H_
 
 #include <cstdint>
+
+#include "amd_smi/amdsmi.h"
 
 // Reserved test-only init flag. Passed to amdsmi_init() / rsmi_init() to
 // switch GPU device mutexes from blocking to non-blocking (trylock) mode,
@@ -33,4 +35,9 @@
 // Current public flags occupy bits [0:3]; this flag uses bit 59 (0x0800_0000_0000_0000).
 inline constexpr uint64_t AMD_SMI_INIT_FLAG_RESRV_TEST1 = 0x0800000000000000ULL;
 
-#endif  // AMD_SMI_INCLUDE_AMD_SMI_TEST_FLAGS_H_
+// Internal test-only wrapper around rsmi_test_sleep. Acquires the device mutex
+// for |seconds| seconds and returns an amdsmi_status_t so tests do not need to
+// extern-declare the rsmi_status_t function directly.
+amdsmi_status_t amdsmi_test_sleep(amdsmi_processor_handle processor_handle, uint32_t seconds);
+
+#endif  // AMD_SMI_INCLUDE_AMD_SMI_TEST_INTERNAL_H_

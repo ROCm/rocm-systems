@@ -42,7 +42,7 @@
 #include <regex>
 
 #include "amd_smi/impl/amd_smi_common.h"
-#include "amd_smi/impl/amd_smi_test_flags.h"
+#include "amd_smi/impl/amd_smi_test_internal.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_logger.h"

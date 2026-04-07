@@ -66,6 +66,7 @@
 #endif  // BRCM_NIC
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_processor.h"
+#include "amd_smi/impl/amd_smi_test_internal.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
 #include "amd_smi/impl/xf86drm.h"
@@ -8580,4 +8581,12 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
   }
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+// Test-only wrapper: acquires the device mutex for |seconds| seconds.
+// Not declared in amdsmi.h — internal use via amd_smi_test_internal.h only.
+// rsmi_test_sleep is undocumented and not in rocm_smi.h, so forward-declare it.
+extern rsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
+amdsmi_status_t amdsmi_test_sleep(amdsmi_processor_handle processor_handle, uint32_t seconds) {
+  return rsmi_wrapper(rsmi_test_sleep, processor_handle, 0, seconds);
 }

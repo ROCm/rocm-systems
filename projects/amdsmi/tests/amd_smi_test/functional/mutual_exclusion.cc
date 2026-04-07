@@ -37,7 +37,7 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_test_flags.h"
+#include "amd_smi/impl/amd_smi_test_internal.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 
 TestMutualExclusion::TestMutualExclusion() : TestBase() {
@@ -52,8 +52,6 @@ TestMutualExclusion::TestMutualExclusion() : TestBase() {
 }
 
 TestMutualExclusion::~TestMutualExclusion(void) {}
-
-extern amdsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
 
 void TestMutualExclusion::SetUp(void) {
   std::string label;
@@ -263,7 +261,7 @@ void TestMutualExclusion::Run(void) {
     IF_VERB(STANDARD) {
       std::cout << "MUTEX_HOLDER process: started sleeping for 10 seconds..." << std::endl;
     }
-    ret = rsmi_test_sleep(0, 10);
+    ret = amdsmi_test_sleep(processor_handles_[0], 10);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
     IF_VERB(STANDARD) { std::cout << "MUTEX_HOLDER process: Sleep process woke up." << std::endl; }
 

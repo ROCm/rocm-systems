@@ -37,6 +37,7 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_test_internal.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 // How long the holder process holds the mutex (seconds).
@@ -48,8 +49,6 @@ static constexpr double kMinWaitSeconds = 3.0;
 // calling amdsmi_get_gpu_id. rsmi_test_sleep's mutex acquisition is
 // sub-microsecond; 200ms is a 200,000x margin.
 static constexpr long kWaiterMutexPauseNs = 200000000L;  // 200 ms
-
-extern amdsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
 
 TestCrossProcessSerialization::TestCrossProcessSerialization() : TestBase() {
   set_title("Cross-Process Serialization Test");
@@ -289,7 +288,7 @@ void TestCrossProcessSerialization::Run(void) {
     ASSERT_GT(write(run_pipe_[1], &run_ready, 1), 0)
         << "HOLDER: write(run_pipe_) failed: " << strerror(errno);
     close(run_pipe_[1]);
-    amdsmi_status_t ret = rsmi_test_sleep(0, kHoldSeconds);
+    amdsmi_status_t ret = amdsmi_test_sleep(processor_handles_[0], kHoldSeconds);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
     IF_VERB(STANDARD) {
       std::cout << "HOLDER process: released mutex after " << kHoldSeconds << "s." << std::endl;
