@@ -104,11 +104,11 @@ __device__ static inline void lock(uint32_t *lock) {
   } while (0 == __hip_atomic_compare_exchange_strong(lock, &expected, 1,
                                                      __ATOMIC_ACQUIRE,
                                                      __ATOMIC_ACQUIRE,
-                                                     __HIP_MEMORY_SCOPE_SYSTEM));
+                                                     __HIP_MEMORY_SCOPE_AGENT));
 }
 
 __device__ static inline void unlock(uint32_t *lock) {
-  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 }
 
 __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
@@ -127,8 +127,7 @@ __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
 
   hdr.typ_qid_indx = (key_lo | (key_hi << 32));
 
-  __threadfence_system();
-  __hip_atomic_store(bnxt_dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+  __hip_atomic_store(bnxt_dbr, hdr.typ_qid_indx, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
 __device__ void QueuePair::bnxt_check_cqe_error(struct bnxt_re_req_cqe *cqe) {
@@ -190,7 +189,7 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
     sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
     bnxt_sq.head = sq_head;
 
-    sq_tail = __hip_atomic_load(&bnxt_sq.tail, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_AGENT);
+    sq_tail = __hip_atomic_load(&bnxt_sq.tail, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
 
     consumed_slots  = (sq_tail - sq_head + sq_depth) % sq_depth;
     available_slots = sq_depth - consumed_slots;

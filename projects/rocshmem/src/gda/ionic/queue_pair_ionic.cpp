@@ -149,7 +149,8 @@ __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
    */
   if (((cq_pos - cq_dbpos) & cq_mask) >= 100) {
     cq_dbpos = cq_pos;
-    __atomic_store_n(cq_dbreg, cq_dbval | (cq_mask & cq_dbpos), __ATOMIC_SEQ_CST); //TODO:maybe relaxed?
+    __hip_atomic_store(cq_dbreg, cq_dbval | (cq_mask & cq_dbpos),
+                       __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
   }
 
   sq_msn = msn;
@@ -266,18 +267,17 @@ __device__ void QueuePair::ionic_ring_doorbell(uint32_t pos) {
 
   for (uint32_t i = 0; i < lane_count; ++i) {
     if (lane_id == i) {
-      __threadfence();
-      __atomic_store_n(sq_dbreg, sq_dbval | (sq_mask & pos), __ATOMIC_SEQ_CST);
+      __hip_atomic_store(sq_dbreg, sq_dbval | (sq_mask & pos),
+                         __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
     }
   }
-  __threadfence();
 }
 
 __device__ void QueuePair::ionic_ring_doorbell_single(uint32_t pos) {
   // When threads write at once to the same address, not all writes reach the bus.
   // Take turns and insert a thread fence between writes to the same address.
-  __threadfence();
-  __atomic_store_n(&sq_dbreg[8 * __lane_id()], sq_dbval | (sq_mask & pos), __ATOMIC_SEQ_CST);
+  __hip_atomic_store(&sq_dbreg[8 * __lane_id()], sq_dbval | (sq_mask & pos),
+                     __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
 __device__ void QueuePair::ionic_quiet(ActiveWFInfo &wf_info) {
