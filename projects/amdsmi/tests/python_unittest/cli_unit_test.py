@@ -268,9 +268,9 @@ class TestAmdSmiCli(unittest.TestCase):
 
     def get_dict_from_json(self, data):
         failures = []
-        for name, data in data.items():
+        for name, data_str in data.items():
             try:
-                data[name] = json.loads(data)
+                data[name] = json.loads(data_str)
             except json.JSONDecodeError:
                 msg = f"Failure: {name} contains invalid json"
                 failures.append((f"cmd=amd-smi {name}", msg))
@@ -1591,11 +1591,11 @@ class TestAmdSmiCli(unittest.TestCase):
             self.print_results(failures, fail_on_results=True)
             return
 
-        data = self.get_monitor_metric_data(data["monitor1"], data["monitor2"], None)
-        monitor_fails = self.compare_monitor_metric_data("Monitor", data)
+        _data = self.get_monitor_metric_data(data["monitor1"], data["monitor2"], None)
+        monitor_fails = self.compare_monitor_metric_data("Monitor", _data)
 
-        data = self.get_monitor_metric_data(data["monitor2"], None, data["metric3"])
-        metric_fails = self.compare_monitor_metric_data("Metric", data)
+        _data = self.get_monitor_metric_data(data["monitor2"], None, data["metric3"])
+        metric_fails = self.compare_monitor_metric_data("Metric", _data)
 
         failures = monitor_fails + metric_fails
         if len(failures) > 0:
@@ -1657,8 +1657,8 @@ class TestAmdSmiCli(unittest.TestCase):
             self.print_results(failures, fail_on_results=True)
             return
 
-        data = self.get_monitor_metric_data(data["monitor1"], data["monitor2"], None)
-        monitor_fails = self.compare_monitor_metric_data("Monitor", data)
+        _data = self.get_monitor_metric_data(data["monitor1"], data["monitor2"], None)
+        monitor_fails = self.compare_monitor_metric_data("Monitor", _data)
 
         # Monitor to Metric
         cmd = "amd-smi monitor --json"
@@ -1689,8 +1689,8 @@ class TestAmdSmiCli(unittest.TestCase):
             self.print_results(failures, fail_on_results=True)
             return
 
-        data = self.get_monitor_metric_data(data["monitor"], None, data["metric3"])
-        metric_fails = self.compare_monitor_metric_data("Metric", data)
+        _data = self.get_monitor_metric_data(data["monitor"], None, data["metric3"])
+        metric_fails = self.compare_monitor_metric_data("Metric", _data)
 
         # Report failures
         failures = monitor_fails + metric_fails
@@ -1754,8 +1754,8 @@ class TestAmdSmiCli(unittest.TestCase):
             self.print_results(failures, fail_on_results=True)
             return
 
-        data = self.get_monitor_metric_data(data["monitor1"], data["monitor2"], None)
-        monitor_fails = self.compare_monitor_metric_data("Workload", data)
+        _data = self.get_monitor_metric_data(data["monitor1"], data["monitor2"], None)
+        monitor_fails = self.compare_monitor_metric_data("Workload", _data)
 
         # Report failures
         failures = monitor_fails
