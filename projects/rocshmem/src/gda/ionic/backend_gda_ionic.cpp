@@ -39,7 +39,6 @@ void GDABackend::ionic_create_cqs(int ncqes) {
   cq_attr.comp_vector   = 0;
   cq_attr.flags         = 0;
   cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
-  cq_attr.parent_domain = pd_parent;
 
   memset(&ionic_cq_attr, 0, sizeof(ionic_cq_attr));
   if (ionic_dv.create_cq_ex) {
@@ -48,18 +47,17 @@ void GDABackend::ionic_create_cqs(int ncqes) {
   }
 
   for (size_t i = 0; i < qps.size(); i++) {
+    NicDevice &nic = nic_for_qp(i);
     struct ibv_cq_ex *cq_ex = nullptr;
 
-    cq_attr.parent_domain = pd_uxdma[i & 1];
+    cq_attr.parent_domain = nic.pd_uxdma[i & 1];
 
     if (ionic_dv.create_cq_ex) {
-      cq_ex = ionic_dv.create_cq_ex(context, &cq_attr, &ionic_cq_attr);
-      // If cq_ex is nullptr, fallback to ibv_create_cq_ex below.
-      //CHECK_NNULL(cq_ex, "ionic_dv_create_cq_ex");
+      cq_ex = ionic_dv.create_cq_ex(nic.context, &cq_attr, &ionic_cq_attr);
     }
 
     if (!cq_ex) {
-      cq_ex = ibv_create_cq_ex(context, &cq_attr);
+      cq_ex = ibv_create_cq_ex(nic.context, &cq_attr);
       CHECK_NNULL(cq_ex, "ibv_create_cq_ex");
     }
 
@@ -69,8 +67,9 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 }
 
 void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
+  NicDevice &nic = nic_for_qp(conn_num);
   ionic_dv_ctx dvctx;
-  ionic_dv.get_ctx(&dvctx, context);
+  ionic_dv.get_ctx(&dvctx, nic.context);
 
   int hip_dev_id{-1};
   CHECK_HIP(hipGetDevice(&hip_dev_id));
@@ -111,22 +110,24 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->dev_name[sizeof(gpu_qp->dev_name) - 1] = 0;
 
   gpu_qp->qp_num = qps[conn_num]->qp_num;
-  gpu_qp->lkey = heap_mr->lkey;
-  gpu_qp->rkey = heap_rkey[conn_num % num_pes];
+  int pe = conn_num % num_pes;
+  int nic_idx = nic_idx_for_qp_row(conn_num / num_pes);
+  gpu_qp->lkey = nic.heap_mr->lkey;
+  gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
   gpu_qp->inline_threshold = 32;
 }
 
-void GDABackend::ionic_setup_parent_domain(struct ibv_parent_domain_init_attr* pattr) {
-  ionic_dv.pd_set_sqcmb(pd_parent, false, false, false);
-  ionic_dv.pd_set_rqcmb(pd_parent, false, false, false);
+void GDABackend::ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr) {
+  ionic_dv.pd_set_sqcmb(nic.pd_parent, false, false, false);
+  ionic_dv.pd_set_rqcmb(nic.pd_parent, false, false, false);
 
   for (int uxdma_i = 0; uxdma_i < 2; ++uxdma_i) {
-    pd_uxdma[uxdma_i] = ibv.alloc_parent_domain(context, pattr);
-    CHECK_NNULL(pd_uxdma[uxdma_i], "ibv_alloc_parent_domain (uxdma)");
+    nic.pd_uxdma[uxdma_i] = ibv.alloc_parent_domain(nic.context, pattr);
+    CHECK_NNULL(nic.pd_uxdma[uxdma_i], "ibv_alloc_parent_domain (uxdma)");
 
-    ionic_dv.pd_set_sqcmb(pd_uxdma[uxdma_i], false, false, false);
-    ionic_dv.pd_set_rqcmb(pd_uxdma[uxdma_i], false, false, false);
-    ionic_dv.pd_set_udma_mask(pd_uxdma[uxdma_i], 1u << uxdma_i);
+    ionic_dv.pd_set_sqcmb(nic.pd_uxdma[uxdma_i], false, false, false);
+    ionic_dv.pd_set_rqcmb(nic.pd_uxdma[uxdma_i], false, false, false);
+    ionic_dv.pd_set_udma_mask(nic.pd_uxdma[uxdma_i], 1u << uxdma_i);
   }
 }
 

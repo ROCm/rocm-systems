@@ -193,16 +193,11 @@ TEST_F(TopologyTestFixture, GetClosestNicToGpuValid) {
   int numNics = GetNumDevices(EXE_NIC);
 
   if (numGpus > 0 && numNics > 0) {
-    const char* devName = nullptr;
+    std::string devName;
     int result = GetClosestNicToGpu(0, nullptr, &devName);
-    // Should return a valid NIC index or -1 if detection failed
     if (result >= 0) {
       EXPECT_LT(result, numNics);
-      // Device name should be set
-      EXPECT_NE(devName, nullptr);
-      if (devName != nullptr) {
-        free(const_cast<char*>(devName));
-      }
+      EXPECT_FALSE(devName.empty());
     }
   }
 }
@@ -570,4 +565,128 @@ TEST_F(PCIeTreeTestFixture, LcaDepthVerification) {
   ASSERT_NE(lca, nullptr);
   depth = GetLcaDepth(lca->address, &root_);
   EXPECT_EQ(depth, 0);  // Root level
+}
+
+//==============================================================================
+// Multi-NIC Topology Tests
+//==============================================================================
+
+TEST_F(DeviceTypeTestFixture, NicPathTypeOrdering) {
+  EXPECT_LT(NIC_PATH_PIX, NIC_PATH_PXB);
+  EXPECT_LT(NIC_PATH_PXB, NIC_PATH_PHB);
+  EXPECT_LT(NIC_PATH_PHB, NIC_PATH_SYS);
+}
+
+TEST_F(DeviceTypeTestFixture, ParseNicMergeLevelKnown) {
+  EXPECT_EQ(ParseNicMergeLevel("PIX"), NIC_PATH_PIX);
+  EXPECT_EQ(ParseNicMergeLevel("PXB"), NIC_PATH_PXB);
+  EXPECT_EQ(ParseNicMergeLevel("PHB"), NIC_PATH_PHB);
+  EXPECT_EQ(ParseNicMergeLevel("SYS"), NIC_PATH_SYS);
+}
+
+TEST_F(DeviceTypeTestFixture, ParseNicMergeLevelUnknown) {
+  testing::internal::CaptureStderr();
+  auto result = ParseNicMergeLevel("INVALID");
+  std::string err = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(result, NIC_PATH_SYS);
+  EXPECT_TRUE(err.find("unknown") != std::string::npos ||
+              err.find("defaulting") != std::string::npos);
+}
+
+TEST_F(DeviceTypeTestFixture, ParseNicListCommaSeparated) {
+  auto result = ParseNicList("rdma0,rdma1,rdma2");
+  ASSERT_EQ(result.size(), 3u);
+  EXPECT_EQ(result[0], "rdma0");
+  EXPECT_EQ(result[1], "rdma1");
+  EXPECT_EQ(result[2], "rdma2");
+}
+
+TEST_F(DeviceTypeTestFixture, ParseNicListTrimsSpaces) {
+  auto result = ParseNicList("  rdma0 , rdma1 , rdma2  ");
+  ASSERT_EQ(result.size(), 3u);
+  EXPECT_EQ(result[0], "rdma0");
+  EXPECT_EQ(result[1], "rdma1");
+  EXPECT_EQ(result[2], "rdma2");
+}
+
+TEST_F(DeviceTypeTestFixture, ParseNicListSingle) {
+  auto result = ParseNicList("rdma0");
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result[0], "rdma0");
+}
+
+TEST_F(DeviceTypeTestFixture, ParseNicListEmpty) {
+  auto result = ParseNicList("");
+  EXPECT_TRUE(result.empty());
+}
+
+TEST_F(DeviceTypeTestFixture, SelectRankGroupRoundRobin) {
+  std::string spec = "g0;g1;g2";
+
+  EXPECT_EQ(SelectRankGroup(spec, 0), "g0");
+  EXPECT_EQ(SelectRankGroup(spec, 1), "g1");
+  EXPECT_EQ(SelectRankGroup(spec, 2), "g2");
+  EXPECT_EQ(SelectRankGroup(spec, 3), "g0");
+  EXPECT_EQ(SelectRankGroup(spec, 4), "g1");
+  EXPECT_EQ(SelectRankGroup(spec, 5), "g2");
+}
+
+TEST_F(DeviceTypeTestFixture, SelectRankGroupSingle) {
+  EXPECT_EQ(SelectRankGroup("rdma0,rdma1", 0), "rdma0,rdma1");
+  EXPECT_EQ(SelectRankGroup("rdma0,rdma1", 1), "rdma0,rdma1");
+}
+
+TEST_F(DeviceTypeTestFixture, IbvDeviceNameAtIndex) {
+  auto const& devList = GetIbvDeviceList();
+  if (!devList.empty()) {
+    EXPECT_FALSE(devList[0].name.empty());
+  }
+}
+
+TEST_F(TopologyTestFixture, BuildFilteredNicAddressesNoFilter) {
+  auto addrs = BuildFilteredNicAddresses(nullptr);
+  auto const& devList = GetIbvDeviceList();
+  EXPECT_EQ(addrs.size(), devList.size());
+  for (size_t i = 0; i < devList.size(); i++) {
+    if (devList[i].hasActivePort) {
+      EXPECT_FALSE(addrs[i].empty());
+    }
+  }
+}
+
+TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithExclude) {
+  auto const& devList = GetIbvDeviceList();
+  if (devList.empty()) return;
+
+  std::string excl = "^" + devList[0].name;
+  auto addrs = BuildFilteredNicAddresses(excl.c_str());
+  EXPECT_TRUE(addrs[0].empty());
+}
+
+TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithInclude) {
+  auto const& devList = GetIbvDeviceList();
+  if (devList.empty()) return;
+
+  std::string incl = devList[0].name;
+  auto addrs = BuildFilteredNicAddresses(incl.c_str());
+  for (size_t i = 1; i < devList.size(); i++) {
+    if (devList[i].name != devList[0].name) {
+      EXPECT_TRUE(addrs[i].empty())
+          << "NIC " << devList[i].name << " should be excluded by include list";
+    }
+  }
+}
+
+TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithMultiInclude) {
+  auto const& devList = GetIbvDeviceList();
+  if (devList.size() < 2) return;
+
+  std::string incl = devList[0].name + "," + devList[1].name;
+  auto addrs = BuildFilteredNicAddresses(incl.c_str());
+  for (size_t i = 2; i < devList.size(); i++) {
+    if (devList[i].name != devList[0].name && devList[i].name != devList[1].name) {
+      EXPECT_TRUE(addrs[i].empty())
+          << "NIC " << devList[i].name << " should be excluded by include list";
+    }
+  }
 }

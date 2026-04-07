@@ -27,11 +27,13 @@
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <cassert>
+#include <algorithm>
 
 #include "backend_gda.hpp"
 #include "debug_gda.hpp"
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
+#include "topology.hpp"
 #include "gda_team.hpp"
 #include "log.hpp"
 #include "mpi_instance.hpp"
@@ -80,14 +82,19 @@ void GDABackend::init() {
   // Initialize QP allocator to finegrained allocator
   qp_allocator_ = new HIPAllocatorFinegrained();
 
-  select_nic();
+  select_nics();
 
-  // Determine number of QPs to create per PE
-  num_qps_per_pe = envvar::gda::num_qps_per_pe_default_ctx.get_value() +
-                   envvar::gda::num_qps_per_pe_usr_ctx.get_value() *
+  // Effective QPs per PE per context type: at least num_nics_ so each NIC
+  // gets a dedicated QP row.
+  qps_per_pe_default_ctx_ = std::max(envvar::gda::num_qps_per_pe_default_ctx.get_value(),
+                                     static_cast<size_t>(num_nics_));
+  qps_per_pe_usr_ctx_     = std::max(envvar::gda::num_qps_per_pe_usr_ctx.get_value(),
+                                     static_cast<size_t>(num_nics_));
+
+  num_qps_per_pe = qps_per_pe_default_ctx_ +
+                   qps_per_pe_usr_ctx_ *
                    envvar::max_num_contexts;
 
-  // Total number of QPs created
   num_qps = num_qps_per_pe * num_pes;
 
   //TODO setup_host_interface();
@@ -144,13 +151,64 @@ GDABackend::~GDABackend() {
   }
 }
 
-void GDABackend::select_nic() {
+void GDABackend::select_nics() {
+  bool verbose = envvar::debug_level.get_value() >= envvar::types::debug_level::INFO;
+
+  const std::string &force_merge = envvar::gda::net_force_merge.get_value();
+  const std::string &merge_level_str = envvar::gda::net_merge_level.get_value();
+  bool use_force_merge = !force_merge.empty();
+  bool use_auto_merge  = envvar::gda::merge_nics;
+
+  int gpu_dev = 0;
+  CHECK_HIP(hipGetDevice(&gpu_dev));
+
+  const char *hca_list = envvar::hca_list.get_value().c_str();
+  std::vector<std::string> nic_names;
+
   if (!envvar::requested_nic.is_default()) {
-    requested_nic = envvar::requested_nic.get_value().c_str();
+    nic_names.push_back(envvar::requested_nic.get_value());
+  } else if (use_force_merge) {
+    std::string my_group = SelectRankGroup(force_merge, my_pe);
+    nic_names = ParseNicList(my_group);
+    if (nic_names.empty()) {
+      LOG_ERROR_EXIT("ROCSHMEM_GDA_NET_FORCE_MERGE is set but "
+              "contains no valid NIC names for PE %d: '%s'",
+              my_pe, force_merge.c_str());
+    }
+  } else if (use_auto_merge) {
+    auto merge_level = rocshmem::ParseNicMergeLevel(merge_level_str);
+
+    int found = rocshmem::GetClosestNicsToGpu(gpu_dev, hca_list, merge_level,
+                                              nic_names);
+
+    if (found <= 0) {
+      LOG_ERROR_EXIT("NIC fusion enabled but no NICs found "
+                     "(merge_level=%s)", merge_level_str.c_str());
+    }
   } else {
-    int gpu_dev = 0;
-    CHECK_HIP(hipGetDevice(&gpu_dev));
-    rocshmem::GetClosestNicToGpu(gpu_dev, envvar::hca_list.get_value().c_str(), &requested_nic);
+    std::string name;
+    if (rocshmem::GetClosestNicToGpu(gpu_dev, hca_list, &name) >= 0) {
+      nic_names.push_back(name);
+    }
+  }
+
+  if (nic_names.empty()) {
+    LOG_ERROR_EXIT("No NIC found for PE %d (GPU %d)", my_pe, gpu_dev);
+  }
+
+  nic_devices_.resize(nic_names.size());
+  for (size_t i = 0; i < nic_names.size(); i++) {
+    nic_devices_[i].nic_name = nic_names[i];
+  }
+  num_nics_ = static_cast<int>(nic_devices_.size());
+
+  {
+    std::string nic_list;
+    for (int i = 0; i < num_nics_; i++) {
+      nic_list += " " + nic_devices_[i].nic_name;
+    }
+    LOG_INFO("PE %d GPU %d selected %d NIC(s):%s",
+             my_pe, gpu_dev, num_nics_, nic_list.c_str());
   }
 }
 
@@ -760,12 +818,14 @@ void GDABackend::cleanup_ibv() {
 
   if (gda_provider == GDAProvider::BNXT) {
     for (size_t i = 0; i < qps.size(); i++) {
+      NicDevice &nic = nic_for_qp(i);
+
       err = bnxt_re_dv.destroy_qp(qps[i]);
       CHECK_ZERO(err, "bnxt_re_dv_destroy_qp");
 
       CHECK_HIP(hipHostUnregister(bnxt_qps[i].db_region_attr->dbr));
 
-      err = bnxt_re_dv.free_db_region(context, bnxt_qps[i].db_region_attr);
+      err = bnxt_re_dv.free_db_region(nic.context, bnxt_qps[i].db_region_attr);
       CHECK_ZERO(err, "bnxt_re_dv_free_db_region");
 
       err = bnxt_re_dv.umem_dereg(bnxt_qps[i].attr.rq_umem_handle);
@@ -800,7 +860,6 @@ void GDABackend::cleanup_ibv() {
     }
   } else if (gda_provider == GDAProvider::MLX5) {
     for (size_t i = 0; i < mlx5_qps.size(); i++) {
-      // mlx5dv::destroy_qp also destroys the associated CQ
       err = mlx5dv.destroy_qp(mlx5_qps[i]);
       CHECK_ZERO(err, "mlx5dv::destroy_qp");
     }
@@ -810,26 +869,34 @@ void GDABackend::cleanup_ibv() {
       CHECK_ZERO(err, "ibv_destroy_qp");
 
       err = ibv.destroy_cq(cqs[i]);
-      CHECK_ZERO(err, "ibv_destroy_cq");
+      CHECK_ZERO(err, "ibv_destroy_cqs");
     }
-
-    if (gda_provider == GDAProvider::IONIC) {
-      err = ibv.dealloc_pd(pd_uxdma[0]);
-      CHECK_ZERO(err, "ibv_dealloc_pd (uxdma[0])");
-
-      err = ibv.dealloc_pd(pd_uxdma[1]);
-      CHECK_ZERO(err, "ibv_dealloc_pd (uxdma[1])");
-    }
-
-    err = ibv.dealloc_pd(pd_parent);
-    CHECK_ZERO(err, "ibv_dealloc_pd (pd_parent)");
   }
 
-  err = ibv.dealloc_pd(pd_orig);
-  CHECK_ZERO(err, "ibv_dealloc_pd (pd_orig)");
-
-  err = ibv.close_device(context);
-  CHECK_ZERO(err, "ibv_close_device");
+  for (auto &nic : nic_devices_) {
+    if (gda_provider == GDAProvider::IONIC) {
+      if (nic.pd_uxdma[0]) {
+        err = ibv.dealloc_pd(nic.pd_uxdma[0]);
+        CHECK_ZERO(err, "ibv_dealloc_pd (uxdma[0])");
+      }
+      if (nic.pd_uxdma[1]) {
+        err = ibv.dealloc_pd(nic.pd_uxdma[1]);
+        CHECK_ZERO(err, "ibv_dealloc_pd (uxdma[1])");
+      }
+    }
+    if (nic.pd_parent) {
+      err = ibv.dealloc_pd(nic.pd_parent);
+      CHECK_ZERO(err, "ibv_dealloc_pd (pd_parent)");
+    }
+    if (nic.pd_orig) {
+      err = ibv.dealloc_pd(nic.pd_orig);
+      CHECK_ZERO(err, "ibv_dealloc_pd (pd_orig)");
+    }
+    if (nic.context) {
+      err = ibv.close_device(nic.context);
+      CHECK_ZERO(err, "ibv_close_device");
+    }
+  }
 }
 
 
@@ -899,14 +966,15 @@ void GDABackend::close_dv_libs() {
 
 void GDABackend::exchange_qp_dest_info() {
   for (size_t i = 0; i < qps.size(); i++) {
-    dest_info[i].lid = portinfo.lid;
+    NicDevice &nic = nic_for_qp(i);
+    dest_info[i].lid = nic.portinfo.lid;
     if (gda_provider == GDAProvider::MLX5) {
       dest_info[i].qpn = mlx5_qps[i].qpn;
     } else {
       dest_info[i].qpn = qps[i]->qp_num;
     }
     dest_info[i].psn = 0;
-    dest_info[i].gid = gid;
+    dest_info[i].gid = nic.gid;
   }
 
   for (size_t i = 0; i < num_qps_per_pe; i++) {
@@ -925,15 +993,19 @@ void GDABackend::setup_heap_memory_rkey() {
   if (envvar::gda::pcie_relaxed_ordering) {
     access |= IBV_ACCESS_RELAXED_ORDERING;
   }
-  heap_mr = ibv.reg_mr(pd_orig, base_heap, heap.get_size(), access);
-  CHECK_NNULL(heap_mr, "ibv_reg_mr");
+  for (int n = 0; n < num_nics_; n++) {
+    nic_devices_[n].heap_mr = ibv.reg_mr(nic_devices_[n].pd_orig, base_heap, heap.get_size(), access);
+    CHECK_NNULL(nic_devices_[n].heap_mr, "ibv_reg_mr");
+  }
 
-  const size_t rkeys_size = sizeof(uint32_t) * num_pes;
+  const size_t rkeys_size = sizeof(uint32_t) * num_pes * num_nics_;
   uint32_t *host_rkey_cpy = reinterpret_cast<uint32_t*>(malloc(rkeys_size));
   if (!host_rkey_cpy) { abort(); }
 
-  CHECK_HIP(hipHostMalloc(&heap_rkey, sizeof(uint32_t) * num_pes));
-  heap_rkey[my_pe] = heap_mr->rkey;
+  CHECK_HIP(hipHostMalloc(&heap_rkey, sizeof(uint32_t) * num_pes * num_nics_));
+  for (int n = 0; n < num_nics_; n++) {
+    heap_rkey[my_pe * num_nics_ + n] = nic_devices_[n].heap_mr->rkey;
+  }
 
   hipStream_t stream;
   CHECK_HIP(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -953,8 +1025,13 @@ void GDABackend::setup_heap_memory_rkey() {
 }
 
 void GDABackend::cleanup_heap_memory_rkey() {
-  int ret = ibv.dereg_mr(heap_mr);
-  CHECK_ZERO(ret, "ibv_dereg_mr");
+  for (auto &nic : nic_devices_) {
+    if (nic.heap_mr) {
+      int ret = ibv.dereg_mr(nic.heap_mr);
+      CHECK_ZERO(ret, "ibv_dereg_mr");
+      nic.heap_mr = nullptr;
+    }
+  }
 
   CHECK_HIP(hipHostFree(heap_rkey));
 }
@@ -972,7 +1049,7 @@ void GDABackend::setup_gpu_qps() {
   CHECK_NNULL(host_qps, "malloc (host_qps)");
 
   for (size_t i = 0; i < qp_objs_count; i++) {
-    new (&host_qps[i]) QueuePair(pd_orig, gda_provider);
+    new (&host_qps[i]) QueuePair(nic_for_qp(i).pd_orig, gda_provider);
     CHECK_HIP(hipMemcpy(&gpu_qps[i], &host_qps[i], sizeof(QueuePair), hipMemcpyDefault));
 
     initialize_gpu_qp(&gpu_qps[i], i);
@@ -1002,58 +1079,60 @@ void GDABackend::open_ib_device() {
   device_list = ibv.get_device_list(&num_devices);
   CHECK_NNULL(device_list, "ibv_get_device_list");
 
-  if (requested_nic) {
+  for (auto &nic : nic_devices_) {
+    nic.device = nullptr;
     for (int i = 0; i < num_devices; i++) {
       const char *select_device = ibv.get_device_name(device_list[i]);
       CHECK_NNULL(select_device, "ibv_get_device_name");
 
-      if (0 == strcmp(select_device, requested_nic)) {
-        device = device_list[i];
+      if (0 == strcmp(select_device, nic.nic_name.c_str())) {
+        nic.device = device_list[i];
         break;
       }
     }
+
+    if (nullptr == nic.device) {
+      LOG_ERROR_EXIT(
+        "Failed to select NIC '%s' when initializing GDA backend.\n"
+        "  ROCSHMEM_HCA_LIST or ROCSHMEM_USE_IB_HCA may have excluded all available NICs.\n"
+        "  Please adjust HCA_LIST or NIC configuration.",
+        nic.nic_name.c_str());
+    }
+
+    if (gda_provider == GDAProvider::MLX5) {
+      struct mlx5dv_context_attr context_attr{ .flags = MLX5DV_CONTEXT_FLAGS_DEVX };
+      nic.context = mlx5dv.open_device(nic.device, &context_attr);
+    } else {
+      nic.context = ibv.open_device(nic.device);
+    }
+    CHECK_NNULL(nic.context, "ib open device");
+    dump_ibv_context(nic.context);
+    dump_ibv_device(nic.context->device);
+
+    err = ibv.query_device(nic.context, &nic.device_attr);
+    CHECK_ZERO(err, "ibv_query_device");
+
+    validate_ib_device(nic);
+
+    nic.pd_orig = ibv.alloc_pd(nic.context);
+    CHECK_NNULL(nic.pd_orig, "ib allocate pd");
+    dump_ibv_pd(nic.pd_orig);
+
+    if (gda_provider == GDAProvider::IONIC) {
+      create_parent_domain(nic);
+    }
+
+    err = ibv.query_port(nic.context, nic.port, &nic.portinfo);
+    CHECK_ZERO(err, "ibv_query_port");
+    dump_ibv_port_attr(&nic.portinfo);
+
+    select_gid_index(nic);
   }
-
-  if (nullptr == device) {
-    LOG_ERROR_EXIT(
-      "Failed to select a NIC when initializing GDA backend.\n"
-      "  ROCSHMEM_HCA_LIST or ROCSHMEM_USE_IB_HCA may have excluded all available NICs.\n"
-      "  Please review HCA_LIST or NIC configuration.\n");
-  }
-
-  if (gda_provider == GDAProvider::MLX5) {
-    /* Explicitly request DevX context */
-    struct mlx5dv_context_attr context_attr = {};
-    context_attr.flags = MLX5DV_CONTEXT_FLAGS_DEVX;
-    context = mlx5dv.open_device(device, &context_attr);
-  } else {
-    context = ibv.open_device(device);
-  }
-  CHECK_NNULL(context, "ib open device");
-  dump_ibv_context(context);
-  dump_ibv_device(context->device);
-
-  validate_ib_device();
-
-  pd_orig = ibv.alloc_pd(context);
-  CHECK_NNULL(pd_orig, "ib allocate pd");
-  dump_ibv_pd(pd_orig);
-
-  if (gda_provider == GDAProvider::IONIC) {
-    create_parent_domain();
-  }
-
-  err = ibv.query_port(context, port, &portinfo);
-  CHECK_ZERO(err, "ibv_query_port");
-  dump_ibv_port_attr(&portinfo);
-
-  /* Must init after querying port */
-  select_gid_index();
 
   ibv.free_device_list(device_list);
 }
 
-void GDABackend::validate_ib_device() {
+void GDABackend::validate_ib_device(NicDevice &nic) {
   char hostname[HOST_NAME_MAX + 1];
   const char *nicname;
   int err;
@@ -1061,28 +1140,25 @@ void GDABackend::validate_ib_device() {
   err = gethostname(hostname, sizeof(hostname));
   CHECK_ZERO(err, "gethostname");
 
-  nicname = ibv.get_device_name(device);
+  nicname = ibv.get_device_name(nic.device);
   CHECK_NNULL(nicname, "ibv_get_device_name");
 
-  debug_str = "[" + std::string(hostname) + ", " + std::string(nicname) + "]";
-
-  err = ibv.query_device(context, &device_attr);
-  CHECK_ZERO(err, "ibv_query_device");
+  std::string debug_str = "[" + std::string(hostname) + ", " + std::string(nicname) + "]";
 
   if (gda_provider == GDAProvider::BNXT) {
     const std::set<uint32_t> supported_bnxt_part_ids = { 0x1760 /* BCM57608 */};
     const char min_supported_bnxt_fw_ver[12] = "233.2.104.0";
 
-    if (device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
+    if (nic.device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
       LOG_ERROR_EXIT("%s GDAProvider::BNXT requested but an invalid device is selected", debug_str.c_str());
     }
 
-    if (supported_bnxt_part_ids.find(device_attr.vendor_part_id) == supported_bnxt_part_ids.end()) {
-      LOG_ERROR_EXIT("%s Unsupported Broadcom Part: %x", debug_str.c_str(), device_attr.vendor_part_id);
+    if (supported_bnxt_part_ids.find(nic.device_attr.vendor_part_id) == supported_bnxt_part_ids.end()) {
+      LOG_ERROR_EXIT("%s Unsupported Broadcom Part: %x", debug_str.c_str(), nic.device_attr.vendor_part_id);
     }
 
-    if (strverscmp(min_supported_bnxt_fw_ver, device_attr.fw_ver) > 0) {
-      LOG_ERROR("%s Unsupported firmware version: %s", debug_str.c_str(), device_attr.fw_ver);
+    if (strverscmp(min_supported_bnxt_fw_ver, nic.device_attr.fw_ver) > 0) {
+      LOG_ERROR("%s Unsupported firmware version: %s", debug_str.c_str(), nic.device_attr.fw_ver);
       if (envvar::gda::override_nic_firmware_check == false) {
         exit(EXIT_FAILURE);
       }
@@ -1113,7 +1189,6 @@ void GDABackend::modify_qps_reset_to_init() {
 
   attr.qp_state        = IBV_QPS_INIT;
   attr.pkey_index      = 0;
-  attr.port_num        = port;
   attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE
                        | IBV_ACCESS_LOCAL_WRITE
                        | IBV_ACCESS_REMOTE_READ
@@ -1124,11 +1199,14 @@ void GDABackend::modify_qps_reset_to_init() {
             | IBV_QP_PORT
             | IBV_QP_ACCESS_FLAGS;
 
-  for (size_t i =0; i < qps.size() ; i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
+    NicDevice &nic = nic_for_qp(i);
+    attr.port_num = nic.port;
+
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
     } else if (gda_provider == GDAProvider::MLX5) {
-      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, gid_type);
+      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, nic.gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1143,22 +1221,12 @@ void GDABackend::modify_qps_init_to_rtr() {
 
   memset(&attr, 0, sizeof(struct ibv_qp_attr));
   attr.qp_state               = IBV_QPS_RTR;
-  attr.path_mtu               = portinfo.active_mtu;
   attr.min_rnr_timer          = 12;
-  attr.ah_attr.port_num       = port;
 
   if (gda_provider == GDAProvider::IONIC) {
     attr.max_dest_rd_atomic = 15;
   } else {
     attr.max_dest_rd_atomic = 1;
-  }
-
-  if (portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
-    attr.ah_attr.grh.sgid_index = gid_index;
-    attr.ah_attr.is_global      = 1;
-    attr.ah_attr.grh.hop_limit  = 255; // Max possible value
-    attr.ah_attr.sl             = 1;
-    attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
   }
 
   attr_mask = IBV_QP_STATE
@@ -1170,10 +1238,23 @@ void GDABackend::modify_qps_init_to_rtr() {
             | IBV_QP_MIN_RNR_TIMER;
 
   for (size_t i = 0; i < qps.size(); i++) {
+    NicDevice &nic = nic_for_qp(i);
+
+    attr.path_mtu         = nic.portinfo.active_mtu;
+    attr.ah_attr.port_num = nic.port;
+
+    if (nic.portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
+      attr.ah_attr.grh.sgid_index = nic.gid_index;
+      attr.ah_attr.is_global      = 1;
+      attr.ah_attr.grh.hop_limit  = 255; // Max possible value
+      attr.ah_attr.sl             = 1;
+      attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
+    }
+
     attr.rq_psn      = dest_info[i].psn;
     attr.dest_qp_num = dest_info[i].qpn;
 
-    if (portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
+    if (nic.portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
       memcpy(&attr.ah_attr.grh.dgid, &dest_info[i].gid, 16);
     } else {
       attr.ah_attr.dlid = dest_info[i].lid;
@@ -1182,7 +1263,7 @@ void GDABackend::modify_qps_init_to_rtr() {
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
     } else if (gda_provider == GDAProvider::MLX5) {
-      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, gid_type);
+      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, nic.gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1215,12 +1296,13 @@ void GDABackend::modify_qps_rtr_to_rts() {
             | IBV_QP_RNR_RETRY;
 
   for (size_t i = 0; i < qps.size(); i++) {
+    NicDevice &nic = nic_for_qp(i);
     attr.sq_psn = dest_info[i].psn;
 
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
     } else if (gda_provider == GDAProvider::MLX5) {
-      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, gid_type);
+      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, nic.gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1332,11 +1414,11 @@ void GDABackend::pd_release([[maybe_unused]] struct ibv_pd* pd, [[maybe_unused]]
   CHECK_HIP(hipFree(ptr));
 }
 
-void GDABackend::create_parent_domain() {
+void GDABackend::create_parent_domain(NicDevice &nic) {
   struct ibv_parent_domain_init_attr pattr;
 
   memset(&pattr, 0, sizeof(struct ibv_parent_domain_init_attr));
-  pattr.pd         = pd_orig;
+  pattr.pd         = nic.pd_orig;
   pattr.td         = nullptr,
   pattr.comp_mask  = IBV_PARENT_DOMAIN_INIT_ATTR_ALLOCATORS;
   pattr.free       = GDABackend::pd_release;
@@ -1348,12 +1430,12 @@ void GDABackend::create_parent_domain() {
     pattr.alloc      = GDABackend::pd_alloc_host;
   }
 
-  pd_parent = ibv.alloc_parent_domain(context, &pattr);
-  CHECK_NNULL(pd_parent, "ibv_alloc_parent_domain");
-  dump_ibv_pd(pd_parent);
+  nic.pd_parent = ibv.alloc_parent_domain(nic.context, &pattr);
+  CHECK_NNULL(nic.pd_parent, "ibv_alloc_parent_domain");
+  dump_ibv_pd(nic.pd_parent);
 
   if (gda_provider == GDAProvider::IONIC) {
-    ionic_setup_parent_domain(&pattr);
+    ionic_setup_parent_domain(nic, &pattr);
   }
 }
 
@@ -1371,8 +1453,6 @@ void GDABackend::create_cqs(int cqe) {
   cq_attr.comp_vector   = 0;
   cq_attr.flags         = 0;
   cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
-  cq_attr.parent_domain = pd_parent;
-
   /* enable mlx5 CQ collapsing by setting CQ length to 1 and enabling CQ overrun ignore:
    *  - mlx5 driver sets mlx5_ifc_cqc_bits::oi bit when IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN is set
    *    this has the hardware ignore CQ overruns; CQ consumer counter doorbells should not be rung
@@ -1387,7 +1467,9 @@ void GDABackend::create_cqs(int cqe) {
   }
 
   for (size_t i = 0; i < qps.size(); i++) {
-    cq_ex = ibv.create_cq_ex(context, &cq_attr);
+    NicDevice &nic = nic_for_qp(i);
+    cq_attr.parent_domain = nic.pd_parent;
+    cq_ex = ibv.create_cq_ex(nic.context, &cq_attr);
     CHECK_NNULL(cq_ex, "ibv_create_cq_ex");
 
     cqs[i] = ibv.cq_ex_to_cq(cq_ex);
@@ -1423,26 +1505,29 @@ void GDABackend::create_qps(int sq_length) {
   attr.sq_sig_all          = 0;
   attr.qp_type             = IBV_QPT_RC;
   attr.comp_mask           = IBV_QP_INIT_ATTR_PD;
-  attr.pd                  = pd_parent;
 
   if (gda_provider == GDAProvider::IONIC) {
     attr.cap.max_recv_sge    = 1; // TODO allow zero sges in the driver
   }
 
   for (size_t i = 0; i < qps.size(); i++) {
+    NicDevice &nic = nic_for_qp(i);
     if (gda_provider == GDAProvider::IONIC) {
-      attr.pd      = pd_uxdma[i & 1];
+      attr.pd = nic.pd_uxdma[i & 1];
+    } else {
+      attr.pd = nic.pd_parent;
     }
     attr.send_cq = cqs[i];
     attr.recv_cq = cqs[i];
 
-    qps[i] = ibv.create_qp_ex(context, &attr);
+    qps[i] = ibv.create_qp_ex(nic.context, &attr);
     CHECK_NNULL(qps[i], "ibv_create_qp_ex");
   }
 }
 
-void GDABackend::select_gid_index() {
+void GDABackend::select_gid_index(NicDevice &nic) {
   struct ibv_gid_entry *gid_entries;
+  struct ibv_gid_entry *gid_entry;
   union ibv_gid current_gid;
   union ibv_gid selected_gid;
   uint32_t current_gid_type;
@@ -1453,11 +1538,11 @@ void GDABackend::select_gid_index() {
   int selected_gid_index            = -1;
   ssize_t gid_tbl_entries           = 0;
 
-  int gid_tbl_len         = portinfo.gid_tbl_len;
+  int gid_tbl_len         = nic.portinfo.gid_tbl_len;
 
   gid_entries = (struct ibv_gid_entry*) calloc(gid_tbl_len, sizeof(struct ibv_gid_entry));
 
-  gid_tbl_entries = ibv.query_gid_table(context, gid_entries, gid_tbl_len, 0);
+  gid_tbl_entries = ibv.query_gid_table(nic.context, gid_entries, gid_tbl_len, 0);
   if (gid_tbl_entries < 0) {
     LOG_WARN("ibv_query_gid_table failed: GIDs not available");
     free(gid_entries);
@@ -1476,7 +1561,7 @@ void GDABackend::select_gid_index() {
       break;
     }
 
-    err = ibv.query_gid(context, port, i, &current_gid);
+    err = ibv.query_gid(nic.context, nic.port, i, &current_gid);
     CHECK_ZERO(err, "ibv_query_gid");
 
     /* We don't want local GIDs */
@@ -1498,9 +1583,9 @@ void GDABackend::select_gid_index() {
     }
   }
 
-  gid_index = selected_gid_index;
-  gid_type  = selected_gid_type;
-  gid       = selected_gid;
+  nic.gid_index = selected_gid_index;
+  nic.gid_type  = selected_gid_type;
+  nic.gid       = selected_gid;
 
   free(gid_entries);
 }

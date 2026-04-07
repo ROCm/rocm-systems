@@ -548,6 +548,9 @@ namespace envvar {
     extern const var<size_t> num_qps_per_pe_default_ctx;
     // Number of QPs to create per PE for each user context
     extern const var<size_t> num_qps_per_pe_usr_ctx;
+    extern const var<bool> merge_nics;
+    extern const var<std::string> net_merge_level;
+    extern const var<std::string> net_force_merge;
   }  // namespace gda
 
   /**
