@@ -271,7 +271,7 @@ auto  counter_collection_ctx = rocprofiler_context_id_t{0};
 auto  att_device_context     = rocprofiler_context_id_t{0};
 auto  att_consecutive_kernel_dispatch_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
-auto  att_marker_trace_id = std::atomic<uint64_t>{0};
+auto       att_marker_trace_id = std::atomic<uint64_t>{0};
 std::mutex att_shader_data;
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
