@@ -6,8 +6,10 @@
 #include "context.h"
 #include "hip.h"
 #include "static.h"
+#include "sys.h"
 
 #include <cstdlib>
+#include <syslog.h>
 #include <system_error>
 
 namespace hipFile {
@@ -233,4 +235,18 @@ Hip::hipHostUnregister(void *hostPtr) const
     (void)throwOnHipError<Hip::RuntimeError>(::hipHostUnregister(hostPtr));
 }
 
+ScopedHipSetDevice::ScopedHipSetDevice(int device) : original_device{Context<Hip>::get()->hipGetDevice()}
+{
+    Context<Hip>::get()->hipSetDevice(device);
+}
+
+ScopedHipSetDevice::~ScopedHipSetDevice()
+{
+    try {
+        Context<Hip>::get()->hipSetDevice(original_device);
+    }
+    catch (Hip::RuntimeError &e) {
+        Context<Sys>::get()->syslog(LOG_CRIT, "Error setting HIP device back to original.");
+    }
+}
 }

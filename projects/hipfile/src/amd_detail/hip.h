@@ -96,4 +96,21 @@ struct Hip {
     };
 };
 
+class ScopedHipSetDevice {
+public:
+    ScopedHipSetDevice(int device_id);
+    ~ScopedHipSetDevice();
+
+    // Don't allow copying
+    ScopedHipSetDevice(const ScopedHipSetDevice &)            = delete;
+    ScopedHipSetDevice &operator=(const ScopedHipSetDevice &) = delete;
+
+    // Don't allow moving
+    ScopedHipSetDevice(ScopedHipSetDevice &&)            = delete;
+    ScopedHipSetDevice &operator=(ScopedHipSetDevice &&) = delete;
+
+private:
+    int original_device;
+};
+
 }
