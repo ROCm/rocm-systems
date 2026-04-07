@@ -70,7 +70,7 @@ static void print_arch_info(std::ostream& os) {
   }
 
   print_entry(os, "System Arch", prop.gcnArchName);
-  print_entry(os, "Supported System Arch", supported_arch ? "Yes" : "No");
+  print_entry(os, "System Arch is supported", supported_arch ? "Yes" : "No");
 }
 
 static void print_rocm_info(std::ostream& os) {
@@ -81,13 +81,21 @@ static void print_rocm_info(std::ostream& os) {
 }
 
 static void print_mpi_info(std::ostream& os) {
-#ifdef OMPI_MAJOR_VERSION
-  std::string mpi_version = std::to_string(OMPI_MAJOR_VERSION) + "."
+#if defined(OMPI_MAJOR_VERSION)
+  std::string mpi_version = "Open MPI "
+                          + std::to_string(OMPI_MAJOR_VERSION) + "."
                           + std::to_string(OMPI_MINOR_VERSION) + "."
                           + std::to_string(OMPI_RELEASE_VERSION);
-  print_entry(os, "Open MPI", mpi_version.c_str());
+  print_entry(os, "External MPI", mpi_version.c_str());
+#elif defined(MPICH_VERSION)
+  print_entry(os, "External MPI", "MPICH " MPICH_VERSION);
+#elif defined(MPI_VERSION)
+  std::string mpi_version = "MPI (unknown vendor) "
+                          + std::to_string(MPI_VERSION) + "."
+                          + std::to_string(MPI_SUBVERSION);
+  print_entry(os, "External MPI", mpi_version.c_str());
 #else
-  print_entry(os, "MPI", "Unsupported MPI Library");
+  print_entry(os, "External MPI", "No");
 #endif
 }
 
