@@ -80,28 +80,24 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
-  // GFX12 VSCRATCH: 24-bit signed offset, optional SGPR base via saddr.
+  // GFX12 VSCRATCH: scratch_base + VGPR (32-bit) + saddr + signed 24-bit offset.
+  // VGPR is always 32-bit for scratch (not a 64-bit pair).
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   lane_mask = exec;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
-  uint64_t saddr_val = 0;
+  uint64_t scratch_base = wf.scratch_base();
+  uint32_t saddr_val = 0;
   if (inst.saddr != 0x7F) {
     uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
-    saddr_val = (static_cast<uint64_t>(cu.read_sgpr(sb + 1)) << 32) | cu.read_sgpr(sb);
+    saddr_val = cu.read_sgpr(sb);
   }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
-    uint64_t vaddr;
-    if (inst.saddr != 0x7F) {
-      vaddr = cu.read_vgpr(vbase, lane);
-    } else {
-      vaddr =
-          (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
-    }
-    addrs[lane] = saddr_val + vaddr + offset;
+    uint32_t vaddr = cu.read_vgpr(vbase, lane);
+    addrs[lane] = scratch_base + vaddr + saddr_val + offset;
   }
 }
 
