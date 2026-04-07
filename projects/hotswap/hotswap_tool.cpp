@@ -35,12 +35,8 @@ namespace {
 
 using ByteVec = std::shared_ptr<std::vector<uint8_t>>;
 
-struct CodeObjectData {
-  ByteVec bytes;
-};
-
 std::mutex g_reader_map_mutex;
-std::unordered_map<uint64_t, CodeObjectData> g_reader_map;
+std::unordered_map<uint64_t, ByteVec> g_reader_map;
 
 // Rewritten ELF buffers must outlive the executable because ROCR's
 // LoadedCodeObjectImpl stores a raw pointer to the ELF data (used by
@@ -62,7 +58,7 @@ decltype(hsa_executable_load_agent_code_object) *g_orig_load_agent_code_object =
 void stash_bytes(uint64_t handle, const uint8_t *data, size_t size) {
   auto vec = std::make_shared<std::vector<uint8_t>>(data, data + size);
   std::scoped_lock lock(g_reader_map_mutex);
-  g_reader_map[handle].bytes = std::move(vec);
+  g_reader_map[handle] = std::move(vec);
 }
 
 ssize_t read_all(int fd, void *buf, size_t count) {
@@ -218,7 +214,7 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
 
   auto vec = std::make_shared<std::vector<uint8_t>>(std::move(buf));
   std::scoped_lock lock(g_reader_map_mutex);
-  g_reader_map[code_object_reader->handle].bytes = std::move(vec);
+  g_reader_map[code_object_reader->handle] = std::move(vec);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -266,7 +262,7 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     std::scoped_lock lock(g_reader_map_mutex);
     const auto it = g_reader_map.find(code_object_reader.handle);
     if (it != g_reader_map.end()) {
-      local_bytes = it->second.bytes;
+      local_bytes = it->second;
     }
   }
 
