@@ -462,16 +462,35 @@ class CodeGenerator:
                     f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, ExecuteFn exec_fn) '
                     f': IsaInstruction<Isa>("", exec_fn), inst_(*inst), '
                     f'owned_mnemonic_({mnemonic_expr}) '
-                    f'{{ mnemonic_ = owned_mnemonic_;{size_line}{modifier_lines}}}'
+                    f'{{ mnemonic_ = owned_mnemonic_;{size_line}}}'
                 )
             else:
                 class_ctor_impl = (
                     f'{inst_enc.fmt_enc_name}::{inst_enc.fmt_enc_name}'
                     f'(std::string_view mnemonic, const {inst_enc.fmt_enc_name}MachineInst *inst, ExecuteFn exec_fn) '
                     f': IsaInstruction<Isa>({mnemonic_expr}, exec_fn), inst_(*inst) '
-                    f'{{{size_line}{modifier_lines}}}'
+                    f'{{{size_line}}}'
                 )
             class_func_impls.append(cgen.Line(class_ctor_impl))
+
+            # Generate build_modifiers() override for encoding bases
+            # that have modifier flags (memory instructions). This is
+            # called lazily by disassemble() instead of eagerly in the
+            # constructor, avoiding string allocation on the hot path.
+            if modifier_lines:
+                public_members.append(
+                    cgen.Line('void build_modifiers(std::string &out) const override;'),
+                )
+                # The modifier_lines were written for the constructor where
+                # they appended to modifiers_ and accessed inst->field.
+                # Rewrite to append to 'out' and access via local pointer.
+                mod_impl = modifier_lines.replace('modifiers_', 'out')
+                class_func_impls.append(cgen.Line(
+                    f'void {inst_enc.fmt_enc_name}::build_modifiers'
+                    f'(std::string &out) const '
+                    f'{{ auto *inst = &inst_;(void)inst;'
+                    f'{mod_impl}}}'
+                ))
             fmt_enc_name = inst_enc.fmt_enc_name
 
             if fmt_enc_name not in cond_emitted:

@@ -75,8 +75,13 @@ bool Sop2::hasImpliedLiteral() { return inst_.op == 69 || inst_.op == 70; }
 Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
+}
+
+void Smem::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
   if (inst->nv)
-    modifiers_ += " nv";
+    out += " nv";
 }
 
 Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn)
@@ -212,14 +217,19 @@ Vds::Vds(std::string_view mnemonic, const VdsMachineInst *inst, ExecuteFn exec_f
 Vbuffer::Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
+}
+
+void Vbuffer::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
   if (inst->offen)
-    modifiers_ += " offen";
+    out += " offen";
   if (inst->idxen)
-    modifiers_ += " idxen";
+    out += " idxen";
   if (inst->ioffset)
-    modifiers_ += " offset:" + std::to_string(inst->ioffset);
+    out += " offset:" + std::to_string(inst->ioffset);
   if (inst->nv)
-    modifiers_ += " nv";
+    out += " nv";
 }
 
 Vimage::Vimage(std::string_view mnemonic, const VimageMachineInst *inst, ExecuteFn exec_fn)
@@ -240,22 +250,37 @@ Vexport::Vexport(std::string_view mnemonic, const VexportMachineInst *inst, Exec
 Vflat::Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
+}
+
+void Vflat::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
   if (inst->nv)
-    modifiers_ += " nv";
+    out += " nv";
 }
 
 Vscratch::Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
+}
+
+void Vscratch::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
   if (inst->nv)
-    modifiers_ += " nv";
+    out += " nv";
 }
 
 Vglobal::Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
+}
+
+void Vglobal::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
   if (inst->nv)
-    modifiers_ += " nv";
+    out += " nv";
 }
 
 Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst,

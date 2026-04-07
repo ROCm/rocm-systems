@@ -86,10 +86,15 @@ bool Sop2::hasImpliedLiteral() { return inst_.op == 69 || inst_.op == 70; }
 Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
+}
+
+void Smem::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
   if (inst->glc)
-    modifiers_ += " glc";
+    out += " glc";
   if (inst->dlc)
-    modifiers_ += " dlc";
+    out += " dlc";
 }
 
 Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn)
@@ -225,33 +230,43 @@ Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
 Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
+}
+
+void Mubuf::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
   if (inst->offen)
-    modifiers_ += " offen";
+    out += " offen";
   if (inst->idxen)
-    modifiers_ += " idxen";
+    out += " idxen";
   if (inst->offset)
-    modifiers_ += " offset:" + std::to_string(inst->offset);
+    out += " offset:" + std::to_string(inst->offset);
   if (inst->glc)
-    modifiers_ += " glc";
+    out += " glc";
   if (inst->dlc)
-    modifiers_ += " dlc";
+    out += " dlc";
   if (inst->slc)
-    modifiers_ += " slc";
+    out += " slc";
 }
 
 Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
+}
+
+void Mtbuf::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
   if (inst->offen)
-    modifiers_ += " offen";
+    out += " offen";
   if (inst->offset)
-    modifiers_ += " offset:" + std::to_string(inst->offset);
+    out += " offset:" + std::to_string(inst->offset);
   if (inst->glc)
-    modifiers_ += " glc";
+    out += " glc";
   if (inst->dlc)
-    modifiers_ += " dlc";
+    out += " dlc";
   if (inst->slc)
-    modifiers_ += " slc";
+    out += " slc";
 }
 
 Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn)
@@ -271,14 +286,19 @@ Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exe
       owned_mnemonic_(flat_mnemonic(mnemonic, inst->seg)) {
   mnemonic_ = owned_mnemonic_;
   size_ = sizeof(OpEncoding);
+}
+
+void Flat::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
   if (inst->offset)
-    modifiers_ += " offset:" + std::to_string(inst->offset);
+    out += " offset:" + std::to_string(inst->offset);
   if (inst->glc)
-    modifiers_ += " glc";
+    out += " glc";
   if (inst->dlc)
-    modifiers_ += " dlc";
+    out += " dlc";
   if (inst->slc)
-    modifiers_ += " slc";
+    out += " slc";
 }
 
 Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst,
