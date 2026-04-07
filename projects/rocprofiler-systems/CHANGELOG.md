@@ -18,8 +18,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Fixed an issue where the `--rocm-domains` CLI option for `rocprof-sys-run` was not recognized.
-  The `ROCPROFSYS_ROCM_DOMAINS` setting was not registered during CLI argument parsing, causing
-  the auto-generated `--rocm-domains` flag to be missing.
 
 ## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
 
