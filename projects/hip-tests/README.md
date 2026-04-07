@@ -12,8 +12,8 @@ The information presented in this document is for informational purposes only an
 
 The `rocm-systems/projects/hip-tests` repository maintains several branches. The branches that are of importance are:
 
-* Main branch: This is the stable branch. It is up to date with the latest release branch, for example, if the latest release is rocm-7.2, main branch will be the repository based on this release.
-* Develop branch: This is the default branch, on which the new features are still under development and visible. While this maybe of interest to many, it should be noted that this branch and the features under development might not be stable.
+* Main branch: This is the stable branch. It is up to date with the latest release branch. For example, if the latest release is rocm-7.2, main branch will be the repository based on this release.
+* Develop branch: This is the default branch, on which the new features are still under development and visible. While this may be of interest to many, it should be noted that this branch and the features under development might not be stable.
 * Release branches: These are branches corresponding to each ROCM release, listed with release tags, such as rocm-7.2, etc.
 
 ## Building HIP Catch tests
