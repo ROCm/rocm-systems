@@ -62,6 +62,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--path` and `--subpath` options will be removed as they are already deprecated
 
+### Known issues
+
+* For Strix Halo, the roofline metrics table will have N/A values for "peak" field
+  * This will be fixed by adding empirical benchmark support for Strix Halo in a future release
+
 ## ROCm Compute Profiler 3.5.0 for ROCm 7.12.0
 
 ### Added
