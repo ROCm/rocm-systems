@@ -11,5 +11,5 @@ assertion:
   Unit_Assert_Positive_Basic_KernelPass: *level_2
   Unit_Assert_Positive_Basic_KernelFail:
     <<: *level_2
-    # fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
-    disabled: [amd_windows, amd_wsl, nvidia_windows]
+    # === Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===
+    disabled: [amd_windows]

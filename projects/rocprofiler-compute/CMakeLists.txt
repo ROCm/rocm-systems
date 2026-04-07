@@ -550,8 +550,17 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_pc_sampling_analysis
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s
+        --junitxml=tests/test_pc_sampling_analysis.xml ${COV_OPTION}
+        tests/test_pc_sampling_analysis.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_pc_sampling
+    test_pc_sampling_analysis
     PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
@@ -589,6 +598,18 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_utils_profile_csv.xml ${COV_OPTION}
         tests/test_utils_profile_csv.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# Profiler base unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_profiler_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_profiler_base.xml ${COV_OPTION} tests/test_profiler_base.py
+        ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -665,22 +686,9 @@ install(
 )
 # support files and version info
 install(
-    FILES
-        src/argparser.py
-        src/config.py
-        src/rocprof_compute_base.py
-        src/roofline.py
-        VERSION
-        VERSION.sha
+    FILES src/argparser.py src/config.py src/rocprof_compute_base.py VERSION VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
-)
-# src/hip (local hip python wrapper)
-install(
-    DIRECTORY src/hip
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
 )
 # src/rocprof_compute_analyze
 install(
@@ -698,9 +706,13 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# src/utils/rooflines
-file(GLOB rooflinebins src/utils/rooflines/roofline-*)
-install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT main)
+# src/roofline
+install(
+    DIRECTORY src/roofline
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/rocprof_compute_soc
 install(
     DIRECTORY src/rocprof_compute_soc
