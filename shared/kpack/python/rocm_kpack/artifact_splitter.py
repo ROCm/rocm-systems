@@ -426,6 +426,7 @@ class ArtifactSplitter:
                 group_name=self.artifact_prefix,
                 gfx_arch_family=arch,  # Use specific arch, not family
                 gfx_arches=[arch],
+                compressor=ZstdCompressor(),
             )
 
             # Add kernels to archive

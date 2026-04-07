@@ -89,94 +89,81 @@ class DatabaseHandler(ABC):
         return True
 
 
-class RocBLASHandler(DatabaseHandler):
+# Regex matching a library/<arch>/ path component (for per-arch subdirectory layout).
+_LIBRARY_ARCH_DIR_PATTERN = re.compile(
+    r"/library/(" + _GFX_ARCH_PATTERN.pattern + r")/"
+)
+
+
+class _TensileHandler(DatabaseHandler):
+    """Base class for Tensile-based library handlers (rocBLAS, hipBLASLt, hipSPARSELt).
+
+    Supports two directory layouts:
+
+    Flat (current):
+        lib/<lib>/library/TensileLibrary_gfx942.co
+        lib/<lib>/library/TensileLibrary_..._fallback.dat  (no arch → generic)
+
+    Per-arch subdirectory (rocm-libraries#5976):
+        lib/<lib>/library/gfx942/TensileLibrary_....co
+        lib/<lib>/library/gfx942/TensileLibrary_..._fallback.dat
+        lib/<lib>/library/gfx942/TensileManifest.txt
+
+    In the flat layout, architecture is extracted from the filename and only
+    known Tensile extensions are accepted. In the per-arch layout, the
+    architecture comes from the directory name and any file underneath is
+    accepted (manifests, fallback .dat files, etc.).
+    """
+
+    # Subclasses set this to the directory marker (e.g. "rocblas/library")
+    _library_dir: str
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        path_str = self._relative_path(path, prefix_root)
+
+        if self._library_dir not in path_str:
+            return None
+
+        # Try filename-based detection (flat layout, known extensions)
+        if path.suffix in (".co", ".hsaco", ".dat"):
+            match = _GFX_ARCH_PATTERN.search(path.name)
+            if match:
+                return match.group(0)
+
+        # Try directory-based detection (per-arch subdirectory layout):
+        # .../library/<arch>/anything
+        dir_match = _LIBRARY_ARCH_DIR_PATTERN.search(path_str)
+        if dir_match:
+            return dir_match.group(1)
+
+        return None
+
+
+class RocBLASHandler(_TensileHandler):
     """Handler for rocBLAS Tensile library files."""
+
+    _library_dir = "rocblas/library"
 
     def name(self) -> str:
         return "rocblas"
 
-    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
-        """
-        Detect rocBLAS kernel database files.
 
-        Pattern: lib/rocblas/library/*_gfx*.{co,hsaco,dat}
-        """
-        path_str = self._relative_path(path, prefix_root)
-
-        # Check if it's in rocblas/library directory
-        if "rocblas/library" not in path_str:
-            return None
-
-        # Check file extension
-        if path.suffix not in [".co", ".hsaco", ".dat"]:
-            return None
-
-        # Extract architecture from filename
-        # Look for patterns like _gfx1100, _gfx1101, gfx1102, etc.
-        match = _GFX_ARCH_PATTERN.search(path.name)
-        if match:
-            return match.group(0)
-
-        # Some .dat files don't have architecture suffix but are generic
-        # We don't move those
-        return None
-
-
-class HipBLASLtHandler(DatabaseHandler):
+class HipBLASLtHandler(_TensileHandler):
     """Handler for hipBLASLt kernel files."""
+
+    _library_dir = "hipblaslt/library"
 
     def name(self) -> str:
         return "hipblaslt"
 
-    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
-        """
-        Detect hipBLASLt kernel database files.
 
-        Pattern: lib/hipblaslt/library/*_gfx*.{co,hsaco,dat}
-        """
-        path_str = self._relative_path(path, prefix_root)
-
-        # Check if it's in hipblaslt/library directory
-        if "hipblaslt/library" not in path_str:
-            return None
-
-        # Check file extension
-        if path.suffix not in [".co", ".hsaco", ".dat"]:
-            return None
-
-        # Extract architecture from filename
-        match = _GFX_ARCH_PATTERN.search(path.name)
-        if match:
-            return match.group(0)
-
-        return None
-
-
-class HipSparseLtHandler(DatabaseHandler):
+class HipSparseLtHandler(_TensileHandler):
     """Handler for hipSPARSELt Tensile kernel files."""
+
+    _library_dir = "hipsparselt/library"
 
     def name(self) -> str:
         return "hipsparselt"
-
-    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
-        """
-        Detect hipSPARSELt kernel database files.
-
-        Pattern: lib/hipsparselt/library/*_gfx*.{co,hsaco,dat}
-        """
-        path_str = self._relative_path(path, prefix_root)
-
-        if "hipsparselt/library" not in path_str:
-            return None
-
-        if path.suffix not in [".co", ".hsaco", ".dat"]:
-            return None
-
-        match = _GFX_ARCH_PATTERN.search(path.name)
-        if match:
-            return match.group(0)
-
-        return None
 
 
 class AotritonHandler(DatabaseHandler):
@@ -261,10 +248,11 @@ class MIOpenHandler(DatabaseHandler):
         if not path.is_file():
             return None
 
-        # Match .model, .db.txt, .fdb.txt, .OpenCL.fdb.txt, .HIP.fdb.txt
+        # Match .kdb, .model, .db.txt, .fdb.txt, .OpenCL.fdb.txt, .HIP.fdb.txt
         name = path.name
         if not (
-            name.endswith(".model")
+            name.endswith(".kdb")
+            or name.endswith(".model")
             or name.endswith(".db.txt")
             or name.endswith(".fdb.txt")
         ):

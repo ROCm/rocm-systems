@@ -1278,7 +1278,8 @@ void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint6
   while (true) {
     // Make sure that the address before ::curr_index is already released.
     // Otherwise the CP may read invalid packets.
-    if (atomic::Load(&cached_commit_index_, std::memory_order_acquire) == curr_index) {
+    uint64_t commit_index = atomic::Load(&cached_commit_index_, std::memory_order_acquire);
+    if (commit_index == curr_index) {
       if (sdma_wait_idle_) {
         // TODO: remove when sdma wpointer issue is resolved.
         // Wait until the SDMA engine finish processing all packets before
@@ -1310,6 +1311,7 @@ void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint6
     // burning CPU cycles.
     if (core::g_use_mwaitx) {
       timer::DoMwaitx(static_cast<int64_t*>(static_cast<void*>(&cached_commit_index_)),
+                      static_cast<int64_t>(commit_index),
                       10000, true);
     } else {
       os::YieldThread();

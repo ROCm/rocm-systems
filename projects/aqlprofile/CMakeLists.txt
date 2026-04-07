@@ -52,10 +52,12 @@ include ( ${LIB_DIR}/CMakeLists.txt )
 
 ## Set the VERSION and SOVERSION values
 set_property ( TARGET ${TARGET_NAME} PROPERTY VERSION "${LIB_VERSION_STRING}" )
-set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+if ( NOT WIN32 )
+  set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+endif ()
 
-## If the library is a release, strip the target library
-if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
+## If the library is a release, strip the target library (Linux only)
+if ( NOT WIN32 AND "${CMAKE_BUILD_TYPE}" STREQUAL release )
   add_custom_command ( TARGET ${AQLPROFILE_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *aqlprofile*.so )
 endif ()
 
@@ -66,8 +68,37 @@ option(AQLPROFILE_BUILD_TESTS "Build tests for AQLProfile" OFF)
 if(AQLPROFILE_BUILD_TESTS)
 enable_testing()
 include(CTest)
-set ( TEST_BINARY_DIR ${PROJECT_BINARY_DIR}/test )
-add_subdirectory ( ${TEST_DIR} ${TEST_BINARY_DIR} )
+
+# Locate or fetch GoogleTest
+find_package(GTest QUIET)
+if(NOT GTest_FOUND)
+    message(STATUS "GTest not found on system -- fetching via FetchContent")
+    include(FetchContent)
+    set(BUILD_GMOCK ON CACHE BOOL "Build GMock" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "Disable GTest installation" FORCE)
+    if(MSVC)
+        set(gtest_force_shared_crt ON CACHE BOOL "Use shared CRT for GTest" FORCE)
+    endif()
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        v1.17.0
+    )
+    FetchContent_MakeAvailable(googletest)
+    # Suppress MSVC warnings in GTest itself
+    if(MSVC)
+        foreach(_t gtest gtest_main gmock gmock_main)
+            if(TARGET ${_t})
+                target_compile_options(${_t} PRIVATE /W0)
+            endif()
+        endforeach()
+    endif()
+endif()
+
+if(NOT WIN32)
+  set ( TEST_BINARY_DIR ${PROJECT_BINARY_DIR}/test )
+  add_subdirectory ( ${TEST_DIR} ${TEST_BINARY_DIR} )
+endif()
 endif()
 
 if(AQLPROFILE_INSTALL_TESTS)
