@@ -1722,6 +1722,23 @@ class CodeGenerator:
                 elif op == 'rndne' and dtype == 'f16':
                     L.append('  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));')
                     L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::nearbyint(f)));')
+                elif op == 'cvt_f32_i32':
+                    L.append('  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>(val)));')
+                elif op == 'cvt_f32_u32':
+                    L.append('  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(val));')
+                elif op == 'cvt_i32_f32':
+                    L.append('  float f = std::bit_cast<float>(val);')
+                    L.append('  int32_t r = std::isnan(f) ? 0 : (f >= 2147483648.0f ? INT32_MAX : (f < -2147483648.0f ? INT32_MIN : static_cast<int32_t>(f)));')
+                    L.append('  uint32_t result = static_cast<uint32_t>(r);')
+                elif op == 'cvt_u32_f32':
+                    L.append('  float f = std::bit_cast<float>(val);')
+                    L.append('  uint32_t result = (std::isnan(f) || f < 0.0f) ? 0u : (f >= 4294967296.0f ? UINT32_MAX : static_cast<uint32_t>(f));')
+                elif op == 'cvt_f16_f32':
+                    L.append('  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::bit_cast<float>(val)));')
+                elif op == 'cvt_f32_f16':
+                    L.append('  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF)));')
+                elif op == 'cvt_hi_f32_f16':
+                    L.append('  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>((val >> 16) & 0xFFFF)));')
                 elif op in op_map:
                     L.append(f'  uint32_t result = {op_map[op]};')
                 else:
@@ -3393,6 +3410,15 @@ class CodeGenerator:
             L.append('    }')
             L.append('    if (inst_.clamp) sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());')
             L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(sum));')
+        elif cls == 'dot4_f32_fp8':
+            # FP8 dot product: D.f32 += sum(A.fp8[i] * B.fp8[i]) for i in 0..3
+            L.append(f'    float acc = std::bit_cast<float>({s2}.read_lane(wf, lane));')
+            L.append('    for (int i = 0; i < 4; ++i) {')
+            L.append('      float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));')
+            L.append('      float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));')
+            L.append('      acc += a * b;')
+            L.append('    }')
+            L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(acc));')
         else:  # dot4_u32_u8
             L.append(f'    uint32_t acc = {s2}.read_lane(wf, lane);')
             L.append('    uint32_t sum = acc;')
