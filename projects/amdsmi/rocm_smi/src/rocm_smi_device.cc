@@ -714,12 +714,6 @@ Device::Device(std::string p, RocmSMI_env_vars const* e)
 Device::~Device() { shared_mutex_close(mutex_); }
 
 /**
- * @brief Get the full sysfs path to the gpu_od directory
- * @return Full path to gpu_od directory (e.g., /sys/class/drm/card0/device/gpu_od/)
- */
-std::string Device::get_gpu_od_path(void) const { return path_ + "/device/" + kDevGpuOdPath; }
-
-/**
  * @brief Get the full sysfs path to the gpu_od fan_minimum_pwm file
  * @return Full path to fan_minimum_pwm file (e.g.,
  * /sys/class/drm/card0/device/gpu_od/fan_ctrl/fan_minimum_pwm)
