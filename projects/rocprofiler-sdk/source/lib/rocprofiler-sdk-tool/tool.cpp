@@ -3113,8 +3113,9 @@ tool_detach(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    // Flush all buffers, stop context to ensure in-flight GPU operations complete,
-    // then flush again to capture any final events (same pattern as tool_fini)
+    // Flush buffered records, stop the context to prevent further callbacks and
+    // finalize tracing state, then flush again to capture any final records
+    // emitted during shutdown (same pattern as tool_fini)
     flush();
     rocprofiler_stop_context(get_client_ctx());
     flush();
