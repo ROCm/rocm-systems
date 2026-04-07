@@ -6,6 +6,20 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Optimized
+
+### Resolved issues
+
+### Upcoming changes
+
+## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
+
+### Added
+
 * Added L2 memory bandwidth derived metrics under `--membw-analysis` to allow L2 memory bandwidth specific profiling and analysis metric block 30.
 
 * Introduced support for MI350P GPU
@@ -42,6 +56,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed roofline benchmark MFMA FP16/BF16/INT8 peaks for MI 350
 
 ### Upcoming changes
+
+* `--path` and `--subpath` options will be removed as they are already deprecated
 
 ## ROCm Compute Profiler 3.5.0 for ROCm 7.12.0
 
