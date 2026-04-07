@@ -305,7 +305,7 @@ Use the following command to view the available domains:
    * ``kernel_dispatch`` can be used to enable kernel dispatch tracing.
    * ``rocdecode_api`` can be used to enable rocdecode API tracing.
    * ``rocjpeg_api`` can be used to enable rocjpeg API tracing.
-   * ``kfd_events`` can be used to enable all KFD (Kernel Fusion Driver) event tracing, including page faults, page migrations, queue evictions, unmap events, and dropped events. Requires ``HSA_XNACK=1`` and an XNACK-capable GPU. Individual KFD domains can also be enabled selectively: ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``, ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, ``kfd_event_dropped_events``.
+   * ``kfd_events`` can be used to enable all Kernel Fusion Driver (KFD) event tracing, including page faults, page migrations, queue evictions, unmap events, and dropped events. Requires ``HSA_XNACK=1`` and an XNACK-capable GPU. You can also selectively enable the Individual KFD domains: ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``, ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, ``kfd_event_dropped_events``.
 
 For example, the following is a valid configuration:
 
