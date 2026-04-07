@@ -87,6 +87,7 @@ private:
 class Smem : public IsaInstruction<Isa> {
 public:
   Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = SmemMachineInst;
 
 public:
@@ -208,6 +209,7 @@ private:
 class Vbuffer : public IsaInstruction<Isa> {
 public:
   Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = VbufferMachineInst;
 
 public:
@@ -252,6 +254,7 @@ private:
 class Vflat : public IsaInstruction<Isa> {
 public:
   Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = VflatMachineInst;
 
 public:
@@ -263,6 +266,7 @@ private:
 class Vscratch : public IsaInstruction<Isa> {
 public:
   Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = VscratchMachineInst;
 
 public:
@@ -274,6 +278,7 @@ private:
 class Vglobal : public IsaInstruction<Isa> {
 public:
   Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst, ExecuteFn exec_fn);
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = VglobalMachineInst;
 
 public:
