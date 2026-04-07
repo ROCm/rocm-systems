@@ -75,6 +75,7 @@ class SvmFillMemoryCommand;
 class SvmMapMemoryCommand;
 class SvmUnmapMemoryCommand;
 class SvmPrefetchAsyncCommand;
+class SvmPrefetchBatchAsyncCommand;
 class StreamOperationCommand;
 class BatchMemoryOperationCommand;
 class VirtualMapCommand;
@@ -693,7 +694,8 @@ class Settings : public amd::HeapObject {
       uint gwsInitSupported_ : 1;             //!< Check if GWS is supported on this machine.
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
-      uint reserved_ : 14;
+      uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
+      uint reserved_ : 13;
     };
     uint value_;
   };
@@ -1283,6 +1285,9 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitSignal(amd::SignalCommand& cmd) = 0;
   virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) = 0;
   virtual void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) { ShouldNotReachHere(); }
+  virtual void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) {
+    ShouldNotReachHere();
+  }
   virtual void submitStreamOperation(amd::StreamOperationCommand& cmd) { ShouldNotReachHere(); }
   virtual void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd) {
     ShouldNotReachHere();

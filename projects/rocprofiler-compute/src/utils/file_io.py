@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import rocpd_data, schema
+from utils import schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -210,6 +210,71 @@ def create_df_kernel_top_stats(
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
 
+def build_agent_to_gpu_map(
+    agent_info_path: Path,
+) -> dict[str, int]:
+    """
+    Map ``"Agent N"`` strings to 0-indexed GPU IDs.
+
+    GPU agents are identified by ``Agent_Type == "GPU"`` in the
+    agent info CSV.  They are sorted by ``Node_Id`` so that the
+    first GPU agent maps to GPU 0, the second to GPU 1, etc.
+
+    Returns an empty dict when *agent_info_path* does not exist.
+    """
+    if not agent_info_path.exists():
+        return {}
+
+    agent_df = pd.read_csv(agent_info_path)
+    gpu_agents = (
+        agent_df[agent_df["Agent_Type"] == "GPU"]
+        .sort_values("Node_Id")
+        .reset_index(drop=True)
+    )
+    return {f"Agent {row.Node_Id}": row.Index for row in gpu_agents.itertuples()}
+
+
+@demarcate
+def process_pc_sampling_kernel_trace(
+    workload_path: str,
+) -> pd.DataFrame:
+    """
+    Build kernel and dispatch info from a kernel trace.
+
+    Used for PC-sampling-only runs where ``pmc_perf`` data is not
+    available.  Reads ``ps_file_kernel_trace.csv`` (and optionally
+    ``ps_file_agent_info.csv`` for GPU ID mapping)
+    """
+    trace_path = Path(workload_path) / "ps_file_kernel_trace.csv"
+    if not trace_path.exists():
+        console_warning(
+            f"Kernel trace not found at {trace_path}. Cannot build dispatch data."
+        )
+        return pd.DataFrame(
+            columns=[
+                "Dispatch_Id",
+                "Kernel_Name",
+                "Start_Timestamp",
+                "End_Timestamp",
+                "GPU_ID",
+            ]
+        )
+
+    trace_df = pd.read_csv(trace_path)
+
+    # Map agent IDs to GPU IDs
+    agent_to_gpu = build_agent_to_gpu_map(
+        Path(workload_path) / "ps_file_agent_info.csv"
+    )
+    trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu).fillna(0).astype(int)
+
+    trace_df = trace_df[
+        ["Dispatch_Id", "Kernel_Name", "Start_Timestamp", "End_Timestamp", "GPU_ID"]
+    ]
+
+    return trace_df
+
+
 @demarcate
 def create_df_pmc(
     raw_data_root_dir: str,
@@ -229,34 +294,45 @@ def create_df_pmc(
         dfs: list[pd.DataFrame] = []
         coll_levels: list[str] = []
 
-        for csv_file in Path(raw_data_dir).rglob("*.csv"):
-            file_name = csv_file.name
+        coll_level_map = {}
+        for file_name in Path(raw_data_dir).rglob("*.csv"):
+            # In csv format accumulator counters are specified as
+            # SQ_ACCUM_PREV_HIRES counter in the coll_level specific csv
+            if config_dict.get(
+                "format_rocprof_output"
+            ) == "csv" and file_name.name.startswith("pmc_perf_SQ"):
+                coll_level_map[file_name] = file_name.name[
+                    len("pmc_perf_") : -len(".csv")
+                ]
 
-            is_sq_file = file_name.startswith("SQ")
-            is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+            # coll_level for pmc_perf.csv
+            if file_name.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv":
+                coll_level_map[file_name] = schema.PMC_PERF_FILE_PREFIX
 
-            if is_sq_file or is_pmc_perf:
-                tmp_df = pd.read_csv(csv_file)
+        for csv_file in coll_level_map:
+            tmp_df = pd.read_csv(csv_file)
 
-                if config_dict.get("format_rocprof_output") == "rocpd":
-                    tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
+            if config_dict.get("format_rocprof_output") == "rocpd":
+                tmp_df = utils_analysis.process_rocpd_csv(tmp_df)
 
-                # Demangle original KernelNames
-                # Skip for Standalone Roofline with -1 to keep full kernel names
-                if kernel_verbose >= 0:
-                    kernel_name_shortener(tmp_df, kernel_verbose)
+            # Demangle original KernelNames
+            # Skip for Standalone Roofline with -1 to keep full kernel names
+            if kernel_verbose >= 0:
+                kernel_name_shortener(tmp_df, kernel_verbose)
 
-                # NB:
-                #   Idealy, the Node column should be added out of
-                #   multiindexing level. Here, we add it into pmc_perf
-                #   as it is the main sub-df which can be handled easily
-                #   later.
-                if file_name == "pmc_perf.csv" and node_name is not None:
-                    tmp_df.insert(0, "Node", node_name)
+            # NB:
+            #   Idealy, the Node column should be added out of
+            #   multiindexing level. Here, we add it into pmc_perf
+            #   as it is the main sub-df which can be handled easily
+            #   later.
+            if (
+                csv_file.name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+                and node_name is not None
+            ):
+                tmp_df.insert(0, "Node", node_name)
 
-                dfs.append(tmp_df)
-                # Remove .csv extension for collection level
-                coll_levels.append(csv_file.stem)
+            dfs.append(tmp_df)
+            coll_levels.append(coll_level_map[csv_file])
 
         if not dfs:
             return pd.DataFrame()

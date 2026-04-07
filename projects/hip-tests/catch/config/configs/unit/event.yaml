@@ -104,7 +104,7 @@ event:
     <<: *level_2
     # (amd_linux) SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.
     # (amd_windows) Note: intermittent Seg fault failure
-    disabled: [gfx1200, gfx1201, amd_windows, amd_wsl]
+    disabled: [gfx1200, gfx1201, amdgcnspirv, amd_windows, amd_wsl]
     tags: [lifecycle]
   Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem:
     <<: *level_2

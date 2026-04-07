@@ -11,7 +11,7 @@ import shutil
 from subprocess import Popen, PIPE, CalledProcessError, run
 import signal
 
-DEFAULT_TIMEOUT = 30
+DEFAULT_TIMEOUT = 60
 
 
 def run_and_communicate(
@@ -501,9 +501,9 @@ def check_test_9():
             if not kernel_started and "Kernel started" in s:
                 kernel_started = True
                 os.kill(p.pid, signal.SIGQUIT)
-                # We give our program 30 secs to start the kernel.
+                # We give our program LOOP_TIMEOUT secs to start the kernel.
                 # Once we know that the kernel is running, we give it
-                # extra 30 seconds to process SIGQUIT.
+                # an extra LOOP_TIMEOUT seconds to process SIGQUIT.
                 deadline = deadline + LOOP_TIMEOUT
 
             if kernel_started:

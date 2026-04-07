@@ -40,6 +40,7 @@ else()
 endif()
 
 add_compile_definitions(
+  NCCL_USE_CMAKE
   NCCL_MAJOR=${NCCL_MAJOR}
   NCCL_MINOR=${NCCL_MINOR}
   NCCL_PATCH=${NCCL_PATCH}
@@ -56,10 +57,35 @@ endif()
 # RCCL project
 #==================================================================================================
 project(rccl CXX)
+set(ENV{NCCL_USE_CMAKE} "1")
 
 # Build options
 #==================================================================================================
-option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      OFF)
+# NCCL compatibility options (aliases/shims). Defaults preserve existing RCCL behavior.
+option(DEBUG                                   "Enable debug build compatibility flag"         OFF)
+option(ASAN                                    "Enable address sanitizer compatibility flag"   OFF)
+option(WERROR                                  "Treat warnings as errors compatibility flag"   OFF)
+option(PROFAPI                                 "Enable profiling API compatibility flag"       OFF)
+option(NVTX                                    "Enable NVTX compatibility flag"                ON)
+option(BUILD_DEBIAN_PACKAGE                    "Build Debian package compatibility flag"       OFF)
+option(BUILD_REDHAT_PACKAGE                    "Build Redhat package compatibility flag"       OFF)
+option(BUILD_TXZ_PACKAGE                       "Build TXZ package compatibility flag"          OFF)
+option(BUILD_CONDA_PACKAGE                     "Build Conda package compatibility flag"        OFF)
+option(BUILD_SRCTXZ_PACKAGE                    "Build source TXZ package compatibility flag"   OFF)
+option(BUILD_DOC_PACKAGE                       "Build documentation package compatibility flag" OFF)
+option(BUILD_PACKAGES                          "Build all packages compatibility flag"          OFF)
+
+set(_rccl_default_build_address_sanitizer OFF)
+if(ASAN)
+  set(_rccl_default_build_address_sanitizer ON)
+endif()
+
+set(_rccl_default_roctx ON)
+if(NOT NVTX)
+  set(_rccl_default_roctx OFF)
+endif()
+
+option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${_rccl_default_build_address_sanitizer})
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
@@ -79,7 +105,7 @@ option(ENABLE_IFC                              "Enable indirect function call"  
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
-option(ROCTX                                   "Enable ROCTX"                                  ON)
+option(ROCTX                                   "Enable ROCTX"                                  ${_rccl_default_roctx})
 option(PROFILE                                 "Enable profiling"                              OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
@@ -88,6 +114,28 @@ option(QUIET_WARNINGS                          "Supress compiler warnings"      
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
 option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
+
+# Translate NCCL-compatible aliases into existing RCCL build knobs.
+if(DEBUG AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+endif()
+
+if(BUILD_PACKAGES)
+  set(BUILD_DEBIAN_PACKAGE ON)
+  set(BUILD_REDHAT_PACKAGE ON)
+  set(BUILD_TXZ_PACKAGE ON)
+  set(BUILD_CONDA_PACKAGE ON)
+  set(BUILD_SRCTXZ_PACKAGE ON)
+  set(BUILD_DOC_PACKAGE ON)
+endif()
+
+if(WERROR)
+  add_compile_options(-Werror)
+endif()
+
+if(PROFAPI)
+  add_compile_definitions(PROFAPI)
+endif()
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -354,58 +402,7 @@ find_package(hsa-runtime64 REQUIRED)
 get_target_property(HSA_INCLUDE_PATH hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "HSA runtime: ${HSA_INCLUDE_PATH}")
 
-## Check for amd-smi if ROCm 7.11.0 or newer
-if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
-  find_package(amd_smi PATHS ${ROCM_PATH}/lib/cmake/amd_smi)
-  if(amd_smi_FOUND)
-    message(STATUS "amd_smi_INCLUDE_DIR: ${amd_smi_INCLUDE_DIR}")
-    message(STATUS "amd_smi_LIB_DIR: ${amd_smi_LIB_DIR}")
-    set(SMI_INCLUDE_DIR "${amd_smi_INCLUDE_DIR}" CACHE INTERNAL "amd-smi include directory")
-    set(SMI_LIB_DIR "${amd_smi_LIB_DIR}" CACHE INTERNAL "amd-smi library directory")
-    set(SMI_LIB_NAME "amd-smi-lib" CACHE INTERNAL "amd-smi-lib for packaging")
-    if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
-      message(FATAL_ERROR "amd_smi not found in ${SMI_INCLUDE_DIR}")
-    endif()
-    message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
-    set(SMI_LIBRARIES amd_smi)
-  endif()
-endif()
-
 set(USE_AMDSMI ON CACHE INTERNAL "Force enable AMD SMI path since we use lazy loading, and rsmi path is available as fallback if AMD SMI is not enabled at runtime")
-
-## Commenting this out for full deprecation in a future PR
-# if(NOT USE_AMDSMI)
-#   ## Fallback to rocm-smi if amd-smi not found or ROCm < 7.11.0
-#   message(WARNING "Could not find amd_smi. Falling back to rocm_smi.")
-#   find_package(rocm_smi PATHS ${ROCM_PATH}/lib/cmake/rocm_smi)
-#   if(rocm_smi_FOUND)
-#     set(SMI_INCLUDE_DIR "${rocm_smi_INCLUDE_DIR}" CACHE INTERNAL "rocm-smi include directory")
-#     set(SMI_LIB_DIR "${rocm_smi_LIB_DIR}" CACHE INTERNAL "rocm-smi library directory")
-#   else()
-#     message(WARNING "CMake could not find rocm-smi. Checking old include directory structure for rocm_smi")
-#     set(SMI_INCLUDE_DIR "${ROCM_PATH}/rocm_smi/include")
-#     set(SMI_LIB_DIR     "${ROCM_PATH}/rocm_smi/lib")
-#   endif()
-
-#   if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
-#     message(FATAL_ERROR "rocm_smi not found in ${SMI_INCLUDE_DIR}")
-#   endif()
-#   message(STATUS "Found rocm_smi at ${SMI_INCLUDE_DIR}")
-#   set(SMI_LIB_NAME "rocm-smi-lib" CACHE INTERNAL "rocm-smi-lib for packaging")
-#   set(SMI_LIBRARIES rocm_smi64)
-
-#   check_include_file_cxx("${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi64Config.h" HAVE_ROCM_SMI64CONFIG)
-
-#   ### Check for RSMI_INIT_FLAG_THRAD_ONLY_MUTEX support
-#   file(READ "${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi.h" rocm_smi_incl)
-#   string(FIND "${rocm_smi_incl}" "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX" matchres)
-#   if(${matchres} EQUAL -1)
-#     message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX not supported")
-#   else()
-#     message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX supported")
-#     set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
-#   endif ()
-# endif()
 
 ## Check for BFD library if custom backtrace is requested
 if(BUILD_BFD)
@@ -724,3 +721,14 @@ rocm_create_package(
   DESCRIPTION "ROCm Communication Collectives Library"
   MAINTAINER  "RCCL Maintainer <rccl-maintainer@amd.com>"
   LDCONFIG)
+
+# NCCL-like package target wrappers that forward to RCCL's package target.
+if(TARGET package)
+  add_custom_target(debian_build DEPENDS package)
+  add_custom_target(redhat_build DEPENDS package)
+  add_custom_target(txz_build DEPENDS package)
+  add_custom_target(conda_build DEPENDS package)
+  add_custom_target(srctxz_build DEPENDS package)
+  add_custom_target(doc_build DEPENDS package)
+  add_custom_target(build_packages DEPENDS package)
+endif()
