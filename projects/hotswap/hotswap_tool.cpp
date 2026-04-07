@@ -145,10 +145,12 @@ std::string read_elf_isa_note(const uint8_t *elf, size_t size) {
     while (note_offset + sizeof(Elf64_Nhdr) <= note_end) {
       const auto *nhdr =
           reinterpret_cast<const Elf64_Nhdr *>(elf + note_offset);
-      const size_t name_sz_aligned = (nhdr->n_namesz + 3) & ~3u;
+      const size_t name_sz_aligned =
+          (static_cast<size_t>(nhdr->n_namesz) + 3) & ~size_t{3};
       const size_t desc_off =
           note_offset + sizeof(Elf64_Nhdr) + name_sz_aligned;
-      const size_t desc_sz_aligned = (nhdr->n_descsz + 3) & ~3u;
+      const size_t desc_sz_aligned =
+          (static_cast<size_t>(nhdr->n_descsz) + 3) & ~size_t{3};
       const size_t next_note = desc_off + desc_sz_aligned;
 
       if (next_note > note_end) {
@@ -220,10 +222,11 @@ hsa_status_t HSA_API hotswap_reader_create_from_file(
 
 hsa_status_t HSA_API
 hotswap_reader_destroy(hsa_code_object_reader_t code_object_reader) {
-  {
-    std::scoped_lock lock(g_reader_map_mutex);
-    g_reader_map.erase(code_object_reader.handle);
-  }
+  // Do NOT erase from g_reader_map here. For file-converted readers, ROCR's
+  // LoadedCodeObjectImpl holds a raw pointer to our buffer (via SetMemory).
+  // The shared_ptr in g_reader_map keeps it alive until OnUnload.
+  // For memory-based readers, the app owns the original buffer and ROCR
+  // points to that, so our copy is redundant but harmless.
   return g_orig_reader_destroy(code_object_reader);
 }
 
@@ -307,11 +310,13 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
                                          loaded_code_object);
   g_orig_reader_destroy(new_reader);
 
-  // ROCR's LoadedCodeObjectImpl holds a raw pointer to the ELF data for
-  // debugger/profiler queries. The buffer must outlive the executable.
-  {
+  if (status == HSA_STATUS_SUCCESS) {
+    // ROCR's LoadedCodeObjectImpl holds a raw pointer to the ELF data for
+    // debugger/profiler queries. The buffer must outlive the executable.
     std::scoped_lock lock(g_rewritten_elfs_mutex);
     g_rewritten_elfs.push_back(out_elf);
+  } else {
+    std::free(out_elf);
   }
 
   return status;
