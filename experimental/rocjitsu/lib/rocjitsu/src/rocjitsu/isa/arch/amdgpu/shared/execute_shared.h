@@ -949,6 +949,85 @@ inline void execute_s_ctz_i32_b64_sop1([[maybe_unused]] Inst &inst,
   wf.write_scc(result != 0);
 }
 
+/// @brief Shared execute() for s_cvt_f16_f32_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_cvt_f16_f32_sop1([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::bit_cast<float>(val)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
+/// @brief Shared execute() for s_cvt_f32_f16_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_cvt_f32_f16_sop1([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
+/// @brief Shared execute() for s_cvt_f32_i32_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_cvt_f32_i32_sop1([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>(val)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
+/// @brief Shared execute() for s_cvt_f32_u32_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_cvt_f32_u32_sop1([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  uint32_t result = std::bit_cast<uint32_t>(static_cast<float>(val));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
+/// @brief Shared execute() for s_cvt_hi_f32_f16_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_cvt_hi_f32_f16_sop1([[maybe_unused]] Inst &inst,
+                                          [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  uint32_t result =
+      std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>((val >> 16) & 0xFFFF)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
+/// @brief Shared execute() for s_cvt_i32_f32_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_cvt_i32_f32_sop1([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  float f = std::bit_cast<float>(val);
+  int32_t r = std::isnan(f) ? 0
+                            : (f >= 2147483648.0f
+                                   ? INT32_MAX
+                                   : (f < -2147483648.0f ? INT32_MIN : static_cast<int32_t>(f)));
+  uint32_t result = static_cast<uint32_t>(r);
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
+/// @brief Shared execute() for s_cvt_u32_f32_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_cvt_u32_f32_sop1([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  float f = std::bit_cast<float>(val);
+  uint32_t result = (std::isnan(f) || f < 0.0f)
+                        ? 0u
+                        : (f >= 4294967296.0f ? UINT32_MAX : static_cast<uint32_t>(f));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
 /// @brief Shared execute() for s_ff0_i32_b32_sop1 (scalar_unary).
 template <typename Inst>
 inline void execute_s_ff0_i32_b32_sop1([[maybe_unused]] Inst &inst,
@@ -1579,6 +1658,25 @@ inline void execute_s_quadmask_b64_sop1([[maybe_unused]] Inst &inst,
   wf.write_scc(result != 0);
 }
 
+/// @brief Shared execute() for s_rndne_f16_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_rndne_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));
+  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::nearbyint(f)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
+/// @brief Shared execute() for s_rndne_f32_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_rndne_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  uint32_t result = std::bit_cast<uint32_t>(std::nearbyint(std::bit_cast<float>(val)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
 /// @brief Shared execute() for s_sext_i32_i16_sop1 (scalar_unary).
 template <typename Inst>
 inline void execute_s_sext_i32_i16_sop1([[maybe_unused]] Inst &inst,
@@ -1648,6 +1746,25 @@ inline void execute_s_subb_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
   uint64_t wide = static_cast<uint64_t>(s0) - static_cast<uint64_t>(s1) - bin;
   inst.sdst.write_scalar(wf, static_cast<uint32_t>(wide));
   wf.write_scc(static_cast<uint64_t>(s0) < static_cast<uint64_t>(s1) + bin);
+}
+
+/// @brief Shared execute() for s_trunc_f16_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_trunc_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));
+  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::trunc(f)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
+}
+
+/// @brief Shared execute() for s_trunc_f32_sop1 (scalar_unary).
+template <typename Inst>
+inline void execute_s_trunc_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint32_t val = inst.ssrc0.read_scalar(wf);
+  uint32_t result = std::bit_cast<uint32_t>(std::trunc(std::bit_cast<float>(val)));
+  inst.sdst.write_scalar(wf, result);
+  wf.write_scc(result != 0);
 }
 
 /// @brief Shared execute() for s_wqm_b32_sop1 (scalar_unary).

@@ -261,6 +261,15 @@ _SOP1_SPECIAL = {
     'S_SLEEP_VAR': ('nop', None),
     'S_CEIL': ('scalar_unary', 'ceil'),
     'S_FLOOR': ('scalar_unary', 'floor'),
+    'S_TRUNC': ('scalar_unary', 'trunc'),
+    'S_RNDNE': ('scalar_unary', 'rndne'),
+    'S_CVT_F32_I32': ('scalar_unary', 'cvt_f32_i32'),
+    'S_CVT_F32_U32': ('scalar_unary', 'cvt_f32_u32'),
+    'S_CVT_I32_F32': ('scalar_unary', 'cvt_i32_f32'),
+    'S_CVT_U32_F32': ('scalar_unary', 'cvt_u32_f32'),
+    'S_CVT_F16_F32': ('scalar_unary', 'cvt_f16_f32'),
+    'S_CVT_F32_F16': ('scalar_unary', 'cvt_f32_f16'),
+    'S_CVT_HI_F32_F16': ('scalar_unary', 'cvt_hi_f32_f16'),
 }
 
 def _derive_sop1(name: str) -> InstructionSemantics | None:
@@ -867,6 +876,10 @@ _VOP3P_PK16_MAP = {
     'V_PK_MUL_F16': ('pk_binop', 'mul', 'f16'),
     'V_PK_MIN_F16': ('pk_binop', 'min', 'f16'),
     'V_PK_MAX_F16': ('pk_binop', 'max', 'f16'),
+    'V_PK_MIN_NUM_F16': ('pk_binop', 'min', 'f16'),
+    'V_PK_MAX_NUM_F16': ('pk_binop', 'max', 'f16'),
+    'V_PK_MINIMUM_F16': ('pk_binop', 'min', 'f16'),
+    'V_PK_MAXIMUM_F16': ('pk_binop', 'max', 'f16'),
 }
 
 def _derive_vop3p(name: str) -> InstructionSemantics | None:
@@ -915,6 +928,10 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'dot4_i32_i8')
     if name == 'V_DOT4_U32_U8':
         return InstructionSemantics(name, 'dot4_u32_u8')
+    # FP8 dot products (RDNA4)
+    if name in ('V_DOT4_F32_FP8_FP8', 'V_DOT4_F32_FP8_BF8',
+                'V_DOT4_F32_BF8_FP8', 'V_DOT4_F32_BF8_BF8'):
+        return InstructionSemantics(name, 'dot4_f32_fp8')
     if name == 'V_DOT8_I32_I4':
         return InstructionSemantics(name, 'dot8_i32_i4')
     if name == 'V_DOT8_U32_U4':
@@ -949,8 +966,9 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     # WMMA (Wave Matrix Multiply-Accumulate) — RDNA3/3.5/4
     import re
     m = re.match(r'V_(?:S?WMMA[C]?)_(F32|F16|BF16|I32|FP8|BF8)_'
-                 r'(\d+)X(\d+)X(\d+)_?(F16|BF16|IU8|IU4|FP8|BF8|F16_FP8|F16_BF8'
-                 r'|BF16_FP8|BF16_BF8)?$', name)
+                 r'(\d+)X(\d+)X(\d+)_?(F16|BF16|IU8|IU4|FP8|BF8'
+                 r'|FP8_FP8|FP8_BF8|BF8_FP8|BF8_BF8'
+                 r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8)?$', name)
     if m:
         return InstructionSemantics(name, 'mfma')  # Reuse MFMA semantic class — same matrix pattern
 
