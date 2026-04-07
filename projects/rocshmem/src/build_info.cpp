@@ -102,6 +102,7 @@ static void parse_config(std::ostream& os) {
     "ROCSHMEM_GIT_HASH",
     "ROCSHMEM_INSTALL_PREFIX",
     "ROCSHMEM_OFFLOAD_TARGETS",
+    "ROCSHMEM_BUILD_TYPE",
   };
 
   os << "#------------------------------------------------------------------------------#\n";
@@ -144,6 +145,7 @@ void print_build_info(std::ostream& os) {
 
   print_entry(os, "Version", rocshmem::VERSION);
   print_entry(os, "Git Hash", ROCSHMEM_GIT_HASH);
+  print_entry(os, "Build Type", ROCSHMEM_BUILD_TYPE);
   print_entry(os, "Install Prefix", ROCSHMEM_INSTALL_PREFIX);
 
   print_arch_info(os);
