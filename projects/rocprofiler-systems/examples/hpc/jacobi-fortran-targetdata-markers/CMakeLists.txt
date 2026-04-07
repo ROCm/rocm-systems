@@ -15,7 +15,15 @@ endif()
 
 check_compiler_version(amdflang_EXECUTABLE _AMDFLANG_VERSION)
 if(_AMDFLANG_VERSION LESS 20) # amdflang openmp requirement
-    rocprofiler_systems_message(AUTHOR_WARNING "amdflang version ${_AMDFLANG_VERSION} is less than the minimum required version 20 for jacobi-fortran-usm example")
+    rocprofiler_systems_message(AUTHOR_WARNING "amdflang version ${_AMDFLANG_VERSION} is less than the minimum required version 20 for jacobi-fortran-targetdata-markers example")
+    return()
+endif()
+
+if(_AMDFLANG_VERSION GREATER_EQUAL 20 AND CMAKE_VERSION VERSION_LESS "3.24")
+    rocprofiler_systems_message(AUTHOR_WARNING
+        "CMake ${CMAKE_VERSION} does not support LLVM flang-new (amdflang >= 20). "
+        "CMake 3.24+ is required for jacobi-fortran-targetdata-markers example."
+    )
     return()
 endif()
 

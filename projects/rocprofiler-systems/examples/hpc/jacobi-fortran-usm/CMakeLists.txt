@@ -18,6 +18,14 @@ if(_AMDFLANG_VERSION LESS 20) # amdflang openmp requirement
     return()
 endif()
 
+if(_AMDFLANG_VERSION GREATER_EQUAL 20 AND CMAKE_VERSION VERSION_LESS "3.24")
+    rocprofiler_systems_message(AUTHOR_WARNING
+        "CMake ${CMAKE_VERSION} does not support LLVM flang-new (amdflang >= 20). "
+        "CMake 3.24+ is required for jacobi-fortran-usm example."
+    )
+    return()
+endif()
+
 set(offload_arch_flags "-fopenmp")
 set(offload_link_flags "-fopenmp")
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)

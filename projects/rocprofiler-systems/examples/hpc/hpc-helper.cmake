@@ -50,14 +50,18 @@ mark_as_advanced(HIPCC_EXECUTABLE)
 # For HIPCC, this returns the underlying CLANG version, not HIP version
 function(CHECK_COMPILER_VERSION _COMPILER _OUTPUT)
     execute_process(
-        COMMAND ${_COMPILER} --version
+        COMMAND ${${_COMPILER}} --version
         OUTPUT_VARIABLE _VERSION_OUTPUT
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
-    # Match "clang version X" or "flang-new version X" (AMD compiler line)
+    # Match "clang version X", "flang-new version X", or "flang version X" (AMD compiler line)
     # This skips "HIP version:" which appears first in hipcc output
-    string(REGEX MATCH "(clang|flang-new) version ([0-9]+)" _MATCH "${_VERSION_OUTPUT}")
+    string(
+        REGEX MATCH "(clang|flang-new|flang) version ([0-9]+)"
+        _MATCH
+        "${_VERSION_OUTPUT}"
+    )
     set(${_OUTPUT} "${CMAKE_MATCH_2}" PARENT_SCOPE)
 endfunction()
 
