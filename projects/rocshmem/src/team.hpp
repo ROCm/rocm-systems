@@ -93,6 +93,16 @@ class Team {
        MPI_Comm mpi_comm);
 
   /**
+   * @brief Non-copyable and non-movable because Team
+   * owns a hipMalloc'd TeamInfo block and an MPI
+   * communicator that require unique ownership.
+   */
+  Team(const Team&) = delete;
+  Team& operator=(const Team&) = delete;
+  Team(Team&&) = delete;
+  Team& operator=(Team&&) = delete;
+
+  /**
    * @brief Destructor.
    */
   virtual ~Team();
