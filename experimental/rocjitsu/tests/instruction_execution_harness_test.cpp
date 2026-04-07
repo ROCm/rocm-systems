@@ -139,7 +139,7 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     // Decode the instruction.
     std::unique_ptr<Instruction> inst;
     try {
-      inst = decoder->decode(te.words.data());
+      inst.reset(decoder->decode(te.words.data()));
     } catch (const util::InvalidInst &) {
       decode_fail_list.emplace_back(te.mnemonic);
       continue;

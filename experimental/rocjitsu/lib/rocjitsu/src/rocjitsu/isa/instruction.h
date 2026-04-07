@@ -70,6 +70,30 @@ public:
   Instruction(std::string_view mnemonic, ExecuteFn exec) : execute(exec), mnemonic_(mnemonic) {}
   virtual ~Instruction() = default;
 
+  /// @brief Pool allocator hooks, set by the decoder's enable_pool().
+  /// Thread-local because each CU partition thread has its own decoder/pool.
+  /// Instructions are wholly owned by their CU and always allocated/freed
+  /// on the same thread.
+  using AllocFn = void *(*)(void *pool, size_t size);
+  using DeallocFn = void (*)(void *pool, void *ptr);
+  static thread_local inline AllocFn alloc_fn_;
+  static thread_local inline DeallocFn dealloc_fn_;
+  static thread_local inline void *alloc_pool_;
+
+  static void *operator new(size_t size) {
+    if (alloc_fn_)
+      return alloc_fn_(alloc_pool_, size);
+    return ::operator new(size);
+  }
+
+  static void operator delete(void *ptr) noexcept {
+    if (dealloc_fn_) {
+      dealloc_fn_(alloc_pool_, ptr);
+      return;
+    }
+    ::operator delete(ptr);
+  }
+
   Instruction(const Instruction &) = delete;
   Instruction &operator=(const Instruction &) = delete;
   Instruction(Instruction &&) = delete;

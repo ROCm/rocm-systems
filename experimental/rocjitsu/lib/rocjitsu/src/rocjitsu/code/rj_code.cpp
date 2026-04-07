@@ -149,7 +149,8 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
     uint64_t pc = 0;
     while (pc < inst_data_size) {
-      auto inst = decoder->decode(&inst_data[pc]);
+      auto *raw_inst = decoder->decode(&inst_data[pc]);
+      std::unique_ptr<Instruction> inst(raw_inst);
       owned->list.push_back(*inst);
       ++pc;
       if (inst->size() == 8)

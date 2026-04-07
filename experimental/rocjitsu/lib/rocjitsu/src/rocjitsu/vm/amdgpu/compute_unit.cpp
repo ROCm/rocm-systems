@@ -34,6 +34,11 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   if (!decoder_)
     throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
 
+  // Enable pool allocation for the hot decode-execute path.
+  // Instructions decoded during step() are always deleted before the CU
+  // (and its decoder) are destroyed, so pool allocation is safe here.
+  decoder_->enable_pool();
+
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
 
@@ -169,16 +174,16 @@ void ComputeUnitCore::tick_pipelines() {
   local_mem_pipeline_.tick();
 }
 
-void ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> inst, Wavefront &wf) {
+void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   switch (inst->data()->tag()) {
   case SCALAR_MEM:
-    scalar_mem_pipeline_.issue(std::move(inst), wf);
+    scalar_mem_pipeline_.issue(inst, wf);
     break;
   case LOCAL_MEM:
-    local_mem_pipeline_.issue(std::move(inst), wf);
+    local_mem_pipeline_.issue(inst, wf);
     break;
   case GLOBAL_MEM:
-    global_mem_pipeline_.issue(std::move(inst), wf);
+    global_mem_pipeline_.issue(inst, wf);
     break;
   default:
     break;
@@ -241,7 +246,7 @@ bool ComputeUnitCore::step() {
   rj_code_binary_inst_t words[4];
   for (int i = 0; i < 4; ++i)
     words[i] = memory_->fetch32(active->pc + i * 4);
-  std::unique_ptr<Instruction> inst;
+  Instruction *inst = nullptr;
   try {
     inst = decoder_->decode(words);
   } catch (const util::InvalidInst &) {
@@ -257,10 +262,12 @@ bool ComputeUnitCore::step() {
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
 
-  execute_instruction(inst.get(), *active);
+  execute_instruction(inst, *active);
 
   if (inst->is_memory_op())
-    route_memory_inst(std::move(inst), *active);
+    route_memory_inst(inst, *active);
+  else
+    delete inst;
 
   // Advance PC past the current instruction. Branch execute() methods are required
   // to account for this by computing: wf.pc = target - inst_size, so the net result
