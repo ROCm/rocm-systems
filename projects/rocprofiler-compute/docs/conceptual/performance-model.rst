@@ -18,7 +18,7 @@ material:
   and chapters for compute units, L2, shader engine, command processor, system
   speed-of-light, and references.
 
-* **RDNA (client GPUs)** — :doc:`RDNA3 <rdna/rdna-performance-model>`:
+* **Navi(RDNA)** — :doc:`RDNA3 <rdna/rdna-performance-model>`:
   WGPs, TCP (GL0), GL1C, GL2C, GCEA, and gfx1151 panel layout.
 
 For practical profiling walkthroughs, see :doc:`/tutorial/profiling-by-example`.
