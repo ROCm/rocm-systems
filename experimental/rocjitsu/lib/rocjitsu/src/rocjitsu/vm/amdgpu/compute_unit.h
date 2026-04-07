@@ -346,7 +346,7 @@ protected:
   /// @brief Route a memory instruction into the appropriate pipeline.
   /// @param inst The memory instruction (ownership transferred).
   /// @param wf The issuing wavefront.
-  void route_memory_inst(std::unique_ptr<Instruction> inst, Wavefront &wf);
+  void route_memory_inst(Instruction *inst, Wavefront &wf);
 
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
