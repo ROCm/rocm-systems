@@ -15,7 +15,7 @@ namespace rocr::hotswap {
 ///
 /// Called by the hotswap tools lib when the code object's ISA differs from
 /// the agent's ISA, or when stepping patches are needed (e.g., B0-to-A0).
-/// Delegates to COMGR's amd_comgr_hotswap_rewrite via dlopen.
+/// Delegates to COMGR's amd_comgr_hotswap_rewrite (linked directly).
 ///
 /// On success, *out_data and *out_size describe the rewritten code object.
 /// If *out_data differs from elf_data, it was allocated by this function

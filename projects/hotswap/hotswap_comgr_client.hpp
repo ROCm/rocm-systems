@@ -1,4 +1,4 @@
-//===- hotswap_comgr_client.hpp - dlopen interface to COMGR hotswap -------===//
+//===- hotswap_comgr_client.hpp - COMGR hotswap client --------------------===//
 //
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -11,10 +11,10 @@
 
 namespace rocr::hotswap {
 
-/// Check if COMGR's hotswap backend is available (found via dlopen).
+/// Check if COMGR's hotswap backend is available.
 bool ComgrHotswapAvailable();
 
-/// Call COMGR's amd_comgr_hotswap_rewrite via dlopen/dlsym.
+/// Call COMGR's amd_comgr_hotswap_rewrite (linked directly).
 /// @param source_isa  Code object ISA, e.g. "amdgcn-amd-amdhsa--gfx1250"
 /// @param target_isa  Agent hardware ISA, e.g. "amdgcn-amd-amdhsa--gfx1250"
 /// Returns 0 on success, non-zero on failure. Caller frees *out_elf with
