@@ -10,12 +10,15 @@
 
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <functional>
 #include <string>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 #include "common/DeviceApiLocal.hpp"
-#include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting
 {
@@ -104,6 +107,14 @@ struct DeviceApiResources
 
     std::vector<DeviceApiRankResources> ranks;
 };
+
+static DeviceApiResources& createProcessLifetimeResources(int rankCount)
+{
+    // These tests run in a fresh exec-isolated child process and exit immediately
+    // after the test body completes. Keep resources process-lifetime to avoid the
+    // known communicator teardown crash tracked separately in the debugging notes.
+    return *new DeviceApiResources(rankCount);
+}
 
 static int getVisibleGpuCount()
 {
@@ -196,6 +207,11 @@ static void registerInputWindows(DeviceApiResources& resources)
     ASSERT_EQ(groupResult, ncclSuccess);
 }
 
+static void clearHipErrorState()
+{
+    (void)hipGetLastError();
+}
+
 static void runPositiveLsaRemoteReadTest()
 {
     if(getVisibleGpuCount() < kPositiveRanks)
@@ -204,11 +220,12 @@ static void runPositiveLsaRemoteReadTest()
     if(!hasFullDirectP2p(kPositiveRanks))
         GTEST_SKIP() << "This test requires direct P2P access between the first 2 GPUs.";
 
-    DeviceApiResources resources(kPositiveRanks);
+    DeviceApiResources& resources = createProcessLifetimeResources(kPositiveRanks);
     initializeCommunicators(resources);
 
     const std::array<int, kPositiveRanks> inputValues = {7, 11};
     allocatePositiveBuffers(resources, inputValues);
+
     registerInputWindows(resources);
 
     for(const auto& rank : resources.ranks)
@@ -251,6 +268,8 @@ static void runPositiveLsaRemoteReadTest()
     for(auto& rank : resources.ranks)
     {
         ASSERT_EQ(hipSetDevice(rank.device), hipSuccess);
+        clearHipErrorState();
+
         hipLaunchKernelGGL(
             lsaReadPeerValueKernel,
             dim3(kBlocksPerRank),
@@ -261,7 +280,10 @@ static void runPositiveLsaRemoteReadTest()
             rank.outputBuffer,
             rank.devComm
         );
-        ASSERT_EQ(hipGetLastError(), hipSuccess);
+        const hipError_t launchError = hipGetLastError();
+        ASSERT_EQ(launchError, hipSuccess)
+            << "lsaReadPeerValueKernel launch failed on device " << rank.device << ": "
+            << hipGetErrorString(launchError);
     }
 
     for(auto& rank : resources.ranks)
@@ -291,7 +313,7 @@ static void runDevCommCreateFailureTest()
     if(getVisibleGpuCount() < kNegativeRanks)
         GTEST_SKIP() << "This test requires at least 1 visible GPU.";
 
-    DeviceApiResources resources(kNegativeRanks);
+    DeviceApiResources& resources = createProcessLifetimeResources(kNegativeRanks);
     initializeCommunicators(resources);
     allocateInputBuffer(resources.ranks[0], kNegativeTestSeed);
     registerInputWindows(resources);
@@ -307,59 +329,81 @@ static void runDevCommCreateFailureTest()
         resources.ranks[0].devCommCreated = true;
 }
 
-static ProcessIsolatedTestRunner::TestConfig makeDeviceApiEnabledConfig(
-    const std::string& name, std::function<void()> testFn
+static void runExecIsolatedDeviceApiTest(
+    const std::string&                                  testName,
+    const std::unordered_map<std::string, std::string>& environment,
+    const std::function<void()>&                        testFn
 )
 {
-    return ProcessIsolatedTestRunner::TestConfig(name, testFn)
-        .withEnvironment({{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_WIN_ENABLE", "1"}})
-        .withTimeout(std::chrono::seconds(60));
-}
+    const char* childTestName = std::getenv("RCCL_DEVICE_API_EXEC_CHILD");
+    if(childTestName != nullptr && testName == childTestName)
+    {
+        testFn();
+        fflush(nullptr);
+        _exit(::testing::Test::HasFailure() ? EXIT_FAILURE : EXIT_SUCCESS);
+    }
 
-static ProcessIsolatedTestRunner::TestConfig makeCuMemDisabledConfig(
-    const std::string& name, std::function<void()> testFn
-)
-{
-    return ProcessIsolatedTestRunner::TestConfig(name, testFn)
-        .withEnvironment({{"NCCL_CUMEM_ENABLE", "0"}, {"NCCL_WIN_ENABLE", "1"}})
-        .withTimeout(std::chrono::seconds(60));
-}
+    std::array<char, 4096> executablePath = {};
+    const ssize_t          pathLength
+        = readlink("/proc/self/exe", executablePath.data(), executablePath.size() - 1);
+    ASSERT_GT(pathLength, 0) << "Failed to resolve current executable path";
+    executablePath[pathLength] = '\0';
 
-static ProcessIsolatedTestRunner::TestConfig makeWinDisabledConfig(
-    const std::string& name, std::function<void()> testFn
-)
-{
-    return ProcessIsolatedTestRunner::TestConfig(name, testFn)
-        .withEnvironment({{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_WIN_ENABLE", "0"}})
-        .withTimeout(std::chrono::seconds(60));
+    const pid_t childPid = fork();
+    ASSERT_NE(childPid, -1) << "Failed to fork exec-isolated child for " << testName;
+
+    if(childPid == 0)
+    {
+        for(const auto& [name, value] : environment)
+            setenv(name.c_str(), value.c_str(), 1);
+        setenv("RCCL_DEVICE_API_EXEC_CHILD", testName.c_str(), 1);
+
+        const std::string filterArgument = "--gtest_filter=" + testName;
+        execl(
+            executablePath.data(),
+            executablePath.data(),
+            filterArgument.c_str(),
+            static_cast<char*>(nullptr)
+        );
+        _exit(127);
+    }
+
+    int status = 0;
+    ASSERT_EQ(waitpid(childPid, &status, 0), childPid)
+        << "Failed to wait for exec-isolated child for " << testName;
+
+    ASSERT_TRUE(WIFEXITED(status))
+        << "Exec-isolated child terminated abnormally for " << testName;
+    ASSERT_EQ(WEXITSTATUS(status), 0)
+        << "Exec-isolated child returned non-zero exit code for " << testName;
 }
 
 } // namespace
 
 TEST(DeviceApi, LsaRemoteRead)
 {
-    RUN_ISOLATED_TESTS(
-        makeDeviceApiEnabledConfig(
-            "DeviceApi.LsaRemoteRead", []() { runPositiveLsaRemoteReadTest(); }
-        )
+    runExecIsolatedDeviceApiTest(
+        "DeviceApi.LsaRemoteRead",
+        {{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_WIN_ENABLE", "1"}},
+        []() { runPositiveLsaRemoteReadTest(); }
     );
 }
 
 TEST(DeviceApi, CuMemDisabled)
 {
-    RUN_ISOLATED_TESTS(
-        makeCuMemDisabledConfig(
-            "DeviceApi.CuMemDisabled", []() { runDevCommCreateFailureTest(); }
-        )
+    runExecIsolatedDeviceApiTest(
+        "DeviceApi.CuMemDisabled",
+        {{"NCCL_CUMEM_ENABLE", "0"}, {"NCCL_WIN_ENABLE", "1"}},
+        []() { runDevCommCreateFailureTest(); }
     );
 }
 
 TEST(DeviceApi, WinDisabled)
 {
-    RUN_ISOLATED_TESTS(
-        makeWinDisabledConfig(
-            "DeviceApi.WinDisabled", []() { runDevCommCreateFailureTest(); }
-        )
+    runExecIsolatedDeviceApiTest(
+        "DeviceApi.WinDisabled",
+        {{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_WIN_ENABLE", "0"}},
+        []() { runDevCommCreateFailureTest(); }
     );
 }
 
