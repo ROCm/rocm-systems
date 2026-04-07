@@ -7,6 +7,10 @@
 // Minimal mock of libamd_comgr.so that exports amd_comgr_hotswap_rewrite.
 // Returns a malloc'd copy of the input unchanged (passthrough).
 //
+// TODO(COMGR-upstream): Once the real amd_comgr_hotswap_rewrite lands in
+// a released COMGR, this mock is only needed for test environments without
+// COMGR installed. It can be moved behind a BUILD_TESTING guard.
+//
 //===----------------------------------------------------------------------===//
 
 #include <cstdlib>

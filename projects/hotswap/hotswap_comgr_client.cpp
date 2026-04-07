@@ -6,8 +6,9 @@
 
 #include "hotswap_comgr_client.hpp"
 
-// Forward-declare the COMGR function to avoid requiring the full header.
-// The linker resolves this against libamd_comgr.so at load time.
+// TODO(COMGR-upstream): Replace this forward declaration with
+// #include <amd_comgr.h> once the hotswap API lands in a released COMGR.
+// The return type is amd_comgr_status_t (enum, ABI-compatible with int).
 extern "C" int amd_comgr_hotswap_rewrite(const void *elf_data, size_t elf_size,
                                          const char *source_isa_name,
                                          const char *target_isa_name,

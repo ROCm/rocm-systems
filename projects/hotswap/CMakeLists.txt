@@ -8,13 +8,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(HSA_RUNTIME_INC "${CMAKE_CURRENT_SOURCE_DIR}/../rocr-runtime/runtime/hsa-runtime/inc"
     CACHE PATH "Path to HSA runtime include directory")
 
-# Mock COMGR library (exports amd_comgr_hotswap_rewrite as passthrough)
+# TODO(COMGR-upstream): Remove mock-comgr once amd_comgr_hotswap_rewrite
+# is available in a released libamd_comgr.so. At that point, find_library
+# will always succeed and the mock is only needed for CI without COMGR.
 add_library(mock-comgr SHARED tests/mock_comgr.cpp)
 set_target_properties(mock-comgr PROPERTIES
   OUTPUT_NAME "amd_comgr"
   POSITION_INDEPENDENT_CODE ON)
 
-# Find real COMGR or fall back to mock for all targets
+# Find real COMGR or fall back to mock for all targets.
+# TODO(COMGR-upstream): Once COMGR ships the hotswap API, the mock
+# fallback can be gated behind BUILD_TESTING instead of being the default.
 find_library(AMD_COMGR_LIB NAMES amd_comgr)
 if(AMD_COMGR_LIB)
   set(COMGR_LINK_LIB ${AMD_COMGR_LIB})
