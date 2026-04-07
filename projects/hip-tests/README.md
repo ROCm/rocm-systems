@@ -105,7 +105,7 @@ $ cmake ..
 $ make all
 ```
 
-To build all samples together run:
+To build all samples together, run:
 ```bash
 $ cd hip-tests
 $ mkdir -p build && cd build
