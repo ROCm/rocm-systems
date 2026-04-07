@@ -66,6 +66,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to Output directory.",
     )
+    parser.addoption(
+        "--att-marker-trace-out-dir",
+        action="store",
+        help="Path to ATT marker trace output directory.",
+    )
 
 
 @pytest.fixture
@@ -111,4 +116,12 @@ def att_shaderdata_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-shaderdata-out-dir")
     if not output_dir_path:
         pytest.skip("--att-shaderdata-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_marker_trace_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-marker-trace-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-marker-trace-out-dir not provided")
     return output_dir_path
