@@ -196,3 +196,61 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
 else()
     message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")
 endif()
+
+# --- PyTorch tests (require Python + torch with ROCm + LD_PRELOAD) ---
+
+# Prefer the project venv when available; fall back to system Python.
+if(EXISTS "${CMAKE_SOURCE_DIR}/.venv/bin/python3")
+    set(_RJ_PYTHON "${CMAKE_SOURCE_DIR}/.venv/bin/python3")
+else()
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND)
+        set(_RJ_PYTHON "${Python3_EXECUTABLE}")
+    endif()
+endif()
+
+if(_RJ_PYTHON AND HSA_RUNTIME64)
+    # Only check that torch is importable. torch.cuda.is_available()
+    # is False at configure time (no LD_PRELOAD); it will work at test time.
+    execute_process(
+        COMMAND ${_RJ_PYTHON} -c "import torch"
+        ERROR_QUIET
+        RESULT_VARIABLE _TORCH_RC
+    )
+    if(_TORCH_RC EQUAL 0)
+        set(TORCH_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/torch_test.py)
+
+        # Helper: register a unittest test class as a ctest under LD_PRELOAD.
+        function(rj_add_torch_test TEST_CLASS)
+            set(TEST_NAME "TorchTest.${TEST_CLASS}")
+            add_test(NAME ${TEST_NAME}
+                COMMAND ${_RJ_PYTHON} -m unittest
+                    torch_test.${TEST_CLASS} -v
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+            set_tests_properties(${TEST_NAME} PROPERTIES
+                ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
+                TIMEOUT 300)
+        endfunction()
+
+        rj_add_torch_test(TestDeviceDiscovery)
+        rj_add_torch_test(TestTensorTransfer)
+        rj_add_torch_test(TestArithmetic)
+        rj_add_torch_test(TestComparison)
+        rj_add_torch_test(TestMath)
+        rj_add_torch_test(TestReductions)
+        rj_add_torch_test(TestMatrixOps)
+        rj_add_torch_test(TestIndexingReshape)
+        rj_add_torch_test(TestDtypes)
+        rj_add_torch_test(TestActivations)
+        rj_add_torch_test(TestNNLayers)
+        rj_add_torch_test(TestAutograd)
+        rj_add_torch_test(TestMemory)
+        rj_add_torch_test(TestRNG)
+
+        message(STATUS "PyTorch tests enabled (${_RJ_PYTHON})")
+    else()
+        message(STATUS "PyTorch tests disabled (torch not importable)")
+    endif()
+else()
+    message(STATUS "PyTorch tests disabled (Python or libhsa-runtime64 not found)")
+endif()
