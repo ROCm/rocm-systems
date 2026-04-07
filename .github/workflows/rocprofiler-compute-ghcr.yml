@@ -31,7 +31,7 @@ jobs:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
-      containers_list: ${{ steps.generate_matrix_ci.outputs.containers_list }}
+      containers_list: ${{ steps.generate_containers_list.outputs.containers_list }}
       gpu_list: ${{ steps.generate_gpu_list.outputs.gpu_list }}
 
     steps:
