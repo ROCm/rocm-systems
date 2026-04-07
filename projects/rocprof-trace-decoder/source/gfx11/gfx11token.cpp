@@ -37,7 +37,6 @@ TokenLookupTable::TokenLookupTable()
     //                  type             pattern  plen  toklen  time_begin  time_end
     AddEncoding({MISC_GFX10,         0b1010001, 7, 24,  7, 16});
     AddEncoding({UTIL_COUNTER_GFX11, 0b0110001, 7, 48,  7,  9});
-    AddEncoding({UTIL_COUNTER_GFX10, 0b0110001, 7, 48,  7,  9});
     AddEncoding({TIMESTAMP,          0b0000001, 7, 48, 12, 48});
     // clang-format on
 }

@@ -42,7 +42,6 @@ TokenLookupTable::TokenLookupTable()
     AddEncoding({EXEC_POPCOUNT1,    0b1100110,  7, 24,  7, 10});
     AddEncoding({EXEC_POPCOUNT3,    0b010110,   6, 48,  6,  9});
     AddEncoding({NEW_PC_GFX12,      0b0100001,  7, 72,  8, 11});
-    AddEncoding({NEW_PC_GFX10,      0b0100001,  7, 72,  8, 11});
     AddEncoding({WAVE_START_EXT,    0b11100,    5, 40,  5,  7});
     AddEncoding({WAVE_ALLOC,        0b00101,    5, 24,  5,  8});
     AddEncoding({TIMESTAMP,         0b0000001,  7, 64, 12, 64});
