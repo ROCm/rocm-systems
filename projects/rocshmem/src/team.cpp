@@ -128,8 +128,10 @@ __host__ Team::~Team() {
     tinfo_wrt_parent = nullptr;
     tinfo_wrt_world = nullptr;
   }
-  if (mpi_comm != MPI_COMM_NULL)
+  if (mpi_comm != MPI_COMM_NULL) {
     mpilib_ftable_.Comm_free (&mpi_comm);
+    mpi_comm = MPI_COMM_NULL;
+  }
 }
 
 }  // namespace rocshmem
