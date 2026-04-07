@@ -698,7 +698,7 @@ class Settings : public amd::HeapObject {
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
-      uint reserved_ : 13;
+      uint reserved_ : 12;
     };
     uint value_;
   };
