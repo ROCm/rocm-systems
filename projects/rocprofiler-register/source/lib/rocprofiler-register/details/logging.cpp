@@ -34,8 +34,29 @@
 #include <string_view>
 #include <unordered_map>
 
-#include <sys/types.h>
-#include <unistd.h>
+#if defined(_WIN32)
+#    include <windows.h>
+#else
+#    include <sys/types.h>
+#    include <unistd.h>
+#endif
+
+// Windows defines ERROR as a macro, so undef it
+#if defined(_WIN32)
+#    ifdef ERROR
+#        undef ERROR
+#    endif
+#endif
+
+// glog on Windows defines severities differently
+#if !defined(GLOG_INFO)
+namespace google {
+    constexpr int INFO = 0;
+    constexpr int WARNING = 1;
+    constexpr int ERROR = 2;
+    constexpr int FATAL = 3;
+}
+#endif
 
 namespace rocprofiler_register
 {
@@ -113,11 +134,16 @@ update_logging(const logging_config& cfg, bool setup_env = false, int env_overri
 #define ROCP_REG_LOG_LEVEL_NONE    0
 
 void
-init_logging(std::string_view env_prefix, logging_config cfg = logging_config{})
+init_logging(std::string_view env_prefix, logging_config cfg)
 {
     static auto _once = std::once_flag{};
-    std::call_once(_once, [env_prefix, &cfg]() {
+    std::call_once(_once, [](std::string_view env_prefix, logging_config& cfg) {
         auto get_argv0 = []() {
+#if defined(_WIN32)
+            char buf[MAX_PATH];
+            GetModuleFileNameA(NULL, buf, MAX_PATH);
+            return std::string{buf};
+#else
             auto ifs  = std::ifstream{ "/proc/self/cmdline" };
             auto sarg = std::string{};
             while(ifs && !ifs.eof())
@@ -126,6 +152,7 @@ init_logging(std::string_view env_prefix, logging_config cfg = logging_config{})
                 if(!sarg.empty()) break;
             }
             return sarg;
+#endif
         };
 
         auto to_lower = [](std::string val) {
@@ -216,14 +243,14 @@ init_logging(std::string_view env_prefix, logging_config cfg = logging_config{})
 
         LOG(INFO) << "logging initialized via " << fmt::format("{}_LOG_LEVEL", env_prefix)
                   << ". Log Level: " << loglvl;
-    });
+    }, env_prefix, cfg);
 }
 }  // namespace
 
 void
 initialize()
 {
-    init_logging("ROCPROFILER_REGISTER");
+    init_logging("ROCPROFILER_REGISTER", logging_config{});
 }
 }  // namespace logging
 }  // namespace rocprofiler_register

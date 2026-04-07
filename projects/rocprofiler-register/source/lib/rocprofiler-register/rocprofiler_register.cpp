@@ -18,7 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#if !defined(_WIN32)
 #define GNU_SOURCE 1
+#endif
 
 #include <rocprofiler-register/rocprofiler-register.h>
 
@@ -41,8 +43,69 @@
 #include <string_view>
 #include <utility>
 
-#include <dlfcn.h>
-#include <unistd.h>
+#if defined(_WIN32)
+#    include <windows.h>
+#    include <psapi.h>
+#else
+#    include <dlfcn.h>
+#    include <unistd.h>
+#endif
+
+// Windows compatibility wrappers
+#if defined(_WIN32)
+#    define RTLD_LAZY      0
+#    define RTLD_NOW       0
+#    define RTLD_GLOBAL    0
+#    define RTLD_NOLOAD    0x00004
+#    define RTLD_DEFAULT   ((void*)0)
+
+namespace {
+inline void* dlopen_impl(const char* filename, int flags) {
+    if(flags & RTLD_NOLOAD) {
+        // Check if already loaded
+        HMODULE hMod = GetModuleHandleA(filename);
+        return reinterpret_cast<void*>(hMod);
+    }
+    HMODULE hMod = LoadLibraryA(filename);
+    return reinterpret_cast<void*>(hMod);
+}
+
+inline void* dlsym_impl(void* handle, const char* symbol) {
+    if(handle == RTLD_DEFAULT) {
+        // Search all loaded modules
+        HMODULE modules[1024];
+        DWORD needed;
+        if(EnumProcessModules(GetCurrentProcess(), modules, sizeof(modules), &needed)) {
+            DWORD numModules = needed / sizeof(HMODULE);
+            for(DWORD i = 0; i < numModules; i++) {
+                void* addr = reinterpret_cast<void*>(GetProcAddress(modules[i], symbol));
+                if(addr) return addr;
+            }
+        }
+        return nullptr;
+    }
+    return reinterpret_cast<void*>(GetProcAddress(reinterpret_cast<HMODULE>(handle), symbol));
+}
+
+inline int dlclose_impl(void* handle) {
+    if(handle) FreeLibrary(reinterpret_cast<HMODULE>(handle));
+    return 0;
+}
+
+inline int setenv(const char* name, const char* value, int overwrite) {
+    if(!overwrite) {
+        size_t envsize = 0;
+        errno_t err = getenv_s(&envsize, nullptr, 0, name);
+        if(err || envsize) return 0;
+    }
+    return _putenv_s(name, value);
+}
+}
+
+#    define dlopen  dlopen_impl
+#    define dlsym   dlsym_impl
+#    define dlclose dlclose_impl
+#endif
 
 namespace
 {
@@ -51,19 +114,21 @@ using rocprofiler_register_library_api_table_func_t =
 }
 
 extern "C" {
-#pragma weak rocprofiler_configure
-#pragma weak rocprofiler_set_api_table
-#pragma weak rocprofiler_attach
-#pragma weak rocprofiler_detach
-#pragma weak rocprofiler_attach_set_api_table
-#pragma weak rocprofiler_register_import_hip
-#pragma weak rocprofiler_register_import_hip_static
-#pragma weak rocprofiler_register_import_hip_compiler
-#pragma weak rocprofiler_register_import_hip_compiler_static
-#pragma weak rocprofiler_register_import_hsa
-#pragma weak rocprofiler_register_import_hsa_static
-#pragma weak rocprofiler_register_import_roctx
-#pragma weak rocprofiler_register_import_roctx_static
+#if !defined(_WIN32)
+#    pragma weak rocprofiler_configure
+#    pragma weak rocprofiler_set_api_table
+#    pragma weak rocprofiler_attach
+#    pragma weak rocprofiler_detach
+#    pragma weak rocprofiler_attach_set_api_table
+#    pragma weak rocprofiler_register_import_hip
+#    pragma weak rocprofiler_register_import_hip_static
+#    pragma weak rocprofiler_register_import_hip_compiler
+#    pragma weak rocprofiler_register_import_hip_compiler_static
+#    pragma weak rocprofiler_register_import_hsa
+#    pragma weak rocprofiler_register_import_hsa_static
+#    pragma weak rocprofiler_register_import_roctx
+#    pragma weak rocprofiler_register_import_roctx_static
+#endif
 
 typedef struct rocprofiler_client_id_t
 {
@@ -143,22 +208,31 @@ using rocp_set_api_table_data_t          = std::tuple<void*,
                                              rocprofiler_attach_func_t,
                                              rocprofiler_detach_func_t>;
 
-using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
+using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle) * 8>;
 
-static_assert(sizeof(bitset_t) ==
-                  sizeof(rocprofiler_register_library_indentifier_t::handle),
-              "bitset should be same at uint64_t");
+static_assert(bitset_t{}.size() ==
+                  sizeof(rocprofiler_register_library_indentifier_t::handle) * 8,
+              "bitset should have bits equal to uint64_t size in bits");
 
+#if defined(_WIN32)
+constexpr auto rocprofiler_lib_name                = "rocprofiler-sdk.dll";
+constexpr auto rocprofiler_attach_lib_name         = "rocprofiler-sdk-attach.dll";
+#else
 constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
-constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
 constexpr auto rocprofiler_attach_lib_name         = "librocprofiler-sdk-attach.so";
+#endif
+constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
 constexpr auto rocprofiler_attach_lib_register_entrypoint =
     "rocprofiler_attach_set_api_table";
 constexpr auto rocprofiler_lib_attach_entrypoint = "rocprofiler_attach";
 constexpr auto rocprofiler_lib_detach_entrypoint = "rocprofiler_detach";
 
+#if defined(_WIN32)
+constexpr auto rocprofiler_register_lib_name = "rocprofiler-register.dll";
+#else
 constexpr auto rocprofiler_register_lib_name =
     "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
+#endif
 
 enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
 {
@@ -339,8 +413,14 @@ rocp_reg_scan_for_tools()
         common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD",
                         !_rocp_reg_lib.empty() || !_rocp_tool_libs.empty());
 
+#if defined(_WIN32)
+    // On Windows, rocprofiler_configure is not a weak symbol, so we only check
+    // the dlsym result and environment variables
+    bool _found_tool = (_configure_func != nullptr || _force_tool);
+#else
     bool _found_tool =
         (rocprofiler_configure != nullptr || _configure_func != nullptr || _force_tool);
+#endif
 
     static void*                       rocprofiler_lib_handle    = nullptr;
     static rocprofiler_set_api_table_t rocprofiler_lib_config_fn = nullptr;
@@ -394,7 +474,7 @@ get_library_handle(std::string_view _rocp_reg_lib)
             : (fs::path{ get_this_library_path() } / _rocp_reg_lib_path);
 
     // check to see if the rocprofiler library is already loaded
-    rocprofiler_lib_handle = dlopen(_rocp_reg_lib_path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+    rocprofiler_lib_handle = dlopen(_rocp_reg_lib_path.string().c_str(), RTLD_NOLOAD | RTLD_LAZY);
 
     if(rocprofiler_lib_handle)
     {
@@ -407,7 +487,7 @@ get_library_handle(std::string_view _rocp_reg_lib)
     if(!rocprofiler_lib_handle)
     {
         rocprofiler_lib_handle =
-            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+            dlopen(_rocp_reg_lib_path.string().c_str(), RTLD_GLOBAL | RTLD_LAZY);
 
         if(rocprofiler_lib_handle)
         {
@@ -423,7 +503,7 @@ get_library_handle(std::string_view _rocp_reg_lib)
     {
         _rocp_reg_lib_path = _rocp_reg_lib_path_abs;
         rocprofiler_lib_handle =
-            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+            dlopen(_rocp_reg_lib_path.string().c_str(), RTLD_GLOBAL | RTLD_LAZY);
     }
 
     // try to load with the basename path
@@ -431,7 +511,7 @@ get_library_handle(std::string_view _rocp_reg_lib)
     {
         _rocp_reg_lib_path = _rocp_reg_lib_path_fname;
         rocprofiler_lib_handle =
-            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+            dlopen(_rocp_reg_lib_path.string().c_str(), RTLD_GLOBAL | RTLD_LAZY);
     }
 
     LOG(INFO) << "loaded " << _rocp_reg_lib << " library at "
@@ -452,6 +532,8 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
     rocprofiler_attach_func_t   rocprofiler_lib_attach_fn = nullptr;
     rocprofiler_detach_func_t   rocprofiler_lib_detach_fn = nullptr;
 
+#if !defined(_WIN32)
+    // On Linux, check if symbols were provided via LD_PRELOAD using weak symbols
     if(rocprofiler_set_api_table)
     {
         rocprofiler_lib_config_fn = &rocprofiler_set_api_table;
@@ -465,6 +547,7 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
                                rocprofiler_lib_config_fn,
                                rocprofiler_lib_attach_fn,
                                rocprofiler_lib_detach_fn);
+#endif
 
     // look to see if entrypoint function is already a symbol
     *(void**) (&rocprofiler_lib_config_fn) =
@@ -904,12 +987,11 @@ rocprofiler_register_iterate_registration_info(
     {
         if(itr)
         {
-            auto _info = rocprofiler_register_registration_info_t{
-                .size             = sizeof(rocprofiler_register_registration_info_t),
-                .common_name      = itr->common_name,
-                .lib_version      = itr->lib_version,
-                .api_table_length = itr->api_tables.size()
-            };
+            auto _info = rocprofiler_register_registration_info_t{};
+            _info.size             = sizeof(rocprofiler_register_registration_info_t);
+            _info.common_name      = itr->common_name;
+            _info.lib_version      = itr->lib_version;
+            _info.api_table_length = itr->api_tables.size();
             // invoke callback and break if the caller does not return zero
             if(callback(&_info, data) != ROCP_REG_SUCCESS) break;
         }
@@ -920,8 +1002,8 @@ rocprofiler_register_iterate_registration_info(
 
 //
 //  This function can be invoked by ptrace
-rocprofiler_register_error_code_t
-rocprofiler_register_invoke_nonpropagated_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
+ROCPROFILER_REGISTER_PUBLIC_API rocprofiler_register_error_code_t
+rocprofiler_register_invoke_nonpropagated_registrations();
 
 rocprofiler_register_error_code_t
 rocprofiler_register_invoke_nonpropagated_registrations()
@@ -931,12 +1013,12 @@ rocprofiler_register_invoke_nonpropagated_registrations()
 
 //
 //  This function can be invoked by ptrace
-rocprofiler_register_error_code_t
-rocprofiler_register_invoke_all_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
+ROCPROFILER_REGISTER_PUBLIC_API rocprofiler_register_error_code_t
+rocprofiler_register_invoke_all_registrations();
 
 // This function can be invoked by ptrace
-rocprofiler_register_error_code_t
-rocprofiler_register_invoke_prestore_loads() ROCPROFILER_REGISTER_PUBLIC_API;
+ROCPROFILER_REGISTER_PUBLIC_API rocprofiler_register_error_code_t
+rocprofiler_register_invoke_prestore_loads();
 
 rocprofiler_register_error_code_t
 rocprofiler_register_invoke_all_registrations()
@@ -944,12 +1026,12 @@ rocprofiler_register_invoke_all_registrations()
     return rocp_invoke_registrations(true);
 }
 
-rocprofiler_register_error_code_t
+ROCPROFILER_REGISTER_PUBLIC_API rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer,
-                            const char* tool_lib_path) ROCPROFILER_REGISTER_PUBLIC_API;
+                            const char* tool_lib_path);
 
-rocprofiler_register_error_code_t
-rocprofiler_register_detach() ROCPROFILER_REGISTER_PUBLIC_API;
+ROCPROFILER_REGISTER_PUBLIC_API rocprofiler_register_error_code_t
+rocprofiler_register_detach();
 
 //
 //  This function can be invoked by ptrace

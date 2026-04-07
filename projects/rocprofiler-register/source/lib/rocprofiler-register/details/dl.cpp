@@ -20,7 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#if !defined(_WIN32)
 #define GNU_SOURCE 1
+#endif
 
 #include "dl.hpp"
 #include "filesystem.hpp"
@@ -31,12 +33,14 @@
 #include <string>
 #include <string_view>
 
-#include <dlfcn.h>
-#include <elf.h>
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#    include <elf.h>
+#    include <link.h>
+#    include <sys/types.h>
+#    include <unistd.h>
+#endif
 #include <fmt/core.h>
-#include <link.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 namespace rocprofiler_register
 {
@@ -44,12 +48,51 @@ namespace binary
 {
 namespace
 {
+#if defined(_WIN32)
+const open_modes_vec_t default_link_open_modes = { 0 };
+#else
 const open_modes_vec_t default_link_open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
+#endif
 }  // namespace
 
 std::vector<segment_address_ranges>
 get_segment_addresses(pid_t _pid)
 {
+#if defined(_WIN32)
+    // Windows implementation using EnumProcessModules
+    auto _data = std::vector<segment_address_ranges>{};
+    HMODULE modules[1024];
+    DWORD needed;
+    HANDLE hProcess = (_pid == GetCurrentProcessId()) ? GetCurrentProcess() : OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, _pid);
+
+    if (hProcess && EnumProcessModules(hProcess, modules, sizeof(modules), &needed))
+    {
+        DWORD numModules = needed / sizeof(HMODULE);
+        for (DWORD i = 0; i < numModules; i++)
+        {
+            char szModName[MAX_PATH];
+            if (GetModuleFileNameExA(hProcess, modules[i], szModName, sizeof(szModName)))
+            {
+                MODULEINFO modInfo;
+                if (GetModuleInformation(hProcess, modules[i], &modInfo, sizeof(modInfo)))
+                {
+                    segment_address_ranges entry;
+                    entry.filepath = szModName;
+                    address_range range;
+                    range.start = reinterpret_cast<uintptr_t>(modInfo.lpBaseOfDll);
+                    range.last = range.start + modInfo.SizeOfImage - 1;
+                    entry.ranges.push_back(range);
+                    _data.push_back(entry);
+                }
+            }
+        }
+    }
+
+    if (hProcess && _pid != GetCurrentProcessId())
+        CloseHandle(hProcess);
+
+    return _data;
+#else
     auto _data  = std::vector<segment_address_ranges>{};
     auto _fname = fmt::format("/{}/{}/{}", "proc", _pid, "maps");
     auto ifs    = std::ifstream{ _fname };
@@ -87,6 +130,7 @@ get_segment_addresses(pid_t _pid)
         }
     }
     return _data;
+#endif
 }
 
 std::optional<std::string>
@@ -94,6 +138,39 @@ get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
 {
     if(_name.empty()) return fs::current_path().string();
 
+#if defined(_WIN32)
+    (void)_open_modes; // unused on Windows
+
+    // Try to get module handle (checks if already loaded)
+    HMODULE _handle = GetModuleHandleA(_name.data());
+
+    if(_handle)
+    {
+        char szModName[MAX_PATH];
+        if(GetModuleFileNameA(_handle, szModName, sizeof(szModName)))
+        {
+            return fs::absolute(fs::path{ szModName }).string();
+        }
+    }
+    else
+    {
+        // Try to load the module
+        _handle = LoadLibraryA(_name.data());
+        if(_handle)
+        {
+            char szModName[MAX_PATH];
+            if(GetModuleFileNameA(_handle, szModName, sizeof(szModName)))
+            {
+                auto result = fs::absolute(fs::path{ szModName }).string();
+                FreeLibrary(_handle);
+                return result;
+            }
+            FreeLibrary(_handle);
+        }
+    }
+
+    return std::nullopt;
+#else
     if(_open_modes.empty()) _open_modes = default_link_open_modes;
 
     void* _handle = nullptr;
@@ -117,6 +194,7 @@ get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
     }
 
     return std::nullopt;
+#endif
 }
 }  // namespace binary
 }  // namespace rocprofiler_register

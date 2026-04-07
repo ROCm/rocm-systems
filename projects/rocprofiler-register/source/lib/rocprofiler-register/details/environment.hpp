@@ -23,7 +23,9 @@
 #include <fmt/core.h>
 #include <glog/logging.h>
 
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <unistd.h>
+#endif
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,6 +40,19 @@ namespace common
 {
 namespace
 {
+#if defined(_WIN32)
+inline int setenv(const char* name, const char* value, int overwrite)
+{
+    if(!overwrite)
+    {
+        size_t envsize = 0;
+        errno_t err = getenv_s(&envsize, nullptr, 0, name);
+        if(err || envsize) return 0;
+    }
+    return _putenv_s(name, value);
+}
+#endif
+
 inline std::string
 get_env_impl(std::string_view env_id, std::string_view _default)
 {
@@ -110,7 +125,7 @@ get_env_impl(std::string_view env_id, bool _default)
 inline int
 set_env_impl(std::string_view env_id, bool value, int overwrite)
 {
-    return ::setenv(env_id.data(), (value) ? "1" : "0", overwrite);
+    return setenv(env_id.data(), (value) ? "1" : "0", overwrite);
 }
 
 template <typename Tp>
@@ -119,7 +134,7 @@ set_env_impl(std::string_view env_id, Tp value, int overwrite)
 {
     auto str_value = std::stringstream{};
     str_value << value;
-    return ::setenv(env_id.data(), str_value.str().c_str(), overwrite);
+    return setenv(env_id.data(), str_value.str().c_str(), overwrite);
 }
 }  // namespace
 

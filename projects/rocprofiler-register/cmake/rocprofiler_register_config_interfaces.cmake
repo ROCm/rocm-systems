@@ -55,13 +55,17 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_library(stdcxxfs_LIBRARY NAMES stdc++fs)
-find_package_handle_standard_args(stdcxxfs-library REQUIRED_VARS stdcxxfs_LIBRARY)
+if(NOT WIN32)
+    find_library(stdcxxfs_LIBRARY NAMES stdc++fs)
+    find_package_handle_standard_args(stdcxxfs-library REQUIRED_VARS stdcxxfs_LIBRARY)
 
-if(stdcxxfs_LIBRARY)
-    target_link_libraries(rocprofiler-register-stdcxxfs
-                          INTERFACE $<BUILD_INTERFACE:${stdcxxfs_LIBRARY}>)
+    if(stdcxxfs_LIBRARY)
+        target_link_libraries(rocprofiler-register-stdcxxfs
+                              INTERFACE $<BUILD_INTERFACE:${stdcxxfs_LIBRARY}>)
+    else()
+        target_link_libraries(rocprofiler-register-stdcxxfs
+                              INTERFACE $<BUILD_INTERFACE:stdc++fs>)
+    endif()
 else()
-    target_link_libraries(rocprofiler-register-stdcxxfs
-                          INTERFACE $<BUILD_INTERFACE:stdc++fs>)
+    # On Windows with MSVC, filesystem is part of the standard library
 endif()

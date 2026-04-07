@@ -556,3 +556,22 @@ set_tests_properties(
         "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};LD_PRELOAD=librocprofiler-register.so;ROCPROFILER_REGISTER_LIBRARY=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/librocprofiler-sdk.so.0;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         LABELS
         "dlopen;secure")
+
+# Windows-specific test
+if(WIN32)
+    add_executable(test-windows-hip test-windows-hip.cpp)
+    target_link_libraries(test-windows-hip PRIVATE rocprofiler-register::rocprofiler-register)
+
+    add_test(
+        NAME test-windows-hip
+        COMMAND $<TARGET_FILE:test-windows-hip>
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+    set_tests_properties(
+        test-windows-hip
+        PROPERTIES
+            LABELS "windows;hip;smoke-test")
+
+    # Install the test executable
+    install(TARGETS test-windows-hip DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()

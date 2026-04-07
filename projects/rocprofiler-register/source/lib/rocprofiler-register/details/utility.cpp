@@ -25,8 +25,10 @@
 #include <string>
 #include <string_view>
 
-#include <sys/types.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <sys/types.h>
+#    include <unistd.h>
+#endif
 
 namespace rocprofiler_register
 {

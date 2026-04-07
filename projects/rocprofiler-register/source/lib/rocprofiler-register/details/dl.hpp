@@ -28,9 +28,15 @@
 #include <string_view>
 #include <vector>
 
-#include <dlfcn.h>
-#include <sys/types.h>
-#include <unistd.h>
+#if defined(_WIN32)
+#    include <windows.h>
+#    include <psapi.h>
+     using pid_t = DWORD;
+#else
+#    include <dlfcn.h>
+#    include <sys/types.h>
+#    include <unistd.h>
+#endif
 
 namespace rocprofiler_register
 {
@@ -51,7 +57,11 @@ struct segment_address_ranges
 };
 
 std::vector<segment_address_ranges>
+#if defined(_WIN32)
+get_segment_addresses(pid_t _pid = GetCurrentProcessId());
+#else
 get_segment_addresses(pid_t _pid = getpid());
+#endif
 
 // helper function for translating generic lib name to resolved path
 std::optional<std::string>
