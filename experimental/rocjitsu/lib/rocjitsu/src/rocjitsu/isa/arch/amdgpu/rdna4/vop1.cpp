@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -22,7 +23,12 @@ VNopVop1::VNopVop1(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void VNopVop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VNopVop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
     : Vop1("v_mov_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -37,9 +43,20 @@ VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VMovB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -61,9 +78,20 @@ VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VReadfirstlaneB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   uint32_t val = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -88,9 +116,20 @@ VCvtI32F64Vop1::VCvtI32F64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtI32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -122,9 +161,20 @@ VCvtF64I32Vop1::VCvtF64I32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF64I32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -147,9 +197,20 @@ VCvtF32I32Vop1::VCvtF32I32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32I32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -172,9 +233,20 @@ VCvtF32U32Vop1::VCvtF32U32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -197,9 +269,20 @@ VCvtU32F32Vop1::VCvtU32F32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtU32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -229,9 +312,20 @@ VCvtI32F32Vop1::VCvtI32F32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -263,9 +357,20 @@ VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF16F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -288,9 +393,20 @@ VCvtF32F16Vop1::VCvtF32F16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -314,9 +430,20 @@ VCvtNearestI32F32Vop1::VCvtNearestI32F32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtNearestI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -348,9 +475,20 @@ VCvtFloorI32F32Vop1::VCvtFloorI32F32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtFloorI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -382,9 +520,22 @@ VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VCvtOffF32I4Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtOffF32I4Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VCvtF32F64Vop1::VCvtF32F64Vop1(const MachineInst *inst)
     : Vop1("v_cvt_f32_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -399,9 +550,20 @@ VCvtF32F64Vop1::VCvtF32F64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -424,9 +586,20 @@ VCvtF64F32Vop1::VCvtF64F32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF64F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -449,9 +622,20 @@ VCvtF32Ubyte0Vop1::VCvtF32Ubyte0Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32Ubyte0Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -474,9 +658,20 @@ VCvtF32Ubyte1Vop1::VCvtF32Ubyte1Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32Ubyte1Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -499,9 +694,20 @@ VCvtF32Ubyte2Vop1::VCvtF32Ubyte2Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32Ubyte2Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -524,9 +730,20 @@ VCvtF32Ubyte3Vop1::VCvtF32Ubyte3Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32Ubyte3Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -549,9 +766,20 @@ VCvtU32F64Vop1::VCvtU32F64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtU32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -581,9 +809,20 @@ VCvtF64U32Vop1::VCvtF64U32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF64U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -606,9 +845,20 @@ VTruncF64Vop1::VTruncF64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VTruncF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -631,9 +881,20 @@ VCeilF64Vop1::VCeilF64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCeilF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -656,9 +917,20 @@ VRndneF64Vop1::VRndneF64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRndneF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -681,9 +953,20 @@ VFloorF64Vop1::VFloorF64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFloorF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -700,7 +983,12 @@ VPipeflushVop1::VPipeflushVop1(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void VPipeflushVop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VPipeflushVop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VMovB16Vop1::VMovB16Vop1(const MachineInst *inst)
     : Vop1("v_mov_b16_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -715,9 +1003,20 @@ VMovB16Vop1::VMovB16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VMovB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -739,9 +1038,20 @@ VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFractF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -764,9 +1074,20 @@ VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VTruncF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -789,9 +1110,20 @@ VCeilF32Vop1::VCeilF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCeilF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -814,9 +1146,20 @@ VRndneF32Vop1::VRndneF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRndneF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -839,9 +1182,20 @@ VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFloorF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -864,9 +1218,20 @@ VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VExpF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -889,9 +1254,20 @@ VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VLogF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -914,9 +1290,20 @@ VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRcpF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -939,9 +1326,20 @@ VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRcpIflagF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -964,9 +1362,20 @@ VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRsqF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -989,9 +1398,20 @@ VRcpF64Vop1::VRcpF64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRcpF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1014,9 +1434,20 @@ VRsqF64Vop1::VRsqF64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRsqF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1039,9 +1470,20 @@ VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VSqrtF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1064,9 +1506,20 @@ VSqrtF64Vop1::VSqrtF64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VSqrtF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1089,9 +1542,20 @@ VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VSinF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1114,9 +1578,20 @@ VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCosF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1139,9 +1614,20 @@ VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VNotB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1164,9 +1650,20 @@ VBfrevB32Vop1::VBfrevB32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VBfrevB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1192,9 +1689,20 @@ VClzI32U32Vop1::VClzI32U32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VClzI32U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1218,9 +1726,20 @@ VCtzI32B32Vop1::VCtzI32B32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCtzI32B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1244,9 +1763,20 @@ VClsI32Vop1::VClsI32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VClsI32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1273,9 +1803,20 @@ VFrexpExpI32F64Vop1::VFrexpExpI32F64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFrexpExpI32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1301,9 +1842,20 @@ VFrexpMantF64Vop1::VFrexpMantF64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFrexpMantF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1328,9 +1880,20 @@ VFractF64Vop1::VFractF64Vop1(const MachineInst *inst)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFractF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1353,9 +1916,20 @@ VFrexpExpI32F32Vop1::VFrexpExpI32F32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFrexpExpI32F32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1381,9 +1955,20 @@ VFrexpMantF32Vop1::VFrexpMantF32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFrexpMantF32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1408,9 +1993,22 @@ VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VMovreldB32Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VMovreldB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
     : Vop1("v_movrels_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1425,9 +2023,22 @@ VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VMovrelsB32Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VMovrelsB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
     : Vop1("v_movrelsd_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1442,9 +2053,22 @@ VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VMovrelsdB32Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VMovrelsdB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
     : Vop1("v_movrelsd_2_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1459,6 +2083,14 @@ VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VMovrelsd2B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1479,9 +2111,20 @@ VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF16U16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1504,9 +2147,20 @@ VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF16I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1529,9 +2183,20 @@ VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1561,9 +2226,20 @@ VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1595,9 +2271,20 @@ VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRcpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1620,9 +2307,20 @@ VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VSqrtF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1645,9 +2343,20 @@ VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRsqF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1670,9 +2379,20 @@ VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VLogF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1695,9 +2415,20 @@ VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VExpF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1720,9 +2451,20 @@ VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFrexpMantF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1747,9 +2489,20 @@ VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFrexpExpI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1775,9 +2528,20 @@ VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFloorF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1800,9 +2564,20 @@ VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCeilF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1825,9 +2600,20 @@ VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VTruncF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1850,9 +2636,20 @@ VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VRndneF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1875,9 +2672,20 @@ VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VFractF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1900,9 +2708,20 @@ VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VSinF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1925,9 +2744,20 @@ VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCosF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1950,9 +2780,22 @@ VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VSatPkU8I16Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VSatPkU8I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_norm_i16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1967,9 +2810,22 @@ VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VCvtNormI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtNormI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
     : Vop1("v_cvt_norm_u16_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1984,9 +2840,22 @@ VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VCvtNormU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtNormU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
     : Vop1("v_swap_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2003,9 +2872,20 @@ VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VSwapB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2031,9 +2911,20 @@ VSwapB16Vop1::VSwapB16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VSwapB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2057,9 +2948,22 @@ VPermlane64B32Vop1::VPermlane64B32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VPermlane64B32Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VPermlane64B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
     : Vop1("v_swaprel_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2076,6 +2980,14 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VSwaprelB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -2096,9 +3008,20 @@ VNotB16Vop1::VNotB16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VNotB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2121,9 +3044,20 @@ VCvtI32I16Vop1::VCvtI32I16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtI32I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2147,9 +3081,20 @@ VCvtU32U16Vop1::VCvtU32U16Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtU32U16Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2172,9 +3117,20 @@ VCvtF32Fp8Vop1::VCvtF32Fp8Vop1(const MachineInst *inst)
     src0 = Operand(
         8, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(8, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2197,9 +3153,20 @@ VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
     src0 = Operand(
         8, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(8, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
 void VCvtF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2222,9 +3189,22 @@ VCvtPkF32Fp8Vop1::VCvtPkF32Fp8Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VCvtPkF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtPkF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 VCvtPkF32Bf8Vop1::VCvtPkF32Bf8Vop1(const MachineInst *inst)
     : Vop1("v_cvt_pk_f32_bf8_e32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2239,9 +3219,22 @@ VCvtPkF32Bf8Vop1::VCvtPkF32Bf8Vop1(const MachineInst *inst)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 250) {
+    auto *dp = reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+  }
 }
 
-void VCvtPkF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VCvtPkF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  (void)wf;
+}
 
 } // namespace rdna4
 } // namespace rocjitsu

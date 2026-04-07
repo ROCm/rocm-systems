@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mfma_exec.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -151,6 +152,153 @@ INSTANTIATE_TEST_SUITE_P(AllIsas, CuFactoryTest,
                                            ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
                                            ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
                                            ROCJITSU_CODE_ARCH_RDNA4));
+
+// ---------------------------------------------------------------------------
+// DPP permutation tests
+// ---------------------------------------------------------------------------
+
+TEST(DppPermuteTest, QuadPerm) {
+  using namespace amdgpu::dpp;
+  // quad_perm(1,0,3,2) = swap pairs within each quad
+  // Encoding: lane0->1, lane1->0, lane2->3, lane3->2
+  // = (1 << 0) | (0 << 2) | (3 << 4) | (2 << 6) = 0xB1
+  bool oob = false;
+  EXPECT_EQ(dpp_permute(0xB1, 0, 64, oob), 1);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(0xB1, 1, 64, oob), 0);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(0xB1, 2, 64, oob), 3);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(0xB1, 3, 64, oob), 2);
+  EXPECT_FALSE(oob);
+  // Quad boundary: lane 4 starts a new quad, same permutation.
+  EXPECT_EQ(dpp_permute(0xB1, 4, 64, oob), 5);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(0xB1, 5, 64, oob), 4);
+  EXPECT_FALSE(oob);
+}
+
+TEST(DppPermuteTest, RowShr1) {
+  using namespace amdgpu::dpp;
+  bool oob = false;
+  // row_shr 1 = 0x111: data shifts right, so lane K reads from lane K-1.
+  EXPECT_EQ(dpp_permute(0x111, 1, 64, oob), 0);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(0x111, 15, 64, oob), 14);
+  EXPECT_FALSE(oob);
+  // Lane 0 (first in row) goes OOB (no lane -1).
+  oob = false;
+  dpp_permute(0x111, 0, 64, oob);
+  EXPECT_TRUE(oob);
+}
+
+TEST(DppPermuteTest, RowShl1) {
+  using namespace amdgpu::dpp;
+  bool oob = false;
+  // row_shl 1 = 0x101: data shifts left, so lane K reads from lane K+1.
+  EXPECT_EQ(dpp_permute(0x101, 0, 64, oob), 1);
+  EXPECT_FALSE(oob);
+  EXPECT_EQ(dpp_permute(0x101, 14, 64, oob), 15);
+  EXPECT_FALSE(oob);
+  // Lane 15 (last in row) goes OOB (no lane 16 in this row).
+  oob = false;
+  dpp_permute(0x101, 15, 64, oob);
+  EXPECT_TRUE(oob);
+}
+
+TEST(DppPermuteTest, RowMirror) {
+  using namespace amdgpu::dpp;
+  bool oob = false;
+  // row_mirror = 0x140: reverse lane order within a row.
+  EXPECT_EQ(dpp_permute(0x140, 0, 64, oob), 15);
+  EXPECT_EQ(dpp_permute(0x140, 15, 64, oob), 0);
+  EXPECT_EQ(dpp_permute(0x140, 7, 64, oob), 8);
+  // Second row.
+  EXPECT_EQ(dpp_permute(0x140, 16, 64, oob), 31);
+}
+
+TEST(DppPermuteTest, RowXmask) {
+  using namespace amdgpu::dpp;
+  bool oob = false;
+  // row_xmask with mask=1 = 0x151: XOR lane offset with 1 (swap adjacent pairs).
+  EXPECT_EQ(dpp_permute(0x151, 0, 64, oob), 1);
+  EXPECT_EQ(dpp_permute(0x151, 1, 64, oob), 0);
+  EXPECT_EQ(dpp_permute(0x151, 2, 64, oob), 3);
+  EXPECT_EQ(dpp_permute(0x151, 3, 64, oob), 2);
+}
+
+TEST(DppPermuteTest, DppRead) {
+  using namespace amdgpu::dpp;
+  // Set up 64 source values: src[i] = i * 10.
+  uint32_t src[64];
+  for (int i = 0; i < 64; ++i)
+    src[i] = i * 10;
+
+  // row_shr 1: lane 1 reads from lane 0.
+  uint32_t val = dpp_read(src, 1, 64, 0x111, 0xF, 0xF, 1, 999);
+  EXPECT_EQ(val, 0u); // src[0] = 0
+
+  // Lane 5 reads from lane 4 (src[4] = 40).
+  val = dpp_read(src, 5, 64, 0x111, 0xF, 0xF, 1, 999);
+  EXPECT_EQ(val, 40u);
+
+  // Lane 0 goes OOB, bound_ctrl=1 -> returns 0.
+  val = dpp_read(src, 0, 64, 0x111, 0xF, 0xF, 1, 999);
+  EXPECT_EQ(val, 0u);
+
+  // Lane 0 goes OOB, bound_ctrl=0 -> returns old_val.
+  val = dpp_read(src, 0, 64, 0x111, 0xF, 0xF, 0, 999);
+  EXPECT_EQ(val, 999u);
+
+  // Row mask disables row 0 (bits [3:0], row0 = lanes 0-15).
+  val = dpp_read(src, 5, 64, 0x111, 0xE, 0xF, 1, 999);
+  EXPECT_EQ(val, 999u); // row 0 masked -> old_val
+
+  // Bank mask disables bank 1 (lanes 4-7 within each row).
+  val = dpp_read(src, 5, 64, 0x111, 0xF, 0xD, 1, 999);
+  EXPECT_EQ(val, 999u); // bank 1 disabled -> old_val
+
+  // Unmasked lane in row 1: lane 17 reads from lane 16.
+  val = dpp_read(src, 17, 64, 0x111, 0xF, 0xF, 1, 999);
+  EXPECT_EQ(val, 160u); // src[16] = 160
+}
+
+// ---------------------------------------------------------------------------
+// SDWA tests
+// ---------------------------------------------------------------------------
+
+TEST(SdwaTest, SrcSelect) {
+  using namespace amdgpu::sdwa;
+  uint32_t val = 0xDEADBEEF;
+
+  EXPECT_EQ(sdwa_src_select(val, BYTE_0, false), 0xEFu);
+  EXPECT_EQ(sdwa_src_select(val, BYTE_1, false), 0xBEu);
+  EXPECT_EQ(sdwa_src_select(val, BYTE_2, false), 0xADu);
+  EXPECT_EQ(sdwa_src_select(val, BYTE_3, false), 0xDEu);
+  EXPECT_EQ(sdwa_src_select(val, WORD_0, false), 0xBEEFu);
+  EXPECT_EQ(sdwa_src_select(val, WORD_1, false), 0xDEADu);
+  EXPECT_EQ(sdwa_src_select(val, DWORD, false), val);
+
+  // Sign extension.
+  EXPECT_EQ(sdwa_src_select(0x00000080, BYTE_0, true), 0xFFFFFF80u);
+  EXPECT_EQ(sdwa_src_select(0x00000080, BYTE_0, false), 0x80u);
+  EXPECT_EQ(sdwa_src_select(0x00008000, WORD_0, true), 0xFFFF8000u);
+}
+
+TEST(SdwaTest, DstMerge) {
+  using namespace amdgpu::sdwa;
+  // Write result byte 0x42 into BYTE_1, zero-pad rest.
+  uint32_t merged = sdwa_dst_merge(0x42, 0xAAAAAAAA, BYTE_1, UNUSED_PAD);
+  EXPECT_EQ(merged, 0x00004200u);
+
+  // Preserve unused bytes.
+  merged = sdwa_dst_merge(0x42, 0xAABBCCDD, BYTE_1, UNUSED_PRESERVE);
+  EXPECT_EQ(merged, 0xAABB42DDu);
+
+  // Full dword: just return result.
+  merged = sdwa_dst_merge(0x12345678, 0xAAAAAAAA, DWORD, UNUSED_PAD);
+  EXPECT_EQ(merged, 0x12345678u);
+}
 
 // ---------------------------------------------------------------------------
 // Scratch address calculation tests

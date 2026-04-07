@@ -384,8 +384,6 @@ class CodeGenerator:
                     ],
                 ),
             ]
-            private_members = [cgen.Line('private:')]
-
             # Determine whether the constructor needs a runtime size
             # check for an extension DWORD beyond the base encoding.
             #
@@ -523,7 +521,7 @@ class CodeGenerator:
                             [cgen.Statement(f'return {enc_cond[1]}')]
                         ),
                     )
-                    private_members.append(func_decl)
+                    public_members.append(func_decl)
                     class_func_impls.append(func_body)
 
             if inst_enc.has_implied_literal_ops:
@@ -546,7 +544,7 @@ class CodeGenerator:
                         [cgen.Statement(f'return {implied_literal_cond}')]
                     ),
                 )
-                private_members.append(func_decl)
+                public_members.append(func_decl)
                 class_func_impls.append(func_body)
 
             class_members.extend(public_members)
@@ -555,21 +553,24 @@ class CodeGenerator:
                     f'using OpEncoding = {inst_enc.fmt_enc_name}MachineInst'
                 )
             )
-            # inst_ is public so shared execute templates can access
-            # encoding fields through the instruction reference.
-            protected_members = [cgen.Line('public:')]
-            protected_members.append(
+            class_members.append(
                 cgen.Statement(
                     '[[maybe_unused]] const OpEncoding inst_'
                 )
             )
             # FLAT encoding bases need an owned string for the dynamic mnemonic.
             if rule.use_flat_mnemonic:
-                protected_members.append(
+                class_members.append(
                     cgen.Statement('std::string owned_mnemonic_')
                 )
-            class_members.extend(protected_members)
-            class_members.extend(private_members)
+            # VOP1/VOP2 encoding bases store DPP control fields.
+            # apply_dpp() is a free function in dpp_sdwa_ops.h.
+            if inst_enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
+                class_members.append(cgen.Statement('uint32_t dpp_ctrl_ = 0'))
+                class_members.append(cgen.Statement('uint32_t dpp_row_mask_ = 0xF'))
+                class_members.append(cgen.Statement('uint32_t dpp_bank_mask_ = 0xF'))
+                class_members.append(cgen.Statement('uint32_t dpp_bound_ctrl_ = 0'))
+                class_members.append(cgen.Statement('std::unique_ptr<DppOperand> dpp_src0_'))
             s = cgen.Struct(
                 f'{inst_enc.fmt_enc_name} : public IsaInstruction<Isa>',
                 [x for x in class_members],
@@ -617,17 +618,18 @@ class CodeGenerator:
             )
             class_func_impls.insert(0, flat_mnemonic_helper)
 
+        _enc_cpp_includes = [
+            (
+                f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/encodings.h',
+                False,
+            ),
+            ('string', True),
+        ]
         class_impl_file = CppFile(
             'encodings',
             self.out_path,
             False,
-            [
-                (
-                    f'rocjitsu/isa/arch/amdgpu/{self.isa_spec.arch_name}/encodings.h',
-                    False,
-                ),
-                ('string', True),
-            ],
+            _enc_cpp_includes,
             [],
             class_func_impls,
             self.isa_spec.arch_name,
@@ -4266,6 +4268,53 @@ class CodeGenerator:
                                     f'static_cast<int>(reinterpret_cast<const {_lit_struct}*>(inst)->simm32));'
                                 )
 
+                    # DPP fixup: when src0 == 250 (DPP marker), replace the
+                    # src0 operand with vsrc0 from the DPP extension dword.
+                    # This lets the instruction execute normally with the
+                    # correct VGPR source. Lane permutation is not yet
+                    # applied (identity permutation).
+                    # DPP/SDWA: src0 marker values 250 (DPP) and 249 (SDWA)
+                    # indicate the real VGPR index is in the extension dword.
+                    # CDNA uses VopDpp, RDNA uses VopDpp16 (both have vsrc0).
+                    _DPP_ENC_BASES = {'ENC_VOP1': 'Vop1', 'ENC_VOP2': 'Vop2'}
+                    _enc_base = _DPP_ENC_BASES.get(enc.enc_name.upper())
+                    if _enc_base:
+                        # CDNA (GFX9) uses VopDpp; RDNA (GFX10+) uses VopDpp16.
+                        _is_rdna = any(
+                            ie.enc_name.startswith('VOP1_VOP_DPP16')
+                            for ie in self.isa_spec.inst_encodings
+                        )
+                        _dpp_suffix = 'VopDpp16' if _is_rdna else 'VopDpp'
+                        _dpp_struct = f'{_enc_base}{_dpp_suffix}MachineInst'
+                        for opnd in inst.operands:
+                            if opnd.name == 'src0' and opnd.name in enc_field_names:
+                                # DPP (src0 == 250): read vsrc0 and DPP control
+                                # fields from the ISA-specific extension dword,
+                                # storing them on the Instruction base for
+                                # apply_dpp() to use later.
+                                ctor_body_parts.append(
+                                    f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 250) {{'
+                                    f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
+                                    f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, dp->vsrc0);'
+                                    f' dpp_ctrl_ = dp->dpp_ctrl;'
+                                    f' dpp_row_mask_ = dp->row_mask;'
+                                    f' dpp_bank_mask_ = dp->bank_mask;'
+                                    f' dpp_bound_ctrl_ = dp->bound_ctrl;'
+                                    f'}}'
+                                )
+                                # SDWA (src0 == 249): CDNA and RDNA1/2 only.
+                                _has_sdwa = any(
+                                    'SDWA' in ie.enc_name
+                                    for ie in self.isa_spec.inst_encodings
+                                )
+                                if _has_sdwa:
+                                    _sdwa_struct = f'{_enc_base}VopSdwaMachineInst'
+                                    ctor_body_parts.append(
+                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == 249) '
+                                        f'src0 = Operand({opnd.size}, OperandType::OPR_VGPR, '
+                                        f'reinterpret_cast<const {_sdwa_struct}*>(inst)->vsrc0);'
+                                    )
+
                     # Implied literal fixup: FMAMK/FMAAK always carry an
                     # inline 32-bit literal even when the ISA spec omits the
                     # simm32 operand. Add a simm32_ member to hold it.
@@ -4318,6 +4367,14 @@ class CodeGenerator:
                     )
                     if sem:
                         body = self._gen_execute_body(inst, sem, enc.enc_name)
+                        # VOP1/VOP2: prepend DPP preamble so the encoding
+                        # base's apply_dpp() runs before the ALU logic.
+                        _dpp_preamble = ''
+                        if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
+                            _dpp_preamble = ('  if (inst_.src0 == 250)\n'
+                                             '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
+                                             '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,\n'
+                                             '        dpp_src0_, wf);\n')
                         can_share = self._can_share_execute(inst.mnemonic)
                         if can_share:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
@@ -4325,6 +4382,7 @@ class CodeGenerator:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
+                                f'{_dpp_preamble}'
                                 f'  amdgpu::execute_{tmpl_name}(*this, wf);\n}}'
                             )
                             body_key = (inst.mnemonic, enc.enc_name)
@@ -4335,6 +4393,7 @@ class CodeGenerator:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
+                                f'{_dpp_preamble}'
                                 f'{body}\n}}'
                             )
                     else:
@@ -4404,6 +4463,11 @@ class CodeGenerator:
                         ('cmath', True),
                         ('limits', True),
                     ])
+                # VOP1/VOP2 need DPP header for apply_dpp() in execute_impl.
+                if enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2'):
+                    cpp_includes.append((
+                        'rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h', False
+                    ))
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
