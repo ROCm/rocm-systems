@@ -3292,6 +3292,9 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   amd::smi::MonitorTypes mon_type = amd::smi::kMonInvalid;
   uint16_t val_ui16;
   GET_DEV_FROM_INDX
+  // DEVICE_MUTEX moved before the HBM/gpuboard early-return paths so that
+  // all code paths — including the HBM temperature block — hold the lock.
+  // Previously the mutex was acquired after those blocks, leaving them unprotected.
   DEVICE_MUTEX
 
   // handle gpu board temp

@@ -40,6 +40,16 @@
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 
+// How long the mutex-holder process holds the device mutex (seconds).
+// The tester process uses trylock (RESRV_TEST1 mode) so all its API calls
+// return AMDSMI_STATUS_BUSY immediately — it completes well within kTesterWaitSeconds.
+// kHoldSeconds only needs to exceed kTesterWaitSeconds by a comfortable margin.
+// NOTE: minimum expected test runtime is ~kHoldSeconds.
+static constexpr uint32_t kHoldSeconds = 4;
+// How long the tester process waits after SetUp before making API calls,
+// giving the holder enough time to acquire the mutex first.
+static constexpr unsigned int kTesterWaitSeconds = 2;
+
 TestMutualExclusion::TestMutualExclusion() : TestBase() {
   set_title("Mutual Exclusion Test");
   set_description(
@@ -258,10 +268,13 @@ void TestMutualExclusion::Run(void) {
     sigaddset(&sigchld_mask, SIGCHLD);
     sigprocmask(SIG_BLOCK, &sigchld_mask, &old_mask);
 
+    // NOTE: minimum expected test runtime is ~kHoldSeconds;
+    // CI timeouts should account for this.
     IF_VERB(STANDARD) {
-      std::cout << "MUTEX_HOLDER process: started sleeping for 10 seconds..." << std::endl;
+      std::cout << "MUTEX_HOLDER process: started sleeping for " << kHoldSeconds << " seconds..."
+                << std::endl;
     }
-    ret = amdsmi_test_sleep(processor_handles_[0], 10);
+    ret = amdsmi_test_sleep(processor_handles_[0], kHoldSeconds);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
     IF_VERB(STANDARD) { std::cout << "MUTEX_HOLDER process: Sleep process woke up." << std::endl; }
 
@@ -276,8 +289,8 @@ void TestMutualExclusion::Run(void) {
     EXPECT_EQ(WEXITSTATUS(child_status), 0) << "TESTER child process reported CHECK_RET failure(s)";
   } else {
     // Both processes should have completed amdsmi_init().
-    // let the other process get started on rsmi_test_sleep().
-    sleep(2);
+    // Wait for the holder to acquire the mutex before making API calls.
+    sleep(kTesterWaitSeconds);
     TestBase::Run();
     IF_VERB(STANDARD) {
       std::cout << "TESTER process: verifying that all amdsmi_dev_* functions "
@@ -465,6 +478,7 @@ void TestMutualExclusion::Run(void) {
     ret = amdsmi_get_gpu_ecc_status(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+#undef CHECK_RET
 
     /* Other functions holding device mutexes. Listed for reference.
     amdsmi_dev_sku_get

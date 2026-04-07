@@ -41,6 +41,8 @@
 #include "rocm_smi/rocm_smi_utils.h"
 
 // How long the holder process holds the mutex (seconds).
+// NOTE: This test takes at least kHoldSeconds (~5s) to run by design — the
+// waiter must block for the full hold duration to prove cross-process serialization.
 static constexpr unsigned int kHoldSeconds = 5;
 // Minimum elapsed time (seconds) the waiter must observe to prove it blocked.
 // Set below kHoldSeconds to absorb scheduling jitter.
