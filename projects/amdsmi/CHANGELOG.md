@@ -1637,6 +1637,10 @@ $ amd-smi
       ...
       ```
 
+- **Modified the enum `AMDSMI_STATUS_MORE_DATA` in `amdsmi_status_t`**.  
+  - The `AMDSMI_STATUS_MORE_DATA` value changed from 57 to 39.
+  - Change was done to align all drivers on a common value.
+
 ### Removed
 
 - **Removed unnecessary API, `amdsmi_free_name_value_pairs(),` from amdsmi.h**.  
