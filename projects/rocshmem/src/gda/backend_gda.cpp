@@ -29,6 +29,7 @@
 #include <cassert>
 
 #include "backend_gda.hpp"
+#include "debug_gda.hpp"
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
 #include "gda_team.hpp"
