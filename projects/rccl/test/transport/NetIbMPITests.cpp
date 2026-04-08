@@ -779,6 +779,184 @@ TEST_F(NetIbMPITest, MultipleSequentialConnections) {
     }
 }
 
+TEST_F(NetIbMPITest, RapidConnectDisconnect) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    std::vector<ncclNetProperties_t> props(ndev);
+    std::vector<int> physDevs;
+    for (int i = 0; i < ndev; i++) {
+        memset(&props[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
+        if (!props[i].name || !strchr(props[i].name, '+'))
+            physDevs.push_back(i);
+    }
+    ASSERT_FALSE(physDevs.empty()) << "No physical devices found";
+
+    int mergedDev = CreateMergedDevice(3, rank);
+    if (mergedDev == -1) {
+        GTEST_SKIP() << "Failed to create merged device";
+    }
+
+
+    static constexpr int kIterations = 100;
+
+    struct RdmaResourceCounts {
+        int qp = -1;
+        int cq = -1;
+        int mr = -1;
+        int pd = -1;
+    };
+
+    auto execCommand = [](const char* cmd) -> std::string {
+        std::array<char, 256> buf{};
+        std::string out;
+
+        FILE* pipe = popen(cmd, "r");
+        if (!pipe) return out;
+
+        while (fgets(buf.data(), buf.size(), pipe) != nullptr)
+            out += buf.data();
+
+        pclose(pipe);
+        return out;
+    };
+
+    auto countNonEmptyLines = [](const std::string& text) -> int {
+        std::istringstream iss(text);
+        std::string line;
+        int count = 0;
+        while (std::getline(iss, line)) {
+            if (!line.empty()) count++;
+        }
+        return count;
+    };
+
+    auto readRdmaResourceCounts = [&]() -> RdmaResourceCounts {
+        RdmaResourceCounts counts;
+
+        std::string probe =
+            execCommand("sh -c 'rdma resource show qp >/dev/null 2>&1 && "
+                        "rdma resource show cq >/dev/null 2>&1 && "
+                        "rdma resource show mr >/dev/null 2>&1 && "
+                        "rdma resource show pd >/dev/null 2>&1 && echo OK'");
+        if (probe.find("OK") == std::string::npos) return counts;
+
+        std::string qpOut = execCommand("rdma resource show qp 2>/dev/null");
+        std::string cqOut = execCommand("rdma resource show cq 2>/dev/null");
+        std::string mrOut = execCommand("rdma resource show mr 2>/dev/null");
+        std::string pdOut = execCommand("rdma resource show pd 2>/dev/null");
+
+        if (qpOut.empty() || cqOut.empty() || mrOut.empty() || pdOut.empty()) return counts;
+
+        counts.qp = countNonEmptyLines(qpOut);
+        counts.cq = countNonEmptyLines(cqOut);
+        counts.mr = countNonEmptyLines(mrOut);
+        counts.pd = countNonEmptyLines(pdOut);
+
+        return counts;
+    };
+
+    auto countsAvailable = [](const RdmaResourceCounts& c) -> bool {
+        return c.qp >= 0 && c.cq >= 0 && c.mr >= 0 && c.pd >= 0;
+    };
+
+    RdmaResourceCounts before = readRdmaResourceCounts();
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    for (int iter = 0; iter < kIterations; iter++) {
+        void* listenComm = nullptr;
+        void* recvComm = nullptr;
+        void* sendComm = nullptr;
+        ncclNetHandle_t handle;
+        memset(&handle, 0, sizeof(handle));
+
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(mergedDev, &handle, &listenComm), ncclSuccess)
+                << "CreateListenComm failed at iteration " << iter;
+            ASSERT_NE(listenComm, nullptr)
+                << "listenComm is NULL at iteration " << iter;
+
+            MPI_Send(&handle, sizeof(ncclNetHandle_t), MPI_BYTE,
+                     peerRank, 7000 + iter, MPI_COMM_WORLD);
+        } else {
+            MPI_Recv(&handle, sizeof(ncclNetHandle_t), MPI_BYTE,
+                     peerRank, 7000 + iter, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == 0) {
+            int attempts = 0;
+            while (!recvComm && attempts < kMaxRetryAttempts) {
+                ASSERT_EQ(AcceptConnection(listenComm, &recvComm), ncclSuccess)
+                    << "AcceptConnection failed at iteration " << iter;
+                if (!recvComm) usleep(kPollIntervalUs);
+                attempts++;
+            }
+            ASSERT_NE(recvComm, nullptr)
+                << "AcceptConnection did not complete at iteration " << iter;
+        } else {
+            int attempts = 0;
+            while (!sendComm && attempts < kMaxRetryAttempts) {
+                ASSERT_EQ(ConnectToRemote(mergedDev, &handle, &sendComm), ncclSuccess)
+                    << "ConnectToRemote failed at iteration " << iter;
+                if (!sendComm) usleep(kPollIntervalUs);
+                attempts++;
+            }
+            ASSERT_NE(sendComm, nullptr)
+                << "ConnectToRemote did not complete at iteration " << iter;
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == 0) {
+            ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess)
+                << "CloseRecvComm failed at iteration " << iter;
+            ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess)
+                << "CloseListenComm failed at iteration " << iter;
+        } else {
+            ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess)
+                << "CloseSendComm failed at iteration " << iter;
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    RdmaResourceCounts after = readRdmaResourceCounts();
+
+    if (countsAvailable(before) && countsAvailable(after)) {
+        EXPECT_EQ(after.qp, before.qp)
+            << "QP leak detected on rank " << rank
+            << ": before=" << before.qp << " after=" << after.qp;
+        EXPECT_EQ(after.cq, before.cq)
+            << "CQ leak detected on rank " << rank
+            << ": before=" << before.cq << " after=" << after.cq;
+        EXPECT_EQ(after.mr, before.mr)
+            << "MR leak detected on rank " << rank
+            << ": before=" << before.mr << " after=" << after.mr;
+        EXPECT_EQ(after.pd, before.pd)
+            << "PD leak detected on rank " << rank
+            << ": before=" << before.pd << " after=" << after.pd;
+    } else {
+        GTEST_SKIP() << "RDMA resource counters unavailable; rapid connect/disconnect "
+                     << "behavior was tested, but QP/CQ/MR/PD leak check was skipped";
+    }
+}
+
 TEST_F(NetIbMPITest, ConnectWithInvalidHandle) {
     ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
                                          kRequirePowerOfTwo, 1, kNoNodeLimit))
@@ -1536,6 +1714,7 @@ TEST_F(NetIbMPITest, MultidirectionalTransfer) {
         int tag;
     };
 
+    // to be extended for running multirank
     std::vector<Pattern> patterns = {
         {"Allgather (4KB)", 4096, 4096,
          (rank == 0) ? 1000 : 2000, (rank == 0) ? 2000 : 1000, 300},
