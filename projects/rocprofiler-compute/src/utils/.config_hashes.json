@@ -1,5 +1,23 @@
 {
   "archs": {
+    "gfx1151": {
+      "delta_hash": null,
+      "files": {
+        "0000_Top_Stats.yaml": "e20b23bcf3d5d5f4d1fb30cb171850f3",
+        "0100_System_Info.yaml": "5bee16deca4a0b880af47a002fa7bab9",
+        "0200_System_Speed_Of_Light.yaml": "e26f10cc97e46cc2585faa0e6dd619e6",
+        "0300_Memory_Chart.yaml": "740e2a539b72c3874df9870a7b0e7135",
+        "0400_roofline.yaml": "554dc69c80ac5b4b8767c244cb5e6ba2",
+        "0500_CPC.yaml": "d32b1aea018a730d330ed82e73835ffa",
+        "0600_SPI.yaml": "4aeb74aba69b956e889242ebae2db0b2",
+        "0700_WGP.yaml": "f3ed504a5de07279cdf03779b18854f3",
+        "0800_TCP_Cache.yaml": "f462a6a3cc6ebcd81d6935601bf71011",
+        "1100_GL1C.yaml": "687b6f352560af9462a6e76619244426",
+        "1300_GL2C.yaml": "f7fef8a0c25235adcd87763291f17f40",
+        "1500_GCEA.yaml": "0e7fbc65ce1a4034b458347bbe3ed9a7",
+        "1700_GRBM.yaml": "5b688ce2905aae189a870f16b6a89a44"
+      }
+    },
     "gfx908": {
       "delta_hash": "dafcea1d4f2e6e6e52ca48599dd1ad54",
       "files": {
@@ -136,7 +154,7 @@
         "1700_l2_cache.yaml": "e33e5de1c43c26472acc5bd7d2a94af3",
         "1800_l2_cache_per_channel.yaml": "ffbaef1fea16af57b08d1e513cb5a29f",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b",
-        "3000_mem_bw.yaml": "e98e707a2c98eca52a4aa490c4ae2630"
+        "3000_mem_bw.yaml": "4ed0c6d2ef7a9db804f6f319ac6e3cee"
       }
     }
   }

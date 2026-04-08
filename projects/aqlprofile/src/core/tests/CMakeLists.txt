@@ -38,6 +38,7 @@ target_link_libraries(
             GTest::gtest_main)
 gtest_discover_tests(
     gfx9-memory-manager-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -65,6 +66,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     aqlprofile-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -93,6 +95,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     command-buffer-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -120,6 +123,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     counters-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -144,6 +148,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     pm4-factory-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -164,6 +169,7 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     logger-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")
 
@@ -204,5 +210,6 @@ target_link_libraries(
             ${CMAKE_DL_LIBS})
 gtest_discover_tests(
     aql-profile-v2-test
+    DISCOVERY_MODE PRE_TEST
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES TIMEOUT 45 LABELS "unittests")

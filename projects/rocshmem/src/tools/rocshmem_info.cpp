@@ -23,8 +23,10 @@
  *****************************************************************************/
 
 #include "util.hpp"
+#include "envvar.hpp"
 
 #include <stdio.h>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -145,7 +147,39 @@ void print_rocm_info() {
   PRINT_ENTRY("ROCm", rocm_version);
 }
 
-int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
+void print_usage(const char* progname) {
+  std::cout << "Usage: " << progname << " [OPTIONS]\n\n";
+  std::cout << "Display rocSHMEM build information and environment variables.\n\n";
+  std::cout << "Options:\n";
+  std::cout << "  -h, --help       Show this help message\n";
+  std::cout << "  --env:all        Print all environment variables (name=value)\n";
+  std::cout << "  --env:full       Print all environment variables with full documentation\n";
+  std::cout << "\n";
+  std::cout << "Default mode: Display build information and modified env vars\n";
+  std::cout << "\n";
+  std::cout << "Examples:\n";
+  std::cout << "  " << progname << " --env:all          # Show build info + all env vars\n";
+  std::cout << "  " << progname << " --env:full         # Show build info + env vars with docs\n";
+}
+
+int main (int argc, char **argv) {
+  rocshmem::envvar::print_mode env_mode = rocshmem::envvar::print_mode::MODIFIED;
+
+  // Parse command line arguments
+  for (int i = 1; i < argc; i++) {
+    if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
+      print_usage(argv[0]);
+      return 0;
+    } else if (std::strcmp(argv[i], "--env:all") == 0) {
+      env_mode = rocshmem::envvar::print_mode::ALL_VALUES;
+    } else if (std::strcmp(argv[i], "--env:full") == 0) {
+      env_mode = rocshmem::envvar::print_mode::FULL_DOCUMENTATION;
+    } else {
+      std::cerr << "Error: Unknown option: " << argv[i] << "\n";
+      print_usage(argv[0]);
+      return 1;
+    }
+  }
 
   printf("################################################################################\n");
   printf("#                                rocSHMEM Info                                 #\n");
@@ -164,9 +198,15 @@ int main ([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
   }
 
   printf("################################################################################\n");
+  std::cout << "\n";
+  rocshmem::envvar::print_envvars(env_mode, std::cout);
+  printf("################################################################################\n");
+
 #if defined(USE_GDA)
+  printf("\n################################################################################");
   rocshmem::DisplayTopology(false);
   printf("################################################################################\n");
 #endif //defined(USE_GDA)
+
   return 0;
 }

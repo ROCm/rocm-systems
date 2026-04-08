@@ -51,7 +51,7 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-  
+
 env:
   ROCPROFSYS_CI: ON
   ROCM_PATH: "/opt/rocm"
@@ -108,7 +108,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          sparse-checkout: projects/rocprofiler-compute/
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
 
       - name: Setup Environment
         id: setup_env

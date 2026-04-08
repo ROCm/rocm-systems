@@ -57,6 +57,41 @@ class AMDSMISubparserHelpFormatter(argparse.RawTextHelpFormatter):
         return ", ".join(action.option_strings) + " " + args_string
 
 
+class AMDSMISubParser(argparse.ArgumentParser):
+    """Subcommand parser with custom error handling for AMDSMI CLI.
+    Used as parser_class for subcommands so that argparse errors on
+    subcommand arguments (e.g., --loglevel INVALID) are routed through
+    the same AmdSmiException framework instead of calling sys.exit(2).
+    """
+
+    def error(self, message):
+        helpers = AMDSMIHelpers()
+        outputformat = helpers.get_output_format()
+        command = sys.argv[1] if len(sys.argv) > 1 else ""
+
+        if ": invalid choice: " in message:
+            # e.g. "argument --loglevel: invalid choice: 'DDEBUG' (choose from ...)"
+            # or   "argument --process-isolation: invalid choice: 2 (choose from 0, 1)"
+            _after = message.split(": invalid choice: ")[1]
+            value = _after.split("'")[1] if _after.startswith("'") else _after.split(" ")[0]
+            hint = _after[_after.find(" (") :].rstrip() if " (" in _after else None
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                command, value, outputformat, hint=hint
+            )
+        elif ": expected" in message:
+            # e.g. "argument --gpu: expected one argument"
+            arg = (
+                message[len("argument ") :].split(":")[0]
+                if message.startswith("argument ")
+                else message
+            )
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(arg, outputformat)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                command, message, outputformat
+            )
+
+
 class AMDSMIParser(argparse.ArgumentParser):
     """Unified Parser for AMDSMI CLI.
         This parser doesn't access amdsmi's lib directly,but via AMDSMIHelpers,
@@ -166,10 +201,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Setup subparsers
         self.subparsers = self.add_subparsers(
-            title="AMD-SMI Commands",
-            parser_class=argparse.ArgumentParser,
-            help="Descriptions:",
-            metavar="",
+            title="AMD-SMI Commands", parser_class=AMDSMISubParser, help="Descriptions:", metavar=""
         )
 
         # Store possible subcommands & aliases for later errors
@@ -3234,5 +3266,26 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
                 sys.argv[1], message, outputformat
             )
+        elif ": invalid choice: " in message:
+            # Named argument with invalid choice (e.g., argument --loglevel: invalid choice: ...)
+            # or unquoted integer (e.g., argument --process-isolation: invalid choice: 2 ...)
+            _after = message.split(": invalid choice: ")[1]
+            value = _after.split("'")[1] if _after.startswith("'") else _after.split(" ")[0]
+            hint = _after[_after.find(" (") :].rstrip() if " (" in _after else None
+            command = sys.argv[1] if len(sys.argv) > 1 else ""
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                command, value, outputformat, hint=hint
+            )
+        elif ": expected" in message:
+            # Named argument missing its value (e.g., argument --gpu: expected one argument)
+            arg = (
+                message[len("argument ") :].split(":")[0]
+                if message.startswith("argument ")
+                else message
+            )
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(arg, outputformat)
         else:
-            print(message)
+            command = sys.argv[1] if len(sys.argv) > 1 else ""
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                command, message, outputformat
+            )

@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from roofline import Roofline
+from roofline.roofline_main import Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
