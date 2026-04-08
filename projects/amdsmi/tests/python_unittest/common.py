@@ -93,19 +93,24 @@ def make_runner_verbosity(verbose):
 
 
 def expand_glob_k_arg(caller_globals):
-    """Expand a glob pattern in a -k/--keyword argument into individual -k flags.
+    """Expand a glob or negation pattern in a -k/--keyword argument into individual -k flags.
 
-    Python's unittest -k flag does substring matching only — wildcards like
-    'test_ttm*' are treated as literal strings and match nothing.  This function
-    detects when a glob pattern is supplied, finds all test method names from
-    the caller's globals that match it, and rewrites sys.argv to use one -k per
-    match.  unittest treats multiple -k flags as OR, so the result is equivalent
-    to the intended glob.
+    Python's unittest -k flag does substring matching only — wildcards and
+    negation are now supported.  This function handles two cases:
+
+    1. Glob patterns: 'test_ttm*' is expanded into one -k per matching test name.
+       unittest treats multiple -k flags as OR, so the result is the intended glob.
+
+    2. Negation: 'not <pattern>' excludes tests whose name matches <pattern>
+       (substring or glob) and expands the remaining tests into individual -k flags.
 
     Call this from the __main__ block of any test file, passing globals():
         common.expand_glob_k_arg(globals())
 
-    Example: -k "test_ttm*"  →  -k test_ttm_info -k test_ttm_set_dry_run
+    Examples:
+        -k "test_ttm*"              →  -k test_ttm_info -k test_ttm_set_dry_run
+        -k "not test_gpu_fan_speed" →  -k test_foo -k test_bar  (everything else)
+        -k "not test_gpu_fan*"      →  -k test_foo -k test_bar  (glob negation)
     """
     import fnmatch
 
@@ -116,7 +121,11 @@ def expand_glob_k_arg(caller_globals):
             continue
 
         pattern = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""
-        if "*" not in pattern and "?" not in pattern:
+
+        is_negation = pattern.startswith("not ") or pattern.startswith("not\t")
+        is_glob = "*" in pattern or "?" in pattern
+
+        if not is_negation and not is_glob:
             break  # plain substring — nothing to expand
 
         # Collect every test method name from all TestCase subclasses in the caller's module
@@ -127,13 +136,27 @@ def expand_glob_k_arg(caller_globals):
         # Deduplicate while preserving order
         all_test_names = list(dict.fromkeys(all_test_names))
 
-        matches = [n for n in all_test_names if fnmatch.fnmatch(n, pattern)]
+        if is_negation:
+            # Strip the leading "not " and match/exclude by substring or glob
+            neg_pattern = pattern[4:].strip()
+            if "*" in neg_pattern or "?" in neg_pattern:
+                matches = [n for n in all_test_names if not fnmatch.fnmatch(n, neg_pattern)]
+            else:
+                matches = [n for n in all_test_names if neg_pattern not in n]
+        else:
+            matches = [n for n in all_test_names if fnmatch.fnmatch(n, pattern)]
+
+        # Remove the single "-k <pattern>" pair
+        del sys.argv[idx : idx + 2]
         if matches:
-            # Remove the single "-k glob*" pair and insert one "-k name" per match
-            del sys.argv[idx : idx + 2]
+            # Insert one "-k name" per match
             for i, name in enumerate(matches):
                 sys.argv.insert(idx + i * 2, flag)
                 sys.argv.insert(idx + i * 2 + 1, name)
+        else:
+            # Nothing matched — insert a sentinel that won't match any real test
+            sys.argv.insert(idx, flag)
+            sys.argv.insert(idx + 1, "__no_tests_match__")
         break
 
 
