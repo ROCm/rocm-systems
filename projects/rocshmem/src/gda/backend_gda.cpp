@@ -848,7 +848,7 @@ void GDABackend::open_dv_libs() {
     if (ret == ROCSHMEM_SUCCESS) {
       gda_provider = GDAProvider::BNXT;
     } else {
-      LOG_WARN("Initializing rocSHMEM BNXT GDA support failed");
+      LOG_TRACE("Initializing rocSHMEM BNXT GDA support failed");
     }
   }
 #endif // defined(GDA_BNXT)
@@ -861,7 +861,7 @@ void GDABackend::open_dv_libs() {
     if (ret == ROCSHMEM_SUCCESS) {
       gda_provider = GDAProvider::IONIC;
     } else {
-      LOG_WARN("Initializing rocSHMEM IONIC GDA support failed");
+      LOG_TRACE("Initializing rocSHMEM IONIC GDA support failed");
     }
   }
 #endif // defined(GDA_IONIC)
@@ -874,7 +874,7 @@ void GDABackend::open_dv_libs() {
     if (ret == ROCSHMEM_SUCCESS) {
       gda_provider = GDAProvider::MLX5;
     } else {
-      LOG_WARN("Initializing rocSHMEM MLX5 GDA support failed");
+      LOG_TRACE("Initializing rocSHMEM MLX5 GDA support failed");
     }
   }
 #endif // defined(GDA_MLX5)
@@ -1399,9 +1399,11 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   switch (gda_provider) {
   case GDAProvider::IONIC:
     ionic_initialize_gpu_qp(gpu_qp, conn_num);
+    dump_ibv_qp(qps[conn_num], conn_num);
     break;
   case GDAProvider::BNXT:
     bnxt_initialize_gpu_qp(gpu_qp, conn_num);
+    dump_ibv_qp(qps[conn_num], conn_num);
     break;
   case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
@@ -1409,7 +1411,6 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   default:
     assert(false /* GDAProvider initialize_gpu_qp */);
   }
-  dump_ibv_qp(qps[conn_num], conn_num);
 }
 
 void GDABackend::create_qps(int sq_length) {

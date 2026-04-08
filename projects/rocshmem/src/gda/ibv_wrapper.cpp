@@ -246,7 +246,7 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
 
     return mr;
   } else {
-    LOG_TRACE("Using ibv_reg_mr()");
+    LOG_TRACE("Using ibv_reg_mr(%p, %zd)", addr, length);
 
     // Passthrough function for ibv_reg_mr macro in verbs.h
     int is_access_const = __builtin_constant_p(((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0);
