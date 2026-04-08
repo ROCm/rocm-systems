@@ -1055,6 +1055,202 @@ TEST_F(NetIbMPITest, MakeVirtualDeviceInvalidProps) {
 
 }
 
+// =============================================================================
+// Test: MergeMultipleDevices
+//
+// Tests makeVDevice() with increasing numbers of physical devices:
+//   - 3 devices: should succeed (within NCCL_NET_MAX_DEVS_PER_NIC = 4 limit)
+//   - 4 devices: should succeed (at the limit)
+//   - 5 devices: should fail (exceeds the limit)
+//
+// makeVDevice() is additive — each successful call appends a new merged device
+// to the device list. Physical devices remain visible (hiding is done by the
+// topology layer's XML manipulation, not by makeVDevice).
+//
+// =============================================================================
+TEST_F(NetIbMPITest, MergeMultipleDevices) {
+    ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit))
+        << "Test requirements not met";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    // --- Collect all device properties and identify physical (non-merged) devices ---
+    std::vector<ncclNetProperties_t> allProps(ndev);
+    std::vector<int> physicalDevices;
+
+    for (int i = 0; i < ndev; i++) {
+        memset(&allProps[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &allProps[i]), ncclSuccess);
+
+        bool isMerged = (allProps[i].name && strchr(allProps[i].name, '+') != nullptr);
+        if (!isMerged) {
+            physicalDevices.push_back(i);
+        }
+    }
+
+    if (physicalDevices.size() < 5) {
+        GTEST_SKIP() << "Need at least 5 physical (non-merged) IB devices, found "
+                     << physicalDevices.size();
+    }
+
+    // --- Find 5 physical devices with matching speed ---
+    int targetSpeed = allProps[physicalDevices[0]].speed;
+    std::vector<int> selected;
+
+    for (size_t i = 0; i < physicalDevices.size() && selected.size() < 5; i++) {
+        int devIdx = physicalDevices[i];
+        if (allProps[devIdx].speed == targetSpeed) {
+            selected.push_back(devIdx);
+        }
+    }
+
+    if (selected.size() < 5) {
+        GTEST_SKIP() << "Could not find 5 physical devices with matching speed. "
+                     << "Found " << selected.size() << " devices at speed " << targetSpeed;
+    }
+
+    // =========================================================================
+    // Sub-test 1: Merge 3 devices (should succeed, under limit of 4)
+    // =========================================================================
+    {
+        int ndevBefore = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+        ncclNetVDeviceProps_t vProps;
+        memset(&vProps, 0, sizeof(vProps));
+        vProps.ndevs = 3;
+        vProps.devs[0] = selected[0];
+        vProps.devs[1] = selected[1];
+        vProps.devs[2] = selected[2];
+
+        int vdev = -1;
+        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+
+        EXPECT_EQ(result, ncclSuccess)
+            << "Merging 3 devices should succeed (within limit of 4)";
+
+        if (result == ncclSuccess) {
+            EXPECT_GE(vdev, 0) << "Virtual device index should be non-negative";
+
+            // Device count should increase by 1
+            int ndevAfter = 0;
+            ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+            EXPECT_EQ(ndevAfter, ndevBefore + 1)
+                << "makeVDevice should add exactly one device";
+
+            // Verify the new merged device properties
+            ncclNetProperties_t vdevProps;
+            memset(&vdevProps, 0, sizeof(vdevProps));
+            ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
+
+            // Name should contain two '+' separators (3 devices)
+            ASSERT_NE(vdevProps.name, nullptr);
+            std::string mergedName(vdevProps.name);
+            int plusCount = 0;
+            for (char c : mergedName) {
+                if (c == '+') plusCount++;
+            }
+            EXPECT_EQ(plusCount, 2)
+                << "3-device merge should have 2 '+' separators, got " << plusCount
+                << " in name '" << mergedName << "'";
+
+            // Speed should be sum of 3 constituents
+            int expectedSpeed = allProps[selected[0]].speed +
+                                allProps[selected[1]].speed +
+                                allProps[selected[2]].speed;
+            EXPECT_EQ(vdevProps.speed, expectedSpeed)
+                << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
+        }
+    }
+
+    // =========================================================================
+    // Sub-test 2: Merge 4 devices (should succeed, at the limit)
+    // =========================================================================
+    {
+        int ndevBefore = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+        ncclNetVDeviceProps_t vProps;
+        memset(&vProps, 0, sizeof(vProps));
+        vProps.ndevs = 4;
+        vProps.devs[0] = selected[0];
+        vProps.devs[1] = selected[1];
+        vProps.devs[2] = selected[2];
+        vProps.devs[3] = selected[3];
+
+        int vdev = -1;
+        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+
+        EXPECT_EQ(result, ncclSuccess)
+            << "Merging 4 devices should succeed (at the limit of NCCL_NET_MAX_DEVS_PER_NIC)";
+
+        if (result == ncclSuccess) {
+            EXPECT_GE(vdev, 0);
+
+            int ndevAfter = 0;
+            ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+            EXPECT_EQ(ndevAfter, ndevBefore + 1);
+
+            ncclNetProperties_t vdevProps;
+            memset(&vdevProps, 0, sizeof(vdevProps));
+            ASSERT_EQ(GetDeviceProperties(vdev, &vdevProps), ncclSuccess);
+
+            // Name should contain three '+' separators (4 devices)
+            ASSERT_NE(vdevProps.name, nullptr);
+            std::string mergedName(vdevProps.name);
+            int plusCount = 0;
+            for (char c : mergedName) {
+                if (c == '+') plusCount++;
+            }
+            EXPECT_EQ(plusCount, 3)
+                << "4-device merge should have 3 '+' separators, got " << plusCount
+                << " in name '" << mergedName << "'";
+
+            // Speed should be sum of 4 constituents
+            int expectedSpeed = allProps[selected[0]].speed +
+                                allProps[selected[1]].speed +
+                                allProps[selected[2]].speed +
+                                allProps[selected[3]].speed;
+            EXPECT_EQ(vdevProps.speed, expectedSpeed)
+                << "Merged speed should be " << expectedSpeed << ", got " << vdevProps.speed;
+        }
+    }
+
+    // =========================================================================
+    // Sub-test 3: Merge 5 devices (should FAIL, exceeds limit of 4)
+    // =========================================================================
+    {
+        int ndevBefore = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevBefore), ncclSuccess);
+
+        ncclNetVDeviceProps_t vProps;
+        memset(&vProps, 0, sizeof(vProps));
+        vProps.ndevs = 5;
+        vProps.devs[0] = selected[0];
+        vProps.devs[1] = selected[1];
+        vProps.devs[2] = selected[2];
+        vProps.devs[3] = selected[3];
+        vProps.devs[4] = selected[4];
+
+        int vdev = -1;
+        ncclResult_t result = MakeVirtualDevice(&vdev, &vProps);
+
+        EXPECT_NE(result, ncclSuccess)
+            << "Merging 5 devices should fail (exceeds NCCL_NET_MAX_DEVS_PER_NIC = 4)";
+
+        // Device count should NOT have changed
+        int ndevAfter = 0;
+        ASSERT_EQ(GetDeviceCount(&ndevAfter), ncclSuccess);
+        EXPECT_EQ(ndevAfter, ndevBefore)
+            << "Failed merge should not add any devices";
+    }
+}
+
 // Stress and Edge Case Tests
 
 // Tests multiple sequential transfers on the same connection using host memory.
