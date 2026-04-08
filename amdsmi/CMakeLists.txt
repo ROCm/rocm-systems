@@ -93,6 +93,11 @@ set(PKG_VERSION_NUM_COMMIT 0)
 project(${AMD_SMI_LIBS_TARGET} DESCRIPTION "AMD System Management libraries"
         HOMEPAGE_URL "https://github.com/ROCm/amdsmi")
 
+# Set default installation prefix to /opt/rocm
+if(NOT CMAKE_INSTALL_PREFIX)
+    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Installation prefix" FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -175,6 +180,11 @@ set(CMN_SRC_LIST)
 
 set(CMN_INC_LIST)
 
+if(NOT TARGET dxg_shared)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../shared
+                     ${CMAKE_CURRENT_BINARY_DIR}/shared)
+endif()
+
 add_subdirectory("src")
 
 if(BUILD_TESTS)
@@ -223,7 +233,6 @@ install(
     COMPONENT dev)
 endif()
 
-set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 if(ENABLE_ASAN_PACKAGING)
     set(COMP_TYPE "asan")
     # install license file in share/doc/amd_smi-asan folder
@@ -314,37 +323,11 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}
     COMPONENT dev)
 
-# RPM package specific variables
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
-    "${CPACK_PACKAGING_INSTALL_PREFIX} ${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
-#Set rpm distro
-if(CPACK_RPM_PACKAGE_RELEASE)
-    set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
-endif()
-# NOTE: RPM SUGGESTS DO NOT WORK! https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete")
-set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
-set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
-# python version gated by rhel8 :(
-# note that RPM based systems have "devel" suffix instead of "dev" in debian based systems
-set(CPACK_RPM_PACKAGE_REQUIRES "sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
-set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
-set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
-
-# don't terminate if bytecompile of python files fails
-set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")
-# Cpack converts !/usr/bin/env python3 to /usr/libexec/platform-python in RHEL8.
-# prevent the BRP(buildroot policy) script from checking and modifying interpreter directives
-string(APPEND CPACK_RPM_SPEC_MORE_DEFINE "\n%undefine __brp_mangle_shebangs")
-
 # Add rocm-core dependency if -DROCM_DEP_ROCMCORE=ON is passed
 if(ROCM_DEP_ROCMCORE)
     string(APPEND CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ", rocm-core-asan")
-    string(APPEND CPACK_RPM_ASAN_PACKAGE_REQUIRES ", rocm-core-asan")
     string(APPEND CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ", rocm-core")
-    string(APPEND CPACK_RPM_DEV_PACKAGE_REQUIRES ", rocm-core")
     string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", rocm-core")
-    string(APPEND CPACK_RPM_PACKAGE_REQUIRES ", rocm-core")
 endif()
 
 ## Enable Component Mode and set component specific flags
@@ -352,10 +335,6 @@ set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
 set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-tests")
 set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-asan")
-set(CPACK_RPM_COMPONENT_INSTALL ON)
-set(CPACK_RPM_DEV_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
-set(CPACK_RPM_TESTS_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-tests")
-set(CPACK_RPM_ASAN_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-asan")
 if(ENABLE_ASAN_PACKAGING)
     # ASAN Package requires only asan component with libraries and license file
     set(CPACK_COMPONENTS_ALL asan)
@@ -363,13 +342,9 @@ else()
     set(CPACK_COMPONENTS_ALL dev tests)
 endif()
 
-# The line below doesn't currently work; it may be this issue:
-# https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-
-
 #Set the names now using CPACK utility
+set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
-set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 
 # Configure Lintian Specific Package Data
 configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
