@@ -3001,10 +3001,27 @@ class AMDSMICommands:
         )
         num_partition = partition_metric_info["num_partition"]
 
+        # Detect if this is an APU system with APU-specific metrics
+        is_apu = "apu_metrics" in gpu_metric and gpu_metric["apu_metrics"] != "N/A"
+        apu = gpu_metric.get("apu_metrics", {}) if is_apu else {}
+
+        # Determine APU version for version-specific fields
+        if is_apu:
+            format_rev = gpu_metric.get("common_header.format_revision", "N/A")
+            content_rev = gpu_metric.get("common_header.content_revision", "N/A")
+            is_apu_v24 = (format_rev == 2 and content_rev == 4)
+            is_apu_v30 = (format_rev == 3 and content_rev == 0)
+            apu_core_count = 8 if is_apu_v24 else 16
+            apu_l3_count = 2 if is_apu_v24 else 0
+        else:
+            is_apu_v24 = is_apu_v30 = False
+            apu_core_count = apu_l3_count = 0
+
         if self.logger.is_json_format():
             values_dict["gpu"] = int(gpu_id)
         # Populate the pcie_dict first due to multiple gpu metrics calls incorrectly increasing bandwidth
-        if "pcie" in current_platform_args:
+        # Skip PCIE for APU systems (no PCIe connection - integrated into CPU)
+        if "pcie" in current_platform_args and not is_apu:
             if args.pcie:
                 pcie_dict = {
                     "width": "N/A",
@@ -3116,38 +3133,62 @@ class AMDSMICommands:
         if "usage" in current_platform_args:
             if args.usage:
                 try:
-                    engine_usage = amdsmi_interface.amdsmi_get_gpu_activity(args.gpu)
-                    logging.debug(f"engine_usage dictionary = {engine_usage}")
+                    if is_apu:
+                        # APU-specific usage metrics
+                        engine_usage = {}
+                        engine_usage["gfx_activity"] = apu.get("average_gfx_activity", "N/A")
 
-                    # TODO: move vcn_activity and jpeg_activity into amdsmi_get_gpu_activity
-                    engine_usage["vcn_activity"] = gpu_metric["vcn_activity"]
-                    engine_usage["jpeg_activity"] = gpu_metric["jpeg_activity"]
-                    engine_usage["gfx_busy_inst"] = "N/A"
-                    engine_usage["jpeg_busy"] = "N/A"
-                    engine_usage["vcn_busy"] = "N/A"
+                        # v2.4 has mm_activity, v3.0 has vcn_activity
+                        if is_apu_v24:
+                            engine_usage["mm_activity"] = apu.get("average_mm_activity", "N/A")
+                        elif is_apu_v30:
+                            engine_usage["vcn_activity"] = apu.get("average_vcn_activity", "N/A")
+                            engine_usage["ipu_activity"] = apu.get("average_ipu_activity", ["N/A"] * 8)
+                            engine_usage["core_c0_activity"] = apu.get("average_core_c0_activity", ["N/A"] * apu_core_count)[:apu_core_count]
+                            if apu.get("average_dram_reads") != "N/A" or apu.get("average_dram_writes") != "N/A":
+                                engine_usage["dram_bandwidth"] = {
+                                    "reads_mb_s": apu.get("average_dram_reads", "N/A"),
+                                    "writes_mb_s": apu.get("average_dram_writes", "N/A")
+                                }
+                            if apu.get("average_ipu_reads") != "N/A" or apu.get("average_ipu_writes") != "N/A":
+                                engine_usage["ipu_bandwidth"] = {
+                                    "reads_mb_s": apu.get("average_ipu_reads", "N/A"),
+                                    "writes_mb_s": apu.get("average_ipu_writes", "N/A")
+                                }
+                    else:
+                        # Discrete GPU usage metrics
+                        engine_usage = amdsmi_interface.amdsmi_get_gpu_activity(args.gpu)
+                        logging.debug(f"engine_usage dictionary = {engine_usage}")
 
-                    if num_partition != "N/A":
-                        # these are one after another, in order to display each in sub-sections
-                        new_xcp_dict = {}
-                        for current_xcp in range(num_partition):
-                            new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
-                                "xcp_stats.gfx_busy_inst"
-                            ][current_xcp]
-                        engine_usage["gfx_busy_inst"] = new_xcp_dict
+                        # TODO: move vcn_activity and jpeg_activity into amdsmi_get_gpu_activity
+                        engine_usage["vcn_activity"] = gpu_metric["vcn_activity"]
+                        engine_usage["jpeg_activity"] = gpu_metric["jpeg_activity"]
+                        engine_usage["gfx_busy_inst"] = "N/A"
+                        engine_usage["jpeg_busy"] = "N/A"
+                        engine_usage["vcn_busy"] = "N/A"
 
-                        new_xcp_dict = {}
-                        for current_xcp in range(num_partition):
-                            new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.jpeg_busy"][
-                                current_xcp
-                            ]
-                        engine_usage["jpeg_busy"] = new_xcp_dict
+                        if num_partition != "N/A":
+                            # these are one after another, in order to display each in sub-sections
+                            new_xcp_dict = {}
+                            for current_xcp in range(num_partition):
+                                new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
+                                    "xcp_stats.gfx_busy_inst"
+                                ][current_xcp]
+                            engine_usage["gfx_busy_inst"] = new_xcp_dict
 
-                        new_xcp_dict = {}
-                        for current_xcp in range(num_partition):
-                            new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.vcn_busy"][
-                                current_xcp
-                            ]
-                        engine_usage["vcn_busy"] = new_xcp_dict
+                            new_xcp_dict = {}
+                            for current_xcp in range(num_partition):
+                                new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.jpeg_busy"][
+                                    current_xcp
+                                ]
+                            engine_usage["jpeg_busy"] = new_xcp_dict
+
+                            new_xcp_dict = {}
+                            for current_xcp in range(num_partition):
+                                new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.vcn_busy"][
+                                    current_xcp
+                                ]
+                            engine_usage["vcn_busy"] = new_xcp_dict
 
                     logging.debug(f"After updates to engine_usage dictionary = {engine_usage}")
 
@@ -3194,40 +3235,100 @@ class AMDSMICommands:
                     logging.debug("Failed to get gpu activity for gpu %s | %s", gpu_id, e)
         if "power" in current_platform_args:
             if args.power:
-                power_dict = {
-                    "socket_power": "N/A",
-                    "gfx_voltage": "N/A",
-                    "soc_voltage": "N/A",
-                    "mem_voltage": "N/A",
-                    "throttle_status": "N/A",
-                    "power_management": "N/A",
-                    "ubb_power": "N/A",
-                }
-
-                try:
-                    voltage_unit = "mV"
+                if is_apu:
+                    # APU-specific power metrics (values are in mW, convert to W)
                     power_unit = "W"
-                    power_info = amdsmi_interface.amdsmi_get_power_info(args.gpu)
-                    for key, value in power_info.items():
-                        if "voltage" in key:
-                            power_info[key] = self.helpers.unit_format(
-                                self.logger, value, voltage_unit
+                    power_dict = {}
+
+                    if apu.get("average_socket_power") != "N/A":
+                        power_dict["socket_power"] = self.helpers.unit_format(
+                            self.logger, apu["average_socket_power"] / 1000.0, power_unit
+                        )
+                    if apu.get("average_gfx_power") != "N/A":
+                        power_dict["gfx_power"] = self.helpers.unit_format(
+                            self.logger, apu["average_gfx_power"] / 1000.0, power_unit
+                        )
+                    if apu.get("average_core_power") != "N/A":
+                        core_power_list = [p / 1000.0 if p != "N/A" else "N/A" for p in apu["average_core_power"][:apu_core_count]]
+                        power_dict["core_power"] = core_power_list
+
+                    # v2.4-specific fields
+                    if is_apu_v24:
+                        if apu.get("average_cpu_power") != "N/A":
+                            power_dict["cpu_power"] = self.helpers.unit_format(
+                                self.logger, apu["average_cpu_power"] / 1000.0, power_unit
                             )
-                        elif "power" in key:
-                            power_info[key] = self.helpers.unit_format(
-                                self.logger, value, power_unit
+                        if apu.get("average_soc_power") != "N/A":
+                            power_dict["soc_power"] = self.helpers.unit_format(
+                                self.logger, apu["average_soc_power"] / 1000.0, power_unit
                             )
 
-                    power_dict["socket_power"] = power_info["socket_power"]
-                    power_dict["gfx_voltage"] = power_info["gfx_voltage"]
-                    power_dict["soc_voltage"] = power_info["soc_voltage"]
-                    power_dict["mem_voltage"] = power_info["mem_voltage"]
-                    power_dict["ubb_power"] = power_info.get("ubb_power", "N/A")
+                    # v3.0-specific fields
+                    if is_apu_v30:
+                        if apu.get("average_ipu_power") != "N/A":
+                            power_dict["ipu_power"] = self.helpers.unit_format(
+                                self.logger, apu["average_ipu_power"] / 1000.0, power_unit
+                            )
+                        if apu.get("average_apu_power") != "N/A":
+                            power_dict["apu_power"] = self.helpers.unit_format(
+                                self.logger, apu["average_apu_power"] / 1000.0, power_unit
+                            )
+                        if apu.get("average_dgpu_power") != "N/A":
+                            power_dict["dgpu_power"] = self.helpers.unit_format(
+                                self.logger, apu["average_dgpu_power"] / 1000.0, power_unit
+                            )
+                        if apu.get("average_all_core_power") != "N/A":
+                            power_dict["all_core_power"] = self.helpers.unit_format(
+                                self.logger, apu["average_all_core_power"] / 1000.0, power_unit
+                            )
+                        if apu.get("average_sys_power") != "N/A":
+                            power_dict["sys_power"] = self.helpers.unit_format(
+                                self.logger, apu["average_sys_power"] / 1000.0, power_unit
+                            )
+                        if apu.get("stapm_power_limit") != "N/A":
+                            power_dict["stapm_limit"] = self.helpers.unit_format(
+                                self.logger, apu["stapm_power_limit"] / 1000.0, power_unit
+                            )
+                        if apu.get("current_stapm_power_limit") != "N/A":
+                            power_dict["current_stapm_limit"] = self.helpers.unit_format(
+                                self.logger, apu["current_stapm_power_limit"] / 1000.0, power_unit
+                            )
+                else:
+                    # Discrete GPU power metrics
+                    power_dict = {
+                        "socket_power": "N/A",
+                        "gfx_voltage": "N/A",
+                        "soc_voltage": "N/A",
+                        "mem_voltage": "N/A",
+                        "throttle_status": "N/A",
+                        "power_management": "N/A",
+                        "ubb_power": "N/A",
+                    }
 
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    logging.debug(
-                        "Failed to get power info for gpu %s | %s", gpu_id, e.get_error_info()
-                    )
+                    try:
+                        voltage_unit = "mV"
+                        power_unit = "W"
+                        power_info = amdsmi_interface.amdsmi_get_power_info(args.gpu)
+                        for key, value in power_info.items():
+                            if "voltage" in key:
+                                power_info[key] = self.helpers.unit_format(
+                                    self.logger, value, voltage_unit
+                                )
+                            elif "power" in key:
+                                power_info[key] = self.helpers.unit_format(
+                                    self.logger, value, power_unit
+                                )
+
+                        power_dict["socket_power"] = power_info["socket_power"]
+                        power_dict["gfx_voltage"] = power_info["gfx_voltage"]
+                        power_dict["soc_voltage"] = power_info["soc_voltage"]
+                        power_dict["mem_voltage"] = power_info["mem_voltage"]
+                        power_dict["ubb_power"] = power_info.get("ubb_power", "N/A")
+
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        logging.debug(
+                            "Failed to get power info for gpu %s | %s", gpu_id, e.get_error_info()
+                        )
 
                 try:
                     is_power_management_enabled = (
@@ -3258,8 +3359,64 @@ class AMDSMICommands:
                 values_dict["power"] = power_dict
         if "clock" in current_platform_args:
             if args.clock:
-                # Populate Skeleton output with N/A
-                clocks = {}
+                if is_apu:
+                    # APU clock metrics (already in MHz)
+                    clocks = {}
+                    clock_unit = "MHz"
+
+                    # Average clocks (common to both versions)
+                    if apu.get("average_gfxclk_frequency") != "N/A":
+                        clocks["avg_gfxclk"] = apu["average_gfxclk_frequency"]
+                    if apu.get("average_socclk_frequency") != "N/A":
+                        clocks["avg_socclk"] = apu["average_socclk_frequency"]
+                    if apu.get("average_uclk_frequency") != "N/A":
+                        clocks["avg_uclk"] = apu["average_uclk_frequency"]
+                    if apu.get("average_fclk_frequency") != "N/A":
+                        clocks["avg_fclk"] = apu["average_fclk_frequency"]
+                    if apu.get("average_vclk_frequency") != "N/A":
+                        clocks["avg_vclk"] = apu["average_vclk_frequency"]
+
+                    # v2.4-specific clocks
+                    if is_apu_v24:
+                        if apu.get("average_dclk_frequency") != "N/A":
+                            clocks["avg_dclk"] = apu["average_dclk_frequency"]
+                        if apu.get("current_gfxclk") != "N/A":
+                            clocks["cur_gfxclk"] = apu["current_gfxclk"]
+                        if apu.get("current_socclk") != "N/A":
+                            clocks["cur_socclk"] = apu["current_socclk"]
+                        if apu.get("current_uclk") != "N/A":
+                            clocks["cur_uclk"] = apu["current_uclk"]
+                        if apu.get("current_fclk") != "N/A":
+                            clocks["cur_fclk"] = apu["current_fclk"]
+                        if apu.get("current_vclk") != "N/A":
+                            clocks["cur_vclk"] = apu["current_vclk"]
+                        if apu.get("current_dclk") != "N/A":
+                            clocks["cur_dclk"] = apu["current_dclk"]
+
+                    # v3.0-specific clocks
+                    if is_apu_v30:
+                        if apu.get("average_vpeclk_frequency") != "N/A":
+                            clocks["avg_vpeclk"] = apu["average_vpeclk_frequency"]
+                        if apu.get("average_ipuclk_frequency") != "N/A":
+                            clocks["avg_ipuclk"] = apu["average_ipuclk_frequency"]
+                        if apu.get("average_mpipu_frequency") != "N/A":
+                            clocks["avg_mpipu"] = apu["average_mpipu_frequency"]
+                        if apu.get("current_core_maxfreq") != "N/A":
+                            clocks["cur_core_maxfreq"] = apu["current_core_maxfreq"]
+                        if apu.get("current_gfx_maxfreq") != "N/A":
+                            clocks["cur_gfx_maxfreq"] = apu["current_gfx_maxfreq"]
+
+                    # Core clocks (common to both, different counts)
+                    if apu.get("current_coreclk") != "N/A":
+                        clocks["core_clk"] = apu["current_coreclk"][:apu_core_count]
+
+                    # L3 clocks (v2.4 only)
+                    if is_apu_v24 and apu.get("current_l3clk") != "N/A":
+                        clocks["l3_clk"] = apu["current_l3clk"][:apu_l3_count]
+                else:
+                    # Discrete GPU clocks
+                    # Populate Skeleton output with N/A
+                    clocks = {}
 
                 for clock_index in range(amdsmi_interface.AMDSMI_MAX_NUM_GFX_CLKS):
                     gfx_index = f"gfx_{clock_index}"
@@ -3587,71 +3744,88 @@ class AMDSMICommands:
                 values_dict["clock"] = clocks
         if "temperature" in current_platform_args:
             if args.temperature:
-                try:
-                    temperature_edge_current = amdsmi_interface.amdsmi_get_temp_metric(
-                        args.gpu,
-                        amdsmi_interface.AmdSmiTemperatureType.EDGE,
-                        amdsmi_interface.AmdSmiTemperatureMetric.CURRENT,
-                    )
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    temperature_edge_current = "N/A"
-                    logging.debug(
-                        "Failed to get current edge temperature for gpu %s | %s",
-                        gpu_id,
-                        e.get_error_info(),
-                    )
+                if is_apu:
+                    # APU temperatures (convert from centi-Celsius to Celsius)
+                    temperatures = {}
+                    if apu.get("temperature_gfx") != "N/A":
+                        temperatures["gfx"] = apu["temperature_gfx"] / 100.0
+                    if apu.get("temperature_soc") != "N/A":
+                        temperatures["soc"] = apu["temperature_soc"] / 100.0
+                    if apu.get("temperature_core") != "N/A":
+                        temp_core = [t / 100.0 if t != "N/A" else "N/A" for t in apu["temperature_core"][:apu_core_count]]
+                        temperatures["core"] = temp_core
+                    if is_apu_v24 and apu.get("temperature_l3") != "N/A":
+                        temp_l3 = [t / 100.0 if t != "N/A" else "N/A" for t in apu["temperature_l3"][:apu_l3_count]]
+                        temperatures["l3"] = temp_l3
+                    if is_apu_v30 and apu.get("temperature_skin") != "N/A":
+                        temperatures["skin"] = apu["temperature_skin"] / 100.0
+                else:
+                    # Discrete GPU temperatures
+                    try:
+                        temperature_edge_current = amdsmi_interface.amdsmi_get_temp_metric(
+                            args.gpu,
+                            amdsmi_interface.AmdSmiTemperatureType.EDGE,
+                            amdsmi_interface.AmdSmiTemperatureMetric.CURRENT,
+                        )
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        temperature_edge_current = "N/A"
+                        logging.debug(
+                            "Failed to get current edge temperature for gpu %s | %s",
+                            gpu_id,
+                            e.get_error_info(),
+                        )
 
-                try:
-                    temperature_edge_limit = amdsmi_interface.amdsmi_get_temp_metric(
-                        args.gpu,
-                        amdsmi_interface.AmdSmiTemperatureType.EDGE,
-                        amdsmi_interface.AmdSmiTemperatureMetric.CRITICAL,
-                    )
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    temperature_edge_limit = "N/A"
-                    logging.debug(
-                        "Failed to get edge temperature limit for gpu %s | %s",
-                        gpu_id,
-                        e.get_error_info(),
-                    )
+                    try:
+                        temperature_edge_limit = amdsmi_interface.amdsmi_get_temp_metric(
+                            args.gpu,
+                            amdsmi_interface.AmdSmiTemperatureType.EDGE,
+                            amdsmi_interface.AmdSmiTemperatureMetric.CRITICAL,
+                        )
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        temperature_edge_limit = "N/A"
+                        logging.debug(
+                            "Failed to get edge temperature limit for gpu %s | %s",
+                            gpu_id,
+                            e.get_error_info(),
+                        )
 
-                # If edge limit is reporting 0 then set the current edge temp to N/A
-                if temperature_edge_limit == 0:
-                    temperature_edge_current = "N/A"
+                    # If edge limit is reporting 0 then set the current edge temp to N/A
+                    if temperature_edge_limit == 0:
+                        temperature_edge_current = "N/A"
 
-                try:
-                    temperature_hotspot_current = amdsmi_interface.amdsmi_get_temp_metric(
-                        args.gpu,
-                        amdsmi_interface.AmdSmiTemperatureType.HOTSPOT,
-                        amdsmi_interface.AmdSmiTemperatureMetric.CURRENT,
-                    )
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    temperature_hotspot_current = "N/A"
-                    logging.debug(
-                        "Failed to get current hotspot temperature for gpu %s | %s",
-                        gpu_id,
-                        e.get_error_info(),
-                    )
+                    try:
+                        temperature_hotspot_current = amdsmi_interface.amdsmi_get_temp_metric(
+                            args.gpu,
+                            amdsmi_interface.AmdSmiTemperatureType.HOTSPOT,
+                            amdsmi_interface.AmdSmiTemperatureMetric.CURRENT,
+                        )
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        temperature_hotspot_current = "N/A"
+                        logging.debug(
+                            "Failed to get current hotspot temperature for gpu %s | %s",
+                            gpu_id,
+                            e.get_error_info(),
+                        )
 
-                try:
-                    temperature_vram_current = amdsmi_interface.amdsmi_get_temp_metric(
-                        args.gpu,
-                        amdsmi_interface.AmdSmiTemperatureType.VRAM,
-                        amdsmi_interface.AmdSmiTemperatureMetric.CURRENT,
-                    )
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    temperature_vram_current = "N/A"
-                    logging.debug(
-                        "Failed to get current vram temperature for gpu %s | %s",
-                        gpu_id,
-                        e.get_error_info(),
-                    )
+                    try:
+                        temperature_vram_current = amdsmi_interface.amdsmi_get_temp_metric(
+                            args.gpu,
+                            amdsmi_interface.AmdSmiTemperatureType.VRAM,
+                            amdsmi_interface.AmdSmiTemperatureMetric.CURRENT,
+                        )
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        temperature_vram_current = "N/A"
+                        logging.debug(
+                            "Failed to get current vram temperature for gpu %s | %s",
+                            gpu_id,
+                            e.get_error_info(),
+                        )
 
-                temperatures = {
-                    "edge": temperature_edge_current,
-                    "hotspot": temperature_hotspot_current,
-                    "mem": temperature_vram_current,
-                }
+                    temperatures = {
+                        "edge": temperature_edge_current,
+                        "hotspot": temperature_hotspot_current,
+                        "mem": temperature_vram_current,
+                    }
 
                 temp_unit_human_readable = "\N{DEGREE SIGN}C"
                 temp_unit_json = "C"
@@ -3786,7 +3960,8 @@ class AMDSMICommands:
                         gpu_id,
                         e.get_error_info(),
                     )
-        if "fan" in current_platform_args:
+        # Skip FAN for APU systems (typically passive cooling or CPU fan)
+        if "fan" in current_platform_args and not is_apu:
             if args.fan:
                 fan_dict = {"speed": "N/A", "max": "N/A", "rpm": "N/A", "usage": "N/A"}
 
@@ -3824,7 +3999,8 @@ class AMDSMICommands:
                     )
 
                 values_dict["fan"] = fan_dict
-        if "voltage_curve" in current_platform_args:
+        # Skip VOLTAGE_CURVE for APU systems (mobile/laptop power management)
+        if "voltage_curve" in current_platform_args and not is_apu:
             if args.voltage_curve:
                 # Populate N/A values per voltage point
                 voltage_point_dict = {}
@@ -3872,7 +4048,8 @@ class AMDSMICommands:
                     voltage_point_dict[f"point_{point}_voltage"] = voltage
 
                 values_dict["voltage_curve"] = voltage_point_dict
-        if "overdrive" in current_platform_args:
+        # Skip OVERDRIVE for APU systems (not applicable to integrated GPUs)
+        if "overdrive" in current_platform_args and not is_apu:
             if args.overdrive:
                 try:
                     overdrive_level = amdsmi_interface.amdsmi_get_gpu_overdrive_level(args.gpu)
@@ -4267,148 +4444,6 @@ class AMDSMICommands:
                                 self.logger, value, activity_unit
                             )
                 values_dict["throttle"] = throttle_status
-
-        # APU Metrics (version 2.4 and 3.0)
-        if "apu_metrics" in gpu_metric:
-            apu_metrics_dict = {}
-            apu = gpu_metric["apu_metrics"]
-
-            # Determine APU version
-            format_rev = gpu_metric.get("common_header.format_revision", "N/A")
-            content_rev = gpu_metric.get("common_header.content_revision", "N/A")
-            is_v24 = (format_rev == 2 and content_rev == 4)
-            is_v30 = (format_rev == 3 and content_rev == 0)
-            core_count = 8 if is_v24 else 16
-            l3_count = 2 if is_v24 else 0
-
-            # Temperature (convert from centi-Celsius to Celsius)
-            temp_dict = {}
-            if apu.get("temperature_gfx") != "N/A":
-                temp_dict["gfx"] = self.helpers.unit_format(
-                    self.logger, apu["temperature_gfx"] / 100.0, "°C"
-                )
-            if apu.get("temperature_soc") != "N/A":
-                temp_dict["soc"] = self.helpers.unit_format(
-                    self.logger, apu["temperature_soc"] / 100.0, "°C"
-                )
-            if apu.get("temperature_core") != "N/A":
-                temp_core = [t / 100.0 if t != "N/A" else "N/A" for t in apu["temperature_core"][:core_count]]
-                temp_dict["core"] = [self.helpers.unit_format(self.logger, t, "°C") for t in temp_core]
-            if is_v24 and apu.get("temperature_l3") != "N/A":
-                temp_l3 = [t / 100.0 if t != "N/A" else "N/A" for t in apu["temperature_l3"][:l3_count]]
-                temp_dict["l3"] = [self.helpers.unit_format(self.logger, t, "°C") for t in temp_l3]
-            if is_v30 and apu.get("temperature_skin") != "N/A":
-                temp_dict["skin"] = self.helpers.unit_format(
-                    self.logger, apu["temperature_skin"] / 100.0, "°C"
-                )
-            if temp_dict:
-                apu_metrics_dict["temperature"] = temp_dict
-
-            # Utilization
-            util_dict = {}
-            if apu.get("average_gfx_activity") != "N/A":
-                util_dict["gfx_activity"] = self.helpers.unit_format(
-                    self.logger, apu["average_gfx_activity"], "%"
-                )
-            if is_v24 and apu.get("average_mm_activity") != "N/A":
-                util_dict["mm_activity"] = self.helpers.unit_format(
-                    self.logger, apu["average_mm_activity"], "%"
-                )
-            if is_v30 and apu.get("average_vcn_activity") != "N/A":
-                util_dict["vcn_activity"] = self.helpers.unit_format(
-                    self.logger, apu["average_vcn_activity"], "%"
-                )
-            if is_v30 and apu.get("average_ipu_activity") != "N/A":
-                ipu_activity = apu["average_ipu_activity"]
-                util_dict["ipu_activity"] = [self.helpers.unit_format(self.logger, v, "%") for v in ipu_activity]
-            if is_v30 and apu.get("average_core_c0_activity") != "N/A":
-                core_c0 = apu["average_core_c0_activity"][:core_count]
-                util_dict["core_c0_activity"] = [self.helpers.unit_format(self.logger, v, "%") for v in core_c0]
-            if util_dict:
-                apu_metrics_dict["utilization"] = util_dict
-
-            # Power (convert from mW to W)
-            power_dict = {}
-            power_fields = ["average_socket_power", "average_gfx_power"]
-            if is_v24:
-                power_fields.extend(["average_cpu_power", "average_soc_power"])
-            if is_v30:
-                power_fields.extend([
-                    "average_ipu_power", "average_apu_power", "average_dgpu_power",
-                    "average_all_core_power", "average_sys_power"
-                ])
-
-            for field_name in power_fields:
-                if apu.get(field_name) != "N/A":
-                    display_name = field_name.replace("average_", "").replace("_", " ").title().replace(" ", "_").lower()
-                    power_dict[display_name] = self.helpers.unit_format(
-                        self.logger, apu[field_name] / 1000.0, "W"
-                    )
-
-            if apu.get("average_core_power") != "N/A":
-                core_power = [p / 1000.0 if p != "N/A" else "N/A" for p in apu["average_core_power"][:core_count]]
-                power_dict["core_power"] = [self.helpers.unit_format(self.logger, p, "W") for p in core_power]
-
-            if is_v30:
-                if apu.get("stapm_power_limit") != "N/A":
-                    power_dict["stapm_limit"] = self.helpers.unit_format(
-                        self.logger, apu["stapm_power_limit"] / 1000.0, "W"
-                    )
-                if apu.get("current_stapm_power_limit") != "N/A":
-                    power_dict["current_stapm_limit"] = self.helpers.unit_format(
-                        self.logger, apu["current_stapm_power_limit"] / 1000.0, "W"
-                    )
-
-            if power_dict:
-                apu_metrics_dict["power"] = power_dict
-
-            # Clocks (already in MHz)
-            clock_dict = {}
-            clock_fields = ["gfxclk", "socclk", "uclk", "fclk", "vclk"]
-            if is_v24:
-                clock_fields.append("dclk")
-            if is_v30:
-                clock_fields.extend(["vpeclk", "ipuclk", "mpipu"])
-
-            for clk in clock_fields:
-                field_name = f"average_{clk}_frequency"
-                if apu.get(field_name) != "N/A":
-                    clock_dict[f"avg_{clk}"] = self.helpers.unit_format(
-                        self.logger, apu[field_name], "MHz"
-                    )
-
-            if is_v24:
-                current_clocks = ["gfxclk", "socclk", "uclk", "fclk", "vclk", "dclk"]
-                for clk in current_clocks:
-                    field_name = f"current_{clk}"
-                    if apu.get(field_name) != "N/A":
-                        clock_dict[f"cur_{clk}"] = self.helpers.unit_format(
-                            self.logger, apu[field_name], "MHz"
-                        )
-
-            if apu.get("current_coreclk") != "N/A":
-                core_clk = apu["current_coreclk"][:core_count]
-                clock_dict["core_clk"] = [self.helpers.unit_format(self.logger, c, "MHz") for c in core_clk]
-
-            if clock_dict:
-                apu_metrics_dict["clocks"] = clock_dict
-
-            # Throttle status
-            throttle_dict = {}
-            if is_v24 and apu.get("throttle_status") != "N/A":
-                throttle_dict["status"] = f"0x{apu['throttle_status']:08x}"
-            if is_v30:
-                throttle_fields = ["prochot", "spl", "fppt", "sppt", "thm_core", "thm_gfx", "thm_soc"]
-                for field in throttle_fields:
-                    field_name = f"throttle_residency_{field}"
-                    if apu.get(field_name) != "N/A":
-                        throttle_dict[field] = apu[field_name]
-
-            if throttle_dict:
-                apu_metrics_dict["throttle"] = throttle_dict
-
-            if apu_metrics_dict:
-                values_dict["apu_metrics"] = apu_metrics_dict
 
         # Store timestamp first if watching_output is enabled
         if watching_output:
