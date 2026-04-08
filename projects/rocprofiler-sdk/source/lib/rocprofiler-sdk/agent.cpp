@@ -635,11 +635,9 @@ read_topology()
 
     if(!fs::exists(sysfs_nodes_path))
     {
-        // Not ROCP_CI_LOG: ROCPROFILER_CI maps CI logs to FATAL, but missing KFD sysfs is
-        // normal on CPU-only hosts, containers, and CI runners doing import/smoke tests.
         ROCP_WARNING << fmt::format("sysfs nodes path '{}' does not exist",
-            sysfs_nodes_path.string());
-            
+                                    sysfs_nodes_path.string());
+
         return data;
     }
 
