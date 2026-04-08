@@ -26,7 +26,7 @@ Example:
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -509,7 +509,7 @@ class AnalysisResult:
 
 
 def analyze_database(
-    database_path: Path,
+    database_path: Union[str, Path],
     *,
     custom_prompt: Optional[str] = None,
     enable_llm: bool = False,
@@ -557,6 +557,7 @@ def analyze_database(
         >>> for rec in result.recommendations.high_priority:
         ...     print(f"- {rec.title}")
     """
+    database_path = Path(database_path)
     # Validate database exists
     if not database_path.exists():
         raise DatabaseNotFoundError(f"Database file not found: {database_path}")
@@ -923,8 +924,8 @@ def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
 
 
 def analyze_database_to_json(
-    database_path: Path,
-    output_json_path: Optional[Path] = None,
+    database_path: Union[str, Path],
+    output_json_path: Optional[Union[str, Path]] = None,
     **kwargs,
 ) -> str:
     """
@@ -948,12 +949,12 @@ def analyze_database_to_json(
     json_output = result.to_json()
 
     if output_json_path:
-        output_json_path.write_text(json_output)
+        Path(output_json_path).write_text(json_output)
 
     return json_output
 
 
-def get_kernel_analysis(database_path: Path, kernel_name: str, **kwargs) -> Dict:
+def get_kernel_analysis(database_path: Union[str, Path], kernel_name: str, **kwargs) -> Dict:
     """
     Get analysis for a specific kernel.
 
@@ -970,7 +971,7 @@ def get_kernel_analysis(database_path: Path, kernel_name: str, **kwargs) -> Dict
 
 
 def get_recommendations(
-    database_path: Path,
+    database_path: Union[str, Path],
     priority_filter: Optional[str] = None,
     category_filter: Optional[str] = None,
     **kwargs,
@@ -1006,7 +1007,7 @@ def get_recommendations(
 
 
 def analyze_source(
-    source_dir: Path,
+    source_dir: Union[str, Path],
     *,
     custom_prompt: Optional[str] = None,
     enable_llm: bool = False,
@@ -1046,6 +1047,7 @@ def analyze_source(
         >>> for rec in result.recommendations:
         ...     print(f"[{rec['priority']}] {rec['category']}: {rec['issue']}")
     """
+    source_dir = Path(source_dir)
     if not source_dir.exists() or not source_dir.is_dir():
         raise SourceDirectoryNotFoundError(
             f"Source directory not found or not a directory: {source_dir}"
@@ -1097,7 +1099,7 @@ def analyze_source(
     return result
 
 
-def validate_database(database_path: Path) -> Dict[str, Any]:
+def validate_database(database_path: Union[str, Path]) -> Dict[str, Any]:
     """
     Validate database schema and contents without performing analysis.
 
@@ -1112,6 +1114,7 @@ def validate_database(database_path: Path) -> Dict[str, Any]:
         >>> print(f"Valid: {validation['is_valid']}")
         >>> print(f"Analysis tier: {validation['tier']}")
     """
+    database_path = Path(database_path)
     if not database_path.exists():
         raise DatabaseNotFoundError(f"Database not found: {database_path}")
 
