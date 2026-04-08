@@ -575,6 +575,196 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
     }
 }
 
+TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    std::vector<ncclNetProperties_t> props(ndev);
+    std::vector<int> physDevs;
+    for (int i = 0; i < ndev; i++) {
+        memset(&props[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
+        if (!props[i].name || !strchr(props[i].name, '+'))
+            physDevs.push_back(i);
+    }
+
+    int needed = 8;
+    if ((int)physDevs.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
+
+    int targetSpeed = props[physDevs[0]].speed;
+    std::vector<int> compat;
+    for (int d : physDevs)
+        if (props[d].speed == targetSpeed) compat.push_back(d);
+    if ((int)compat.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
+
+    int devOffset = (rank == 1) ? 4 : 0;
+    std::vector<int> devsA = {compat[devOffset + 0], compat[devOffset + 1]};
+    std::vector<int> devsB = {compat[devOffset + 2], compat[devOffset + 3]};
+
+    int mergedDevA = -1, mergedDevB = -1;
+    {
+        ncclNetVDeviceProps_t v;
+        memset(&v, 0, sizeof(v));
+        v.ndevs = 2;
+        v.devs[0] = devsA[0]; v.devs[1] = devsA[1];
+        if (MakeVirtualDevice(&mergedDevA, &v) != ncclSuccess || mergedDevA < 0)
+            GTEST_SKIP() << "Failed to create merged device A";
+    }
+    {
+        ncclNetVDeviceProps_t v;
+        memset(&v, 0, sizeof(v));
+        v.ndevs = 2;
+        v.devs[0] = devsB[0]; v.devs[1] = devsB[1];
+        if (MakeVirtualDevice(&mergedDevB, &v) != ncclSuccess || mergedDevB < 0)
+            GTEST_SKIP() << "Failed to create merged device B";
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    static constexpr size_t kTransferSize = 4096;
+
+    void* listenCommA = nullptr, *listenCommB = nullptr;
+    void* recvCommA = nullptr, *recvCommB = nullptr;
+    void* sendCommA = nullptr, *sendCommB = nullptr;
+    ncclNetHandle_t handleA, handleB;
+
+    // Both listens on rank 0
+    if (rank == 0) {
+        ASSERT_EQ(CreateListenComm(mergedDevA, &handleA, &listenCommA), ncclSuccess);
+        ASSERT_EQ(CreateListenComm(mergedDevB, &handleB, &listenCommB), ncclSuccess);
+
+        bool handlesEqual = (memcmp(&handleA, &handleB, sizeof(ncclNetHandle_t)) == 0);
+        EXPECT_FALSE(handlesEqual)
+            << "Two simultaneous listens on different devices produced identical handles";
+
+        MPI_Send(&handleA, sizeof(handleA), MPI_BYTE, peerRank, 60, MPI_COMM_WORLD);
+        MPI_Send(&handleB, sizeof(handleB), MPI_BYTE, peerRank, 61, MPI_COMM_WORLD);
+    } else {
+        MPI_Recv(&handleA, sizeof(handleA), MPI_BYTE, peerRank, 60,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&handleB, sizeof(handleB), MPI_BYTE, peerRank, 61,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Connect + Accept
+    if (rank == 0) {
+        while (!recvCommA) AcceptConnection(listenCommA, &recvCommA);
+        while (!recvCommB) AcceptConnection(listenCommB, &recvCommB);
+    } else {
+        while (!sendCommA) ConnectToRemote(mergedDevA, &handleA, &sendCommA);
+        while (!sendCommB) ConnectToRemote(mergedDevB, &handleB, &sendCommB);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Transfer on BOTH connections
+    struct ConnInfo {
+        void* recvComm; void* sendComm;
+        int tag; int seed; const char* label;
+    };
+    ConnInfo conns[2] = {
+        {recvCommA, sendCommA, 200, 2000, "Connection A"},
+        {recvCommB, sendCommB, 201, 3000, "Connection B"},
+    };
+
+    for (int c = 0; c < 2; c++) {
+        void* comm = (rank == 0) ? conns[c].recvComm : conns[c].sendComm;
+
+        void* buf = malloc(kTransferSize);
+        ASSERT_NE(buf, nullptr);
+        void* mhandle = nullptr;
+        ASSERT_EQ(RegisterMemory(comm, buf, kTransferSize, NCCL_PTR_HOST, &mhandle),
+                  ncclSuccess);
+
+        if (rank == 1) {
+            uint8_t* p = static_cast<uint8_t*>(buf);
+            for (size_t j = 0; j < kTransferSize; j++)
+                p[j] = (uint8_t)((conns[c].seed + j) % kBytePatternModulo);
+        } else {
+            memset(buf, 0xDE, kTransferSize);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        void* req = nullptr;
+        if (rank == 0) {
+            void* rb[1] = {buf}; size_t rs[1] = {kTransferSize};
+            int rt[1] = {conns[c].tag}; void* rh[1] = {mhandle};
+            ASSERT_EQ(PostRecv(conns[c].recvComm, 1, rb, rs, rt, rh, &req), ncclSuccess);
+            ASSERT_NE(req, nullptr);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == 1) {
+            void* sendReq = nullptr;
+            int attempts = 0;
+            do {
+                ASSERT_EQ(PostSend(conns[c].sendComm, buf, kTransferSize,
+                                   conns[c].tag, mhandle, &sendReq), ncclSuccess);
+                if (sendReq) break;
+                attempts++;
+                usleep(kPollIntervalUs);
+            } while (attempts < kMaxRetryAttempts);
+            ASSERT_NE(sendReq, nullptr)
+                << conns[c].label << " PostSend NULL after " << attempts << " retries";
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == 0) {
+            int csz[1] = {0};
+            ASSERT_EQ(WaitForCompletion(req, csz, kLargeTransferTimeoutMs), ncclSuccess)
+                << conns[c].label << " recv timed out";
+            EXPECT_EQ(csz[0], (int)kTransferSize)
+                << conns[c].label << " size mismatch";
+
+            uint8_t* p = static_cast<uint8_t*>(buf);
+            bool ok = true;
+            size_t errIdx = 0;
+            uint8_t errExp = 0, errGot = 0;
+            for (size_t j = 0; j < kTransferSize; j++) {
+                uint8_t expected = (uint8_t)((conns[c].seed + j) % kBytePatternModulo);
+                if (p[j] != expected) {
+                    ok = false;
+                    errIdx = j; errExp = expected; errGot = p[j];
+                    break;
+                }
+            }
+            EXPECT_TRUE(ok) << conns[c].label << " data mismatch at byte " << errIdx
+                            << ": expected " << (int)errExp << " got " << (int)errGot;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+        free(buf);
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // Close
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvCommA), ncclSuccess);
+        ASSERT_EQ(CloseRecvComm(recvCommB), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendCommA), ncclSuccess);
+        ASSERT_EQ(CloseSendComm(sendCommB), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        ASSERT_EQ(CloseListenComm(listenCommA), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenCommB), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 TEST_F(NetIbMPITest, MultipleSequentialConnections) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
