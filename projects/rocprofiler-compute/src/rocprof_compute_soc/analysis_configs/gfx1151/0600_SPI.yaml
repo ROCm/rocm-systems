@@ -25,7 +25,7 @@ Panel Config:
           # Use GRBM_SPI_BUSY (not SPI_BUSY): SPI_BUSY is summed over all SPI instances, so it
           # can exceed GRBM_GUI_ACTIVE when multiple SEs are busy in the same cycle. GRBM counts
           # "any SPI busy" vs GUI active.
-          avg: AVG((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          avg: SUM(100 * GRBM_SPI_BUSY) / SUM(GRBM_GUI_ACTIVE)
           min: MIN((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           max: MAX((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           unit: Percent
@@ -47,12 +47,12 @@ Panel Config:
         # latter is a counter_defs derived alias and is often absent from pmc_perf.csv, which
         # yields all-zero / NaN metrics. Profiler output typically already aggregates instances.
         Compute Wave Dispatches:
-          avg: AVG(SPI_CSN_WAVE / $denom)
+          avg: SUM(SPI_CSN_WAVE) / SUM($denom)
           min: MIN(SPI_CSN_WAVE / $denom)
           max: MAX(SPI_CSN_WAVE / $denom)
           unit: (Count + $normUnit)
         Wave Dispatch Rate:
-          avg: AVG((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          avg: SUM(SPI_CSN_WAVE) / SUM(GRBM_GUI_ACTIVE)
           min: MIN((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           max: MAX((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           unit: Waves/cycle
