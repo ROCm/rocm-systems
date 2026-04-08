@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <sys/cdefs.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -159,45 +160,40 @@ public:
         static std::shared_ptr<spdlog::logger> _instance;
         static std::atomic<bool>               _initialized{ false };
         static std::mutex                      _init_mutex;
-        static std::shared_mutex               _fork_gate;
+        static std::atomic<bool>               _log_lock{ false };
 
         static std::once_flag _atfork_flag;
         std::call_once(_atfork_flag, [] {
             pthread_atfork(
-                // prefork: acquire _init_mutex then exclusively lock the
-                // fork-gate. The exclusive lock drains all in-flight
-                // shared-lock holders (log calls), guaranteeing every _mt
-                // sink mutex is unlocked when fork() clones the process.
+                // prefork: lock _init_mutex.  Safe because it is only held
+                // briefly during one-time logger creation, never during
+                // normal log calls — so no lock-ordering inversion with
+                // glibc-internal locks acquired by fork().
+                [] { _init_mutex.lock(); },
+                // parent postfork: unlock, resume normal operation.
+                [] { _init_mutex.unlock(); },
+                // child postfork: reset the atomic spinlock (well-defined
+                // atomic store — no UB unlike placement-new on a mutex),
+                // then safely delete the old logger (_st sinks have no
+                // internal mutex).  No leak.
                 [] {
-                    _init_mutex.lock();
-                    _fork_gate.lock();
-                },
-                // parent postfork: unlock in reverse order, resume logging
-                [] {
-                    _fork_gate.unlock();
-                    _init_mutex.unlock();
-                },
-                // child postfork: all _mt sink mutexes are unlocked (no
-                // thread was mid-write), so reset() safely destroys the
-                // old logger. Do NOT call spdlog::drop() — the registry
-                // mutex may be held by a thread that no longer exists.
-                [] {
+                    _log_lock.store(false, std::memory_order_relaxed);
                     _instance.reset();
                     _initialized.store(false, std::memory_order_release);
-                    ::new(&_init_mutex) std::mutex();
-                    ::new(&_fork_gate) std::shared_mutex();
+                    _init_mutex.unlock();
                 });
         });
 
-        if(!_initialized.load(std::memory_order_acquire))
+        if(_initialized.load(std::memory_order_acquire))
         {
-            std::lock_guard<std::mutex> lock(_init_mutex);
+            return *_instance;
+        }
 
-            if(!_initialized.load(std::memory_order_relaxed))
-            {
-                _instance = create_logger(_fork_gate);
-                _initialized.store(true, std::memory_order_release);
-            }
+        std::lock_guard<std::mutex> lock(_init_mutex);
+        if(!_initialized.load(std::memory_order_relaxed))
+        {
+            _instance = create_logger(_log_lock);
+            _initialized.store(true, std::memory_order_release);
         }
 
         return *_instance;
@@ -206,43 +202,50 @@ public:
     logger_t() = delete;
 
 private:
-    // Gates sink access through a shared_mutex (fork-gate). Logging takes a
-    // shared lock (concurrent, ~1 atomic op). Fork takes an exclusive lock,
-    // draining all in-flight log calls so every _mt sink mutex is unlocked
-    // when the process is cloned — enabling safe destruction in the child.
+    // Serializes _st sink access through an atomic spinlock.  Unlike a
+    // mutex or shared_mutex the spinlock can be safely reset in a
+    // post-fork child with a plain atomic store — no undefined behaviour,
+    // no TSan complaints, and the old logger can be cleanly deleted.
     class fork_safe_logger : public spdlog::logger
     {
     public:
         template <typename It>
-        fork_safe_logger(std::string name, It begin, It end, std::shared_mutex& fork_gate)
+        fork_safe_logger(std::string name, It begin, It end, std::atomic<bool>& log_lock)
         : spdlog::logger(std::move(name), begin, end)
-        , m_fork_gate(fork_gate)
+        , m_log_lock(log_lock)
         {}
 
     protected:
         void sink_it_(const spdlog::details::log_msg& msg) override
         {
-            std::shared_lock<std::shared_mutex> lock(m_fork_gate);
+            while(m_log_lock.exchange(true, std::memory_order_acquire))
+                std::this_thread::yield();
             spdlog::logger::sink_it_(msg);
+            m_log_lock.store(false, std::memory_order_release);
         }
 
         void flush_() override
         {
-            std::shared_lock<std::shared_mutex> lock(m_fork_gate);
+            while(m_log_lock.exchange(true, std::memory_order_acquire))
+                std::this_thread::yield();
             spdlog::logger::flush_();
+            m_log_lock.store(false, std::memory_order_release);
         }
 
     private:
-        std::shared_mutex& m_fork_gate;
+        std::atomic<bool>& m_log_lock;
     };
 
-    static std::shared_ptr<spdlog::logger> create_logger(std::shared_mutex& fork_gate)
+    static std::shared_ptr<spdlog::logger> create_logger(std::atomic<bool>& log_lock)
     {
         logger_settings_t logger_settings;
 
         std::vector<spdlog::sink_ptr> sinks;
 
-        sinks.push_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
+        // Use _st sinks — no internal mutex.  Thread safety is provided
+        // by fork_safe_logger's atomic spinlock, which can be safely
+        // reset after fork() with a plain atomic store (no UB).
+        sinks.push_back(std::make_shared<spdlog::sinks::stdout_color_sink_st>());
 
         auto log_file = logger_settings.get_log_file();
         if(!log_file.empty())
@@ -250,11 +253,11 @@ private:
             log_file = include_process_id_in_filename(log_file);
 
             sinks.push_back(
-                std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file, true));
+                std::make_shared<spdlog::sinks::basic_file_sink_st>(log_file, true));
         }
 
         auto log = std::shared_ptr<spdlog::logger>(
-            new fork_safe_logger(s_logger_name, sinks.begin(), sinks.end(), fork_gate));
+            new fork_safe_logger(s_logger_name, sinks.begin(), sinks.end(), log_lock));
 
         log->set_pattern(logger_settings.get_log_pattern());
         log->set_level(logger_settings.get_log_level());
