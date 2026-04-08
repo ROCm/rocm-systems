@@ -27,110 +27,37 @@
 
 #include "log.hpp"
 
-static void dump_ibv_context(struct ibv_context *x);
-static void dump_ibv_device(struct ibv_device *x);
-static void dump_ibv_pd(struct ibv_pd *x);
-static void dump_ibv_port_attr(struct ibv_port_attr *x);
-static void dump_ibv_qp(struct ibv_qp *qp, int conn_num);
-static void dump_mlx5dv_qp(struct mlx5dv_qp *qp_dv, int conn_num);
-static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
 
 [[maybe_unused]] static void dump_ibv_context([[maybe_unused]] struct ibv_context* x) {
-  /*
-   * struct ibv_context {
-   *   struct ibv_device      *device;
-   *   struct ibv_context_ops  ops;
-   *   int                     cmd_fd;
-   *   int                     async_fd;
-   *   int                     num_comp_vectors;
-   *   pthread_mutex_t         mutex;
-   *   void                   *abi_compat;
-   * };
-   */
-  LOG_TRACE("\n"
-         "===============================================\n"
-         "                IBV_CONTEXT\n"
-         "===============================================\n"
+  LOG_INFO("IBV_CONTEXT\n"
          "  (ibv_device*)        device              = %p\n"
          "  (int)                cmd_fd              = %d\n"
          "  (int)                async_fd            = %d\n"
          "  (int)                num_comp_vectors    = %d\n"
-         "  (void*)              abi_compat          = %p\n",
+         "  (void*)              abi_compat          = %p",
          x->device, x->cmd_fd, x->async_fd, x->num_comp_vectors, x->abi_compat);
-};
+}
 
 [[maybe_unused]] static void dump_ibv_device([[maybe_unused]] struct ibv_device* x) {
-  /*
-   * struct ibv_device {
-   *   struct _ibv_device_ops  _ops;
-   *   enum ibv_node_type node_type;
-   *   enum ibv_transport_type transport_type;
-   *   char name[IBV_SYSFS_NAME_MAX];
-   *   char dev_name[IBV_SYSFS_NAME_MAX];
-   *   char dev_path[IBV_SYSFS_PATH_MAX];
-   *   char ibdev_path[IBV_SYSFS_PATH_MAX];
-   * };
-   */
-  LOG_TRACE("\n"
-         "===============================================\n"
-         "               IBV_DEVICE\n"
-         "===============================================\n"
+  LOG_INFO("IBV_DEVICE\n"
          "  (enum ibv_node_type)      node_type      = %d\n"
          "  (enum ibv_transport_type) transport_type = %d\n"
          "  (char[])                  name           = %s\n"
          "  (char[])                  dev_name       = %s\n"
          "  (char[])                  dev_path       = %s\n"
-         "  (char[])                  ibdev_path     = %s\n",
+         "  (char[])                  ibdev_path     = %s",
          x->node_type, x->transport_type, x->name, x->dev_name, x->dev_path, x->ibdev_path);
 }
 
 [[maybe_unused]] static void dump_ibv_pd([[maybe_unused]] struct ibv_pd* x) {
-  /*
-   * struct ibv_pd {
-   *   struct ibv_context     *context;
-   *   uint32_t                handle;
-   * };
-   */
-  LOG_TRACE("\n"
-         "===============================================\n"
-         "               IBV_PD\n"
-         "===============================================\n"
+  LOG_INFO("IBV_PD\n"
          "  (ibv_context*) context = %p\n"
-         "  (uint32_t)     handle  = 0x%x\n",
+         "  (uint32_t)     handle  = 0x%x",
          x->context, x->handle);
 }
 
 [[maybe_unused]] static void dump_ibv_port_attr([[maybe_unused]] struct ibv_port_attr* x) {
-  /*
-   * struct ibv_port_attr {
-   *   enum ibv_port_state     state;
-   *   enum ibv_mtu            max_mtu;
-   *   enum ibv_mtu            active_mtu;
-   *   int                     gid_tbl_len;
-   *   uint32_t                port_cap_flags;
-   *   uint32_t                max_msg_sz;
-   *   uint32_t                bad_pkey_cntr;
-   *   uint32_t                qkey_viol_cntr;
-   *   uint16_t                pkey_tbl_len;
-   *   uint16_t                lid;
-   *   uint16_t                sm_lid;
-   *   uint8_t                 lmc;
-   *   uint8_t                 max_vl_num;
-   *   uint8_t                 sm_sl;
-   *   uint8_t                 subnet_timeout;
-   *   uint8_t                 init_type_reply;
-   *   uint8_t                 active_width;
-   *   uint8_t                 active_speed;
-   *   uint8_t                 phys_state;
-   *   uint8_t                 link_layer;
-   *   uint8_t                 flags;
-   *   uint16_t                port_cap_flags2;
-   * };
-   */
-  LOG_TRACE("\n"
-         "===============================================\n"
-         "               IBV_PORT_ATTR\n"
-         "===============================================\n"
+  LOG_INFO("IBV_PORT_ATTR\n"
          "  (enum ibv_port_state) state           = %u\n"
          "  (enum ibv_mtu)        max_mtu         = %u\n"
          "  (enum ibv_mtu)        active_mtu      = %u\n"
@@ -152,86 +79,65 @@ static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
          "  (uint8_t)             phys_state      = 0x%x\n"
          "  (uint8_t)             link_layer      = 0x%x\n"
          "  (uint8_t)             flags           = 0x%x\n"
-         "  (uint16_t)            port_cap_flags2 = 0x%x\n",
+         "  (uint16_t)            port_cap_flags2 = 0x%x",
          x->state, x->max_mtu, x->active_mtu, x->gid_tbl_len, x->port_cap_flags, x->max_msg_sz,
          x->bad_pkey_cntr, x->qkey_viol_cntr, x->pkey_tbl_len, x->lid, x->sm_lid, x->lmc, x->max_vl_num,
          x->sm_sl, x->subnet_timeout, x->init_type_reply, x->active_width, x->active_speed, x->phys_state,
          x->link_layer, x->flags, x->port_cap_flags2);
 }
 
-[[maybe_unused]] void dump_ibv_qp([[maybe_unused]] struct ibv_qp *qp, [[maybe_unused]] int conn_num) {
-  /*
-   * struct ibv_qp {
-   *   struct ibv_context     *context;
-   *   void                   *qp_context;
-   *   struct ibv_pd          *pd;
-   *   struct ibv_cq          *send_cq;
-   *   struct ibv_cq          *recv_cq;
-   *   struct ibv_srq         *srq;
-   *   uint32_t                handle;
-   *   uint32_t                qp_num;
-   *   enum ibv_qp_state       state;
-   *   enum ibv_qp_type        qp_type;
-   *   pthread_mutex_t         mutex;
-   *   pthread_cond_t          cond;
-   *   uint32_t                events_completed;
-   * };
-   */
-  LOG_TRACE("");
-  LOG_TRACE("============== QP_DUMP CONNECTION#%d ==========", conn_num);
-  LOG_TRACE("  (ibv_context*)      context          = %p",   qp->context);
-  LOG_TRACE("  (void*)             qp_context       = %p",   qp->qp_context);
-  LOG_TRACE("  (ibv_pd*)           pd               = %p",   qp->pd);
-  LOG_TRACE("  (ibv_cq*)           send_cq          = %p",   qp->send_cq);
-  LOG_TRACE("  (ibv_cq*)           recv_cq          = %p",   qp->recv_cq);
-  LOG_TRACE("  (ibv_srq*)          srq              = %p",   qp->srq);
-  LOG_TRACE("  (uint32_t)          handle           = 0x%x", qp->handle);
-  LOG_TRACE("  (uint32_t)          qp_num           = 0x%x", qp->qp_num);
-  LOG_TRACE("  (enum ibv_qp_state) state            = %u",   qp->state);
-  LOG_TRACE("  (enum_ibv_qp_type)  qp_type          = %u",   qp->qp_type);
-  LOG_TRACE("  (uint32_t)          events_completed = %u",   qp->events_completed);
-  LOG_TRACE("=========== QP_DUMP_END CONNECTION#%d  ========", conn_num);
+[[maybe_unused]] static void dump_ibv_qp([[maybe_unused]] struct ibv_qp *qp, [[maybe_unused]] int conn_num) {
+  LOG_INFO("IBV_QP CONNECTION#%d\n"
+         "  (ibv_context*)      context          = %p\n"
+         "  (void*)             qp_context       = %p\n"
+         "  (ibv_pd*)           pd               = %p\n"
+         "  (ibv_cq*)           send_cq          = %p\n"
+         "  (ibv_cq*)           recv_cq          = %p\n"
+         "  (ibv_srq*)          srq              = %p\n"
+         "  (uint32_t)          handle           = 0x%x\n"
+         "  (uint32_t)          qp_num           = 0x%x\n"
+         "  (enum ibv_qp_state) state            = %u\n"
+         "  (enum_ibv_qp_type)  qp_type          = %u\n"
+         "  (uint32_t)          events_completed = %u",
+         conn_num, qp->context, qp->qp_context, qp->pd, qp->send_cq, qp->recv_cq,
+         qp->srq, qp->handle, qp->qp_num, qp->state, qp->qp_type, qp->events_completed);
 }
 
-[[maybe_unused]] void dump_mlx5dv_qp([[maybe_unused]] struct mlx5dv_qp *qp_dv, [[maybe_unused]] int conn_num) {
-  LOG_TRACE("");
-  LOG_TRACE("===============================================");
-  LOG_TRACE("     INITIALIZED MLXDV_QP FOR CONNECTION#%d", conn_num);
-  LOG_TRACE("===============================================");
-  LOG_TRACE("=================== QP_DUMP ===================");
-  LOG_TRACE("  (__be32*)  dbrec           = %p",     qp_dv->dbrec);
-  LOG_TRACE("  (void*)    sq.buf          = %p",     qp_dv->sq.buf);
-  LOG_TRACE("  (uint32_t) sq.wqe_cnt      = %u",     qp_dv->sq.wqe_cnt);
-  LOG_TRACE("  (uint32_t) sq.stride       = %u",     qp_dv->sq.stride);
-  LOG_TRACE("  (void*)    rq.buf          = %p",     qp_dv->rq.buf);
-  LOG_TRACE("  (uint32_t) rq.wqe_cnt      = %u",     qp_dv->rq.wqe_cnt);
-  LOG_TRACE("  (uint32_t) rq.stride       = %u",     qp_dv->rq.stride);
-  LOG_TRACE("  (void*)    bf.reg          = %p",     qp_dv->bf.reg);
-  LOG_TRACE("  (uint32_t) bf.size         = 0x%x",   qp_dv->bf.size);
-  LOG_TRACE("  (uint64_t) comp_mask       = 0x%lx",  qp_dv->comp_mask);
-  LOG_TRACE("  (off_t)    uar_mmap_offset = 0x%lx",  qp_dv->uar_mmap_offset);
-  LOG_TRACE("  (uint32_t) tirn            = 0x%x",   qp_dv->tirn);
-  LOG_TRACE("  (uint32_t) tisn            = 0x%x",   qp_dv->tisn);
-  LOG_TRACE("  (uint32_t) rqn             = 0x%x",   qp_dv->rqn);
-  LOG_TRACE("  (uint32_t) sqn             = 0x%x",   qp_dv->sqn);
-  LOG_TRACE("  (uint64_t) tir_icm_addr    = 0x%lx",  qp_dv->tir_icm_addr);
-  LOG_TRACE("================== QP_DUMP_END ================");
+[[maybe_unused]] static void dump_mlx5dv_qp([[maybe_unused]] struct mlx5dv_qp *qp_dv, [[maybe_unused]] int conn_num) {
+  LOG_INFO("MLX5DV_QP CONNECTION#%d\n"
+         "  (__be32*)  dbrec           = %p\n"
+         "  (void*)    sq.buf          = %p\n"
+         "  (uint32_t) sq.wqe_cnt      = %u\n"
+         "  (uint32_t) sq.stride       = %u\n"
+         "  (void*)    rq.buf          = %p\n"
+         "  (uint32_t) rq.wqe_cnt      = %u\n"
+         "  (uint32_t) rq.stride       = %u\n"
+         "  (void*)    bf.reg          = %p\n"
+         "  (uint32_t) bf.size         = 0x%x\n"
+         "  (uint64_t) comp_mask       = 0x%lx\n"
+         "  (off_t)    uar_mmap_offset = 0x%lx\n"
+         "  (uint32_t) tirn            = 0x%x\n"
+         "  (uint32_t) tisn            = 0x%x\n"
+         "  (uint32_t) rqn             = 0x%x\n"
+         "  (uint32_t) sqn             = 0x%x\n"
+         "  (uint64_t) tir_icm_addr    = 0x%lx",
+         conn_num, qp_dv->dbrec, qp_dv->sq.buf, qp_dv->sq.wqe_cnt, qp_dv->sq.stride,
+         qp_dv->rq.buf, qp_dv->rq.wqe_cnt, qp_dv->rq.stride, qp_dv->bf.reg, qp_dv->bf.size,
+         qp_dv->comp_mask, qp_dv->uar_mmap_offset, qp_dv->tirn, qp_dv->tisn,
+         qp_dv->rqn, qp_dv->sqn, qp_dv->tir_icm_addr);
 }
 
-[[maybe_unused]] void dump_mlx5dv_cq([[maybe_unused]] struct mlx5dv_cq *cq_dv, [[maybe_unused]] int conn_num) {
-  LOG_TRACE("");
-  LOG_TRACE("===============================================");
-  LOG_TRACE("     INITIALIZED MLX5DV_CQ FOR CONNECTION#%d", conn_num);
-  LOG_TRACE("===============================================");
-  LOG_TRACE("=================== CQ_DUMP ===================");
-  LOG_TRACE("  (void*)    buf             = %p",     cq_dv->buf);
-  LOG_TRACE("  (__be32*)  dbrec           = %p",     cq_dv->dbrec);
-  LOG_TRACE("  (uint32_t) cqe_cnt         = %u",     cq_dv->cqe_cnt);
-  LOG_TRACE("  (uint32_t) cqe_size        = %u",     cq_dv->cqe_size);
-  LOG_TRACE("  (void*)    cq_uar          = %p",     cq_dv->cq_uar);
-  LOG_TRACE("  (uint32_t) cqn             = 0x%x",   cq_dv->cqn);
-  LOG_TRACE("  (uint64_t) comp_mask       = 0x%lx",  cq_dv->comp_mask);
-  LOG_TRACE("================== CQ_DUMP_END ================");
+[[maybe_unused]] static void dump_mlx5dv_cq([[maybe_unused]] struct mlx5dv_cq *cq_dv, [[maybe_unused]] int conn_num) {
+  LOG_INFO("MLX5DV_CQ CONNECTION#%d\n"
+         "  (void*)    buf             = %p\n"
+         "  (__be32*)  dbrec           = %p\n"
+         "  (uint32_t) cqe_cnt         = %u\n"
+         "  (uint32_t) cqe_size        = %u\n"
+         "  (void*)    cq_uar          = %p\n"
+         "  (uint32_t) cqn             = 0x%x\n"
+         "  (uint64_t) comp_mask       = 0x%lx",
+         conn_num, cq_dv->buf, cq_dv->dbrec, cq_dv->cqe_cnt, cq_dv->cqe_size,
+         cq_dv->cq_uar, cq_dv->cqn, cq_dv->comp_mask);
 }
 
 #endif /* LIBRARY_SRC_GDA_DEBUG_GDA_HPP_ */

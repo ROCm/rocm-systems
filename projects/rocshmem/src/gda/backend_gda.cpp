@@ -1402,6 +1402,7 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   default:
     assert(false /* GDAProvider initialize_gpu_qp */);
   }
+  dump_ibv_qp(qps[conn_num], conn_num);
 }
 
 void GDABackend::create_qps(int sq_length) {

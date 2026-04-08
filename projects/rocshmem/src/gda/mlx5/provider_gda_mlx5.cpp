@@ -662,25 +662,24 @@ static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp
 }
 
 void mlx5_devx_qp::dump([[maybe_unused]] int conn_num) {
-  LOG_TRACE("");
-  LOG_TRACE("===============================================");
-  LOG_TRACE("     INITIALIZED MLX5_DEVX_QP FOR CONNECTION#%d", conn_num);
-  LOG_TRACE("===============================================");
-  LOG_TRACE("=================== QP_DUMP ===================");
-  LOG_TRACE("  (uint32_t)  qpn              = 0x%x",  this->qpn);
-  LOG_TRACE("  (void*)     sq               = %p",    this->sq);
-  LOG_TRACE("  (uint16_t)  sq_depth         = %hu",   this->sq_depth);
-  LOG_TRACE("  (uint32_t*) qp_dbrec         = %p",    this->qp_dbrec);
-  LOG_TRACE("  (uint32_t)  cqn              = 0x%x",  this->cqn);
-  LOG_TRACE("  (void*)     cq               = %p",    this->cq);
-  LOG_TRACE("  (uint32_t)  cq_depth         = %u",    this->cq_depth);
-  LOG_TRACE("  (uint32_t*) cq_dbrec         = %p",    this->cq_dbrec);
-  LOG_TRACE("  (void*)     uar->reg_addr    = %p",    this->uar->reg_addr);
-  LOG_TRACE("  (void*)     uar->base_addr   = %p",    this->uar->base_addr);
-  LOG_TRACE("  (uint32_t)  uar->page_id     = 0x%x",  this->uar->page_id);
-  LOG_TRACE("  (off_t)     uar->mmap_offset = 0x%lx", this->uar->mmap_off);
-  LOG_TRACE("  (uint64_t)  uar->comp_mask   = 0x%lx", this->uar->comp_mask);
-  LOG_TRACE("================== QP_DUMP_END ================");
+  LOG_INFO("MLX5_DEVX_QP CONNECTION#%d\n"
+         "  (uint32_t)  qpn              = 0x%x\n"
+         "  (void*)     sq               = %p\n"
+         "  (uint16_t)  sq_depth         = %hu\n"
+         "  (uint32_t*) qp_dbrec         = %p\n"
+         "  (uint32_t)  cqn              = 0x%x\n"
+         "  (void*)     cq               = %p\n"
+         "  (uint32_t)  cq_depth         = %u\n"
+         "  (uint32_t*) cq_dbrec         = %p\n"
+         "  (void*)     uar->reg_addr    = %p\n"
+         "  (void*)     uar->base_addr   = %p\n"
+         "  (uint32_t)  uar->page_id     = 0x%x\n"
+         "  (off_t)     uar->mmap_offset = 0x%lx\n"
+         "  (uint64_t)  uar->comp_mask   = 0x%lx",
+         conn_num, this->qpn, this->sq, this->sq_depth, this->qp_dbrec,
+         this->cqn, this->cq, this->cq_depth, this->cq_dbrec,
+         this->uar->reg_addr, this->uar->base_addr, this->uar->page_id,
+         this->uar->mmap_off, this->uar->comp_mask);
 }
 
 }  // namespace rocshmem
