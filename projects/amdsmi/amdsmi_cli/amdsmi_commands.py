@@ -3844,7 +3844,7 @@ class AMDSMICommands:
                 values_dict["temperature"] = temperatures
 
         # Since pcie bw may increase based on frequent metrics calls, we add it to the output here, but the populate the values first
-        if "pcie" in current_platform_args:
+        if "pcie" in current_platform_args and not is_apu:
             if args.pcie:
                 values_dict["pcie"] = pcie_dict
 
