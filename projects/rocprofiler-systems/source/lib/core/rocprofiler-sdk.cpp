@@ -520,7 +520,7 @@ get_buffered_domains()
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #endif
         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
-#if(ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 10000)
         ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
         ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
         ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
@@ -579,7 +579,7 @@ get_buffered_domains()
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
         }
-#if(ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 10000)
         else if(itr == "kfd_events" || itr == "kfd_page_fault" ||
                 itr == "kfd_page_migrate" || itr == "kfd_queue" ||
                 itr == "kfd_event_queue" || itr == "kfd_event_unmap_from_gpu" ||

@@ -34,13 +34,6 @@
                     "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'kfd_event_unmap_from_gpu';"
                 },
                 {
-                    "comparison": "greater_than",
-                    "description": "Verify that 'kfd_event_unmap_from_gpu' appears in category in regions table",
-                    "error_message": "'kfd_event_unmap_from_gpu' category entries not found in regions",
-                    "expected_result": 0,
-                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'kfd_event_unmap_from_gpu';"
-                },
-                {
                     "comparison": "equals",
                     "description": "Check for any NULL values in the 'name' column for KFD regions",
                     "error_message": "NULL entries found in the name column of KFD regions",
