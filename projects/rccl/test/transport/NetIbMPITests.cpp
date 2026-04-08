@@ -924,7 +924,7 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
 TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
@@ -1093,6 +1093,187 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
             for (size_t i = 0; i < sz && ok; i++)
                 ok = (out[i] == (uint8_t)((seed + i) % kBytePatternModulo));
             EXPECT_TRUE(ok) << "Data mismatch for " << c.desc;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+}
+
+TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly kExactTwoProcesses processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    std::vector<ncclNetProperties_t> props(ndev);
+    std::vector<int> physDevs;
+    for (int i = 0; i < ndev; i++) {
+        memset(&props[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
+        if (!props[i].name || !strchr(props[i].name, '+'))
+            physDevs.push_back(i);
+    }
+
+    // Select 3 compatible devices per rank
+    int needed = 6;
+    if ((int)physDevs.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
+
+    int targetSpeed = props[physDevs[0]].speed;
+    std::vector<int> compat;
+    for (int d : physDevs)
+        if (props[d].speed == targetSpeed) compat.push_back(d);
+    if ((int)compat.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
+
+    int offset = (rank == 1) ? 3 : 0;
+    std::vector<int> selected(compat.begin() + offset, compat.begin() + offset + 3);
+
+    // Create 3-NIC merged device
+    ncclNetVDeviceProps_t vProps;
+    memset(&vProps, 0, sizeof(vProps));
+    vProps.ndevs = 3;
+    for (int i = 0; i < 3; i++) vProps.devs[i] = selected[i];
+
+    int mergedDev = -1;
+    ncclResult_t res = MakeVirtualDevice(&mergedDev, &vProps);
+    if (res != ncclSuccess || mergedDev < 0)
+        GTEST_SKIP() << "Rank " << rank << " failed to create 3-NIC merged device";
+
+    // Build test size list
+    long pageSize = sysconf(_SC_PAGESIZE);
+    if (pageSize <= 0) pageSize = 4096;
+
+    std::vector<size_t> testSizes = {
+        // Tiny — size < nqps (3 QPs → some get 0-byte chunks)
+        1,
+        // Non-power-of-two — uneven 3-way splits
+        3, 7, 1023, 4097, 65537,
+        // Page boundary
+        (size_t)pageSize,
+        // Powers of two: 2 bytes to 64 MB
+        2, 4, 8, 16, 32, 64, 128, 256, 512, 1024,
+        2048, 4096, 8192, 16384, 32768, 65536,
+        128 * 1024, 256 * 1024, 512 * 1024,
+        1024 * 1024,
+        2 * 1024 * 1024,
+        4 * 1024 * 1024,
+        8 * 1024 * 1024,
+        16 * 1024 * 1024,
+        32 * 1024 * 1024,
+        64 * 1024 * 1024,
+    };
+
+    // Sort and deduplicate (pageSize might duplicate 4096)
+    std::sort(testSizes.begin(), testSizes.end());
+    testSizes.erase(std::unique(testSizes.begin(), testSizes.end()), testSizes.end());
+
+    size_t maxSize = testSizes.back();
+
+    // Allocate max-size buffer once, register once
+    void* buffer = malloc(maxSize);
+    ASSERT_NE(buffer, nullptr);
+    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+    // Setup connection through merged device
+    ConnectionPair pair;
+    ncclNetHandle_t handle;
+    if (rank == 0) {
+        ASSERT_EQ(CreateListenComm(mergedDev, &handle, &pair.listenComm), ncclSuccess);
+        MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+        while (!pair.recvComm) AcceptConnection(pair.listenComm, &pair.recvComm);
+    } else {
+        MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        while (!pair.sendComm) ConnectToRemote(mergedDev, &handle, &pair.sendComm);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    NetConnectionGuard conn(net_);
+    if (rank == 0) { conn.setRecvComm(pair.recvComm); conn.setListenComm(pair.listenComm); }
+    else conn.setSendComm(pair.sendComm);
+
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buffer, maxSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    NetMHandleGuard mhGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+    int passed = 0, failed = 0;
+
+    for (size_t idx = 0; idx < testSizes.size(); idx++) {
+        size_t sz = testSizes[idx];
+        int tag = 800 + (int)idx;
+        int seed = 9000 + (int)idx;
+
+        if (rank == 1) {
+            uint8_t* p = static_cast<uint8_t*>(buffer);
+            for (size_t i = 0; i < sz; i++)
+                p[i] = (uint8_t)((seed + i) % kBytePatternModulo);
+        } else {
+            memset(buffer, 0xDE, sz);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Transfer
+        void* req = nullptr;
+        if (rank == 0) {
+            void* b[1] = {buffer}; size_t s[1] = {sz}; int t[1] = {tag}; void* h[1] = {mhandle};
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, b, s, t, h, &req), ncclSuccess);
+            ASSERT_NE(req, nullptr) << "Recv request NULL for size " << sz;
+        } else {
+            for (int a = 0; !req && a < kMaxRetryAttempts; a++) {
+                ASSERT_EQ(PostSend(pair.sendComm, buffer, sz, tag, mhandle, &req), ncclSuccess);
+                if (!req) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(req, nullptr) << "isend stuck NULL for size " << sz;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int csz[1] = {0};
+        int timeout = (sz > 1024 * 1024) ? kLargeTransferTimeoutMs : kDefaultTimeoutMs;
+        ASSERT_EQ(WaitForCompletion(req, csz, timeout), ncclSuccess)
+            << "Transfer timeout for size " << sz;
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Verify on receiver
+        if (rank == 0) {
+            bool sizeOk = (csz[0] == (int)sz);
+            bool dataOk = true;
+            size_t errIdx = 0;
+            uint8_t errExp = 0, errGot = 0;
+
+            if (sizeOk) {
+                uint8_t* p = static_cast<uint8_t*>(buffer);
+                for (size_t i = 0; i < sz; i++) {
+                    uint8_t expected = (uint8_t)((seed + i) % kBytePatternModulo);
+                    if (p[i] != expected) {
+                        dataOk = false;
+                        errIdx = i; errExp = expected; errGot = p[i];
+                        break;
+                    }
+                }
+            }
+
+            bool ok = sizeOk && dataOk;
+            if (ok) {
+                passed++;
+            } else {
+                failed++;
+                if (!sizeOk) {
+                    fprintf(stderr, "  [FAIL] size=%10zu  size mismatch: got %d\n", sz, csz[0]);
+                } else {
+                    fprintf(stderr, "  [FAIL] size=%10zu  data error at byte %zu: "
+                            "expected %u, got %u\n", sz, errIdx, errExp, errGot);
+                }
+            }
+            fflush(stderr);
+
+            EXPECT_TRUE(ok) << "Failed for size " << sz;
         }
         MPI_Barrier(MPI_COMM_WORLD);
     }
