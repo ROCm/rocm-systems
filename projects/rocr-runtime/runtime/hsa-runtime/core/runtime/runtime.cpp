@@ -3432,7 +3432,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
                                       hsa_signal_t completion_signal) {
 
 #if !defined (__linux__)
-  return HSA_STATUS_ERROR_NOT_SUPPORTED;
+  return HSA_STATUS_ERROR;
 #else
   const size_t kPageSize = os::PageSize();
   
