@@ -3,7 +3,7 @@
 
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 
-#if ROCPROFILER_VERSION >= 700
+#if ROCPROFILER_VERSION >= 10000
 
 #    include "core/categories.hpp"
 #    include "core/trace_cache/buffer_storage.hpp"

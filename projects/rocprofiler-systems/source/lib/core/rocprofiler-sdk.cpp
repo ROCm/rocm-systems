@@ -333,7 +333,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     _add_domain("hsa_api");
     _add_domain("marker_api");
     _add_domain("roctx");
-#if(ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 10000)
     _add_domain("kfd_events");
 #endif
 
