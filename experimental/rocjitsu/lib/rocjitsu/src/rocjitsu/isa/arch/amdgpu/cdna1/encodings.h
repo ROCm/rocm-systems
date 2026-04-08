@@ -85,6 +85,10 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
+  uint32_t sdwa_src0_sel_ = 6;
+  bool sdwa_src0_sext_ = false;
+  uint32_t sdwa_dst_sel_ = 6;
+  uint32_t sdwa_dst_unused_ = 0;
 };
 
 class Vopc : public IsaInstruction<Isa> {
@@ -112,6 +116,10 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   std::unique_ptr<DppOperand> dpp_src0_;
+  uint32_t sdwa_src0_sel_ = 6;
+  bool sdwa_src0_sext_ = false;
+  uint32_t sdwa_dst_sel_ = 6;
+  uint32_t sdwa_dst_unused_ = 0;
 };
 
 class Vintrp : public IsaInstruction<Isa> {

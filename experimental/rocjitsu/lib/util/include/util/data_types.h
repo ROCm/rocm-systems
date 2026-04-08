@@ -44,12 +44,51 @@ inline float f16_to_f32(uint16_t h) {
 inline uint16_t f32_to_f16(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
   uint32_t sign = (f >> 16) & 0x8000;
-  int32_t exp = ((f >> 23) & 0xFF) - 127 + 15;
-  uint32_t mant = (f >> 13) & 0x3FF;
-  if (exp <= 0)
-    return static_cast<uint16_t>(sign);
+  uint32_t f_exp = (f >> 23) & 0xFF;
+  uint32_t f_mant = f & 0x7FFFFF;
+
+  // Inf or NaN.
+  if (f_exp == 0xFF) {
+    if (f_mant)
+      return static_cast<uint16_t>(sign | 0x7C00 | (f_mant >> 13) |
+                                   1);           // NaN, preserve payload MSBs
+    return static_cast<uint16_t>(sign | 0x7C00); // Inf
+  }
+
+  // Rebias exponent from F32 (bias 127) to F16 (bias 15).
+  int32_t exp = static_cast<int32_t>(f_exp) - 127 + 15;
+
+  // F16 denormal or underflow.
+  if (exp <= 0) {
+    if (exp < -10)
+      return static_cast<uint16_t>(sign); // too small, flush to zero
+    // Denormal: shift mantissa right, add implicit 1-bit.
+    uint32_t mant = f_mant | 0x800000;
+    int shift = 14 - exp; // shift = 14 when exp=0, 24 when exp=-10
+    uint32_t round_bit = (mant >> (shift - 1)) & 1;
+    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = mant >> shift;
+    // Round-to-nearest-even.
+    result += round_bit & (sticky | (result & 1));
+    return static_cast<uint16_t>(sign | result);
+  }
+
+  // Overflow → Inf.
   if (exp >= 31)
-    return static_cast<uint16_t>(sign | 0x7C00 | (mant ? 0x200 : 0));
+    return static_cast<uint16_t>(sign | 0x7C00);
+
+  // Normal number: round-to-nearest-even on the 13 truncated mantissa bits.
+  uint32_t round_bit = (f_mant >> 12) & 1;
+  uint32_t sticky = (f_mant & 0xFFF) ? 1 : 0;
+  uint32_t mant = f_mant >> 13;
+  mant += round_bit & (sticky | (mant & 1));
+  // Rounding may overflow mantissa into exponent.
+  if (mant > 0x3FF) {
+    mant = 0;
+    exp += 1;
+    if (exp >= 31)
+      return static_cast<uint16_t>(sign | 0x7C00); // overflow to Inf
+  }
   return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
 }
 
