@@ -118,7 +118,7 @@ texture:
     tags: [texref, image]
   Unit_hipTexRefGetBorderColor_Positive:
     <<: *level_2
-    tags: [image]
+    tags: [texref, image]
   Unit_hipTexRefGetBorderColor_Negative:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
