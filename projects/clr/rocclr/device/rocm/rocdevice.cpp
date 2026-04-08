@@ -3908,12 +3908,13 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
               errorMsg, status);
     }
 
-    // core dump technically won't capture much useful info for OOM case
-    // So disable core dump for OOM and let the error to be catch gracefully
+    // Core dumps generally provide limited value for OOM, so do not let
+    // DumpCoreFile() be the reason to abort in that case. OOM should still
+    // honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
     const bool is_oom = (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
     const bool should_abort =
       is_oom
-        ? (amd::Os::DumpCoreFile() && !HIP_SKIP_ABORT_ON_GPU_ERROR)
+        ? !HIP_SKIP_ABORT_ON_GPU_ERROR
         : (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR);
 
     if (should_abort) {
