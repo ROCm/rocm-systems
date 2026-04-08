@@ -129,6 +129,24 @@ Full list of options that must not change
   - ``kernel_exclude_regex``
   - ``kernel_iteration_range``
 
+Attaching to a process tree
+----------------------------
+
+By default, ``rocprofv3 --attach`` attaches to the target process **and all of its descendant processes**. This is useful for profiling applications that spawn child processes, such as multi-process MPI jobs or launchers that fork workers.
+
+.. code-block:: bash
+
+   # Attach to PID 1234 and all its children (default behavior)
+   rocprofv3 --attach 1234 --hip-trace
+
+To attach only to the specified PID and skip its descendants, pass ``--attach-children=false``:
+
+.. code-block:: bash
+
+   rocprofv3 --attach 1234 --attach-children=false --hip-trace
+
+The child process tree is enumerated once at attach time using ``/proc``. Processes that are spawned after attachment begins are not automatically profiled.
+
 Key considerations
 -------------------
 
@@ -141,3 +159,5 @@ Here are some important points to be noted while using dynamic process attachmen
 - To use attachment in a docker container, add the ``ptrace`` capability to the container (``SYS_PTRACE``).
 
 - The profiler collects data for the entire remaining lifetime of the process or until the configured collection period expires. To learn how to configure the collection period, see :ref:`duration-specific`.
+
+- When attaching to a process tree, if attachment to an individual child process fails (for example, because it exited between enumeration and attach), the error is logged and attachment continues with the remaining processes.

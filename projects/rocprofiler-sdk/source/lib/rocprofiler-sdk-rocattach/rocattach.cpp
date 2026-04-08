@@ -34,6 +34,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <queue>
 #include <unordered_map>
 
 extern char** environ;
@@ -330,6 +331,37 @@ setup(int pid)
     return ROCATTACH_STATUS_SUCCESS;
 }
 
+// Collect all PIDs in the process tree rooted at root_pid (BFS via /proc).
+// Returns root_pid plus all descendant PIDs. Enumerates children for every thread
+// since children can be spawned via clone() from any thread.
+std::vector<pid_t>
+collect_process_tree(pid_t root_pid)
+{
+    std::vector<pid_t> result;
+    std::queue<pid_t>  worklist;
+    worklist.push(root_pid);
+
+    while(!worklist.empty())
+    {
+        pid_t pid = worklist.front();
+        worklist.pop();
+        result.push_back(pid);
+
+        auto            task_dir = "/proc/" + std::to_string(pid) + "/task";
+        std::error_code ec;
+        for(const auto& entry : std::filesystem::directory_iterator(task_dir, ec))
+        {
+            if(!entry.is_directory()) continue;
+            auto          children_path = entry.path() / "children";
+            std::ifstream children_file(children_path);
+            pid_t         child_pid;
+            while(children_file >> child_pid)
+                worklist.push(child_pid);
+        }
+    }
+    return result;
+}
+
 rocattach_status_t
 teardown(int pid)
 {
@@ -399,6 +431,35 @@ teardown(int pid)
 ROCATTACH_EXTERN_C_INIT
 
 rocattach_status_t
+rocattach_attach_tree(int root_pid)
+{
+    rocprofiler::rocattach::initialize_logging();
+
+    if(!rocprofiler::rocattach::PTraceSession::is_supported())
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-attach] rocattach is not supported on this platform.";
+        return ROCATTACH_STATUS_ERROR_NOT_SUPPORTED;
+    }
+
+    auto pids = rocprofiler::rocattach::collect_process_tree(root_pid);
+    ROCP_INFO << "[rocprofiler-sdk-rocattach] Found " << pids.size()
+              << " process(es) in tree rooted at pid " << root_pid;
+
+    auto last_status = ROCATTACH_STATUS_SUCCESS;
+    for(pid_t pid : pids)
+    {
+        auto status = rocprofiler::rocattach::setup(pid);
+        if(status != ROCATTACH_STATUS_SUCCESS)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach_tree failed for pid " << pid
+                       << " with error code " << status << ", continuing with remaining processes";
+            last_status = status;
+        }
+    }
+    return last_status;
+}
+
+rocattach_status_t
 rocattach_attach(int pid)
 {
     rocprofiler::rocattach::initialize_logging();
@@ -417,6 +478,37 @@ rocattach_attach(int pid)
         return status;
     }
     return ROCATTACH_STATUS_SUCCESS;
+}
+
+rocattach_status_t
+rocattach_detach_tree(int root_pid)
+{
+    rocprofiler::rocattach::initialize_logging();
+
+    // Enumerate the process tree at detach time and tear down every PID that
+    // has an active session. collect_process_tree reads only /proc (no locks),
+    // and teardown acquires and releases the sessions lock internally, so
+    // concurrent calls from multiple threads are safe.
+    auto pids = rocprofiler::rocattach::collect_process_tree(root_pid);
+    ROCP_INFO << "[rocprofiler-sdk-rocattach] rocattach_detach_tree found " << pids.size()
+              << " process(es) in tree rooted at pid " << root_pid;
+
+    auto last_status = ROCATTACH_STATUS_SUCCESS;
+    for(pid_t pid : pids)
+    {
+        auto status = rocprofiler::rocattach::teardown(pid);
+        // teardown returns ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT when there is no active session
+        // for the given PID. This is expected for processes in the tree that were never attached,
+        // so silently skip them rather than propagating the error.
+        if(status == ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT) continue;
+        if(status != ROCATTACH_STATUS_SUCCESS)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_detach_tree failed for pid " << pid
+                       << " with error code " << status << ", continuing with remaining processes";
+            last_status = status;
+        }
+    }
+    return last_status;
 }
 
 rocattach_status_t
