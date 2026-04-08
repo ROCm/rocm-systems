@@ -1,15 +1,21 @@
 ---
 definitions:
   level_0: &level_0
-    level: 0
+    level: [0]
   level_1: &level_1
-    level: 1
+    level: [1]
   level_2: &level_2
-    level: 2
+    level: [2]
   level_3: &level_3
-    level: 3
+    level: [3]
   level_4: &level_4
-    level: 4
+    level: [4]
+  level_default: &level_default
+    level: [0, 1, 2]
+  level_stress: &level_stress
+    level: [3, 4]
+  level_all: &level_all
+    level: [0, 1, 2, 3, 4]
 
 # ==============================================================================
 # LEVEL PARAMETERS - Test parameters for each level
