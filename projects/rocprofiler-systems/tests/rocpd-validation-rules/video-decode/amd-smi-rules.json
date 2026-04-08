@@ -14,6 +14,7 @@
             ],
             "validation_queries": [
                 {
+                    "requires": "vcn_activity",
                     "comparison": "greater_than",
                     "description": "Check for vcn_activity amd-smi metrics",
                     "error_message": "Did not find vcn_activity in amd-smi metrics",
@@ -33,13 +34,31 @@
             ],
             "validation_queries": [
                 {
+                    "requires": "gfx_activity",
                     "comparison": "greater_than",
-                    "description": "Check for amd-smi monitoring busy times",
+                    "description": "Check for amd-smi GFX busy samples",
+                    "error_message": "Less than expected number of captured amd-smi gfx-busy samples!",
+                    "expected_result": 10,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_busy_gfx'"
+                },
+                {
+                    "requires": "umc_activity",
+                    "comparison": "greater_than",
+                    "description": "Check for amd-smi UMC busy samples",
+                    "error_message": "Less than expected number of captured amd-smi umc-busy samples!",
+                    "expected_result": 10,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_busy_umc'"
+                },
+                {
+                    "requires": "mm_activity",
+                    "comparison": "greater_than",
+                    "description": "Check for amd-smi MM busy samples",
                     "error_message": "Less than expected number of captured amd-smi mm-busy samples!",
                     "expected_result": 10,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_busy_mm'"
                 },
                 {
+                    "requires": "mem_usage",
                     "comparison": "greater_than",
                     "description": "Check for amd-smi monitoring GPU memory usage",
                     "error_message": "Less than expected number of captured amd-smi memory-usage samples!",
@@ -47,6 +66,7 @@
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_memory_usage'"
                 },
                 {
+                    "requires": "vcn_activity",
                     "comparison": "greater_than",
                     "description": "Check for amd-smi monitoring VCN activity",
                     "error_message": "Less than expected activity in amd-smi vcn-activity samples!",

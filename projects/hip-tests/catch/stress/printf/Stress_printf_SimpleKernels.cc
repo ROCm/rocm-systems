@@ -592,7 +592,7 @@ HIP_TEST_CASE(Stress_printf_ConstStr) {
       hipPrintfStressTest::test_printf_conststr(num_blocks, threads_per_block, print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -613,7 +613,7 @@ HIP_TEST_CASE(Stress_printf_IfElseConditionalStr) {
                                                                    print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -634,7 +634,7 @@ HIP_TEST_CASE(Stress_printf_IfConditionalStr) {
                                                                       print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -654,7 +654,7 @@ HIP_TEST_CASE(Stress_printf_VariableStr) {
       hipPrintfStressTest::EmpiricalValues1);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -674,7 +674,7 @@ HIP_TEST_CASE(Stress_printf_DependentCalc) {
                                                       hipPrintfStressTest::EmpiricalValues2);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -694,7 +694,7 @@ HIP_TEST_CASE(Stress_printf_DecimalStr) {
   TestPassed = hipPrintfStressTest::test_decimal_str(num_blocks, threads_per_block, print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -714,7 +714,7 @@ HIP_TEST_CASE(Stress_printf_SharedMem) {
   TestPassed = hipPrintfStressTest::test_shared_mem(num_blocks, threads_per_block, print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -733,7 +733,7 @@ HIP_TEST_CASE(Stress_printf_SynchronizedPrintf) {
   TestPassed = hipPrintfStressTest::test_synchronized_printf(1, threads_per_block, print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -753,6 +753,6 @@ HIP_TEST_CASE(Stress_printf_AtomicCalc) {
       hipPrintfStressTest::EmpiricalValues2);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }

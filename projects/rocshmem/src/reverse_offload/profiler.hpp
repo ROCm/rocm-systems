@@ -59,7 +59,7 @@ class ProfilerProxy {
   ProfilerProxy() = default;
 
   explicit ProfilerProxy(size_t num_blocks)
-    : num_elem_{num_blocks}, proxy_{num_blocks} {
+    : proxy_{num_blocks}, num_elem_{num_blocks} {
 
     auto *stat{proxy_.get()};
     assert(stat);

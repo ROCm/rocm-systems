@@ -904,6 +904,19 @@ Examples:
         "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
     )
     analyze_advanced_group.add_argument(
+        "--view",
+        dest="view",
+        metavar="NAME",
+        choices=["table"],  # future: e.g. "bar" for additional TTY views
+        default=None,
+        help=(
+            "\t\tTTY output view. "
+            "table: force plain tables and ignore cli_style from YAML "
+            "(e.g. mem_chart, Roofline charts as tables). "
+            "Additional views may be added in future releases."
+        ),
+    )
+    analyze_advanced_group.add_argument(
         "--dependency",
         action="store_true",
         help="\t\tList the installation dependency.",

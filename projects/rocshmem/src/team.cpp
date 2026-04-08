@@ -82,8 +82,8 @@ __host__ Team::Team(Backend* handle, TeamInfo* team_info_wrt_parent,
                     MPI_Comm _mpi_comm)
     : world_size(handle->getNumPEs()),
       my_pe_in_world(handle->getMyPE()),
-      tinfo_wrt_parent(team_info_wrt_parent),
       tinfo_wrt_world(team_info_wrt_world),
+      tinfo_wrt_parent(team_info_wrt_parent),
       num_pes(_num_pes),
       my_pe(_my_pe) {
   if (_mpi_comm != MPI_COMM_NULL) {
