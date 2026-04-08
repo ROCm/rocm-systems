@@ -235,8 +235,8 @@ class AMDSMIHelpers:
         cpu_choices = {}
         cpu_choices_str = ""
 
+        cpu_handles = []
         try:
-            cpu_handles = []
             # amdsmi_get_cpu_handles() returns the cpu socket handles stored for cpu_id
             ret = amdsmi_interface.amdsmi_get_cpu_handles()
             cpu_handles = ret["processor_handles"]
@@ -285,8 +285,8 @@ class AMDSMIHelpers:
         core_choices = {}
         core_choices_str = ""
 
+        core_handles = []
         try:
-            core_handles = []
             # amdsmi_get_cpucore_handles() returns the core handles stored for core_id
             core_handles = amdsmi_interface.amdsmi_get_cpucore_handles()
         except amdsmi_interface.AmdSmiLibraryException as e:
