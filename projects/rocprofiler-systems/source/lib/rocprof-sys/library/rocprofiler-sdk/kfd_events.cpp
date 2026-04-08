@@ -209,7 +209,12 @@ template <>
 uint64_t
 get_kfd_pmc_value(const rocprofiler_buffer_tracing_kfd_page_migrate_record_t* record)
 {
-    // Return the size of the address range being migrated
+    if(record->end_address.value < record->start_address.value)
+    {
+        LOG_WARNING("KFD page migrate: end_address ({:#x}) < start_address ({:#x})",
+                    record->end_address.value, record->start_address.value);
+        return 0;
+    }
     return record->end_address.value - record->start_address.value;
 }
 
@@ -233,6 +238,12 @@ uint64_t
 get_kfd_pmc_value(
     const rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t* record)
 {
+    if(record->end_address.value < record->start_address.value)
+    {
+        LOG_WARNING("KFD unmap_from_gpu: end_address ({:#x}) < start_address ({:#x})",
+                    record->end_address.value, record->start_address.value);
+        return 0;
+    }
     return record->end_address.value - record->start_address.value;
 }
 
@@ -492,6 +503,8 @@ tool_kfd_event_queue_callback(
     if(!record) return;
 
     // Only process RESTORE_RESCHEDULED operations
+    // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
+    // All others are captured within paired KFD_QUEUE operations
     if(record->operation != ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED) return;
 
     auto        _timestamp = record->timestamp;
