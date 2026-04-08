@@ -1114,9 +1114,27 @@ FlatAtomicFcmpswapFlat::FlatAtomicFcmpswapFlat(const MachineInst *inst)
 }
 
 void FlatAtomicFcmpswapFlat::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_FCMPSWAP)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
 }
 
 FlatAtomicFminFlat::FlatAtomicFminFlat(const MachineInst *inst)
@@ -1704,9 +1722,31 @@ FlatAtomicFcmpswapX2Flat::FlatAtomicFcmpswapX2Flat(const MachineInst *inst)
 }
 
 void FlatAtomicFcmpswapX2Flat::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled flat_atomic variant (FLAT_ATOMIC_FCMPSWAP_X2)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = (inst_.glc != 0);
+  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
+  d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
+  d->non_temporal = 0;
+  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 16);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 2, lane);
+    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
+    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 3, lane);
+    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
+  }
+  set_data(std::move(d));
 }
 
 FlatAtomicFminX2Flat::FlatAtomicFminX2Flat(const MachineInst *inst)

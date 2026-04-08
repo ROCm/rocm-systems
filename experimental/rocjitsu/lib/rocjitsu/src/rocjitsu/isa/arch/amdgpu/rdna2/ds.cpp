@@ -1283,9 +1283,23 @@ DsWrxchg2st64RtnB32Ds::DsWrxchg2st64RtnB32Ds(const MachineInst *inst)
 }
 
 void DsWrxchg2st64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled ds_atomic variant (DS_WRXCHG2ST64_RTN_B32)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
 }
 
 DsCmpstRtnB32Ds::DsCmpstRtnB32Ds(const MachineInst *inst)
@@ -2845,9 +2859,25 @@ DsWrxchg2st64RtnB64Ds::DsWrxchg2st64RtnB64Ds(const MachineInst *inst)
 }
 
 void DsWrxchg2st64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(
-      mnemonic()); // TODO: unhandled ds_atomic variant (DS_WRXCHG2ST64_RTN_B64)
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
 }
 
 DsCmpstRtnB64Ds::DsCmpstRtnB64Ds(const MachineInst *inst)

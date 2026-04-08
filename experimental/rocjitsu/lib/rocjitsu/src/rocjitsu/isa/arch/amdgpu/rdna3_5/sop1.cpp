@@ -1113,10 +1113,7 @@ SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
     : Sop1("s_getpc_b64", reinterpret_cast<const OpEncoding *>(inst),
