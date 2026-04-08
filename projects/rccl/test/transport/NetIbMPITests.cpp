@@ -352,6 +352,52 @@ protected:
 
         return done ? ncclSuccess : ncclInternalError;
     }
+
+    // Helper: create a merged device from N physical NICs.
+    // Returns merged device index, or -1 if not enough devices / merge failed.
+    // physDevs: indices of physical (non-merged) devices
+    // props: device properties (indexed by device index)
+    // nNicsToMerge: how many NICs to merge (e.g., 2, 3, 4)
+    // rank: MPI rank of this process
+    int CreateMergedDevice(int nNicsToMerge, int rank)
+    {
+        int outMergedDev = -1;
+
+        int ndev = 0;
+        RCCL_TEST_CHECK(GetDeviceCount(&ndev));
+        if (ndev <= 0) return ncclInvalidArgument;
+
+        std::vector<ncclNetProperties_t> props(ndev);
+        std::vector<int> physDevs;
+        for (int i = 0; i < ndev; i++) {
+            memset(&props[i], 0, sizeof(ncclNetProperties_t));
+            RCCL_TEST_CHECK(GetDeviceProperties(i, &props[i]));
+            if (!props[i].name || !strchr(props[i].name, '+'))
+                physDevs.push_back(i);
+        }
+
+        int targetSpeed = props[physDevs[0]].speed;
+        std::vector<int> compat;
+        for (int d : physDevs)
+            if (props[d].speed == targetSpeed) compat.push_back(d);
+        if ((int)compat.size() < nNicsToMerge * 2) return ncclInvalidArgument;
+
+        int offset = (rank == 1) ? nNicsToMerge : 0;
+        if (offset + nNicsToMerge > (int)compat.size()) return ncclInvalidArgument;
+
+        ncclNetVDeviceProps_t vProps;
+        memset(&vProps, 0, sizeof(vProps));
+        vProps.ndevs = nNicsToMerge;
+        for (int i = 0; i < nNicsToMerge; i++)
+            vProps.devs[i] = compat[offset + i];
+
+        if (MakeVirtualDevice(&outMergedDev, &vProps) != ncclSuccess || outMergedDev < 0) {
+            fprintf(stderr, "Rank %d failed to create %d-NIC merged device", rank, nNicsToMerge);
+            return -1;
+        }
+
+        return outMergedDev;
+    }
 };
 
 // Initialization Tests
@@ -476,41 +522,11 @@ TEST_F(NetIbMPITest, ListenCloseListen) {
     int peerRank = (rank + 1) % 2;
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
-    int ndev = 0;
-    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
-    ASSERT_GT(ndev, 0);
 
-    std::vector<ncclNetProperties_t> props(ndev);
-    std::vector<int> physDevs;
-    for (int i = 0; i < ndev; i++) {
-        memset(&props[i], 0, sizeof(ncclNetProperties_t));
-        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
-        if (!props[i].name || !strchr(props[i].name, '+'))
-            physDevs.push_back(i);
+    int mergedDev = CreateMergedDevice(4, rank);
+    if (mergedDev == -1) {
+        GTEST_SKIP() << "Failed to create merged device";
     }
-
-    int needed = 8;
-    if ((int)physDevs.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
-
-    int targetSpeed = props[physDevs[0]].speed;
-    std::vector<int> compat;
-    for (int d : physDevs)
-        if (props[d].speed == targetSpeed) compat.push_back(d);
-    if ((int)compat.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
-
-    int devOffset = (rank == 1) ? 4 : 0;
-    std::vector<int> selected(compat.begin() + devOffset, compat.begin() + devOffset + 4);
-
-    ncclNetVDeviceProps_t vProps;
-    memset(&vProps, 0, sizeof(vProps));
-    vProps.ndevs = 4;
-    for (int i = 0; i < 4; i++) vProps.devs[i] = selected[i];
-
-    int mergedDev = -1;
-    if (MakeVirtualDevice(&mergedDev, &vProps) != ncclSuccess || mergedDev < 0)
-        GTEST_SKIP() << "Rank " << rank << " failed to create 4-NIC merged device";
 
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -584,51 +600,9 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
     int peerRank = (rank + 1) % 2;
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
-    int ndev = 0;
-    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
-    ASSERT_GT(ndev, 0);
 
-    std::vector<ncclNetProperties_t> props(ndev);
-    std::vector<int> physDevs;
-    for (int i = 0; i < ndev; i++) {
-        memset(&props[i], 0, sizeof(ncclNetProperties_t));
-        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
-        if (!props[i].name || !strchr(props[i].name, '+'))
-            physDevs.push_back(i);
-    }
-
-    int needed = 8;
-    if ((int)physDevs.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
-
-    int targetSpeed = props[physDevs[0]].speed;
-    std::vector<int> compat;
-    for (int d : physDevs)
-        if (props[d].speed == targetSpeed) compat.push_back(d);
-    if ((int)compat.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
-
-    int devOffset = (rank == 1) ? 4 : 0;
-    std::vector<int> devsA = {compat[devOffset + 0], compat[devOffset + 1]};
-    std::vector<int> devsB = {compat[devOffset + 2], compat[devOffset + 3]};
-
-    int mergedDevA = -1, mergedDevB = -1;
-    {
-        ncclNetVDeviceProps_t v;
-        memset(&v, 0, sizeof(v));
-        v.ndevs = 2;
-        v.devs[0] = devsA[0]; v.devs[1] = devsA[1];
-        if (MakeVirtualDevice(&mergedDevA, &v) != ncclSuccess || mergedDevA < 0)
-            GTEST_SKIP() << "Failed to create merged device A";
-    }
-    {
-        ncclNetVDeviceProps_t v;
-        memset(&v, 0, sizeof(v));
-        v.ndevs = 2;
-        v.devs[0] = devsB[0]; v.devs[1] = devsB[1];
-        if (MakeVirtualDevice(&mergedDevB, &v) != ncclSuccess || mergedDevB < 0)
-            GTEST_SKIP() << "Failed to create merged device B";
-    }
+    int mergedDevA = CreateMergedDevice(2, rank);
+    int mergedDevB = CreateMergedDevice(2, rank);
     MPI_Barrier(MPI_COMM_WORLD);
 
     static constexpr size_t kTransferSize = 4096;
@@ -1227,47 +1201,9 @@ TEST_F(NetIbMPITest, SendRecvDifferentMemoryTypes) {
     int rank = MPIEnvironment::world_rank;
     int peerRank = (rank + 1) % 2;
 
-    // --- Init and discover devices ---
     ASSERT_EQ(InitNetIb(), ncclSuccess);
-    int ndev = 0;
-    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
-    ASSERT_GT(ndev, 0);
 
-    std::vector<ncclNetProperties_t> props(ndev);
-    std::vector<int> physDevs;
-    for (int i = 0; i < ndev; i++) {
-        memset(&props[i], 0, sizeof(ncclNetProperties_t));
-        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
-        if (!props[i].name || !strchr(props[i].name, '+'))
-            physDevs.push_back(i);
-    }
-
-    // --- Select 4 compatible devices per rank ---
-    int needed = 8;
-    if ((int)physDevs.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
-
-    int targetSpeed = props[physDevs[0]].speed;
-    std::vector<int> compat;
-    for (int d : physDevs)
-        if (props[d].speed == targetSpeed) compat.push_back(d);
-    if ((int)compat.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
-
-    // Rank 0: first 4, Rank 1: next 4
-    int offset = (rank == 1) ? 4 : 0;
-    std::vector<int> selected(compat.begin() + offset, compat.begin() + offset + 4);
-
-    // --- Create merged device ---
-    ncclNetVDeviceProps_t vProps;
-    memset(&vProps, 0, sizeof(vProps));
-    vProps.ndevs = 4;
-    for (int i = 0; i < 4; i++) vProps.devs[i] = selected[i];
-
-    int mergedDev = -1;
-    ncclResult_t res = MakeVirtualDevice(&mergedDev, &vProps);
-    if (res != ncclSuccess || mergedDev < 0)
-        GTEST_SKIP() << "Rank " << rank << " failed to create merged device";
+    int mergedDev = CreateMergedDevice(4, rank);
 
     ncclNetProperties_t mProps;
     memset(&mProps, 0, sizeof(mProps));
@@ -1406,43 +1342,8 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
     int ndev = 0;
-    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
-    ASSERT_GT(ndev, 0);
 
-    std::vector<ncclNetProperties_t> props(ndev);
-    std::vector<int> physDevs;
-    for (int i = 0; i < ndev; i++) {
-        memset(&props[i], 0, sizeof(ncclNetProperties_t));
-        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
-        if (!props[i].name || !strchr(props[i].name, '+'))
-            physDevs.push_back(i);
-    }
-
-    // Select 3 compatible devices per rank
-    int needed = 6;
-    if ((int)physDevs.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
-
-    int targetSpeed = props[physDevs[0]].speed;
-    std::vector<int> compat;
-    for (int d : physDevs)
-        if (props[d].speed == targetSpeed) compat.push_back(d);
-    if ((int)compat.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
-
-    int offset = (rank == 1) ? 3 : 0;
-    std::vector<int> selected(compat.begin() + offset, compat.begin() + offset + 3);
-
-    // Create 3-NIC merged device
-    ncclNetVDeviceProps_t vProps;
-    memset(&vProps, 0, sizeof(vProps));
-    vProps.ndevs = 3;
-    for (int i = 0; i < 3; i++) vProps.devs[i] = selected[i];
-
-    int mergedDev = -1;
-    ncclResult_t res = MakeVirtualDevice(&mergedDev, &vProps);
-    if (res != ncclSuccess || mergedDev < 0)
-        GTEST_SKIP() << "Rank " << rank << " failed to create 3-NIC merged device";
+    int mergedDev = CreateMergedDevice(3, rank);
 
     // Build test size list
     long pageSize = sysconf(_SC_PAGESIZE);
@@ -1586,51 +1487,10 @@ TEST_F(NetIbMPITest, MultidirectionalTransfer) {
     int peerRank = (rank + 1) % 2;
 
     ASSERT_EQ(InitNetIb(), ncclSuccess);
-    int ndev = 0;
-    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
-    ASSERT_GT(ndev, 0);
 
-    std::vector<ncclNetProperties_t> props(ndev);
-    std::vector<int> physDevs;
-    for (int i = 0; i < ndev; i++) {
-        memset(&props[i], 0, sizeof(ncclNetProperties_t));
-        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
-        if (!props[i].name || !strchr(props[i].name, '+'))
-            physDevs.push_back(i);
-    }
+    int mergedSendDev = CreateMergedDevice(4, rank);
+    int mergedRecvDev = CreateMergedDevice(4, rank);
 
-    int needed = 8;
-    if ((int)physDevs.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
-
-    int targetSpeed = props[physDevs[0]].speed;
-    std::vector<int> compat;
-    for (int d : physDevs)
-        if (props[d].speed == targetSpeed) compat.push_back(d);
-    if ((int)compat.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
-
-    int devOffset = (rank == 1) ? 4 : 0;
-    std::vector<int> sendDevs = {compat[devOffset + 0], compat[devOffset + 1]};
-    std::vector<int> recvDevs = {compat[devOffset + 2], compat[devOffset + 3]};
-
-    int mergedSendDev = -1, mergedRecvDev = -1;
-    {
-        ncclNetVDeviceProps_t v;
-        memset(&v, 0, sizeof(v));
-        v.ndevs = 2;
-        v.devs[0] = sendDevs[0]; v.devs[1] = sendDevs[1];
-        if (MakeVirtualDevice(&mergedSendDev, &v) != ncclSuccess || mergedSendDev < 0)
-            GTEST_SKIP() << "Failed to create send merged device";
-    }
-    {
-        ncclNetVDeviceProps_t v;
-        memset(&v, 0, sizeof(v));
-        v.ndevs = 2;
-        v.devs[0] = recvDevs[0]; v.devs[1] = recvDevs[1];
-        if (MakeVirtualDevice(&mergedRecvDev, &v) != ncclSuccess || mergedRecvDev < 0)
-            GTEST_SKIP() << "Failed to create recv merged device";
-    }
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Setup bidirectional connections
@@ -1797,42 +1657,8 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
 
     // --- Init and discover devices ---
     ASSERT_EQ(InitNetIb(), ncclSuccess);
-    int ndev = 0;
-    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
-    ASSERT_GT(ndev, 0);
 
-    std::vector<ncclNetProperties_t> props(ndev);
-    std::vector<int> physDevs;
-    for (int i = 0; i < ndev; i++) {
-        memset(&props[i], 0, sizeof(ncclNetProperties_t));
-        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
-        if (!props[i].name || !strchr(props[i].name, '+'))
-            physDevs.push_back(i);
-    }
-
-    int needed = 6;
-    if ((int)physDevs.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
-
-    int targetSpeed = props[physDevs[0]].speed;
-    std::vector<int> compat;
-    for (int d : physDevs)
-        if (props[d].speed == targetSpeed) compat.push_back(d);
-    if ((int)compat.size() < needed)
-        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
-
-    int devOffset = (rank == 1) ? 3 : 0;
-    std::vector<int> selected(compat.begin() + devOffset, compat.begin() + devOffset + 3);
-
-    // --- Create 3-NIC merged device ---
-    ncclNetVDeviceProps_t vProps;
-    memset(&vProps, 0, sizeof(vProps));
-    vProps.ndevs = 3;
-    for (int i = 0; i < 3; i++) vProps.devs[i] = selected[i];
-
-    int mergedDev = -1;
-    if (MakeVirtualDevice(&mergedDev, &vProps) != ncclSuccess || mergedDev < 0)
-        GTEST_SKIP() << "Rank " << rank << " failed to create 3-NIC merged device";
+    int mergedDev = CreateMergedDevice(3, rank);
 
     // --- Parameters ---
     static constexpr int kNumOutstanding = 8;
