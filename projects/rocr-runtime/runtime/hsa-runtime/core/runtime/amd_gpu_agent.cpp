@@ -3159,10 +3159,23 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     if (HSA::hsa_signal_create(1, 0, NULL, &device_datahost->done_sig1) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    // TODO: Once we have things working and can measure
-    // latency after 2nd level trap handler decrements signals and set watermark accordingly
-    device_datahost->buf_watermark0 = 0.8 * device_datahost->buf_size;
-    device_datahost->buf_watermark1 = 0.8 * device_datahost->buf_size;
+    // Dynamic watermark based on sampling interval
+    // Strategy: Minimize buffer swap overhead at aggressive intervals,
+    //           maximize sample freshness at relaxed intervals
+    float watermark_ratio;
+    size_t interval = session.interval();
+    if (interval <= 65536) {
+      // Aggressive sampling: Keep high watermark to minimize swap overhead
+      watermark_ratio = 0.80f;
+    } else if (interval <= 262144) {
+      // Moderate sampling: Balance between freshness and overhead
+      watermark_ratio = 0.70f;
+    } else {
+      // Relaxed sampling: Maximize freshness with early flush
+      watermark_ratio = 0.50f;
+    }
+    device_datahost->buf_watermark0 = watermark_ratio * device_datahost->buf_size;
+    device_datahost->buf_watermark1 = watermark_ratio * device_datahost->buf_size;
 
     // Allocate device memory for 2nd level trap handler TMA
     size_t deviceAllocSize = sizeof(pcs_sampling_data_t) + (2 * trap_buffer_size);
