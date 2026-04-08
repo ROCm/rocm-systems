@@ -12,12 +12,12 @@ find_package(rocprofiler-sdk REQUIRED)
 
 set(HIP_GRAPH_BUBBLES_ENVIRONMENT)
 if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib")
-    list(
-        APPEND HIP_GRAPH_BUBBLES_ENVIRONMENT
-        "LD_LIBRARY_PATH=$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib:$ENV{LD_LIBRARY_PATH}")
+    list(APPEND HIP_GRAPH_BUBBLES_ENVIRONMENT
+         "LD_LIBRARY_PATH=$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib:$ENV{LD_LIBRARY_PATH}")
 endif()
 
-function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIONS TIMEOUT_SECS)
+function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIONS
+         TIMEOUT_SECS)
     set(TEST_NAME "rocprofv3-test-hip-graph-bubbles-${SUFFIX}")
     set(OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/hip-graph-bubbles-${SUFFIX}")
     math(EXPR EXPECTED_DISPATCH_COUNT "${NUM_KERNELS} * ${NUM_ITERATIONS}")
@@ -25,9 +25,9 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
     rocprofiler_add_integration_execute_test(
         ${TEST_NAME}
         COMMAND
-            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace -d ${OUTPUT_DIR} -o
-            out --output-format csv -- $<TARGET_FILE:hip-graph-bubbles> ${NUM_KERNELS}
-            ${NUM_ITERATIONS} 256 25
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace -d
+            ${OUTPUT_DIR} -o out --output-format csv pftrace --
+            $<TARGET_FILE:hip-graph-bubbles> ${NUM_KERNELS} ${NUM_ITERATIONS} 256 25
         DEPENDS hip-graph-bubbles
         TIMEOUT ${TIMEOUT_SECS}
         LABELS "integration-tests"

@@ -10,12 +10,12 @@ project(
 
 set(HIP_GRAPH_BUBBLES_STANDALONE_ENVIRONMENT)
 if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib")
-    list(
-        APPEND HIP_GRAPH_BUBBLES_STANDALONE_ENVIRONMENT
-        "LD_LIBRARY_PATH=$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib:$ENV{LD_LIBRARY_PATH}")
+    list(APPEND HIP_GRAPH_BUBBLES_STANDALONE_ENVIRONMENT
+         "LD_LIBRARY_PATH=$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib:$ENV{LD_LIBRARY_PATH}")
 endif()
 
-function(add_hip_graph_bubbles_standalone_test SUFFIX NUM_KERNELS NUM_ITERATIONS TIMEOUT_SECS)
+function(add_hip_graph_bubbles_standalone_test SUFFIX NUM_KERNELS NUM_ITERATIONS
+         TIMEOUT_SECS)
     math(EXPR EXPECTED_DISPATCH_COUNT "${NUM_KERNELS} * ${NUM_ITERATIONS}")
 
     rocprofiler_add_integration_execute_test(
@@ -26,7 +26,8 @@ function(add_hip_graph_bubbles_standalone_test SUFFIX NUM_KERNELS NUM_ITERATIONS
         LABELS "integration-tests;standalone"
         ENVIRONMENT ${HIP_GRAPH_BUBBLES_STANDALONE_ENVIRONMENT}
         PASS_REGULAR_EXPRESSION
-            "Total kernel launches: ${EXPECTED_DISPATCH_COUNT};Test completed successfully")
+            "Total kernel launches: ${EXPECTED_DISPATCH_COUNT};Test completed successfully"
+        )
 endfunction()
 
 add_hip_graph_bubbles_standalone_test(k256-i20 256 20 30)

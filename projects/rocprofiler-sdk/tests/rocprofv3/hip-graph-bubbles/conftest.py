@@ -62,7 +62,9 @@ def kernel_input_data(request):
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
-    assert len(data) > 0, f"CSV file '{filename}' contained no data rows. The profiler may have failed to produce output."
+    assert (
+        len(data) > 0
+    ), f"CSV file '{filename}' contained no data rows. The profiler may have failed to produce output."
     return data
 
 

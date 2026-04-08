@@ -43,11 +43,15 @@ def test_kernel_trace_row_count(
 def test_kernel_trace_dispatch_ids(kernel_input_data, expected_dispatch_count):
     dispatch_ids = []
     for idx, row in enumerate(kernel_input_data):
-        assert row["Kind"] == "KERNEL_DISPATCH", f"Row {idx}: expected Kind=KERNEL_DISPATCH, got '{row['Kind']}'"
+        assert (
+            row["Kind"] == "KERNEL_DISPATCH"
+        ), f"Row {idx}: expected Kind=KERNEL_DISPATCH, got '{row['Kind']}'"
         try:
             dispatch_ids.append(int(row["Dispatch_Id"]))
         except ValueError as e:
-            raise ValueError(f"Row {idx}: failed to parse Dispatch_Id='{row['Dispatch_Id']}'") from e
+            raise ValueError(
+                f"Row {idx}: failed to parse Dispatch_Id='{row['Dispatch_Id']}'"
+            ) from e
 
     assert len(dispatch_ids) == expected_dispatch_count
     assert len(set(dispatch_ids)) == expected_dispatch_count
@@ -57,19 +61,39 @@ def test_kernel_trace_fields(kernel_input_data, expected_dispatch_count):
     assert len(kernel_input_data) == expected_dispatch_count
 
     for idx, row in enumerate(kernel_input_data):
-        assert row["Kind"] == "KERNEL_DISPATCH", f"Row {idx}: expected Kind=KERNEL_DISPATCH, got '{row['Kind']}'"
+        assert (
+            row["Kind"] == "KERNEL_DISPATCH"
+        ), f"Row {idx}: expected Kind=KERNEL_DISPATCH, got '{row['Kind']}'"
         try:
-            assert int(row["Agent_Id"].split(" ")[-1]) >= 0, f"Row {idx}: Agent_Id must be >= 0"
+            assert (
+                int(row["Agent_Id"].split(" ")[-1]) >= 0
+            ), f"Row {idx}: Agent_Id must be >= 0"
             assert int(row["Queue_Id"]) > 0, f"Row {idx}: Queue_Id must be > 0"
             assert int(row["Kernel_Id"]) > 0, f"Row {idx}: Kernel_Id must be > 0"
-            assert int(row["Correlation_Id"]) > 0, f"Row {idx}: Correlation_Id must be > 0"
-            assert int(row["Workgroup_Size_X"]) == 256, f"Row {idx}: expected Workgroup_Size_X=256, got {row['Workgroup_Size_X']}"
-            assert int(row["Workgroup_Size_Y"]) == 1, f"Row {idx}: expected Workgroup_Size_Y=1, got {row['Workgroup_Size_Y']}"
-            assert int(row["Workgroup_Size_Z"]) == 1, f"Row {idx}: expected Workgroup_Size_Z=1, got {row['Workgroup_Size_Z']}"
-            assert int(row["Grid_Size_X"]) == 256, f"Row {idx}: expected Grid_Size_X=256, got {row['Grid_Size_X']}"
-            assert int(row["Grid_Size_Y"]) == 1, f"Row {idx}: expected Grid_Size_Y=1, got {row['Grid_Size_Y']}"
-            assert int(row["Grid_Size_Z"]) == 1, f"Row {idx}: expected Grid_Size_Z=1, got {row['Grid_Size_Z']}"
-            assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"]), f"Row {idx}: End_Timestamp must be >= Start_Timestamp"
+            assert (
+                int(row["Correlation_Id"]) > 0
+            ), f"Row {idx}: Correlation_Id must be > 0"
+            assert (
+                int(row["Workgroup_Size_X"]) == 256
+            ), f"Row {idx}: expected Workgroup_Size_X=256, got {row['Workgroup_Size_X']}"
+            assert (
+                int(row["Workgroup_Size_Y"]) == 1
+            ), f"Row {idx}: expected Workgroup_Size_Y=1, got {row['Workgroup_Size_Y']}"
+            assert (
+                int(row["Workgroup_Size_Z"]) == 1
+            ), f"Row {idx}: expected Workgroup_Size_Z=1, got {row['Workgroup_Size_Z']}"
+            assert (
+                int(row["Grid_Size_X"]) == 256
+            ), f"Row {idx}: expected Grid_Size_X=256, got {row['Grid_Size_X']}"
+            assert (
+                int(row["Grid_Size_Y"]) == 1
+            ), f"Row {idx}: expected Grid_Size_Y=1, got {row['Grid_Size_Y']}"
+            assert (
+                int(row["Grid_Size_Z"]) == 1
+            ), f"Row {idx}: expected Grid_Size_Z=1, got {row['Grid_Size_Z']}"
+            assert int(row["End_Timestamp"]) >= int(
+                row["Start_Timestamp"]
+            ), f"Row {idx}: End_Timestamp must be >= Start_Timestamp"
         except ValueError as e:
             raise ValueError(f"Row {idx}: failed to parse integer field in {row}") from e
 
@@ -91,8 +115,7 @@ def test_kernel_trace_no_bubbles(
 
     # Filter to only simpleKernel dispatches (exclude BLIT kernels, etc.)
     simple_kernel_data = [
-        row for row in kernel_input_data
-        if "simpleKernel" in row.get("Kernel_Name", "")
+        row for row in kernel_input_data if "simpleKernel" in row.get("Kernel_Name", "")
     ]
 
     assert len(simple_kernel_data) > 0, (
@@ -134,7 +157,7 @@ def test_kernel_trace_no_bubbles(
         for i in range(len(sorted_dispatches) - 1):
             try:
                 curr_end = int(sorted_dispatches[i]["End_Timestamp"])
-                next_start = int(sorted_dispatches[i+1]["Start_Timestamp"])
+                next_start = int(sorted_dispatches[i + 1]["Start_Timestamp"])
                 gap = next_start - curr_end
                 all_gaps.append(gap)
             except (KeyError, ValueError) as e:
@@ -148,21 +171,38 @@ def test_kernel_trace_no_bubbles(
         # No gaps means each iteration had only 1 kernel, which is fine
         return
 
+    all_gaps_sorted = sorted(all_gaps)
+    median_gap = all_gaps_sorted[len(all_gaps) // 2]
     max_gap = max(all_gaps)
-    p95_gap = sorted(all_gaps)[int(len(all_gaps) * 0.95)]
+    p99_9_gap = all_gaps_sorted[int(len(all_gaps) * 0.999)]
 
-    # Conservative threshold: 500µs to minimize spurious failures (Type I errors)
-    # This can be tuned based on empirical results
-    BUBBLE_THRESHOLD_NS = 500_000  # 500 microseconds
+    # Check for uniform elevated gaps (all kernels have small but consistent gaps)
+    # Expected: kernels within a graph launch should execute back-to-back with minimal gaps
+    MEDIAN_THRESHOLD_NS = 2_000  # 2 microseconds
 
-    assert p95_gap < BUBBLE_THRESHOLD_NS, (
-        f"Bubble detected: 95th percentile gap between consecutive kernel dispatches "
-        f"within the same graph launch is {p95_gap}ns ({p95_gap/1000:.1f}µs), "
-        f"which exceeds the threshold of {BUBBLE_THRESHOLD_NS}ns ({BUBBLE_THRESHOLD_NS/1000}µs). "
-        f"Max gap: {max_gap}ns ({max_gap/1000:.1f}µs). "
-        f"Total gaps analyzed: {len(all_gaps)}. "
-        f"This indicates the profiler may be introducing scheduling stalls."
-    )
+    if median_gap > MEDIAN_THRESHOLD_NS:
+        raise AssertionError(
+            f"Bubble detected: uniform elevated gaps between all kernels. "
+            f"Median gap is {median_gap}ns ({median_gap/1000:.2f}µs), "
+            f"which exceeds the threshold of {MEDIAN_THRESHOLD_NS}ns ({MEDIAN_THRESHOLD_NS/1000}µs). "
+            f"All {len(all_gaps)} gaps between consecutive dispatches are elevated, "
+            f"indicating the profiler is introducing overhead on every kernel launch."
+        )
+
+    # Check for batching patterns (most gaps are small, but some are very large)
+    # This detects scenarios where kernels are grouped into batches with large
+    # gaps between batches
+    OUTLIER_THRESHOLD_NS = 50_000  # 50 microseconds
+
+    if p99_9_gap > OUTLIER_THRESHOLD_NS:
+        raise AssertionError(
+            f"Bubble detected: batching pattern with large inter-batch gaps. "
+            f"99.9th percentile gap is {p99_9_gap}ns ({p99_9_gap/1000:.2f}µs), "
+            f"which exceeds the threshold of {OUTLIER_THRESHOLD_NS}ns ({OUTLIER_THRESHOLD_NS/1000}µs). "
+            f"Median gap: {median_gap}ns ({median_gap/1000:.2f}µs), "
+            f"Max gap: {max_gap}ns ({max_gap/1000:.2f}µs). "
+            f"This indicates kernels are being dispatched in batches rather than continuously."
+        )
 
 
 if __name__ == "__main__":

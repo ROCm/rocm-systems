@@ -28,16 +28,15 @@ THE SOFTWARE.
 #include <iostream>
 #include <vector>
 
-#define HIP_CHECK(cmd)                                                         \
-    {                                                                          \
-        hipError_t error = cmd;                                                \
-        if(error != hipSuccess)                                                \
-        {                                                                      \
-            std::cerr << "HIP error: '" << #cmd << "' returned "               \
-                      << hipGetErrorString(error) << " (" << error << ") at " \
-                      << __FILE__ << ":" << __LINE__ << std::endl;             \
-            exit(EXIT_FAILURE);                                                \
-        }                                                                      \
+#define HIP_CHECK(cmd)                                                                             \
+    {                                                                                              \
+        hipError_t error = cmd;                                                                    \
+        if(error != hipSuccess)                                                                    \
+        {                                                                                          \
+            std::cerr << "HIP error: '" << #cmd << "' returned " << hipGetErrorString(error)       \
+                      << " (" << error << ") at " << __FILE__ << ":" << __LINE__ << std::endl;     \
+            exit(EXIT_FAILURE);                                                                    \
+        }                                                                                          \
     }
 
 // Simple kernel that does minimal work
@@ -65,8 +64,7 @@ void
 print_usage(const char* argv0)
 {
     std::cerr << "Usage: " << argv0
-              << " [num_kernels] [num_iterations] [array_size] [progress_interval]"
-              << std::endl;
+              << " [num_kernels] [num_iterations] [array_size] [progress_interval]" << std::endl;
 }
 
 int
@@ -97,8 +95,7 @@ parse_args(int argc, char** argv)
     if(argc > 1) cfg.num_kernels = parse_positive_integer("num_kernels", argv[1]);
     if(argc > 2) cfg.num_iterations = parse_positive_integer("num_iterations", argv[2]);
     if(argc > 3) cfg.array_size = parse_positive_integer("array_size", argv[3]);
-    if(argc > 4)
-        cfg.progress_interval = parse_positive_integer("progress_interval", argv[4]);
+    if(argc > 4) cfg.progress_interval = parse_positive_integer("progress_interval", argv[4]);
 
     if(cfg.array_size < 256)
     {
@@ -115,8 +112,7 @@ main(int argc, char** argv)
 {
     const auto cfg = parse_args(argc, argv);
 
-    std::cout << "Creating HIP graph with " << cfg.num_kernels << " kernel launches"
-              << std::endl;
+    std::cout << "Creating HIP graph with " << cfg.num_kernels << " kernel launches" << std::endl;
     std::cout << "Will execute graph " << cfg.num_iterations << " times" << std::endl;
     std::cout << "Array size: " << cfg.array_size << std::endl;
     std::cout << "Progress interval: " << cfg.progress_interval << std::endl;
@@ -144,8 +140,7 @@ main(int argc, char** argv)
 
     for(int i = 0; i < cfg.num_kernels; i++)
     {
-        hipLaunchKernelGGL(
-            simpleKernel, gridSize, blockSize, 0, stream, d_data, i, cfg.array_size);
+        hipLaunchKernelGGL(simpleKernel, gridSize, blockSize, 0, stream, d_data, i, cfg.array_size);
         HIP_CHECK(hipGetLastError());
     }
 
@@ -184,8 +179,7 @@ main(int argc, char** argv)
     std::cout << std::fixed << std::setprecision(4);
     std::cout << "\n=== Timing Results ===" << std::endl;
     std::cout << "Total execution time: " << elapsed.count() << " seconds" << std::endl;
-    std::cout << "Total kernel launches: " << (cfg.num_kernels * cfg.num_iterations)
-              << std::endl;
+    std::cout << "Total kernel launches: " << (cfg.num_kernels * cfg.num_iterations) << std::endl;
     std::cout << "Average time per iteration: " << (elapsed.count() / cfg.num_iterations)
               << " seconds" << std::endl;
     std::cout << "======================" << std::endl;
