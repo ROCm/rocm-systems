@@ -137,7 +137,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 int ROBackend::backend_can_run() {
   auto handle = dlopen("libmpi.so", RTLD_LAZY);
   if (!handle) {
-    printf("Could not open libmpi.so. Returning\n");
+    LOG_TRACE("Could not open libmpi.so");
     return ROCSHMEM_ERROR;
   }
   //TODO dlsym MPI_Get_library_version and verify compat when HAVE_EXTERNAL_MPI is undef

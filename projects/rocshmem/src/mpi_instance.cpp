@@ -44,7 +44,7 @@ int MPIInstance::mpilib_dl_init() {
 
   mpilib_handle_ = dlopen("libmpi.so", RTLD_LAZY);
   if (!mpilib_handle_) {
-    printf("Could not open libmpi.so. Returning\n");
+    LOG_TRACE("Could not open libmpi.so");
     return ROCSHMEM_ERROR;
   }
 

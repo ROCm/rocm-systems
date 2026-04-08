@@ -236,7 +236,7 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
     HIPAllocator* alloc = (allocator != nullptr) ? allocator : get_default_allocator();
     hipError_t err = alloc->GetDmabufHandle(addr, length, &fd, &offset);
     if (err != hipSuccess) {
-      fprintf(stderr, "Failed to get dmabuf handle: %s\n", hipGetErrorString(err));
+      LOG_ERROR("Failed to get dmabuf handle: %s", hipGetErrorString(err));
       return nullptr;
     }
 

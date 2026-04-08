@@ -162,8 +162,7 @@ __device__ void QueuePair::bnxt_check_cqe_error(struct bnxt_re_req_cqe *cqe) {
          & BNXT_RE_BCQE_STATUS_MASK;
 
   if (status != BNXT_RE_REQ_ST_OK) {
-    printf("CQ Error %s (%x)\n", bnxt_re_wc_error_strings[status], status);
-    abort();
+    LOGD_ERROR_ABORT("CQ Error %s (%x)", bnxt_re_wc_error_strings[status], status);
   }
 }
 

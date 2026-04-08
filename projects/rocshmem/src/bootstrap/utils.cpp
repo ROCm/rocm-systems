@@ -255,7 +255,7 @@ void Timer::reset() { set(timeout_); }
 
 void Timer::print(const std::string& name) {
   auto us = elapsed();
-  printf("%s : %ld\n", name.c_str(), us);
+  LOG_INFO("%s : %ld", name.c_str(), us);
 }
 
 ScopedTimer::ScopedTimer(const std::string& name) : name_(name) {}

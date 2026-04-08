@@ -68,14 +68,11 @@
 
 namespace rocshmem {
 
-#define VERIFY_BACKEND()                                                      \
-  {                                                                           \
-    if (!backend) {                                                           \
-      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d",         \
-              "Call 'rocshmem_init'", __FILE__, __LINE__);                    \
-      abort();                                                                \
-    }                                                                         \
-  }
+#define VERIFY_BACKEND() do {                                                 \
+  if (!backend) {                                                             \
+    LOG_ERROR_ABORT("rocSHMEM not initialized: call rocshmem_init() before"); \
+  }                                                                           \
+} while(0)
 
 Backend *backend = nullptr;
 MPIInstance *mpi_instance = nullptr;
@@ -97,27 +94,27 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
   if (!envstr.empty()) {
     if (envstr.find("gda") != std::string::npos) {
       if (GDABackend::backend_can_run() != ROCSHMEM_SUCCESS) {
-        fprintf(stderr, "Error: ROCSHMEM_BACKEND=gda requested but GDA backend cannot run.\n"
-                        "No active RDMA interface found for the requested provider.\n"
-                        "Check that the correct NIC hardware is present and the link is active.\n");
-        exit(1);
+        LOG_ERROR_EXIT("ROCSHMEM_BACKEND=gda requested but GDA backend cannot run.\n"
+                       "  No active RDMA interface found for the requested provider.\n"
+                       "  Check that the correct NIC hardware is present and the link is active.\n"
+                       "  ");
       }
       return BackendType::GDA_BACKEND;
     }
     if (envstr.find("ro") != std::string::npos) {
       if (ROBackend::backend_can_run() != ROCSHMEM_SUCCESS) {
-        fprintf(stderr, "Error: ROCSHMEM_BACKEND=ro requested but RO backend cannot run.\n"
-                        "MPI library could not be loaded.\n"
-                        "Check that MPI is properly installed and accessible.\n");
-        exit(1);
+        LOG_ERROR_EXIT("ROCSHMEM_BACKEND=ro requested but RO backend cannot run.\n"
+                       "  An MPI library could not be loaded.\n"
+                       "  Check that MPI is properly installed and accessible.\n"
+                       "  ");
       }
       return BackendType::RO_BACKEND;
     }
     if (envstr.find("ipc") != std::string::npos) {
       if (IPCBackend::backend_can_run(comm, bootstrap) != ROCSHMEM_SUCCESS) {
-        fprintf(stderr, "Error: ROCSHMEM_BACKEND=ipc requested but IPC backend cannot run.\n"
-                "Most likely cause is PEs distributed to more than one node.\n");
-        exit(1);
+        LOG_ERROR_EXIT("ROCSHMEM_BACKEND=ipc requested but IPC backend cannot run.\n"
+                       "  Most likely cause is that PEs are distributed accross more than one node.\n"
+                       "  ");
       }
       return BackendType::IPC_BACKEND;
     }
@@ -136,9 +133,9 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
     return BackendType::RO_BACKEND;
   }
 
-  fprintf(stderr, "No backend capable of executing the job. This is most likely\n"
-                  "a system or runtime configuration error. Aborting.\n");
-  exit(1);
+  LOG_ERROR_EXIT("No backend could be selected.\n"
+                 "  This is most likely a system or runtime configuration error.\n"
+                 "  ");
 
   // Return code left in to satisfy compiler.
   return BackendType::IPC_BACKEND;
@@ -161,18 +158,16 @@ static void setFilesLimit() {
   assert(!backend);
 
 #if defined(USE_HEAP_DEVICE_VMM_POSIX)
-  fprintf(stderr, "ROCSHMEM_ERROR: VMM POSIX allocator (USE_HEAP_DEVICE_VMM_POSIX) "
-          "is not compatible with MPI-based initialization. "
-          "Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or disable VMM POSIX allocator.");
-  exit(1);
+  LOG_ERROR_EXIT("VMM POSIX allocator (USE_HEAP_DEVICE_VMM_POSIX) is not compatible with MPI-based initialization.\n"
+                 "  Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or disable VMM POSIX allocator.\n"
+                 "  ");
 #endif
 
   int count = 0;
   CHECK_HIP(hipGetDeviceCount(&count));
 
   if (count == 0) {
-    printf("No GPU found! \n");
-    abort();
+    LOG_ERROR_ABORT("No GPU found!");
   }
 
   setFilesLimit();
@@ -181,9 +176,9 @@ static void setFilesLimit() {
   int ret;
   ret = MPIInstance::mpilib_dl_init();
   if (ret != ROCSHMEM_SUCCESS) {
-    fprintf(stderr, "Could not initialize MPI library. This initialization method of "
-            "rocSHMEM requires MPI library to be loaded at runtime. Aborting.\n");
-    exit(1);
+    LOG_ERROR_EXIT("Could not initialize the MPI library.\n"
+                   "  This initialization method of rocSHMEM requires MPI library to be loaded at runtime.\n"
+                   "  ");
   }
 
   mpi_instance = new MPIInstance(comm);
@@ -241,8 +236,7 @@ static void setFilesLimit() {
 #endif
 
   if (!backend) {
-    printf("No Backend could be initialized! Aborting.\n");
-    exit(1);
+    LOG_ERROR_EXIT("No Backend could be initialized!");
   }
 
   init_constant_memory();
@@ -255,9 +249,9 @@ static void setFilesLimit() {
   int ret;
   ret = MPIInstance::mpilib_dl_init();
   if (ret != ROCSHMEM_SUCCESS) {
-    fprintf(stderr, "Could not initialize MPI library. This initialization method of "
-            "rocSHMEM requires MPI library to be loaded at runtime. Aborting.\n");
-    exit(1);
+    LOG_ERROR_EXIT("Could not initialize the MPI library.\n"
+                   "  This initialization method of rocSHMEM requires MPI library to be loaded at runtime.\n"
+                   "  ");
   }
   mpilib_ftable_.Initialized(&initialized);
 
@@ -273,10 +267,10 @@ static void setFilesLimit() {
     if (world_size != nranks) {
       // This solution will require MPI_Sessions. This is planned for the
       // future, but is not supported in the current version.
-      fprintf(stderr, "Unsupported configuration to initialize rocSHMEM. Please "
-              "initialize the MPI library using MPI_Init first, if you want to "
-              "initialize rocSHMEM with a subset of the processes\n");
-      exit(1);
+      LOG_ERROR_EXIT("Unsupported configuration to initialize rocSHMEM.\n"
+                     "  rocSHMEM initialization with a subgroup of processes requires MPI.\n"
+                     "  Please initialize the MPI library using MPI_Init first\n"
+                     "  ");
     }
   }
 
@@ -314,8 +308,7 @@ static void setFilesLimit() {
   CHECK_HIP(hipGetDeviceCount(&count));
 
   if (count == 0) {
-    printf("No GPU found! \n");
-    abort();
+    LOG_ERROR_ABORT("No GPU found!");
   }
 
   setFilesLimit();
@@ -371,8 +364,7 @@ static void setFilesLimit() {
 #endif
 
   if (!backend) {
-    printf("No Backend could be initialized! Aborting.\n");
-    exit(1);
+    LOG_ERROR_EXIT("No Backend could be initialized!");
   }
 
   init_constant_memory();
@@ -385,9 +377,7 @@ static void setFilesLimit() {
   if ((attr == nullptr) ||
       ((flags != ROCSHMEM_INIT_WITH_UNIQUEID) &&
        (flags != ROCSHMEM_INIT_WITH_MPI_COMM)) ) {
-    fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d",
-            "Call 'rocshmem_init_attr: invalid input argument'",
-            __FILE__, __LINE__);
+    LOG_ERROR("rocshmem_init_attr: invalid input argument");
     return ROCSHMEM_ERROR;
   }
 
@@ -420,9 +410,7 @@ static void setFilesLimit() {
                                                               rocshmem_uniqueid_t *uid,
                                                               rocshmem_init_attr_t *attr) {
   if (uid == nullptr || attr == nullptr) {
-      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d",
-              "Call 'rocshmem_get_uniqueid: invalid input argument'",
-              __FILE__, __LINE__);
+      LOG_ERROR("rocshmem_get_uniqueid: invalid input argument");
       return ROCSHMEM_ERROR;
   }
 
@@ -439,9 +427,7 @@ static void setFilesLimit() {
 [[maybe_unused]] __host__ int rocshmem_get_uniqueid(rocshmem_uniqueid_t *uid) {
   rocshmem_uniqueid_t tuid;
   if (uid == nullptr) {
-      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d",
-              "Call 'rocshmem_get_uniqueid: invalid input argument'",
-              __FILE__, __LINE__);
+      LOG_ERROR("rocshmem_get_uniqueid: invalid input argument");
       return ROCSHMEM_ERROR;
   }
 
@@ -460,9 +446,9 @@ static void setFilesLimit() {
 [[maybe_unused]] __host__ void rocshmem_init() {
   auto ret = MPIInstance::mpilib_dl_init();
   if (ret != ROCSHMEM_SUCCESS) {
-    fprintf(stderr, "Could not initialize MPI library. This initialization method of "
-            "rocSHMEM requires MPI library to be loaded at runtime. Aborting.\n");
-    exit(1);
+    LOG_ERROR_EXIT("Could not initialize the MPI library.\n"
+                   "  This initialization method of rocSHMEM requires the MPI library to be loaded at runtime."
+                   "  ");
   }
   library_init(MPI_COMM_WORLD);
 }
@@ -485,7 +471,7 @@ static void setFilesLimit() {
     return backend->getMyPE();
   }
 
-  fprintf(stderr, "[WARNING] rocshmem_init() has not been called\n");
+  LOG_WARN("rocshmem_init() has not been called");
   return -1;
 }
 
@@ -494,7 +480,7 @@ static void setFilesLimit() {
     return backend->getNumPEs();
   }
 
-  fprintf(stderr, "[WARNING] rocshmem_init() has not been called\n");
+  LOG_WARN("rocshmem_init() has not been called");
   return -1;
 }
 

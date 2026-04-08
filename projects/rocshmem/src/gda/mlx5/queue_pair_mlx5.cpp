@@ -86,11 +86,9 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_w
   // ring doorbell by storing first 8B of WQE to the doorbell register
   __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 
-#if defined(BUILD_DEBUG_LEVEL_DEVICE)
-  printf("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)\n",
-         mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
-         &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
-#endif
+  LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
+             mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
+             &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
 }
 
 __device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe) {
@@ -111,14 +109,14 @@ __device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe) {
   case MLX5_CQE_RESP_SEND_IMM:
   case MLX5_CQE_RESP_SEND_INV:
     // (valid) responder completion?!
-    printf("CQ: unexpected responder completion (%x)\n", opcode);
+    LOGD_ERROR("CQ: unexpected responder completion (%x)", opcode);
     break;
   case MLX5_CQE_RESIZE_CQ:
   case MLX5_CQE_NO_PACKET:
-    printf("CQ: unexpected completion type (%x)\n", opcode);
+    LOGD_ERROR("CQ: unexpected completion type (%x)", opcode);
     break;
   case MLX5_CQE_SIG_ERR:
-    printf("CQ: unexpected signature error (%x)\n", opcode);
+    LOGD_ERROR("CQ: unexpected signature error (%x)", opcode);
     break;
   case MLX5_CQE_REQ_ERR:
     syndrome = __hip_atomic_load(&err_cqe->syndrome, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
@@ -166,16 +164,16 @@ __device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe) {
       cqe_syndrome_string = "unknown syndrome type";
       break;
     }
-    printf("CQ requester error: %s (%x)\n", cqe_syndrome_string, syndrome);
+    LOGD_ERROR("CQ requester error (%x)", syndrome);
     break;
   case MLX5_CQE_RESP_ERR:
-    printf("CQ: unexpected responder error (%x)\n", opcode);
+    LOGD_ERROR("CQ: unexpected responder error (%x)", opcode);
     break;
   case MLX5_CQE_INVALID:
-    printf("CQ: invalid completion (%x), check owner bit = %u?\n", opcode, owner);
+    LOGD_ERROR("CQ: invalid completion (%x), check owner bit = %u?", opcode, owner);
     break;
   default:
-    printf("CQ: unknown completion type (%x)\n", opcode);
+    LOGD_ERROR("CQ: unknown completion type (%x)", opcode);
     break;
   }
   abort();
@@ -211,7 +209,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
     // CQEs are initially invalid, retry until we see a valid CQE
     if (opcode == MLX5_CQE_INVALID) {
 #if defined(BUILD_DEBUG_LEVEL_DEVICE)
-      printf("CQ: invalid completion (%x)\n", opcode);
+      LOGD_TRACE("CQ: invalid completion (%x)", opcode);
 #endif
       continue;
     }
