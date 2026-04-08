@@ -12555,15 +12555,26 @@ class AMDSMICommands:
             if gpu_metrics != "N/A":
                 mem_util = gpu_metrics["average_umc_activity"]
                 gfx_util = gpu_metrics["average_gfx_activity"]
+
+                # Power: Try current_socket_power, then average_socket_power, then APU metrics
                 if gpu_metrics["current_socket_power"] != "N/A":
                     current_power = gpu_metrics["current_socket_power"]
-                else:
+                elif gpu_metrics["average_socket_power"] != "N/A":
                     current_power = gpu_metrics["average_socket_power"]
-                # If the hotspot temperature is not available use the edge temp (applicable to APUs)
+                elif "apu_metrics" in gpu_metrics and gpu_metrics["apu_metrics"].get("average_socket_power") != "N/A":
+                    # APU metrics power is in mW, convert to W
+                    current_power = gpu_metrics["apu_metrics"]["average_socket_power"] / 1000.0
+                else:
+                    current_power = "N/A"
+
+                # Temperature: Try hotspot, edge, then APU metrics
                 if gpu_metrics["temperature_hotspot"] != "N/A":
                     temperature = gpu_metrics["temperature_hotspot"]
                 elif gpu_metrics["temperature_edge"] != "N/A":
                     temperature = gpu_metrics["temperature_edge"]
+                elif "apu_metrics" in gpu_metrics and gpu_metrics["apu_metrics"].get("temperature_gfx") != "N/A":
+                    # APU temperature is in centi-Celsius, convert to Celsius
+                    temperature = gpu_metrics["apu_metrics"]["temperature_gfx"] / 100.0
                 else:
                     temperature = "N/A"
             else:
