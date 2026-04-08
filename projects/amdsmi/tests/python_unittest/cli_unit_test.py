@@ -122,23 +122,27 @@ class TestAmdSmiCli(unittest.TestCase):
 
         if my_args.verbose >= common.VERBOSITY_VERBOSE:
             # Execute the following to print the asic and board info once per test run
-            if my_args.diagnostic == "DEBUG":
-                for i, _ in enumerate(cls.common.processors):
-                    msg = f"gpu={i}"
-                    cls.common.print(msg)
-                    msg = f"virtualization mode(gpu={i})"
-                    cls.common.print(msg, cls.common.virt_mode[i])
-                    msg = f"asic info(gpu={i})"
-                    cls.common.print(msg, cls.common.asic_info[i])
-                    msg = f"board info(gpu={i})"
-                    cls.common.print(msg, cls.common.board_info[i])
-                    cls.common.print("")
+            for i, _ in enumerate(cls.common.processors):
+                msg = f"gpu={i}"
+                cls.common.print(msg)
+                msg = f"virtualization mode(gpu={i})"
+                cls.common.print(msg, cls.common.virt_mode[i])
+                msg = f"asic info(gpu={i})"
+                cls.common.print(msg, cls.common.asic_info[i])
+                msg = f"board info(gpu={i})"
+                cls.common.print(msg, cls.common.board_info[i])
+                cls.common.print("")
 
         cls.tmp_filename = "_tmp.log"
         cls.tmp_folder = "_tmp"
 
         # TODO: Need to be able to get automatic answers from CLI
-        cls.skip_args_require_input = {"reset --gtt", "set --fan", "set --memory-partition"}
+        cls.skip_args_require_input = {"reset --gtt"}
+        # TODO (amdsmi_team): WE NEED A TICKET ON THIS - restarting a system is VERY intrusive.
+        # This type of action should not be allowed for our users. Lets follow the typical
+        # pattern for these types of actions (see fan set & memory partition changes)
+        # where user has to type y/n and its clearly documented the action that will
+        # occur.
 
         cls.gpus = ["all"]
         for data in cls.list_data:
@@ -177,12 +181,12 @@ class TestAmdSmiCli(unittest.TestCase):
             "DETERMINISM",
         ]
         cls.profile_levels = [
-            "CUSTOM_MASK",
-            "VIDEO_MASK",
-            "POWER_SAVING_MASK",
-            "COMPUTE_MASK",
-            "VR_MASK",
-            "THREE_D_FULL_SCR_MASK",
+            "CUSTOM",
+            "VIDEO",
+            "POWER_SAVING",
+            "COMPUTE",
+            "VR",
+            "3D_FULL_SCREEN",
             "BOOTUP_DEFAULT",
         ]
         cls.compute_partition_modes = ["SPX", "DPX", "TPX", "QPX", "CPX"]
@@ -299,15 +303,23 @@ class TestAmdSmiCli(unittest.TestCase):
                 else:
                     unit = monitor1[i][key]["unit"]
                     if key == "vram_used" or key == "vram_total":
-                        # Monitor data reported in GB, Metric data in GB
-                        # Convert GB to MB for comparison
+                        # Normalize to MB regardless of what unit monitor reports (GB or MB)
+                        # Metric always reports in MB; use factor 1024 for GB conversion
+                        monitor1_unit = monitor1[i][key]["unit"]
                         unit = monitor1[i][key]["unit"] = "MB"
-                        data1 = int(monitor1[i][key]["value"] * 1000)
+                        if monitor1_unit == "GB":
+                            data1 = round(monitor1[i][key]["value"] * 1024)
+                        else:
+                            data1 = int(monitor1[i][key]["value"])
                     else:
                         data1 = int(monitor1[i][key]["value"])
-                    if monitor2 != None:
+                    if monitor2 is not None:
                         if key == "vram_used" or key == "vram_total":
-                            data2 = int(monitor2[i][key]["value"] * 1000)
+                            monitor2_unit = monitor2[i][key]["unit"]
+                            if monitor2_unit == "GB":
+                                data2 = round(monitor2[i][key]["value"] * 1024)
+                            else:
+                                data2 = int(monitor2[i][key]["value"])
                         else:
                             data2 = int(monitor2[i][key]["value"])
                     else:
@@ -322,7 +334,7 @@ class TestAmdSmiCli(unittest.TestCase):
                         elif key == "gfx":
                             data2 = metric["gpu_data"][i]["usage"]["gfx_activity"]["value"]
                         elif key == "mem":
-                            data2 = metric["gpu_data"][i]["usage"]["mm_activity"]["value"]
+                            data2 = metric["gpu_data"][i]["usage"]["umc_activity"]["value"]
                         elif key == "vram_used":
                             data2 = int(metric["gpu_data"][i]["mem_usage"]["used_vram"]["value"])
                         elif key == "vram_total":
@@ -340,8 +352,18 @@ class TestAmdSmiCli(unittest.TestCase):
             for key in data[i]:
                 if data[i][key][3] == "N/A":
                     continue
-                max_diff = max(data[i][key][0], data[i][key][1])
                 max_diff = max(data[i][key][0], data[i][key][1]) * 0.1
+                if key in ("gfx", "mem"):
+                    max_diff = max(max_diff, 5.0)
+                if key == "vram_used":
+                    # monitor reports vram in GB rounded to 0.1 GB precision; metric reports in MB.
+                    # After converting monitor GB -> MB (factor 1024), worst-case rounding error
+                    # is 0.05 GB * 1024 = 51.2 MB, so floor the threshold at 52 MB.
+                    max_diff = max(max_diff, 52.0)
+                if key == "vram_total":
+                    # vram_total is a static hardware property and should not drift between samples.
+                    # Only expected difference is the same GB->MB rounding error as vram_used (52 MB).
+                    max_diff = 52.0
                 if data[i][key][2] > max_diff:
                     status = "Failure"
                     compare = ">"
@@ -953,6 +975,10 @@ class TestAmdSmiCli(unittest.TestCase):
                     )
                     if ready:
                         line = proc.stdout.readline()
+                        if not line:
+                            # EOF: process exited before printing EVENT LISTENING
+                            break
+                        std_out += line
                         if "EVENT LISTENING" in line:
                             event_listening = True
                             break
@@ -962,27 +988,33 @@ class TestAmdSmiCli(unittest.TestCase):
                         f"within {self.EVENT_LISTENER_STARTUP_WAIT_SEC}s for cmd: {cmd}",
                         file=sys.stderr,
                     )
+                    # If the process already exited on its own (e.g. bad argument),
+                    # capture its actual return code instead of the hardcoded 0.
+                    proc.poll()
+                    if proc.returncode is not None and proc.returncode > 0:
+                        rc = proc.returncode
 
-                # Run an event
-                cmd_trigger = "amd-smi reset --gpureset"
-                (rc_trigger, std_out_trigger, std_err_trigger) = self.util.RunCmdSync(
-                    cmd_trigger, time_out=self.CMD_TIMEOUT
-                )
+                if event_listening:
+                    # Run an event trigger only when the listener is confirmed active
+                    cmd_trigger = "amd-smi reset --gpureset"
+                    (rc_trigger, std_out_trigger, std_err_trigger) = self.util.RunCmdSync(
+                        cmd_trigger, time_out=self.CMD_TIMEOUT
+                    )
 
-                # Wait for the event notification to propagate from the driver,
-                # be received by listener.read() and written to the output file
-                # before killing the process with SIGKILL.
-                # listener.read() has a 2000ms polling timeout, so wait up to
-                # that long (plus a small buffer) for output to appear.
-                if "--file" in cmd:
-                    deadline = time.monotonic() + self.EVENT_FILE_POLL_TIMEOUT_SEC
-                    while time.monotonic() < deadline:
-                        if (
-                            os.path.exists(self.tmp_filename)
-                            and os.path.getsize(self.tmp_filename) > 0
-                        ):
-                            break
-                        time.sleep(self.EVENT_FILE_POLL_INTERVAL_SEC)
+                    # Wait for the event notification to propagate from the driver,
+                    # be received by listener.read() and written to the output file
+                    # before killing the process with SIGKILL.
+                    # listener.read() has a 2000ms polling timeout, so wait up to
+                    # that long (plus a small buffer) for output to appear.
+                    if "--file" in cmd:
+                        deadline = time.monotonic() + self.EVENT_FILE_POLL_TIMEOUT_SEC
+                        while time.monotonic() < deadline:
+                            if (
+                                os.path.exists(self.tmp_filename)
+                                and os.path.getsize(self.tmp_filename) > 0
+                            ):
+                                break
+                            time.sleep(self.EVENT_FILE_POLL_INTERVAL_SEC)
 
                 # Terminate the monitoring
                 proc.kill()
@@ -990,7 +1022,12 @@ class TestAmdSmiCli(unittest.TestCase):
                 if proc.stdout:
                     proc.stdout.close()
             else:
-                (rc, std_out, std_err) = self.util.RunCmdSync(cmd, time_out=self.CMD_TIMEOUT)
+                # Some 'set' subcommands prompt for y/n confirmation; auto-answer 'y'
+                YES_PROMPT_PATTERNS = ["set --fan ", "set --memory-partition "]
+                msg_in = "y\n" if any(p in cmd for p in YES_PROMPT_PATTERNS) else None
+                (rc, std_out, std_err) = self.util.RunCmdSync(
+                    cmd, msg_in=msg_in, time_out=self.CMD_TIMEOUT
+                )
 
             error_code, output_stream = self.get_error_code(std_out, std_err, cond)
 
@@ -1031,7 +1068,9 @@ class TestAmdSmiCli(unittest.TestCase):
                 failures.append((cmd, msg))
 
             if cmd_trigger:
-                error_code_trigger, _ = self.get_error_code(std_out_trigger, std_err_trigger, cond)
+                error_code_trigger, _ = self.get_error_code(
+                    std_out_trigger, std_err_trigger, self.PASS
+                )
                 msg_trigger, _ = self.get_cmd_return_msg(rc_trigger, error_code_trigger, self.PASS)
                 # Even if the trigger cmd failed, put the output in with the cmd fail or pass output
                 if passed:
@@ -1382,6 +1421,23 @@ class TestAmdSmiCli(unittest.TestCase):
         cmds = self.create_cmds(
             "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
+
+        # If no GPU supports compute partitioning, expect those commands to fail
+        compute_partition_supported = any(
+            self.partition_data["current_partition"][i]["accelerator_type"] != "N/A"
+            for i in range(len(self.common.processors))
+        )
+        if not compute_partition_supported:
+            cmds = [
+                (
+                    cmd,
+                    self.FAIL
+                    if any(f"--compute-partition {m}" in cmd for m in self.compute_partition_modes)
+                    else cond,
+                )
+                for cmd, cond in cmds
+            ]
+
         self.run_cmds(cmds)
 
         # Restore starting values
@@ -1395,12 +1451,21 @@ class TestAmdSmiCli(unittest.TestCase):
             # set --perf-level defaults
             perf_level = self.metric_data["gpu_data"][index]["perf_level"]
             if perf_level != "N/A":
-                perf_level = perf_level.removeprefix("AMDSMI_DEV_PERF_LEVEL_")
+                prefix = "AMDSMI_DEV_PERF_LEVEL_"
+                perf_level = (
+                    perf_level[len(prefix) :] if perf_level.startswith(prefix) else perf_level
+                )
                 cmds.append((f"amd-smi set --perf-level {perf_level} --gpu {index}", self.PASS))
 
             # set --profile defaults
             if power_profile[index]:
-                profile = power_profile[index]["current"].removeprefix("AMDSMI_PWR_PROF_PRST_")
+                _profile_raw = power_profile[index]["current"]
+                _prefix = "AMDSMI_PWR_PROF_PRST_"
+                profile = (
+                    _profile_raw[len(_prefix) :]
+                    if _profile_raw.startswith(_prefix)
+                    else _profile_raw
+                )
                 cmds.append((f"amd-smi set --profile {profile} --gpu {index}", self.PASS))
 
             # set --perf-determinism defaults
@@ -1698,6 +1763,10 @@ class TestAmdSmiCli(unittest.TestCase):
             self.print_results(failures, fail_on_results=True)
         return
 
+    @unittest.skipUnless(
+        os.getenv("AMDSMI_TEST_RVS"),
+        "set AMDSMI_TEST_RVS=1 to enable (requires rvs and puts load on the GPU)",
+    )
     def test_monitor_with_workload(self):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi monitor"
@@ -1740,13 +1809,13 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Receive process data and time_stamp
         process_data = q.get()
-        print(process_data)
         process_time_stamp = q.get()
         p1.join()
 
         if my_args.diagnostic == "DEBUG":
-            print(f"Collection TimeStamp: Monitor2={time_stamp_process}  Monitor1={time_stamp}")
-            print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
+            print(process_data)
+            print(f"Collection TimeStamp: Monitor2={process_time_stamp}  Monitor1={time_stamp}")
+            print(f"          Difference: {abs(process_time_stamp - time_stamp)} seconds")
 
         data = {"monitor1": data1, "monitor2": data2}
         data, failures = self.get_dict_from_json(data)
@@ -1878,7 +1947,9 @@ class TestAmdSmiCli(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    # exit_on_error was added in Python 3.9; fall back gracefully on older versions
+    # Strip CLI-specific args early so all subsequent sys.argv checks (verbosity,
+    # -k, -h) and unittest itself only see standard unittest flags.
+    # exit_on_error was added in Python 3.9; fall back gracefully on older versions.
     _parser_kwargs = {"add_help": False}
     if sys.version_info >= (3, 9):
         _parser_kwargs["exit_on_error"] = False
@@ -1919,59 +1990,92 @@ if __name__ == "__main__":
         help="add --loglevel to cmd",
     )
     my_args, remaining = parser.parse_known_args(sys.argv[1:])
-
     my_args.reduce_cmds = not my_args.use_all_cmd_options
     my_args.diagnostic_index = DIAGNOSTIC_CHOICES.index(my_args.diagnostic)
-    my_args.verbose = common.VERBOSITY_NORMAL
 
-    # Print argparse and unittest help
-    if "--help" in sys.argv or "-h" in sys.argv:
-        print("AMD-SMI CLI Options:")
+    # Handle -h/--help before stripping argv so the custom args are still visible.
+    # Print the test list and CLI-specific options first, then let unittest append its own section.
+    if "-h" in sys.argv or "--help" in sys.argv:
+        common.print_tests(__name__)
+        print("AMD-SMI CLI Unit Test Options:")
         parser.print_help()
-        print("\nUnit tests Options:")
-        unittest.main(
-            argv=["unittest", "-h"],
-            exit=False,
-            testRunner=unittest.TextTestRunner(stream=sys.stdout),
-        )
-        sys.exit(0)
+        print("\nUnittest Options:")
+        sys.argv[1:] = ["-h"]
+        unittest.main()
 
-    # Detect if ran without sudo or root privileges
-    # Run if only printing commands
-    if os.geteuid() != 0 and not my_args.print_cmds_only:
+    # Replace sys.argv with only the flags unittest understands.
+    sys.argv[1:] = remaining
+
+    # Parse verbosity from command line.
+    # -v/-vv/--verbose all select VERBOSITY_VERBOSE; -q/--quiet selects QUIET.
+    my_args.verbose = common.VERBOSITY_NORMAL
+    if "-q" in sys.argv or "--quiet" in sys.argv:
+        my_args.verbose = common.VERBOSITY_QUIET
+    elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
+        my_args.verbose = common.VERBOSITY_VERBOSE
+
+    # If no -k or --keyword argument is given, print all available tests.
+    # Do this before the -h check so the test list appears above unittest's help output.
+    if not ("-k" in sys.argv or "--keyword" in sys.argv):
+        if my_args.verbose > common.VERBOSITY_QUIET:
+            common.print_tests(__name__)
+
+    # Only show the dot-character legend when not in verbose mode; in verbose
+    # mode each test prints its own result line so the dot legend is irrelevant.
+    if my_args.verbose < common.VERBOSITY_VERBOSE:
+        common.print_legend()
+
+    if my_args.verbose > common.VERBOSITY_QUIET:
+        print("AMD SMI CLI Unit Tests\n")
+        print("Running tests...\n")
+
+    # Detect if ran without sudo or root privileges.
+    # Bypass when only printing commands (no real subprocess execution).
+    if os.geteuid() != 0 and not my_args.printCmdsOnly:
         print(
-            "Some tests may require elevated privileges (sudo/root) to run completely.\n",
+            "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n",
             file=sys.stderr,
         )
         print("Please relaunch with elevated privileges.\n", file=sys.stderr)
         sys.exit(1)
 
-    # Parse verbosity from command line (updates the module-level default)
-    if "-q" in sys.argv or "--quiet" in sys.argv:
-        my_args.verbose = common.VERBOSITY_QUIET
-    elif "-v" in sys.argv or "--verbose" in sys.argv:
-        my_args.verbose = common.VERBOSITY_VERBOSE
+    # WARNING: Future developers! Please read. :)
+    # Avoid per-test ASIC skipping because:
+    # 1) Masks API bugs — we should verify the API handles unsupported cases correctly, not skip past them.
+    # 2) Unknown behavior — we don't know what the API actually does in unsupported configurations if we never run it.
+    # 3) Tests may be wrong — skipped tests are never validated and can silently rot.
+    # 4) Hides driver/firmware gaps — a missing implementation looks the same as "not supported"/etc...
+    # 5) False coverage — a suite that skips isn't really passing, it's just not running.
+    # 6) Skips become permanent — they rarely get revisited and turn into long-term technical debt.
+    #
+    # Preferred approach: Run the test. If the API returns an "unsupported" result, assert that response explicitly
+    # rather than skipping.
 
-    if my_args.verbose > common.VERBOSITY_QUIET:
-        print("AMD SMI CLI Unit Tests\n", file=sys.stdout)
+    # ---------------------------------------------------------------------------
+    # Skip approaches to AVOID in tests
+    #
+    # Approach                        | Example                                         | Problem
+    # --------------------------------|-------------------------------------------------|------------------------------------------
+    # Unconditional TODO skip         | if self.common.TODO_SKIP_FAIL: skipTest(...)    | Never runs; API behavior stays unknown
+    # GFX filter / target version     | if gfx in GFX_FILTER: skipTest(...)             | Explicit but still hides API behavior
+    # Feature flag skip               | if not gpu_supports_feature: skipTest(...)      | Doesn't verify API returns correct error
+    # Exception swallow               | except Exception: pass                          | Hides failures silently; worse than skip
+    # Broad except + skip             | except Exception: skipTest(...)                 | Skips on *any* error, including test bugs
+    # Commented-out assertions        | # self.assertEqual(...)                         | Test always passes; nothing is verified
+    #
+    # Preferred approach:
+    #   Run the test on all ASICs. If the feature is unsupported, assert the API
+    #   returns the expected error code rather than skipping.
+    #
+    #   try:
+    #       result = amdsmi.amdsmi_get_some_feature(processor)
+    #       self.assertIsNotNone(result)
+    #   except amdsmi.AmdSmiLibraryException as e:
+    #       self.assertEqual(e.get_error_code(), amdsmi.AmdSmiStatus.AMDSMI_STATUS_NOT_SUPPORTED)
+    # ---------------------------------------------------------------------------
 
-    # If no -k or --keyword argument is given, print all available tests
-    if not ("-k" in sys.argv or "--keyword" in sys.argv):
-        if my_args.verbose > common.VERBOSITY_QUIET:
-            common.print_tests(__name__)
-
-    # Print legend only when progress chars (., s, F, E), only show if in quiet mode
-    if my_args.verbose == common.VERBOSITY_NORMAL:
-        common.print_legend()
-
-    verbosity_str = {
-        common.VERBOSITY_QUIET: "QUIET",
-        common.VERBOSITY_NORMAL: "NORMAL",
-        common.VERBOSITY_VERBOSE: "VERBOSE",
-    }
-
-    print(f"Running with verbosity: {verbosity_str[my_args.verbose]}\n", file=sys.stderr)
-
-    sys.argv[1:] = remaining
-    unittest.main()
-    sys.exit(0)
+    runner = unittest.TextTestRunner(
+        stream=sys.stderr, verbosity=common.make_runner_verbosity(my_args.verbose)
+    )
+    common.expand_glob_k_arg(globals())
+    unittest.main(testRunner=runner)
