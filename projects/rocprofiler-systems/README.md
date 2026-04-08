@@ -148,10 +148,10 @@ docker run -v "$(cd .. && pwd)":/home/development                               
 Inside the container, clean, build, and install the project with testing enabled using the following commands:
 
 ```shell
-rm -rf build/debug
-cmake --preset debug
-cmake --build build/debug --target all --parallel $(nproc)
-cmake --build build/debug --target install
+rm -rf build/debug-optimized
+cmake --preset debug-optimized
+cmake --build build/debug-optimized --target all --parallel $(nproc)
+cmake --build build/debug-optimized --target install
 source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 ```
 
@@ -171,7 +171,7 @@ source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 Then, use the following command to start automated testing:
 
 ```shell
-ctest --test-dir build/debug --output-on-failure
+ctest --test-dir build/debug-optimized --output-on-failure
 ```
 
 To enable MPI testing inside the container, set the following environment variables:
@@ -181,7 +181,7 @@ export OMPI_ALLOW_RUN_AS_ROOT=1
 export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 ```
 
-For manual testing, you can find the executables in `build/debug/bin`.
+For manual testing, you can find the executables in `build/debug-optimized/bin`.
 
 ### ROCm Systems Profiler settings
 
