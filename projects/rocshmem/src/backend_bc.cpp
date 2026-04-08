@@ -91,6 +91,15 @@ void Backend::init(void) {
                       hipMemcpyDefault));
 
   /*
+   * Copy PE number to device constant memory for device-side logging.
+   */
+  int* pe_addr{nullptr};
+  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&pe_addr),
+                                HIP_SYMBOL(log_pe_number_device)));
+  CHECK_HIP(hipMemcpy(pe_addr, &log_pe_number, sizeof(log_pe_number),
+                      hipMemcpyDefault));
+
+  /*
    * Copy this Backend object to 'backend_device_proxy' global in the
    * device memory space to provide a device-side handle to Backend.
    */

@@ -20,9 +20,17 @@ control the behavior of rocSHMEM.
       - **Value**
 
     * - | ``ROCSHMEM_DEBUG_LEVEL``
-        | Debug output level (NONE, VERSION, WARN, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)
-      - `` ``
-      -
+        | Debug output level
+      - ``NONE``
+      - | ``NONE``: Print error messages only. No debug output.
+        | ``ERROR``: Print error messages only. No debug output. Synonym for NONE.
+        | ``WARN``: Print warnings and above.
+        | ``VERSION``: Print version information.
+        | ``ENV:MODIFIED``: Print modified environment variables.
+        | ``ENV:ALL``: Print all environment variables.
+        | ``ENV:FULL``: Print full environment variable documentation.
+        | ``INFO``: Print informational messages and above.
+        | ``TRACE``: Print all messages (requires ``BUILD_DEBUG_LEVEL_TRACE`` at build time).
 
     * - | ``ROCSHMEM_HEAP_SIZE``
         | Defines the size of the rocSHMEM symmetric heap in bytes (per PE).

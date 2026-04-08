@@ -22,6 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include "log.hpp"
 #include "mpi_transport.hpp"
 #include <algorithm>
 #include <functional>
@@ -93,7 +94,7 @@ void MPITransport::submitRequestsToMPI() {
       putMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, true);
-      DPRINTF("Submitted PUT dst %p src %p size %lu pe %d win_id %d\n",
+      LOG_TRACE("Submitted PUT dst %p src %p size %lu pe %d win_id %d",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.PE, next_element.ro_net_win_id);
       break;
@@ -108,7 +109,7 @@ void MPITransport::submitRequestsToMPI() {
       putMem(next_element.dst, source_buffer, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, true, true);
-      DPRINTF("Submitted P dst %p value %p pe %d\n", next_element.dst,
+      LOG_TRACE("Submitted P dst %p value %p pe %d", next_element.dst,
               next_element.src, next_element.PE);
       break;
     }
@@ -116,14 +117,14 @@ void MPITransport::submitRequestsToMPI() {
       getMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, true);
-      DPRINTF("Submitted GET dst %p src %p size %lu pe %d\n", next_element.dst,
+      LOG_TRACE("Submitted GET dst %p src %p size %lu pe %d", next_element.dst,
               next_element.src, next_element.ol1.size, next_element.PE);
       break;
     case RO_NET_PUT_NBI:
       putMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, false);
-      DPRINTF("Submitted PUT NBI dst %p src %p size %lu pe %d\n",
+      LOG_TRACE("Submitted PUT NBI dst %p src %p size %lu pe %d",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.PE);
       break;
@@ -131,7 +132,7 @@ void MPITransport::submitRequestsToMPI() {
       getMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
              next_element.status, false);
-      DPRINTF("Submitted GET NBI dst %p src %p size %lu pe %d\n",
+      LOG_TRACE("Submitted GET NBI dst %p src %p size %lu pe %d",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.PE);
       break;
@@ -142,7 +143,7 @@ void MPITransport::submitRequestsToMPI() {
              next_element.status, true,
              static_cast<ROCSHMEM_OP>(next_element.op),
              static_cast<ro_net_types>(next_element.datatype));
-      DPRINTF("Submitted AMO dst %p src %p Val %llu pe %d\n", next_element.dst,
+      LOG_TRACE("Submitted AMO dst %p src %p Val %llu pe %d", next_element.dst,
               next_element.src, next_element.ol1.atomic_value, next_element.PE);
       break;
     case RO_NET_AMO_FCAS:
@@ -152,7 +153,7 @@ void MPITransport::submitRequestsToMPI() {
               next_element.status, true,
               const_cast<void **>(&next_element.ol2.pWrk),
               static_cast<ro_net_types>(next_element.datatype));
-      DPRINTF("Submitted F_CSWAP dst %p src %p Val %llu pe %d cond %ld\n",
+      LOG_TRACE("Submitted F_CSWAP dst %p src %p Val %llu pe %d cond %ld",
               next_element.dst, next_element.src, next_element.ol1.atomic_value,
               next_element.PE,
               reinterpret_cast<int64_t>(next_element.ol2.pWrk));
@@ -164,7 +165,7 @@ void MPITransport::submitRequestsToMPI() {
                      static_cast<ROCSHMEM_OP>(next_element.op),
                      static_cast<ro_net_types>(next_element.datatype),
                      next_element.status, true);
-      DPRINTF("Submitted FLOAT_SUM_TEAM_REDUCE dst %p src %p size %lu team %zd\n",
+      LOG_TRACE("Submitted FLOAT_SUM_TEAM_REDUCE dst %p src %p size %lu team %zd",
               next_element.dst, next_element.src, next_element.ol1.size,
               (intptr_t)next_element.team_comm);
       break;
@@ -174,7 +175,7 @@ void MPITransport::submitRequestsToMPI() {
                      (MPI_Comm)next_element.team_comm, next_element.PE_root,
                      static_cast<ro_net_types>(next_element.datatype),
                      next_element.status, true);
-      DPRINTF(
+      LOG_TRACE(
           "Submitted TEAM_BROADCAST dst %p src %p size %lu "
           "team %zd, PE_root %d \n",
           next_element.dst, next_element.src, next_element.ol1.size,
@@ -186,7 +187,7 @@ void MPITransport::submitRequestsToMPI() {
                next_element.ol2.pWrk,
                static_cast<ro_net_types>(next_element.datatype),
                next_element.status, true);
-      DPRINTF("Submitted ALLTOALL  dst %p src %p size %lu team %zd\n",
+      LOG_TRACE("Submitted ALLTOALL  dst %p src %p size %lu team %zd",
               next_element.dst, next_element.src, next_element.ol1.size,
               (intptr_t)next_element.team_comm);
       break;
@@ -196,7 +197,7 @@ void MPITransport::submitRequestsToMPI() {
                next_element.ol2.pWrk,
                static_cast<ro_net_types>(next_element.datatype),
                next_element.status, true);
-      DPRINTF("Submitted FCOLLECT  dst %p src %p size %lu team %zd\n",
+      LOG_TRACE("Submitted FCOLLECT  dst %p src %p size %lu team %zd",
               next_element.dst, next_element.src, next_element.ol1.size,
               (intptr_t)next_element.team_comm);
       break;
@@ -204,22 +205,22 @@ void MPITransport::submitRequestsToMPI() {
       barrier(queue_idx, next_element.status, true,
               next_element.team_comm == ((intptr_t) NULL) ? ro_net_comm_world : (MPI_Comm)next_element.team_comm,
               true);
-      DPRINTF("Submitted Barrier_all\n");
+      LOG_TRACE("Submitted Barrier_all");
       break;
     case RO_NET_SYNC:
       barrier(queue_idx, next_element.status, true,
               next_element.team_comm == ((intptr_t) NULL) ? ro_net_comm_world : (MPI_Comm)next_element.team_comm,
               false);
-      DPRINTF("Submitted Sync\n");
+      LOG_TRACE("Submitted Sync");
       break;
     case RO_NET_FENCE:
     case RO_NET_QUIET:
       quiet(queue_idx, next_element.status);
-      DPRINTF("Submitted FENCE/QUIET\n");
+      LOG_TRACE("Submitted FENCE/QUIET");
       break;
     case RO_NET_FINALIZE:
       quiet(queue_idx, next_element.status);
-      DPRINTF("Submitted Finalize\n");
+      LOG_TRACE("Submitted Finalize");
       break;
     default:
       fprintf(stderr, "Invalid GPU Packet received, exiting....\n");
@@ -597,7 +598,7 @@ void MPITransport::progress() {
     usleep(envvar::ro::progress_delay);
     NET_CHECK(mpilib_ftable_.Iprobe(MPI_ANY_SOURCE, tag, ro_net_comm_world, &flag, &status));
   } else {
-    DPRINTF("Testing all outstanding requests (%zu)\n", requests.size());
+    LOG_TRACE("Testing all outstanding requests (%zu)", requests.size());
 
     int incount = (requests.size() < testsome_indices.size())
                       ? requests.size()
@@ -615,7 +616,7 @@ void MPITransport::progress() {
 
       if (contextId != -1) {
         outstanding[contextId]--;
-        DPRINTF(
+        LOG_TRACE(
             "Finished op for contextId %d at status addr %p "
             "(%d requests outstanding)\n",
             contextId, status, outstanding[contextId]);
@@ -636,7 +637,7 @@ void MPITransport::progress() {
       // all outstanding requests are complete.
       if (!outstanding[contextId] && !waiting_quiet[contextId].empty()) {
         for (const auto status : waiting_quiet[contextId]) {
-          DPRINTF("Finished Quiet for contextId %d at status addr %p\n", contextId,
+          LOG_TRACE("Finished Quiet for contextId %d at status addr %p", contextId,
                   status);
           queue->notify(status);
         }
@@ -658,7 +659,7 @@ void MPITransport::progress() {
 
 void MPITransport::quiet(int contextId, volatile char *status) {
   if (!outstanding[contextId]) {
-    DPRINTF("Finished Quiet immediately for contextId %d at status addr %p\n",
+    LOG_TRACE("Finished Quiet immediately for contextId %d at status addr %p",
             contextId, status);
     queue->notify(status);
   } else {

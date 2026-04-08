@@ -292,11 +292,12 @@ namespace envvar {
     inline namespace _debug {
       enum class debug_level {
         NONE,
-        VERSION,
+        ERROR = NONE,
         WARN,
         ENV,
         ENV_ALL,
         ENV_FULL,
+        VERSION,
         INFO,
         TRACE,
       };

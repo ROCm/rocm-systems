@@ -25,6 +25,8 @@
 #ifndef LIBRARY_SRC_GDA_DEBUG_GDA_HPP_
 #define LIBRARY_SRC_GDA_DEBUG_GDA_HPP_
 
+#include "log.hpp"
+
 static void dump_ibv_context(struct ibv_context *x);
 static void dump_ibv_device(struct ibv_device *x);
 static void dump_ibv_pd(struct ibv_pd *x);
@@ -45,7 +47,7 @@ static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
    *   void                   *abi_compat;
    * };
    */
-  DPRINTF("\n"
+  LOG_TRACE("\n"
          "===============================================\n"
          "                IBV_CONTEXT\n"
          "===============================================\n"
@@ -69,7 +71,7 @@ static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
    *   char ibdev_path[IBV_SYSFS_PATH_MAX];
    * };
    */
-  DPRINTF("\n"
+  LOG_TRACE("\n"
          "===============================================\n"
          "               IBV_DEVICE\n"
          "===============================================\n"
@@ -89,7 +91,7 @@ static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
    *   uint32_t                handle;
    * };
    */
-  DPRINTF("\n"
+  LOG_TRACE("\n"
          "===============================================\n"
          "               IBV_PD\n"
          "===============================================\n"
@@ -125,7 +127,7 @@ static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
    *   uint16_t                port_cap_flags2;
    * };
    */
-  DPRINTF("\n"
+  LOG_TRACE("\n"
          "===============================================\n"
          "               IBV_PORT_ATTR\n"
          "===============================================\n"
@@ -175,61 +177,61 @@ static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
    *   uint32_t                events_completed;
    * };
    */
-  DPRINTF("\n");
-  DPRINTF("============== QP_DUMP CONNECTION#%d ==========\n", conn_num);
-  DPRINTF("  (ibv_context*)      context          = %p\n",   qp->context);
-  DPRINTF("  (void*)             qp_context       = %p\n",   qp->qp_context);
-  DPRINTF("  (ibv_pd*)           pd               = %p\n",   qp->pd);
-  DPRINTF("  (ibv_cq*)           send_cq          = %p\n",   qp->send_cq);
-  DPRINTF("  (ibv_cq*)           recv_cq          = %p\n",   qp->recv_cq);
-  DPRINTF("  (ibv_srq*)          srq              = %p\n",   qp->srq);
-  DPRINTF("  (uint32_t)          handle           = 0x%x\n", qp->handle);
-  DPRINTF("  (uint32_t)          qp_num           = 0x%x\n", qp->qp_num);
-  DPRINTF("  (enum ibv_qp_state) state            = %u\n",   qp->state);
-  DPRINTF("  (enum_ibv_qp_type)  qp_type          = %u\n",   qp->qp_type);
-  DPRINTF("  (uint32_t)          events_completed = %u\n",   qp->events_completed);
-  DPRINTF("=========== QP_DUMP_END CONNECTION#%d  ========\n", conn_num);
+  LOG_TRACE("");
+  LOG_TRACE("============== QP_DUMP CONNECTION#%d ==========", conn_num);
+  LOG_TRACE("  (ibv_context*)      context          = %p",   qp->context);
+  LOG_TRACE("  (void*)             qp_context       = %p",   qp->qp_context);
+  LOG_TRACE("  (ibv_pd*)           pd               = %p",   qp->pd);
+  LOG_TRACE("  (ibv_cq*)           send_cq          = %p",   qp->send_cq);
+  LOG_TRACE("  (ibv_cq*)           recv_cq          = %p",   qp->recv_cq);
+  LOG_TRACE("  (ibv_srq*)          srq              = %p",   qp->srq);
+  LOG_TRACE("  (uint32_t)          handle           = 0x%x", qp->handle);
+  LOG_TRACE("  (uint32_t)          qp_num           = 0x%x", qp->qp_num);
+  LOG_TRACE("  (enum ibv_qp_state) state            = %u",   qp->state);
+  LOG_TRACE("  (enum_ibv_qp_type)  qp_type          = %u",   qp->qp_type);
+  LOG_TRACE("  (uint32_t)          events_completed = %u",   qp->events_completed);
+  LOG_TRACE("=========== QP_DUMP_END CONNECTION#%d  ========", conn_num);
 }
 
 [[maybe_unused]] void dump_mlx5dv_qp([[maybe_unused]] struct mlx5dv_qp *qp_dv, [[maybe_unused]] int conn_num) {
-  DPRINTF("\n");
-  DPRINTF("===============================================\n");
-  DPRINTF("     INITIALIZED MLXDV_QP FOR CONNECTION#%d\n", conn_num);
-  DPRINTF("===============================================\n");
-  DPRINTF("=================== QP_DUMP ===================\n");
-  DPRINTF("  (__be32*)  dbrec           = %p\n",     qp_dv->dbrec);
-  DPRINTF("  (void*)    sq.buf          = %p\n",     qp_dv->sq.buf);
-  DPRINTF("  (uint32_t) sq.wqe_cnt      = %u\n",     qp_dv->sq.wqe_cnt);
-  DPRINTF("  (uint32_t) sq.stride       = %u\n",     qp_dv->sq.stride);
-  DPRINTF("  (void*)    rq.buf          = %p\n",     qp_dv->rq.buf);
-  DPRINTF("  (uint32_t) rq.wqe_cnt      = %u\n",     qp_dv->rq.wqe_cnt);
-  DPRINTF("  (uint32_t) rq.stride       = %u\n",     qp_dv->rq.stride);
-  DPRINTF("  (void*)    bf.reg          = %p\n",     qp_dv->bf.reg);
-  DPRINTF("  (uint32_t) bf.size         = 0x%x\n",   qp_dv->bf.size);
-  DPRINTF("  (uint64_t) comp_mask       = 0x%lx\n",  qp_dv->comp_mask);
-  DPRINTF("  (off_t)    uar_mmap_offset = 0x%lx\n",  qp_dv->uar_mmap_offset);
-  DPRINTF("  (uint32_t) tirn            = 0x%x\n",   qp_dv->tirn);
-  DPRINTF("  (uint32_t) tisn            = 0x%x\n",   qp_dv->tisn);
-  DPRINTF("  (uint32_t) rqn             = 0x%x\n",   qp_dv->rqn);
-  DPRINTF("  (uint32_t) sqn             = 0x%x\n",   qp_dv->sqn);
-  DPRINTF("  (uint64_t) tir_icm_addr    = 0x%lx\n",  qp_dv->tir_icm_addr);
-  DPRINTF("================== QP_DUMP_END ================\n");
+  LOG_TRACE("");
+  LOG_TRACE("===============================================");
+  LOG_TRACE("     INITIALIZED MLXDV_QP FOR CONNECTION#%d", conn_num);
+  LOG_TRACE("===============================================");
+  LOG_TRACE("=================== QP_DUMP ===================");
+  LOG_TRACE("  (__be32*)  dbrec           = %p",     qp_dv->dbrec);
+  LOG_TRACE("  (void*)    sq.buf          = %p",     qp_dv->sq.buf);
+  LOG_TRACE("  (uint32_t) sq.wqe_cnt      = %u",     qp_dv->sq.wqe_cnt);
+  LOG_TRACE("  (uint32_t) sq.stride       = %u",     qp_dv->sq.stride);
+  LOG_TRACE("  (void*)    rq.buf          = %p",     qp_dv->rq.buf);
+  LOG_TRACE("  (uint32_t) rq.wqe_cnt      = %u",     qp_dv->rq.wqe_cnt);
+  LOG_TRACE("  (uint32_t) rq.stride       = %u",     qp_dv->rq.stride);
+  LOG_TRACE("  (void*)    bf.reg          = %p",     qp_dv->bf.reg);
+  LOG_TRACE("  (uint32_t) bf.size         = 0x%x",   qp_dv->bf.size);
+  LOG_TRACE("  (uint64_t) comp_mask       = 0x%lx",  qp_dv->comp_mask);
+  LOG_TRACE("  (off_t)    uar_mmap_offset = 0x%lx",  qp_dv->uar_mmap_offset);
+  LOG_TRACE("  (uint32_t) tirn            = 0x%x",   qp_dv->tirn);
+  LOG_TRACE("  (uint32_t) tisn            = 0x%x",   qp_dv->tisn);
+  LOG_TRACE("  (uint32_t) rqn             = 0x%x",   qp_dv->rqn);
+  LOG_TRACE("  (uint32_t) sqn             = 0x%x",   qp_dv->sqn);
+  LOG_TRACE("  (uint64_t) tir_icm_addr    = 0x%lx",  qp_dv->tir_icm_addr);
+  LOG_TRACE("================== QP_DUMP_END ================");
 }
 
 [[maybe_unused]] void dump_mlx5dv_cq([[maybe_unused]] struct mlx5dv_cq *cq_dv, [[maybe_unused]] int conn_num) {
-  DPRINTF("\n");
-  DPRINTF("===============================================\n");
-  DPRINTF("     INITIALIZED MLX5DV_CQ FOR CONNECTION#%d\n", conn_num);
-  DPRINTF("===============================================\n");
-  DPRINTF("=================== CQ_DUMP ===================\n");
-  DPRINTF("  (void*)    buf             = %p\n",     cq_dv->buf);
-  DPRINTF("  (__be32*)  dbrec           = %p\n",     cq_dv->dbrec);
-  DPRINTF("  (uint32_t) cqe_cnt         = %u\n",     cq_dv->cqe_cnt);
-  DPRINTF("  (uint32_t) cqe_size        = %u\n",     cq_dv->cqe_size);
-  DPRINTF("  (void*)    cq_uar          = %p\n",     cq_dv->cq_uar);
-  DPRINTF("  (uint32_t) cqn             = 0x%x\n",   cq_dv->cqn);
-  DPRINTF("  (uint64_t) comp_mask       = 0x%lx\n",  cq_dv->comp_mask);
-  DPRINTF("================== CQ_DUMP_END ================\n");
+  LOG_TRACE("");
+  LOG_TRACE("===============================================");
+  LOG_TRACE("     INITIALIZED MLX5DV_CQ FOR CONNECTION#%d", conn_num);
+  LOG_TRACE("===============================================");
+  LOG_TRACE("=================== CQ_DUMP ===================");
+  LOG_TRACE("  (void*)    buf             = %p",     cq_dv->buf);
+  LOG_TRACE("  (__be32*)  dbrec           = %p",     cq_dv->dbrec);
+  LOG_TRACE("  (uint32_t) cqe_cnt         = %u",     cq_dv->cqe_cnt);
+  LOG_TRACE("  (uint32_t) cqe_size        = %u",     cq_dv->cqe_size);
+  LOG_TRACE("  (void*)    cq_uar          = %p",     cq_dv->cq_uar);
+  LOG_TRACE("  (uint32_t) cqn             = 0x%x",   cq_dv->cqn);
+  LOG_TRACE("  (uint64_t) comp_mask       = 0x%lx",  cq_dv->comp_mask);
+  LOG_TRACE("================== CQ_DUMP_END ================");
 }
 
 #endif /* LIBRARY_SRC_GDA_DEBUG_GDA_HPP_ */

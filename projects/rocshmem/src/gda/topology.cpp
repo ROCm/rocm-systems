@@ -22,6 +22,7 @@
  * THE SOFTWARE.
  *****************************************************************************/
 
+#include "log.hpp"
 #include "topology.hpp"
 #include "ibv_wrapper.hpp"
 #include "numa_wrapper.hpp"
@@ -913,7 +914,7 @@ namespace rocshmem
     }
 
     int closestIdx = closestNicId[gpuIndex];
-    DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestIdx,
+    LOG_TRACE("GPU Device id: %d closest NIC id : %d name: %s", gpuIndex, closestIdx,
            (-1 != closestIdx)? ibvDeviceList[closestIdx].name.c_str(): "none-found");
     if (dev_name != nullptr && closestIdx != -1) {
       *dev_name = strdup(ibvDeviceList[closestIdx].name.c_str());

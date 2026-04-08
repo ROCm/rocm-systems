@@ -36,6 +36,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "constants.hpp"
 #include "assembly.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 
@@ -112,7 +113,7 @@ namespace rocshmem {
     }                                                                            \
 } while (0)
 
-#ifdef DEBUG
+#ifdef BUILD_DEBUG_LEVEL_TRACE
 #define DPRINTF(...)     \
   do {                   \
     printf(__VA_ARGS__); \
@@ -123,10 +124,10 @@ namespace rocshmem {
   } while (0);
 #endif
 
-#ifdef DEBUG
-#define GPU_DPRINTF(...)                                         \
-  do {                                                           \
-    gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u) " __VA_ARGS__); \
+#ifdef BUILD_DEBUG_LEVEL_DEVICE
+#define GPU_DPRINTF(...)                                                \
+  do {                                                                  \
+    rocshmem::dprintf("T%04dw%04ut%04u " __VA_ARGS__);\
   } while (0);
 #else
 #define GPU_DPRINTF(...) \
@@ -412,31 +413,6 @@ __device__ __forceinline__ bool is_last_active_lane() {
   }
 }
 
-extern __constant__ int* print_lock;
-
-template <typename... Args>
-[[maybe_unused]] __device__ void gpu_dprintf(const char* fmt, const Args&... args) {
-  for (int i{0}; i < WF_SIZE; i++) {
-    if ((get_flat_block_id() % WF_SIZE) == i) {
-      /*
-       * GPU-wide global lock that ensures that both prints are executed
-       * by a single thread atomically.  We deliberately break control
-       * flow so that only a single thread in a WF accesses the lock at a
-       * time.  If multiple threads in the same WF attempt to gain the
-       * lock at the same time, you have a classic GPU control flow
-       * deadlock caused by threads in the same WF waiting on each other.
-       */
-      while (atomicCAS(print_lock, 0, 1) == 1) {
-      }
-
-      printf(fmt, hipBlockIdx_x, hipBlockIdx_y, hipBlockIdx_z,
-                  hipThreadIdx_x, hipThreadIdx_y, hipThreadIdx_z,
-                  args...);
-
-      *print_lock = 0;
-    }
-  }
-}
 
 #define LOAD(VAR) __atomic_load_n((VAR), __ATOMIC_SEQ_CST)
 #define STORE(DST, SRC) __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST)

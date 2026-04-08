@@ -86,7 +86,7 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_w
   // ring doorbell by storing first 8B of WQE to the doorbell register
   __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 
-#if defined(DEBUG)
+#if defined(BUILD_DEBUG_LEVEL_DEVICE)
   printf("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)\n",
          mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
          &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
@@ -210,13 +210,13 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
     // CQEs are initially invalid, retry until we see a valid CQE
     if (opcode == MLX5_CQE_INVALID) {
-#if defined(DEBUG)
+#if defined(BUILD_DEBUG_LEVEL_DEVICE)
       printf("CQ: invalid completion (%x)\n", opcode);
 #endif
       continue;
     }
 
-#if defined(DEBUG)
+#if defined(BUILD_DEBUG_LEVEL_DEVICE)
     mlx5_check_cqe_error(cqe);
 #endif
 

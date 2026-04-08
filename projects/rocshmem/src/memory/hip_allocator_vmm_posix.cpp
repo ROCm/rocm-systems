@@ -169,7 +169,7 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
     int major = 0, minor = 0;
     if (sscanf(kernel_info.release, "%d.%d", &major, &minor) == 2) {
       if (major < 6 || (major == 6 && minor < 8)) {
-        fprintf(stderr, "ROCSHMEM_WARNING: Linux kernel version %d.%d may not work correctly with VMM POSIX allocator. "
+        fprintf(stderr, "LOG_WARNING: Linux kernel version %d.%d may not work correctly with VMM POSIX allocator. "
                 "Kernel version 6.8 or higher is recommended.\n",
                 major, minor);
       }
@@ -179,7 +179,7 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
   // Allow other processes to trace this process for pidfd_getfd syscall
   // This avoids the need for CAP_SYS_PTRACE capability
   if (prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0) != 0) {
-    fprintf(stderr, "ROCSHMEM_WARNING: Failed to set PR_SET_PTRACER: %s. "
+    fprintf(stderr, "LOG_WARNING: Failed to set PR_SET_PTRACER: %s. "
             "IPC operations may require CAP_SYS_PTRACE capability.\n",
             strerror(errno));
   }

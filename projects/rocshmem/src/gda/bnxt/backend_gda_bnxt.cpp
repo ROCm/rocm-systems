@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "gda/backend_gda.hpp"
+#include "log.hpp"
 #include "util.hpp"
 #include <unistd.h> // getpagesize()
 
@@ -306,7 +307,7 @@ void* GDABackend::bnxt_dv_dlopen() {
     // Try hard-coded PATH
     dv_handle = dlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
     if (!dv_handle) {
-      DPRINTF("Could not open libbnxt_re.so. Returning\n");
+      LOG_WARN("Could not open libbnxt_re.so. Returning");
     }
   }
   return dv_handle;

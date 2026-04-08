@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "context_ipc_device.hpp"
+#include "log.hpp"
 #include "util.hpp"
 #include "ipc_team.hpp"
 #include "rocshmem_calc.hpp"
@@ -404,7 +405,7 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      GPU_DPRINTF("Unsupported reduction size for IPC conduit.\n");
+      LOGD_WARN("Unsupported reduction size for IPC conduit.");
       return ROCSHMEM_ERROR;
     }
   }

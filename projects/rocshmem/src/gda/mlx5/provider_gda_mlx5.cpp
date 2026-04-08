@@ -27,6 +27,7 @@
 #include <type_traits>
 #include <hip/hip_runtime.h>
 
+#include "log.hpp"
 #include "util.hpp"
 #include "gda/bit.hpp"
 #include "gda/ibv_wrapper.hpp"
@@ -661,25 +662,25 @@ static int mlx5_modify_qp_rtr2rts(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp
 }
 
 void mlx5_devx_qp::dump([[maybe_unused]] int conn_num) {
-  DPRINTF("\n");
-  DPRINTF("===============================================\n");
-  DPRINTF("     INITIALIZED MLX5_DEVX_QP FOR CONNECTION#%d\n", conn_num);
-  DPRINTF("===============================================\n");
-  DPRINTF("=================== QP_DUMP ===================\n");
-  DPRINTF("  (uint32_t)  qpn              = 0x%x\n",  this->qpn);
-  DPRINTF("  (void*)     sq               = %p\n",    this->sq);
-  DPRINTF("  (uint16_t)  sq_depth         = %hu\n",   this->sq_depth);
-  DPRINTF("  (uint32_t*) qp_dbrec         = %p\n",    this->qp_dbrec);
-  DPRINTF("  (uint32_t)  cqn              = 0x%x\n",  this->cqn);
-  DPRINTF("  (void*)     cq               = %p\n",    this->cq);
-  DPRINTF("  (uint32_t)  cq_depth         = %u\n",    this->cq_depth);
-  DPRINTF("  (uint32_t*) cq_dbrec         = %p\n",    this->cq_dbrec);
-  DPRINTF("  (void*)     uar->reg_addr    = %p\n",    this->uar->reg_addr);
-  DPRINTF("  (void*)     uar->base_addr   = %p\n",    this->uar->base_addr);
-  DPRINTF("  (uint32_t)  uar->page_id     = 0x%x\n",  this->uar->page_id);
-  DPRINTF("  (off_t)     uar->mmap_offset = 0x%lx\n", this->uar->mmap_off);
-  DPRINTF("  (uint64_t)  uar->comp_mask   = 0x%lx\n", this->uar->comp_mask);
-  DPRINTF("================== QP_DUMP_END ================\n");
+  LOG_TRACE("");
+  LOG_TRACE("===============================================");
+  LOG_TRACE("     INITIALIZED MLX5_DEVX_QP FOR CONNECTION#%d", conn_num);
+  LOG_TRACE("===============================================");
+  LOG_TRACE("=================== QP_DUMP ===================");
+  LOG_TRACE("  (uint32_t)  qpn              = 0x%x",  this->qpn);
+  LOG_TRACE("  (void*)     sq               = %p",    this->sq);
+  LOG_TRACE("  (uint16_t)  sq_depth         = %hu",   this->sq_depth);
+  LOG_TRACE("  (uint32_t*) qp_dbrec         = %p",    this->qp_dbrec);
+  LOG_TRACE("  (uint32_t)  cqn              = 0x%x",  this->cqn);
+  LOG_TRACE("  (void*)     cq               = %p",    this->cq);
+  LOG_TRACE("  (uint32_t)  cq_depth         = %u",    this->cq_depth);
+  LOG_TRACE("  (uint32_t*) cq_dbrec         = %p",    this->cq_dbrec);
+  LOG_TRACE("  (void*)     uar->reg_addr    = %p",    this->uar->reg_addr);
+  LOG_TRACE("  (void*)     uar->base_addr   = %p",    this->uar->base_addr);
+  LOG_TRACE("  (uint32_t)  uar->page_id     = 0x%x",  this->uar->page_id);
+  LOG_TRACE("  (off_t)     uar->mmap_offset = 0x%lx", this->uar->mmap_off);
+  LOG_TRACE("  (uint64_t)  uar->comp_mask   = 0x%lx", this->uar->comp_mask);
+  LOG_TRACE("================== QP_DUMP_END ================");
 }
 
 }  // namespace rocshmem

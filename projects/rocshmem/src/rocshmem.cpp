@@ -37,6 +37,7 @@
 #include "build_info.hpp"
 #include "context_incl.hpp"
 #include "envvar.hpp"
+#include "log.hpp"
 #if defined(USE_GDA)
 #include "gda/backend_gda.hpp"
 #include "gda/context_gda_tmpl_host.hpp"
@@ -70,7 +71,7 @@ namespace rocshmem {
 #define VERIFY_BACKEND()                                                      \
   {                                                                           \
     if (!backend) {                                                           \
-      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",         \
+      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d",         \
               "Call 'rocshmem_init'", __FILE__, __LINE__);                    \
       abort();                                                                \
     }                                                                         \
@@ -94,7 +95,6 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
   std::string envstr = envvar::backend;
   std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
   if (!envstr.empty()) {
-    DPRINTF("Found environment variable ROCSHMEM_BACKEND, value is %s\n", envstr.c_str());
     if (envstr.find("gda") != std::string::npos) {
       if (GDABackend::backend_can_run() != ROCSHMEM_SUCCESS) {
         fprintf(stderr, "Error: ROCSHMEM_BACKEND=gda requested but GDA backend cannot run.\n"
@@ -124,15 +124,15 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
   }
 
   if (IPCBackend::backend_can_run(comm, bootstrap) == ROCSHMEM_SUCCESS) {
-    DPRINTF("IPCBackend::backend_can_run returned success\n");
+    LOG_TRACE("IPCBackend::backend_can_run returned success");
     return BackendType::IPC_BACKEND;
   }
   if (GDABackend::backend_can_run() == ROCSHMEM_SUCCESS) {
-    DPRINTF("GDABackend::backend_can_run returned success\n");
+    LOG_TRACE("GDABackend::backend_can_run returned success");
     return BackendType::GDA_BACKEND;
   }
   if (ROBackend::backend_can_run() == ROCSHMEM_SUCCESS) {
-    DPRINTF("MPIInstance could dl_init MPI library\n");
+    LOG_TRACE("MPIInstance could dl_init MPI library");
     return BackendType::RO_BACKEND;
   }
 
@@ -147,12 +147,12 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
 static void setFilesLimit() {
   rlimit filesLimit;
   if (getrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
-    DPRINTF("getrlimit failed\n");
+    LOG_WARN("getrlimit failed");
     return;
   }
   filesLimit.rlim_cur = filesLimit.rlim_max;
   if (setrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
-    DPRINTF("setrlimit failed\n");
+    LOG_WARN("setrlimit failed");
     return;
   }
 }
@@ -163,7 +163,7 @@ static void setFilesLimit() {
 #if defined(USE_HEAP_DEVICE_VMM_POSIX)
   fprintf(stderr, "ROCSHMEM_ERROR: VMM POSIX allocator (USE_HEAP_DEVICE_VMM_POSIX) "
           "is not compatible with MPI-based initialization. "
-          "Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or disable VMM POSIX allocator.\n");
+          "Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or disable VMM POSIX allocator.");
   exit(1);
 #endif
 
@@ -187,19 +187,17 @@ static void setFilesLimit() {
   }
 
   mpi_instance = new MPIInstance(comm);
+  log_pe_number = mpi_instance->get_rank();
 
   // Print build info and/or environment variables based on DEBUG_LEVEL.
   // Only PE 0 prints to avoid duplicated output.
   if (mpi_instance->get_rank() == 0) {
     using rocshmem::envvar::types::debug_level;
     auto debug_val = envvar::debug_level.get_value();
-    if (debug_val >= debug_level::INFO) {
+    if (debug_val >= debug_level::VERSION) {
       print_build_info(std::cout);
     }
-    if (debug_val == debug_level::ENV ||
-        debug_val == debug_level::ENV_ALL ||
-        debug_val == debug_level::ENV_FULL ||
-        debug_val >= debug_level::INFO) {
+    if (debug_val >= debug_level::ENV) {
       envvar::print_mode mode;
       if (debug_val == debug_level::ENV_ALL) {
         mode = envvar::print_mode::ALL_VALUES;
@@ -216,17 +214,17 @@ static void setFilesLimit() {
   BackendType type = select_backend_type(comm, nullptr);
   switch (type) {
   case BackendType::GDA_BACKEND:
-    DPRINTF("Initializing GDA backend using MPI\n");
+    LOG_INFO("Initializing GDA backend using MPI");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(GDABackend)));
     backend = new (backend) GDABackend(comm);
     break;
   case BackendType::RO_BACKEND:
-    DPRINTF("Initializing RO backend using MPI\n");
+    LOG_INFO("Initializing RO backend using MPI");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(ROBackend)));
     backend = new (backend) ROBackend(comm);
     break;
   case BackendType::IPC_BACKEND:
-    DPRINTF("Initializing IPC backend using MPI\n");
+    LOG_INFO("Initializing IPC backend using MPI");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
     backend = new (backend) IPCBackend(comm);
     break;
@@ -328,13 +326,10 @@ static void setFilesLimit() {
   if (bootstrap->getRank() == 0) {
     using rocshmem::envvar::types::debug_level;
     auto debug_val = envvar::debug_level.get_value();
-    if (debug_val >= debug_level::INFO) {
+    if (debug_val >= debug_level::VERSION) {
       print_build_info(std::cout);
     }
-    if (debug_val == debug_level::ENV ||
-        debug_val == debug_level::ENV_ALL ||
-        debug_val == debug_level::ENV_FULL ||
-        debug_val >= debug_level::INFO) {
+    if (debug_val >= debug_level::ENV) {
       envvar::print_mode mode;
       if (debug_val == debug_level::ENV_ALL) {
         mode = envvar::print_mode::ALL_VALUES;
@@ -351,16 +346,16 @@ static void setFilesLimit() {
   BackendType type = select_backend_type(MPI_COMM_NULL, bootstrap);
   switch (type) {
   case BackendType::GDA_BACKEND:
-    DPRINTF("Initializing GDA backend with TCP bootstrapping\n");
+    LOG_INFO("Initializing GDA backend with TCP bootstrapping");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(GDABackend)));
     backend = new (backend) GDABackend(bootstrap);
     break;
   case BackendType::RO_BACKEND:
-    DPRINTF("Initializing RO backend with TCP bootstrapping\n");
+    LOG_INFO("Initializing RO backend with TCP bootstrapping");
     library_init_subcomm(bootstr, bootstr->getNranks(), bootstr->getRank());
     break;
   case BackendType::IPC_BACKEND:
-    DPRINTF("Initializing IPC backend with TCP bootstrapping\n");
+    LOG_INFO("Initializing IPC backend with TCP bootstrapping");
     CHECK_HIP(hipHostMalloc(&backend, sizeof(IPCBackend)));
     backend = new (backend) IPCBackend(bootstrap);
     break;
@@ -390,7 +385,7 @@ static void setFilesLimit() {
   if ((attr == nullptr) ||
       ((flags != ROCSHMEM_INIT_WITH_UNIQUEID) &&
        (flags != ROCSHMEM_INIT_WITH_MPI_COMM)) ) {
-    fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
+    fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d",
             "Call 'rocshmem_init_attr: invalid input argument'",
             __FILE__, __LINE__);
     return ROCSHMEM_ERROR;
@@ -407,6 +402,7 @@ static void setFilesLimit() {
     assert (attr->rank >= 0);
     assert (attr->rank < attr->nranks);
 
+    log_pe_number = attr->rank;
     bootstr = new TcpBootstrap(attr->rank, attr->nranks);
     bootstr->initialize(attr->uid, envvar::bootstrap::timeout);
 
@@ -424,7 +420,7 @@ static void setFilesLimit() {
                                                               rocshmem_uniqueid_t *uid,
                                                               rocshmem_init_attr_t *attr) {
   if (uid == nullptr || attr == nullptr) {
-      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
+      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d",
               "Call 'rocshmem_get_uniqueid: invalid input argument'",
               __FILE__, __LINE__);
       return ROCSHMEM_ERROR;
@@ -443,7 +439,7 @@ static void setFilesLimit() {
 [[maybe_unused]] __host__ int rocshmem_get_uniqueid(rocshmem_uniqueid_t *uid) {
   rocshmem_uniqueid_t tuid;
   if (uid == nullptr) {
-      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
+      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d",
               "Call 'rocshmem_get_uniqueid: invalid input argument'",
               __FILE__, __LINE__);
       return ROCSHMEM_ERROR;
@@ -863,7 +859,7 @@ __host__ Context *get_internal_ctx(rocshmem_ctx_t ctx) {
 }
 
 __host__ int rocshmem_ctx_create(int64_t options, rocshmem_ctx_t *ctx) {
-  DPRINTF("Host function: rocshmem_ctx_create\n");
+  LOG_TRACE("Host function: rocshmem_ctx_create");
 
   void *phys_ctx;
   backend->ctx_create(options, &phys_ctx);
@@ -879,7 +875,7 @@ __host__ int rocshmem_ctx_create(int64_t options, rocshmem_ctx_t *ctx) {
 }
 
 __host__ void rocshmem_ctx_destroy(rocshmem_ctx_t ctx) {
-  DPRINTF("Host function: rocshmem_ctx_destroy\n");
+  LOG_TRACE("Host function: rocshmem_ctx_destroy");
 
   /* TODO: Implicit quiet on this context */
 
@@ -893,21 +889,21 @@ __host__ void rocshmem_ctx_destroy(rocshmem_ctx_t ctx) {
 template <typename T>
 __host__ void rocshmem_put(rocshmem_ctx_t ctx, T *dest, const T *source,
                             size_t nelems, int pe) {
-  DPRINTF("Host function: rocshmem_put\n");
+  LOG_TRACE("Host function: rocshmem_put");
 
   get_internal_ctx(ctx)->put(dest, source, nelems, pe);
 }
 
 __host__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void *dest,
                                    const void *source, size_t nelems, int pe) {
-  DPRINTF("Host function: rocshmem_ctx_putmem\n");
+  LOG_TRACE("Host function: rocshmem_ctx_putmem");
 
   get_internal_ctx(ctx)->putmem(dest, source, nelems, pe);
 }
 
 template <typename T>
 __host__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
-  DPRINTF("Host function: rocshmem_p\n");
+  LOG_TRACE("Host function: rocshmem_p");
 
   get_internal_ctx(ctx)->p(dest, value, pe);
 }
@@ -915,21 +911,21 @@ __host__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
 template <typename T>
 __host__ void rocshmem_get(rocshmem_ctx_t ctx, T *dest, const T *source,
                             size_t nelems, int pe) {
-  DPRINTF("Host function: rocshmem_get\n");
+  LOG_TRACE("Host function: rocshmem_get");
 
   get_internal_ctx(ctx)->get(dest, source, nelems, pe);
 }
 
 __host__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void *dest,
                                    const void *source, size_t nelems, int pe) {
-  DPRINTF("Host function: rocshmem_ctx_getmem\n");
+  LOG_TRACE("Host function: rocshmem_ctx_getmem");
 
   get_internal_ctx(ctx)->getmem(dest, source, nelems, pe);
 }
 
 template <typename T>
 __host__ T rocshmem_g(rocshmem_ctx_t ctx, const T *source, int pe) {
-  DPRINTF("Host function: rocshmem_g\n");
+  LOG_TRACE("Host function: rocshmem_g");
 
   return get_internal_ctx(ctx)->g(source, pe);
 }
@@ -937,7 +933,7 @@ __host__ T rocshmem_g(rocshmem_ctx_t ctx, const T *source, int pe) {
 template <typename T>
 __host__ void rocshmem_put_nbi(rocshmem_ctx_t ctx, T *dest, const T *source,
                                 size_t nelems, int pe) {
-  DPRINTF("Host function: rocshmem_put_nbi\n");
+  LOG_TRACE("Host function: rocshmem_put_nbi");
 
   get_internal_ctx(ctx)->put_nbi(dest, source, nelems, pe);
 }
@@ -945,7 +941,7 @@ __host__ void rocshmem_put_nbi(rocshmem_ctx_t ctx, T *dest, const T *source,
 __host__ void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx, void *dest,
                                        const void *source, size_t nelems,
                                        int pe) {
-  DPRINTF("Host function: rocshmem_ctx_putmem_nbi\n");
+  LOG_TRACE("Host function: rocshmem_ctx_putmem_nbi");
 
   get_internal_ctx(ctx)->putmem_nbi(dest, source, nelems, pe);
 }
@@ -953,7 +949,7 @@ __host__ void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx, void *dest,
 template <typename T>
 __host__ void rocshmem_get_nbi(rocshmem_ctx_t ctx, T *dest, const T *source,
                                 size_t nelems, int pe) {
-  DPRINTF("Host function: rocshmem_get_nbi\n");
+  LOG_TRACE("Host function: rocshmem_get_nbi");
 
   get_internal_ctx(ctx)->get_nbi(dest, source, nelems, pe);
 }
@@ -961,7 +957,7 @@ __host__ void rocshmem_get_nbi(rocshmem_ctx_t ctx, T *dest, const T *source,
 __host__ void rocshmem_ctx_getmem_nbi(rocshmem_ctx_t ctx, void *dest,
                                        const void *source, size_t nelems,
                                        int pe) {
-  DPRINTF("Host function: rocshmem_ctx_getmem_nbi\n");
+  LOG_TRACE("Host function: rocshmem_ctx_getmem_nbi");
 
   get_internal_ctx(ctx)->getmem_nbi(dest, source, nelems, pe);
 }
@@ -969,7 +965,7 @@ __host__ void rocshmem_ctx_getmem_nbi(rocshmem_ctx_t ctx, void *dest,
 template <typename T>
 __host__ T rocshmem_atomic_fetch_add(rocshmem_ctx_t ctx, T *dest, T val,
                                       int pe) {
-  DPRINTF("Host function: rocshmem_atomic_fetch_add\n");
+  LOG_TRACE("Host function: rocshmem_atomic_fetch_add");
 
   return get_internal_ctx(ctx)->amo_fetch_add<T>(dest, val, pe);
 }
@@ -977,21 +973,21 @@ __host__ T rocshmem_atomic_fetch_add(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __host__ T rocshmem_atomic_compare_swap(rocshmem_ctx_t ctx, T *dest, T cond,
                                          T val, int pe) {
-  DPRINTF("Host function: rocshmem_atomic_compare_swap\n");
+  LOG_TRACE("Host function: rocshmem_atomic_compare_swap");
 
   return get_internal_ctx(ctx)->amo_fetch_cas(dest, val, cond, pe);
 }
 
 template <typename T>
 __host__ T rocshmem_atomic_fetch_inc(rocshmem_ctx_t ctx, T *dest, int pe) {
-  DPRINTF("Host function: rocshmem_atomic_fetch_inc\n");
+  LOG_TRACE("Host function: rocshmem_atomic_fetch_inc");
 
   return get_internal_ctx(ctx)->amo_fetch_add<T>(dest, 1, pe);
 }
 
 template <typename T>
 __host__ T rocshmem_atomic_fetch(rocshmem_ctx_t ctx, T *source, int pe) {
-  DPRINTF("Host function: rocshmem_atomic_fetch\n");
+  LOG_TRACE("Host function: rocshmem_atomic_fetch");
 
   return get_internal_ctx(ctx)->amo_fetch_add<T>(source, 0, pe);
 }
@@ -999,14 +995,14 @@ __host__ T rocshmem_atomic_fetch(rocshmem_ctx_t ctx, T *source, int pe) {
 template <typename T>
 __host__ void rocshmem_atomic_add(rocshmem_ctx_t ctx, T *dest, T val,
                                    int pe) {
-  DPRINTF("Host function: rocshmem_atomic_add\n");
+  LOG_TRACE("Host function: rocshmem_atomic_add");
 
   get_internal_ctx(ctx)->amo_add<T>(dest, val, pe);
 }
 
 template <typename T>
 __host__ void rocshmem_atomic_inc(rocshmem_ctx_t ctx, T *dest, int pe) {
-  DPRINTF("Host function: rocshmem_atomic_inc\n");
+  LOG_TRACE("Host function: rocshmem_atomic_inc");
 
   get_internal_ctx(ctx)->amo_add<T>(dest, 1, pe);
 }
@@ -1014,14 +1010,14 @@ __host__ void rocshmem_atomic_inc(rocshmem_ctx_t ctx, T *dest, int pe) {
 template <typename T>
 __host__ void rocshmem_atomic_set(rocshmem_ctx_t ctx, T *dest, T val,
                                    int pe) {
-  DPRINTF("Host function: rocshmem_atomic_set\n");
+  LOG_TRACE("Host function: rocshmem_atomic_set");
 
   get_internal_ctx(ctx)->amo_set(dest, val, pe);
 }
 
 template <typename T>
 __host__ T rocshmem_atomic_swap(rocshmem_ctx_t ctx, T *dest, T val, int pe) {
-  DPRINTF("Host function: rocshmem_atomic_set\n");
+  LOG_TRACE("Host function: rocshmem_atomic_set");
 
   return get_internal_ctx(ctx)->amo_swap(dest, val, pe);
 }
@@ -1029,7 +1025,7 @@ __host__ T rocshmem_atomic_swap(rocshmem_ctx_t ctx, T *dest, T val, int pe) {
 template <typename T>
 __host__ T rocshmem_atomic_fetch_and(rocshmem_ctx_t ctx, T *dest, T val,
                                       int pe) {
-  DPRINTF("Host function: rocshmem_atomic_fetch_and\n");
+  LOG_TRACE("Host function: rocshmem_atomic_fetch_and");
 
   return get_internal_ctx(ctx)->amo_fetch_and(dest, val, pe);
 }
@@ -1037,7 +1033,7 @@ __host__ T rocshmem_atomic_fetch_and(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __host__ void rocshmem_atomic_and(rocshmem_ctx_t ctx, T *dest, T val,
                                    int pe) {
-  DPRINTF("Host function: rocshmem_atomic_and\n");
+  LOG_TRACE("Host function: rocshmem_atomic_and");
 
   get_internal_ctx(ctx)->amo_and(dest, val, pe);
 }
@@ -1045,14 +1041,14 @@ __host__ void rocshmem_atomic_and(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __host__ T rocshmem_atomic_fetch_or(rocshmem_ctx_t ctx, T *dest, T val,
                                      int pe) {
-  DPRINTF("Host function: rocshmem_atomic_fetch_or\n");
+  LOG_TRACE("Host function: rocshmem_atomic_fetch_or");
 
   return get_internal_ctx(ctx)->amo_fetch_or(dest, val, pe);
 }
 
 template <typename T>
 __host__ void rocshmem_atomic_or(rocshmem_ctx_t ctx, T *dest, T val, int pe) {
-  DPRINTF("Host function: rocshmem_atomic_or\n");
+  LOG_TRACE("Host function: rocshmem_atomic_or");
 
   get_internal_ctx(ctx)->amo_or(dest, val, pe);
 }
@@ -1060,7 +1056,7 @@ __host__ void rocshmem_atomic_or(rocshmem_ctx_t ctx, T *dest, T val, int pe) {
 template <typename T>
 __host__ T rocshmem_atomic_fetch_xor(rocshmem_ctx_t ctx, T *dest, T val,
                                       int pe) {
-  DPRINTF("Host function: rocshmem_atomic_fetch_xor\n");
+  LOG_TRACE("Host function: rocshmem_atomic_fetch_xor");
 
   return get_internal_ctx(ctx)->amo_fetch_xor(dest, val, pe);
 }
@@ -1068,32 +1064,32 @@ __host__ T rocshmem_atomic_fetch_xor(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __host__ void rocshmem_atomic_xor(rocshmem_ctx_t ctx, T *dest, T val,
                                    int pe) {
-  DPRINTF("Host function: rocshmem_atomic_xor\n");
+  LOG_TRACE("Host function: rocshmem_atomic_xor");
 
   get_internal_ctx(ctx)->amo_xor(dest, val, pe);
 }
 
 __host__ void rocshmem_ctx_fence(rocshmem_ctx_t ctx) {
-  DPRINTF("Host function: rocshmem_ctx_fence\n");
+  LOG_TRACE("Host function: rocshmem_ctx_fence");
 
   get_internal_ctx(ctx)->fence();
 }
 
 __host__ void rocshmem_ctx_quiet(rocshmem_ctx_t ctx) {
-  DPRINTF("Host function: rocshmem_ctx_quiet\n");
+  LOG_TRACE("Host function: rocshmem_ctx_quiet");
 
   get_internal_ctx(ctx)->quiet();
 }
 
 __host__ void rocshmem_barrier_all() {
-  DPRINTF("Host function: rocshmem_barrier_all\n");
+  LOG_TRACE("Host function: rocshmem_barrier_all");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all();
 }
 
 
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream) {
-  DPRINTF("Host function: rocshmem_barrier_all_on_stream\n");
+  LOG_TRACE("Host function: rocshmem_barrier_all_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all_on_stream(stream);
 }
@@ -1101,7 +1097,7 @@ __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream) {
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                              const void *source, size_t size,
                                              hipStream_t stream) {
-  DPRINTF("Host function: rocshmem_alltoallmem_on_stream\n");
+  LOG_TRACE("Host function: rocshmem_alltoallmem_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
       ->alltoallmem_on_stream(team, dest, source, size, stream);
@@ -1110,7 +1106,7 @@ __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
 __host__ void rocshmem_broadcastmem_on_stream(rocshmem_team_t team, void *dest,
                                               const void *source, size_t nelems,
                                               int pe_root, hipStream_t stream) {
-  DPRINTF("Host function: rocshmem_broadcastmem_on_stream\n");
+  LOG_TRACE("Host function: rocshmem_broadcastmem_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
       ->broadcastmem_on_stream(team, dest, source, nelems, pe_root, stream);
@@ -1119,7 +1115,7 @@ __host__ void rocshmem_broadcastmem_on_stream(rocshmem_team_t team, void *dest,
 __host__ void rocshmem_getmem_on_stream(void *dest, const void *source,
                                         size_t nelems, int pe,
                                         hipStream_t stream) {
-  DPRINTF("Host function: rocshmem_getmem_on_stream\n");
+  LOG_TRACE("Host function: rocshmem_getmem_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
       ->getmem_on_stream(dest, source, nelems, pe, stream);
@@ -1128,7 +1124,7 @@ __host__ void rocshmem_getmem_on_stream(void *dest, const void *source,
 __host__ void rocshmem_putmem_on_stream(void *dest, const void *source,
                                         size_t nelems, int pe,
                                         hipStream_t stream) {
-  DPRINTF("Host function: rocshmem_putmem_on_stream\n");
+  LOG_TRACE("Host function: rocshmem_putmem_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
       ->putmem_on_stream(dest, source, nelems, pe, stream);
@@ -1139,7 +1135,7 @@ __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
                                                uint64_t *sig_addr,
                                                uint64_t signal, int sig_op,
                                                int pe, hipStream_t stream) {
-  DPRINTF("Host function: rocshmem_putmem_signal_on_stream\n");
+  LOG_TRACE("Host function: rocshmem_putmem_signal_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
       ->putmem_signal_on_stream(dest, source, nelems, sig_addr, signal, sig_op,
@@ -1149,14 +1145,14 @@ __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
 __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
                                                    uint64_t cmp_value,
                                                    hipStream_t stream) {
-  DPRINTF("Host function: rocshmem_signal_wait_until_on_stream\n");
+  LOG_TRACE("Host function: rocshmem_signal_wait_until_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
       ->signal_wait_until_on_stream(sig_addr, cmp, cmp_value, stream);
 }
 
 __host__ void rocshmem_sync_all() {
-  DPRINTF("Host function: rocshmem_sync_all\n");
+  LOG_TRACE("Host function: rocshmem_sync_all");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all();
 }
@@ -1166,7 +1162,7 @@ __host__ void rocshmem_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, T *dest,
                                   const T *source, int nelem, int pe_root,
                                   int pe_start, int log_pe_stride, int pe_size,
                                   long *p_sync) {
-  DPRINTF("Host function: rocshmem_broadcast\n");
+  LOG_TRACE("Host function: rocshmem_broadcast");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
       ->broadcast<T>(dest, source, nelem, pe_root, pe_start, log_pe_stride,
@@ -1177,7 +1173,7 @@ template <typename T>
 __host__ void rocshmem_broadcast([[maybe_unused]] rocshmem_ctx_t ctx,
                                   rocshmem_team_t team, T *dest,
                                   const T *source, int nelem, int pe_root) {
-  DPRINTF("Host function: Team-based rocshmem_broadcast\n");
+  LOG_TRACE("Host function: Team-based rocshmem_broadcast");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
       ->broadcast<T>(team, dest, source, nelem, pe_root);
@@ -1188,7 +1184,7 @@ __host__ void rocshmem_to_all([[maybe_unused]] rocshmem_ctx_t ctx, T *dest,
                                const T *source, int nreduce, int PE_start,
                                int logPE_stride, int PE_size, T *pWrk,
                                long *pSync) {
-  DPRINTF("Host function: rocshmem_to_all\n");
+  LOG_TRACE("Host function: rocshmem_to_all");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
       ->to_all<T, Op>(dest, source, nreduce, PE_start, logPE_stride, PE_size,
@@ -1199,7 +1195,7 @@ template <typename T, ROCSHMEM_OP Op>
 __host__ int rocshmem_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
                                rocshmem_team_t team, T *dest, const T *source,
                                int nreduce) {
-  DPRINTF("Host function: Team-based rocshmem_reduce\n");
+  LOG_TRACE("Host function: Team-based rocshmem_reduce");
 
   return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
               ->reduce<T, Op>(team, dest, source, nreduce);
@@ -1207,7 +1203,7 @@ __host__ int rocshmem_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
 
 template <typename T>
 __host__ void rocshmem_wait_until(T *ivars, int cmp, T val) {
-  DPRINTF("Host function: rocshmem_wait_until\n");
+  LOG_TRACE("Host function: rocshmem_wait_until");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->wait_until(ivars, cmp, val);
 }
@@ -1215,7 +1211,7 @@ __host__ void rocshmem_wait_until(T *ivars, int cmp, T val) {
 template <typename T>
 __host__ void rocshmem_wait_until_all(T *ivars, size_t nelems, const int* status,
                                        int cmp, T val) {
-  DPRINTF("Host function: rocshmem_wait_until_all\n");
+  LOG_TRACE("Host function: rocshmem_wait_until_all");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->wait_until_all(ivars,
       nelems, status, cmp, val);
@@ -1224,7 +1220,7 @@ __host__ void rocshmem_wait_until_all(T *ivars, size_t nelems, const int* status
 template <typename T>
 __host__ size_t rocshmem_wait_until_any(T *ivars, size_t nelems, const int* status,
                                        int cmp, T val) {
-  DPRINTF("Host function: rocshmem_wait_until_any\n");
+  LOG_TRACE("Host function: rocshmem_wait_until_any");
 
   return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->wait_until_any(ivars,
       nelems, status, cmp, val);
@@ -1234,7 +1230,7 @@ template <typename T>
 __host__ size_t rocshmem_wait_until_some(T *ivars, size_t nelems, size_t* indices,
                                         const int* status, int cmp,
                                         T val) {
-  DPRINTF("Host function: rocshmem_wait_until_some\n");
+  LOG_TRACE("Host function: rocshmem_wait_until_some");
 
   return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->wait_until_some(ivars, nelems,
       indices, status, cmp, val);
@@ -1243,7 +1239,7 @@ __host__ size_t rocshmem_wait_until_some(T *ivars, size_t nelems, size_t* indice
 template <typename T>
 __host__ size_t rocshmem_wait_until_any_vector(T *ivars, size_t nelems, const int* status,
                                                 int cmp, T* vals) {
-  DPRINTF("Host function: rocshmem_wait_until_any_vector\n");
+  LOG_TRACE("Host function: rocshmem_wait_until_any_vector");
 
   return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->wait_until_any_vector(ivars,
       nelems, status, cmp, vals);
@@ -1252,7 +1248,7 @@ __host__ size_t rocshmem_wait_until_any_vector(T *ivars, size_t nelems, const in
 template <typename T>
 __host__ void rocshmem_wait_until_all_vector(T *ivars, size_t nelems, const int* status,
                                               int cmp, T* vals) {
-  DPRINTF("Host function: rocshmem_wait_until_all_vector\n");
+  LOG_TRACE("Host function: rocshmem_wait_until_all_vector");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->wait_until_all_vector(ivars,
       nelems, status, cmp, vals);
@@ -1263,7 +1259,7 @@ __host__ size_t rocshmem_wait_until_some_vector(T *ivars, size_t nelems,
                                                size_t* indices,
                                                const int* status,
                                                int cmp, T* vals) {
-  DPRINTF("Host function: rocshmem_wait_until_some_vector\n");
+  LOG_TRACE("Host function: rocshmem_wait_until_some_vector");
 
   return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->wait_until_some_vector(ivars,
       nelems, indices, status, cmp, vals);
@@ -1271,7 +1267,7 @@ __host__ size_t rocshmem_wait_until_some_vector(T *ivars, size_t nelems,
 
 template <typename T>
 __host__ int rocshmem_test(T *ivars, int cmp, T val) {
-  DPRINTF("Host function: rocshmem_testl\n");
+  LOG_TRACE("Host function: rocshmem_testl");
 
   return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->test(ivars, cmp, val);
 }

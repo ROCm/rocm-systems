@@ -34,8 +34,6 @@
 
 namespace rocshmem {
 
-__constant__ int* print_lock;
-
 typedef struct device_agent {
   hsa_agent_t agent;
   hsa_amd_memory_pool_t pool;

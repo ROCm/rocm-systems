@@ -24,7 +24,7 @@
 
 #include "context_ro_host.hpp"
 
-
+#include "log.hpp"
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "backend_type.hpp"
 #include "context_incl.hpp"
@@ -67,46 +67,46 @@ __host__ ROHostContext::~ROHostContext() {
 
 __host__ void ROHostContext::putmem_nbi(void *dest, const void *source,
                                         size_t nelems, int pe) {
-  DPRINTF("Function: ro_net_host_putmem_nbi\n");
+  LOG_TRACE("Function: ro_net_host_putmem_nbi");
 
   host_interface->putmem_nbi(dest, source, nelems, pe, context_window_info);
 }
 
 __host__ void ROHostContext::getmem_nbi(void *dest, const void *source,
                                         size_t nelems, int pe) {
-  DPRINTF("Function: ro_net_host_getmem_nbi\n");
+  LOG_TRACE("Function: ro_net_host_getmem_nbi");
 
   host_interface->getmem_nbi(dest, source, nelems, pe, context_window_info);
 }
 
 __host__ void ROHostContext::putmem(void *dest, const void *source,
                                     size_t nelems, int pe) {
-  DPRINTF("Function: ro_net_host_putmem\n");
+  LOG_TRACE("Function: ro_net_host_putmem");
 
   host_interface->putmem(dest, source, nelems, pe, context_window_info);
 }
 
 __host__ void ROHostContext::getmem(void *dest, const void *source,
                                     size_t nelems, int pe) {
-  DPRINTF("Function: ro_net_host_getmem\n");
+  LOG_TRACE("Function: ro_net_host_getmem");
 
   host_interface->getmem(dest, source, nelems, pe, context_window_info);
 }
 
 __host__ void ROHostContext::fence() {
-  DPRINTF("Function: ro_net_host_fence\n");
+  LOG_TRACE("Function: ro_net_host_fence");
 
   host_interface->fence(context_window_info);
 }
 
 __host__ void ROHostContext::quiet() {
-  DPRINTF("Function: ro_net_host_quiet\n");
+  LOG_TRACE("Function: ro_net_host_quiet");
 
   host_interface->quiet(context_window_info);
 }
 
 __host__ void *ROHostContext::shmem_ptr(const void *dest, int pe) {
-  DPRINTF("Function: ro_net_host_shmem_ptr\n");
+  LOG_TRACE("Function: ro_net_host_shmem_ptr");
 
   void *ret = nullptr;
   int local_pe{-1};
@@ -120,13 +120,13 @@ __host__ void *ROHostContext::shmem_ptr(const void *dest, int pe) {
 }
 
 __host__ void ROHostContext::sync_all() {
-  DPRINTF("Function: ro_net_host_sync_all\n");
+  LOG_TRACE("Function: ro_net_host_sync_all");
 
   host_interface->sync_all(context_window_info);
 }
 
 __host__ void ROHostContext::barrier_all() {
-  DPRINTF("Function: ro_net_host_barrier_all\n");
+  LOG_TRACE("Function: ro_net_host_barrier_all");
 
   host_interface->fence(context_window_info);
 
@@ -134,7 +134,7 @@ __host__ void ROHostContext::barrier_all() {
 }
 
 __host__ void ROHostContext::barrier_all_on_stream(hipStream_t stream) {
-  DPRINTF("Function: ro_net_host_barrier_all_on_stream\n");
+  LOG_TRACE("Function: ro_net_host_barrier_all_on_stream");
 
   host_interface->barrier_all_on_stream(stream);
 }
@@ -144,7 +144,7 @@ __host__ void ROHostContext::alltoallmem_on_stream(rocshmem_team_t team,
                                                     const void *source,
                                                     size_t size,
                                                     hipStream_t stream) {
-  DPRINTF("Function: ro_net_host_alltoallmem_on_stream\n");
+  LOG_TRACE("Function: ro_net_host_alltoallmem_on_stream");
 
   host_interface->alltoallmem_on_stream(team, dest, source, size, stream);
 }
@@ -154,7 +154,7 @@ __host__ void ROHostContext::broadcastmem_on_stream(rocshmem_team_t team,
                                                     const void *source,
                                                     size_t nelems, int pe_root,
                                                     hipStream_t stream) {
-  DPRINTF("Function: ro_net_host_broadcastmem_on_stream\n");
+  LOG_TRACE("Function: ro_net_host_broadcastmem_on_stream");
 
   host_interface->broadcastmem_on_stream(team, dest, source, nelems, pe_root,
                                          stream);
@@ -163,7 +163,7 @@ __host__ void ROHostContext::broadcastmem_on_stream(rocshmem_team_t team,
 __host__ void ROHostContext::getmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
-  DPRINTF("Function: ro_net_host_getmem_on_stream\n");
+  LOG_TRACE("Function: ro_net_host_getmem_on_stream");
 
   host_interface->getmem_on_stream(dest, source, nelems, pe, stream);
 }
@@ -171,7 +171,7 @@ __host__ void ROHostContext::getmem_on_stream(void *dest, const void *source,
 __host__ void ROHostContext::putmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
-  DPRINTF("Function: ro_net_host_putmem_on_stream\n");
+  LOG_TRACE("Function: ro_net_host_putmem_on_stream");
 
   host_interface->putmem_on_stream(dest, source, nelems, pe, stream);
 }
@@ -179,7 +179,7 @@ __host__ void ROHostContext::putmem_on_stream(void *dest, const void *source,
 __host__ void ROHostContext::putmem_signal_on_stream(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe, hipStream_t stream) {
-  DPRINTF("Function: ro_net_host_putmem_signal_on_stream\n");
+  LOG_TRACE("Function: ro_net_host_putmem_signal_on_stream");
 
   host_interface->putmem_signal_on_stream(dest, source, nelems, sig_addr,
                                           signal, sig_op, pe, stream);
@@ -189,7 +189,7 @@ __host__ void ROHostContext::signal_wait_until_on_stream(uint64_t *sig_addr,
                                                          int cmp,
                                                          uint64_t cmp_value,
                                                          hipStream_t stream) {
-  DPRINTF("Function: ro_net_host_signal_wait_until_on_stream\n");
+  LOG_TRACE("Function: ro_net_host_signal_wait_until_on_stream");
 
   host_interface->signal_wait_until_on_stream(sig_addr, cmp, cmp_value, stream);
 }

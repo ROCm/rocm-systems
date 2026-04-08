@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "constmem.hpp"
+#include "log.hpp"
 #include "util.hpp"
 #include "context_gda_device.hpp"
 #include "gda_team.hpp"
@@ -562,7 +563,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
         }
       }
     } else {
-      GPU_DPRINTF("Unsupported reduction size for GDA conduit.\n");
+      LOGD_WARN("Unsupported reduction size for GDA conduit.");
       return ROCSHMEM_ERROR;
     }
   }

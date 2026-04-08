@@ -42,8 +42,8 @@ namespace envvar {
       "Defines whether rocSHMEM is expected to use MPI internally when using the uniqueId based initialization. 0: Do not use MPI; 1: Use MPI",
       false);
     const var<types::debug_level> debug_level("DEBUG_LEVEL",
-      "Debug output level (NONE, VERSION, WARN, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)",
-      types::debug_level::NONE);
+      "Debug output level (NONE/ERROR, WARN, VERSION, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)",
+      types::debug_level::WARN);
     const var<size_t> heap_size("HEAP_SIZE",
       "Defines the size of the rocSHMEM symmetric heap in bytes (per PE). Size in bytes (per PE); Note: the heap is on GPU memory",
       1L << 30);
@@ -181,6 +181,8 @@ namespace envvar {
         std::transform(level_str.begin(), level_str.end(), level_str.begin(), ::toupper);
         if (level_str == "NONE") {
           level = debug_level::NONE;
+        } else if (level_str == "ERROR") {
+          level = debug_level::ERROR;
         } else if (level_str == "VERSION") {
           level = debug_level::VERSION;
         } else if (level_str == "WARN") {
@@ -207,7 +209,7 @@ namespace envvar {
 
       std::ostream& operator<<(std::ostream& os, const debug_level& level) {
         switch (level) {
-        case debug_level::NONE:
+        case debug_level::NONE:  // also debug_level::ERROR
           return os << "NONE";
         case debug_level::VERSION:
           return os << "VERSION";
