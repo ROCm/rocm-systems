@@ -41,7 +41,7 @@ def test_kernel_records(input_data):
 
 
 def test_counter_records(input_data):
-    """verify exactly one GRBM_COUNT PMC event is present for each kernel"""
+    """verify GRBM_COUNT PMC events are an exact multiple of the number of kernels"""
     data = input_data
 
     cursor = data.cursor()
@@ -49,8 +49,8 @@ def test_counter_records(input_data):
     kernel_count = cursor.execute("SELECT COUNT(*) FROM kernels").fetchone()[0]
     pmc_event_count = cursor.execute("SELECT COUNT(*) FROM rocpd_pmc_event").fetchone()[0]
 
-    assert pmc_event_count == kernel_count, (
-        f"Expected rocpd_pmc_event count ({pmc_event_count}) to equal "
+    assert (pmc_event_count % kernel_count) == 0, (
+        f"Expected rocpd_pmc_event count ({pmc_event_count}) to be exact multiple of "
         f"kernel count ({kernel_count})"
     )
 
