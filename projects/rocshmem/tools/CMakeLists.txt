@@ -24,32 +24,9 @@
 # SOURCES
 ###############################################################################
 
-execute_process (
-  COMMAND bash -c "git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD;"
-  OUTPUT_VARIABLE GIT_HASH
-)
-
-string(STRIP "${GIT_HASH}" GIT_HASH)
-string(REPLACE ";" " " ROCSHMEM_OFFLOAD_TARGETS "${COMPILING_TARGETS}")
-
 add_executable(rocshmem_info rocshmem_info.cpp)
 
-target_compile_definitions(
-  rocshmem_info
-  PRIVATE
-  ROCSHMEM_INSTALL_PREFIX="${CMAKE_INSTALL_PREFIX}"
-  ROCSHMEM_GIT_HASH="${GIT_HASH}"
-  ROCSHMEM_OFFLOAD_TARGETS="${ROCSHMEM_OFFLOAD_TARGETS}"
-)
-
-target_include_directories(
-  rocshmem_info
-  PRIVATE
-    roc::rocshmem
-)
-
-target_link_libraries(
-  rocshmem_info
+target_link_libraries(rocshmem_info
   PRIVATE
     roc::rocshmem
 )

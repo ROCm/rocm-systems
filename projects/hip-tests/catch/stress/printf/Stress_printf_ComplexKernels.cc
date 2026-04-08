@@ -399,7 +399,7 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStream completed \n");
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
@@ -414,7 +414,7 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
   int numOfGPUs = 0;
   HIP_CHECK(hipGetDeviceCount(&numOfGPUs));
   if (numOfGPUs < 2) {
-    printf("Skipping test because numOfGPUs < 2\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   // num_blocks is calculated using an approximate formula to arrive at
@@ -429,6 +429,6 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
   REQUIRE(TestPassed);
   printf("Test - Stress_printf_ComplexKernelMultStreamMultGpu end \n");
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }

@@ -140,7 +140,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_MultDevSetGet) {
   hipDevice_t device0, device1;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("Need 2 GPUs to run test. Skipping Test..");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -332,7 +332,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_FuncTstOnMultDev) {
   int deviceId = 0, devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HipTest::HIP_SKIP_TEST("Machine is Single GPU. Skipping Test..");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   for (deviceId = 0; deviceId < devicecount; deviceId++) {
@@ -614,7 +614,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2UnifiedMemCpy) {
   CTX_CREATE();
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory.Skipping Test..");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
   size_t granularity = 0;
@@ -754,7 +754,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerDevMemCpy) {
   int devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HipTest::HIP_SKIP_TEST("Machine is Single GPU. Skipping Test..");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   int deviceId = 0, value = 0;
@@ -845,7 +845,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy) {
   int devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HipTest::HIP_SKIP_TEST("Machine is Single GPU. Skipping Test..");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   int deviceId = 0, value = 0;
@@ -1007,7 +1007,7 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy) {
   int devicecount = 0;
   HIP_CHECK(hipGetDeviceCount(&devicecount));
   if (devicecount < 2) {
-    HipTest::HIP_SKIP_TEST("Machine is Single GPU. Skipping Test..");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   int deviceId = 0, value = 0;

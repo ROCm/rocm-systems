@@ -24,6 +24,7 @@
 
 #include "envvar.hpp"
 
+#include <algorithm>
 #include <istream>
 #include <list>
 #include <mutex>
@@ -177,6 +178,7 @@ namespace envvar {
       std::istream& operator>>(std::istream& is, debug_level& level) {
         std::string level_str;
         is >> level_str;
+        std::transform(level_str.begin(), level_str.end(), level_str.begin(), ::toupper);
         if (level_str == "NONE") {
           level = debug_level::NONE;
         } else if (level_str == "VERSION") {
@@ -329,6 +331,7 @@ namespace envvar {
       os << "# https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/api/env_variables.html\n";
       os << "#------------------------------------------------------------------------------#\n";
     }
+    os << "################################################################################\n";
   }
 
 }  // namespace envvar
