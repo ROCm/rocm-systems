@@ -4329,33 +4329,35 @@ class AMDSMICommands:
 
             # Power (convert from mW to W)
             power_dict = {}
-            power_fields_mw = {
-                "socket_power": "average_socket_power_mw",
-                "gfx_power": "average_gfx_power_mw",
-            }
+            power_fields = ["average_socket_power", "average_gfx_power"]
             if is_v24:
-                power_fields_mw.update({
-                    "cpu_power": "average_cpu_power_mw",
-                    "soc_power": "average_soc_power_mw",
-                })
+                power_fields.extend(["average_cpu_power", "average_soc_power"])
             if is_v30:
-                power_fields_mw.update({
-                    "ipu_power": "average_ipu_power_mw",
-                    "apu_power": "average_apu_power_mw",
-                    "dgpu_power": "average_dgpu_power_mw",
-                    "all_core_power": "average_all_core_power_mw",
-                    "sys_power": "average_sys_power_mw",
-                })
+                power_fields.extend([
+                    "average_ipu_power", "average_apu_power", "average_dgpu_power",
+                    "average_all_core_power", "average_sys_power"
+                ])
 
-            for display_name, field_name in power_fields_mw.items():
+            for field_name in power_fields:
                 if apu.get(field_name) != "N/A":
+                    display_name = field_name.replace("average_", "").replace("_", " ").title().replace(" ", "_").lower()
                     power_dict[display_name] = self.helpers.unit_format(
                         self.logger, apu[field_name] / 1000.0, "W"
                     )
 
-            if apu.get("average_core_power_mw") != "N/A":
-                core_power = [p / 1000.0 if p != "N/A" else "N/A" for p in apu["average_core_power_mw"][:core_count]]
+            if apu.get("average_core_power") != "N/A":
+                core_power = [p / 1000.0 if p != "N/A" else "N/A" for p in apu["average_core_power"][:core_count]]
                 power_dict["core_power"] = [self.helpers.unit_format(self.logger, p, "W") for p in core_power]
+
+            if is_v30:
+                if apu.get("stapm_power_limit") != "N/A":
+                    power_dict["stapm_limit"] = self.helpers.unit_format(
+                        self.logger, apu["stapm_power_limit"] / 1000.0, "W"
+                    )
+                if apu.get("current_stapm_power_limit") != "N/A":
+                    power_dict["current_stapm_limit"] = self.helpers.unit_format(
+                        self.logger, apu["current_stapm_power_limit"] / 1000.0, "W"
+                    )
 
             if power_dict:
                 apu_metrics_dict["power"] = power_dict
