@@ -6076,10 +6076,7 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VInterpP1llF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VInterpP1llF16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
     : Vop3("v_interp_p1lv_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -6096,10 +6093,7 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VInterpP1lvF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VInterpP1lvF16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VInterpP2LegacyF16Vop3::VInterpP2LegacyF16Vop3(const MachineInst *inst)
     : Vop3("v_interp_p2_legacy_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -6116,10 +6110,7 @@ VInterpP2LegacyF16Vop3::VInterpP2LegacyF16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VInterpP2LegacyF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VInterpP2LegacyF16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
     : Vop3("v_interp_p2_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -6136,10 +6127,7 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VInterpP2F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VInterpP2F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
     : Vop3("v_add_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAddF64Vop3>()),

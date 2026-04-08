@@ -55,8 +55,7 @@ const ProcessResult &rocminfo_output() {
 
 TEST(RocminfoTest, ExitsSuccessfully) {
   EXPECT_EQ(rocminfo_output().exit_code, 0)
-      << "rocminfo failed with exit code " << rocminfo_output().exit_code
-      << "\nOutput:\n"
+      << "rocminfo failed with exit code " << rocminfo_output().exit_code << "\nOutput:\n"
       << rocminfo_output().output;
 }
 
@@ -68,16 +67,14 @@ TEST(RocminfoTest, InterposerActive) {
 
 TEST(RocminfoTest, HsaSystemAttributes) {
   ASSERT_EQ(rocminfo_output().exit_code, 0) << rocminfo_output().output;
-  EXPECT_NE(rocminfo_output().output.find("HSA System Attributes"),
-            std::string::npos)
+  EXPECT_NE(rocminfo_output().output.find("HSA System Attributes"), std::string::npos)
       << "rocminfo did not report HSA System Attributes.\nOutput:\n"
       << rocminfo_output().output;
 }
 
 TEST(RocminfoTest, DetectsGpuAgent) {
   ASSERT_EQ(rocminfo_output().exit_code, 0) << rocminfo_output().output;
-  EXPECT_NE(rocminfo_output().output.find("Device Type:             GPU"),
-            std::string::npos)
+  EXPECT_NE(rocminfo_output().output.find("Device Type:             GPU"), std::string::npos)
       << "rocminfo did not detect a GPU agent.\nOutput:\n"
       << rocminfo_output().output;
 }

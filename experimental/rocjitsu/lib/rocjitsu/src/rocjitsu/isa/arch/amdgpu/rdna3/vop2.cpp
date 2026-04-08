@@ -77,8 +77,10 @@ VDot2accF32F16Vop2::VDot2accF32F16Vop2(const MachineInst *inst)
 }
 
 void VDot2accF32F16Vop2::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
@@ -204,8 +206,10 @@ VFmacDx9ZeroF32Vop2::VFmacDx9ZeroF32Vop2(const MachineInst *inst)
 }
 
 void VFmacDx9ZeroF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  amdgpu::execute_v_fmac_dx9_zero_f32_vop2(*this, wf);
 }
 
 VMulDx9ZeroF32Vop2::VMulDx9ZeroF32Vop2(const MachineInst *inst)
@@ -1134,8 +1138,10 @@ VCvtPkRtzF16F32Vop2::VCvtPkRtzF16F32Vop2(const MachineInst *inst)
 }
 
 void VCvtPkRtzF16F32Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  amdgpu::execute_v_cvt_pk_rtz_f16_f32_vop2(*this, wf);
 }
 
 VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
@@ -1490,8 +1496,10 @@ VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
 }
 
 void VPkFmacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 } // namespace rdna3

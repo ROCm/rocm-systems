@@ -1553,10 +1553,7 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f16_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -3367,8 +3364,16 @@ VCvtPkRtzF16F32Vop3::VCvtPkRtzF16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkRtzF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    uint32_t lo = util::f32_to_f16(s0);
+    uint32_t hi = util::f32_to_f16(s1);
+    vdst.write_lane(wf, lane, lo | (hi << 16));
+  }
 }
 
 VMinNumF16Vop3::VMinNumF16Vop3(const MachineInst *inst)
@@ -3709,8 +3714,36 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
 }
 
 void VFmaDx9ZeroF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fma(a, b, c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
@@ -4275,10 +4308,7 @@ VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
     : Vop3("v_min3_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3I32Vop3>()),
@@ -4728,8 +4758,36 @@ VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
 }
 
 void VMin3NumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmin(std::fmin(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
@@ -4748,8 +4806,36 @@ VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
 }
 
 void VMax3NumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmax(std::fmax(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
@@ -4768,8 +4854,36 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
 }
 
 void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmin(std::fmin(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
@@ -4788,8 +4902,36 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
 }
 
 void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmax(std::fmax(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
@@ -4904,8 +5046,36 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
 }
 
 void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmin(std::fmin(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
@@ -4924,8 +5094,36 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
 }
 
 void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmax(std::fmax(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
@@ -4944,8 +5142,36 @@ VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
 }
 
 void VMed3NumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
@@ -4964,8 +5190,36 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
 }
 
 void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
@@ -5154,8 +5408,15 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
 }
 
 void VXor3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t a = src0.read_lane(wf, lane);
+    uint32_t b = src1.read_lane(wf, lane);
+    uint32_t c = src2.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, a ^ b ^ c);
+  }
 }
 
 VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
@@ -5780,10 +6041,7 @@ VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
     : Vop3("v_permlanex16_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5800,10 +6058,7 @@ VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     : Vop3("v_cndmask_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -5865,8 +6120,15 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
 }
 
 void VMaxminU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t a = src0.read_lane(wf, lane);
+    uint32_t b = src1.read_lane(wf, lane);
+    uint32_t c = src2.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, std::max(a, std::min(b, c)));
+  }
 }
 
 VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
@@ -5885,8 +6147,15 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
 }
 
 void VMinmaxU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t a = src0.read_lane(wf, lane);
+    uint32_t b = src1.read_lane(wf, lane);
+    uint32_t c = src2.read_lane(wf, lane);
+    vdst.write_lane(wf, lane, std::min(a, std::max(b, c)));
+  }
 }
 
 VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
@@ -5905,8 +6174,15 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
 }
 
 void VMaxminI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    int32_t a = static_cast<int32_t>(src0.read_lane(wf, lane));
+    int32_t b = static_cast<int32_t>(src1.read_lane(wf, lane));
+    int32_t c = static_cast<int32_t>(src2.read_lane(wf, lane));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(std::max(a, std::min(b, c))));
+  }
 }
 
 VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
@@ -5925,8 +6201,15 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
 }
 
 void VMinmaxI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    int32_t a = static_cast<int32_t>(src0.read_lane(wf, lane));
+    int32_t b = static_cast<int32_t>(src1.read_lane(wf, lane));
+    int32_t c = static_cast<int32_t>(src2.read_lane(wf, lane));
+    vdst.write_lane(wf, lane, static_cast<uint32_t>(std::min(a, std::max(b, c))));
+  }
 }
 
 VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
@@ -5944,10 +6227,7 @@ VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
     : Vop3("v_dot2_bf16_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -5964,10 +6244,7 @@ VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
     : Vop3("v_minmax_num_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5985,8 +6262,36 @@ VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
 }
 
 void VMinmaxNumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmin(a, std::fmax(b, c));
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
@@ -6005,8 +6310,36 @@ VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
 }
 
 void VMaxminNumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmax(a, std::fmin(b, c));
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
@@ -6025,8 +6358,36 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
 }
 
 void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmin(a, std::fmax(b, c));
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
@@ -6045,8 +6406,36 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
 }
 
 void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmax(a, std::fmin(b, c));
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
@@ -6065,8 +6454,36 @@ VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
 }
 
 void VMinimummaximumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmin(std::fmax(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
@@ -6085,8 +6502,36 @@ VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
 }
 
 void VMaximumminimumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmax(std::fmin(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
@@ -6105,8 +6550,36 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
 }
 
 void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmin(std::fmax(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
@@ -6125,8 +6598,36 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
 }
 
 void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float a = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(src2.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      a = std::fabs(a);
+    if (inst_.neg & (1u << 0))
+      a = -a;
+    if (inst_.abs & (1u << 1))
+      b = std::fabs(b);
+    if (inst_.neg & (1u << 1))
+      b = -b;
+    if (inst_.abs & (1u << 2))
+      c = std::fabs(c);
+    if (inst_.neg & (1u << 2))
+      c = -c;
+    float result = std::fmax(std::fmin(a, b), c);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
@@ -6140,8 +6641,26 @@ VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
 }
 
 void VSExpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = amdgpu::transcendental::exp_f32(s);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
@@ -6155,8 +6674,26 @@ VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
 }
 
 void VSExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = std::exp2(s);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
@@ -6170,8 +6707,26 @@ VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
 }
 
 void VSLogF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = amdgpu::transcendental::log_f32(s);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
@@ -6185,8 +6740,26 @@ VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
 }
 
 void VSLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = std::log2(s);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
@@ -6200,8 +6773,26 @@ VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
 }
 
 void VSRcpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = amdgpu::transcendental::rcp_f32(s);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
@@ -6215,8 +6806,26 @@ VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
 }
 
 void VSRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = 1.0f / s;
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
@@ -6230,8 +6839,26 @@ VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
 }
 
 void VSRsqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = amdgpu::transcendental::rsq_f32(s);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
@@ -6245,8 +6872,26 @@ VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
 }
 
 void VSRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = 1.0f / std::sqrt(s);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
@@ -6261,8 +6906,26 @@ VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
 }
 
 void VSSqrtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(src0.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = amdgpu::transcendental::sqrt_f32(s);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
@@ -6277,8 +6940,26 @@ VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
 }
 
 void VSSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst_.neg & (1u << 0))
+      s = -s;
+    float result = std::sqrt(s);
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
@@ -6403,8 +7084,16 @@ VMadCoU64U32Vop3SdstEnc::VMadCoU64U32Vop3SdstEnc(const MachineInst *inst)
 }
 
 void VMadCoU64U32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint64_t s0 = src0.read_lane(wf, lane);
+    uint64_t s1 = src1.read_lane(wf, lane);
+    uint64_t s2 = src2.read_lane64(wf, lane);
+    uint64_t result = s0 * s1 + s2;
+    vdst.write_lane64(wf, lane, result);
+  }
 }
 
 VMadCoI64I32Vop3SdstEnc::VMadCoI64I32Vop3SdstEnc(const MachineInst *inst)
@@ -6425,8 +7114,16 @@ VMadCoI64I32Vop3SdstEnc::VMadCoI64I32Vop3SdstEnc(const MachineInst *inst)
 }
 
 void VMadCoI64I32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    int64_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
+    int64_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
+    int64_t s2 = static_cast<int64_t>(src2.read_lane64(wf, lane));
+    uint64_t result = static_cast<uint64_t>(s0 * s1 + s2);
+    vdst.write_lane64(wf, lane, result);
+  }
 }
 
 VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
@@ -6616,8 +7313,18 @@ VCvtPkI16F32Vop3::VCvtPkI16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t s0 = src0.read_lane(wf, lane);
+    uint32_t s1 = src1.read_lane(wf, lane);
+    int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));
+    int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));
+    vdst.write_lane(wf, lane,
+                    (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
+                        static_cast<uint32_t>(static_cast<uint16_t>(lo)));
+  }
 }
 
 VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
@@ -6634,8 +7341,18 @@ VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t s0 = src0.read_lane(wf, lane);
+    uint32_t s1 = src1.read_lane(wf, lane);
+    int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));
+    int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));
+    vdst.write_lane(wf, lane,
+                    (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
+                        static_cast<uint32_t>(static_cast<uint16_t>(lo)));
+  }
 }
 
 VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
@@ -6793,10 +7510,7 @@ VPermlane16VarB32Vop3::VPermlane16VarB32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPermlane16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPermlane16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VPermlanex16VarB32Vop3::VPermlanex16VarB32Vop3(const MachineInst *inst)
     : Vop3("v_permlanex16_var_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -6811,10 +7525,7 @@ VPermlanex16VarB32Vop3::VPermlanex16VarB32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPermlanex16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPermlanex16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
     : Vop3("v_pack_b32_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -6845,8 +7556,22 @@ VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
 }
 
 void VCvtPkNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    auto cvt_u16 = [](float f) -> uint16_t {
+      if (std::isnan(f))
+        return 0;
+      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+    };
+    uint16_t lo = cvt_u16(s0);
+    uint16_t hi = cvt_u16(s1);
+    vdst.write_lane(wf, lane,
+                    (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));
+  }
 }
 
 VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
@@ -6863,8 +7588,22 @@ VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
 }
 
 void VCvtPkNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    auto cvt_u16 = [](float f) -> uint16_t {
+      if (std::isnan(f))
+        return 0;
+      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+    };
+    uint16_t lo = cvt_u16(s0);
+    uint16_t hi = cvt_u16(s1);
+    vdst.write_lane(wf, lane,
+                    (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));
+  }
 }
 
 VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
@@ -7017,8 +7756,22 @@ VCvtPkNormI16F32Vop3::VCvtPkNormI16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkNormI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    auto cvt_u16 = [](float f) -> uint16_t {
+      if (std::isnan(f))
+        return 0;
+      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+    };
+    uint16_t lo = cvt_u16(s0);
+    uint16_t hi = cvt_u16(s1);
+    vdst.write_lane(wf, lane,
+                    (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));
+  }
 }
 
 VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
@@ -7035,8 +7788,22 @@ VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkNormU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    auto cvt_u16 = [](float f) -> uint16_t {
+      if (std::isnan(f))
+        return 0;
+      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+    };
+    uint16_t lo = cvt_u16(s0);
+    uint16_t hi = cvt_u16(s1);
+    vdst.write_lane(wf, lane,
+                    (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));
+  }
 }
 
 VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
@@ -7405,8 +8172,31 @@ VMinimumF64Vop3::VMinimumF64Vop3(const MachineInst *inst)
 }
 
 void VMinimumF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
+    double sv1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
+    if (inst_.abs & (1u << 0))
+      sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0))
+      sv0 = -sv0;
+    if (inst_.abs & (1u << 1))
+      sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1))
+      sv1 = -sv1;
+    double result = sv0 /* TODO: fmin */;
+    if (inst_.omod == 1)
+      result *= 2.0;
+    else if (inst_.omod == 2)
+      result *= 4.0;
+    else if (inst_.omod == 3)
+      result *= 0.5;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0, 1.0);
+    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+  }
 }
 
 VMaximumF64Vop3::VMaximumF64Vop3(const MachineInst *inst)
@@ -7423,8 +8213,31 @@ VMaximumF64Vop3::VMaximumF64Vop3(const MachineInst *inst)
 }
 
 void VMaximumF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    double sv0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
+    double sv1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
+    if (inst_.abs & (1u << 0))
+      sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0))
+      sv0 = -sv0;
+    if (inst_.abs & (1u << 1))
+      sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1))
+      sv1 = -sv1;
+    double result = sv0 /* TODO: fmax */;
+    if (inst_.omod == 1)
+      result *= 2.0;
+    else if (inst_.omod == 2)
+      result *= 4.0;
+    else if (inst_.omod == 3)
+      result *= 0.5;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0, 1.0);
+    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+  }
 }
 
 VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
@@ -7548,8 +8361,31 @@ VMinimumF32Vop3::VMinimumF32Vop3(const MachineInst *inst)
 }
 
 void VMinimumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0))
+      sv0 = -sv0;
+    if (inst_.abs & (1u << 1))
+      sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1))
+      sv1 = -sv1;
+    float result = sv0 /* TODO: fmin */;
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMaximumF32Vop3::VMaximumF32Vop3(const MachineInst *inst)
@@ -7566,8 +8402,31 @@ VMaximumF32Vop3::VMaximumF32Vop3(const MachineInst *inst)
 }
 
 void VMaximumF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float sv1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    if (inst_.abs & (1u << 0))
+      sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0))
+      sv0 = -sv0;
+    if (inst_.abs & (1u << 1))
+      sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1))
+      sv1 = -sv1;
+    float result = sv0 /* TODO: fmax */;
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
 }
 
 VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
@@ -7584,8 +8443,31 @@ VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
 }
 
 void VMinimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float sv1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0))
+      sv0 = -sv0;
+    if (inst_.abs & (1u << 1))
+      sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1))
+      sv1 = -sv1;
+    float result = sv0 /* TODO: fmin */;
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VMaximumF16Vop3::VMaximumF16Vop3(const MachineInst *inst)
@@ -7602,8 +8484,31 @@ VMaximumF16Vop3::VMaximumF16Vop3(const MachineInst *inst)
 }
 
 void VMaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float sv0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
+    float sv1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    if (inst_.abs & (1u << 0))
+      sv0 = std::fabs(sv0);
+    if (inst_.neg & (1u << 0))
+      sv0 = -sv0;
+    if (inst_.abs & (1u << 1))
+      sv1 = std::fabs(sv1);
+    if (inst_.neg & (1u << 1))
+      sv1 = -sv1;
+    float result = sv0 /* TODO: fmax */;
+    if (inst_.omod == 1)
+      result *= 2.0f;
+    else if (inst_.omod == 2)
+      result *= 4.0f;
+    else if (inst_.omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = std::clamp(result, 0.0f, 1.0f);
+    vdst.write_lane(wf, lane, util::f32_to_f16(result));
+  }
 }
 
 VCvtPkFp8F32Vop3::VCvtPkFp8F32Vop3(const MachineInst *inst)

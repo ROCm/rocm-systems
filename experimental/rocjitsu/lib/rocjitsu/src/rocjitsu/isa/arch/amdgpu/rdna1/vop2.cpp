@@ -262,8 +262,19 @@ VMacLegacyF32Vop2::VMacLegacyF32Vop2(const MachineInst *inst)
 }
 
 void VMacLegacyF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float sv1 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(sv0 * sv1 + std::bit_cast<float>(vdst.read_lane(wf, lane))));
+  }
 }
 
 VMulLegacyF32Vop2::VMulLegacyF32Vop2(const MachineInst *inst)
@@ -2113,8 +2124,10 @@ VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
 }
 
 void VPkFmacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 } // namespace rdna1
