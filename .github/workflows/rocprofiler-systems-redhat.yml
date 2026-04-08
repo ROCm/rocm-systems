@@ -65,7 +65,6 @@ jobs:
       with:
         sparse-checkout: |
           projects/rocprofiler-systems/
-          .gitmodules
 
     - name: Configure Env
       shell: bash

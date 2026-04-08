@@ -37,7 +37,6 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
-            .gitmodules
 
       - name: Generate generic installer script
         shell: bash

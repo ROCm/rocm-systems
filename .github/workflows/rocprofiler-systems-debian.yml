@@ -69,7 +69,6 @@ jobs:
       with:
         sparse-checkout: |
           projects/rocprofiler-systems/
-          .gitmodules
 
     - name: Install Packages
       timeout-minutes: 25

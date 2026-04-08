@@ -112,7 +112,6 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
-            .gitmodules
 
       - name: Setup Environment
         id: setup_env
