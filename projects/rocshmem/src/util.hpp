@@ -51,14 +51,10 @@ namespace rocshmem {
  * @param[in] fn_str   String describing checked function
  *
  */
-#define CHECK_NNULL(value, fn_str) do {                \
-  if (UNLIKELY(nullptr == (value))) {                  \
-    fprintf(stderr,                                    \
-      "Error: %s: %s (%d) at RocSHMEM::%s:%d\n",       \
-      fn_str, strerror(errno), errno,                  \
-      __FILE__, __LINE__);                             \
-    abort();                                           \
-  }                                                    \
+#define CHECK_NNULL(value, fn_str) do {                                        \
+  if (UNLIKELY(nullptr == (value))) {                                          \
+    LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno);            \
+  }                                                                            \
 } while(0)
 
 /**
@@ -69,14 +65,10 @@ namespace rocshmem {
  * @param[in] fn_str   String describing checked function
  *
  */
-#define CHECK_ZERO(value, fn_str) do {                 \
-  if (UNLIKELY(0 != (value))) {                        \
-    fprintf(stderr,                                    \
-      "Error: %s: %s (%d) at RocSHMEM::%s:%d\n",       \
-      fn_str, strerror(errno), errno,             \
-      __FILE__, __LINE__);                             \
-    abort();                                           \
-  }                                                    \
+#define CHECK_ZERO(value, fn_str) do {                                         \
+  if (UNLIKELY(0 != (value))) {                                                \
+    LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno);            \
+  }                                                                            \
 } while(0)
 
 /**
@@ -86,31 +78,25 @@ namespace rocshmem {
  * @param[in] instr    HIP function to run and check
  *
  */
-#define CHECK_HIP(instr) do {                               \
-  hipError_t error = (instr);                               \
-  if (error != hipSuccess) {                                \
-    fprintf(stderr,                                         \
-      "Error: " #instr ": %s (%d) at RocSHMEM::%s:%d\n",    \
-      hipGetErrorString(error), error, __FILE__, __LINE__); \
-    abort();                                                \
-  }                                                         \
+#define CHECK_HIP(instr) do {                                                  \
+  hipError_t error = (instr);                                                  \
+  if (error != hipSuccess) {                                                   \
+    LOG_ERROR_ABORT(#instr ": %s (%d)", hipGetErrorString(error), error);       \
+  }                                                                            \
 } while(0)
 
 /**
  * @name CHECK_HSA
- * @brief Checks if HSA command succeeded. If it is not not success then it exits the program.
+ * @brief Checks if HSA command succeeded. If it is not success then it exits the program.
  *
  * @param[in] cmd HSA function to run and check
  *
  */
-#define CHECK_HSA(cmd)                                                           \
-  do {                                                                           \
-    hsa_status_t error = cmd;                                                    \
-    if (error != HSA_STATUS_SUCCESS) {                                           \
-      fprintf(stderr, "Error: " #cmd ": %d at RocSHMEM::%s:%d\n",                \
-              error, __FILE__, __LINE__);                                        \
-      exit(EXIT_FAILURE);                                                        \
-    }                                                                            \
+#define CHECK_HSA(cmd) do {                                                    \
+  hsa_status_t error = cmd;                                                    \
+  if (error != HSA_STATUS_SUCCESS) {                                           \
+    LOG_ERROR_EXIT(#cmd ": %d", error);                                        \
+  }                                                                            \
 } while (0)
 
 /* Helper Macros for handling dynamic libraries */
