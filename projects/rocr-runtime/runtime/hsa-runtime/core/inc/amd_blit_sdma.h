@@ -296,7 +296,8 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   hsa_status_t SubmitCommand(const void* cmds, size_t cmd_size, uint64_t size,
                              const std::vector<core::Signal*>& dep_signals,
-                             core::Signal& out_signal, std::vector<core::Signal*>& gang_signals);
+                             core::Signal& out_signal,
+                             std::vector<core::Signal*>& gang_signals) override;
 
   hsa_status_t SubmitBlockingCommand(const void* cmds, size_t cmd_size, uint64_t size);
 
