@@ -124,8 +124,13 @@ process_agent_counters(rocprofiler_agent_id_t    agent_id,
 
                 if(status != ROCPROFILER_STATUS_SUCCESS)
                 {
-                    // Silently skip instead of aborting - the root cause warning was already logged
-                    // in dimensions.cpp
+                    ROCP_TRACE << fmt::format(
+                        "[{}] skipping counter metadata for handle {} because "
+                        "rocprofiler_query_counter_info(...) failed: {} :: {}",
+                        __FUNCTION__,
+                        counters[i].handle,
+                        rocprofiler_get_status_name(status),
+                        rocprofiler_get_status_string(status));
                     continue;
                 }
 

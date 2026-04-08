@@ -1,0 +1,12 @@
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+    - name: INVALID_MIXED_COUNTER
+      description: "Should be rejected - mixing expression with block/event"
+      properties: []
+      definitions:
+        - architectures:
+            - gfx942
+          expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
+          block: GRBM
+          event: 1

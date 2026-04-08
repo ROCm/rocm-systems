@@ -120,8 +120,8 @@ generate_dimensions(rocprofiler_agent_id_t agent_id)
             continue;
         } catch(const std::exception& e)
         {
-            ROCP_WARNING << "Unexpected error processing counter '" << metric << "': " << e.what()
-                         << ". Counter will be skipped.";
+            ROCP_ERROR << "Unexpected error processing counter '" << metric << "': " << e.what()
+                       << ". Counter will be skipped.";
             continue;
         }
     }

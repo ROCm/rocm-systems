@@ -23,7 +23,9 @@ rocprofiler_configure_pytest_files(
          malformed.yaml
          no_block_event.yaml
          missing_top_key.yaml
-         empty_architectures.yaml)
+         empty_architectures.yaml
+         expression_plus_event.yaml
+         block_without_event.yaml)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -145,6 +147,30 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
         -E ${CMAKE_CURRENT_BINARY_DIR}/empty_architectures.yaml -d
         ${CMAKE_CURRENT_BINARY_DIR}/out_empty_architectures -o empty_architectures_test
+        --output-format csv -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-yaml-validation-expression-plus-event
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
+        -E ${CMAKE_CURRENT_BINARY_DIR}/expression_plus_event.yaml -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_expression_plus_event -o
+        expression_plus_event_test --output-format csv -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-yaml-validation-block-without-event
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
+        -E ${CMAKE_CURRENT_BINARY_DIR}/block_without_event.yaml -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_block_without_event -o block_without_event_test
         --output-format csv -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45

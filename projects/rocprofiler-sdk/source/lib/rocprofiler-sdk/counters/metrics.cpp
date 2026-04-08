@@ -97,6 +97,9 @@ void
 print_counter_yaml_schema_hint()
 {
     ROCP_ERROR << "Expected structure:\n"
+               << "Each definition must be one of:\n"
+               << "  (1) expression counter: architectures + expression\n"
+               << "  (2) hardware counter: architectures + block + event\n"
                << "rocprofiler-sdk:\n"
                << "  counters-schema-version: 1\n"
                << "  counters:\n"
@@ -104,6 +107,10 @@ print_counter_yaml_schema_hint()
                << "    description: 'Counter description'\n"
                << "    properties: []\n"
                << "    definitions:\n"
+               << "    - architectures:\n"
+               << "      - gfx942\n"
+               << "      expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM\n"
+               << "      # OR\n"
                << "    - architectures:\n"
                << "      - gfx942\n"
                << "      block: BLOCK_NAME\n"
@@ -183,7 +190,13 @@ get_required_scalar(const YAML::Node& parent, const char* key, const std::string
 
     try
     {
-        return node.as<std::string>();
+        auto value = node.as<std::string>();
+        if(value.empty())
+        {
+            ROCP_WARNING << "Skipping " << context << ": empty '" << key << "'";
+            return std::nullopt;
+        }
+        return value;
     } catch(const YAML::Exception& e)
     {
         ROCP_WARNING << "Skipping " << context << ": invalid '" << key << "': " << e.what();
@@ -224,6 +237,7 @@ validate_definitions_node(const YAML::Node& counter, const std::string& counter_
 
     return true;
 }
+
 bool
 validate_definition_node(const YAML::Node& definition, const std::string& counter_name)
 {
@@ -234,10 +248,11 @@ validate_definition_node(const YAML::Node& definition, const std::string& counte
         return false;
     }
 
-    if(!definition["architectures"] || !definition["architectures"].IsSequence())
+    if(!definition["architectures"] || !definition["architectures"].IsSequence() ||
+       definition["architectures"].size() == 0)
     {
         ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
-                     << "': missing or invalid 'architectures'";
+                     << "': missing, invalid, or empty 'architectures'";
         return false;
     }
 
@@ -259,6 +274,42 @@ validate_definition_node(const YAML::Node& definition, const std::string& counte
     {
         ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
                      << "': 'expression' must be a scalar";
+        return false;
+    }
+
+    // Validate mutually exclusive counter types:
+    // Allowed forms:
+    //   1) expression counter: architectures + expression
+    //   2) hardware counter: architectures + block + event
+    const bool has_block      = static_cast<bool>(definition["block"]);
+    const bool has_event      = static_cast<bool>(definition["event"]);
+    const bool has_expression = static_cast<bool>(definition["expression"]);
+
+    if(!has_expression && !has_event)
+    {
+        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                     << "': missing both 'event' and 'expression'";
+        return false;
+    }
+
+    if(has_event && !has_block)
+    {
+        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                     << "': 'event' requires 'block'";
+        return false;
+    }
+
+    if(has_block && !has_event)
+    {
+        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                     << "': 'block' requires 'event'";
+        return false;
+    }
+
+    if(has_expression && (has_block || has_event))
+    {
+        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                     << "': definition must be either 'expression' or 'block' + 'event', not both";
         return false;
     }
 
@@ -368,7 +419,7 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 
     // Track counter names per architecture to detect duplicates
     std::unordered_map<std::string, std::unordered_set<std::string>> arch_counter_names;
-    static std::unordered_set<std::string>                           warned_duplicates;
+    std::unordered_set<std::string>                                  warned_duplicates;
 
     for(const auto& counter : header)
     {
@@ -397,13 +448,6 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
             auto block      = get_optional_scalar(definition, "block");
             auto event      = get_optional_scalar(definition, "event");
             auto expression = get_optional_scalar(definition, "expression");
-
-            if(event.empty() && expression.empty())
-            {
-                ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
-                             << "': definition must contain 'event' or 'expression'";
-                continue;
-            }
 
             for(const auto& arch : definition["architectures"])
             {
