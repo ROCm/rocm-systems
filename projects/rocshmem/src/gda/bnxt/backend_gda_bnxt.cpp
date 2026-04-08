@@ -307,7 +307,7 @@ void* GDABackend::bnxt_dv_dlopen() {
     // Try hard-coded PATH
     dv_handle = dlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
     if (!dv_handle) {
-      LOG_WARN("Could not open libbnxt_re.so. Returning");
+      LOG_TRACE("Could not open libbnxt_re.so. Returning");
     }
   }
   return dv_handle;

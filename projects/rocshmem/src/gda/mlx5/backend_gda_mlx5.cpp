@@ -34,7 +34,7 @@ void* GDABackend::mlx5_dv_dlopen() {
   void* dv_handle{nullptr};
   dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
   if (!dv_handle) {
-    LOG_WARN("Could not open libmlx5.so. Returning");
+    LOG_TRACE("Could not open libmlx5.so. Returning");
   }
   return dv_handle;
 }

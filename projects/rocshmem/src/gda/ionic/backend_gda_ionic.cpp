@@ -137,7 +137,7 @@ void* GDABackend::ionic_dv_dlopen() {
     // Try hard-coded PATH
     dv_handle = dlopen("/usr/local/lib/libionic.so", RTLD_LAZY);
     if (!dv_handle) {
-      LOG_WARN("Could not open libionic.so. Returning");
+      LOG_TRACE("Could not open libionic.so. Returning");
     }
   }
   return dv_handle;
