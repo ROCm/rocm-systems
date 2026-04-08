@@ -101,7 +101,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu) {
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
   if (devcount < 2) {
-    SUCCEED("Skipping the test as number of Devices found less than 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   // Get current device property

@@ -275,7 +275,7 @@ class MIGPUSpecs:
         4. Default settings (last resort)
         """
         # Constants for legacy GPUs that don't support compute partitions
-        LEGACY_ARCHS = {"gfx908", "gfx90a"}
+        LEGACY_ARCHS = {"gfx908", "gfx90a", "gfx1150", "gfx1151"}
         LEGACY_MODELS = {"mi50", "mi60", "mi100", "mi210", "mi250", "mi250x"}
 
         # Normalize inputs to lowercase for consistent comparison

@@ -154,8 +154,6 @@ graph:
     tags: [node]
   Unit_hipGraphAddHostNode_ClonedGraphWithHostNode:
     <<: *level_2
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipGraphAddHostNode_VectorSquare:
     <<: *level_2
@@ -247,10 +245,6 @@ graph:
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
     <<: *level_2
     tags: [node]
-  Unit_hipGraphMemcpyNodeSetParamsToSymbol_Functional:
-    <<: *level_2
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_2
@@ -768,22 +762,7 @@ graph:
   Unit_hipStreamIsCapturing_Positive_Thread:
     <<: *level_2
     tags: [capture]
-  Unit_hipStreamIsCapturing_Negative:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamIsCapturing_Functional_Basic:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamIsCapturing_Functional:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamIsCapturing_hipStreamPerThread:
-    <<: *level_2
-    tags: [capture]
   Unit_hipStreamIsCapturing_ParentAndForkedStream:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamIsCapturing_CheckCaptureStatus_FromThread:
     <<: *level_2
     tags: [capture]
   Unit_hipStreamIsCapturing_ChkNullStrmStatus:
@@ -948,18 +927,6 @@ graph:
   Unit_hipStreamGetCaptureInfo_Negative_Parameters:
     <<: *level_2
     tags: [capture]
-  Unit_hipStreamGetCaptureInfo_BasicFunctional:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamGetCaptureInfo_hipStreamPerThread:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamGetCaptureInfo_UniqueID:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamGetCaptureInfo_ArgValidation:
-    <<: *level_2
-    tags: [capture]
   Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus:
     <<: *level_2
     tags: [capture]
@@ -1000,9 +967,6 @@ graph:
     <<: *level_2
     tags: [capture]
   Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative:
-    <<: *level_2
-    tags: [node]
-  Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Functional:
     <<: *level_2
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic:
@@ -1101,12 +1065,6 @@ graph:
     <<: *level_2
     tags: [exec]
   Unit_hipGraphLaunch_Negative_Parameters:
-    <<: *level_2
-    tags: [exec]
-  Unit_hipGraphLaunch_Negative:
-    <<: *level_2
-    tags: [exec]
-  Unit_hipGraphLaunch_Functional_hipStreamPerThread:
     <<: *level_2
     tags: [exec]
   Unit_hipGraphLaunch_Functional_multidevice_test:
@@ -1271,7 +1229,6 @@ graph:
   Unit_hipGraphRetainUserObject_Negative_Basic:
     <<: *level_2
     tags: [userobj]
-  Unit_hipGraphRetainUserObject_Negative_Null_Object: *level_2
   Unit_hipGraphDebugDotPrint_Functional:
     <<: *level_2
     tags: [query]
