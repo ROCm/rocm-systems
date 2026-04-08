@@ -22,29 +22,23 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine DEBUG
-#cmakedefine PROFILE
-#cmakedefine USE_RO
-#cmakedefine USE_IPC
-#cmakedefine USE_GDA
-#cmakedefine USE_THREADS
-#cmakedefine USE_SHARED_CTX
-#cmakedefine USE_WF_COAL
-#cmakedefine USE_HEAP_DEVICE_FINEGRAIN
-#cmakedefine USE_HEAP_DEVICE_UNCACHED
-#cmakedefine USE_HEAP_DEVICE_COARSEGRAIN
-#cmakedefine USE_HEAP_DEVICE_VMM_POSIX
-#cmakedefine USE_FUNC_CALL
-#cmakedefine USE_SINGLE_NODE
-#cmakedefine USE_HDP_FLUSH
-#cmakedefine USE_HDP_FLUSH_HOST_SIDE
-#cmakedefine GDA_IONIC
-#cmakedefine GDA_BNXT
-#cmakedefine GDA_MLX5
-#cmakedefine HAVE_EXTERNAL_MPI
-#cmakedefine HAVE_DEVICE_MALLOC_UNCACHED
+#ifndef LIBRARY_SRC_BUILD_INFO_HPP_
+#define LIBRARY_SRC_BUILD_INFO_HPP_
 
-#define ROCSHMEM_GIT_HASH        "@ROCSHMEM_GIT_HASH@"
-#define ROCSHMEM_INSTALL_PREFIX  "@CMAKE_INSTALL_PREFIX@"
-#define ROCSHMEM_OFFLOAD_TARGETS "@ROCSHMEM_OFFLOAD_TARGETS@"
-#define ROCSHMEM_BUILD_TYPE      "@CMAKE_BUILD_TYPE@"
+#include <iostream>
+
+namespace rocshmem {
+
+/**
+ * Print a formatted block showing the rocSHMEM build configuration:
+ * version, git hash, install prefix, GPU arch, ROCm/MPI versions, and the
+ * compile-time flags from rocshmem_config.h.
+ *
+ * Called by the rocshmem_info tool and by the library itself when
+ * ROCSHMEM_DEBUG_LEVEL >= INFO.
+ */
+void print_build_info(std::ostream& os = std::cout);
+
+}  // namespace rocshmem
+
+#endif  // LIBRARY_SRC_BUILD_INFO_HPP_

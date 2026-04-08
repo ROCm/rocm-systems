@@ -8,8 +8,6 @@
 #include <initializer_list>
 #include <iostream>
 #include <string>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
@@ -24,30 +22,6 @@ get_output_directory(const char* env_var = "ROCPROFSYS_OUTPUT_PATH")
     if(output_path && strlen(output_path) > 0) return std::string(output_path);
 
     return "rocprof-sys-output";
-}
-
-inline bool
-check_directory_writable(const std::string& dir)
-{
-    struct stat st;
-    if(stat(dir.c_str(), &st) == 0)
-    {
-        return (access(dir.c_str(), W_OK) == 0);
-    }
-
-    std::string parent = dir;
-    size_t      pos    = parent.find_last_of('/');
-    if(pos != std::string::npos)
-    {
-        parent = parent.substr(0, pos);
-        if(parent.empty()) parent = ".";
-    }
-    else
-    {
-        parent = ".";
-    }
-
-    return (access(parent.c_str(), W_OK) == 0);
 }
 
 inline std::string
@@ -184,13 +158,6 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 
     std::cout << "\nOutput:        " << output_dir << "\n";
 
-    if(!check_directory_writable(output_dir))
-    {
-        std::cerr << "\nWARNING: Output directory may not be writable!\n";
-        std::cerr << "   Try: rocprof-sys-" << tool_name
-                  << " -o /tmp/profile -- <command>\n\n";
-    }
-
     std::cout << "\nResults will be available in:\n"
               << "  • Text profile:  " << output_dir << "/wall_clock.txt\n"
               << "  • Trace (visual): " << output_dir << "/perfetto-trace.proto\n"
@@ -254,38 +221,6 @@ validate_preset_modes(const std::vector<std::string>& active_presets)
         return false;
     }
     return true;
-}
-
-inline bool
-check_rocm_available()
-{
-    return (access("/opt/rocm/bin/hipconfig", X_OK) == 0);
-}
-
-inline void
-warn_if_rocm_unavailable()
-{
-    if(!check_rocm_available())
-    {
-        std::cerr << "\nWARNING: GPU tracing requested but ROCm is not available\n\n";
-        std::cerr << "GPU features will be disabled.\n\n";
-    }
-}
-
-inline void
-warn_if_gpu_preset_without_rocm(const std::vector<std::string>& active_presets)
-{
-    for(const auto& preset : active_presets)
-    {
-        if(preset == "--workload-trace" || preset == "--trace-hpc" ||
-           preset == "--sys-trace" || preset == "--runtime-trace" ||
-           preset == "--trace-gpu" || preset == "--trace-openmp" ||
-           preset == "--trace-hw-counters")
-        {
-            warn_if_rocm_unavailable();
-            return;
-        }
-    }
 }
 
 }  // namespace common_utils

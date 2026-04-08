@@ -38,7 +38,7 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_DC_TOOLS=ON"],
         "projects_to_test": "",  # rdc-tests is not built by TheRock build system - TBD
     },
-    # dbggapi changes need to exercise both ROCgdb and debug agent.
+    # dbgapi changes need to exercise both ROCgdb and debug agent.
     "debug_tools-dbgapi": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_ALL=OFF",

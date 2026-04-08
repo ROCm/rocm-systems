@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "core/output_file_registry.hpp"
 #include "core/trace_cache/buffer_storage.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -53,7 +54,7 @@ public:
     buffer_storage_t&     get_buffer_storage() { return m_storage; }
     metadata_registry&    get_metadata_registry() { return *m_metadata; }
     void                  shutdown();
-    void                  post_process_bulk();
+    void                  post_process_bulk(output_file_registry& output_registry);
 
 private:
     cache_manager() = default;

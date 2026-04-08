@@ -3444,6 +3444,9 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       amd::MemObjMap::AddMemObj(vcmd.ptr(), vaddr_sub_obj);
       vaddr_sub_obj->getUserData().phys_mem_obj = phys_mem_obj;
       phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
+      if (phys_mem_obj->getMemFlags() & ROCCLR_MEM_INTERPROCESS) {
+        vaddr_sub_obj->setVmmImported(true);
+      }
     } else {
       LogError("HSA Command: hsa_amd_vmem_map failed!");
     }
