@@ -54,6 +54,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "inc/hsa_ext_amd_aie.h"
 #include "core/inc/amd_memory_region.h"
@@ -66,8 +67,12 @@
 namespace rocr {
 namespace AMD {
 
-static_assert((sizeof(core::ShareableHandle::handle) >= sizeof(uint32_t)) &&
-                  (alignof(core::ShareableHandle::handle) >= alignof(uint32_t)),
+namespace {
+using ShareableHandleWord = decltype(std::declval<core::ShareableHandle>().handle);
+}
+
+static_assert((sizeof(ShareableHandleWord) >= sizeof(uint32_t)) &&
+                  (alignof(ShareableHandleWord) >= alignof(uint32_t)),
               "ShareableHandle cannot store a XDNA handle");
 
 /// @brief Opcode types for commands.
