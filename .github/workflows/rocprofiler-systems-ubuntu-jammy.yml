@@ -69,7 +69,8 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - uses: actions/checkout@v6
+    - &sparse-checkout
+      uses: actions/checkout@v6
       with:
         sparse-checkout: |
           projects/rocprofiler-systems/
@@ -263,11 +264,7 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - uses: actions/checkout@v6
-      with:
-        sparse-checkout: |
-          projects/rocprofiler-systems/
-          .gitmodules
+    - *sparse-checkout
 
     - name: Install System Dependency Packages
       timeout-minutes: 25
@@ -400,11 +397,7 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - uses: actions/checkout@v6
-      with:
-        sparse-checkout: |
-          projects/rocprofiler-systems/
-          .gitmodules
+    - *sparse-checkout
 
     - name: Install Packages
       timeout-minutes: 25
