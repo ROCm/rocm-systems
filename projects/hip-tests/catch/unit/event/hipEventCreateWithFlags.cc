@@ -14,6 +14,19 @@ constexpr int test_iteration_hstvismem = 5;
 constexpr int test_iteration_noncohmem = 10;
 constexpr int block_size = 512;
 
+// Atomic store required as events are created with special flag hipEventDisableSystemFence [Ref : SWDEV-523177]
+template <typename T> __global__ void vector_square_system_scope_atomic(const T* A_d, T* C_d, size_t N_ELMTS) {
+  size_t i = (blockIdx.x * blockDim.x + threadIdx.x);
+  if (i < N_ELMTS) {
+#if HT_AMD
+    T result = A_d[i] * A_d[i];
+    __hip_atomic_store(&C_d[i], result, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
+    C_d[i] = A_d[i] * A_d[i];
+#endif
+  }
+}
+
 /**
  * @addtogroup hipEventCreateWithFlags hipEventCreateWithFlags
  * @{
@@ -112,7 +125,11 @@ static void testMemCoherency(eSyncToTest test, eMemoryToTest mem, uint32_t flags
     // Inititalize the buffer with random data
     init_input(ibuf_h, buffer_size);
     HIP_CHECK(hipMemcpy(buf_d, ibuf_h, sizeof(int) * buffer_size, hipMemcpyDefault));
-    HipTest::vector_square<int><<<grid_size, block_size, 0, stream>>>(buf_d, buf_d, buffer_size);
+    if (flags & hipEventDisableSystemFence) {
+      vector_square_system_scope_atomic<int><<<grid_size, block_size, 0, stream>>>(buf_d, buf_d, buffer_size);
+    } else {
+      HipTest::vector_square<int><<<grid_size, block_size, 0, stream>>>(buf_d, buf_d, buffer_size);
+    }
     HIP_CHECK(hipEventRecord(event, stream));
     // test different synchronization APIs
     if (test == eSyncToTest::eStreamSynchronize) {
