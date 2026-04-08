@@ -23,6 +23,7 @@ import argparse
 import functools
 import json
 import logging
+import math
 import multiprocessing
 import os
 import signal
@@ -8192,7 +8193,7 @@ class AMDSMICommands:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
-            fan (int, optional): Value override for args.fan. Defaults to None.
+            fan (tuple, optional): Value override for args.fan as (value, is_percentage). Defaults to None.
             perf_level (amdsmi_interface.AmdSmiDevPerfLevel, optional): Value override for args.perf_level. Defaults to None.
             profile (bool, optional): Value override for args.profile. Defaults to None.
             perf_determinism (int, optional): Value override for args.perf_determinism. Defaults to None.
@@ -8309,21 +8310,93 @@ class AMDSMICommands:
 
         # Handle args
         if self.helpers.is_baremetal():
-            if isinstance(args.fan, int):
-                # Convert fan speed to percentage
-                # Note: amdsmi_set_gpu_fan_speed expects fan speed in RPM, so
-                # we convert the value to a percentage based on the maximum fan speed of 255 RPM.
-                # We need to round down the user's passed fan speed % to the nearest whole number.
-                # This allows us to match the float -> int conversion when converting from percentage to RPM (as previously passed by the parser).
-                fan_percentage = int(
-                    (int(args.fan) / 255) * 100 // 1
-                )  # round down (aka floor) to nearest whole number
+            if isinstance(args.fan, tuple):
+                # Parse input: args.fan is now (value, is_percentage) tuple from parser
+                input_value, is_percentage = args.fan
+
+                # Check if gpu_od interface is available
+                has_gpu_od, gpu_od_path = self.helpers.detect_gpu_od(gpu_bdf)
+
+                # Helper function for consistent error formatting
+                def format_fan_error(message, include_driver_note=False):
+                    error_msg = message
+                    if include_driver_note:
+                        error_msg += (
+                            "\nNote: For Navi3x+ GPUs, ensure the amdgpu driver is loaded with"
+                            " gpu_od enabled:\n  sudo modprobe amdgpu ppfeaturemask=0xfff7ffff"
+                            "\nIf fan operations return 'Device or resource busy', disable"
+                            " runtime PM:\n  echo on | sudo tee"
+                            " /sys/class/drm/card<N>/device/power/control"
+                        )
+                    return error_msg
+
+                # Convert based on interface type and input format
+                if has_gpu_od:
+                    # For gpu_od interface: read OD_RANGE dynamically using shared helper
+                    od_min, od_max = self.helpers.parse_gpu_od_fan_range(gpu_od_path)
+                    if od_min is None:
+                        # Parsing failed - cannot proceed without valid range
+                        result = format_fan_error(
+                            f"Unable to read gpu_od OD_RANGE from {gpu_od_path}. Cannot set fan speed.",
+                            include_driver_note=True,
+                        )
+                        self.logger.store_output(args.gpu, "fan", result)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+
+                    od_range = od_max - od_min
+                    if is_percentage:
+                        # Convert percentage (0-100%) to hardware range (od_min-od_max)
+                        hw_value = od_min + int((input_value / 100) * od_range)
+                        fan_percentage = input_value
+                    else:
+                        # Direct hardware value
+                        if od_min <= input_value <= od_max:
+                            hw_value = input_value
+                            fan_percentage = (
+                                int(((input_value - od_min) / od_range) * 100)
+                                if od_range > 0
+                                else 0
+                            )
+                        else:
+                            result = format_fan_error(
+                                f"Invalid fan speed value {input_value} for gpu_od interface. Valid range: {od_min}-{od_max} or use percentage (0-100%)",
+                                include_driver_note=True,
+                            )
+                            self.logger.store_output(args.gpu, "fan", result)
+                            self.logger.print_output()
+                            self.logger.clear_multiple_devices_output()
+                            return
+                else:
+                    # For legacy hwmon: range 0-255
+                    if is_percentage:
+                        # Convert percentage (0-100%) to PWM (0-255) using ceiling rounding
+                        hw_value = math.ceil((input_value / 100) * 255)
+                        fan_percentage = input_value
+                    else:
+                        # Direct PWM value
+                        if 0 <= input_value <= 255:
+                            hw_value = input_value
+                            fan_percentage = int(
+                                (input_value / 255) * 100 // 1
+                            )  # round down (aka floor) to nearest whole number
+                        else:
+                            result = f"Invalid fan speed value {input_value}. Valid range: 0-255 or use percentage (0-100%)"
+                            self.logger.store_output(args.gpu, "fan", result)
+                            self.logger.print_output()
+                            self.logger.clear_multiple_devices_output()
+                            return
+
                 try:
-                    amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, args.fan)
+                    amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, hw_value)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
-                    result = f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {args.fan} RPM ({fan_percentage}%)"
+                    result = format_fan_error(
+                        f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
+                        include_driver_note=has_gpu_od,
+                    )
                     self.logger.store_output(args.gpu, "fan", result)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
@@ -8332,7 +8405,7 @@ class AMDSMICommands:
                 self.logger.store_output(
                     args.gpu,
                     "fan",
-                    f"Successfully set fan speed to {args.fan} RPM ({fan_percentage}%)",
+                    f"Successfully set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
                 )
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
@@ -9157,7 +9230,7 @@ class AMDSMICommands:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
-            fan (int, optional): Value override for args.fan. Defaults to None.
+            fan (tuple, optional): Value override for args.fan as (value, is_percentage). Defaults to None.
             perf_level (amdsmi_interface.AmdSmiDevPerfLevel, optional): Value override for args.perf_level. Defaults to None.
             profile (bool, optional): Value override for args.profile. Defaults to None.
             perf_determinism (int, optional): Value override for args.perf_determinism. Defaults to None.

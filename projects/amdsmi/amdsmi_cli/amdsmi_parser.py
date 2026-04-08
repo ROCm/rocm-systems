@@ -1007,6 +1007,45 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=iterations_help,
         )
 
+    def _add_watch_arguments(self, subcommand_parser: argparse.ArgumentParser):
+        # Device arguments help text
+        watch_help = "Reprint the command in a loop of INTERVAL seconds"
+        watch_time_help = "The total duration of TIME to watch the command"
+        iterations_help = "The total number of ITERATIONS to repeat the command"
+
+        watch_arguments_group = subcommand_parser.add_argument_group("Watch Arguments")
+
+        # Mutually Exclusive Args within the subparser
+        watch_arguments_group.add_argument(
+            "-w",
+            "--watch",
+            action="store",
+            metavar="INTERVAL",
+            type=lambda value: self._positive_int(value, "--watch"),
+            required=False,
+            help=watch_help,
+        )
+        watch_arguments_group.add_argument(
+            "-W",
+            "--watch_time",
+            action=self._check_watch_selected(),
+            metavar="TIME",
+            type=lambda value: self._positive_int(value, "--watch_time"),
+            required=False,
+            help=watch_time_help,
+        )
+        watch_arguments_group.add_argument(
+            "-i",
+            "--iterations",
+            action=self._check_watch_selected(),
+            metavar="ITERATIONS",
+            type=lambda value: self._positive_int(value, "--iterations"),
+            required=False,
+            help=iterations_help,
+        )
+
+        return watch_arguments_group
+
     def _validate_cpu_core(self, value):
         if value == "":
             outputformat = self.helpers.get_output_format()
@@ -1086,43 +1125,48 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         return _PromptSpecWarning
 
-    @staticmethod
-    def _custom_ceil(x):
-        """Custom ceiling function to round up float values to the nearest integer.
-        This is used to ensure that fan speed percentages are rounded up correctly.
-        """
-        if x == int(x):  # If x is already an integer
-            return int(x)
-        elif x > 0:  # For positive numbers, floor division + 1
-            return int(x) + 1
-        else:  # For negative numbers, floor division directly gives the ceiling
-            return int(x)
-
     def _validate_fan_speed(self):
-        """Validate fan speed input"""
+        """Validate fan speed input
+
+        Accepts:
+        - Percentage: 0-100% (converted at command layer based on GPU interface)
+        - Direct value: 0-255 (legacy hwmon) or OD_RANGE min-max (gpu_od interface)
+
+        Note: For direct values, we accept 0-255 here for backward compatibility.
+        The command layer will validate against the correct range (OD_RANGE for gpu_od,
+        0-255 for legacy) after detecting the GPU interface type.
+        """
         amdsmi_helpers = self.helpers
 
         class _ValidateFanSpeed(argparse.Action):
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if isinstance(values, str):
-                    # Convert percentage to fan level
                     if "%" in values:
                         try:
                             amdsmi_helpers.confirm_out_of_spec_warning()
-                            # Convert percentage to fan speed level
-                            values = (int(values[:-1]) / 100) * 255
-                            values = AMDSMIParser._custom_ceil(values)  # Round up (Ceiling)
-                            setattr(args, self.dest, values)
+                            # Store percentage value with is_percentage flag
+                            # CLI will convert based on gpu_od availability
+                            percentage_value = int(values[:-1])
+                            if 0 <= percentage_value <= 100:
+                                # Store as tuple: (percentage_value, is_percentage=True)
+                                setattr(args, self.dest, (percentage_value, True))
+                            else:
+                                raise argparse.ArgumentError(
+                                    self, f"Invalid argument: '{values}' needs to be 0-100%"
+                                )
                         except ValueError as e:
                             raise argparse.ArgumentError(
                                 self, f"Invalid argument: '{values}' needs to be 0-100%"
                             )
-                    else:  # Store the fan level as fan_speed
+                    else:  # Store the direct hardware value
                         values = int(values)
                         if 0 <= values <= 255:
                             amdsmi_helpers.confirm_out_of_spec_warning()
-                            setattr(args, self.dest, values)
+                            # Store as tuple: (direct_value, is_percentage=False)
+                            # Note: Accepts 0-255 for legacy compatibility.
+                            # Command layer validates against interface-specific range.
+                            setattr(args, self.dest, (values, False))
                         else:
                             raise argparse.ArgumentError(
                                 self, f"Invalid argument: '{values}' needs to be 0-255"
@@ -1378,45 +1422,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
 
         return command_modifier_group
-
-    def _add_watch_arguments(self, subcommand_parser: argparse.ArgumentParser):
-        # Device arguments help text
-        watch_help = "Reprint the command in a loop of INTERVAL seconds"
-        watch_time_help = "The total duration of TIME to watch the command"
-        iterations_help = "The total number of ITERATIONS to repeat the command"
-
-        watch_arguments_group = subcommand_parser.add_argument_group("Watch Arguments")
-
-        # Mutually Exclusive Args within the subparser
-        watch_arguments_group.add_argument(
-            "-w",
-            "--watch",
-            action="store",
-            metavar="INTERVAL",
-            type=lambda value: self._positive_int(value, "--watch"),
-            required=False,
-            help=watch_help,
-        )
-        watch_arguments_group.add_argument(
-            "-W",
-            "--watch_time",
-            action=self._check_watch_selected(),
-            metavar="TIME",
-            type=lambda value: self._positive_int(value, "--watch_time"),
-            required=False,
-            help=watch_time_help,
-        )
-        watch_arguments_group.add_argument(
-            "-i",
-            "--iterations",
-            action=self._check_watch_selected(),
-            metavar="ITERATIONS",
-            type=lambda value: self._positive_int(value, "--iterations"),
-            required=False,
-            help=iterations_help,
-        )
-
-        return watch_arguments_group
 
     def _add_default_parser(self, subparsers: argparse._SubParsersAction, func):
         # there should be no args to parse here so let this be a dummy function to preserve later logic
@@ -2392,7 +2397,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         if self.helpers.is_amdgpu_initialized():
             if self.helpers.is_baremetal():
                 fan_support = self.helpers.get_fan_support()
-                set_fan_help = f"Set GPU fan speed ({fan_support})"
+                # Check if fan_support contains multi-line format (starts with newline)
+                if fan_support.startswith("\n"):
+                    # Multi-line format - don't wrap in parentheses
+                    set_fan_help = f"Set GPU fan speed :{fan_support}"
+                else:
+                    # Single line format - wrap in parentheses
+                    set_fan_help = f"Set GPU fan speed ({fan_support})"
                 perf_level_help_choices_str = ", ".join(self.helpers.get_perf_levels()[0][0:-1])
                 set_perf_level_help = (
                     f"Set one of the following performance levels:\n\t{perf_level_help_choices_str}"

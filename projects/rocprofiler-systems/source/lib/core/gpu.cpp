@@ -49,6 +49,9 @@
 
 #include "logger/debug.hpp"
 
+#include <atomic>
+#include <mutex>
+
 namespace rocprofsys
 {
 namespace gpu
@@ -75,44 +78,29 @@ check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
                                          static_cast<int>(_code), _msg));
 }
 
-// Ensures initialization happens only once
-std::once_flag amdsmi_once;
-
-// Tracks whether AMD SMI is initialized
-bool&
-_amdsmi_is_initialized()
-{
-    static bool initialized = false;
-    return initialized;
-}
+std::atomic<bool> amdsmi_initialized{ false };
 
 bool
 amdsmi_init()
 {
-    auto _amdsmi_init = []() {
-        try
-        {
-            // Currently, only AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_NICS are
-            // supported
-            uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
+    if(amdsmi_initialized.exchange(true)) return true;
 
+    try
+    {
+        // Currently, only AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_NICS are supported
+        uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
 #ifdef AINIC_SUPPORTED
-            init_flags |= AMDSMI_INIT_AMD_NICS;
+        init_flags |= AMDSMI_INIT_AMD_NICS;
 #endif
-
-            ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(init_flags));
-            get_processor_handles();
-            _amdsmi_is_initialized() = true;  // Mark as initialized
-        } catch(std::exception& _e)
-        {
-            LOG_ERROR("Exception thrown initializing amd-smi: {}", _e.what());
-            _amdsmi_is_initialized() = false;  // Mark as not initialized
-            return false;
-        }
-        return true;
-    }();
-
-    return _amdsmi_init;
+        ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(init_flags));
+        get_processor_handles();
+    } catch(std::exception& _e)
+    {
+        LOG_ERROR("Exception thrown initializing amd-smi: {}", _e.what());
+        amdsmi_initialized.store(false);
+        return false;
+    }
+    return true;
 }
 
 size_t
@@ -171,9 +159,16 @@ device_count()
 bool
 initialize_amdsmi()
 {
-    // Ensure initialization happens only once
-    std::call_once(amdsmi_once, amdsmi_init);
-    return _amdsmi_is_initialized();
+    return amdsmi_init();
+}
+
+bool
+reinitialize_amdsmi()
+{
+    static std::mutex           mtx;
+    std::lock_guard<std::mutex> lock(mtx);
+    amdsmi_initialized.store(false);
+    return amdsmi_init();
 }
 
 template <typename ArchiveT>

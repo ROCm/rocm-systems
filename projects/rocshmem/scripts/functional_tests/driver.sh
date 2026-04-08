@@ -691,6 +691,16 @@ RETRY_THRESHOLD=${RETRY_THRESHOLD:-5}  # Maximum number of failed tests to retry
 ValidateInput $#
 ValidateLogDir $LOG_DIR
 
+# Print build info and environment variables before running tests
+ROCSHMEM_INFO="$(dirname "$APP")/rocshmem_info"
+if [ ! -x "$ROCSHMEM_INFO" ]; then
+  # builddir case
+  ROCSHMEM_INFO="$(dirname "$APP")/../../tools/rocshmem_info"
+fi
+if [ -x "$ROCSHMEM_INFO" ]; then
+  "$ROCSHMEM_INFO"
+fi
+
 case $TEST in
   "heatmaprma")
     TestHeatMapRMA

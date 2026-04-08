@@ -347,6 +347,151 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
   }
 }
 
+rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err) {
+  switch (err) {
+    case 0:
+      return RSMI_STATUS_SUCCESS;
+    case EACCES:
+    case EPERM:
+      return RSMI_STATUS_PERMISSION;
+    case ENOENT:
+      return RSMI_STATUS_NOT_SUPPORTED;
+    case EINVAL:
+      return RSMI_STATUS_INVALID_ARGS;
+    default:
+      return RSMI_STATUS_FILE_ERROR;
+  }
+}
+
+// Helper function to read multi-line sysfs file into vector of strings
+static int ReadSysfsLines(const std::string& path, std::vector<std::string>* lines) {
+  auto is_regular_file_result = isRegularFile(path, nullptr);
+  if (is_regular_file_result != 0) {
+    return ENOENT;
+  }
+
+  std::ifstream fs(path);
+  if (!fs.is_open()) {
+    int ret = errno;
+    errno = 0;
+    std::ostringstream oss;
+    oss << __PRETTY_FUNCTION__ << " | Fail | Could not open file: " << path
+        << " | Returning: " << std::strerror(ret) << " |";
+    LOG_ERROR(oss);
+    return ret;
+  }
+
+  std::string line;
+  while (std::getline(fs, line)) {
+    lines->push_back(line);
+  }
+  fs.close();
+
+  std::ostringstream oss;
+  oss << "Successfully read " << lines->size() << " lines from SYSFS file (" << path << ")";
+  LOG_INFO(oss);
+  return 0;
+}
+
+int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm) {
+  // Read fan_minimum_pwm sysfs file and parse OD_RANGE values.
+  // File format (multi-line):
+  //   FAN_MINIMUM_PWM:
+  //   <value>
+  //   OD_RANGE:
+  //   MINIMUM_PWM: <min> <max>
+  std::vector<std::string> lines;
+  int ret = ReadSysfsLines(path, &lines);
+  if (ret != 0) {
+    return ret;
+  }
+
+  if (lines.empty()) {
+    return EINVAL;
+  }
+
+  // Use TextFileTagContents_t for structured parsing
+  amd::smi::TextFileTagContents_t parser(lines);
+  parser.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+      .structure_content();
+
+  // Check if OD_RANGE section exists with MINIMUM_PWM key
+  if (!parser.contains_structured_key("OD_RANGE:", "MINIMUM_PWM:")) {
+    return EINVAL;
+  }
+
+  // Get "MINIMUM_PWM: <min> <max>" value
+  auto min_max_str = parser.get_structured_value_by_keys("OD_RANGE:", "MINIMUM_PWM:", false);
+
+  // Parse the two numbers from the string
+  std::istringstream iss(min_max_str);
+  uint64_t val1, val2;
+  if (!(iss >> val1 >> val2)) {
+    return EINVAL;
+  }
+
+  if (min_pwm) *min_pwm = val1;
+  if (max_pwm) *max_pwm = val2;
+  return 0;
+}
+
+int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
+  // Read fan_minimum_pwm sysfs file and parse the current FAN_MINIMUM_PWM value.
+  // File format (multi-line):
+  //   FAN_MINIMUM_PWM:
+  //   <value>
+  //   OD_RANGE:
+  //   MINIMUM_PWM: <min> <max>
+  std::vector<std::string> lines;
+  int ret = ReadSysfsLines(path, &lines);
+  if (ret != 0) {
+    return ret;
+  }
+
+  if (lines.empty()) {
+    return EINVAL;
+  }
+
+  // Use TextFileTagContents_t for structured parsing
+  amd::smi::TextFileTagContents_t parser(lines);
+  parser.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+      .structure_content();
+
+  // Check if FAN_MINIMUM_PWM section exists
+  if (!parser.contains_title_key("FAN_MINIMUM_PWM:")) {
+    return EINVAL;
+  }
+
+  // Get the first value under FAN_MINIMUM_PWM section
+  auto current_str = parser.get_structured_data_subkey_first("FAN_MINIMUM_PWM:");
+
+  // Parse the value
+  uint64_t val;
+  std::istringstream iss(current_str);
+  if (!(iss >> val)) {
+    return EINVAL;
+  }
+
+  if (current_pwm) *current_pwm = val;
+  return 0;
+}
+
+rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value) {
+  int write_ret = WriteSysfsStr(path, value);
+  if (write_ret != 0) {
+    return SysfsWriteErrnoToRsmiStatus(write_ret);
+  }
+
+  // Commit by writing 'c'
+  write_ret = WriteSysfsStr(path, "c");
+  if (write_ret != 0) {
+    return SysfsWriteErrnoToRsmiStatus(write_ret);
+  }
+  return RSMI_STATUS_SUCCESS;
+}
+
 rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err) {
   // Map KFD ioctl errno to RSMI status
   // See rocm_smi_kfd_data_manager.cc for error sources

@@ -1239,6 +1239,14 @@ bool Device::populateOCLDeviceConstants() {
       }
     }
 
+    // For APU systems the SVM aperture can exceed actual physical RAM.
+    const size_t phys_mem = amd::Os::getPhysicalMemSize();
+    const uint apu_mem_percent =
+        ((phys_mem / Mi) > 1536 && IS_WINDOWS) ? 75 : 50;
+    const uint64_t apu_mem_limit = phys_mem * apu_mem_percent / 100;
+    info_.globalMemSize_ = std::min(info_.globalMemSize_,
+                                    static_cast<uint64_t>(apu_mem_limit));
+
     gpuvm_segment_max_alloc_ =
         uint64_t(info_.globalMemSize_ * std::min(GPU_SINGLE_ALLOC_PERCENT, 100u) / 100u);
     assert(gpuvm_segment_max_alloc_ > 0);
@@ -1271,14 +1279,17 @@ bool Device::populateOCLDeviceConstants() {
     }
   }
 
-  freeMem_ = info_.globalMemSize_;
-
   // Make sure the max allocation size is not larger than the available memory size.
   info_.maxMemAllocSize_ = std::min(info_.maxMemAllocSize_, info_.globalMemSize_);
   info_.maxMemAllocSize_ = amd::alignDown(info_.maxMemAllocSize_, sizeof(uint64_t));
 
   // Maximum system memory allocation size allowed
   info_.maxPhysicalMemAllocSize_ = amd::Os::getPhysicalMemSize();
+
+  // Mirror PAL: global memory should not exceed 4x max single alloc
+  info_.globalMemSize_ = std::min(4 * info_.maxMemAllocSize_, info_.globalMemSize_);
+
+  freeMem_ = info_.globalMemSize_;
 
   // make sure we don't run anything over 8 params for now
   info_.maxParameterSize_ = 1024;

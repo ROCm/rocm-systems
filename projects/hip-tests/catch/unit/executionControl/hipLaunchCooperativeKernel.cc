@@ -148,7 +148,7 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Negative_Parameters) {
                                                            reinterpret_cast<void*>(kernel), 1, 0));
     const unsigned int multiproc_count =
         GetDeviceAttribute(hipDeviceAttributeMultiprocessorCount, 0);
-    const unsigned int dim = std::ceil(std::cbrt(max_blocks * multiproc_count));
+    const unsigned int dim = std::ceil(std::cbrt(max_blocks * multiproc_count)) + 1u;
     HIP_CHECK_ERROR(hipLaunchCooperativeKernel(reinterpret_cast<void*>(kernel), dim3{dim, dim, dim},
                                                dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorCooperativeLaunchTooLarge);
