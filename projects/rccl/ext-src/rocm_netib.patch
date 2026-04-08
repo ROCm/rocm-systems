@@ -237,9 +237,9 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
    qpInitAttr.cap.max_recv_sge = 1;
 -  qpInitAttr.cap.max_inline_data = ncclParamIbUseInline() ? sizeof(struct ncclIbSendFifo) : 0;
 +  if (rcclCtsInlineData) {
-+    qpInitAttr.cap.max_inline_data = MAX_INLINE_DATA_SIZE;
++    qpInitAttr.cap.max_inline_data = NCCL_NET_IB_MAX_RECVS * MAX_INLINE_DATA_SIZE;
 +  } else {
-+    qpInitAttr.cap.max_inline_data = ncclIbUseInline ? sizeof(struct ncclIbSendFifo) : 0;
++    qpInitAttr.cap.max_inline_data = ncclIbUseInline ? NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSendFifo) : 0;
 +  }
    NCCLCHECK(wrap_ibv_create_qp(&qp->qp, base->pd, &qpInitAttr));
 +  if (rcclAinicRoce) {
