@@ -363,50 +363,71 @@ rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err) {
   }
 }
 
+// Helper function to read multi-line sysfs file into vector of strings
+static int ReadSysfsLines(const std::string& path, std::vector<std::string>* lines) {
+  auto is_regular_file_result = isRegularFile(path, nullptr);
+  if (is_regular_file_result != 0) {
+    return ENOENT;
+  }
+
+  std::ifstream fs(path);
+  if (!fs.is_open()) {
+    int ret = errno;
+    errno = 0;
+    std::ostringstream oss;
+    oss << __PRETTY_FUNCTION__ << " | Fail | Could not open file: " << path
+        << " | Returning: " << std::strerror(ret) << " |";
+    LOG_ERROR(oss);
+    return ret;
+  }
+
+  std::string line;
+  while (std::getline(fs, line)) {
+    lines->push_back(line);
+  }
+  fs.close();
+
+  std::ostringstream oss;
+  oss << "Successfully read " << lines->size() << " lines from SYSFS file (" << path << ")";
+  LOG_INFO(oss);
+  return 0;
+}
+
 int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max_pwm) {
   // Read fan_minimum_pwm sysfs file and parse OD_RANGE values.
-  // File format (newlines stripped by ReadSysfsStr):
-  //   "FAN_MINIMUM_PWM:<value>OD_RANGE:MINIMUM_PWM: <min> <max>"
-  std::string content;
-  int ret = ReadSysfsStr(path, &content);
+  // File format (multi-line):
+  //   FAN_MINIMUM_PWM:
+  //   <value>
+  //   OD_RANGE:
+  //   MINIMUM_PWM: <min> <max>
+  std::vector<std::string> lines;
+  int ret = ReadSysfsLines(path, &lines);
   if (ret != 0) {
     return ret;
   }
 
-  // Find "MINIMUM_PWM:" and parse the two values after it
-  auto pos = content.find("MINIMUM_PWM:");
-  if (pos == std::string::npos) {
+  if (lines.empty()) {
     return EINVAL;
   }
 
-  // Skip past the "MINIMUM_PWM:" that's part of "FAN_MINIMUM_PWM:"
-  // We want the one after "OD_RANGE:"
-  auto od_pos = content.find("OD_RANGE:");
-  if (od_pos == std::string::npos) {
+  // Use TextFileTagContents_t for structured parsing
+  amd::smi::TextFileTagContents_t parser(lines);
+  parser.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+      .structure_content();
+
+  // Check if OD_RANGE section exists with MINIMUM_PWM key
+  if (!parser.contains_structured_key("OD_RANGE:", "MINIMUM_PWM:")) {
     return EINVAL;
   }
 
-  pos = content.find("MINIMUM_PWM:", od_pos);
-  if (pos == std::string::npos) {
-    return EINVAL;
-  }
+  // Get "MINIMUM_PWM: <min> <max>" value
+  auto min_max_str = parser.get_structured_value_by_keys("OD_RANGE:", "MINIMUM_PWM:", false);
 
-  pos += strlen("MINIMUM_PWM:");
-  // Skip whitespace
-  while (pos < content.size() && content[pos] == ' ') pos++;
-
-  char* end = nullptr;
-  unsigned long val1 = strtoul(content.c_str() + pos, &end, 10);
-  if (end == content.c_str() + pos) {
-    return EINVAL;
-  }
-
-  // Skip whitespace
-  while (*end == ' ') end++;
-
-  char* end2 = nullptr;
-  unsigned long val2 = strtoul(end, &end2, 10);
-  if (end2 == end) {
+  // Parse the two numbers from the string
+  std::istringstream iss(min_max_str);
+  uint64_t val1, val2;
+  if (!(iss >> val1 >> val2)) {
     return EINVAL;
   }
 
@@ -417,23 +438,39 @@ int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max
 
 int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
   // Read fan_minimum_pwm sysfs file and parse the current FAN_MINIMUM_PWM value.
-  // File format (newlines stripped by ReadSysfsStr):
-  //   "FAN_MINIMUM_PWM:<value>OD_RANGE:MINIMUM_PWM: <min> <max>"
-  std::string content;
-  int ret = ReadSysfsStr(path, &content);
+  // File format (multi-line):
+  //   FAN_MINIMUM_PWM:
+  //   <value>
+  //   OD_RANGE:
+  //   MINIMUM_PWM: <min> <max>
+  std::vector<std::string> lines;
+  int ret = ReadSysfsLines(path, &lines);
   if (ret != 0) {
     return ret;
   }
 
-  auto pos = content.find("FAN_MINIMUM_PWM:");
-  if (pos == std::string::npos) {
+  if (lines.empty()) {
     return EINVAL;
   }
-  pos += strlen("FAN_MINIMUM_PWM:");
 
-  char* end = nullptr;
-  unsigned long val = strtoul(content.c_str() + pos, &end, 10);
-  if (end == content.c_str() + pos) {
+  // Use TextFileTagContents_t for structured parsing
+  amd::smi::TextFileTagContents_t parser(lines);
+  parser.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+      .structure_content();
+
+  // Check if FAN_MINIMUM_PWM section exists
+  if (!parser.contains_title_key("FAN_MINIMUM_PWM:")) {
+    return EINVAL;
+  }
+
+  // Get the first value under FAN_MINIMUM_PWM section
+  auto current_str = parser.get_structured_data_subkey_first("FAN_MINIMUM_PWM:");
+
+  // Parse the value
+  uint64_t val;
+  std::istringstream iss(current_str);
+  if (!(iss >> val)) {
     return EINVAL;
   }
 
