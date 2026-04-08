@@ -151,17 +151,33 @@ class CmdBuilder {
   virtual void BuildWaitRegMemCommand(CmdBuffer* cmdbuf, bool mem_space, uint64_t wait_addr,
                                       bool func_eq, uint32_t mask_val, uint32_t wait_val) = 0;
 
+  /// @brief Same as the above function but takes a Register object.
+  void BuildWaitRegMemCommand(CmdBuffer* cmdbuf, bool mem_space, const Register& wait_addr,
+                              bool func_eq, uint32_t mask_val, uint32_t wait_val) {
+    BuildWaitRegMemCommand(cmdbuf, mem_space, get_addr(wait_addr), func_eq, mask_val, wait_val);
+  }
+
   /// @brief Build CP command to program a Gpu register
   /// @param cmdbuf Pointer to command buffer to be appended
   /// @param addr Register to be programmed
   /// @param value Value to write into register
   virtual void BuildWriteUConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) = 0;
 
+  /// @brief Same as the above function but takes a Register object.
+  void BuildWriteUConfigRegPacket(CmdBuffer* cmdbuf, const Register& reg, uint32_t value) {
+    BuildWriteUConfigRegPacket(cmdbuf, get_addr(reg), value);
+  }
+
   /// @brief Build and copy WriteShReg command
   /// @param cmdbuf Pointer to command buffer to be appended
   /// @param addr Offset of the register
   /// @param value Value to write into register
   virtual void BuildWriteShRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) = 0;
+
+  /// @brief Same as the above function but takes a Register object.
+  void BuildWriteShRegPacket(CmdBuffer* cmdbuf, const Register& reg, uint32_t value) {
+    BuildWriteShRegPacket(cmdbuf, get_addr(reg), value);
+  }
 
   /// @brief Build a Gpu command that copies data from a specified
   /// source register to destination
@@ -179,6 +195,12 @@ class CmdBuilder {
   virtual void BuildCopyRegDataPacket(CmdBuffer* cmdbuf, uint64_t src_reg_addr,
                                       const void* dst_addr, uint32_t size, bool wait) {
     BuildCopyRegDataPacket(cmdbuf, uint32_t(src_reg_addr), dst_addr, size, wait);
+  }
+
+  /// @brief Same as the above function but takes a Register object.
+  void BuildCopyRegDataPacket(CmdBuffer* cmd, const Register& reg, const void* dst_addr,
+                              uint32_t size, bool wait) {
+    BuildCopyRegDataPacket(cmd, get_addr(reg), dst_addr, size, wait);
   }
 
   /// @brief Builds the Gpu command to reference indirectly a stream
@@ -233,6 +255,11 @@ class CmdBuilder {
   }
 
   virtual void BuildWriteConfigRegPacket(CmdBuffer* cmdbuf, uint32_t addr, uint32_t value) = 0;
+
+  /// @brief Same as the above function but takes a Register object.
+  void BuildWriteConfigRegPacket(CmdBuffer* cmdbuf, const Register& reg, uint32_t value) {
+    BuildWriteConfigRegPacket(cmdbuf, get_addr(reg), value);
+  }
 
  private:
   const reg_base_offset_table* const ip_offset_table;

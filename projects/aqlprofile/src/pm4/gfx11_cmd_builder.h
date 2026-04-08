@@ -389,14 +389,6 @@ class Gfx11CmdBuilder : public CmdBuilder {
 #endif
   }
 
-  void BuildWriteShRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value) {
-    BuildWriteShRegPacket(cmd, get_addr(reg), value);
-  }
-
-  void BuildWriteUConfigRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value) {
-    BuildWriteUConfigRegPacket(cmd, get_addr(reg), value);
-  }
-
   void BuildWritePConfigRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value) {
     BuildWritePConfigRegPacket(cmd, get_addr(reg), value);
   }
@@ -407,24 +399,11 @@ class Gfx11CmdBuilder : public CmdBuilder {
                                (mask & 1 << 1) ? get_addr(reg_hi) : 0, dst_addr, mask);
   }
 
-  void BuildWriteConfigRegPacket(CmdBuffer* cmd, const Register& reg, uint32_t value) {
-    BuildWriteConfigRegPacket(cmd, get_addr(reg), value);
-  }
-
-  void BuildWaitRegMemCommand(CmdBuffer* cmd, bool mem_space, const Register& wait_addr,
-                              bool func_eq, uint32_t mask_val, uint32_t wait_val) {
-    BuildWaitRegMemCommand(cmd, mem_space, get_addr(wait_addr), func_eq, mask_val, wait_val);
-  }
-
   void BuildWriteRegDataPacket(CmdBuffer* cmd, const Register& reg, const uint32_t* data,
                                uint32_t count, bool wait) {
     BuildWriteRegDataPacket(cmd, get_addr(reg), data, count, wait);
   }
 
-  void BuildCopyRegDataPacket(CmdBuffer* cmd, const Register& reg, const void* dst_addr,
-                              uint32_t size, bool wait) {
-    BuildCopyRegDataPacket(cmd, get_addr(reg), dst_addr, size, wait);
-  }
 };
 
 }  // namespace pm4_builder
