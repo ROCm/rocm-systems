@@ -4268,6 +4268,146 @@ class AMDSMICommands:
                             )
                 values_dict["throttle"] = throttle_status
 
+        # APU Metrics (version 2.4 and 3.0)
+        if "apu_metrics" in gpu_metric:
+            apu_metrics_dict = {}
+            apu = gpu_metric["apu_metrics"]
+
+            # Determine APU version
+            format_rev = gpu_metric.get("common_header.format_revision", "N/A")
+            content_rev = gpu_metric.get("common_header.content_revision", "N/A")
+            is_v24 = (format_rev == 2 and content_rev == 4)
+            is_v30 = (format_rev == 3 and content_rev == 0)
+            core_count = 8 if is_v24 else 16
+            l3_count = 2 if is_v24 else 0
+
+            # Temperature (convert from centi-Celsius to Celsius)
+            temp_dict = {}
+            if apu.get("temperature_gfx") != "N/A":
+                temp_dict["gfx"] = self.helpers.unit_format(
+                    self.logger, apu["temperature_gfx"] / 100.0, "°C"
+                )
+            if apu.get("temperature_soc") != "N/A":
+                temp_dict["soc"] = self.helpers.unit_format(
+                    self.logger, apu["temperature_soc"] / 100.0, "°C"
+                )
+            if apu.get("temperature_core") != "N/A":
+                temp_core = [t / 100.0 if t != "N/A" else "N/A" for t in apu["temperature_core"][:core_count]]
+                temp_dict["core"] = [self.helpers.unit_format(self.logger, t, "°C") for t in temp_core]
+            if is_v24 and apu.get("temperature_l3") != "N/A":
+                temp_l3 = [t / 100.0 if t != "N/A" else "N/A" for t in apu["temperature_l3"][:l3_count]]
+                temp_dict["l3"] = [self.helpers.unit_format(self.logger, t, "°C") for t in temp_l3]
+            if is_v30 and apu.get("temperature_skin") != "N/A":
+                temp_dict["skin"] = self.helpers.unit_format(
+                    self.logger, apu["temperature_skin"] / 100.0, "°C"
+                )
+            if temp_dict:
+                apu_metrics_dict["temperature"] = temp_dict
+
+            # Utilization
+            util_dict = {}
+            if apu.get("average_gfx_activity") != "N/A":
+                util_dict["gfx_activity"] = self.helpers.unit_format(
+                    self.logger, apu["average_gfx_activity"], "%"
+                )
+            if is_v24 and apu.get("average_mm_activity") != "N/A":
+                util_dict["mm_activity"] = self.helpers.unit_format(
+                    self.logger, apu["average_mm_activity"], "%"
+                )
+            if is_v30 and apu.get("average_vcn_activity") != "N/A":
+                util_dict["vcn_activity"] = self.helpers.unit_format(
+                    self.logger, apu["average_vcn_activity"], "%"
+                )
+            if is_v30 and apu.get("average_ipu_activity") != "N/A":
+                ipu_activity = apu["average_ipu_activity"]
+                util_dict["ipu_activity"] = [self.helpers.unit_format(self.logger, v, "%") for v in ipu_activity]
+            if is_v30 and apu.get("average_core_c0_activity") != "N/A":
+                core_c0 = apu["average_core_c0_activity"][:core_count]
+                util_dict["core_c0_activity"] = [self.helpers.unit_format(self.logger, v, "%") for v in core_c0]
+            if util_dict:
+                apu_metrics_dict["utilization"] = util_dict
+
+            # Power (convert from mW to W)
+            power_dict = {}
+            power_fields_mw = {
+                "socket_power": "average_socket_power_mw",
+                "gfx_power": "average_gfx_power_mw",
+            }
+            if is_v24:
+                power_fields_mw.update({
+                    "cpu_power": "average_cpu_power_mw",
+                    "soc_power": "average_soc_power_mw",
+                })
+            if is_v30:
+                power_fields_mw.update({
+                    "ipu_power": "average_ipu_power_mw",
+                    "apu_power": "average_apu_power_mw",
+                    "dgpu_power": "average_dgpu_power_mw",
+                    "all_core_power": "average_all_core_power_mw",
+                    "sys_power": "average_sys_power_mw",
+                })
+
+            for display_name, field_name in power_fields_mw.items():
+                if apu.get(field_name) != "N/A":
+                    power_dict[display_name] = self.helpers.unit_format(
+                        self.logger, apu[field_name] / 1000.0, "W"
+                    )
+
+            if apu.get("average_core_power_mw") != "N/A":
+                core_power = [p / 1000.0 if p != "N/A" else "N/A" for p in apu["average_core_power_mw"][:core_count]]
+                power_dict["core_power"] = [self.helpers.unit_format(self.logger, p, "W") for p in core_power]
+
+            if power_dict:
+                apu_metrics_dict["power"] = power_dict
+
+            # Clocks (already in MHz)
+            clock_dict = {}
+            clock_fields = ["gfxclk", "socclk", "uclk", "fclk", "vclk"]
+            if is_v24:
+                clock_fields.append("dclk")
+            if is_v30:
+                clock_fields.extend(["vpeclk", "ipuclk", "mpipu"])
+
+            for clk in clock_fields:
+                field_name = f"average_{clk}_frequency"
+                if apu.get(field_name) != "N/A":
+                    clock_dict[f"avg_{clk}"] = self.helpers.unit_format(
+                        self.logger, apu[field_name], "MHz"
+                    )
+
+            if is_v24:
+                current_clocks = ["gfxclk", "socclk", "uclk", "fclk", "vclk", "dclk"]
+                for clk in current_clocks:
+                    field_name = f"current_{clk}"
+                    if apu.get(field_name) != "N/A":
+                        clock_dict[f"cur_{clk}"] = self.helpers.unit_format(
+                            self.logger, apu[field_name], "MHz"
+                        )
+
+            if apu.get("current_coreclk") != "N/A":
+                core_clk = apu["current_coreclk"][:core_count]
+                clock_dict["core_clk"] = [self.helpers.unit_format(self.logger, c, "MHz") for c in core_clk]
+
+            if clock_dict:
+                apu_metrics_dict["clocks"] = clock_dict
+
+            # Throttle status
+            throttle_dict = {}
+            if is_v24 and apu.get("throttle_status") != "N/A":
+                throttle_dict["status"] = f"0x{apu['throttle_status']:08x}"
+            if is_v30:
+                throttle_fields = ["prochot", "spl", "fppt", "sppt", "thm_core", "thm_gfx", "thm_soc"]
+                for field in throttle_fields:
+                    field_name = f"throttle_residency_{field}"
+                    if apu.get(field_name) != "N/A":
+                        throttle_dict[field] = apu[field_name]
+
+            if throttle_dict:
+                apu_metrics_dict["throttle"] = throttle_dict
+
+            if apu_metrics_dict:
+                values_dict["apu_metrics"] = apu_metrics_dict
+
         # Store timestamp first if watching_output is enabled
         if watching_output:
             self.logger.store_output(args.gpu, "timestamp", int(time.time()))
