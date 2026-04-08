@@ -249,8 +249,6 @@ texture:
     tags: [texobj, image]
   Unit_TexObjectCreate_TypePitch2D_EdgeCases:
     <<: *level_2
-    # === the runtime is not really able to detect invalid device pointers a.t.m. ===
-    disabled: [amd_windows]
     tags: [texobj, image]
   Unit_hipGetTexObjectResourceDesc_positive:
     <<: *level_2
