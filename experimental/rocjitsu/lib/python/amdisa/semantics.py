@@ -208,11 +208,13 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     if name in _SPLIT_WAIT:
         return InstructionSemantics(name, 'wait_counter',
                                    operation=name[2:].lower())
-    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_BARRIER, S_ICACHE_INV,
+    # S_BARRIER: workgroup synchronization. Set WfState::BARRIER.
+    if name == 'S_BARRIER':
+        return InstructionSemantics(name, 'barrier')
+
+    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_ICACHE_INV,
     # S_INCPERFLEVEL, S_DECPERFLEVEL — all are either no-ops or system/debug
     # instructions that don't affect compute simulation correctness.
-    # Explicitly classifying them as 'nop' rather than falling through avoids
-    # accidental stub generation if new SOPP ops are added.
     return InstructionSemantics(name, 'nop')
 
 # Mnemonic stems (after stripping dtype) → (semantic_class, operation).
@@ -445,7 +447,7 @@ _VOP1_OP_MAP = {
     'V_CLREXCP': ('nop', None),
     'V_SAT_PK_U8_I16': ('nop', None),
     'V_SCREEN_PARTITION_4SE': ('nop', None),
-    'V_ACCVGPR_MOV': ('nop', None),
+    'V_ACCVGPR_MOV': ('vector_mov', None),
     'V_CVT_F32_FP8': ('vector_unary', 'cvt_f32_fp8'),
     'V_CVT_F32_BF8': ('vector_unary', 'cvt_f32_bf8'),
     'V_CVT_F32_BF16': ('vector_unary', 'cvt_f32_bf16'),
@@ -566,7 +568,15 @@ def _derive_vop2(name: str) -> InstructionSemantics | None:
         _, dtype = _split_dtype(name)
         return InstructionSemantics(name, 'vector_cndmask', data_type=dtype)
 
-    # ADD_CO / SUB_CO / etc. → vector_add_co
+    # RDNA carry-in variants: V_ADD_CO_CI_U32 = V_ADDC_CO_U32 equivalent.
+    # Check _CO_CI_ BEFORE the generic _CO_ pattern to avoid greedy match.
+    m = re.match(r'V_(ADD|SUB|SUBREV)_CO_CI_(\w+)', name)
+    if m:
+        ci_map = {'ADD': 'addc', 'SUB': 'subbc', 'SUBREV': 'subbrevco'}
+        return InstructionSemantics(name, 'vector_add_co',
+                                   operation=ci_map[m.group(1)],
+                                   data_type=_DTYPE_MAP.get(m.group(2)))
+    # ADD_CO / SUB_CO / ADDC_CO etc. → vector_add_co
     m = re.match(r'V_(ADD|SUB|SUBREV|ADDC|SUBB|SUBBREV)_CO_(\w+)', name)
     if m:
         op_raw, dt_raw = m.group(1), m.group(2)
@@ -1328,9 +1338,9 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     (was ``DS_CMPST``), which are handled by the atomic fallthrough.
     """
     upper = name.upper()
-    is_write = ('_WRITE_' in upper or '_WRITE2_' in upper
+    is_write = ('_WRITE_' in upper or '_WRITE2' in upper
                 or 'DS_STORE_' in upper or 'DS_STORE_2ADDR' in upper)
-    is_read = ('_READ_' in upper or '_READ2_' in upper
+    is_read = ('_READ_' in upper or '_READ2' in upper
                or 'DS_LOAD_' in upper or 'DS_LOAD_2ADDR' in upper)
     if is_write:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
@@ -1357,8 +1367,8 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         '_ADD_RTN_U32': ('add', 4, 1), '_ADD_RTN_U64': ('add', 8, 2),
         '_SUB_U32': ('sub', 4, 1), '_SUB_U64': ('sub', 8, 2),
         '_SUB_RTN_U32': ('sub', 4, 1), '_SUB_RTN_U64': ('sub', 8, 2),
-        '_RSUB_U32': ('sub', 4, 1), '_RSUB_U64': ('sub', 8, 2),
-        '_RSUB_RTN_U32': ('sub', 4, 1), '_RSUB_RTN_U64': ('sub', 8, 2),
+        '_RSUB_U32': ('rsub', 4, 1), '_RSUB_U64': ('rsub', 8, 2),
+        '_RSUB_RTN_U32': ('rsub', 4, 1), '_RSUB_RTN_U64': ('rsub', 8, 2),
         '_MIN_I32': ('smin', 4, 1), '_MIN_I64': ('smin', 8, 2),
         '_MIN_RTN_I32': ('smin', 4, 1), '_MIN_RTN_I64': ('smin', 8, 2),
         '_MIN_U32': ('umin', 4, 1), '_MIN_U64': ('umin', 8, 2),

@@ -4,6 +4,7 @@
 // This file was automatically generated. Do not modify.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/sopp.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -156,7 +157,9 @@ SBarrierSopp::SBarrierSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SBarrierSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBarrierSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_barrier_sopp(*this, wf);
+}
 
 SSetkillSopp::SSetkillSopp(const MachineInst *inst)
     : Sopp("s_setkill", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSetkillSopp>()),

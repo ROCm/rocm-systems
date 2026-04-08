@@ -1725,11 +1725,9 @@ SMulU64Sop2::SMulU64Sop2(const MachineInst *inst)
 }
 
 void SMulU64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t s0 = ssrc0.read_scalar(wf);
-  uint32_t s1 = ssrc1.read_scalar(wf);
-  (void)s1;
-  uint32_t result = s0; // TODO: op=mul
-  sdst.write_scalar(wf, result);
+  uint64_t s0 = ssrc0.read_scalar64(wf);
+  uint64_t s1 = ssrc1.read_scalar64(wf);
+  sdst.write_scalar64(wf, static_cast<uint64_t>(s0 * s1));
 }
 
 } // namespace rdna4

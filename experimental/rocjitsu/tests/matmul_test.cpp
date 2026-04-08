@@ -398,7 +398,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 4) - 1));
+                  ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   ((104 / 8) - 1));
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
@@ -464,7 +464,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 4) - 1));
+                  ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   ((104 / 8) - 1));
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);

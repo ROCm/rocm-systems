@@ -100,7 +100,7 @@ void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::RSUB;
   ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
@@ -479,9 +479,26 @@ DsWrite2st64B32Ds::DsWrite2st64B32Ds(const MachineInst *inst)
   src_operands_[2] = &data1;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void DsWrite2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsWrite2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
+}
 
 DsCmpstB32Ds::DsCmpstB32Ds(const MachineInst *inst)
     : Ds("ds_cmpst_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsCmpstB32Ds>()),
@@ -828,7 +845,7 @@ void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::RSUB;
   ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
@@ -1516,9 +1533,18 @@ DsRead2st64B32Ds::DsRead2st64B32Ds(const MachineInst *inst)
   src_operands_[0] = &addr;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void DsRead2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsRead2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = true;
+  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
     : Ds("ds_read_i8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsReadI8Ds>()),
@@ -1618,7 +1644,34 @@ DsSwizzleB32Ds::DsSwizzleB32Ds(const MachineInst *inst)
 }
 
 void DsSwizzleB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // DS swizzle: not yet implemented.
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);
+  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t src_lane;
+    if (offset & 0x8000) {
+      // QDMode: swizzle within 4-lane quads.
+      uint32_t and_mask = offset & 0x1F;
+      uint32_t or_mask = (offset >> 5) & 0x1F;
+      uint32_t xor_mask = (offset >> 10) & 0x1F;
+      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;
+      src_lane = (lane & ~0x3) | (src_lane & 0x3); // stay in quad
+    } else {
+      // BitMode: full-wave swizzle.
+      uint32_t and_mask = offset & 0x1F;
+      uint32_t or_mask = (offset >> 5) & 0x1F;
+      uint32_t xor_mask = (offset >> 10) & 0x1F;
+      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;
+    }
+    if (src_lane < wf.wf_size())
+      cu.write_vgpr(vb + inst_.vdst, lane, src_data[src_lane]);
+  }
 }
 
 DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
@@ -1635,7 +1688,20 @@ DsPermuteB32Ds::DsPermuteB32Ds(const MachineInst *inst)
 }
 
 void DsPermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // DS permute: not yet implemented.
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t vb = wf.vgpr_alloc().base;
+  // Pre-read all src0 (data0) values.
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, lane);
+    uint32_t src_lane = (addr_val / 4) % wf.wf_size();
+    cu.write_vgpr(vb + inst_.vdst, lane, src_data[src_lane]);
+  }
 }
 
 DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
@@ -1652,7 +1718,20 @@ DsBpermuteB32Ds::DsBpermuteB32Ds(const MachineInst *inst)
 }
 
 void DsBpermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // DS permute: not yet implemented.
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t vb = wf.vgpr_alloc().base;
+  // Pre-read all src0 (data0) values.
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, lane);
+    uint32_t src_lane = (addr_val / 4) % wf.wf_size();
+    cu.write_vgpr(vb + inst_.vdst, lane, src_data[src_lane]);
+  }
 }
 
 DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
@@ -1738,7 +1817,7 @@ void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::RSUB;
   ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
@@ -2141,9 +2220,28 @@ DsWrite2st64B64Ds::DsWrite2st64B64Ds(const MachineInst *inst)
   src_operands_[2] = &data1;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void DsWrite2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsWrite2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
+  }
+  set_data(std::move(d));
+}
 
 DsCmpstB64Ds::DsCmpstB64Ds(const MachineInst *inst)
     : Ds("ds_cmpst_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<DsCmpstB64Ds>()),
@@ -2575,7 +2673,7 @@ void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
-  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->atomic_op = amdgpu::AtomicOp::RSUB;
   ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
@@ -3250,9 +3348,18 @@ DsRead2st64B64Ds::DsRead2st64B64Ds(const MachineInst *inst)
   src_operands_[0] = &addr;
   num_src_ = 1;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void DsRead2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void DsRead2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = true;
+  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
     : Ds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
