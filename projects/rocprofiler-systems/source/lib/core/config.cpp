@@ -2791,7 +2791,7 @@ get_tmp_file(std::string _basename, std::string _ext)
     auto _pos         = _output_path.rfind('/');
     if(_pos != std::string::npos) _output_path = _output_path.substr(_pos + 1);
     if(_output_path.empty()) _output_path = "rocprofsys";
-    _cfg.subdirectory = fmt::format("{}/{}", _output_path, "%ppid%");
+    _cfg.subdirectory = fmt::format("{}/{}/", _output_path, "%ppid%");
     auto _fname =
         settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
 
