@@ -1,259 +1,259 @@
 ---
 performance:
-  Performance_hipEventCreate: *level_2
-  Performance_hipEventCreateWithFlags: *level_2
-  Performance_hipEventRecord: *level_2
-  Performance_hipEventDestroy: *level_2
-  Performance_hipEventSynchronize: *level_2
-  Performance_hipEventElapsedTime: *level_2
-  Performance_hipEventQuery: *level_2
-  Performance_Example: *level_2
-  Performance_Triple_Chevron: *level_2
-  Performance_hipLaunchKernel: *level_2
-  Performance_hipLaunchCooperativeKernel: *level_2
-  Performance_hipExtLaunchKernel: *level_2
+  Performance_hipEventCreate: *level_default
+  Performance_hipEventCreateWithFlags: *level_default
+  Performance_hipEventRecord: *level_default
+  Performance_hipEventDestroy: *level_default
+  Performance_hipEventSynchronize: *level_default
+  Performance_hipEventElapsedTime: *level_default
+  Performance_hipEventQuery: *level_default
+  Performance_Example: *level_default
+  Performance_Triple_Chevron: *level_default
+  Performance_hipLaunchKernel: *level_default
+  Performance_hipLaunchCooperativeKernel: *level_default
+  Performance_hipExtLaunchKernel: *level_default
   Performance_hipExtLaunchKernelGGL_QueryGPUFrequency:
-    <<: *level_2
+    <<: *level_default
     # Following tests disabled as it should be a local perf test
     disabled: [amd_linux, amd_windows, amd_wsl]
-  Performance_hipMemcpy_DeviceToHost: *level_2
-  Performance_hipMemcpy_HostToDevice: *level_2
-  Performance_hipMemcpy_HostToHost: *level_2
-  Performance_hipMemcpy_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpyAsync_DeviceToHost: *level_2
-  Performance_hipMemcpyAsync_HostToDevice: *level_2
-  Performance_hipMemcpyAsync_HostToHost: *level_2
-  Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpyAsync_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpyWithStream_DeviceToHost: *level_2
-  Performance_hipMemcpyWithStream_HostToDevice: *level_2
-  Performance_hipMemcpyWithStream_HostToHost: *level_2
-  Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpyWithStream_DeviceToDevice_EnablePeerAccess: *level_2
+  Performance_hipMemcpy_DeviceToHost: *level_default
+  Performance_hipMemcpy_HostToDevice: *level_default
+  Performance_hipMemcpy_HostToHost: *level_default
+  Performance_hipMemcpy_DeviceToDevice_EnablePeerAccess: *level_default
+  Performance_hipMemcpy_DeviceToDevice_DisablePeerAccess: *level_default
+  Performance_hipMemcpyAsync_DeviceToHost: *level_default
+  Performance_hipMemcpyAsync_HostToDevice: *level_default
+  Performance_hipMemcpyAsync_HostToHost: *level_default
+  Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess: *level_default
+  Performance_hipMemcpyAsync_DeviceToDevice_EnablePeerAccess: *level_default
+  Performance_hipMemcpyWithStream_DeviceToHost: *level_default
+  Performance_hipMemcpyWithStream_HostToDevice: *level_default
+  Performance_hipMemcpyWithStream_HostToHost: *level_default
+  Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess: *level_default
+  Performance_hipMemcpyWithStream_DeviceToDevice_EnablePeerAccess: *level_default
   Performance_hipMemcpyAtoH:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpyHtoA:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
-  Performance_hipMemcpyBatchAsync_D2D: *level_2
-  Performance_hipMemcpyBatchAsync_P2P: *level_2
-  Performance_hipMemcpyBatchAsync_H2D_Pageable: *level_2
-  Performance_hipMemcpyBatchAsync_H2D_Pinned: *level_2
-  Performance_hipMemcpyBatchAsync_D2H_Pageable: *level_2
-  Performance_hipMemcpyBatchAsync_D2H_Pinned: *level_2
-  Performance_hipMemcpyDtoD_PeerAccessEnabled: *level_2
-  Performance_hipMemcpyDtoD_PeerAccessDisabled: *level_2
-  Performance_hipMemcpyDtoDAsync_PeerAccessEnabled: *level_2
-  Performance_hipMemcpyDtoDAsync_PeerAccessDisabled: *level_2
-  Performance_hipMemcpyDtoH: *level_2
-  Performance_hipMemcpyDtoHAsync: *level_2
-  Performance_hipMemcpyHtoD: *level_2
-  Performance_hipMemcpyHtoDAsync: *level_2
-  Performance_hipMemcpyHtoDKernelDtoHV1Async: *level_2
-  Performance_hipMemcpyHtoDKernelDtoHV2Async: *level_2
-  Performance_hipMemcpyToSymbol_SingularValue: *level_2
-  Performance_hipMemcpyToSymbol_ArrayValue: *level_2
-  Performance_hipMemcpyToSymbol_WithOffset: *level_2
-  Performance_hipMemcpyToSymbolAsync_SingularValue: *level_2
-  Performance_hipMemcpyToSymbolAsync_ArrayValue: *level_2
-  Performance_hipMemcpyToSymbolAsync_WithOffset: *level_2
-  Performance_hipMemcpyFromSymbol_SingularValue: *level_2
-  Performance_hipMemcpyFromSymbol_ArrayValue: *level_2
-  Performance_hipMemcpyFromSymbol_WithOffset: *level_2
-  Performance_hipMemcpyFromSymbolAsync_SingularValue: *level_2
-  Performance_hipMemcpyFromSymbolAsync_ArrayValue: *level_2
-  Performance_hipMemcpyFromSymbolAsync_WithOffset: *level_2
-  Performance_hipMemcpy2D_DeviceToHost: *level_2
-  Performance_hipMemcpy2D_HostToDevice: *level_2
+  Performance_hipMemcpyBatchAsync_D2D: *level_default
+  Performance_hipMemcpyBatchAsync_P2P: *level_default
+  Performance_hipMemcpyBatchAsync_H2D_Pageable: *level_default
+  Performance_hipMemcpyBatchAsync_H2D_Pinned: *level_default
+  Performance_hipMemcpyBatchAsync_D2H_Pageable: *level_default
+  Performance_hipMemcpyBatchAsync_D2H_Pinned: *level_default
+  Performance_hipMemcpyDtoD_PeerAccessEnabled: *level_default
+  Performance_hipMemcpyDtoD_PeerAccessDisabled: *level_default
+  Performance_hipMemcpyDtoDAsync_PeerAccessEnabled: *level_default
+  Performance_hipMemcpyDtoDAsync_PeerAccessDisabled: *level_default
+  Performance_hipMemcpyDtoH: *level_default
+  Performance_hipMemcpyDtoHAsync: *level_default
+  Performance_hipMemcpyHtoD: *level_default
+  Performance_hipMemcpyHtoDAsync: *level_default
+  Performance_hipMemcpyHtoDKernelDtoHV1Async: *level_default
+  Performance_hipMemcpyHtoDKernelDtoHV2Async: *level_default
+  Performance_hipMemcpyToSymbol_SingularValue: *level_default
+  Performance_hipMemcpyToSymbol_ArrayValue: *level_default
+  Performance_hipMemcpyToSymbol_WithOffset: *level_default
+  Performance_hipMemcpyToSymbolAsync_SingularValue: *level_default
+  Performance_hipMemcpyToSymbolAsync_ArrayValue: *level_default
+  Performance_hipMemcpyToSymbolAsync_WithOffset: *level_default
+  Performance_hipMemcpyFromSymbol_SingularValue: *level_default
+  Performance_hipMemcpyFromSymbol_ArrayValue: *level_default
+  Performance_hipMemcpyFromSymbol_WithOffset: *level_default
+  Performance_hipMemcpyFromSymbolAsync_SingularValue: *level_default
+  Performance_hipMemcpyFromSymbolAsync_ArrayValue: *level_default
+  Performance_hipMemcpyFromSymbolAsync_WithOffset: *level_default
+  Performance_hipMemcpy2D_DeviceToHost: *level_default
+  Performance_hipMemcpy2D_HostToDevice: *level_default
   Performance_hipMemcpy2D_HostToHost:
-    <<: *level_2
+    <<: *level_default
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Performance_hipMemcpy2D_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy2D_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy2DAsync_DeviceToHost: *level_2
-  Performance_hipMemcpy2DAsync_HostToDevice: *level_2
+  Performance_hipMemcpy2D_DeviceToDevice_DisablePeerAccess: *level_default
+  Performance_hipMemcpy2D_DeviceToDevice_EnablePeerAccess: *level_default
+  Performance_hipMemcpy2DAsync_DeviceToHost: *level_default
+  Performance_hipMemcpy2DAsync_HostToDevice: *level_default
   Performance_hipMemcpy2DAsync_HostToHost:
-    <<: *level_2
+    <<: *level_default
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Performance_hipMemcpy2DAsync_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy2DAsync_DeviceToDevice_EnablePeerAccess: *level_2
+  Performance_hipMemcpy2DAsync_DeviceToDevice_DisablePeerAccess: *level_default
+  Performance_hipMemcpy2DAsync_DeviceToDevice_EnablePeerAccess: *level_default
   Performance_hipMemcpy2DToArray_HostToDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DToArray_DeviceToDevice_DisablePeerAccess:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DToArray_DeviceToDevice_EnablePeerAccess:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DToArrayAsync_HostToDevice:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DToArrayAsync_DeviceToDevice_DisablePeerAccess:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DToArrayAsync_DeviceToDevice_EnablePeerAccess:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DFromArray_DeviceToHost:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DFromArray_DeviceToDevice_EnablePeerAccess:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DFromArrayAsync_DeviceToHost:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_DisablePeerAccess:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
   Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_EnablePeerAccess:
-    <<: *level_2
+    <<: *level_default
     tags: [image]
-  Performance_hipMemcpyParam2D_DeviceToHost: *level_2
-  Performance_hipMemcpyParam2D_HostToDevice: *level_2
-  Performance_hipMemcpyParam2D_HostToHost: *level_2
-  Performance_hipMemcpyParam2D_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpyParam2D_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpyParam2DAsync_DeviceToHost: *level_2
-  Performance_hipMemcpyParam2DAsync_HostToDevice: *level_2
-  Performance_hipMemcpyParam2DAsync_HostToHost: *level_2
-  Performance_hipMemcpyParam2DAsync_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpyParam2DAsync_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy3D_DeviceToHost: *level_2
-  Performance_hipMemcpy3D_HostToDevice: *level_2
-  Performance_hipMemcpy3D_HostToHost: *level_2
-  Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy3D_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy3DAsync_DeviceToHost: *level_2
-  Performance_hipMemcpy3DAsync_HostToDevice: *level_2
-  Performance_hipMemcpy3DAsync_HostToHost: *level_2
-  Performance_hipMemcpy3DAsync_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy3DAsync_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemset: *level_2
-  Performance_hipMemsetAsync: *level_2
-  Performance_hipMemsetD8: *level_2
-  Performance_hipMemsetD8Async: *level_2
+  Performance_hipMemcpyParam2D_DeviceToHost: *level_default
+  Performance_hipMemcpyParam2D_HostToDevice: *level_default
+  Performance_hipMemcpyParam2D_HostToHost: *level_default
+  Performance_hipMemcpyParam2D_DeviceToDevice_DisablePeerAccess: *level_default
+  Performance_hipMemcpyParam2D_DeviceToDevice_EnablePeerAccess: *level_default
+  Performance_hipMemcpyParam2DAsync_DeviceToHost: *level_default
+  Performance_hipMemcpyParam2DAsync_HostToDevice: *level_default
+  Performance_hipMemcpyParam2DAsync_HostToHost: *level_default
+  Performance_hipMemcpyParam2DAsync_DeviceToDevice_DisablePeerAccess: *level_default
+  Performance_hipMemcpyParam2DAsync_DeviceToDevice_EnablePeerAccess: *level_default
+  Performance_hipMemcpy3D_DeviceToHost: *level_default
+  Performance_hipMemcpy3D_HostToDevice: *level_default
+  Performance_hipMemcpy3D_HostToHost: *level_default
+  Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess: *level_default
+  Performance_hipMemcpy3D_DeviceToDevice_EnablePeerAccess: *level_default
+  Performance_hipMemcpy3DAsync_DeviceToHost: *level_default
+  Performance_hipMemcpy3DAsync_HostToDevice: *level_default
+  Performance_hipMemcpy3DAsync_HostToHost: *level_default
+  Performance_hipMemcpy3DAsync_DeviceToDevice_DisablePeerAccess: *level_default
+  Performance_hipMemcpy3DAsync_DeviceToDevice_EnablePeerAccess: *level_default
+  Performance_hipMemset: *level_default
+  Performance_hipMemsetAsync: *level_default
+  Performance_hipMemsetD8: *level_default
+  Performance_hipMemsetD8Async: *level_default
   Performance_hipMemsetD16:
-    <<: *level_2
+    <<: *level_default
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
   Performance_hipMemsetD16Async:
-    <<: *level_2
+    <<: *level_default
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
   Performance_hipMemsetD32:
-    <<: *level_2
+    <<: *level_default
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
   Performance_hipMemsetD32Async:
-    <<: *level_2
+    <<: *level_default
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-  Performance_hipMemset2D: *level_2
-  Performance_hipMemset2DAsync: *level_2
-  Performance_hipMemset3D: *level_2
-  Performance_hipMemset3DAsync: *level_2
-  Performance_hipStreamWaitEvent: *level_2
-  Performance_hipStreamGetFlags: *level_2
-  Performance_hipStreamGetPriority: *level_2
-  Performance_hipExtStreamCreateWithCUMask: *level_2
-  Performance_hipExtStreamGetCUMask: *level_2
-  Performance_hipStreamAddCallback: *level_2
-  Performance_hipStreamWaitValue32: *level_2
-  Performance_hipStreamWaitValue64: *level_2
-  Performance_hipStreamWriteValue32: *level_2
-  Performance_hipStreamWriteValue64: *level_2
-  Performance_hipMallocAsync: *level_2
-  Performance_hipFreeAsync: *level_2
-  Performance_hipMemPoolCreate: *level_2
-  Performance_hipMemPoolDestroy: *level_2
-  Performance_hipMemPoolTrimTo: *level_2
-  Performance_hipMemPoolSetAttribute: *level_2
-  Performance_hipMemPoolGetAttribute: *level_2
-  Performance_hipMemPoolSetAccess: *level_2
-  Performance_hipMallocFromPoolAsync: *level_2
-  Performance_hipMemPoolExportToShareableHandle: *level_2
-  Performance_hipMemPoolGetAccess: *level_2
-  Performance_hipMemPoolImportFromShareableHandle: *level_2
-  Performance_hipMemPoolExportPointer: *level_2
-  Performance_hipMemPoolImportPointer: *level_2
-  Performance_hipStreamCreate: *level_2
-  Performance_hipStreamCreateWithFlags: *level_2
-  Performance_hipStreamCreateWithPriority: *level_2
-  Performance_hipStreamDestroy: *level_2
-  Performance_hipDeviceGetStreamPriorityRange: *level_2
-  Performance_hipStreamQuery: *level_2
-  Performance_hipStreamSynchronize: *level_2
-  Performance_Reduce_Sync_Add: *level_2
-  Performance_Reduce_Sync_Min: *level_2
-  Performance_Reduce_Sync_Max: *level_2
-  Performance_Reduce_Sync_And: *level_2
-  Performance_Reduce_Sync_Or: *level_2
-  Performance_Reduce_Sync_Xor: *level_2
-  Performance_hipPerfDotProduct: *level_2
-  Performance_hipPerfMandelbrot: *level_2
-  Performance_hipPerfDispatchAndExecutionSpeed: *level_2
-  Performance_hipKernelLookup: *level_2
-  Performance_hipEventOverflow: *level_2
-  Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations: *level_2
-  Performance_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps: *level_2
-  Performance_GraphWithMoreAllocFreeNodes_MultipleBranches: *level_2
-  Performance_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches: *level_2
-  Performance_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnLaunch: *level_2
-  Performance_hipGraph_ParallelGraph: *level_2
-  Performance_hipGraph_WithStreamOperations: *level_2
-  Performance_hipGraph_WithStreamCapture: *level_2
-  Performance_GraphTopology_Straight: *level_2
-  Performance_GraphTopology_Parallel: *level_2
-  Performance_GraphTopology_Hexagon: *level_2
-  Performance_GraphTopology_Mixed: *level_2
-  Performance_PyFR_Couette_IndividualGraphs: *level_2
-  Performance_PyFR_Couette_StepSimulation: *level_2
-  Performance_PyFR_Couette_SingleIteration: *level_2
-  Performance_hipPerfMemcpy_test: *level_2
-  Performance_hipPerfBufferCopyRectSpeed_test: *level_2
-  Performance_hipPerfBufferCopySpeed_test: *level_2
-  Performance_hipPerfDevMemReadSpeed_test: *level_2
-  Performance_hipPerfDevMemWriteSpeed_test: *level_2
-  Performance_hipPerfMemFill_test: *level_2
-  Performance_hipPerfMemMallocCpyFree_test: *level_2
-  Performance_hipPerfMemset_test: *level_2
-  Performance_hipPerfSampleRate_test: *level_2
-  Performance_hipPerfSharedMemReadSpeed_test: *level_2
-  Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_CPU: *level_2
-  Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU: *level_2
-  Performance_hipTestP2PUniDirKernelCopy_test_Timing_CPU: *level_2
-  Performance_hipTestP2PUniDirKernelCopy_test_Timing_GPU: *level_2
-  Performance_hipTestP2PBiDirMemcpyAsync_test: *level_2
-  Performance_hipTestP2PBiDirKernelCopy_test: *level_2
-  Performance_hipCheckP2PSupport: *level_2
-  Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_remotes_to_local: *level_2
-  Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_local_to_remotes: *level_2
-  Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_remotes_to_local: *level_2
-  Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_local_to_remotes: *level_2
-  Performance_PerfBufferCopySpeedAll2One_test_hipMemcpyPeerAsync_remotes_to_local: *level_2
-  Performance_PerfBufferCopySpeedOne2All_test_hipMemcpyPeerAsync_local_to_remotes: *level_2
-  Performance_PerfBufferCopySpeedAll2One_test_kernel_copy_remotes_to_local: *level_2
-  Performance_PerfBufferCopySpeedOne2All_test_kernel_copy_local_to_remotes: *level_2
-  Performance_MempoolManager_hipMallocAsync_hipFreeAsync: *level_2
-  Performance_DeviceHeapMemoryAllocation: *level_2
-  Performance_PerfBufferCopySpeedAll2All_Inter_GPU: *level_2
-  Performance_hipPerfMemcpyAsyncSpeed_test: *level_2
-  Performance_hipPerfMemsetAsyncSpeed_test: *level_2
-  Performance_hipPerfHostNumaAlloc_test: *level_2
-  Performance_hipPerfDeviceConcurrency: *level_2
-  Performance_hipPerfStreamConcurrency: *level_2
-  Performance_hipPerfStreamCreateCopyDestroy: *level_2
-  Performance_KernelLaunchLatency_IncreasingNumberOfStreams: *level_2
-  Performance_hipPerfMultiStreamKernelLaunch: *level_2
-  Performance_hipPerfVMMAllocSpeed_test: *level_2
-  Performance_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU: *level_2
-  Performance_Graph_CollapseCorrectness: *level_2
+  Performance_hipMemset2D: *level_default
+  Performance_hipMemset2DAsync: *level_default
+  Performance_hipMemset3D: *level_default
+  Performance_hipMemset3DAsync: *level_default
+  Performance_hipStreamWaitEvent: *level_default
+  Performance_hipStreamGetFlags: *level_default
+  Performance_hipStreamGetPriority: *level_default
+  Performance_hipExtStreamCreateWithCUMask: *level_default
+  Performance_hipExtStreamGetCUMask: *level_default
+  Performance_hipStreamAddCallback: *level_default
+  Performance_hipStreamWaitValue32: *level_default
+  Performance_hipStreamWaitValue64: *level_default
+  Performance_hipStreamWriteValue32: *level_default
+  Performance_hipStreamWriteValue64: *level_default
+  Performance_hipMallocAsync: *level_default
+  Performance_hipFreeAsync: *level_default
+  Performance_hipMemPoolCreate: *level_default
+  Performance_hipMemPoolDestroy: *level_default
+  Performance_hipMemPoolTrimTo: *level_default
+  Performance_hipMemPoolSetAttribute: *level_default
+  Performance_hipMemPoolGetAttribute: *level_default
+  Performance_hipMemPoolSetAccess: *level_default
+  Performance_hipMallocFromPoolAsync: *level_default
+  Performance_hipMemPoolExportToShareableHandle: *level_default
+  Performance_hipMemPoolGetAccess: *level_default
+  Performance_hipMemPoolImportFromShareableHandle: *level_default
+  Performance_hipMemPoolExportPointer: *level_default
+  Performance_hipMemPoolImportPointer: *level_default
+  Performance_hipStreamCreate: *level_default
+  Performance_hipStreamCreateWithFlags: *level_default
+  Performance_hipStreamCreateWithPriority: *level_default
+  Performance_hipStreamDestroy: *level_default
+  Performance_hipDeviceGetStreamPriorityRange: *level_default
+  Performance_hipStreamQuery: *level_default
+  Performance_hipStreamSynchronize: *level_default
+  Performance_Reduce_Sync_Add: *level_default
+  Performance_Reduce_Sync_Min: *level_default
+  Performance_Reduce_Sync_Max: *level_default
+  Performance_Reduce_Sync_And: *level_default
+  Performance_Reduce_Sync_Or: *level_default
+  Performance_Reduce_Sync_Xor: *level_default
+  Performance_hipPerfDotProduct: *level_default
+  Performance_hipPerfMandelbrot: *level_default
+  Performance_hipPerfDispatchAndExecutionSpeed: *level_default
+  Performance_hipKernelLookup: *level_default
+  Performance_hipEventOverflow: *level_default
+  Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations: *level_default
+  Performance_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps: *level_default
+  Performance_GraphWithMoreAllocFreeNodes_MultipleBranches: *level_default
+  Performance_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches: *level_default
+  Performance_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnLaunch: *level_default
+  Performance_hipGraph_ParallelGraph: *level_default
+  Performance_hipGraph_WithStreamOperations: *level_default
+  Performance_hipGraph_WithStreamCapture: *level_default
+  Performance_GraphTopology_Straight: *level_default
+  Performance_GraphTopology_Parallel: *level_default
+  Performance_GraphTopology_Hexagon: *level_default
+  Performance_GraphTopology_Mixed: *level_default
+  Performance_PyFR_Couette_IndividualGraphs: *level_default
+  Performance_PyFR_Couette_StepSimulation: *level_default
+  Performance_PyFR_Couette_SingleIteration: *level_default
+  Performance_hipPerfMemcpy_test: *level_default
+  Performance_hipPerfBufferCopyRectSpeed_test: *level_default
+  Performance_hipPerfBufferCopySpeed_test: *level_default
+  Performance_hipPerfDevMemReadSpeed_test: *level_default
+  Performance_hipPerfDevMemWriteSpeed_test: *level_default
+  Performance_hipPerfMemFill_test: *level_default
+  Performance_hipPerfMemMallocCpyFree_test: *level_default
+  Performance_hipPerfMemset_test: *level_default
+  Performance_hipPerfSampleRate_test: *level_default
+  Performance_hipPerfSharedMemReadSpeed_test: *level_default
+  Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_CPU: *level_default
+  Performance_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU: *level_default
+  Performance_hipTestP2PUniDirKernelCopy_test_Timing_CPU: *level_default
+  Performance_hipTestP2PUniDirKernelCopy_test_Timing_GPU: *level_default
+  Performance_hipTestP2PBiDirMemcpyAsync_test: *level_default
+  Performance_hipTestP2PBiDirKernelCopy_test: *level_default
+  Performance_hipCheckP2PSupport: *level_default
+  Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_remotes_to_local: *level_default
+  Performance_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_local_to_remotes: *level_default
+  Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_remotes_to_local: *level_default
+  Performance_PerfBufferCopySpeedAll2All_test_kernel_copy_local_to_remotes: *level_default
+  Performance_PerfBufferCopySpeedAll2One_test_hipMemcpyPeerAsync_remotes_to_local: *level_default
+  Performance_PerfBufferCopySpeedOne2All_test_hipMemcpyPeerAsync_local_to_remotes: *level_default
+  Performance_PerfBufferCopySpeedAll2One_test_kernel_copy_remotes_to_local: *level_default
+  Performance_PerfBufferCopySpeedOne2All_test_kernel_copy_local_to_remotes: *level_default
+  Performance_MempoolManager_hipMallocAsync_hipFreeAsync: *level_default
+  Performance_DeviceHeapMemoryAllocation: *level_default
+  Performance_PerfBufferCopySpeedAll2All_Inter_GPU: *level_default
+  Performance_hipPerfMemcpyAsyncSpeed_test: *level_default
+  Performance_hipPerfMemsetAsyncSpeed_test: *level_default
+  Performance_hipPerfHostNumaAlloc_test: *level_default
+  Performance_hipPerfDeviceConcurrency: *level_default
+  Performance_hipPerfStreamConcurrency: *level_default
+  Performance_hipPerfStreamCreateCopyDestroy: *level_default
+  Performance_KernelLaunchLatency_IncreasingNumberOfStreams: *level_default
+  Performance_hipPerfMultiStreamKernelLaunch: *level_default
+  Performance_hipPerfVMMAllocSpeed_test: *level_default
+  Performance_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU: *level_default
+  Performance_Graph_CollapseCorrectness: *level_default

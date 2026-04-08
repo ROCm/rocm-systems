@@ -50,7 +50,7 @@ def parse_args():
 def create_test_definition(
     group, case_name, case_config, platform, os_name, arch, asan=False
 ):
-    level = case_config.get("level", 2)
+    levels = case_config.get("level", [0, 1, 2])
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
 
@@ -58,7 +58,8 @@ def create_test_definition(
 
     for tag in tags:
         tags_str += f"[{tag}]"
-    tags_str += f"[level_{level}]"
+    for level in levels:
+        tags_str += f"[level_{level}]"
     tags_str += f"[{group}]"
 
     if (
