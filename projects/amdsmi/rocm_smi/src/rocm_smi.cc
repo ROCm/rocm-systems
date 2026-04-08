@@ -3596,15 +3596,16 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
     rsmi_status_t od_ret = amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(speed));
     if (od_ret != RSMI_STATUS_SUCCESS) {
       // If write/commit fails, attempt to reset to automatic control
-      rsmi_status_t reset_ret = amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(od_min_pwm));
+      rsmi_status_t reset_ret =
+          amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(od_min_pwm));
       if (reset_ret != RSMI_STATUS_SUCCESS) {
-        ss << __PRETTY_FUNCTION__ << " | Failed to set fan speed " << speed
-           << " (error: " << od_ret << ") and recovery reset to " << od_min_pwm
-           << " also failed (error: " << reset_ret << ")";
+        ss << __PRETTY_FUNCTION__ << " | Failed to set fan speed " << speed << " (error: " << od_ret
+           << ") and recovery reset to " << od_min_pwm << " also failed (error: " << reset_ret
+           << ")";
         LOG_ERROR(ss);
       } else {
-        ss << __PRETTY_FUNCTION__ << " | Failed to set fan speed " << speed
-           << " (error: " << od_ret << "), successfully reset to minimum " << od_min_pwm;
+        ss << __PRETTY_FUNCTION__ << " | Failed to set fan speed " << speed << " (error: " << od_ret
+           << "), successfully reset to minimum " << od_min_pwm;
         LOG_WARN(ss);
       }
     }

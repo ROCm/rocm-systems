@@ -150,11 +150,12 @@ def has_gpu_od_interface(bdf):
         bool: True if gpu_od directory exists for this GPU
     """
     # Add amdsmi_cli to path for import
-    cli_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'amdsmi_cli')
+    cli_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "amdsmi_cli")
     if cli_path not in sys.path:
         sys.path.insert(0, cli_path)
 
     from amdsmi_helpers import AMDSMIHelpers
+
     has_gpu_od, _ = AMDSMIHelpers.detect_gpu_od(bdf)
     return has_gpu_od
 
