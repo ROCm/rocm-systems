@@ -1281,6 +1281,45 @@ bool KernelBlitManager::createProgram(Device& device) {
   return result;
 }
 
+// ================================================================================================
+bool KernelBlitManager::runGraphScheduler(
+    void* cmd_buffer, uint32_t total_packet_count, void* queue_ptr) const {
+  if (kernels_[GraphScheduler] == nullptr) {
+    return false;
+  }
+
+  hsa_queue_t* q = reinterpret_cast<hsa_queue_t*>(queue_ptr);
+  auto* aq = reinterpret_cast<amd_queue_t*>(queue_ptr);
+
+  // Pack 7 parameters into kernarg struct
+  auto* params = reinterpret_cast<uint64_t*>(
+      gpu().allocKernArg(7 * sizeof(uint64_t), kCBAlignment));
+  params[0] = reinterpret_cast<uint64_t>(cmd_buffer);
+  params[1] = static_cast<uint64_t>(total_packet_count);
+  params[2] = reinterpret_cast<uint64_t>(q->base_address);
+  params[3] = static_cast<uint64_t>(q->size);
+  params[4] = reinterpret_cast<uint64_t>(&aq->write_dispatch_id);
+  params[5] = reinterpret_cast<uint64_t>(&aq->read_dispatch_id);
+  params[6] = static_cast<uint64_t>(q->doorbell_signal.handle);
+
+  constexpr bool kDirectVa = true;
+  setArgument(kernels_[GraphScheduler], 0, sizeof(cl_mem), params, 0, nullptr, kDirectVa);
+
+  size_t globalWorkOffset[1] = {0};
+  size_t globalWorkSize[1] = {1};
+  size_t localWorkSize[1] = {1};
+  amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
+
+  printf("[runGraphScheduler] capturing arguments...\n");
+  address parameters = captureArguments(kernels_[GraphScheduler]);
+  printf("[runGraphScheduler] parameters=%p, submitting kernel...\n", (void*)parameters);
+  bool result = gpu().submitKernelInternal(ndrange, *kernels_[GraphScheduler], parameters, nullptr);
+  printf("[runGraphScheduler] submitKernelInternal returned %d\n", result);
+  releaseArguments(parameters);
+
+  return result;
+}
+
 // The following data structures will be used for the view creations.
 // Some formats has to be converted before a kernel blit operation
 struct FormatConvertion {

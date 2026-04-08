@@ -611,6 +611,8 @@ class VirtualGPU : public device::VirtualDevice {
   //! Release current HW queue and acquire a new one, avoiding queues with IDs in the excluded set
   bool ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) override;
 
+  bool runGraphSchedulerKernel(void* cmd_buffer, uint32_t packet_count) override;
+
   // Return pointer to PrintfDbg
   PrintfDbg* printfDbg() const { return printfdbg_; }
 
