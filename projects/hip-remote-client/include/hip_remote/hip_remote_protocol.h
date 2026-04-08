@@ -1520,6 +1520,7 @@ typedef struct HIP_PACKED_ATTR {
  */
 typedef struct HIP_PACKED_ATTR {
     uint64_t data_size;       /**< Size of code object data */
+    uint64_t vhandle;         /**< Client-assigned virtual module handle (0 = legacy sync) */
     /* Code object data follows */
 } HipRemoteModuleLoadRequest;
 
@@ -1536,6 +1537,7 @@ typedef struct HIP_PACKED_ATTR {
 /* HIP_OP_MODULE_GET_FUNCTION */
 typedef struct HIP_PACKED_ATTR {
     uint64_t module;
+    uint64_t vhandle;         /**< Client-assigned virtual function handle (0 = sync) */
     char function_name[1024];
 } HipRemoteModuleGetFunctionRequest;
 
@@ -1560,6 +1562,8 @@ typedef struct HIP_PACKED_ATTR {
 typedef struct HIP_PACKED_ATTR {
     uint32_t name_length;
     uint32_t _pad;
+    uint64_t vmodule;         /**< Client-assigned virtual module handle (0 = legacy sync) */
+    uint64_t vfunc;           /**< Client-assigned virtual function handle (0 = legacy sync) */
 } HipRemoteModuleLoadAndGetFunctionRequest;
 
 typedef struct HIP_PACKED_ATTR {

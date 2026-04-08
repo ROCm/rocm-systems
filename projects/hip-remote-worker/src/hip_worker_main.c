@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright 2025 Advanced Micro Devices, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -3489,7 +3489,7 @@ static void handle_func_get_attributes(int fd, uint32_t request_id,
     }
 
     const HipRemoteFuncGetAttributesRequest* req = (const HipRemoteFuncGetAttributesRequest*)payload;
-    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
+    hipFunction_t func = vaddr_translate(req->function);
 
     hipFuncAttributes attr;
     hipError_t err = hipFuncGetAttributes(&attr, (const void*)func);
@@ -3520,7 +3520,7 @@ static void handle_func_set_attribute(int fd, uint32_t request_id,
     }
 
     const HipRemoteFuncSetAttributeRequest* req = (const HipRemoteFuncSetAttributeRequest*)payload;
-    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
+    hipFunction_t func = vaddr_translate(req->function);
     hipFunction_attribute attr = (hipFunction_attribute)req->attribute;
 
     hipError_t err = hipFuncSetAttribute((const void*)func, attr, req->value);
@@ -3538,7 +3538,7 @@ static void handle_func_set_cache_config(int fd, uint32_t request_id,
     }
 
     const HipRemoteFuncSetCacheConfigRequest* req = (const HipRemoteFuncSetCacheConfigRequest*)payload;
-    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
+    hipFunction_t func = vaddr_translate(req->function);
     hipFuncCache_t cache_config = (hipFuncCache_t)req->cache_config;
 
     hipError_t err = hipFuncSetCacheConfig((const void*)func, cache_config);
@@ -3561,7 +3561,7 @@ static void handle_occupancy_max_potential_block_size(int fd, uint32_t request_i
 
     const HipRemoteOccupancyMaxPotentialBlockSizeRequest* req =
         (const HipRemoteOccupancyMaxPotentialBlockSizeRequest*)payload;
-    hipFunction_t f = (hipFunction_t)(uintptr_t)req->function;
+    hipFunction_t f = vaddr_translate(req->function);
 
     int min_grid_size = 0, block_size = 0;
     hipError_t err = hipOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size,
@@ -3587,7 +3587,7 @@ static void handle_occupancy_max_active_blocks_per_sm(int fd, uint32_t request_i
 
     const HipRemoteOccupancyMaxActiveBlocksPerSMRequest* req =
         (const HipRemoteOccupancyMaxActiveBlocksPerSMRequest*)payload;
-    hipFunction_t f = (hipFunction_t)(uintptr_t)req->function;
+    hipFunction_t f = vaddr_translate(req->function);
 
     int num_blocks = 0;
     hipError_t err = hipOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks, f,
@@ -3981,18 +3981,22 @@ static void handle_module_load_data(int fd, uint32_t request_id,
 
     if (err == hipSuccess && module != NULL) {
         store_module_data(module, code_data, code_size);
-        if (g_debug_enabled && code_size >= 16) {
-            const uint8_t* b = (const uint8_t*)code_data;
-            fprintf(stderr, "[HIP-Worker] ModuleLoadData first 16 bytes: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
-                    b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+        if (req->vhandle) {
+            vaddr_map_put(req->vhandle, (uint64_t)(uintptr_t)module, 0);
         }
     }
 
-    HipRemoteModuleLoadResponse resp = {
-        .header = { .error_code = (int32_t)err },
-        .module = (uint64_t)(uintptr_t)module
-    };
-    send_response(fd, HIP_OP_MODULE_LOAD_DATA, request_id, &resp, sizeof(resp));
+    if (req->vhandle) {
+        if (err != hipSuccess)
+            vaddr_map_put(req->vhandle, VADDR_ERROR, 0);
+        send_simple_response(fd, HIP_OP_MODULE_LOAD_DATA, request_id, err);
+    } else {
+        HipRemoteModuleLoadResponse resp = {
+            .header = { .error_code = (int32_t)err },
+            .module = (uint64_t)(uintptr_t)module
+        };
+        send_response(fd, HIP_OP_MODULE_LOAD_DATA, request_id, &resp, sizeof(resp));
+    }
 }
 
 static void handle_module_unload(int fd, uint32_t request_id,
@@ -4003,7 +4007,7 @@ static void handle_module_unload(int fd, uint32_t request_id,
     }
 
     const HipRemoteModuleUnloadRequest* req = (const HipRemoteModuleUnloadRequest*)payload;
-    hipModule_t module = (hipModule_t)(uintptr_t)req->module;
+    hipModule_t module = vaddr_translate(req->module);
 
     /* Invalidate cached kernel arg metadata for this module BEFORE unloading,
      * since HIP may reuse the module handle for a future hipModuleLoadData.
@@ -4036,10 +4040,19 @@ static void handle_module_get_function(int fd, uint32_t request_id,
     }
 
     const HipRemoteModuleGetFunctionRequest* req = (const HipRemoteModuleGetFunctionRequest*)payload;
-    hipModule_t module = (hipModule_t)(uintptr_t)req->module;
+    hipModule_t module = vaddr_translate(req->module);
 
     hipFunction_t function = NULL;
     hipError_t err = hipModuleGetFunction(&function, module, req->function_name);
+
+    /* Store vhandle mapping for shadow resource pattern */
+    if (req->vhandle) {
+        if (err == hipSuccess && function) {
+            vaddr_map_put(req->vhandle, (uint64_t)(uintptr_t)function, 0);
+        } else {
+            vaddr_map_put(req->vhandle, VADDR_ERROR, 0);
+        }
+    }
 
     HipRemoteModuleGetFunctionResponse resp;
     memset(&resp, 0, sizeof(resp));
@@ -4172,6 +4185,9 @@ static void handle_module_load_and_get_function(int fd, uint32_t request_id,
     }
 
     store_module_data(module, code_data, code_size);
+    if (func_req->vmodule) {
+        vaddr_map_put(func_req->vmodule, (uint64_t)(uintptr_t)module, 0);
+    }
 
     hipFunction_t function = NULL;
     err = hipModuleGetFunction(&function, module, kernel_name);
@@ -4258,7 +4274,13 @@ static void handle_launch_kernel(int fd, uint32_t request_id,
         return;
     }
 
-    hipFunction_t function = (hipFunction_t)(uintptr_t)req->function;
+    hipFunction_t function = vaddr_translate(req->function);
+    if ((uintptr_t)function <= VADDR_ERROR) {
+        LOG_ERROR("LaunchKernel: invalid function handle (vaddr=0x%lx resolved to %p)",
+                  (unsigned long)req->function, function);
+        send_simple_response(fd, HIP_OP_LAUNCH_KERNEL, request_id, hipErrorInvalidHandle);
+        return;
+    }
     hipStream_t stream = vaddr_translate(req->stream);
     hipEvent_t start_event = (hipEvent_t)(uintptr_t)req->start_event;
     hipEvent_t stop_event  = (hipEvent_t)(uintptr_t)req->stop_event;
@@ -4528,7 +4550,41 @@ static void handle_mem_ptr_get_info(int fd, uint32_t request_id,
  * Client Handler
  * ============================================================================ */
 
+static void cleanup_gpu_resources(void) {
+    int freed = 0, unloaded = 0;
+
+    /* Free all GPU allocations tracked in the vaddr alloc list */
+    for (int i = 0; i < g_vaddr_alloc_count; i++) {
+        void* ptr = (void*)(uintptr_t)g_vaddr_allocs[i].real;
+        if (ptr && g_vaddr_allocs[i].size > 0) {
+            hipFree(ptr);
+            freed++;
+        }
+    }
+
+    /* Unload all loaded modules */
+    for (int i = 0; i < g_loaded_module_count; i++) {
+        if (g_loaded_modules[i].module) {
+            hipModuleUnload(g_loaded_modules[i].module);
+            unloaded++;
+            free(g_loaded_modules[i].data);
+            g_loaded_modules[i].data = NULL;
+        }
+    }
+
+    if (freed > 0 || unloaded > 0) {
+        fprintf(stderr, "[HIP-Worker] Cleanup: freed %d allocations, unloaded %d modules\n",
+                freed, unloaded);
+    }
+
+    /* Sync and clear any pending errors */
+    hipDeviceSynchronize();
+    hipGetLastError();
+}
+
 static void reset_session_state(void) {
+    cleanup_gpu_resources();
+
     memset(g_vaddr_map, 0, sizeof(g_vaddr_map));
     g_vaddr_alloc_count = 0;
     g_vaddr_allocs_sorted = 1;
@@ -5026,8 +5082,9 @@ static void handle_client(int client_fd) {
     }
 
 client_done:
+    cleanup_gpu_resources();
     close_socket(client_fd);
-    LOG_INFO("Client disconnected");
+    LOG_INFO("Client disconnected (GPU resources cleaned up)");
 }
 
 /* ============================================================================
@@ -5044,6 +5101,14 @@ static void sigchld_handler(int sig) {
 static void signal_handler(int sig) {
     (void)sig;
     g_running = false;
+
+    /* Clean up GPU resources so VRAM isn't leaked */
+    if (g_hip_initialized) {
+        cleanup_gpu_resources();
+        hipDeviceReset();
+        fprintf(stderr, "[HIP-Worker] GPU resources released (signal %d)\n", sig);
+    }
+
     if (g_server_fd >= 0) {
 #ifdef _WIN32
         shutdown(g_server_fd, SD_BOTH);
@@ -5117,6 +5182,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     worker_socket_init();
     signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 #else
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, signal_handler);

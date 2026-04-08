@@ -37,6 +37,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern uint64_t vmodule_alloc(void);
+extern uint64_t vfunc_alloc(void);
+extern hipError_t hipModuleGetFunction_async(hipFunction_t* function,
+                                             hipModule_t module,
+                                             const char* kname);
+
 extern void store_function_info_full(hipFunction_t function,
                                      uint32_t kernarg_size,
                                      uint32_t num_params,
@@ -610,7 +616,10 @@ hipFunction_t hip_fatbin_lookup_function(const void* hostFunction) {
     hipError_t err;
 
     if (!mod->loaded && mod->fatbin_data) {
-        /* Combined load+get in a single round-trip with variable-length name */
+        /* Combined load+get in a single round-trip with variable-length name.
+         * Must stay synchronous because the response includes COMGR param
+         * descriptors needed for correct kernel argument translation. */
+        uint64_t vmod = vmodule_alloc();
         uint32_t name_len = (uint32_t)strlen(dev_name);
         size_t hdr_size = sizeof(HipRemoteModuleLoadRequest)
                         + sizeof(HipRemoteModuleLoadAndGetFunctionRequest)
@@ -619,11 +628,14 @@ hipFunction_t hip_fatbin_lookup_function(const void* hostFunction) {
         if (hdr_buf) {
             HipRemoteModuleLoadRequest* load_req = (HipRemoteModuleLoadRequest*)hdr_buf;
             load_req->data_size = (uint64_t)mod->fatbin_size;
+            load_req->vhandle = vmod;
 
             HipRemoteModuleLoadAndGetFunctionRequest* fn_req =
                 (HipRemoteModuleLoadAndGetFunctionRequest*)(hdr_buf + sizeof(HipRemoteModuleLoadRequest));
             fn_req->name_length = name_len;
             fn_req->_pad = 0;
+            fn_req->vmodule = vmod;
+            fn_req->vfunc = 0;
 
             memcpy(hdr_buf + sizeof(HipRemoteModuleLoadRequest)
                            + sizeof(HipRemoteModuleLoadAndGetFunctionRequest),
@@ -641,7 +653,7 @@ hipFunction_t hip_fatbin_lookup_function(const void* hostFunction) {
             free(hdr_buf);
 
             if (err == hipSuccess) {
-                mod->module = (hipModule_t)(uintptr_t)resp.module;
+                mod->module = (hipModule_t)(uintptr_t)vmod;
                 mod->loaded = 1;
                 func = (hipFunction_t)(uintptr_t)resp.function;
                 store_function_info_full(func, resp.kernarg_size, resp.num_params, resp.params);
@@ -649,7 +661,7 @@ hipFunction_t hip_fatbin_lookup_function(const void* hostFunction) {
                                      (void*)mod->module, (void*)func);
             } else {
                 if (resp.module) {
-                    mod->module = (hipModule_t)(uintptr_t)resp.module;
+                    mod->module = (hipModule_t)(uintptr_t)vmod;
                     mod->loaded = 1;
                 }
                 func = NULL;

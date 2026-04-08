@@ -50,12 +50,16 @@ static hip_once_t g_init_once = HIP_ONCE_INIT;
 static int g_wsa_initialized = 0;
 static int g_dll_loading_complete = 0;  /* Set to 1 after DLL loading finishes */
 
-/* Write coalescing buffer: accumulates FnF requests and flushes them in bulk.
- * 64KB is large enough for ~200 kernel launches but small enough to avoid
- * excessive memory use or TCP fragmentation concerns. */
-#define WRITE_BUFFER_SIZE (64 * 1024)
+/* Write coalescing buffer: accumulates FnF requests and flushes them in bulk. */
+#define WRITE_BUFFER_SIZE (256 * 1024)
 static uint8_t g_write_buffer[WRITE_BUFFER_SIZE];
 static size_t  g_write_buffer_used = 0;
+
+/* Eager flush: send accumulated FnF data every N requests so the worker
+ * starts processing sooner, reducing GPU starvation during cold start.
+ * Disabled (0) for high-latency links where fewer larger sends are better. */
+static int g_eager_flush_interval = 0;
+static int g_fnf_since_flush = 0;
 
 /* ============================================================================
  * Profiling Counters
@@ -291,9 +295,11 @@ static int flush_write_buffer_locked(void) {
     if (rc != 0) {
         mark_disconnected_locked("flush write buffer");
         g_write_buffer_used = 0;
+        g_fnf_since_flush = 0;
         return -1;
     }
     g_write_buffer_used = 0;
+    g_fnf_since_flush = 0;
     return 0;
 }
 
@@ -378,6 +384,19 @@ static void init_from_environment(void) {
         g_content_cache_enabled = 1;
     }
 
+    const char* eager = getenv("HIP_REMOTE_EAGER_FLUSH");
+    if (eager) {
+        g_eager_flush_interval = atoi(eager);
+    } else {
+        /* Auto-detect: enable eager flush for localhost, disable for remote */
+        const char* host = getenv("TF_WORKER_HOST");
+        if (host && (strcmp(host, "localhost") == 0 ||
+                     strcmp(host, "127.0.0.1") == 0 ||
+                     strcmp(host, "::1") == 0)) {
+            g_eager_flush_interval = 64;
+        }
+    }
+
     hip_remote_log_debug("Client initialized: host=%s port=%d",
                          g_client_state.worker_host, g_client_state.worker_port);
 }
@@ -386,6 +405,8 @@ static void init_from_environment(void) {
  * Connect to worker service.
  */
 static int connect_to_worker_locked(void) {
+    hip_call_once(&g_init_once, init_from_environment);
+
     if (g_client_state.connected) {
         return 0;
     }
@@ -595,12 +616,11 @@ hipError_t hip_remote_request(
     void* response,
     size_t response_size
 ) {
-    hip_call_once(&g_init_once, init_from_environment);
     prof_record((uint16_t)op_code, 0);
 
     hip_mutex_lock(&g_client_state.lock);
 
-    /* Ensure connected */
+    /* Ensure connected (also runs init_from_environment on first call) */
     if (connect_to_worker_locked() != 0) {
         hip_mutex_unlock(&g_client_state.lock);
         g_client_state.last_error = hipErrorNotInitialized;
@@ -751,6 +771,12 @@ hipError_t hip_remote_request_fire_and_forget(
             hip_mutex_unlock(&g_client_state.lock);
             return hipErrorNotInitialized;
         }
+        g_fnf_since_flush = 0;
+    }
+
+    if (g_eager_flush_interval > 0 && ++g_fnf_since_flush >= g_eager_flush_interval) {
+        flush_write_buffer_locked();
+        g_fnf_since_flush = 0;
     }
 
     hip_mutex_unlock(&g_client_state.lock);
@@ -811,6 +837,12 @@ hipError_t hip_remote_request_with_data_fire_and_forget(
             hip_mutex_unlock(&g_client_state.lock);
             return hipErrorNotInitialized;
         }
+        g_fnf_since_flush = 0;
+    }
+
+    if (g_eager_flush_interval > 0 && ++g_fnf_since_flush >= g_eager_flush_interval) {
+        flush_write_buffer_locked();
+        g_fnf_since_flush = 0;
     }
 
     hip_mutex_unlock(&g_client_state.lock);

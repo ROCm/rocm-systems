@@ -29,6 +29,19 @@
 #include <string.h>
 
 /* ============================================================================
+ * Virtual Handle Allocators (async module/function loading)
+ * ============================================================================ */
+
+#define VMODULE_BASE  0xBF0000000000ULL
+#define VFUNC_BASE    0xAF0000000000ULL
+
+static uint64_t g_next_vmodule = VMODULE_BASE;
+static uint64_t g_next_vfunc = VFUNC_BASE;
+
+uint64_t vmodule_alloc(void) { return g_next_vmodule++; }
+uint64_t vfunc_alloc(void) { return g_next_vfunc++; }
+
+/* ============================================================================
  * Function Info Tracking
  *
  * The remote protocol returns the kernel argument count from the worker.
@@ -224,24 +237,18 @@ hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
     /* No minimum size check — trust the parser for known formats.
      * Unknown formats already default to 16MB. */
 
+    uint64_t vmod = g_next_vmodule++;
     HipRemoteModuleLoadRequest req;
     req.data_size = approx_size;
+    req.vhandle = vmod;
 
-    HipRemoteModuleLoadResponse resp;
-    memset(&resp, 0, sizeof(resp));
+    *module = (hipModule_t)(uintptr_t)vmod;
 
-    hipError_t err = hip_remote_request_with_data(
+    return hip_remote_request_with_data_fire_and_forget(
         HIP_OP_MODULE_LOAD_DATA,
         &req, sizeof(req),
-        image, approx_size,
-        &resp, sizeof(resp)
+        image, approx_size
     );
-
-    if (err == hipSuccess) {
-        *module = (hipModule_t)(uintptr_t)resp.module;
-    }
-
-    return err;
 }
 
 hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image,
@@ -263,6 +270,22 @@ hipError_t hipModuleUnload(hipModule_t module) {
     );
 }
 
+/* Client-side cache for hipModuleGetFunction to avoid sync round-trips
+ * for repeated lookups of the same (module, name) pair. */
+#define GET_FUNC_CACHE_SIZE 512
+
+typedef struct {
+    uint64_t module;
+    char name[256];
+    hipFunction_t function;
+    uint32_t num_args;
+    uint32_t num_params;
+    HipRemoteParamDesc params[HIP_REMOTE_MAX_PARAM_DESCS];
+} GetFuncCacheEntry;
+
+static GetFuncCacheEntry g_get_func_cache[GET_FUNC_CACHE_SIZE];
+static int g_get_func_cache_count = 0;
+
 hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module,
                                  const char* kname) {
     hip_remote_log_debug("hipModuleGetFunction ENTRY: func=%p module=%p kname=%p (%s)",
@@ -273,9 +296,19 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module,
         return hipErrorInvalidValue;
     }
 
+    uint64_t mod_val = (uint64_t)(uintptr_t)module;
+    for (int i = 0; i < g_get_func_cache_count; i++) {
+        if (g_get_func_cache[i].module == mod_val &&
+            strcmp(g_get_func_cache[i].name, kname) == 0) {
+            *function = g_get_func_cache[i].function;
+            return hipSuccess;
+        }
+    }
+
     HipRemoteModuleGetFunctionRequest req;
     memset(&req, 0, sizeof(req));
-    req.module = (uint64_t)(uintptr_t)module;
+    req.module = mod_val;
+    req.vhandle = 0;
     strncpy(req.function_name, kname, sizeof(req.function_name) - 1);
 
     HipRemoteModuleGetFunctionResponse resp;
@@ -290,8 +323,65 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module,
     if (err == hipSuccess) {
         *function = (hipFunction_t)(uintptr_t)resp.function;
         store_function_info_full(*function, resp.num_args, resp.num_params, resp.params);
-        hip_remote_log_debug("hipModuleGetFunction: function=%p, kernarg_size=%u, num_params=%u",
-                             (void*)*function, resp.num_args, resp.num_params);
+
+        if (g_get_func_cache_count < GET_FUNC_CACHE_SIZE) {
+            GetFuncCacheEntry* e = &g_get_func_cache[g_get_func_cache_count++];
+            e->module = mod_val;
+            strncpy(e->name, kname, sizeof(e->name) - 1);
+            e->name[sizeof(e->name) - 1] = '\0';
+            e->function = *function;
+            e->num_args = resp.num_args;
+            e->num_params = resp.num_params;
+            memcpy(e->params, resp.params, sizeof(resp.params));
+        }
+    }
+
+    return err;
+}
+
+/**
+ * Async variant of hipModuleGetFunction for fat binary modules.
+ * Assigns a virtual function handle and sends FnF. The caller must
+ * guarantee the function exists in the module (fat binary registry).
+ * Errors are deferred to the next kernel launch or sync point.
+ */
+hipError_t hipModuleGetFunction_async(hipFunction_t* function,
+                                      hipModule_t module,
+                                      const char* kname) {
+    if (!function || !kname) return hipErrorInvalidValue;
+
+    uint64_t mod_val = (uint64_t)(uintptr_t)module;
+
+    /* Check cache first */
+    for (int i = 0; i < g_get_func_cache_count; i++) {
+        if (g_get_func_cache[i].module == mod_val &&
+            strcmp(g_get_func_cache[i].name, kname) == 0) {
+            *function = g_get_func_cache[i].function;
+            return hipSuccess;
+        }
+    }
+
+    uint64_t vfunc = g_next_vfunc++;
+    *function = (hipFunction_t)(uintptr_t)vfunc;
+
+    HipRemoteModuleGetFunctionRequest req;
+    memset(&req, 0, sizeof(req));
+    req.module = mod_val;
+    req.vhandle = vfunc;
+    strncpy(req.function_name, kname, sizeof(req.function_name) - 1);
+
+    hipError_t err = hip_remote_request_fire_and_forget(
+        HIP_OP_MODULE_GET_FUNCTION, &req, sizeof(req)
+    );
+
+    if (err == hipSuccess && g_get_func_cache_count < GET_FUNC_CACHE_SIZE) {
+        GetFuncCacheEntry* e = &g_get_func_cache[g_get_func_cache_count++];
+        e->module = mod_val;
+        strncpy(e->name, kname, sizeof(e->name) - 1);
+        e->name[sizeof(e->name) - 1] = '\0';
+        e->function = *function;
+        e->num_args = 0;
+        e->num_params = 0;
     }
 
     return err;
@@ -370,10 +460,8 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
         uint8_t* arg_data = (uint8_t*)(args + 1);
         memcpy(arg_data, extra_buffer, extra_buffer_size);
 
-        hipError_t err = (req->start_event || req->stop_event)
-            ? hip_remote_request(HIP_OP_LAUNCH_KERNEL, buffer, request_size,
-                                 &(HipRemoteResponseHeader){0}, sizeof(HipRemoteResponseHeader))
-            : hip_remote_request_fire_and_forget(HIP_OP_LAUNCH_KERNEL, buffer, request_size);
+        hipError_t err = hip_remote_request_fire_and_forget(
+            HIP_OP_LAUNCH_KERNEL, buffer, request_size);
 
         free(buffer);
         return err;
@@ -399,9 +487,6 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
             req_hdr.launch_flags = 1;
             fill_ext_launch_fields(&req_hdr);
 
-            if (req_hdr.start_event || req_hdr.stop_event)
-                return hip_remote_request(HIP_OP_LAUNCH_KERNEL, &req_hdr, sizeof(req_hdr),
-                                          &(HipRemoteResponseHeader){0}, sizeof(HipRemoteResponseHeader));
             return hip_remote_request_fire_and_forget(HIP_OP_LAUNCH_KERNEL, &req_hdr, sizeof(req_hdr));
         }
     }
@@ -469,10 +554,8 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
     hip_remote_log_debug("hipModuleLaunchKernel: built flat kernarg (%u bytes, %u params)",
                          (uint32_t)total_arg_size, num_params);
 
-    hipError_t err = (req->start_event || req->stop_event)
-        ? hip_remote_request(HIP_OP_LAUNCH_KERNEL, buffer, request_size,
-                             &(HipRemoteResponseHeader){0}, sizeof(HipRemoteResponseHeader))
-        : hip_remote_request_fire_and_forget(HIP_OP_LAUNCH_KERNEL, buffer, request_size);
+    hipError_t err = hip_remote_request_fire_and_forget(
+        HIP_OP_LAUNCH_KERNEL, buffer, request_size);
 
     free(buffer);
     return err;
@@ -747,27 +830,20 @@ hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
     fread(buf, 1, (size_t)len, f);
     fclose(f);
 
-    /* Send with the exact file size */
+    uint64_t vmod = g_next_vmodule++;
     HipRemoteModuleLoadRequest req;
     req.data_size = (uint64_t)len;
+    req.vhandle = vmod;
 
-    HipRemoteModuleLoadResponse resp;
-    memset(&resp, 0, sizeof(resp));
+    *module = (hipModule_t)(uintptr_t)vmod;
 
-    hipError_t err = hip_remote_request_with_data(
+    hipError_t err = hip_remote_request_with_data_fire_and_forget(
         HIP_OP_MODULE_LOAD_DATA,
         &req, sizeof(req),
-        buf, (size_t)len,
-        &resp, sizeof(resp)
+        buf, (size_t)len
     );
 
     free(buf);
-
-    if (err == hipSuccess) {
-        *module = (hipModule_t)(uintptr_t)resp.module;
-    } else {
-        hip_remote_log_error("hipModuleLoad failed: %s\n error: %s", fname, hipGetErrorString(err));
-    }
     return err;
 }
 
