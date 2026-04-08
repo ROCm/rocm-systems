@@ -165,6 +165,16 @@ class IsaProfile(ABC):
         return frozenset()
 
     @property
+    def inst_size_overrides(self) -> dict[str, int]:
+        """Per-instruction size overrides in bytes.
+
+        Used for instructions whose encoding size differs from their
+        parent encoding (e.g., VOP3PX2 instructions are 128-bit but
+        decoded under the 64-bit VOP3P_MFMA encoding).
+        """
+        return {}
+
+    @property
     def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
         """Per-instruction semantic overrides for this ISA.
 
@@ -766,6 +776,16 @@ class CdnaProfile(_AmdgpuProfileBase):
     @property
     def skip_encodings(self) -> frozenset[str]:
         return frozenset({'ENC_VOP3PX2'})
+
+    @property
+    def inst_size_overrides(self) -> dict[str, int]:
+        # VOP3PX2 instructions are 128-bit (16 bytes) but decoded under
+        # the 64-bit VOP3P_MFMA encoding. Override their size so the PC
+        # advances correctly past the 128-bit instruction.
+        return {
+            'V_MFMA_F32_16X16X128_F8F6F4': 16,
+            'V_MFMA_F32_32X32X64_F8F6F4': 16,
+        }
 
     # ISA dimension properties for CDNA3/4 (the two ISAs this profile covers).
     # Cdna1Profile and Cdna2Profile override the ones that differ.

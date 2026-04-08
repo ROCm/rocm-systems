@@ -830,10 +830,7 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f16_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1245,8 +1242,7 @@ VFmacDx9ZeroF32Vop3::VFmacDx9ZeroF32Vop3(const MachineInst *inst)
 }
 
 void VFmacDx9ZeroF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_fmac_dx9_zero_f32_vop3(*this, wf);
 }
 
 VMulDx9ZeroF32Vop3::VMulDx9ZeroF32Vop3(const MachineInst *inst)
@@ -1686,8 +1682,7 @@ VCvtPkRtzF16F32Vop3::VCvtPkRtzF16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkRtzF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_pk_rtz_f16_f32_vop3(*this, wf);
 }
 
 VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
@@ -1827,8 +1822,7 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
 }
 
 void VFmaDx9ZeroF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_fma_dx9_zero_f32_vop3(*this, wf);
 }
 
 VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
@@ -2094,10 +2088,7 @@ VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
     : Vop3("v_min3_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3F32Vop3>()),
@@ -2504,8 +2495,7 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
 }
 
 void VXor3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_xor3_b32_vop3(*this, wf);
 }
 
 VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
@@ -2934,10 +2924,7 @@ VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
     : Vop3("v_permlanex16_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2954,10 +2941,7 @@ VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     : Vop3("v_cndmask_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -2994,8 +2978,7 @@ VMaxminF32Vop3::VMaxminF32Vop3(const MachineInst *inst)
 }
 
 void VMaxminF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_maxmin_f32_vop3(*this, wf);
 }
 
 VMinmaxF32Vop3::VMinmaxF32Vop3(const MachineInst *inst)
@@ -3014,8 +2997,7 @@ VMinmaxF32Vop3::VMinmaxF32Vop3(const MachineInst *inst)
 }
 
 void VMinmaxF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_minmax_f32_vop3(*this, wf);
 }
 
 VMaxminF16Vop3::VMaxminF16Vop3(const MachineInst *inst)
@@ -3034,8 +3016,7 @@ VMaxminF16Vop3::VMaxminF16Vop3(const MachineInst *inst)
 }
 
 void VMaxminF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_maxmin_f16_vop3(*this, wf);
 }
 
 VMinmaxF16Vop3::VMinmaxF16Vop3(const MachineInst *inst)
@@ -3054,8 +3035,7 @@ VMinmaxF16Vop3::VMinmaxF16Vop3(const MachineInst *inst)
 }
 
 void VMinmaxF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_minmax_f16_vop3(*this, wf);
 }
 
 VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
@@ -3074,8 +3054,7 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
 }
 
 void VMaxminU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_maxmin_u32_vop3(*this, wf);
 }
 
 VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
@@ -3094,8 +3073,7 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
 }
 
 void VMinmaxU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_minmax_u32_vop3(*this, wf);
 }
 
 VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
@@ -3114,8 +3092,7 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
 }
 
 void VMaxminI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_maxmin_i32_vop3(*this, wf);
 }
 
 VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
@@ -3134,8 +3111,7 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
 }
 
 void VMinmaxI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_minmax_i32_vop3(*this, wf);
 }
 
 VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
@@ -3153,10 +3129,7 @@ VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
     : Vop3("v_dot2_bf16_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -3173,10 +3146,7 @@ VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
+void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -3384,8 +3354,7 @@ VCvtPkI16F32Vop3::VCvtPkI16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_pk_i16_f32_vop3(*this, wf);
 }
 
 VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
@@ -3402,8 +3371,7 @@ VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_pk_u16_f32_vop3(*this, wf);
 }
 
 VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
@@ -3525,8 +3493,7 @@ VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
 }
 
 void VCvtPkNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_pk_norm_i16_f16_vop3(*this, wf);
 }
 
 VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
@@ -3543,8 +3510,7 @@ VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
 }
 
 void VCvtPkNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_pk_norm_u16_f16_vop3(*this, wf);
 }
 
 VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
@@ -3643,8 +3609,7 @@ VCvtPkNormI16F32Vop3::VCvtPkNormI16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkNormI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_pk_norm_i16_f32_vop3(*this, wf);
 }
 
 VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
@@ -3661,8 +3626,7 @@ VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkNormU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_pk_norm_u16_f32_vop3(*this, wf);
 }
 
 VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)

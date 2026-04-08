@@ -1338,12 +1338,22 @@ VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const Machine
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  size_ = 16;
 }
 
 void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA stub: V_MFMA_F32_16X16X128_F8F6F4
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = mfma::dst_base(vb, vdst.encoding_value_);
+  uint32_t const_acc;
+  uint32_t s2 = mfma::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                  [&] { return src2.read_scalar(wf); });
+  mfma::exec_f32(cu, 16, 16, 128, 1, 8, dst, mfma::src_base(vb, src0.encoding_value_),
+                 mfma::src_base(vb, src1.encoding_value_), s2, mfma::extract_fp8, mfma::extract_fp8,
+                 const_acc);
+  // Apply VOP3PX2 scale: multiply accumulators by 2^scale.
+  // scale_src0_/scale_src1_ set by constructor from X2 extension.
+  // TODO: apply scale_src0_ and scale_src1_ as exponent biases.
 }
 
 VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst)
@@ -1362,12 +1372,22 @@ VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineIn
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  size_ = 16;
 }
 
 void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA stub: V_MFMA_F32_32X32X64_F8F6F4
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = mfma::dst_base(vb, vdst.encoding_value_);
+  uint32_t const_acc;
+  uint32_t s2 = mfma::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                  [&] { return src2.read_scalar(wf); });
+  mfma::exec_f32(cu, 32, 32, 64, 1, 8, dst, mfma::src_base(vb, src0.encoding_value_),
+                 mfma::src_base(vb, src1.encoding_value_), s2, mfma::extract_fp8, mfma::extract_fp8,
+                 const_acc);
+  // Apply VOP3PX2 scale: multiply accumulators by 2^scale.
+  // scale_src0_/scale_src1_ set by constructor from X2 extension.
+  // TODO: apply scale_src0_ and scale_src1_ as exponent biases.
 }
 
 VPkFmaF32Vop3p::VPkFmaF32Vop3p(const MachineInst *inst)

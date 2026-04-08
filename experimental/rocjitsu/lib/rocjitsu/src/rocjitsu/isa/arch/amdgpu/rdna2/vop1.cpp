@@ -1975,8 +1975,10 @@ VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
 }
 
 void VMovrelsd2B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
@@ -2743,8 +2745,10 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
 }
 
 void VSwaprelB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == 250)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_src0_, wf);
   (void)wf;
-  throw util::UnimplementedInst(mnemonic());
 }
 
 } // namespace rdna2

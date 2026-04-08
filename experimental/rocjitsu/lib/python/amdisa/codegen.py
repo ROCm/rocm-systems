@@ -2653,6 +2653,12 @@ class CodeGenerator:
                 'max3': 'std::fmax(std::fmax(a, b), c)',
                 'minimum3': 'std::fmin(std::fmin(a, b), c)',
                 'maximum3': 'std::fmax(std::fmax(a, b), c)',
+                'minmax': 'std::fmin(a, std::fmax(b, c))',
+                'maxmin': 'std::fmax(a, std::fmin(b, c))',
+                'minimummaximum': 'std::fmin(std::fmax(a, b), c)',
+                'maximumminimum': 'std::fmax(std::fmin(a, b), c)',
+                'minmax_num': 'std::fmin(a, std::fmax(b, c))',
+                'maxmin_num': 'std::fmax(a, std::fmin(b, c))',
                 'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
             }
             # Cube map operations: inputs are (x, y, z)
@@ -2717,6 +2723,12 @@ class CodeGenerator:
                 'max3': 'std::fmax(std::fmax(a, b), c)',
                 'minimum3': 'std::fmin(std::fmin(a, b), c)',
                 'maximum3': 'std::fmax(std::fmax(a, b), c)',
+                'minmax': 'std::fmin(a, std::fmax(b, c))',
+                'maxmin': 'std::fmax(a, std::fmin(b, c))',
+                'minimummaximum': 'std::fmin(std::fmax(a, b), c)',
+                'maximumminimum': 'std::fmax(std::fmin(a, b), c)',
+                'minmax_num': 'std::fmin(a, std::fmax(b, c))',
+                'maxmin_num': 'std::fmax(a, std::fmin(b, c))',
                 'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
             }
             expr = f_map.get(op, f'a /* unhandled: {op} */')
@@ -2741,6 +2753,12 @@ class CodeGenerator:
                 'max3': 'std::fmax(std::fmax(a, b), c)',
                 'minimum3': 'std::fmin(std::fmin(a, b), c)',
                 'maximum3': 'std::fmax(std::fmax(a, b), c)',
+                'minmax': 'std::fmin(a, std::fmax(b, c))',
+                'maxmin': 'std::fmax(a, std::fmin(b, c))',
+                'minimummaximum': 'std::fmin(std::fmax(a, b), c)',
+                'maximumminimum': 'std::fmax(std::fmin(a, b), c)',
+                'minmax_num': 'std::fmin(a, std::fmax(b, c))',
+                'maxmin_num': 'std::fmax(a, std::fmin(b, c))',
                 'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
             }
             expr = f_map.get(op, f'a /* unhandled: {op} */')
@@ -2802,6 +2820,10 @@ class CodeGenerator:
                 'min3': 'std::min(std::min(a, b), c)',
                 'max3': 'std::max(std::max(a, b), c)',
                 'med3': 'std::max(std::min(std::max(a, b), c), std::min(a, b))',
+                'minmax': 'std::min(a, std::max(b, c))',
+                'maxmin': 'std::max(a, std::min(b, c))',
+                'minmax_num': 'std::min(a, std::max(b, c))',
+                'maxmin_num': 'std::max(a, std::min(b, c))',
                 'add_lshl': '(a + b) << (c & 31)',
                 'lshl_add': '(a << (b & 31)) + c',
             }
@@ -2857,9 +2879,14 @@ class CodeGenerator:
                     'lshl_add': '(a << (b & 31)) + c',
                     'add_lshl': '(a + b) << (c & 31)',
                     'xad': '(a ^ b) + c',
+                    'xor3': 'a ^ b ^ c',
                     'min3': 'std::min(std::min(a, b), c)',
                     'max3': 'std::max(std::max(a, b), c)',
                     'med3': 'std::max(std::min(std::max(a, b), c), std::min(a, b))',
+                    'minmax': 'std::min(a, std::max(b, c))',
+                    'maxmin': 'std::max(a, std::min(b, c))',
+                    'minmax_num': 'std::min(a, std::max(b, c))',
+                    'maxmin_num': 'std::max(a, std::min(b, c))',
                     'bfi': '(a & b) | (~a & c)',
                     'alignbit': 'static_cast<uint32_t>(((static_cast<uint64_t>(a) << 32) | b) >> (c & 31))',
                     'alignbyte': 'static_cast<uint32_t>(((static_cast<uint64_t>(a) << 32) | b) >> ((c & 3) * 8))',
@@ -3504,7 +3531,7 @@ class CodeGenerator:
             r'(?:_\d+B)?_?(F32|XF32|F16|BF16|I8|IU8|IU4|F64|FP8|BF8'
             r'|BF8_BF8|BF8_FP8|FP8_BF8|FP8_FP8'
             r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8'
-            r'|F8_F6_F4)?'
+            r'|F8_F6_F4|F8F6F4)?'
             r'(?:_1K)?$',
             name)
 
@@ -3582,7 +3609,7 @@ class CodeGenerator:
             'FP8': 8, 'BF8': 8,
             'FP8_FP8': 8, 'FP8_BF8': 8, 'BF8_FP8': 8, 'BF8_BF8': 8,
             'F16_FP8': 8, 'F16_BF8': 8, 'BF16_FP8': 8, 'BF16_BF8': 8,
-            'F8_F6_F4': 8,
+            'F8_F6_F4': 8, 'F8F6F4': 8,
         }
         in_bits = _INPUT_BITS.get(input_type, 32)
 
@@ -3592,14 +3619,14 @@ class CodeGenerator:
             'F16': 'mfma::extract_f16', 'BF16': 'mfma::extract_bf16',
             'FP8_FP8': 'mfma::extract_fp8', 'FP8_BF8': 'mfma::extract_fp8',
             'BF8_FP8': 'mfma::extract_bf8', 'BF8_BF8': 'mfma::extract_bf8',
-            'F8_F6_F4': 'mfma::extract_fp8',  # flexible format, treat as FP8
+            'F8_F6_F4': 'mfma::extract_fp8', 'F8F6F4': 'mfma::extract_fp8',
         }
         _EXTRACT_B = {
             'F32': 'mfma::extract_f32', 'XF32': 'mfma::extract_f32',
             'F16': 'mfma::extract_f16', 'BF16': 'mfma::extract_bf16',
             'FP8_FP8': 'mfma::extract_fp8', 'FP8_BF8': 'mfma::extract_bf8',
             'BF8_FP8': 'mfma::extract_fp8', 'BF8_BF8': 'mfma::extract_bf8',
-            'F8_F6_F4': 'mfma::extract_fp8',
+            'F8_F6_F4': 'mfma::extract_fp8', 'F8F6F4': 'mfma::extract_fp8',
         }
 
         L = []
@@ -3631,6 +3658,15 @@ class CodeGenerator:
             L.append(f'                 mfma::src_base(vb, {s0}.encoding_value_),')
             L.append(f'                 mfma::src_base(vb, {s1}.encoding_value_),')
             L.append(f'                 s2, {ea}, {eb}, const_acc);')
+
+            # VOP3PX2 (MFMA_SCALE): apply scale factors from the X2
+            # extension dwords to the accumulator after the MFMA.
+            # scale_src0/scale_src1 are stored on the instruction by
+            # the constructor (read from the raw inst dword at offset 2).
+            if input_type in ('F8_F6_F4', 'F8F6F4'):
+                L.append('  // Apply VOP3PX2 scale: multiply accumulators by 2^scale.')
+                L.append(f'  // scale_src0_/scale_src1_ set by constructor from X2 extension.')
+                L.append(f'  // TODO: apply scale_src0_ and scale_src1_ as exponent biases.')
 
         return '\n'.join(L)
 
@@ -4344,6 +4380,13 @@ class CodeGenerator:
 
                     if _mem_sem and _mem_sem.semantic_class in _MEM_CLASSES:
                         ctor_body_parts.append('flags_ |= MEMORY_OP;')
+
+                    # Per-instruction size overrides (e.g., VOP3PX2 128-bit
+                    # instructions decoded under 64-bit VOP3P_MFMA).
+                    _size_overrides = self.isa_spec.profile.inst_size_overrides
+                    if inst.name in _size_overrides:
+                        ctor_body_parts.append(
+                            f'size_ = {_size_overrides[inst.name]};')
 
                     class_ctor_impl_str = (
                         f'{inst.fmt_name}::'
