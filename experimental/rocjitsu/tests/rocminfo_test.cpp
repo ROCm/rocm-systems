@@ -60,8 +60,11 @@ TEST(RocminfoTest, ExitsSuccessfully) {
 }
 
 TEST(RocminfoTest, InterposerActive) {
-  EXPECT_NE(rocminfo_output().output.find("rocjitsu:"), std::string::npos)
-      << "LD_PRELOAD interposer does not appear to be active.\nOutput:\n"
+  // The interposer is active if rocminfo sees a GPU agent. The simulated
+  // GPU reports as gfx950, which only appears when the interposer is
+  // providing the KFD topology.
+  EXPECT_NE(rocminfo_output().output.find("gfx950"), std::string::npos)
+      << "LD_PRELOAD interposer does not appear to be active (no gfx950 agent).\nOutput:\n"
       << rocminfo_output().output;
 }
 
