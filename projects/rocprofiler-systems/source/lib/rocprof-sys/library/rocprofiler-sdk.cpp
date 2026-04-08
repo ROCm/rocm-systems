@@ -11,6 +11,7 @@
 #include "core/containers/stable_vector.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/state.hpp"
@@ -2766,8 +2767,10 @@ tool_attach_fini(void* /* tool_data */)
     // Write Perfetto trace output
     if(get_use_perfetto())
     {
-        bool _perfetto_output_error = false;
-        ::rocprofsys::perfetto::post_process(nullptr, _perfetto_output_error);
+        bool                             _perfetto_output_error = false;
+        rocprofsys::output_file_registry _output_registry{};
+        ::rocprofsys::perfetto::post_process(nullptr, _perfetto_output_error,
+                                             _output_registry);
         if(_perfetto_output_error)
             LOG_ERROR("Perfetto output error occurred during attach finalization");
     }
