@@ -97,7 +97,7 @@ _METRIC_JINJA_BINDINGS: tuple[tuple[str, str], ...] = (
     ("wavefront-runtime-stats", "Wavefront runtime stats"),
     ("instruction-mix", "Overall instruction mix"),
     ("valu-arith-instruction-mix", "VALU arithmetic instruction mix"),
-    ("mfma-instruction-mix", "MFMA instruction mix"),
+    ("mfma-instruction-mix", "Matrix instruction mix"),
     ("compute-speed-of-light", "Compute Speed-of-Light"),
     ("pipeline-stats", "Pipeline statistics"),
     ("arithmetic-operations", "Arithmetic operations"),
