@@ -106,9 +106,9 @@ struct cpu_traits
     /**
      * @brief Enumerate CPU devices — one per socket (physical package).
      *
-     * The filter selects socket IDs (not core IDs). All cores on a
-     * selected socket are always monitored. All devices share a single
-     * driver instance (one /proc/stat read serves all sockets).
+     * The provider constructs devices from socket topology. This method
+     * applies the device filter and collects supported metrics, matching
+     * the GPU traits pattern.
      */
     template <typename Settings, typename Provider>
     [[nodiscard]] static std::vector<device_entry> enumerate_devices(
@@ -123,60 +123,45 @@ struct cpu_traits
             return entries;
         }
 
-        const auto& topology     = provider->get_socket_topology();
-        const auto  socket_count = topology.size();
-        LOG_INFO("Detected {} CPU socket(s), {} online CPUs", socket_count,
-                 provider->get_cpu_count());
+        auto devices = provider->template get_devices<device_t>();
 
-        // Select which sockets to monitor
-        std::set<size_t> selected_sockets;
-        switch(filter.mode)
+        for(auto& dev : devices)
         {
-            case device_selection_mode::ALL:
-                for(const auto& [socket_id, cpus] : topology)
-                    selected_sockets.insert(socket_id);
-                break;
-            case device_selection_mode::NONE: return entries;
-            case device_selection_mode::SPECIFIC:
-                for(const auto idx : filter.indices)
-                {
-                    if(topology.count(idx) > 0)
-                    {
-                        selected_sockets.insert(idx);
-                    }
-                    else if(!topology.empty())
-                    {
-                        LOG_WARNING("CPU socket {} not found (available: 0-{})", idx,
-                                    topology.rbegin()->first);
-                    }
-                }
-                break;
-        }
+            const auto index = dev->get_index();
 
-        if(selected_sockets.empty())
-        {
-            LOG_WARNING("No CPU sockets selected for monitoring");
-            return entries;
-        }
+            const bool should_include = (filter.mode == device_selection_mode::ALL) ||
+                                        (filter.mode == device_selection_mode::SPECIFIC &&
+                                         filter.indices.count(index) > 0);
 
-        const auto& drv = provider->get_driver();
-
-        for(const auto socket_id : selected_sockets)
-        {
-            const auto& cpu_set = topology.at(socket_id);
-            auto        dev     = std::make_shared<device_t>(drv, socket_id, cpu_set);
-
-            if(!dev->is_supported())
+            if(should_include)
             {
-                LOG_WARNING("No CPU metrics supported on socket {}", socket_id);
+                if(!dev->is_supported())
+                {
+                    LOG_WARNING("No CPU metrics supported on socket {}", index);
+                }
+                const auto supported = dev->get_supported_metrics();
+                entries.push_back(device_entry{ std::move(dev), supported });
             }
-
-            const auto supported = dev->get_supported_metrics();
-            entries.push_back(device_entry{ std::move(dev), supported });
         }
 
-        LOG_INFO("Enabled {} CPU socket(s) for PMC sampling", selected_sockets.size());
+        warn_invalid_indices(filter, devices.size());
+        LOG_INFO("Enabled {} CPU socket(s) for PMC sampling", entries.size());
         return entries;
+    }
+
+private:
+    static void warn_invalid_indices(const device_filter& filter, size_t max_index)
+    {
+        if(filter.mode != device_selection_mode::SPECIFIC) return;
+        for(const auto idx : filter.indices)
+        {
+            if(idx >= max_index)
+            {
+                LOG_WARNING("Requested CPU socket {} does not exist. "
+                            "Available sockets: 0-{}",
+                            idx, max_index > 0 ? max_index - 1 : 0);
+            }
+        }
     }
 };
 

@@ -4,11 +4,13 @@
 #pragma once
 
 #include "library/pmc/device_providers/procfs/drivers/driver.hpp"
+#include "logger/debug.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <unistd.h>
+#include <vector>
 
 namespace rocprofsys::pmc::device_providers::procfs
 {
@@ -18,6 +20,9 @@ namespace rocprofsys::pmc::device_providers::procfs
  *
  * Unlike the AMD SMI provider, procfs requires no initialization or
  * shutdown -- the kernel filesystems are always available.
+ *
+ * Encapsulates driver internals and socket topology. External code
+ * accesses devices via get_devices<Device>().
  *
  * @tparam DriverFactory Factory for creating procfs driver instances.
  */
@@ -39,23 +44,23 @@ public:
     provider(provider&&)                 = default;
     provider& operator=(provider&&)      = default;
 
-    [[nodiscard]] const std::shared_ptr<driver_t>& get_driver() const noexcept
+    template <typename Device>
+    [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices()
     {
-        return m_driver;
+        std::vector<std::shared_ptr<Device>> devices;
+        const auto&                          topology = m_driver->get_socket_topology();
+
+        for(const auto& [socket_id, cpu_set] : topology)
+        {
+            devices.push_back(std::make_shared<Device>(m_driver, socket_id, cpu_set));
+        }
+
+        LOG_INFO("Detected {} CPU socket(s), {} online CPUs", topology.size(),
+                 m_cpu_count);
+        return devices;
     }
 
     [[nodiscard]] size_t get_cpu_count() const noexcept { return m_cpu_count; }
-
-    [[nodiscard]] size_t get_socket_count() const noexcept
-    {
-        return m_driver->get_socket_count();
-    }
-
-    [[nodiscard]] const drivers::procfs::socket_topology_t& get_socket_topology()
-        const noexcept
-    {
-        return m_driver->get_socket_topology();
-    }
 
     void init() {}
     void shutdown() {}
