@@ -85,6 +85,13 @@ setup_tool_library_env()
 void
 setup_output_env(const std::string& output_path)
 {
+    const auto* existing_output_path = getenv("ROCPROFSYS_OUTPUT_PATH");
+    if(output_path.empty() && existing_output_path != nullptr)
+    {
+        LOG_INFO("Output path: {}", existing_output_path);
+        return;
+    }
+
     const auto* const pwd = getenv("PWD");
     const auto        output =
         output_path.empty() ? fmt::format("{}/rocprof-sys-output", pwd) : output_path;
