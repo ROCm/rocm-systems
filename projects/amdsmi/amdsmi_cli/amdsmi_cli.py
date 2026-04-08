@@ -50,6 +50,10 @@ logging.debug("AMDSMI_GPU_METRICS_CACHE_MS = %sms", gpu_metrics_cache_ms)
 asic_info_cache_ms = os.environ.setdefault("AMDSMI_ASIC_INFO_CACHE_MS", "10000")  # 10 seconds
 logging.debug("AMDSMI_ASIC_INFO_CACHE_MS = %sms", asic_info_cache_ms)
 
+# Set the environment variable for process info cache duration
+process_info_cache_ms = os.environ.setdefault("AMDSMI_PROCESS_INFO_CACHE_MS", "100")
+logging.debug("AMDSMI_PROCESS_INFO_CACHE_MS = %sms", process_info_cache_ms)
+
 try:
     from amdsmi_init import *
     from amdsmi_helpers import AMDSMIHelpers
@@ -259,6 +263,15 @@ if __name__ == "__main__":
         exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
             amd_smi_commands.logger.format, e.get_error_code()
         )
+        _print_error(
+            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
+            amd_smi_commands.logger.destination,
+        )
+        sys.exit(abs(exc.value))
+    except PermissionError as e:
+        command = sys.argv[1] if len(sys.argv) > 1 else ""
+        outputformat = amd_smi_commands.logger.format
+        exc = amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command, outputformat)
         _print_error(
             f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
             amd_smi_commands.logger.destination,

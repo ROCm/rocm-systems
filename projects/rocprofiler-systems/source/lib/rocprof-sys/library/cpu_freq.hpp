@@ -39,6 +39,9 @@ void
 shutdown();
 
 void
+pause();
+
+void
 post_process();
 }  // namespace cpu_freq
 }  // namespace rocprofsys

@@ -256,7 +256,7 @@ def test_roofline_missing_file_handling():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from roofline import Roofline
+    from roofline.roofline_main import Roofline
     from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 
@@ -295,7 +295,7 @@ def test_roofline_invalid_datatype_cli():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from roofline import Roofline
+    from roofline.roofline_main import Roofline
     from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 
@@ -440,18 +440,21 @@ def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
 
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--list-available-metrics",
-        ])
-        assert code == 0
+        try:
+            code = binary_handler_analyze_rocprof_compute([
+                "analyze",
+                "--path",
+                workload_dir,
+                "--list-available-metrics",
+            ])
+            assert code == 0
 
-        # Test output
-        output = capsys.readouterr().out
-        assert "0 -> Top Stats" in output
-        assert "1 -> System Info" in output
+            # Test output
+            output = capsys.readouterr().out
+            assert "0 -> Top Stats" in output
+            assert "1 -> System Info" in output
+        finally:
+            test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
@@ -1338,9 +1341,9 @@ def test_parser_error_handling():
 
     from utils.parser import (
         build_eval_string,
-        calc_builtin_var,
         update_denominator_string,
     )
+    from utils.utils_common import calc_builtin_var
 
     try:
         build_eval_string("AVG(SQ_WAVES)", None, config={})
@@ -1351,10 +1354,7 @@ def test_parser_error_handling():
     assert build_eval_string("", "pmc_perf", config={}) == ""
     assert update_denominator_string("", "per_wave") == ""
 
-    class MockSysInfo:
-        total_l2_chan = 32
-
-    sys_info = MockSysInfo()
+    sys_info = {"total_l2_chan": 32}
     try:
         calc_builtin_var("$unsupported_var", sys_info)
         assert False, "Should have raised exception for unsupported var"

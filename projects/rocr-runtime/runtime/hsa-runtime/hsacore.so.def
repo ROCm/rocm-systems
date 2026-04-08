@@ -270,6 +270,7 @@ global:
 	hsa_ext_image_destroy_v2;
 	hsa_amd_counted_queue_acquire;
 	hsa_amd_counted_queue_release;
+	hsa_amd_svm_discard_batch_async;
 local:
     *;
 };

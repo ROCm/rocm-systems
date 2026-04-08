@@ -22,12 +22,13 @@
 
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
-#include "library/amd_smi.hpp"
 #include "library/cpu_freq.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 
 #include "logger/debug.hpp"
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -40,6 +41,7 @@ namespace
 using promise_t                                         = std::promise<void>;
 std::unique_ptr<promise_t>             polling_finished = {};
 std::vector<std::unique_ptr<instance>> instances        = {};
+std::atomic<bool>                      sampler_paused{ false };
 
 bool&
 is_initialized()
@@ -101,6 +103,7 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
         if(_state->load() != State::Active) continue;
         if(get_state() >= State::Finalized) break;
         if(get_state() != State::Active) continue;
+        if(sampler_paused.load(std::memory_order_relaxed)) continue;
         get_sampler_is_sampling().store(true);
         for(auto& itr : instances)
             itr->sample();
@@ -140,12 +143,14 @@ sampler::setup()
 
     if(get_use_amd_smi())
     {
-        auto& _amd_smi         = instances.emplace_back(std::make_unique<instance>());
-        _amd_smi->setup        = []() { amd_smi::setup(); };
-        _amd_smi->shutdown     = []() { amd_smi::shutdown(); };
-        _amd_smi->post_process = []() { amd_smi::post_process(); };
-        _amd_smi->config       = []() { amd_smi::config(); };
-        _amd_smi->sample       = []() { amd_smi::sample(); };
+        LOG_DEBUG("Setting up PMC sampling.");
+        auto& _pmc         = instances.emplace_back(std::make_unique<instance>());
+        _pmc->setup        = []() { pmc::setup(); };
+        _pmc->shutdown     = []() { pmc::shutdown(); };
+        _pmc->post_process = []() { pmc::post_process(); };
+        _pmc->config       = []() { pmc::config(); };
+        _pmc->sample       = []() { pmc::sample(); };
+        _pmc->pause        = []() { pmc::pause(); };
     }
 
     if(get_cpu_freq_enabled())
@@ -156,6 +161,7 @@ sampler::setup()
         _cpu_freq->post_process = []() { cpu_freq::post_process(); };
         _cpu_freq->config       = []() { cpu_freq::config(); };
         _cpu_freq->sample       = []() { cpu_freq::sample(); };
+        _cpu_freq->pause        = []() { cpu_freq::pause(); };
     }
 
     for(auto& itr : instances)
@@ -225,6 +231,23 @@ sampler::shutdown()
     }
 
     is_initialized() = false;
+}
+
+void
+sampler::pause()
+{
+    sampler_paused.store(true, std::memory_order_relaxed);
+
+    for(auto& itr : instances)
+    {
+        itr->pause();
+    }
+}
+
+void
+sampler::resume()
+{
+    sampler_paused.store(false, std::memory_order_relaxed);
 }
 
 void
