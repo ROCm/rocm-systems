@@ -21,7 +21,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocprofv3-hip-graph-bubbles -o out --output-format
         rocpd --log-level env --hip-runtime-trace --kernel-trace --pmc GRBM_COUNT --
-        $<TARGET_FILE:hip-graph-bubbles> 2000 10
+        $<TARGET_FILE:hip-graph-bubbles> 500 40
     DEPENDS hip-graph-bubbles
     TIMEOUT 60
     LABELS "integration-tests"
