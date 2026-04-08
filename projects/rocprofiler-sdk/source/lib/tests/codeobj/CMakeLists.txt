@@ -36,6 +36,8 @@ find_program(
     PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
     PATH_SUFFIXES bin llvm/bin NO_CACHE)
 
+# The arch only matters for compilation, not execution — the test only parses DWARF debug
+# info from the resulting ELF.  Any valid arch works here.
 set(_SYNCKERNEL_ARCH "gfx90a")
 set(_SYNCKERNEL_SRC "${CMAKE_CURRENT_SOURCE_DIR}/syncthreads_kernel.hip")
 set(_SYNCKERNEL_BUNDLE "${CMAKE_CURRENT_BINARY_DIR}/syncthreads_kernel_bundle.o")
@@ -56,8 +58,14 @@ add_custom_command(
         "Compiling syncthreads_kernel.hip -> syncthreads_kernel.bin (${_SYNCKERNEL_ARCH})"
     VERBATIM)
 
-add_custom_target(syncthreads_kernel_bin ALL DEPENDS "${_SYNCKERNEL_BIN}")
+add_custom_target(syncthreads_kernel_bin DEPENDS "${_SYNCKERNEL_BIN}")
 add_dependencies(codeobj-library-tests syncthreads_kernel_bin)
+
+install(
+    FILES "${_SYNCKERNEL_BIN}"
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin
+    COMPONENT tests
+    OPTIONAL)
 
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/hipcc_output.s
