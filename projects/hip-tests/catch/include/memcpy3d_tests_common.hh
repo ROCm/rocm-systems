@@ -173,9 +173,7 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
     int can_access_peer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
     if (!can_access_peer) {
-      std::string msg = "Skipped as peer access cannot be enabled between devices " +
-          std::to_string(src_device) + " " + std::to_string(dst_device);
-      HipTest::HIP_SKIP_TEST(msg.c_str());
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       if (device_count > 0 && kernel_stream != nullptr && kernel_stream != hipStreamPerThread) {
         HIP_CHECK(hipStreamDestroy(kernel_stream));
       }

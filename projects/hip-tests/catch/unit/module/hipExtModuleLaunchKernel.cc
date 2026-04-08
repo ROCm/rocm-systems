@@ -106,7 +106,7 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
   // first check if uniform_work_group_size = 1.
   const std::regex regexp("uniform_work_group_size\\s*:\\s*1");
   if (false == searchRegExpr(regexp, "copyKernel.s")) {
-    HipTest::HIP_SKIP_TEST("uniform_work_group_size != 1. Skipping test ...");
+    HipTest::HIP_SKIP_TEST("test requires uniform work group size 1.");
     return;
   }
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
@@ -182,14 +182,14 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
   SECTION("compressed fatbin") { HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed)); }
   SECTION("generic target in regular fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTarget));
   }
   SECTION("generic target in compressed fatbin") {
     if (!isGenericTargetSupported()) {
-      fprintf(stderr, "Generic target test is skipped\n");
+      WARN("Skipping section: generic target is not supported on this device.");
       return;
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTargetCompressed));

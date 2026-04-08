@@ -47,15 +47,14 @@ __global__ void ReadKernel(int* out, int* in) {
 HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST("At least 2 devices are required");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
   if (!can_access_peer) {
-    std::string msg = "Skipped as peer access cannot be enabled between devices";
-    HipTest::HIP_SKIP_TEST(msg.c_str());
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     return;
   }
 

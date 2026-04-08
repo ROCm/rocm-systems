@@ -28,6 +28,7 @@
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/utility.hpp"
 #include "library/tracing.hpp"
@@ -45,9 +46,7 @@
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <rocprofiler-sdk/context.h>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace
 {
@@ -73,8 +72,10 @@ template <typename CategoryT>
 ::perfetto::Track
 get_track(CategoryT, std::string name, uint64_t hash_arg)
 {
-    auto  _uuid        = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
-    auto& _track_uuids = tracing::get_perfetto_track_uuids();
+    auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
+
+    std::lock_guard<std::mutex> _lk{ tracing::get_perfetto_track_uuids_mutex() };
+    auto&                       _track_uuids = tracing::get_perfetto_track_uuids();
 
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
@@ -337,7 +338,8 @@ dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
 
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
-    const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid)
+    const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
+    output_file_registry& output_registry)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
@@ -346,6 +348,7 @@ perfetto_processor_t::perfetto_processor_t(
 , m_tmp_file(nullptr)
 , m_tracing_session(nullptr)
 , m_use_annotations(config::get_perfetto_annotations())
+, m_output_registry(output_registry)
 {}
 
 void
@@ -526,6 +529,7 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
             // Write the trace into a file.
             ofs.write(trace_data.data(), trace_data.size());
             if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+            m_output_registry.register_file(_filename, output_format::perfetto);
         }
         ofs.close();
     }
@@ -1278,5 +1282,4 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
     }
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

@@ -1456,39 +1456,146 @@ class AMDSMIHelpers:
             return f"{converted} W"
         return value
 
-    def get_fan_support(self):
-        """Check if fan control is supported on the first device.
+    @staticmethod
+    def detect_gpu_od(bdf):
+        """Detect if a GPU has the gpu_od sysfs interface.
+
+        Args:
+            bdf: PCI Bus/Device/Function string (e.g. '0000:26:00.0')
 
         Returns:
-            str: "0-255 or 0-100%%" if fan control is supported, "N/A" otherwise
+            tuple: (has_gpu_od: bool, gpu_od_path: str or None)
         """
+        drm_base = "/sys/class/drm"
+        try:
+            for card_dir in sorted(os.listdir(drm_base)):
+                if not card_dir.startswith("card") or "-" in card_dir:
+                    continue
+                device_link = os.path.join(drm_base, card_dir, "device")
+                try:
+                    if bdf in os.readlink(device_link):
+                        gpu_od_path = os.path.join(drm_base, card_dir, "device", "gpu_od")
+                        return os.path.isdir(gpu_od_path), gpu_od_path
+                except OSError:
+                    continue
+        except OSError:
+            pass
+        return False, None
+
+    @staticmethod
+    def parse_gpu_od_fan_range(gpu_od_path):
+        """Parse OD_RANGE min/max from gpu_od sysfs.
+
+        Args:
+            gpu_od_path: Path to gpu_od directory
+
+        Returns:
+            tuple: (min_pwm, max_pwm) or (None, None) if parsing fails
+        """
+        try:
+            fan_pwm_path = os.path.join(gpu_od_path, "fan_ctrl", "fan_minimum_pwm")
+            with open(fan_pwm_path, "r") as f:
+                pwm_content = f.read()
+
+            # Parse "OD_RANGE:\nMINIMUM_PWM: <min> <max>"
+            for line in pwm_content.splitlines():
+                if line.strip().startswith("MINIMUM_PWM:"):
+                    parts = line.strip().split()
+                    if len(parts) >= 3:
+                        return int(parts[1]), int(parts[2])
+        except (OSError, IOError, ValueError) as e:
+            logging.debug(f"AMDSMIHelpers.parse_gpu_od_fan_range - Failed to parse OD_RANGE: {e}")
+        return None, None
+
+    def get_fan_support(self):
+        """Check if fan control is supported and return dynamic range info for all devices.
+
+        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and detects
+        legacy hwmon GPUs. Results are cached to improve CLI performance.
+
+        Returns:
+            str: Range description for all GPUs, "N/A" if not supported.
+            Examples:
+                Single GPU: "20-100 or 0-100%"
+                Multiple GPUs with same range: "20-100 or 0-100%"
+                Multiple GPUs with different ranges (multi-line):
+                    "\n  GPU 0: 0-255 or 0-100%\n  GPU 1: 20-100 or 0-100%"
+        """
+        # Use cached result if available to avoid repeated sysfs reads
+        if hasattr(self, "_fan_support_cache"):
+            return self._fan_support_cache
+
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
-        for dev in device_handles:
+        gpu_ranges = []
+
+        for idx, dev in enumerate(device_handles):
             try:
-                # Try to get both fan speed and max fan speed
-                # If both succeed, fan control is supported
+                # Check if fan control is supported
                 _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
-                _ = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
-                # Fan control is supported on this device
-                return "0-255 or 0-100%%"
+                max_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
+
+                # Determine the range based on interface type
+                if max_speed <= 100:
+                    # This is likely a gpu_od GPU - try to get actual min from sysfs
+                    gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
+                    has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
+
+                    if has_gpu_od:
+                        # Use shared helper function to parse OD_RANGE
+                        min_speed, parsed_max = self.parse_gpu_od_fan_range(gpu_od_path)
+                        if min_speed is not None:
+                            # Successfully parsed - use the actual range from sysfs
+                            gpu_ranges.append((idx, f"{min_speed}-{parsed_max} or 0-100%%"))
+                        else:
+                            # Parsing failed - fallback to 0-max_speed
+                            gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
+                    else:
+                        # gpu_od directory doesn't exist but max_speed <= 100
+                        # Could be an edge case - use 0-max_speed
+                        gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
+                else:
+                    # Legacy hwmon GPU (0-255)
+                    gpu_ranges.append((idx, "0-255 or 0-100%%"))
+
             except amdsmi_interface.AmdSmiLibraryException as e:
-                logging.debug(
-                    f"AMDSMIHelpers.get_fan_support - Unable to get fan info for device {dev}: {str(e)}"
-                )
                 if e.err_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
                     logging.debug(
                         f"AMDSMIHelpers.get_fan_support - Device {dev} does not support fan control"
                     )
-                    return "N/A"
+                    continue
+                logging.debug(
+                    f"AMDSMIHelpers.get_fan_support - Unable to get fan info for device {dev}: {str(e)}"
+                )
+                self._fan_support_cache = "N/A"
                 return "N/A"
             except Exception as e:
                 logging.debug(
-                    f"AMDSMIHelpers.get_fan_support - Unexpected error occurred --> Unable to get fan info for device {dev}: {str(e)}"
+                    f"AMDSMIHelpers.get_fan_support - Unexpected error for device {dev}: {str(e)}"
                 )
+                self._fan_support_cache = "N/A"
                 return "N/A"
-            # Only check the first device (socket device, never partition)
-            break
-        return "N/A"
+
+        if not gpu_ranges:
+            self._fan_support_cache = "N/A"
+            return "N/A"
+
+        # Check if all GPUs have the same range
+        if len(gpu_ranges) == 1:
+            # Single GPU - no need to show GPU number
+            result = gpu_ranges[0][1]
+        elif len(set(r[1] for r in gpu_ranges)) == 1:
+            # Multiple GPUs with identical ranges - show once
+            result = gpu_ranges[0][1]
+        else:
+            # Multiple GPUs with different ranges - multi-line format for readability
+            # Use 0-based indexing (GPU 0, GPU 1) to match device numbering
+            lines = [f"  GPU {idx}: {range_str}" for idx, range_str in gpu_ranges]
+            indented_lines = "\n".join(lines)
+            result = "\n" + indented_lines
+
+        # Cache the result for future calls
+        self._fan_support_cache = result
+        return result
 
     def get_soc_pstates(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
