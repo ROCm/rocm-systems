@@ -81,7 +81,6 @@ namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
-
 namespace
 {
 using tool_agent_vec_t                         = std::vector<tool_agent>;
@@ -2604,7 +2603,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
             &_data->kfd_event_queue_buffer));
 
-        // Only enable RESTORE_RESCHEDULED operation
+        // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
+        // All others are captured within paired KFD_QUEUE operations
         auto kfd_event_queue_ops = std::array<rocprofiler_tracing_operation_t, 1>{
             ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
         };

@@ -306,12 +306,22 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
 
-To enable KFD event tracing for GPU memory management analysis:
+
+For KFD event tracing, first check whether your GPU supports XNACK by running
+``rocminfo | grep xnack``. If the output contains ``xnack-``, XNACK is available
+but disabled by default. Enable it by setting the environment variable
+``HSA_XNACK=1``; running ``rocminfo`` again should then show ``xnack+``.
 
 .. code-block:: shell
 
-   HSA_XNACK=1
-   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,kfd_events
+   export HSA_XNACK=1
+
+Then add ``kfd_events`` to ``ROCPROFSYS_ROCM_DOMAINS`` in your configuration file
+or on the command line. For example:
+
+.. code-block:: shell
+
+   ROCPROFSYS_ROCM_DOMAINS=kfd_events
 
 ROCPROFSYS_TRACE_REGION
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

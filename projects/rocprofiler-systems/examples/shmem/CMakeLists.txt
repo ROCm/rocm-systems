@@ -32,12 +32,8 @@ else()
     message(STATUS "oshcc found: ${OSHCC_EXECUTABLE}")
 endif()
 
-# Build with oshcc so shmem.h and OpenSHMEM libs are found.
-# Output to a subdirectory — not directly into CMAKE_BINARY_DIR — to avoid
-# a Makefile-generator circular dependency between the target name
-# (e.g. "shmem_hello") and the identically-named output file.
-set(_SHMEM_BINDIR ${CMAKE_CURRENT_BINARY_DIR}/bin)
-file(MAKE_DIRECTORY ${_SHMEM_BINDIR})
+# Build with oshcc so shmem.h and OpenSHMEM libs are found. Output to project build root.
+set(_SHMEM_BINDIR ${CMAKE_BINARY_DIR})
 set(_SHMEM_SRCDIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(_SHMEM_HELLO_EXE ${_SHMEM_BINDIR}/shmem_hello${CMAKE_EXECUTABLE_SUFFIX})
 set(_SHMEM_PINGPONG_EXE ${_SHMEM_BINDIR}/shmem_pingpong${CMAKE_EXECUTABLE_SUFFIX})

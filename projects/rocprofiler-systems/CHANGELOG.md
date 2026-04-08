@@ -8,7 +8,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
-- Kernel Fusion Driver (KFD) event tracing support to capture page faults, page migrations, queue evictions, GPU unmap events, and dropped events. This is enabled by adding `ROCPROFSYS_ROCM_DOMAINS=kfd_events` to the environment variable.
+- Kernel Fusion Driver (KFD) event tracing support to capture page faults, page migrations, queue evictions, GPU unmap events, and dropped events. Requires ROCProfiler-SDK 1.2.1 or later. Enable with `ROCPROFSYS_ROCM_DOMAINS=kfd_events`.
 - Support for pause and resume of profiling via `roctxProfilerPause` and `roctxProfilerResume`.
 - Support for selective region tracing via the `ROCPROFSYS_TRACE_REGION` environment variable, limiting tracing to specified regions.
 
