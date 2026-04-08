@@ -191,6 +191,7 @@ static void copy_rsmi_gpu_metrics_to_amdsmi(const rsmi_gpu_metrics_t& rsmi_metri
   std::memcpy(&amdsmi_apu_metrics, rsmi_metrics.apu_metrics, sizeof(amdsmi_apu_metrics));
   amdsmi_metrics->apu_metrics = &amdsmi_apu_metrics;
 }
+
 static amdsmi_status_t get_ainic_device_from_handle(amdsmi_processor_handle processor_handle,
                                                     amd::smi::AMDSmiAINICDevice** nicdevice) {
   AMDSMI_CHECK_INIT();

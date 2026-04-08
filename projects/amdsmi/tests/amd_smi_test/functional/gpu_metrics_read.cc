@@ -30,12 +30,20 @@
 #include <map>
 #include <string>
 
+#include "libdrm/amdgpu_drm.h"
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 namespace {
+
+// APU metrics version constants
+constexpr uint8_t kApuMetricsV24FormatRevision = 2;
+constexpr uint8_t kApuMetricsV24ContentRevision = 4;
+constexpr uint8_t kApuMetricsV30FormatRevision = 3;
+constexpr uint8_t kApuMetricsV30ContentRevision = 0;
+constexpr size_t kApuMetricsV24CoreCount = 8;
 
 template <typename T>
 void PrintArrayLine(const std::string& label, const T* values, size_t count) {
@@ -51,11 +59,13 @@ void PrintApuMetrics(const amdsmi_gpu_metrics_t& smu) {
 
   const auto& apu = *smu.apu_metrics;
   const bool is_v24 =
-      smu.common_header.format_revision == 2 && smu.common_header.content_revision == 4;
+      smu.common_header.format_revision == kApuMetricsV24FormatRevision &&
+      smu.common_header.content_revision == kApuMetricsV24ContentRevision;
   const bool is_v30 =
-      smu.common_header.format_revision == 3 && smu.common_header.content_revision == 0;
+      smu.common_header.format_revision == kApuMetricsV30FormatRevision &&
+      smu.common_header.content_revision == kApuMetricsV30ContentRevision;
 
-  const size_t core_count = is_v24 ? 8 : AMDSMI_APU_MAX_CORES;
+  const size_t core_count = is_v24 ? kApuMetricsV24CoreCount : AMDSMI_APU_MAX_CORES;
   const size_t l3_count = is_v24 ? AMDSMI_APU_MAX_L3 : 0;
 
   std::cout << "\n";
@@ -258,6 +268,12 @@ void TestGpuMetricsRead::Run(void) {
                   << "\n\t\t** XCD Counter Value: " << temp_xcd_counter_value << "\n";
       }
       CHK_ERR_ASRT(err);
+      amdsmi_asic_info_t asic_info = {};
+      err = amdsmi_get_gpu_asic_info(processor_handles_[i], &asic_info);
+      ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
+      if ((asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0) {  //Query h/w info: Flag that this is integrated (a.h.a. fusion) GPU
+        ASSERT_NE(smu.apu_metrics, nullptr);
+      }
       IF_VERB(STANDARD) {
         std::cout << "METRIC TABLE HEADER:\n";
         std::cout << "structure_size=" << std::dec
