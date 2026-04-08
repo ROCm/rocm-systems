@@ -13,7 +13,9 @@ vulkan_interop:
   Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Write: *level_2
   Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered: *level_2
   Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap: *level_2
-  Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Parameters: *level_2
+  Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Parameters:
+    <<: *level_2
+    tags: [image]
   Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Capture: *level_2
   Unit_hipGraphAddExternalSemaphoresSignalNode_Positive_Basic: *level_2
   Unit_hipGraphAddExternalSemaphoresSignalNode_Vulkan_Positive_Timeline_Semaphore: *level_2

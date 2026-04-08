@@ -31,8 +31,12 @@ performance:
   Performance_hipMemcpyWithStream_HostToHost: *level_2
   Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess: *level_2
   Performance_hipMemcpyWithStream_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpyAtoH: *level_2
-  Performance_hipMemcpyHtoA: *level_2
+  Performance_hipMemcpyAtoH:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpyHtoA:
+    <<: *level_2
+    tags: [image]
   Performance_hipMemcpyDtoD_PeerAccessEnabled: *level_2
   Performance_hipMemcpyDtoD_PeerAccessDisabled: *level_2
   Performance_hipMemcpyDtoDAsync_PeerAccessEnabled: *level_2
@@ -55,54 +59,126 @@ performance:
   Performance_hipMemcpyFromSymbolAsync_SingularValue: *level_2
   Performance_hipMemcpyFromSymbolAsync_ArrayValue: *level_2
   Performance_hipMemcpyFromSymbolAsync_WithOffset: *level_2
-  Performance_hipMemcpy2D_DeviceToHost: *level_2
-  Performance_hipMemcpy2D_HostToDevice: *level_2
+  Performance_hipMemcpy2D_DeviceToHost:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2D_HostToDevice:
+    <<: *level_2
+    tags: [image]
   Performance_hipMemcpy2D_HostToHost:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Performance_hipMemcpy2D_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy2D_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy2DAsync_DeviceToHost: *level_2
-  Performance_hipMemcpy2DAsync_HostToDevice: *level_2
+  Performance_hipMemcpy2D_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2D_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DAsync_DeviceToHost:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DAsync_HostToDevice:
+    <<: *level_2
+    tags: [image]
   Performance_hipMemcpy2DAsync_HostToHost:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Performance_hipMemcpy2DAsync_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy2DAsync_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy2DToArray_HostToDevice: *level_2
-  Performance_hipMemcpy2DToArray_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy2DToArray_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy2DToArrayAsync_HostToDevice: *level_2
-  Performance_hipMemcpy2DToArrayAsync_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy2DToArrayAsync_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy2DFromArray_DeviceToHost: *level_2
-  Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy2DFromArray_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy2DFromArrayAsync_DeviceToHost: *level_2
-  Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_EnablePeerAccess: *level_2
+  Performance_hipMemcpy2DAsync_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DAsync_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DToArray_HostToDevice:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DToArray_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DToArray_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DToArrayAsync_HostToDevice:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DToArrayAsync_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DToArrayAsync_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DFromArray_DeviceToHost:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DFromArray_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DFromArrayAsync_DeviceToHost:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
   Performance_hipMemcpyParam2D_DeviceToHost: *level_2
-  Performance_hipMemcpyParam2D_HostToDevice: *level_2
+  Performance_hipMemcpyParam2D_HostToDevice:
+    <<: *level_2
+    tags: [image]
   Performance_hipMemcpyParam2D_HostToHost: *level_2
-  Performance_hipMemcpyParam2D_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpyParam2D_DeviceToDevice_EnablePeerAccess: *level_2
+  Performance_hipMemcpyParam2D_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpyParam2D_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
   Performance_hipMemcpyParam2DAsync_DeviceToHost: *level_2
-  Performance_hipMemcpyParam2DAsync_HostToDevice: *level_2
+  Performance_hipMemcpyParam2DAsync_HostToDevice:
+    <<: *level_2
+    tags: [image]
   Performance_hipMemcpyParam2DAsync_HostToHost: *level_2
-  Performance_hipMemcpyParam2DAsync_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpyParam2DAsync_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy3D_DeviceToHost: *level_2
-  Performance_hipMemcpy3D_HostToDevice: *level_2
-  Performance_hipMemcpy3D_HostToHost: *level_2
-  Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy3D_DeviceToDevice_EnablePeerAccess: *level_2
-  Performance_hipMemcpy3DAsync_DeviceToHost: *level_2
-  Performance_hipMemcpy3DAsync_HostToDevice: *level_2
-  Performance_hipMemcpy3DAsync_HostToHost: *level_2
-  Performance_hipMemcpy3DAsync_DeviceToDevice_DisablePeerAccess: *level_2
-  Performance_hipMemcpy3DAsync_DeviceToDevice_EnablePeerAccess: *level_2
+  Performance_hipMemcpyParam2DAsync_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpyParam2DAsync_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3D_DeviceToHost:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3D_HostToDevice:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3D_HostToHost:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3D_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3D_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3DAsync_DeviceToHost:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3DAsync_HostToDevice:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3DAsync_HostToHost:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3DAsync_DeviceToDevice_DisablePeerAccess:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemcpy3DAsync_DeviceToDevice_EnablePeerAccess:
+    <<: *level_2
+    tags: [image]
   Performance_hipMemset: *level_2
   Performance_hipMemsetAsync: *level_2
   Performance_hipMemsetD8: *level_2
@@ -123,10 +199,18 @@ performance:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-  Performance_hipMemset2D: *level_2
-  Performance_hipMemset2DAsync: *level_2
-  Performance_hipMemset3D: *level_2
-  Performance_hipMemset3DAsync: *level_2
+  Performance_hipMemset2D:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemset2DAsync:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemset3D:
+    <<: *level_2
+    tags: [image]
+  Performance_hipMemset3DAsync:
+    <<: *level_2
+    tags: [image]
   Performance_hipStreamWaitEvent: *level_2
   Performance_hipStreamGetFlags: *level_2
   Performance_hipStreamGetPriority: *level_2
