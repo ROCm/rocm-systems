@@ -53,7 +53,6 @@ print_usage(const char* prog_name)
 void
 setup_tool_library_env()
 {
-    const auto* time_format_env_name             = "ROCPROFSYS_TIME_FORMAT";
     const auto* attach_tool_library_env_name     = "ROCPROF_ATTACH_TOOL_LIBRARY";
     const auto* rocp_tool_libraries_env_name     = "ROCP_TOOL_LIBRARIES";
     const auto* output_use_current_time_env_name = "ROCPROFSYS_OUTPUT_USE_CURRENT_TIME";
