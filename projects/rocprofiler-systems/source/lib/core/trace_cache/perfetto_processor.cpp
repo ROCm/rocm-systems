@@ -1323,18 +1323,18 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
         }
     };
 
-    if(_category == trait::name<category::kfd_page_fault>::value)
-        emit_kfd_event(category::kfd_page_fault{});
-    else if(_category == trait::name<category::kfd_page_migrate>::value)
-        emit_kfd_event(category::kfd_page_migrate{});
-    else if(_category == trait::name<category::kfd_queue>::value)
-        emit_kfd_event(category::kfd_queue{});
-    else if(_category == trait::name<category::kfd_event_queue>::value)
-        emit_kfd_event(category::kfd_event_queue{});
-    else if(_category == trait::name<category::kfd_event_unmap_from_gpu>::value)
-        emit_kfd_event(category::kfd_event_unmap_from_gpu{});
-    else if(_category == trait::name<category::kfd_event_dropped_events>::value)
-        emit_kfd_event(category::kfd_event_dropped_events{});
+    if(_category == trait::name<category::rocm_kfd_page_fault>::value)
+        emit_kfd_event(category::rocm_kfd_page_fault{});
+    else if(_category == trait::name<category::rocm_kfd_page_migrate>::value)
+        emit_kfd_event(category::rocm_kfd_page_migrate{});
+    else if(_category == trait::name<category::rocm_kfd_queue>::value)
+        emit_kfd_event(category::rocm_kfd_queue{});
+    else if(_category == trait::name<category::rocm_kfd_event_queue>::value)
+        emit_kfd_event(category::rocm_kfd_event_queue{});
+    else if(_category == trait::name<category::rocm_kfd_event_unmap_from_gpu>::value)
+        emit_kfd_event(category::rocm_kfd_event_unmap_from_gpu{});
+    else if(_category == trait::name<category::rocm_kfd_event_dropped_events>::value)
+        emit_kfd_event(category::rocm_kfd_event_dropped_events{});
     else
         LOG_WARNING("Unknown KFD category: {}", _category);
 }
