@@ -1577,6 +1577,216 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
     }
 }
 
+TEST_F(NetIbMPITest, MultidirectionalTransfer) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    std::vector<ncclNetProperties_t> props(ndev);
+    std::vector<int> physDevs;
+    for (int i = 0; i < ndev; i++) {
+        memset(&props[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
+        if (!props[i].name || !strchr(props[i].name, '+'))
+            physDevs.push_back(i);
+    }
+
+    int needed = 8;
+    if ((int)physDevs.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
+
+    int targetSpeed = props[physDevs[0]].speed;
+    std::vector<int> compat;
+    for (int d : physDevs)
+        if (props[d].speed == targetSpeed) compat.push_back(d);
+    if ((int)compat.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
+
+    int devOffset = (rank == 1) ? 4 : 0;
+    std::vector<int> sendDevs = {compat[devOffset + 0], compat[devOffset + 1]};
+    std::vector<int> recvDevs = {compat[devOffset + 2], compat[devOffset + 3]};
+
+    int mergedSendDev = -1, mergedRecvDev = -1;
+    {
+        ncclNetVDeviceProps_t v;
+        memset(&v, 0, sizeof(v));
+        v.ndevs = 2;
+        v.devs[0] = sendDevs[0]; v.devs[1] = sendDevs[1];
+        if (MakeVirtualDevice(&mergedSendDev, &v) != ncclSuccess || mergedSendDev < 0)
+            GTEST_SKIP() << "Failed to create send merged device";
+    }
+    {
+        ncclNetVDeviceProps_t v;
+        memset(&v, 0, sizeof(v));
+        v.ndevs = 2;
+        v.devs[0] = recvDevs[0]; v.devs[1] = recvDevs[1];
+        if (MakeVirtualDevice(&mergedRecvDev, &v) != ncclSuccess || mergedRecvDev < 0)
+            GTEST_SKIP() << "Failed to create recv merged device";
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Setup bidirectional connections
+    void* sendCommFwd = nullptr, *recvCommFwd = nullptr, *listenCommFwd = nullptr;
+    void* sendCommBwd = nullptr, *recvCommBwd = nullptr, *listenCommBwd = nullptr;
+
+    // Forward: Rank 1 listens, Rank 0 connects
+    {
+        ncclNetHandle_t h;
+        if (rank == 1) {
+            ASSERT_EQ(CreateListenComm(mergedRecvDev, &h, &listenCommFwd), ncclSuccess);
+            MPI_Send(&h, sizeof(h), MPI_BYTE, peerRank, 80, MPI_COMM_WORLD);
+            while (!recvCommFwd) AcceptConnection(listenCommFwd, &recvCommFwd);
+        } else {
+            MPI_Recv(&h, sizeof(h), MPI_BYTE, peerRank, 80, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            while (!sendCommFwd) ConnectToRemote(mergedSendDev, &h, &sendCommFwd);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Backward: Rank 0 listens, Rank 1 connects
+    {
+        ncclNetHandle_t h;
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(mergedRecvDev, &h, &listenCommBwd), ncclSuccess);
+            MPI_Send(&h, sizeof(h), MPI_BYTE, peerRank, 81, MPI_COMM_WORLD);
+            while (!recvCommBwd) AcceptConnection(listenCommBwd, &recvCommBwd);
+        } else {
+            MPI_Recv(&h, sizeof(h), MPI_BYTE, peerRank, 81, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            while (!sendCommBwd) ConnectToRemote(mergedSendDev, &h, &sendCommBwd);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    void* mySendComm = (rank == 0) ? sendCommFwd : sendCommBwd;
+    void* myRecvComm = (rank == 0) ? recvCommBwd : recvCommFwd;
+
+    // Patterns
+    struct Pattern {
+        const char* name;
+        size_t sendSize, recvSize;
+        int sendSeed, recvSeed;
+        int tag;
+    };
+
+    std::vector<Pattern> patterns = {
+        {"Allgather (4KB)", 4096, 4096,
+         (rank == 0) ? 1000 : 2000, (rank == 0) ? 2000 : 1000, 300},
+        {"Alltoall (8KB)", 8192, 8192,
+         (rank == 0) ? 3000 : 4000, (rank == 0) ? 4000 : 3000, 301},
+        {"Hypercube (4KB/16KB)", (size_t)((rank == 0) ? 4096 : 16384),
+         (size_t)((rank == 0) ? 16384 : 4096),
+         (rank == 0) ? 5000 : 6000, (rank == 0) ? 6000 : 5000, 302},
+    };
+
+    for (size_t pi = 0; pi < patterns.size(); pi++) {
+        const Pattern& pat = patterns[pi];
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        void* sendBuf = malloc(pat.sendSize);
+        ASSERT_NE(sendBuf, nullptr);
+        void* sendMr = nullptr;
+        ASSERT_EQ(RegisterMemory(mySendComm, sendBuf, pat.sendSize,
+                                 NCCL_PTR_HOST, &sendMr), ncclSuccess);
+
+        void* recvBuf = malloc(pat.recvSize);
+        ASSERT_NE(recvBuf, nullptr);
+        void* recvMr = nullptr;
+        ASSERT_EQ(RegisterMemory(myRecvComm, recvBuf, pat.recvSize,
+                                 NCCL_PTR_HOST, &recvMr), ncclSuccess);
+
+        {
+            uint8_t* p = static_cast<uint8_t*>(sendBuf);
+            for (size_t j = 0; j < pat.sendSize; j++)
+                p[j] = (uint8_t)((pat.sendSeed + j) % kBytePatternModulo);
+        }
+        memset(recvBuf, 0xDE, pat.recvSize);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // BOTH ranks post recv
+        void* recvReq = nullptr;
+        {
+            void* rb[1] = {recvBuf}; size_t rs[1] = {pat.recvSize};
+            int rt[1] = {pat.tag}; void* rh[1] = {recvMr};
+            ASSERT_EQ(PostRecv(myRecvComm, 1, rb, rs, rt, rh, &recvReq), ncclSuccess);
+            ASSERT_NE(recvReq, nullptr);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // BOTH ranks post send with retry
+        {
+            void* sendReq = nullptr;
+            int attempts = 0;
+            do {
+                ASSERT_EQ(PostSend(mySendComm, sendBuf, pat.sendSize,
+                                   pat.tag, sendMr, &sendReq), ncclSuccess);
+                if (sendReq) break;
+                attempts++;
+                usleep(kPollIntervalUs);
+            } while (attempts < kMaxRetryAttempts);
+            ASSERT_NE(sendReq, nullptr)
+                << pat.name << " PostSend NULL after " << attempts << " retries on rank " << rank;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Wait for recv
+        {
+            int csz[1] = {0};
+            ASSERT_EQ(WaitForCompletion(recvReq, csz, kLargeTransferTimeoutMs), ncclSuccess)
+                << pat.name << " recv timed out on rank " << rank;
+            EXPECT_EQ(csz[0], (int)pat.recvSize)
+                << pat.name << " size mismatch on rank " << rank;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // Verify
+        {
+            uint8_t* p = static_cast<uint8_t*>(recvBuf);
+            bool ok = true;
+            size_t errIdx = 0;
+            uint8_t errExp = 0, errGot = 0;
+            for (size_t j = 0; j < pat.recvSize; j++) {
+                uint8_t expected = (uint8_t)((pat.recvSeed + j) % kBytePatternModulo);
+                if (p[j] != expected) {
+                    ok = false;
+                    errIdx = j; errExp = expected; errGot = p[j];
+                    break;
+                }
+            }
+            EXPECT_TRUE(ok) << pat.name << " rank " << rank
+                            << " data mismatch at byte " << errIdx
+                            << ": expected " << (int)errExp << " got " << (int)errGot;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        ASSERT_EQ(DeregisterMemory(mySendComm, sendMr), ncclSuccess);
+        ASSERT_EQ(DeregisterMemory(myRecvComm, recvMr), ncclSuccess);
+        free(sendBuf);
+        free(recvBuf);
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // Close
+    if (rank == 0) {
+        ASSERT_EQ(CloseSendComm(sendCommFwd), ncclSuccess);
+        ASSERT_EQ(CloseRecvComm(recvCommBwd), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenCommBwd), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseRecvComm(recvCommFwd), ncclSuccess);
+        ASSERT_EQ(CloseSendComm(sendCommBwd), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenCommFwd), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
