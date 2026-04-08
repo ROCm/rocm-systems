@@ -947,11 +947,11 @@ def get_panel_alias() -> dict[str, str]:
     }
 
 
-def get_mpi_rank_info() -> tuple[Optional[str], Optional[str]]:
-    """Detect MPI rank and total ranks.
+def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
+    """Detect job rank and total ranks from runtime environment variables.
 
     Returns a (rank, total_ranks) tuple, ensuring both values come from the same
-    MPI implementation.
+    runtime.
     """
     # Note: PMIX_RANK is intentionally excluded. PMIx has no standard size env var,
     # and PMIx is never a standalone launcher — it always runs behind SLURM, OpenMPI,
@@ -969,18 +969,47 @@ def get_mpi_rank_info() -> tuple[Optional[str], Optional[str]]:
         ("MPI_LOCALRANKID", "MPI_LOCALNRANKS"),  # Generic (local)
         ("MPI_RANK", "MPI_SIZE"),  # Generic
     ]
+    matched_rank = None
+    matched_rank_var = None
+    matched_size = None
+    matched_size_var = None
     for rank_var, size_var in rank_size_env_vars:
         rank_value = os.environ.get(rank_var)
-        if rank_value is not None:
-            size_value = os.environ.get(size_var)
-            return (rank_value, size_value)
+        try:
+            _ = int(rank_value)
+        except (TypeError, ValueError):
+            continue
 
-    return (None, None)
+        # Rank is valid; try to get a matching size for a complete pair
+        size_value = os.environ.get(size_var)
+        try:
+            matched_size = int(size_value)
+        except (TypeError, ValueError):
+            # Size missing or invalid — remember rank as fallback but keep
+            # searching for a runtime that provides both rank and size
+            if matched_rank is None:
+                matched_rank = rank_value
+                matched_rank_var = rank_var
+                matched_size_var = size_var
+            continue
+
+        # Complete pair found
+        matched_rank = rank_value
+        matched_rank_var = rank_var
+        matched_size_var = size_var
+        break
+
+    console_debug(
+        f"Parallel runtime detected: {matched_rank_var}='{matched_rank}',"
+        f" {matched_size_var}={matched_size}"
+    )
+
+    return (matched_rank, matched_size)
 
 
 def replace_rank(name: str) -> str:
     def rank(match: re.Match[str]) -> str:
-        value, _ = get_mpi_rank_info()
+        value, _ = get_job_rank_and_size()
         if value is not None:
             return value + match.group(1)  # preserve trailing slash
         else:

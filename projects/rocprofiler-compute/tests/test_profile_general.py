@@ -817,6 +817,7 @@ def test_output_directory_all_placeholders_combined(
     monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
     monkeypatch.setenv("ENV_1", "custom_env")
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", rank)
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "4")
 
     workload_base_dir = test_utils.get_output_dir(param_id="host_gpu_env_rank")
     workload_dir = os.path.join(
@@ -859,6 +860,7 @@ def test_output_directory_default_with_rank(
     )
     monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
     monkeypatch.setenv("PMI_RANK", rank)
+    monkeypatch.setenv("PMI_SIZE", "4")
 
     workload_base_dir = test_utils.get_output_dir(param_id="rank_def_dir")
     p = Path(workload_base_dir)
@@ -3193,8 +3195,9 @@ def test_multi_rank_warning_application_replay(
     Test that a warning is printed when running a multi-rank application
     in application replay mode.
     """
-    # Set MPI environment variable to simulate multi-rank
+    # Set MPI environment variables to simulate multi-rank
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
 
     workload_dir = test_utils.get_output_dir()
 
@@ -3226,6 +3229,7 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     multi-rank application with iteration multiplexing enabled.
     """
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
 
     workload_dir = test_utils.get_output_dir()
 

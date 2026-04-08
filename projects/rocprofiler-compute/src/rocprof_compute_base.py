@@ -30,7 +30,7 @@ from utils.specs import (
 from utils.utils_common import (
     build_metric_list,
     detect_rocprof,
-    get_mpi_rank_info,
+    get_job_rank_and_size,
     get_panel_alias,
     get_version,
     get_version_display,
@@ -236,7 +236,7 @@ class RocProfCompute:
             )
 
             # Add MPI rank to workload path if available
-            mpi_rank, _ = get_mpi_rank_info()
+            mpi_rank, _ = get_job_rank_and_size()
             if mpi_rank is not None:
                 self.__args.output_directory = str(
                     Path(self.__args.output_directory) / f"{mpi_rank}"
@@ -254,7 +254,7 @@ class RocProfCompute:
 
         # Add MPI rank to workload path if %rank% is not present in output directory
         # and rank is available
-        mpi_rank, _ = get_mpi_rank_info()
+        mpi_rank, _ = get_job_rank_and_size()
         if "%rank%" not in self.__args.output_directory and mpi_rank is not None:
             self.__args.output_directory = str(
                 Path(self.__args.output_directory) / f"{mpi_rank}"
