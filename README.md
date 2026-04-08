@@ -21,6 +21,8 @@ This table provides the current status of the migration of specific ROCm systems
 | `hip-tests`            | Public          | Completed         |                                       |
 | `rdc`                  | Public          | Completed        |                                       |
 | `rocdbgapi`            | Public          | Completed        | None                                  |
+| `rocdecode`            | Public          | Completed        | [![Media Libs CI](https://github.com/ROCm/rocm-systems/actions/workflows/media-libs-ci.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/media-libs-ci.yml) |
+| `rocjpeg`              | Public          | Completed        | [![Media Libs CI](https://github.com/ROCm/rocm-systems/actions/workflows/media-libs-ci.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/media-libs-ci.yml) |
 | `rocm-core`            | Public          | Completed         |                                       |
 | `rocminfo`             | Public          | Completed         |                                       |
 | `rocm-smi-lib`         | Public          | Completed         |                                       |
@@ -69,6 +71,8 @@ projects/
   rccl/
   rdc/
   rocdbgapi/
+  rocdecode/
+  rocjpeg/
   rocm-core
   rocminfo/
   rocmsmilib/

@@ -3802,7 +3802,11 @@ static inline void nontemporalMemcpy(void* __restrict dst, const void* __restric
 }
 #endif
 
-void VirtualGPU::HiddenHeapInit() { const_cast<Device&>(dev()).HiddenHeapInit(*this); }
+void VirtualGPU::HiddenHeapInit() {
+  // We don't really need its id, just want to ensure the queue is created.
+  (void)getQueueID();
+  const_cast<Device&>(dev()).HiddenHeapInit(*this);
+}
 
 // ================================================================================================
 bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const amd::Kernel& kernel,
