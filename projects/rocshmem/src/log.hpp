@@ -40,10 +40,13 @@
  *
  * Output format:
  *   Host:   L<PE> <message> (<file>:<line>:<func>)
- *   Device: WG (x,y,z) TH (x,y,z) L <message> (<file>:<line>:<func>)
+ *   Device: L<PE>w<WG>t<TH> <message> (<file>:<line>)
  *
  * Where L is a single-letter level: E(rror), W(arn), I(nfo), T(race).
- * PE is the 4-digit zero-padded PE number (-1 before initialization).
+ * PE, WG, TH are 4-digit zero-padded PE number, flat workgroup id, and
+ * flat thread id respectively. PE is -1 before initialization.
+ * Device macros embed __FILE__ via string concatenation (no %s needed)
+ * and use %d for __LINE__; __func__ is not available on device.
  * Callers should NOT include a trailing newline — the macros append one.
  *
  * Host macros:
@@ -78,64 +81,64 @@ namespace rocshmem {
  * Host-side logging macros
  *****************************************************************************/
 
-#define LOG_ERROR(fmt, ...) do {                                \
-  rocshmem::static_assert_host_only();                           \
-  fprintf(stderr, "E%04d " fmt " (%s:%d:%s)\n",                 \
-          rocshmem::log_pe_number,                               \
-          __VA_OPT__(__VA_ARGS__,)                               \
-          __FILE__, __LINE__, __func__);                         \
+#define LOG_ERROR(fmt, ...) do {                                              \
+  rocshmem::static_assert_host_only();                                        \
+  fprintf(stderr, "E%04d " fmt " (%s:%d:%s)\n",                               \
+          rocshmem::log_pe_number,                                            \
+          __VA_OPT__(__VA_ARGS__,)                                            \
+          __FILE__, __LINE__, __func__);                                      \
 } while (0)
 
-#define LOG_ERROR_EXIT(fmt, ...) do {                            \
-  rocshmem::static_assert_host_only();                           \
-  fprintf(stderr, "E%04d " fmt " (%s:%d:%s)\n",                 \
-          rocshmem::log_pe_number,                               \
-          __VA_OPT__(__VA_ARGS__,)                               \
-          __FILE__, __LINE__, __func__);                         \
-  exit(EXIT_FAILURE);                                            \
+#define LOG_ERROR_EXIT(fmt, ...) do {                                         \
+  rocshmem::static_assert_host_only();                                        \
+  fprintf(stderr, "E%04d " fmt " (%s:%d:%s)\n",                               \
+          rocshmem::log_pe_number,                                            \
+          __VA_OPT__(__VA_ARGS__,)                                            \
+          __FILE__, __LINE__, __func__);                                      \
+  exit(EXIT_FAILURE);                                                         \
 } while (0)
 
-#define LOG_ERROR_ABORT(fmt, ...) do {                           \
-  rocshmem::static_assert_host_only();                           \
-  fprintf(stderr, "E%04d " fmt " (%s:%d:%s)\n",                 \
-          rocshmem::log_pe_number,                               \
-          __VA_OPT__(__VA_ARGS__,)                               \
-          __FILE__, __LINE__, __func__);                         \
-  abort();                                                       \
+#define LOG_ERROR_ABORT(fmt, ...) do {                                        \
+  rocshmem::static_assert_host_only();                                        \
+  fprintf(stderr, "E%04d " fmt " (%s:%d:%s)\n",                               \
+          rocshmem::log_pe_number,                                            \
+          __VA_OPT__(__VA_ARGS__,)                                            \
+          __FILE__, __LINE__, __func__);                                      \
+  abort();                                                                    \
 } while (0)
 
-#define LOG_WARN(fmt, ...) do {                                 \
-  rocshmem::static_assert_host_only();                           \
-  if (rocshmem::envvar::debug_level.get_value() >=               \
-      rocshmem::envvar::types::debug_level::WARN) {              \
-    fprintf(stderr, "W%04d " fmt " (%s:%d:%s)\n",               \
-            rocshmem::log_pe_number,                             \
-            __VA_OPT__(__VA_ARGS__,)                             \
-            __FILE__, __LINE__, __func__);                       \
-  }                                                              \
+#define LOG_WARN(fmt, ...) do {                                               \
+  rocshmem::static_assert_host_only();                                        \
+  if (rocshmem::envvar::debug_level.get_value() >=                            \
+      rocshmem::envvar::types::debug_level::WARN) {                           \
+    fprintf(stderr, "W%04d " fmt " (%s:%d:%s)\n",                             \
+            rocshmem::log_pe_number,                                          \
+            __VA_OPT__(__VA_ARGS__,)                                          \
+            __FILE__, __LINE__, __func__);                                    \
+  }                                                                           \
 } while (0)
 
-#define LOG_INFO(fmt, ...) do {                                 \
-  rocshmem::static_assert_host_only();                           \
-  if (rocshmem::envvar::debug_level.get_value() >=               \
-      rocshmem::envvar::types::debug_level::INFO) {              \
-    fprintf(stdout, "I%04d " fmt " (%s:%d:%s)\n",               \
-            rocshmem::log_pe_number,                             \
-            __VA_OPT__(__VA_ARGS__,)                             \
-            __FILE__, __LINE__, __func__);                       \
-  }                                                              \
+#define LOG_INFO(fmt, ...) do {                                               \
+  rocshmem::static_assert_host_only();                                        \
+  if (rocshmem::envvar::debug_level.get_value() >=                            \
+      rocshmem::envvar::types::debug_level::INFO) {                           \
+    fprintf(stdout, "I%04d " fmt " (%s:%d:%s)\n",                             \
+            rocshmem::log_pe_number,                                          \
+            __VA_OPT__(__VA_ARGS__,)                                          \
+            __FILE__, __LINE__, __func__);                                    \
+  }                                                                           \
 } while (0)
 
 #ifdef BUILD_DEBUG_LEVEL_TRACE
-#define LOG_TRACE(fmt, ...) do {                                \
-  rocshmem::static_assert_host_only();                           \
-  if (rocshmem::envvar::debug_level.get_value() >=               \
-      rocshmem::envvar::types::debug_level::TRACE) {             \
-    fprintf(stdout, "T%04d " fmt " (%s:%d:%s)\n",               \
-            rocshmem::log_pe_number,                             \
-            __VA_OPT__(__VA_ARGS__,)                             \
-            __FILE__, __LINE__, __func__);                       \
-  }                                                              \
+#define LOG_TRACE(fmt, ...) do {                                              \
+  rocshmem::static_assert_host_only();                                        \
+  if (rocshmem::envvar::debug_level.get_value() >=                            \
+      rocshmem::envvar::types::debug_level::TRACE) {                          \
+    fprintf(stdout, "T%04d " fmt " (%s:%d:%s)\n",                             \
+            rocshmem::log_pe_number,                                          \
+            __VA_OPT__(__VA_ARGS__,)                                          \
+            __FILE__, __LINE__, __func__);                                    \
+  }                                                                           \
 } while (0)
 #else
 #define LOG_TRACE(...) do { rocshmem::static_assert_host_only(); } while (0)
@@ -194,41 +197,36 @@ template <typename... Args>
 
 #ifdef BUILD_DEBUG_LEVEL_DEVICE
 
-#define LOGD_ERROR(fmt, ...) do {                                           \
-  rocshmem::static_assert_device_only();                                    \
-  rocshmem::dprintf("E%04dw%04ut%04u " fmt                   \
-              " (" __FILE__ ":%d)\n",                                       \
-              __VA_OPT__(__VA_ARGS__,) __LINE__);                           \
+#define LOGD_ERROR(fmt, ...) do {                                             \
+  rocshmem::static_assert_device_only();                                      \
+  rocshmem::dprintf("E%04dw%04ut%04u " fmt " (" __FILE__ ":%d)\n",            \
+                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
 } while (0)
 
-#define LOGD_ERROR_ABORT(fmt, ...) do {                                     \
-  rocshmem::static_assert_device_only();                                    \
-  rocshmem::dprintf("E%04dw%04ut%04u " fmt                   \
-              " (" __FILE__ ":%d)\n",                                       \
-              __VA_OPT__(__VA_ARGS__,) __LINE__);                           \
-  abort();                                                                  \
+#define LOGD_ERROR_ABORT(fmt, ...) do {                                       \
+  rocshmem::static_assert_device_only();                                      \
+  rocshmem::dprintf("E%04dw%04ut%04u " fmt " (" __FILE__ ":%d)\n",            \
+                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
+  abort();                                                                    \
 } while (0)
 
-#define LOGD_WARN(fmt, ...) do {                                            \
-  rocshmem::static_assert_device_only();                                    \
-  rocshmem::dprintf("W%04dw%04ut%04u " fmt                   \
-              " (" __FILE__ ":%d)\n",                                       \
-              __VA_OPT__(__VA_ARGS__,) __LINE__);                           \
+#define LOGD_WARN(fmt, ...) do {                                              \
+  rocshmem::static_assert_device_only();                                      \
+  rocshmem::dprintf("W%04dw%04ut%04u " fmt " (" __FILE__ ":%d)\n",            \
+                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
 } while (0)
 
-#define LOGD_INFO(fmt, ...) do {                                            \
-  rocshmem::static_assert_device_only();                                    \
-  rocshmem::dprintf("I%04dw%04ut%04u " fmt                   \
-              " (" __FILE__ ":%d)\n",                                       \
-              __VA_OPT__(__VA_ARGS__,) __LINE__);                           \
+#define LOGD_INFO(fmt, ...) do {                                              \
+  rocshmem::static_assert_device_only();                                      \
+  rocshmem::dprintf("I%04dw%04ut%04u " fmt " (" __FILE__ ":%d)\n",            \
+                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
 } while (0)
 
 #if defined(BUILD_DEBUG_LEVEL_TRACE)
-#define LOGD_TRACE(fmt, ...) do {                                           \
-  rocshmem::static_assert_device_only();                                    \
-  rocshmem::dprintf("T%04dw%04ut%04u " fmt                   \
-              " (" __FILE__ ":%d)\n",                                       \
-              __VA_OPT__(__VA_ARGS__,) __LINE__);                           \
+#define LOGD_TRACE(fmt, ...) do {                                             \
+  rocshmem::static_assert_device_only();                                      \
+  rocshmem::dprintf("T%04dw%04ut%04u " fmt " (" __FILE__ ":%d)\n",            \
+                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
 } while (0)
 #else
 #define LOGD_TRACE(...) do { rocshmem::static_assert_device_only(); } while (0)
