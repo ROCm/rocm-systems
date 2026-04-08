@@ -31,6 +31,7 @@ foreach(file ${CLI_FILES})
     add_custom_command(
         OUTPUT ${dst}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${src} ${dst}
+        COMMAND ${CMAKE_COMMAND} -E touch_nocreate ${dst}
         DEPENDS ${src}
     )
     list(APPEND CLI_OUTPUTS ${dst})
