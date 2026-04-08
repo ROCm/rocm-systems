@@ -39,7 +39,6 @@
 #include "profiler.hpp"
 #include "queue.hpp"
 #include "ro_team_proxy.hpp"
-#include "team_info_proxy.hpp"
 #include "window_proxy.hpp"
 
 namespace rocshmem {
