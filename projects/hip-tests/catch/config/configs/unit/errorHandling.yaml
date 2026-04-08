@@ -14,9 +14,7 @@ errorHandling:
     <<: *level_2
     tags: [multigpu]
   Unit_hipGetLastError_with_hipMemcpyDtoHAsync: *level_2
-  Unit_hipGetLastError_with_hipMemcpyParam2DAsync:
-    <<: *level_2
-    tags: [image]
+  Unit_hipGetLastError_with_hipMemcpyParam2DAsync: *level_2
   Unit_hipGetLastError_with_hipDrvMemcpy3DAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpy3DAsync:
     <<: *level_2
@@ -26,9 +24,7 @@ errorHandling:
   Unit_hipGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2
   Unit_hipGetLastError_with_hipSignalExternalSemaphoresAsync: *level_2
   Unit_hipGetLastError_with_hipMemPrefetchAsync: *level_2
-  Unit_hipGetLastError_with_hipMemcpy2DAsync:
-    <<: *level_2
-    tags: [image]
+  Unit_hipGetLastError_with_hipMemcpy2DAsync: *level_2
   Unit_hipGetLastError_with_hipMemsetAsync: *level_2
   Unit_hipGetLastError_with_MemCpyAsync: *level_2
   Unit_hipGetLastError_with_MemCpyAsync_thread: *level_2
@@ -64,9 +60,7 @@ errorHandling:
     <<: *level_2
     tags: [multigpu]
   Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync: *level_2
-  Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync:
-    <<: *level_2
-    tags: [image]
+  Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync: *level_2
   Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpy3DAsync:
     <<: *level_2
@@ -76,9 +70,7 @@ errorHandling:
   Unit_hipExtGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2
   Unit_hipExtGetLastError_with_hipSignalExternalSemaphoresAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemPrefetchAsync: *level_2
-  Unit_hipExtGetLastError_with_hipMemcpy2DAsync:
-    <<: *level_2
-    tags: [image]
+  Unit_hipExtGetLastError_with_hipMemcpy2DAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemsetAsync: *level_2
   Unit_hipExtGetLastError_with_MemCpyAsync: *level_2
   Unit_hipExtGetLastError_with_MemCpyAsync_thread: *level_2
