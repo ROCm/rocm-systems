@@ -5705,7 +5705,10 @@ def test_pc_sampling_prof_subprocess_fails(
         utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_not_called()
-        mock_console_error.assert_called_once_with("PC sampling failed.")
+        mock_console_error.assert_called_once_with(
+            "PC sampling failed: '--' separator not found in profiler arguments. "
+            "Ensure application command is provided after '--'."
+        )
 
     mock_capture_subprocess.reset_mock()
     mock_console_error.reset_mock()

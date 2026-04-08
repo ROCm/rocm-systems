@@ -423,7 +423,10 @@ def pc_sampling_prof(
                 profiler_options_list.index("--") :
             ]
         except ValueError:
-            console_error("PC sampling failed.")
+            console_error(
+                "PC sampling failed: '--' separator not found in profiler arguments. "
+                "Ensure application command is provided after '--'."
+            )
             return
 
         options = [
