@@ -1,219 +1,103 @@
-# AMD System Management Interface (AMD SMI) library
+# AMD System Management Interface (AMD SMI) Library — WSL
 
-The AMD System Management Interface (AMD SMI) library offers a unified tool for managing and monitoring GPUs,
-particularly in high-performance computing environments. It provides a user-space interface that allows applications to
-control GPU operations, monitor performance, and retrieve information about the system's drivers and GPUs.
+A WSL-focused build of the AMD System Management Interface library for GPU telemetry and monitoring on Windows Subsystem for Linux.
 
-For information on available features, installation steps, API reference material, and helpful tips, refer to the online
-documentation at [rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/)
+This component provides the AMD SMI C++ library, Python interface, and CLI tool (`amd-smi`) for WSL environments.
 
->[!NOTE]
->This project is a successor to [rocm_smi_lib](https://github.com/ROCm/rocm_smi_lib)
->and [esmi_ib_library](https://github.com/amd/esmi_ib_library).
->This project is applicable to Linux Baremetal and Linux VM(Guest). To use AMD SMI for Virtualization, please refer to [AMD-SMI Virtualization](https://github.com/amd/MxGPU-Virtualization/tree/mainline/smi-lib).
+> **Note:** This is a WSL adaptation of [upstream AMD SMI](https://github.com/ROCm/amdsmi). Some features (e.g. ESMI CPU monitoring, Go API, Rust wrapper) are not available on this platform.
 
-## Supported platforms
+## Prerequisites
 
-The AMD SMI library supports Linux bare metal and Linux virtual machine guest
-for AMD GPUs and AMD EPYC™ CPUs via
-[esmi_ib_library](https://github.com/amd/esmi_ib_library).
+- AMD ROCm installed in WSL
+- Windows SDK (see [root README](../README.md#1-install-windows-sdk))
+- CMake >= 3.20
+- GCC >= 11.4
+- Python 3.6.8+ (for Python interface and CLI)
 
-AMD SMI library can run on AMD ROCm supported platforms, refer to
-[System requirements (Linux)](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
-for more information.
+## Building
 
-## Installation
+Build AMD SMI directly from this directory:
 
-* [Install the AMD SMI library and CLI tool](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html)
-
-## Requirements
-
-The following are required to install and use the AMD SMI library through its language interfaces and CLI.
-
-* `amdgpu` driver must be loaded for [`amdsmi_init()`](./docs/how-to/amdsmi-cpp-lib#hello-amd-smi) to work. Refer to the [Instinct documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html) for installation instructions.
-* Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
-
-  ```bash
-  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64
-  ```
-
-### Python interface and CLI tool prerequisites
-
-* Python 3.6.8+ (64-bit)
-
-### Note: No module named more_itertools warning on Azure Linux 3
-During the driver installation process on Azure Linux 3, you might encounter the `ModuleNotFoundError: No module named 'more_itertools'` warning. This warning is a result of the reintroduction of `python3-wheel` and `python3-setuptools` dependencies in the CMake of AMD SMI, which requires `more_itertools` to build these Python libraries. This issue will be fixed in a future ROCm release. As a workaround, use the following command before installation:
-```
-sudo python3 -m pip install more_itertools
+```bash
+cmake -B build -DWIN_SDK=<path-to-windows-sdk> <path-to-amdsmi-source>
+cmake --build build
+sudo cmake --install build
 ```
 
-### Go API prerequisites
+For example, from the amdsmi directory:
+```bash
+cmake -B build -DWIN_SDK=/path/to/windows/sdk .
+cmake --build build
+sudo cmake --install build
+```
 
-* Go version 1.20 or greater
+### Post-install: register the Python module
 
-## AMD SMI basic usage
+When installing via `make install` (instead of a `.deb` package), the Python module is copied to `/opt/rocm/share/amd_smi/` but **not** automatically registered with Python. Run one of the following to enable `import amdsmi`:
 
-### C++ library
+```bash
+# Option 1: pip install (recommended)
+sudo python3 -m pip install /opt/rocm/share/amd_smi
 
-For developers focused on performance monitoring, system diagnostics, or resource management, the AMD SMI C++ library
-offers a powerful and versatile tool to unlock the full capabilities of AMD hardware.
+# Option 2: set PYTHONPATH (add to ~/.bashrc for persistence)
+export PYTHONPATH=/opt/rocm/share/amd_smi:$PYTHONPATH
+```
 
-Refer to the [user guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-cpp-lib.html) and the
-detailed [C++ API reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-cpp-api.html) in the
-ROCm documentation portal.
+> **Note:** `.deb` package installations handle this automatically via the postinst script.
 
-### Python library
-
-The AMD SMI Python interface provides an easy-to-use
-[API](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-py-lib.html) for interacting with AMD
-hardware. It simplifies tasks like monitoring and controlling GPU operations, allowing for rapid development.
-
-Refer to the [user guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-py-lib.html) and the
-detailed [Python API reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-py-api.html) in the
-ROCm documentation portal.
-
-### Go library
-
-The AMD SMI Go interface provides a simple
-[API](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-go-lib.html)
-for AMD hardware management. It streamlines hardware monitoring and control
-while leveraging Golang's features.
-
-Refer to the [user guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-go-lib.html) and the
-[Go API reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-go-api.html) in the
-ROCm documentation portal.
+## Usage
 
 ### CLI tool
 
-A versatile command line tool for managing and monitoring AMD hardware. You can use `amd-smi` for:
-
-- Device information: Quickly retrieve detailed information about AMD GPUs
-
-- Performance monitoring: Real-time monitoring of GPU utilization, memory, temperature, and power consumption
-
-- Process information: Identify which processes are using GPUs
-
-- Configuration management: Adjust GPU settings like clock speeds and power limits
-
-- Error reporting: Monitor and report GPU errors for proactive maintenance
-
-Check out
-[Getting to Know Your GPU: A Deep Dive into AMD SMI -- ROCm Blogs](https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html)
-for a rundown.
-
-### Docker container configuration
-
-To ensure proper functionality of AMD SMI within a Docker container, the
-following configuration options must be included. These settings are
-particularly important for managing memory partitions, as partitioning depends
-on loading and unloading kernel drivers.
-
-- `--cap-add=SYS_MODULE`
-
-- `-v /lib/modules:/lib/modules`
-
-See [Using AMD SMI in a Docker
-container](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/setup-docker-container.html)
-for more information.
-
-## Building AMD SMI
-
-This section describes the prerequisites and steps to build AMD SMI from source.
-
-### Required software
-
-To build the AMD SMI library, the following components are required. Note that the software versions specified were used
-during development; earlier versions are not guaranteed to work.
-
-* CMake (v3.20.0 or later) -- `python3 -m pip install cmake`
-* g++ (v5.4.0 or later)
-
-In order to build the AMD SMI Python package, the following components are required:
-
-* Python (3.6.8 or later)
-* virtualenv -- `python3 -m pip install virtualenv`
-
-### Build steps
-
-1. Clone the AMD SMI repository to your local Linux machine.
-
-   ```shell
-   git clone https://github.com/ROCm/amdsmi.git
-   ```
-
-2. The default installation location for the library and headers is `/opt/rocm`. Before installation, any old ROCm
-   directories should be deleted:
-
-   * `/opt/rocm`
-   * `/opt/rocm-<version_number>`
-
-3. Build the library by following the typical CMake build sequence (run as root user or use `sudo` before `make install`
-   command); for instance:
-
-   ```bash
-   mkdir -p build
-   cd build
-   cmake ..
-   make -j $(nproc)
-   make install
-   ```
-
-   The built library is located in the  `build/` directory. To build the `rpm` and `deb` packages use the following
-   command:
-
-   ```bash
-   make package
-   ```
-
-### Rebuild the Python wrapper
-
-The Python wrapper for the AMD SMI library is found in the [auto-generated file](#py_lib_fs)
-`py-interface/amdsmi_wrapper.py`. It is essential to regenerate this wrapper whenever there are changes to the C++ API.
-It is not regenerated automatically.
-
-To regenerate the wrapper, use the following command.
-
-```shell
-./update_wrapper.sh
-```
-
-After this command, the file in `py-interface/amdsmi_wrapper.py` will be updated
-on compile.
-
->[!NOTE]
->You need Docker installed on your system to regenerate the Python wrapper.
-
-### Build the tests
-
-To verify the build and capabilities of AMD SMI on your system, as well as to see practical examples of its usage, you
-can build and run the available [tests in the repository](https://github.com/ROCm/amdsmi/tree/amd-staging/tests). Follow
-these steps to build the tests:
+The `amd-smi` command-line tool provides GPU monitoring:
 
 ```bash
-mkdir -p build
-cd build
-cmake -DBUILD_TESTS=ON ..
-make -j $(nproc)
+amd-smi
+amd-smi version
+amd-smi static
 ```
 
-#### Run the tests
+**Note:** The following subcommands are not supported in this WSL build:
+- `event` — Event monitoring not available
+- `set` — Setting GPU parameters not supported
+- `reset` — GPU reset operations not supported
+- `ras` — RAS features not available
 
-Once the tests are [built](#build-the-tests), you can run them by executing the `amdsmitst` program. The executable can
-be found at `build/tests/amd_smi_test/`.
+### Python interface
 
-### Build the docs
+```python
+import amdsmi
+amdsmi.amdsmi_init()
+devices = amdsmi.amdsmi_get_processor_handles()
+for dev in devices:
+    print(amdsmi.amdsmi_get_gpu_asic_info(dev))
+amdsmi.amdsmi_shut_down()
+```
 
-To build the documentation, follow the instructions at
-[Building documentation](https://rocm.docs.amd.com/en/latest/contribute/building.html).
+### C++ library
 
-## DISCLAIMER
+```cpp
+#include <amd_smi/amdsmi.h>
 
-The information contained herein is for informational purposes only, and is subject to change without notice. In
-addition, any stated support is planned and is also subject to change. While every precaution has been taken in the
-preparation of this document, it may contain technical inaccuracies, omissions and typographical errors, and AMD is
-under no obligation to update or otherwise correct this information. Advanced Micro Devices, Inc. makes no
-representations or warranties with respect to the accuracy or completeness of the contents of this document, and assumes
-no liability of any kind, including the implied warranties of noninfringement, merchantability or fitness for particular
-purposes, with respect to the operation or use of AMD hardware, software or other products described herein.
+amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+// ... use AMD SMI APIs ...
+amdsmi_shut_down();
+```
 
-© 2023-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+Refer to `include/amd_smi/amdsmi.h` for the full C++ API.
+
+## Known Limitations on WSL
+
+- **ESMI (CPU monitoring):** ESMI symbols are linked in for Python compatibility, but ESMI-based CPU monitoring does not work on WSL.
+- **Go and Rust bindings:** Not included in this build.
+- **GPU telemetry:** Metrics such as temperature, clocks, and power may be less complete than on bare-metal Linux. For broader GPU visibility, use Windows tools (Task Manager, AMD Software: Adrenalin Edition).
+- **Process and engine accounting:** `amd-smi` does not expose per-process GPU memory usage or compute unit (CU) and SDMA utilization on WSL.
+- **Profiling and debugging:** The ROCm profiler and debugger are not supported on WSL.
+
+## Documentation
+
+For upstream AMD SMI documentation, see [rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
+
+## Contributing
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.

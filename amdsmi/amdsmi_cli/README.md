@@ -1,28 +1,60 @@
-# AMD SMI CLI tool
+# AMD SMI CLI tool for WSL
 
-A command line tool for manipulating and monitoring the `amdgpu` kernel;
-`amd-smi` is intended to replace and deprecate the existing
-[`rocm-smi`](https://github.com/rocm/rocm_smi_lib) CLI tool.
+`amd-smi` is the command-line interface for the WSL-focused AMD SMI build in
+this repository. It provides GPU monitoring for supported AMD GPU setups
+running on Windows Subsystem for Linux.
 
-When using the CLI tool, you should have at least one AMD GPU and the driver
-installed.
+This CLI is part of the [AMD SMI WSL component](../README.md).
 
->[!NOTE]
->The AMD SMI CLI tool is provided as an example code to aid the development of
->telemetry tools. The Python or C++ library is recommended as a robust data
->source.
+> [!NOTE]
+> This repository contains a WSL adaptation of AMD SMI. The CLI behavior and
+> feature availability can differ from upstream Linux deployments depending on
+> what is supported by the WSL stack and Windows driver.
 
-Find the documentation in the `docs/` directory.
+## Prerequisites
 
-- [Install AMD SMI](../docs/install/install.md)
-- [About the tool and how to get started](../docs/how-to/amdsmi-cli-tool.md)
+- A supported AMD GPU exposed to WSL
+- AMD ROCm installed in WSL
+- The matching AMD Windows graphics driver installed on the host
+- Python 3.6.8 or newer to run the CLI from source or from the installed Python package
+
+## Build and install
+
+Build this CLI from the `amdsmi` directory as part of the `amdsmi` component.
+Use the build instructions in [../README.md](../README.md#building).
+
+After install, the `amd-smi` executable is available in the installed ROCm
+environment.
+
+If you install with `make install`, the Python module may also need to be
+registered manually as described in [../README.md](../README.md).
+
+## Usage
+
+Basic examples:
+
+```bash
+amd-smi
+amd-smi version
+amd-smi static
+```
+
+Run `amd-smi --help` to see the full command set supported by this build.
+
+> [!NOTE]
+> The CLI is useful for interactive inspection and automation. For integration
+> into larger tools or services, prefer the AMD SMI C++ or Python APIs for
+> telemetry and data collection.
 
 ## Online documentation
 
-Explore the latest documentation on the [ROCm documentation
-portal](https://rocm.docs.amd.com/projects/en/latest/index.html).
+For the upstream AMD SMI documentation set, see:
 
-- [Install AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html)
+- [AMD SMI documentation portal](https://rocm.docs.amd.com/projects/amdsmi/en/latest/)
+- [AMD SMI install guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html)
+- [AMD SMI CLI reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-cli-tool.html)
 
-- [CLI tool usage](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-cli-tool.html).
+Use those pages as the baseline reference for commands and concepts, with the
+understanding that some upstream capabilities may not apply to the WSL
+adaptation in this repository.
 
