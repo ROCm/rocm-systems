@@ -1372,7 +1372,7 @@ typedef struct {
 #define AMDSMI_MAX_NUM_FREQUENCIES 33
 
 //! Maximum possible value for fan speed for legacy hwmon GPUs.
-//! For GPUs with the gpu_od sysfs interface (e.g. Navi3x/4x), use
+//! For GPUs with the gpu_od sysfs interface, use
 //! amdsmi_get_gpu_fan_speed_max() to query the actual maximum.
 //! @cond @tag{gpu_bm_linux} @endcond
 #define AMDSMI_MAX_FAN_SPEED 255

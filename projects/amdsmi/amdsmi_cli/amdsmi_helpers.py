@@ -1503,7 +1503,7 @@ class AMDSMIHelpers:
                     parts = line.strip().split()
                     if len(parts) >= 3:
                         return int(parts[1]), int(parts[2])
-        except (OSError, IOError, ValueError) as e:
+        except (OSError, ValueError) as e:
             logging.debug(f"AMDSMIHelpers.parse_gpu_od_fan_range - Failed to parse OD_RANGE: {e}")
         return None, None
 
