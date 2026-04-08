@@ -5261,10 +5261,14 @@ amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,
   amdsmi_gpu_metrics_t metrics = {};
   status = amdsmi_get_gpu_metrics_info(processor_handle, &metrics);
   if (status == AMDSMI_STATUS_SUCCESS) {
+    // APU metrics power values are in milliwatts, need to convert to watts
+    const bool is_apu = (metrics.apu_metrics != nullptr);
+    const uint32_t power_divisor = is_apu ? 1000 : 1;
+
     if (metrics.current_socket_power != get_std_num_limit<decltype(metrics.current_socket_power)>())
-      info->current_socket_power = metrics.current_socket_power;
+      info->current_socket_power = metrics.current_socket_power / power_divisor;
     if (metrics.average_socket_power != get_std_num_limit<decltype(metrics.average_socket_power)>())
-      info->average_socket_power = metrics.average_socket_power;
+      info->average_socket_power = metrics.average_socket_power / power_divisor;
     if (metrics.voltage_gfx != get_std_num_limit<decltype(metrics.voltage_gfx)>())
       info->gfx_voltage = metrics.voltage_gfx;
     if (metrics.voltage_soc != get_std_num_limit<decltype(metrics.voltage_soc)>())
