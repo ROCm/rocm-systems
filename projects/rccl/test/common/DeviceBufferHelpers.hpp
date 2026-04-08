@@ -401,4 +401,3 @@ std::pair<hipError_t, std::vector<T>> downloadBuffer(const void* device_buffer, 
 } // namespace RCCLTestHelpers
 
 #endif // DEVICE_BUFFER_HELPERS_HPP
-

@@ -82,9 +82,14 @@ def json_data(request):
 
 
 @pytest.fixture
-def pftrace_data(request):
+def pftrace_reader(request):
     filename = request.config.getoption("--pftrace-input")
-    return PerfettoReader(filename).read()[0]
+    return PerfettoReader(filename)
+
+
+@pytest.fixture
+def pftrace_data(pftrace_reader):
+    return pftrace_reader.read()[0]
 
 
 @pytest.fixture

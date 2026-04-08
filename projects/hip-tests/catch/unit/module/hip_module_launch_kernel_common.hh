@@ -215,7 +215,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
     int numDevices = 0;
     HIP_CHECK(hipGetDeviceCount(&numDevices));
     if (numDevices < 2) {
-      SUCCEED("skipped the testcase as number of devices is less than 2");
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       HIP_CHECK(hipSetDevice(1));
       hipStream_t s1;

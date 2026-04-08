@@ -81,7 +81,6 @@ device:
   Unit_hipDeviceGetAttribute_NegTst:
     <<: *level_2
     tags: [query]
-  Print_Out_Attributes: *level_2
   Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported:
     <<: *level_2
     tags: [query]
@@ -91,15 +90,12 @@ device:
   Unit_hipGetDeviceCount_HideDevices:
     <<: *level_2
     tags: [query]
-  Print_Out_Device_Count: *level_2
   Unit_hipGetDeviceProperties_ArchPropertiesTst:
     <<: *level_2
     tags: [multigpu, query]
   Unit_hipGetDeviceProperties_NegTst:
     <<: *level_2
     tags: [query]
-  Print_Out_Properties: *level_2
-  Print_Out_Properties_6_0: *level_2
   Unit_hipRuntimeGetVersion_Positive:
     <<: *level_2
     tags: [init]
@@ -361,18 +357,18 @@ device:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-207
     disabled: [amd_wsl]
-  Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Reused_Memory:
-    <<: *level_2
-    # Note: hsa_amd_ipc_ is dummy
-    disabled: [amd_wsl]
   Unit_hipIpcGetMemHandle_Negative_Handle_For_Freed_Memory: *level_2
   Unit_hipIpcGetMemHandle_Negative_Out_Of_Bound_Pointer: *level_2
   Unit_hipIpcCloseMemHandle_Positive_Reference_Counting:
     <<: *level_2
     # (amd_linux) SWDEV-511679 : Below tests fail in stress test
     # (amd_wsl) Note: hsa_amd_ipc_ is dummy
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_linux]
   Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_wsl]
+  Unit_hipIpcOpenMemHandle_Multiproc: *level_2
+  Unit_hipIpcOpenMemHandle_Multiproc_Child:
+    <<: *level_2
+    disabled: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
