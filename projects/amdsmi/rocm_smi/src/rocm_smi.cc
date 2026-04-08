@@ -1570,9 +1570,6 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
       .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
       .structure_content();
 
-  // Note:  For debug builds/purposes only.
-  assert(txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) ||
-         txt_power_dev_od_voltage.contains_title_key(kTAG_OD_SCLK));
   // Note:  For release builds/purposes.
   if (!txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) &&
       !txt_power_dev_od_voltage.contains_title_key(kTAG_OD_SCLK)) {
