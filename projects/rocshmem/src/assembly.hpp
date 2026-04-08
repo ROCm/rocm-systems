@@ -240,7 +240,8 @@ make_buffer_resource(T* ptr, uint32_t buffer_size) {
   return {as_u64, buffer_size, config};
 }
 
-#if defined(__gfx942__) || defined(__gfx950__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || \
+    defined(__gfx1100__)
 
 __device__ __int128_t llvm_amdgcn_raw_buffer_load_b128(
     i32x4 srsrc, uint32_t voffset, uint32_t soffset,
@@ -250,7 +251,19 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(
     __int128_t vdata, i32x4 srsrc, uint32_t voffset, uint32_t soffset,
     uint32_t coherency) __asm("llvm.amdgcn.raw.buffer.store.i128");
 
-#endif  // __gfx942__ || __gfx950__
+#endif  // __gfx90a__ || __gfx942__ || __gfx950__ || __gfx1100__
+
+#if defined(__gfx1201__)
+
+__device__ __int128_t llvm_amdgcn_raw_buffer_load_b128(
+    i32x4 srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t coherency) __asm("llvm.amdgcn.raw.buffer.load.b128");
+
+__device__ void llvm_amdgcn_raw_buffer_store_b128(
+    __int128_t vdata, i32x4 srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t coherency) __asm("llvm.amdgcn.raw.buffer.store.b128");
+
+#endif  // __gfx1201__
 
 template <int N = 16>
 __device__ __forceinline__ void load_store_asm(buffer_resource* src,
@@ -263,7 +276,21 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src,
 #if defined(__gfx908__)
 #endif
 #if defined(__gfx90a__) || defined(__gfx1100__)
-    //! needs to be implemented
+
+  __int128_t regs[N];
+
+  #pragma unroll
+  for (int i = 0; i < N; i++) {
+    regs[i] = llvm_amdgcn_raw_buffer_load_b128(
+        *reinterpret_cast<i32x4*>(src), thread_idx, i * stride, 0b11u);
+  }
+  #pragma unroll
+  for (int i = 0; i < N; i++) {
+    llvm_amdgcn_raw_buffer_store_b128(regs[i], *reinterpret_cast<i32x4*>(dst),
+                                      thread_idx, i * stride, 0b11u);
+  }
+  __builtin_amdgcn_s_barrier();
+
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
 
@@ -284,7 +311,21 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src,
 
 #endif
 #if defined(__gfx1201__)
-    //! needs to be implemented
+
+  __int128_t regs[N];
+
+  #pragma unroll
+  for (int i = 0; i < N; i++) {
+    regs[i] = llvm_amdgcn_raw_buffer_load_b128(
+        *reinterpret_cast<i32x4*>(src), thread_idx, i * stride, 0b1100u);
+  }
+  #pragma unroll
+  for (int i = 0; i < N; i++) {
+    llvm_amdgcn_raw_buffer_store_b128(regs[i], *reinterpret_cast<i32x4*>(dst),
+                                      thread_idx, i * stride, 0b1100u);
+  }
+  __builtin_amdgcn_s_barrier();
+
 #endif
 }
 
