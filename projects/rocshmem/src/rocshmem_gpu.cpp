@@ -149,13 +149,12 @@ static int copy_device_symbol_to_module(Symbol &builtin_symbol,
   void *source {nullptr};
   hipError_t err = hipGetSymbolAddress(&source, HIP_SYMBOL(builtin_symbol));
   if (err != hipSuccess) {
-    fprintf(stderr,
-            "[rocSHMEM] Error: Failed to get address of built-in %s: %s\n",
-            label, hipGetErrorString(err));
+    LOG_ERROR("Failed to get address of built-in %s: %s",
+              label, hipGetErrorString(err));
     return ROCSHMEM_ERROR;
   }
   if (source == nullptr) {
-    fprintf(stderr, "[rocSHMEM] Error: Built-in %s has null address\n", label);
+    LOG_ERROR("uilt-in %s has null address", label);
     return ROCSHMEM_ERROR;
   }
 
@@ -163,24 +162,21 @@ static int copy_device_symbol_to_module(Symbol &builtin_symbol,
   size_t symbol_size {0};
   err = hipModuleGetGlobal(&target, &symbol_size, module, module_symbol_name);
   if (err != hipSuccess) {
-    fprintf(stderr,
-            "[rocSHMEM] Error: Failed to get %s symbol from module: %s\n",
-            label, hipGetErrorString(err));
+    LOG_ERROR("Failed to get %s symbol from module: %s", 
+              label, hipGetErrorString(err));
     return ROCSHMEM_ERROR;
   }
   if (symbol_size != expected_size) {
-    fprintf(stderr,
-            "[rocSHMEM] Error: Symbol size mismatch for %s. Expected %zu, "
-            "got %zu\n",
-            label, expected_size, symbol_size);
+    LOG_ERROR("Symbol size mismatch for %s. Expected %zu, got %zu\n",
+              label, expected_size, symbol_size);
     return ROCSHMEM_ERROR;
   }
 
   err = hipMemcpyAsync(target, source, expected_size,
                        hipMemcpyDeviceToDevice, stream);
   if (err != hipSuccess) {
-    fprintf(stderr, "[rocSHMEM] Error: Failed to copy %s to device: %s\n",
-            label, hipGetErrorString(err));
+    LOG_ERROR("Failed to copy %s to device: %s\n",
+              label, hipGetErrorString(err));
     return ROCSHMEM_ERROR;
   }
   return ROCSHMEM_SUCCESS;

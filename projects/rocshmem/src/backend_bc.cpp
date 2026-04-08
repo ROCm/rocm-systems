@@ -41,13 +41,11 @@
 
 namespace rocshmem {
 
-#define NET_CHECK(cmd)                                       \
-  {                                                          \
-    if (cmd != MPI_SUCCESS) {                                \
-      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
-      abort() ;                                              \
-    }                                                        \
-  }
+#define NET_CHECK(cmd) do {                                  \
+  if (cmd != MPI_SUCCESS) {                                  \
+    LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");     \
+  }                                                          \
+} while(0)
 
 Backend::Backend(MPI_Comm comm) : heap(comm, nullptr) {
   init();

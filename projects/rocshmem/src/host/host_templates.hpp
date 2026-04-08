@@ -242,15 +242,14 @@ __host__ inline MPI_Op HostInterface::get_mpi_op(ROCSHMEM_OP Op) {
     case ROCSHMEM_XOR:
       return MPI_BXOR;
     default:
-      fprintf(stderr, "Unknown rocSHMEM op MPI conversion %d\n", Op);
-      abort();
+      LOG_ERROR_ABORT("Unknown rocSHMEM op MPI conversion %d\n", Op);
       return 0;
   }
 }
 
 template <typename T>
 __host__ inline MPI_Datatype HostInterface::get_mpi_type() {
-  fprintf(stderr, "Unknown or unimplemented datatype \n");
+  LOG_ERROR("Unknown or unimplemented datatype \n");
 }
 
 #define GET_MPI_TYPE(T, MPI_T)                                    \

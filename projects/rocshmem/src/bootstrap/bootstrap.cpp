@@ -77,7 +77,7 @@ struct ExtInfo {
    }
 
    if (rank_pos == -1) {
-     LOG_ERROR_ABORT("groupAllGather: called with process that is not in list of ranks");
+     ERROR("groupAllGather: called with process that is not in list of ranks");
    }
 
    LOG_TRACE("groupAllGather: rank %d nranks %d size %d", rank, nRanks, size);
@@ -112,7 +112,7 @@ struct ExtInfo {
    }
 
    if (rank_pos == -1) {
-     LOG_ERROR_ABORT("groupAlltoall: called with process that is not in list of ranks");
+     ERROR("groupAlltoall: called with process that is not in list of ranks");
    }
 
    LOG_TRACE("groupAlltoall: rank %d nranks %d size %d", rank, num_pes, size);

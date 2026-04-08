@@ -39,13 +39,11 @@
 
 namespace rocshmem {
 
-#define NET_CHECK(cmd)                                       \
-  {                                                          \
-    if (cmd != MPI_SUCCESS) {                                \
-      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
-      abort() ;                                              \
-    }                                                        \
-  }
+#define NET_CHECK(cmd) do {                                \
+  if (cmd != MPI_SUCCESS) {                                \
+    LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");   \
+  }                                                        \
+} while(0)
 
 MPITransport::MPITransport(MPI_Comm comm, Queue* q)
   : Transport{}, queue{q} {
@@ -223,8 +221,7 @@ void MPITransport::submitRequestsToMPI() {
       LOG_TRACE("Submitted Finalize");
       break;
     default:
-      fprintf(stderr, "Invalid GPU Packet received, exiting....\n");
-      abort();
+      LOG_ERROR_ABORT("Invalid GPU Packet received");
       break;
   }
 }
@@ -308,8 +305,7 @@ MPI_Op MPITransport::get_mpi_op(ROCSHMEM_OP op) {
     case ROCSHMEM_REPLACE:
       return MPI_REPLACE;
     default:
-      fprintf(stderr, "Unknown rocSHMEM op MPI conversion %d\n", op);
-      abort();
+      LOG_ERROR_ABORT("Unknown rocSHMEM op MPI conversion %d\n", op);
   }
 }
 
@@ -338,8 +334,7 @@ static MPI_Datatype convertType(ro_net_types type) {
     case RO_NET_UNSIGNED_CHAR:
       return MPI_UNSIGNED_CHAR;
     default:
-      fprintf(stderr, "Unknown rocSHMEM type MPI conversion %d\n", type);
-      abort();
+      LOG_ERROR_ABORT("Unknown rocSHMEM type MPI conversion %d\n", type);
   }
 }
 
@@ -430,8 +425,7 @@ void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
   NET_CHECK(mpilib_ftable_.Type_size(mpi_type, &type_size));
 
   if (dst == src) {
-    fprintf(stderr, "IN_PLACE option not support for alltoall in the RO rocSHMEM conduit\n");
-    abort();
+    LOG_ERROR_EXIT("IN_PLACE option not supported for alltoall in the RO rocSHMEM conduit");
   }
 
   std::vector<MPI_Request> pe_req(pe_size);
@@ -479,8 +473,7 @@ void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
   NET_CHECK(mpilib_ftable_.Type_size(mpi_type, &type_size));
 
   if (dst == src) {
-    fprintf(stderr, "IN_PLACE option not support for fcollect in the RO rocSHMEM conduit\n");
-    abort();
+    LOG_ERROR_EXIT("IN_PLACE option not supported for fcollect in the RO rocSHMEM conduit");
   }
 
   std::vector<MPI_Request> pe_req(pe_size);
