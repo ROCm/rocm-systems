@@ -36,6 +36,10 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   struct ibv_qp *ib_qp;
   int err;
 
+  NicDevice &nic = nic_for_qp(conn_num);
+  int pe = conn_num % num_pes;
+  int nic_idx = nic_idx_for_qp_row(conn_num / num_pes);
+
   ib_qp = qps[conn_num];
 
   /* Export SCQ */
@@ -72,7 +76,6 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->bnxt_sq.msntbl      = bnxt_qps[conn_num].msntbl;
   gpu_qp->bnxt_sq.msn_tbl_sz  = bnxt_qps[conn_num].msn_tbl_sz;
   gpu_qp->bnxt_sq.psn_sz_log2 = std::log2(bnxt_qps[conn_num].mem_info.sq_psn_sz);
-  NicDevice &nic = nic_for_qp(conn_num);
   gpu_qp->bnxt_sq.mtu         = ibv_mtu_to_int(nic.portinfo.active_mtu);
 
   /* Export DB */
@@ -80,8 +83,6 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   CHECK_HIP(hipHostGetDevicePointer((void**) &gpu_qp->bnxt_dbr, bnxt_qps[conn_num].db_region_attr->dbr, 0));
 
   /* Export Memory Keys */
-  int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp_row(conn_num / num_pes);
   gpu_qp->lkey = nic.heap_mr->lkey;
   gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
 

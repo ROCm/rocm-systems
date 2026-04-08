@@ -91,10 +91,12 @@ void GDABackend::init() {
   qps_per_pe_usr_ctx_     = std::max(envvar::gda::num_qps_per_pe_usr_ctx.get_value(),
                                      static_cast<size_t>(num_nics_));
 
+  // Determine number of QPs to create per PE
   num_qps_per_pe = qps_per_pe_default_ctx_ +
                    qps_per_pe_usr_ctx_ *
                    envvar::max_num_contexts;
 
+  // Total number of QPs created
   num_qps = num_qps_per_pe * num_pes;
 
   //TODO setup_host_interface();
@@ -860,6 +862,7 @@ void GDABackend::cleanup_ibv() {
     }
   } else if (gda_provider == GDAProvider::MLX5) {
     for (size_t i = 0; i < mlx5_qps.size(); i++) {
+      // mlx5dv::destroy_qp also destroys the associated CQ
       err = mlx5dv.destroy_qp(mlx5_qps[i]);
       CHECK_ZERO(err, "mlx5dv::destroy_qp");
     }
@@ -869,7 +872,7 @@ void GDABackend::cleanup_ibv() {
       CHECK_ZERO(err, "ibv_destroy_qp");
 
       err = ibv.destroy_cq(cqs[i]);
-      CHECK_ZERO(err, "ibv_destroy_cqs");
+      CHECK_ZERO(err, "ibv_destroy_cq");
     }
   }
 
@@ -994,15 +997,17 @@ void GDABackend::setup_heap_memory_rkey() {
     access |= IBV_ACCESS_RELAXED_ORDERING;
   }
   for (int n = 0; n < num_nics_; n++) {
-    nic_devices_[n].heap_mr = ibv.reg_mr(nic_devices_[n].pd_orig, base_heap, heap.get_size(), access);
+    nic_devices_[n].heap_mr = ibv.reg_mr(nic_devices_[n].pd_orig, base_heap,
+                                         heap.get_size(), access);
     CHECK_NNULL(nic_devices_[n].heap_mr, "ibv_reg_mr");
   }
 
-  const size_t rkeys_size = sizeof(uint32_t) * num_pes * num_nics_;
+  const size_t rkeys_per_pe = sizeof(uint32_t) * num_nics_;
+  const size_t rkeys_size = rkeys_per_pe * num_pes;
   uint32_t *host_rkey_cpy = reinterpret_cast<uint32_t*>(malloc(rkeys_size));
   if (!host_rkey_cpy) { abort(); }
 
-  CHECK_HIP(hipHostMalloc(&heap_rkey, sizeof(uint32_t) * num_pes * num_nics_));
+  CHECK_HIP(hipHostMalloc(&heap_rkey, rkeys_size));
   for (int n = 0; n < num_nics_; n++) {
     heap_rkey[my_pe * num_nics_ + n] = nic_devices_[n].heap_mr->rkey;
   }
@@ -1013,9 +1018,11 @@ void GDABackend::setup_heap_memory_rkey() {
   CHECK_HIP(hipStreamSynchronize(stream));
 
   if (backend_comm != MPI_COMM_NULL)
-    mpilib_ftable_.Allgather(MPI_IN_PLACE, sizeof(uint32_t), MPI_CHAR, host_rkey_cpy, sizeof(uint32_t), MPI_CHAR, backend_comm);
+    mpilib_ftable_.Allgather(MPI_IN_PLACE, rkeys_per_pe, MPI_CHAR,
+                             host_rkey_cpy, rkeys_per_pe, MPI_CHAR,
+                             backend_comm);
   else
-    backend_bootstr->allGather(host_rkey_cpy, sizeof(uint32_t));
+    backend_bootstr->allGather(host_rkey_cpy, rkeys_per_pe);
 
   CHECK_HIP(hipMemcpyAsync(heap_rkey, host_rkey_cpy, rkeys_size, hipMemcpyHostToDevice, stream));
   CHECK_HIP(hipStreamSynchronize(stream));
@@ -1100,7 +1107,9 @@ void GDABackend::open_ib_device() {
     }
 
     if (gda_provider == GDAProvider::MLX5) {
-      struct mlx5dv_context_attr context_attr{ .flags = MLX5DV_CONTEXT_FLAGS_DEVX };
+      /* Explicitly request DevX context */
+      struct mlx5dv_context_attr context_attr = {};
+      context_attr.flags = MLX5DV_CONTEXT_FLAGS_DEVX;
       nic.context = mlx5dv.open_device(nic.device, &context_attr);
     } else {
       nic.context = ibv.open_device(nic.device);
@@ -1108,9 +1117,6 @@ void GDABackend::open_ib_device() {
     CHECK_NNULL(nic.context, "ib open device");
     dump_ibv_context(nic.context);
     dump_ibv_device(nic.context->device);
-
-    err = ibv.query_device(nic.context, &nic.device_attr);
-    CHECK_ZERO(err, "ibv_query_device");
 
     validate_ib_device(nic);
 
@@ -1126,6 +1132,7 @@ void GDABackend::open_ib_device() {
     CHECK_ZERO(err, "ibv_query_port");
     dump_ibv_port_attr(&nic.portinfo);
 
+    /* Must init after querying port */
     select_gid_index(nic);
   }
 
@@ -1144,6 +1151,9 @@ void GDABackend::validate_ib_device(NicDevice &nic) {
   CHECK_NNULL(nicname, "ibv_get_device_name");
 
   std::string debug_str = "[" + std::string(hostname) + ", " + std::string(nicname) + "]";
+
+  err = ibv.query_device(nic.context, &nic.device_attr);
+  CHECK_ZERO(err, "ibv_query_device");
 
   if (gda_provider == GDAProvider::BNXT) {
     const std::set<uint32_t> supported_bnxt_part_ids = { 0x1760 /* BCM57608 */};
@@ -1527,7 +1537,6 @@ void GDABackend::create_qps(int sq_length) {
 
 void GDABackend::select_gid_index(NicDevice &nic) {
   struct ibv_gid_entry *gid_entries;
-  struct ibv_gid_entry *gid_entry;
   union ibv_gid current_gid;
   union ibv_gid selected_gid;
   uint32_t current_gid_type;

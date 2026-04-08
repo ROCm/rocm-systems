@@ -863,10 +863,18 @@ namespace rocshmem
       return NIC_PATH_SYS;
 
     std::string gpuBusId(hipPciBusId);
+
+    // Use the PCIe tree LCA (Lowest Common Ancestor) to classify the path.
+    // The tree mirrors the sysfs PCIe hierarchy.
+    // Classification strategy:
+    //   LCA is a PCIe device/bridge (address contains ':') -> PIX or PXB
+    //   LCA is above root complex or tree unavailable      -> PHB or SYS (NUMA
+    //   check)
     PCIeNode const* root = GetPCIeTreeRoot();
 
     PCIeNode const* lca = GetLcaBetweenNodes(root, gpuBusId, nicBusId);
     if (lca) {
+      // Check if LCA has a PCIe BDF-style address (contains ':')
       bool lcaIsPCIeNode = lca->address.find(':') != std::string::npos;
 
       if (lcaIsPCIeNode) {
@@ -874,8 +882,15 @@ namespace rocshmem
         int gpuDepth = GetLcaDepth(gpuBusId, root);
 
         if (lcaDepth > 0 && gpuDepth > 0) {
+          // hops = number of PCIe switches between GPU and the common ancestor
           int hops = gpuDepth - lcaDepth;
+
+          // 1 hop: GPU and NIC share the same direct parent switch -> PIX
           if (hops == 1) return NIC_PATH_PIX;
+
+          // >1 hops: multiple switches apart. Check if GPU and NIC branches
+          // share the same secondary bus number at the LCA level
+          // if so, they are still within the same switch fabric -> PIX
           if (hops > 1) {
             auto const* gpuChild = GetChildLeadingTo(lca, gpuBusId);
             auto const* nicChild = GetChildLeadingTo(lca, nicBusId);
@@ -885,12 +900,14 @@ namespace rocshmem
               if (gpuChildBus >= 0 && gpuChildBus == nicChildBus)
                 return NIC_PATH_PIX;
             }
+            // Different switch branches within the same root complex -> PXB
             return NIC_PATH_PXB;
           }
         }
       }
     }
 
+    // Fallback: use NUMA node to distinguish PHB vs SYS
     int gpuNuma = GetClosestCpuNumaToGpu(gpuIndex);
     if (gpuNuma >= 0 && nicNuma >= 0 && gpuNuma == nicNuma) {
       return NIC_PATH_PHB;
@@ -940,7 +957,7 @@ namespace rocshmem
     if (!isInitialized) {
       closestNicId.resize(numGpus, -1);
 
-      std::vector<std::string> ibvAddressList = BuildFilteredNicAddresses(hca_list);
+      auto ibvAddressList = BuildFilteredNicAddresses(hca_list);
 
       // Track how many times a device has been assigned as "closest"
       // This allows distributed work across devices using multiple ports (sharing the same busID)
@@ -1023,7 +1040,7 @@ namespace rocshmem
     if (gpuIndex < 0 || gpuIndex >= numGpus) return -1;
 
     char hipPciBusId[64];
-    hipError_t err = hipDeviceGetPCIBusId(hipPciBusId, sizeof(hipPciBusId), gpuIndex);
+    auto err = hipDeviceGetPCIBusId(hipPciBusId, sizeof(hipPciBusId), gpuIndex);
     if (err != hipSuccess) return -1;
 
     auto ibvAddressList = BuildFilteredNicAddresses(hca_list);
@@ -1038,11 +1055,13 @@ namespace rocshmem
     for (size_t i = 0; i < ibvDeviceList.size(); i++) {
       if (ibvAddressList[i].empty()) continue;
 
-      NicPathType pathType = ComputeGpuNicPathType(gpuIndex, ibvDeviceList[i].busId, ibvDeviceList[i].numaNode);
+      auto pathType = ComputeGpuNicPathType(gpuIndex, ibvDeviceList[i].busId,
+                                            ibvDeviceList[i].numaNode);
       if (pathType > max_path_type) continue;
 
       int dist = GetBusIdDistance(hipPciBusId, ibvAddressList[i]);
-      candidates.push_back({static_cast<int>(i), dist >= 0 ? dist : 9999, pathType});
+      candidates.push_back(
+          {static_cast<int>(i), dist >= 0 ? dist : 9999, pathType});
     }
 
     std::sort(candidates.begin(), candidates.end(),

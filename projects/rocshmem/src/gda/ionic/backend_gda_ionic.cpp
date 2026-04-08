@@ -54,6 +54,7 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 
     if (ionic_dv.create_cq_ex) {
       cq_ex = ionic_dv.create_cq_ex(nic.context, &cq_attr, &ionic_cq_attr);
+      // If cq_ex is nullptr, fallback to ibv_create_cq_ex below.
     }
 
     if (!cq_ex) {
