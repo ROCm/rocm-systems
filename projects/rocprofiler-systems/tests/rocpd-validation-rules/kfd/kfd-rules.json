@@ -14,31 +14,31 @@
             "validation_queries": [
                 {
                     "comparison": "greater_than",
-                    "description": "Verify that 'kfd_page_fault' appears in category in regions table",
-                    "error_message": "'kfd_page_fault' category entries not found in regions",
+                    "description": "Verify that 'rocm_kfd_page_fault' appears in category in regions table",
+                    "error_message": "'rocm_kfd_page_fault' category entries not found in regions",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'kfd_page_fault';"
+                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'rocm_kfd_page_fault';"
                 },
                 {
                     "comparison": "greater_than",
-                    "description": "Verify that 'kfd_page_migrate' appears in category in regions table",
-                    "error_message": "'kfd_page_migrate' category entries not found in regions",
+                    "description": "Verify that 'rocm_kfd_page_migrate' appears in category in regions table",
+                    "error_message": "'rocm_kfd_page_migrate' category entries not found in regions",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'kfd_page_migrate';"
+                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'rocm_kfd_page_migrate';"
                 },
                 {
                     "comparison": "greater_than",
-                    "description": "Verify that 'kfd_event_unmap_from_gpu' appears in category in regions table",
-                    "error_message": "'kfd_event_unmap_from_gpu' category entries not found in regions",
+                    "description": "Verify that 'rocm_kfd_event_unmap_from_gpu' appears in category in regions table",
+                    "error_message": "'rocm_kfd_event_unmap_from_gpu' category entries not found in regions",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'kfd_event_unmap_from_gpu';"
+                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'rocm_kfd_event_unmap_from_gpu';"
                 },
                 {
                     "comparison": "equals",
                     "description": "Check for any NULL values in the 'name' column for KFD regions",
                     "error_message": "NULL entries found in the name column of KFD regions",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) FROM regions WHERE category LIKE 'kfd_%' AND name IS NULL;"
+                    "query": "SELECT COUNT(*) FROM regions WHERE category LIKE 'rocm_kfd_%' AND name IS NULL;"
                 }
             ]
         },
@@ -53,31 +53,31 @@
             "validation_queries": [
                 {
                     "comparison": "greater_than",
-                    "description": "Verify that 'kfd_page_fault' string is present",
-                    "error_message": "'kfd_page_fault' string not found in rocpd_string",
+                    "description": "Verify that 'rocm_kfd_page_fault' string is present",
+                    "error_message": "'rocm_kfd_page_fault' string not found in rocpd_string",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM rocpd_string WHERE string = 'kfd_page_fault';"
+                    "query": "SELECT COUNT(*) as count FROM rocpd_string WHERE string = 'rocm_kfd_page_fault';"
                 },
                 {
                     "comparison": "greater_than",
-                    "description": "Verify that 'kfd_page_migrate' string is present",
-                    "error_message": "'kfd_page_migrate' string not found in rocpd_string",
+                    "description": "Verify that 'rocm_kfd_page_migrate' string is present",
+                    "error_message": "'rocm_kfd_page_migrate' string not found in rocpd_string",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM rocpd_string WHERE string = 'kfd_page_migrate';"
+                    "query": "SELECT COUNT(*) as count FROM rocpd_string WHERE string = 'rocm_kfd_page_migrate';"
                 },
                 {
                     "comparison": "greater_than",
-                    "description": "Verify that 'kfd_queue' string is present",
-                    "error_message": "'kfd_queue' string not found in rocpd_string",
+                    "description": "Verify that 'rocm_kfd_queue' string is present",
+                    "error_message": "'rocm_kfd_queue' string not found in rocpd_string",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM rocpd_string WHERE string = 'kfd_queue';"
+                    "query": "SELECT COUNT(*) as count FROM rocpd_string WHERE string = 'rocm_kfd_queue';"
                 },
                 {
                     "comparison": "greater_than",
-                    "description": "Verify that 'kfd_event_unmap_from_gpu' string is present",
-                    "error_message": "'kfd_event_unmap_from_gpu' string not found in rocpd_string",
+                    "description": "Verify that 'rocm_kfd_event_unmap_from_gpu' string is present",
+                    "error_message": "'rocm_kfd_event_unmap_from_gpu' string not found in rocpd_string",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM rocpd_string WHERE string = 'kfd_event_unmap_from_gpu';"
+                    "query": "SELECT COUNT(*) as count FROM rocpd_string WHERE string = 'rocm_kfd_event_unmap_from_gpu';"
                 }
             ]
         },
@@ -96,42 +96,42 @@
                     "description": "Verify that KFD page fault events have 'address' argument",
                     "error_message": "No 'address' argument found for kfd_page_fault events",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'kfd_page_fault' AND arg_name = 'address';"
+                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_page_fault' AND arg_name = 'address';"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Verify that KFD page migrate events have 'src_agent' argument",
                     "error_message": "No 'src_agent' argument found for kfd_page_migrate events",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'kfd_page_migrate' AND arg_name = 'src_agent';"
+                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_page_migrate' AND arg_name = 'src_agent';"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Verify that KFD page migrate events have 'dst_agent' argument",
                     "error_message": "No 'dst_agent' argument found for kfd_page_migrate events",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'kfd_page_migrate' AND arg_name = 'dst_agent';"
+                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_page_migrate' AND arg_name = 'dst_agent';"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "If kfd_queue events exist, verify 'agent' argument is present",
                     "error_message": "kfd_queue events exist but 'agent' argument is missing in events_args",
                     "expected_result": 0,
-                    "query": "SELECT CASE WHEN (SELECT COUNT(*) FROM regions WHERE category = 'kfd_queue') = 0 THEN 1 ELSE CASE WHEN (SELECT COUNT(*) FROM events_args WHERE category = 'kfd_queue' AND arg_name = 'agent') > 0 THEN 1 ELSE 0 END END as count;"
+                    "query": "SELECT CASE WHEN (SELECT COUNT(*) FROM regions WHERE category = 'rocm_kfd_queue') = 0 THEN 1 ELSE CASE WHEN (SELECT COUNT(*) FROM events_args WHERE category = 'rocm_kfd_queue' AND arg_name = 'agent') > 0 THEN 1 ELSE 0 END END as count;"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Verify that KFD unmap events have 'start_address' argument",
                     "error_message": "No 'start_address' argument found for kfd_event_unmap_from_gpu events",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'kfd_event_unmap_from_gpu' AND arg_name = 'start_address';"
+                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_event_unmap_from_gpu' AND arg_name = 'start_address';"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Verify that KFD unmap events have 'end_address' argument",
                     "error_message": "No 'end_address' argument found for kfd_event_unmap_from_gpu events",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'kfd_event_unmap_from_gpu' AND arg_name = 'end_address';"
+                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_event_unmap_from_gpu' AND arg_name = 'end_address';"
                 }
             ]
         },
@@ -152,30 +152,30 @@
                 {
                     "comparison": "greater_than",
                     "description": "Check that KFD page fault PMC descriptor exists",
-                    "error_message": "No PMC descriptor found for 'kfd_page_fault'",
+                    "error_message": "No PMC descriptor found for 'rocm_kfd_page_fault'",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'kfd_page_fault'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'rocm_kfd_page_fault'"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Check that KFD page migrate PMC descriptor exists",
-                    "error_message": "No PMC descriptor found for 'kfd_page_migrate'",
+                    "error_message": "No PMC descriptor found for 'rocm_kfd_page_migrate'",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'kfd_page_migrate'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'rocm_kfd_page_migrate'"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Check that KFD queue PMC descriptor exists",
-                    "error_message": "No PMC descriptor found for 'kfd_queue'",
+                    "error_message": "No PMC descriptor found for 'rocm_kfd_queue'",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'kfd_queue'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'rocm_kfd_queue'"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Check that KFD unmap from GPU PMC descriptor exists",
-                    "error_message": "No PMC descriptor found for 'kfd_event_unmap_from_gpu'",
+                    "error_message": "No PMC descriptor found for 'rocm_kfd_event_unmap_from_gpu'",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'kfd_event_unmap_from_gpu'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name = 'rocm_kfd_event_unmap_from_gpu'"
                 },
                 {
                     "comparison": "greater_than",
@@ -199,30 +199,30 @@
                 {
                     "comparison": "greater_than",
                     "description": "Check for KFD page fault PMC event samples",
-                    "error_message": "No PMC event samples found for 'kfd_page_fault'",
+                    "error_message": "No PMC event samples found for 'rocm_kfd_page_fault'",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'kfd_page_fault'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'rocm_kfd_page_fault'"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Check for KFD page migrate PMC event samples",
-                    "error_message": "No PMC event samples found for 'kfd_page_migrate'",
+                    "error_message": "No PMC event samples found for 'rocm_kfd_page_migrate'",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'kfd_page_migrate'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'rocm_kfd_page_migrate'"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "If kfd_queue regions exist, verify PMC event samples exist",
                     "error_message": "kfd_queue events exist but no corresponding PMC event samples found",
                     "expected_result": 0,
-                    "query": "SELECT CASE WHEN (SELECT COUNT(*) FROM regions WHERE category = 'kfd_queue') = 0 THEN 1 ELSE CASE WHEN (SELECT COUNT(*) FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'kfd_queue') > 0 THEN 1 ELSE 0 END END as count"
+                    "query": "SELECT CASE WHEN (SELECT COUNT(*) FROM regions WHERE category = 'rocm_kfd_queue') = 0 THEN 1 ELSE CASE WHEN (SELECT COUNT(*) FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'rocm_kfd_queue') > 0 THEN 1 ELSE 0 END END as count"
                 },
                 {
                     "comparison": "greater_than",
                     "description": "Check for KFD unmap from GPU PMC event samples",
-                    "error_message": "No PMC event samples found for 'kfd_event_unmap_from_gpu'",
+                    "error_message": "No PMC event samples found for 'rocm_kfd_event_unmap_from_gpu'",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'kfd_event_unmap_from_gpu'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'rocm_kfd_event_unmap_from_gpu'"
                 }
             ]
         }

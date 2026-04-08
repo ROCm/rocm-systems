@@ -78,7 +78,7 @@ rocprofiler_systems_add_test(
 rocprofiler_systems_add_validation_test(
     NAME kfd-unified-memory-sampling
     PERFETTO_FILE "perfetto-trace.proto"
-    ARGS -m kfd_page_fault kfd_page_migrate kfd_queue kfd_event_unmap_from_gpu -p
+    ARGS -m rocm_kfd_page_fault rocm_kfd_page_migrate rocm_kfd_queue rocm_kfd_event_unmap_from_gpu -p
     LABELS "kfd"
 )
 
@@ -95,7 +95,6 @@ if(${ENABLE_ROCPD_TEST} AND TEST kfd-unified-memory-sampling)
         NAME kfd-unified-memory-sampling
         ROCPD_FILE "rocpd.db"
         ARGS --validation-rules
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
             "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/kfd/kfd-rules.json"
         LABELS "rocpd;kfd"
     )

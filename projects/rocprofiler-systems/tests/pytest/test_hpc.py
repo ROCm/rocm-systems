@@ -144,7 +144,7 @@ class TestJacobi(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD event validation",
-            categories=["kfd_page_fault", "kfd_page_migrate", "kfd_queue"],
+            categories=["rocm_kfd_page_fault", "rocm_kfd_page_migrate", "rocm_kfd_queue"],
             label_substrings=["PAGE_FAULT", "PAGE_MIGRATE", "QUEUE_EVICT"],
             print_output=True,
         )

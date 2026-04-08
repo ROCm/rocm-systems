@@ -90,7 +90,7 @@ class TestKfdEvents(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD page fault validation",
-            categories=["kfd_page_fault"],
+            categories=["rocm_kfd_page_fault"],
             label_substrings=["PAGE_FAULT"],
             print_output=True,
         )
@@ -98,7 +98,7 @@ class TestKfdEvents(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD page migrate validation",
-            categories=["kfd_page_migrate"],
+            categories=["rocm_kfd_page_migrate"],
             label_substrings=["PAGE_MIGRATE"],
             print_output=True,
         )
@@ -106,7 +106,7 @@ class TestKfdEvents(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD unmap from GPU validation",
-            categories=["kfd_event_unmap_from_gpu"],
+            categories=["rocm_kfd_event_unmap_from_gpu"],
             label_substrings=["UNMAP_FROM_GPU"],
             print_output=True,
         )
@@ -145,7 +145,7 @@ class TestKfdEvents(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD prefetch migration validation",
-            categories=["kfd_page_migrate"],
+            categories=["rocm_kfd_page_migrate"],
             label_substrings=["PAGE_MIGRATE"],
             print_output=True,
         )
@@ -153,7 +153,7 @@ class TestKfdEvents(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD combined event validation",
-            categories=["kfd_page_fault", "kfd_page_migrate"],
+            categories=["rocm_kfd_page_fault", "rocm_kfd_page_migrate"],
             label_substrings=["PAGE_FAULT", "PAGE_MIGRATE"],
             print_output=True,
         )
@@ -194,7 +194,7 @@ class TestKfdEvents(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD page fault validation (pressure)",
-            categories=["kfd_page_fault"],
+            categories=["rocm_kfd_page_fault"],
             label_substrings=["PAGE_FAULT"],
             print_output=True,
         )
@@ -202,7 +202,7 @@ class TestKfdEvents(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD page migrate validation (pressure)",
-            categories=["kfd_page_migrate"],
+            categories=["rocm_kfd_page_migrate"],
             label_substrings=["PAGE_MIGRATE"],
             print_output=True,
         )
@@ -210,7 +210,7 @@ class TestKfdEvents(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="Perfetto KFD unmap validation (pressure)",
-            categories=["kfd_event_unmap_from_gpu"],
+            categories=["rocm_kfd_event_unmap_from_gpu"],
             label_substrings=["UNMAP_FROM_GPU"],
             print_output=True,
         )
