@@ -91,7 +91,7 @@ HIP_TEST_CASE(Unit_hipMemAllocHost_VerifyAccess) {
                                     device_index));
 
     if (!support_unified_adressing) {
-      HipTest::HIP_SKIP_TEST("Unified adressing is not supported.");
+      HipTest::HIP_SKIP_TEST("unified addressing is not supported.");
       return;
     }
   }

@@ -1865,6 +1865,33 @@ hsa_amd_counted_queue_release(hsa_queue_t* queue) {
   CATCH;
 }
 
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
+                                               uint32_t num_dep_signals,
+                                               const hsa_signal_t* dep_signals,
+                                               hsa_signal_t completion_signal) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(ptrs);
+  IS_BAD_PTR(sizes);
+  IS_ZERO(count);
+  
+  if (!core::Runtime::runtime_singleton_->XnackEnabled()) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_XNACK_DISABLED);
+  }
+
+  // Check if dep_signals and num_dep_signals are consistent
+  if ((num_dep_signals == 0 && dep_signals != nullptr) || 
+      (num_dep_signals > 0 && dep_signals == nullptr)) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  return core::Runtime::runtime_singleton_->SvmBatchDiscard(ptrs, sizes, count, 
+                                                num_dep_signals, dep_signals,
+                                                completion_signal);
+
+  CATCH;                                       
+}
+
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void *file) {
   TRY;
   return core::Runtime::runtime_singleton_->EnableLogging(flags, file);

@@ -343,15 +343,25 @@ if(NOT TARGET TBB::tbb AND NOT ROCPROFSYS_BUILD_TBB)
     endif()
 endif()
 
-# Create Dyninst::TBB target if building from source
-# --------------------------------------------------------------------------------------#
-# When TBB is built from source, Dyninst's find_package(TBB) would fail because the
-# bundled TBB isn't installed in standard locations. Creating this target causes
-# Dyninst to skip find_package(TBB) and use the bundled dependency instead.
+# Create Dyninst::TBB for Dyninst when it is not already defined.
 
-if(ROCPROFSYS_BUILD_TBB AND NOT TARGET Dyninst::TBB)
+if(NOT TARGET Dyninst::TBB)
     add_library(Dyninst::TBB INTERFACE IMPORTED)
-    target_link_libraries(Dyninst::TBB INTERFACE ${TBB_LIBRARIES})
+
+    if(TARGET TBB::tbb)
+        target_link_libraries(Dyninst::TBB INTERFACE TBB::tbb)
+
+        if(TARGET TBB::tbbmalloc)
+            target_link_libraries(Dyninst::TBB INTERFACE TBB::tbbmalloc)
+        endif()
+
+        if(TARGET TBB::tbbmalloc_proxy)
+            target_link_libraries(Dyninst::TBB INTERFACE TBB::tbbmalloc_proxy)
+        endif()
+    else()
+        target_link_libraries(Dyninst::TBB INTERFACE ${TBB_LIBRARIES})
+    endif()
+
     target_include_directories(Dyninst::TBB SYSTEM INTERFACE ${TBB_INCLUDE_DIRS})
     if(TBB_LIBRARY_DIRS)
         target_link_directories(Dyninst::TBB INTERFACE ${TBB_LIBRARY_DIRS})

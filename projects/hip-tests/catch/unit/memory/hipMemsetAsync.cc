@@ -104,7 +104,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemsetDASyncMulti, int8_t, int16_t, uint32_t) {
  */
 HIP_TEST_CASE(Unit_hipMemset2DASyncMulti) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127");
+  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
   return;
 #endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Unit_hipMemset2DASyncMulti) {
  */
 HIP_TEST_CASE(Unit_hipMemset3DASyncMulti) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127");
+  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
   return;
 #endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
