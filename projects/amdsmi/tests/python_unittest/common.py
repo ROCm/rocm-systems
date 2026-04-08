@@ -141,26 +141,22 @@ def expand_glob_k_arg(caller_globals):
 def has_gpu_od_interface(bdf):
     """Check if a GPU has the gpu_od sysfs interface.
 
+    This is a wrapper around AMDSMIHelpers.detect_gpu_od() for test convenience.
+
     Args:
         bdf: PCI Bus/Device/Function string (e.g. '0000:26:00.0')
 
     Returns:
         bool: True if gpu_od directory exists for this GPU
     """
-    drm_base = "/sys/class/drm"
-    try:
-        for card_dir in sorted(os.listdir(drm_base)):
-            if not card_dir.startswith("card") or "-" in card_dir:
-                continue
-            device_link = os.path.join(drm_base, card_dir, "device")
-            try:
-                if bdf in os.readlink(device_link):
-                    return os.path.isdir(os.path.join(drm_base, card_dir, "device", "gpu_od"))
-            except OSError:
-                continue
-    except OSError:
-        pass
-    return False
+    # Add amdsmi_cli to path for import
+    cli_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'amdsmi_cli')
+    if cli_path not in sys.path:
+        sys.path.insert(0, cli_path)
+
+    from amdsmi_helpers import AMDSMIHelpers
+    has_gpu_od, _ = AMDSMIHelpers.detect_gpu_od(bdf)
+    return has_gpu_od
 
 
 class Common:

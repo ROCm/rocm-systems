@@ -888,9 +888,13 @@ class TestAmdSmiPython(unittest.TestCase):
             if found_error:
                 continue
 
-            # Use a safe mid-range value for testing.
-            # Value 50 is valid for both legacy hwmon (0-255) and gpu_od (20-100).
-            fan_speed = 50
+            # Calculate a safe mid-range value based on actual hardware limits.
+            # This avoids hardcoding and works with any OD_RANGE configuration.
+            # For legacy hwmon: min=0, max=255 -> mid=127
+            # For gpu_od: min=0 (conservative), max from API -> mid dynamically calculated
+            min_value = 0  # Conservative minimum (works for both legacy and gpu_od)
+            max_value = fan_speed_max
+            fan_speed = min_value + ((max_value - min_value) // 2)
 
             # Set fan speed
             msg = f"\t### amdsmi_set_gpu_fan_speed(gpu={i}, index=0, fan_speed={fan_speed}):"

@@ -118,7 +118,7 @@ void TestFanReadWrite::Run(void) {
     } else {
       // Fans are idle or read is unavailable — use a safe mid-range value
       // that works for both legacy hwmon (0-255) and gpu_od (typically 20-100)
-      new_speed = 50;
+      new_speed = max_speed / 2;
     }
 
     IF_VERB(STANDARD) { std::cout << "Setting fan speed to " << new_speed << std::endl; }
@@ -146,7 +146,7 @@ void TestFanReadWrite::Run(void) {
         IF_VERB(STANDARD) {
           if (!((cur_speed > static_cast<int64_t>(0.80 * static_cast<double>(new_speed)) &&
                  cur_speed < static_cast<int64_t>(1.25 * static_cast<double>(new_speed))) ||
-                (cur_speed > static_cast<int64_t>(0.80 * AMDSMI_MAX_FAN_SPEED)))) {
+                (cur_speed > static_cast<int64_t>(0.80 * static_cast<double>(max_speed))))) {
             std::cout << "WARNING: Fan speed is not within the expected range!" << std::endl;
           }
         }
