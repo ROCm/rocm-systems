@@ -66,7 +66,7 @@ HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation_AllGpu) {
       HIP_CHECK(hipMemset((A + allocsize - 1 - samplesize), val, samplesize));
       HIP_CHECK(hipHostFree(A));
     } else {
-      WARN("Skipping test as CPU memory is less than GPU memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeHostMemory);
     }
   }
 }

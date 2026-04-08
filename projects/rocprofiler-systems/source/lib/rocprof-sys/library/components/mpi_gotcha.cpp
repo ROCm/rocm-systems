@@ -31,6 +31,7 @@
 #include "mpi_gotcha.hpp"
 #include "mpip.hpp"
 
+#include <mutex>
 #include <timemory/backends/process.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/signals/signal_mask.hpp>
@@ -210,6 +211,22 @@ void
 mpi_gotcha::shutdown()
 {
     update();
+}
+
+std::mutex mpi_gotcha::s_mutex = {};
+
+void
+mpi_gotcha::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    mpi_gotcha_t::set_ready(false);
+}
+
+void
+mpi_gotcha::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    mpi_gotcha_t::set_ready(true);
 }
 
 bool

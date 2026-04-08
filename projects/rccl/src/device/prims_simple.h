@@ -214,17 +214,14 @@ private:
 
   template<int Recv, int Send>
   inline __device__ void postPeer(bool dataStored) {
-    if (skip_fence){
+    if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
       barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barrier_next, barriers);
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
     }
-    else if((flags & RolePostSend) && dataStored){
-#ifdef __GFX9__
-    __threadfence();
-#else
-    __threadfence_system();
-#endif
+
+    if ((flags & RolePostSend) && dataStored && !skip_fence) {
+      __threadfence_system();
     }
 
     if ((flags & Send*RolePostSend) && next_hdp_reg)
@@ -904,7 +901,23 @@ public:
     }
     if(collWork){
       skip_fence = !collWork -> gfx9CheapFenceOff;
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
+      // DWORDX4 builtins use system-scope cache-bypassing stores, so the
+      // cheap s_waitcnt fence is sufficient when UBR is active.
+      if (collWork->regUsed || collWork->netRegUsed) {
+        skip_fence = true;
+      }
+#endif
     }
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
+    else if(p2pWork) {
+      // the postPeer fence is gated by RolePostSend and protects
+      // send-side stores only.
+      if (p2pWork->sendIpcReg || p2pWork->sendNetReg) {
+        skip_fence = true;
+      }
+    }
+#endif
   }
 
   __forceinline__ __device__ ~Primitives() {

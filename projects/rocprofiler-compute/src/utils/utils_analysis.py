@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import math
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,43 @@ from utils.logger import (
 )
 
 NS_TO_MS = 1.0 / 1_000_000.0
+
+
+def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
+    """Return the divisor and suffix for a bandwidth value in Bytes/s."""
+    if value >= 1e12:
+        return 1e12, "TB/s"
+    if value >= 1e9:
+        return 1e9, "GB/s"
+    if value >= 1e6:
+        return 1e6, "MB/s"
+    if value >= 1e3:
+        return 1e3, "KB/s"
+    return 1.0, "B/s"
+
+
+def format_bw_human_readable(
+    value: Union[int, float, str, None], unit: str = "Bytes/s", precision: int = 2
+) -> str:
+    """Format bandwidth to human-readable string (e.g. 1.5 TB/s).
+
+    Accepts Bytes/s (default) or legacy GB/s input.
+    Returns 'NaN' for NaN, 'N/A' for None/invalid.
+    """
+    if value is None:
+        return "N/A"
+
+    try:
+        numeric_value = float(value)
+    except (ValueError, TypeError):
+        return "N/A"
+
+    if math.isnan(numeric_value):
+        return "NaN"
+
+    bytes_per_sec = numeric_value * 1e9 if unit == "GB/s" else numeric_value
+    divisor, output_unit = get_bw_scale_and_unit(bytes_per_sec)
+    return f"{bytes_per_sec / divisor:.{precision}f} {output_unit}"
 
 
 @dataclass
@@ -592,3 +630,46 @@ def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFra
 
     final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
     return final_df
+
+
+def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Merge counters across unique dispatches from the
+    input dataframe and return processed dataframe.
+    """
+    if df.empty:
+        return df
+
+    data: list[dict[str, Any]] = []
+
+    # Group by unique kernel and merge into a single row
+    for _, group_df in df.groupby([
+        "Dispatch_ID",
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+    ]):
+        row = {
+            "GPU_ID": group_df["GPU_ID"].iloc[0],
+            "Grid_Size": group_df["Grid_Size"].iloc[0],
+            "Workgroup_Size": group_df["Workgroup_Size"].iloc[0],
+            "LDS_Per_Workgroup": group_df["LDS_Per_Workgroup"].iloc[0],
+            "Scratch_Per_Workitem": group_df["Scratch_Per_Workitem"].iloc[0],
+            "Arch_VGPR": group_df["Arch_VGPR"].iloc[0],
+            "Accum_VGPR": group_df["Accum_VGPR"].iloc[0],
+            "SGPR": group_df["SGPR"].iloc[0],
+            "Kernel_Name": group_df["Kernel_Name"].iloc[0],
+            "Kernel_ID": group_df["Kernel_ID"].iloc[0],
+            "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
+            "End_Timestamp": group_df["End_Timestamp"].iloc[0],
+        }
+        # Each counter will become its own column
+        row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
+        data.append(row)
+    df = pd.DataFrame(data)
+    # Rank GPU IDs, map lowest number to 0, next to 1, etc.
+    df["GPU_ID"] = df["GPU_ID"].rank(method="dense").astype(int) - 1
+    # Reset dispatch IDs
+    df["Dispatch_ID"] = range(len(df))
+    return df

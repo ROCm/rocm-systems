@@ -206,7 +206,30 @@ if (NOT BUILD_TESTS_ONLY)
     set(HAVE_DEVICE_MALLOC_UNCACHED OFF)
   endif()
 
+  execute_process(
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE ROCSHMEM_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(NOT ROCSHMEM_GIT_HASH)
+    set(ROCSHMEM_GIT_HASH "unknown")
+  endif()
+
+  string(REPLACE ";" " " ROCSHMEM_OFFLOAD_TARGETS "${GPU_TARGETS}")
+
   configure_file(cmake/rocshmem_config.h.in include/rocshmem/rocshmem_config.h)
+
+  # Embed rocshmem_config.h as a C++17 raw string literal so build_info.cpp
+  # (and the rocshmem_info tool) can display it without reading the file at runtime.
+  file(READ "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config.h" _config_content)
+  file(WRITE "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config_embedded.hpp"
+    "// Auto-generated from rocshmem_config.h — do not edit.\n"
+    "#pragma once\n"
+    "static const char rocshmem_config_h_content[] = R\"ROCSHMEM_CFG_END(\n"
+    "${_config_content}"
+    ")ROCSHMEM_CFG_END\";\n"
+  )
 
   #############################################################################
   # LINKING AND INCLUDE DIRECTORIES
@@ -269,8 +292,9 @@ if (NOT BUILD_TESTS_ONLY)
   )
 
   if (BUILD_TOOLS)
+    add_subdirectory(tools)
     rocm_install(
-      PROGRAMS "${CMAKE_BINARY_DIR}/src/tools/rocshmem_info"
+      PROGRAMS "${CMAKE_BINARY_DIR}/tools/rocshmem_info"
       DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
   endif()

@@ -85,7 +85,7 @@ HIP_TEST_CASE(Unit_hipFuncSetCacheConfig_Negative_Parameters) {
  */
 HIP_TEST_CASE(Unit_hipFuncSetCacheConfig_Negative_Not_Supported) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("This is an AMD specific test");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
   return;
 #endif
 
