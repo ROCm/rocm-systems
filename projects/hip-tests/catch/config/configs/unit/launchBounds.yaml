@@ -1,15 +1,15 @@
 ---
 launchBounds:
   Unit_Kernel_Launch_bounds_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [attributes, kernel]
   Unit_Kernel_Launch_bounds_Negative_OutOfBounds:
-    <<: *level_2
+    <<: *level_default
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
     tags: [attributes, kernel]
   Unit_Kernel_Launch_bounds_Negative_Parameters_RTC:
-    <<: *level_2
+    <<: *level_default
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
     tags: [attributes, kernel]
