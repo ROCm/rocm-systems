@@ -29,7 +29,7 @@ DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd -P )
 
 # override by calling this script with:
 # DOCKER_NAME=yourdockername ./update_rust_wrapper.sh
-DOCKER_NAME="${DOCKER_NAME:-dmitriigalantsev/amdsmi_rust_wrapper_updater}"
+DOCKER_NAME="${DOCKER_NAME:-amdsmi_rust_wrapper_updater}"
 
 command -v docker &>/dev/null || {
     echo "Please install docker!" >&2
@@ -45,7 +45,12 @@ build_docker_image () {
 
     DOCKERFILE_TIME=$(git log -1 --format=%at -- "$DOCKERFILE" 2>/dev/null || echo 0)
     DOCKERFILE_TIME="${DOCKERFILE_TIME:-0}"
-    IMAGE_TIME=$(docker inspect "$DOCKER_NAME" --format '{{.Created}}' 2>/dev/null | date +%s -d- || echo 0)
+    CREATED=$(docker inspect "$DOCKER_NAME" --format '{{.Created}}' 2>/dev/null || echo "")
+    if [ -n "$CREATED" ]; then
+        IMAGE_TIME=$(date +%s -d "$CREATED")
+    else
+        IMAGE_TIME=0
+    fi
 
     # Build if Dockerfile is newer than image (or not yet tracked by git)
     if [ "$DOCKERFILE_TIME" -eq 0 ] || [ "$DOCKERFILE_TIME" -gt "$IMAGE_TIME" ]; then
@@ -57,7 +62,7 @@ build_docker_image
 
 ENABLE_ESMI_LIB=""
 # source ENABLE_ESMI_LIB variable from the previous build if it exists
-if [ -e 'build/CMakeCache.txt' ]; then
+if [ -e "${DIR}/build/CMakeCache.txt" ]; then
     GREP_RESULT=$(grep "ENABLE_ESMI_LIB.*=" "${DIR}/build/CMakeCache.txt" | tail -n 1 | cut -d = -f 2)
     ENABLE_ESMI_LIB="-DENABLE_ESMI_LIB=$GREP_RESULT"
     echo "ENABLE_ESMI_LIB: [$ENABLE_ESMI_LIB]"

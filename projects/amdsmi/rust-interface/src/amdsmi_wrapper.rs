@@ -175,7 +175,7 @@ pub enum AmdsmiContainerTypesT {
 }
 pub type AmdsmiProcessorHandle = *mut ::std::os::raw::c_void;
 pub type AmdsmiSocketHandle = *mut ::std::os::raw::c_void;
-pub type amdsmi_node_handle = *mut ::std::os::raw::c_void;
+pub type AmdsmiNodeHandle = *mut ::std::os::raw::c_void;
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum ProcessorTypeT {
@@ -3361,7 +3361,7 @@ extern "C" {
 extern "C" {
     pub fn amdsmi_get_node_handle(
         processor_handle: AmdsmiProcessorHandle,
-        node_handle: *mut amdsmi_node_handle,
+        node_handle: *mut AmdsmiNodeHandle,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
@@ -4377,7 +4377,7 @@ extern "C" {
 }
 extern "C" {
     pub fn amdsmi_get_npm_info(
-        node_handle: amdsmi_node_handle,
+        node_handle: AmdsmiNodeHandle,
         info: *mut AmdsmiNpmInfoT,
     ) -> AmdsmiStatusT;
 }
