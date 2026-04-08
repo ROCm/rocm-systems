@@ -1279,6 +1279,275 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizesFusion) {
     }
 }
 
+TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // --- Init and discover devices ---
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    std::vector<ncclNetProperties_t> props(ndev);
+    std::vector<int> physDevs;
+    for (int i = 0; i < ndev; i++) {
+        memset(&props[i], 0, sizeof(ncclNetProperties_t));
+        ASSERT_EQ(GetDeviceProperties(i, &props[i]), ncclSuccess);
+        if (!props[i].name || !strchr(props[i].name, '+'))
+            physDevs.push_back(i);
+    }
+
+    int needed = 6;
+    if ((int)physDevs.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " physical devices, found " << physDevs.size();
+
+    int targetSpeed = props[physDevs[0]].speed;
+    std::vector<int> compat;
+    for (int d : physDevs)
+        if (props[d].speed == targetSpeed) compat.push_back(d);
+    if ((int)compat.size() < needed)
+        GTEST_SKIP() << "Need " << needed << " same-speed devices, found " << compat.size();
+
+    int devOffset = (rank == 1) ? 3 : 0;
+    std::vector<int> selected(compat.begin() + devOffset, compat.begin() + devOffset + 3);
+
+    // --- Create 3-NIC merged device ---
+    ncclNetVDeviceProps_t vProps;
+    memset(&vProps, 0, sizeof(vProps));
+    vProps.ndevs = 3;
+    for (int i = 0; i < 3; i++) vProps.devs[i] = selected[i];
+
+    int mergedDev = -1;
+    if (MakeVirtualDevice(&mergedDev, &vProps) != ncclSuccess || mergedDev < 0)
+        GTEST_SKIP() << "Rank " << rank << " failed to create 3-NIC merged device";
+
+    // --- Parameters ---
+    static constexpr int kNumOutstanding = 8;
+    static constexpr int kTagBase = 900;
+    static constexpr int kSendDelayUs = 50000;  // 50ms delay before sender posts
+
+    // --- Setup connection ---
+    ConnectionPair pair;
+    ncclNetHandle_t handle;
+    if (rank == 0) {
+        ASSERT_EQ(CreateListenComm(mergedDev, &handle, &pair.listenComm), ncclSuccess);
+        MPI_Send(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD);
+        while (!pair.recvComm) AcceptConnection(pair.listenComm, &pair.recvComm);
+    } else {
+        MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peerRank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        while (!pair.sendComm) ConnectToRemote(mergedDev, &handle, &pair.sendComm);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    NetConnectionGuard conn(net_);
+    if (rank == 0) { conn.setRecvComm(pair.recvComm); conn.setListenComm(pair.listenComm); }
+    else conn.setSendComm(pair.sendComm);
+
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+
+    // --- Allocate per-operation buffers and register MRs ---
+    std::vector<void*> bufs(kNumOutstanding, nullptr);
+    std::vector<void*> mrs(kNumOutstanding, nullptr);
+    for (int i = 0; i < kNumOutstanding; i++) {
+        bufs[i] = malloc(kLargeBufferSize);
+        ASSERT_NE(bufs[i], nullptr);
+        ASSERT_EQ(RegisterMemory(comm, bufs[i], kLargeBufferSize, NCCL_PTR_HOST, &mrs[i]),
+                  ncclSuccess);
+    }
+
+    // --- GPU resources for async work on sender ---
+    void* gpuA = nullptr;
+    void* gpuB = nullptr;
+    hipStream_t gpuStream = nullptr;
+    if (rank == 1) {
+        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuA, kLargeBufferSize));
+        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&gpuB, kLargeBufferSize));
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamCreate(&gpuStream));
+        HIP_TEST_CHECK_GTEST_FAIL(hipMemset(gpuA, 0xAA, kLargeBufferSize));
+        HIP_TEST_CHECK_GTEST_FAIL(hipMemset(gpuB, 0x00, kLargeBufferSize));
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // =========================================================================
+    // Timeline:
+    //
+    //   Receiver (rank 0):
+    //     Phase 1: PostRecv 0..7 (all recvs posted immediately)
+    //     ──barrier──
+    //     (idle — waiting for data)
+    //     ──barrier──
+    //     Phase 3: WaitForCompletion 0..7, verify data
+    //
+    //   Sender (rank 1):
+    //     (idle)
+    //     ──barrier──
+    //     Phase 2: sleep 50ms, then fill bufs + PostSend 0..7,
+    //              then IMMEDIATELY overwrite all bufs with 0xFF + launch GPU work
+    //     ──barrier──
+    //     Phase 3: verify GPU work
+    //
+    // What we're testing:
+    //   After PostSend, sender overwrites the send buffers with garbage (0xFF).
+    //   If RDMA has already read the original data before the overwrite,
+    //   receiver sees correct data. If RDMA reads after overwrite → corruption.
+    // =========================================================================
+
+    std::vector<void*> recvReqs(kNumOutstanding, nullptr);
+
+    // ===================== Phase 1: Receiver posts ALL recvs =====================
+    if (rank == 0) {
+        for (int i = 0; i < kNumOutstanding; i++) {
+            memset(bufs[i], 0xDE, kLargeBufferSize);  // Poison
+            void* rb[1] = {bufs[i]};
+            size_t rs[1] = {kLargeBufferSize};
+            int rt[1] = {kTagBase + i};
+            void* rh[1] = {mrs[i]};
+            ASSERT_EQ(PostRecv(pair.recvComm, 1, rb, rs, rt, rh, &recvReqs[i]),
+                      ncclSuccess);
+            ASSERT_NE(recvReqs[i], nullptr) << "Recv request NULL for op " << i;
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // ===================== Phase 2: Sender sleeps, sends, then corrupts =====================
+    if (rank == 1) {
+        // Deliberate delay
+        usleep(kSendDelayUs);
+
+        // Fill each buffer with a unique pattern and post send
+        for (int i = 0; i < kNumOutstanding; i++) {
+            uint8_t* p = static_cast<uint8_t*>(bufs[i]);
+            int seed = kTagBase + i;
+            for (size_t j = 0; j < kLargeBufferSize; j++)
+                p[j] = (uint8_t)((seed + j) % kBytePatternModulo);
+
+            void* sendReq = nullptr;
+            ASSERT_EQ(PostSend(pair.sendComm, bufs[i], kLargeBufferSize,
+                               kTagBase + i, mrs[i], &sendReq), ncclSuccess)
+                << "PostSend failed for op " << i;
+            // Don't care about sendReq — we verify via recv completions
+        }
+
+        // IMMEDIATELY overwrite all send buffers with garbage.
+        // This is the critical test: if RDMA hasn't finished reading the
+        // buffer yet, receiver will see 0xFF instead of the pattern.
+        for (int i = 0; i < kNumOutstanding; i++) {
+            memset(bufs[i], 0xFF, kLargeBufferSize);
+        }
+
+        // Also launch async GPU work — overlaps with RDMA completion
+        for (int i = 0; i < 10; i++) {
+            HIP_TEST_CHECK_GTEST_FAIL(
+                hipMemcpyAsync(gpuB, gpuA, kLargeBufferSize,
+                               hipMemcpyDeviceToDevice, gpuStream));
+            HIP_TEST_CHECK_GTEST_FAIL(
+                hipMemsetAsync(gpuA, 0xBB + i, kLargeBufferSize, gpuStream));
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // ===================== Phase 3: Verify =====================
+
+    // Receiver: wait for all recv completions and verify data
+    if (rank == 0) {
+        for (int i = 0; i < kNumOutstanding; i++) {
+            int csz[1] = {0};
+            ASSERT_EQ(WaitForCompletion(recvReqs[i], csz, kLargeTransferTimeoutMs),
+                      ncclSuccess)
+                << "Recv " << i << " timed out";
+            EXPECT_EQ(csz[0], (int)kLargeBufferSize) << "Size mismatch recv op " << i;
+        }
+
+        // Verify data integrity — should be ORIGINAL pattern, not 0xFF
+        int ok = 0;
+        for (int i = 0; i < kNumOutstanding; i++) {
+            uint8_t* p = static_cast<uint8_t*>(bufs[i]);
+            int seed = kTagBase + i;
+            bool good = true;
+            bool sawFF = false;
+            size_t errIdx = 0;
+            uint8_t errExp = 0, errGot = 0;
+
+            for (size_t j = 0; j < kLargeBufferSize; j++) {
+                uint8_t expected = (uint8_t)((seed + j) % kBytePatternModulo);
+                if (p[j] != expected) {
+                    good = false;
+                    if (!sawFF) {
+                        errIdx = j;
+                        errExp = expected;
+                        errGot = p[j];
+                    }
+                    if (p[j] == 0xFF) sawFF = true;
+                    break;
+                }
+            }
+
+            if (good) {
+                ok++;
+            } else {
+                fprintf(stderr, "  [FAIL] op %d byte %zu: expected %u got %u%s\n",
+                        i, errIdx, errExp, errGot,
+                        sawFF ? " (0xFF = sender overwrote before RDMA read!)" : "");
+            }
+        }
+        EXPECT_EQ(ok, kNumOutstanding);
+    }
+
+    // Sender: verify GPU work
+    if (rank == 1) {
+        hipError_t syncErr = hipStreamSynchronize(gpuStream);
+        EXPECT_EQ(syncErr, hipSuccess) << "hipStreamSynchronize failed: "
+                                       << hipGetErrorString(syncErr);
+
+        std::vector<uint8_t> h(kLargeBufferSize);
+
+        // After 10 iterations: gpuA = 0xC4, gpuB = 0xC3
+        {
+            hipError_t err = hipMemcpy(h.data(), gpuA, kLargeBufferSize, hipMemcpyDeviceToHost);
+            EXPECT_EQ(err, hipSuccess) << "hipMemcpy gpuA failed: " << hipGetErrorString(err);
+            bool aOk = std::all_of(h.begin(), h.end(),
+                                   [](uint8_t v){ return v == 0xC4; });
+            EXPECT_TRUE(aOk);
+        }
+        {
+            hipError_t err = hipMemcpy(h.data(), gpuB, kLargeBufferSize, hipMemcpyDeviceToHost);
+            EXPECT_EQ(err, hipSuccess) << "hipMemcpy gpuB failed: " << hipGetErrorString(err);
+            bool bOk = std::all_of(h.begin(), h.end(),
+                                   [](uint8_t v){ return v == 0xC3; });
+            EXPECT_TRUE(bOk);
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // ===================== Cleanup =====================
+    for (int i = 0; i < kNumOutstanding; i++) {
+        if (mrs[i]) DeregisterMemory(comm, mrs[i]);
+        if (bufs[i]) free(bufs[i]);
+    }
+    if (rank == 1) {
+        if (gpuStream) {
+            hipError_t err = hipStreamDestroy(gpuStream);
+            EXPECT_EQ(err, hipSuccess) << "hipStreamDestroy: " << hipGetErrorString(err);
+        }
+        if (gpuA) {
+            hipError_t err = hipFree(gpuA);
+            EXPECT_EQ(err, hipSuccess) << "hipFree(gpuA): " << hipGetErrorString(err);
+        }
+        if (gpuB) {
+            hipError_t err = hipFree(gpuB);
+            EXPECT_EQ(err, hipSuccess) << "hipFree(gpuB): " << hipGetErrorString(err);
+        }
+    }
+}
+
 // Flush Tests
 
 TEST_F(NetIbMPITest, FlushAfterRecv) {
