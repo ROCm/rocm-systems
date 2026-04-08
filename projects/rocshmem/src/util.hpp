@@ -113,28 +113,6 @@ namespace rocshmem {
     }                                                                            \
 } while (0)
 
-#ifdef BUILD_DEBUG_LEVEL_TRACE
-#define DPRINTF(...)     \
-  do {                   \
-    printf(__VA_ARGS__); \
-  } while (0);
-#else
-#define DPRINTF(...) \
-  do {               \
-  } while (0);
-#endif
-
-#ifdef BUILD_DEBUG_LEVEL_DEVICE
-#define GPU_DPRINTF(...)                                                \
-  do {                                                                  \
-    rocshmem::dprintf("T%04dw%04ut%04u " __VA_ARGS__);\
-  } while (0);
-#else
-#define GPU_DPRINTF(...) \
-  do {                   \
-  } while (0);
-#endif
-
 /* Helper Macros for handling dynamic libraries */
 #define PPCAT_NX(prefix, func_name) prefix##func_name
 #define PPCAT(prefix, func_name) PPCAT_NX(prefix, func_name)
@@ -151,7 +129,7 @@ do {                                                                            
 do {                                                                                        \
   *(void **) (&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
   if (!func_struct.func_name) {                                                             \
-    DPRINTF("Failed to find function %s \n",  STRINGIFY(PPCAT(prefix, func_name)));         \
+    LOG_WARN("Failed to find function %s",  STRINGIFY(PPCAT(prefix, func_name)));           \
     dlclose(handle);                                                                        \
     handle = nullptr;                                                                       \
     return ROCSHMEM_ERROR;                                                                  \
@@ -162,7 +140,7 @@ do {                                                                            
 do {                                                                        \
   *(void **) (&func_struct.var_name) = dlsym(handle, STRINGIFY(var_name));  \
   if (!func_struct.var_name) {                                             \
-    DPRINTF("Failed to find function %s \n",  STRINGIFY(var_name));        \
+    LOG_WARN("Failed to find function %s",  STRINGIFY(var_name));          \
     dlclose(handle);                                                        \
     handle = nullptr;                                                       \
     return ROCSHMEM_ERROR;                                                  \

@@ -240,7 +240,7 @@ template <typename... Args>
  *
  * The printf portion is gated by BUILD_DEBUG_LEVEL_DEVICE.
  * abort() in ABORT_DEVICE and ERROR_DEVICE is unconditional.
- * Device printf uses rocshmem::dprintf() (defined in util.hpp) which serializes
+ * Device printf uses rocshmem::dprintf() (defined above) which serializes
  * output through print_lock.  rocshmem::dprintf() prepends block/thread indices
  * as the first 6 printf arguments, so the format string must start with
  * 6 %u specifiers to consume them.
