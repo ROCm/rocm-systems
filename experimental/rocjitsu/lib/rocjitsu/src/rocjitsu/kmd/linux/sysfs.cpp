@@ -150,12 +150,40 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, const GpuInfo &gpu) {
   gpu_id << gpu.gpu_id << "\n";
   write_file(node_dir + "/gpu_id", gpu_id.str());
 
+  // Write the marketing name file for ROCR's topology enumeration.
+  write_file(node_dir + "/name", std::string(gpu.marketing_name) + "\n");
+
+  // Compute capability flags if not explicitly provided.
+  // Layout from hsakmttypes.h HSA_CAP_* defines.
+  uint32_t cap = gpu.capability;
+  if (cap == 0) {
+    cap = (1u << 1)     // HSAMMUPresent
+          | (1u << 5)   // QueueIdleEvent
+          | (1u << 7)   // WatchPointsSupported
+          | (4u << 8)   // WatchPointsTotalBits = 4 (16 watchpoints)
+          | (2u << 12)  // DoorbellType = 2
+          | (1u << 14)  // AQLQueueDoubleMap
+          | (1u << 15)  // DebugTrapSupported
+          | (1u << 16)  // WaveLaunchTrapOverrideSupported
+          | (1u << 17)  // WaveLaunchModeSupported
+          | (1u << 18)  // PreciseMemoryOperationsSupported
+          | (1u << 20)  // Mem_EDCSupport (HBM ECC)
+          | (1u << 21)  // RASEventNotify
+          | (1u << 26)  // SRAM_EDCSupport
+          | (1u << 27)  // SVMAPISupported
+          | (1u << 28)  // CoherentHostAccess
+          | (1u << 29)  // DebugSupportedFirmware
+          | (1u << 30)  // PreciseALUOperationsSupported
+          | (1u << 31); // PerQueueResetSupported
+  }
+
   std::ostringstream props;
   props << "cpu_cores_count 0\n"
         << "simd_count " << gpu.simd_count << "\n"
         << "mem_banks_count 1\n"
         << "caches_count 2\n"
         << "io_links_count 1\n"
+        << "p2p_links_count 0\n"
         << "cpu_core_id_base 0\n"
         << "simd_id_base 2147487744\n"
         << "max_waves_per_simd " << gpu.max_waves_per_simd << "\n"
@@ -167,36 +195,46 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, const GpuInfo &gpu) {
         << "simd_arrays_per_engine " << gpu.num_shader_arrays_per_engine << "\n"
         << "cu_per_simd_array " << gpu.num_cu_per_sh << "\n"
         << "simd_per_cu " << gpu.simd_per_cu << "\n"
-        << "max_slots_scratch_cu 32\n"
+        << "max_slots_scratch_cu " << gpu.max_slots_scratch_cu << "\n"
         << "gfx_target_version " << gpu.gfx_target_version << "\n"
         << "vendor_id " << gpu.vendor_id << "\n"
         << "device_id " << gpu.device_id << "\n"
-        << "location_id 0\n"
-        << "domain 0\n"
+        << "location_id " << gpu.location_id << "\n"
+        << "domain " << gpu.domain << "\n"
         << "drm_render_minor " << gpu.drm_render_minor << "\n"
-        << "hive_id 0\n"
+        << "hive_id " << gpu.hive_id << "\n"
         << "num_sdma_engines " << gpu.num_sdma_engines << "\n"
-        << "num_sdma_xgmi_engines 0\n"
+        << "num_sdma_xgmi_engines " << gpu.num_sdma_xgmi_engines << "\n"
         << "num_sdma_queues_per_engine 2\n"
         << "num_cp_queues " << gpu.num_cp_queues << "\n"
-        << "max_engine_clk_fcompute 2100\n"
+        << "max_engine_clk_fcompute " << gpu.max_engine_clk_fcompute << "\n"
         << "max_engine_clk_ccompute 0\n"
         << "local_mem_size " << gpu.local_mem_size << "\n"
-        << "fw_version 0\n"
-        << "capability " << (2u << 12) << "\n" // DoorbellType=2 (bits[13:12])
-        << "sdma_fw_version 0\n"
+        << "fw_version " << gpu.fw_version << "\n"
+        << "capability " << cap << "\n"
+        << "capability2 " << gpu.capability2 << "\n"
+        << "debug_prop " << gpu.debug_prop << "\n"
+        << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
+        << "unique_id " << gpu.unique_id << "\n"
+        << "num_xcc " << gpu.num_xcc << "\n"
         << "vram_public 1\n"
-        << "vram_size " << gpu.local_mem_size << "\n"
-        << "num_xcc " << gpu.num_xcc << "\n";
+        << "vram_size " << gpu.local_mem_size << "\n";
+
+  if (gpu.family_id > 0)
+    props << "family_id " << gpu.family_id << "\n";
+
   write_file(node_dir + "/properties", props.str());
 
   std::ostringstream mem;
   mem << "heap_type 1\n"
       << "size_in_bytes " << gpu.local_mem_size << "\n"
       << "flags 0\n"
-      << "width 4096\n"
-      << "mem_clk_max 1200\n";
+      << "width " << gpu.mem_width << "\n"
+      << "mem_clk_max " << gpu.mem_clk_max << "\n";
   write_file(node_dir + "/mem_banks/0/properties", mem.str());
+
+  // Used memory tracking (initially 0).
+  write_file(node_dir + "/mem_banks/0/used_memory", "0\n");
 
   // L1 cache (per CU, data cache)
   std::ostringstream l1;

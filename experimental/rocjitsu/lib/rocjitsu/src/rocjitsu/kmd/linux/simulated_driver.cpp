@@ -5,6 +5,8 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
+#include "util/debug_print.h"
+#include "util/except.h"
 
 #include <cerrno>
 #include <chrono>
@@ -71,10 +73,15 @@ SimulatedDriver *SimulatedDriver::get_or_create() {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (!g_instance) {
     g_in_construction = true;
-    auto driver = create_default();
-    g_in_construction = false;
-    if (!driver)
+    std::unique_ptr<SimulatedDriver> driver;
+    try {
+      driver = create_default();
+    } catch (const std::exception &e) {
+      g_in_construction = false;
+      util::debug::print("rocjitsu: ", e.what());
       return nullptr;
+    }
+    g_in_construction = false;
     g_instance.store(driver.release(), std::memory_order_release); // Intentionally leaked.
     g_instance.load(std::memory_order_relaxed)->open();            // Sets g_kfd_fd via open().
   }
@@ -103,18 +110,11 @@ bool SimulatedDriver::in_construction() { return g_in_construction; }
 std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
   const char *config_path = getenv("RJ_CONFIG");
   const char *schema_path = getenv("RJ_SCHEMA");
-  if (!config_path || !schema_path) {
-    fprintf(stderr, "rocjitsu: RJ_CONFIG and RJ_SCHEMA env vars required\n");
-    return nullptr;
-  }
+  if (!config_path || !schema_path)
+    throw util::ConfigError("RJ_CONFIG and RJ_SCHEMA env vars required");
 
   auto state = std::make_unique<DefaultDriverState>();
-  try {
-    state->loaded = config::load_config(config_path, schema_path);
-  } catch (const std::exception &e) {
-    fprintf(stderr, "rocjitsu: config load failed: %s\n", e.what());
-    return nullptr;
-  }
+  state->loaded = config::load_config(config_path, schema_path);
   auto *soc = state->loaded.soc();
   // Override max_ticks: the KFD driver runs the engine indefinitely, waiting for
   // doorbell events from ROCR. Termination is controlled by open()/close().
@@ -136,72 +136,43 @@ std::unique_ptr<SimulatedDriver> SimulatedDriver::create_default() {
 
   auto driver = std::make_unique<SimulatedDriver>(*state->engine, *soc);
 
-  // Set up sysfs topology for ROCR discovery.
-  // Populate GpuInfo based on the configured architecture so ROCR correctly
-  // identifies the simulated GPU regardless of ISA.
+  // Build sysfs GpuInfo from the config's device section.
   Sysfs::GpuInfo gpu{};
-  gpu.simd_count = soc->num_xcds() * 32 * 4; // CUs * SIMDs/CU
-  gpu.max_waves_per_simd = 8;
-  gpu.num_shader_engines = 4;
-  gpu.num_cu_per_sh = 8;
-  gpu.num_shader_arrays_per_engine = 1;
-  gpu.local_mem_size = 64ULL * 1024 * 1024 * 1024; // 64GB
-  gpu.num_cp_queues = 8;
-  gpu.l1_size_kb = 32;
-  gpu.l2_size_kb = 4096;
+  const auto &dev = state->loaded.device;
+  if (!dev.present)
+    throw util::ConfigError("config missing vm.gpu.device section");
 
-  switch (soc->arch()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-    gpu.gpu_id = 0x908;
-    gpu.gfx_target_version = 90800;
-    gpu.device_id = 0x738C;
-    break;
-  case ROCJITSU_CODE_ARCH_CDNA2:
-    gpu.gpu_id = 0x910;
-    gpu.gfx_target_version = 91000;
-    gpu.device_id = 0x7408;
-    break;
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    gpu.gpu_id = 0x940;
-    gpu.gfx_target_version = 94000;
-    gpu.device_id = 0x7400;
-    break;
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    gpu.gpu_id = 0x9500;
-    gpu.gfx_target_version = 90500;
-    gpu.device_id = 0x7400;
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-    gpu.gpu_id = 0x1010;
-    gpu.gfx_target_version = 100100;
-    gpu.device_id = 0x731F;
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA2:
-    gpu.gpu_id = 0x1030;
-    gpu.gfx_target_version = 100300;
-    gpu.device_id = 0x73BF;
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-    gpu.gpu_id = 0x1100;
-    gpu.gfx_target_version = 110000;
-    gpu.device_id = 0x744C;
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    gpu.gpu_id = 0x1150;
-    gpu.gfx_target_version = 110500;
-    gpu.device_id = 0x1506;
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    gpu.gpu_id = 0x1200;
-    gpu.gfx_target_version = 120000;
-    gpu.device_id = 0x15BF;
-    break;
-  default:
-    gpu.gpu_id = 0x9500;
-    gpu.gfx_target_version = 90500;
-    gpu.device_id = 0x7400;
-    break;
-  }
+  gpu.gpu_id = dev.gpu_id;
+  gpu.gfx_target_version = dev.gfx_target_version;
+  gpu.vendor_id = dev.vendor_id;
+  gpu.device_id = dev.device_id;
+  gpu.family_id = dev.family_id;
+  gpu.unique_id = dev.unique_id;
+  gpu.marketing_name = dev.marketing_name.c_str();
+  gpu.drm_render_minor = dev.drm_render_minor;
+  gpu.simd_count = dev.simd_count;
+  gpu.max_waves_per_simd = dev.max_waves_per_simd;
+  gpu.num_shader_engines = dev.num_shader_engines;
+  gpu.num_shader_arrays_per_engine = dev.num_shader_arrays_per_engine;
+  gpu.num_cu_per_sh = dev.num_cu_per_sh;
+  gpu.simd_per_cu = dev.simd_per_cu;
+  gpu.wave_front_size = dev.wave_front_size;
+  gpu.max_slots_scratch_cu = dev.max_slots_scratch_cu;
+  gpu.local_mem_size = dev.local_mem_size;
+  gpu.lds_size_kb = dev.lds_size_kb;
+  gpu.mem_width = dev.mem_width;
+  gpu.mem_clk_max = dev.mem_clk_max;
+  gpu.l1_size_kb = dev.l1_size_kb;
+  gpu.l1_line_size = dev.l1_line_size;
+  gpu.l1_assoc = dev.l1_assoc;
+  gpu.l2_size_kb = dev.l2_size_kb;
+  gpu.l2_line_size = dev.l2_line_size;
+  gpu.l2_assoc = dev.l2_assoc;
+  gpu.num_sdma_engines = dev.num_sdma_engines;
+  gpu.num_sdma_xgmi_engines = dev.num_sdma_xgmi_engines;
+  gpu.num_cp_queues = dev.num_cp_queues;
+  gpu.max_engine_clk_fcompute = dev.max_engine_clk_fcompute;
+  gpu.num_xcc = soc->num_xcds();
 
   driver->setup_topology(gpu);
 
@@ -363,7 +334,7 @@ int SimulatedDriver::ioctl(unsigned long request, void *arg) {
   case AMDKFD_IOC_SET_TRAP_HANDLER:
     return 0;
   default:
-    fprintf(stderr, "rocjitsu: unhandled ioctl 0x%lx\n", request);
+    util::debug::print("rocjitsu: unhandled ioctl 0x", std::hex, request);
     return 0;
   }
 }
