@@ -24,6 +24,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(rocjitsu_kmd_shim PRIVATE _GNU_SOURCE)
     target_compile_options(rocjitsu_kmd_shim PRIVATE -Wall -Wextra -Wpedantic -Werror)
     set_target_properties(rocjitsu_kmd_shim PROPERTIES OUTPUT_NAME "rocjitsu_kmd")
+
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     rj_add_object_library(rocjitsu_kmd windows/stub.cpp)
 else()

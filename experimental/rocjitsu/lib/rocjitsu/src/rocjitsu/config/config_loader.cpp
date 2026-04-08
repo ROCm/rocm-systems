@@ -634,6 +634,45 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
     throw std::runtime_error("Config missing 'topology' section");
 
   result.build_result = build_topology(topo_def, result.exec_mode, arch);
+
+  // Extract KFD device identity from vm.gpu.device if present.
+  if (fb_config->vm() && fb_config->vm()->gpu() && fb_config->vm()->gpu()->device()) {
+    auto *d = fb_config->vm()->gpu()->device();
+    auto &dev = result.device;
+    dev.present = true;
+    dev.gpu_id = d->gpu_id();
+    dev.gfx_target_version = d->gfx_target_version();
+    dev.vendor_id = d->vendor_id();
+    dev.device_id = d->device_id();
+    dev.family_id = d->family_id();
+    dev.unique_id = d->unique_id();
+    if (d->marketing_name())
+      dev.marketing_name = d->marketing_name()->str();
+    dev.drm_render_minor = d->drm_render_minor();
+    dev.simd_count = d->simd_count();
+    dev.max_waves_per_simd = d->max_waves_per_simd();
+    dev.num_shader_engines = d->num_shader_engines();
+    dev.num_shader_arrays_per_engine = d->num_shader_arrays_per_engine();
+    dev.num_cu_per_sh = d->num_cu_per_sh();
+    dev.simd_per_cu = d->simd_per_cu();
+    dev.wave_front_size = d->wave_front_size();
+    dev.max_slots_scratch_cu = d->max_slots_scratch_cu();
+    dev.local_mem_size = d->local_mem_size();
+    dev.lds_size_kb = d->lds_size_kb();
+    dev.mem_width = d->mem_width();
+    dev.mem_clk_max = d->mem_clk_max();
+    dev.l1_size_kb = d->l1_size_kb();
+    dev.l1_line_size = d->l1_line_size();
+    dev.l1_assoc = d->l1_assoc();
+    dev.l2_size_kb = d->l2_size_kb();
+    dev.l2_line_size = d->l2_line_size();
+    dev.l2_assoc = d->l2_assoc();
+    dev.num_sdma_engines = d->num_sdma_engines();
+    dev.num_sdma_xgmi_engines = d->num_sdma_xgmi_engines();
+    dev.num_cp_queues = d->num_cp_queues();
+    dev.max_engine_clk_fcompute = d->max_engine_clk_fcompute();
+  }
+
   return result;
 }
 

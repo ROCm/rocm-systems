@@ -24,29 +24,58 @@ class Sysfs {
 public:
   /// @brief GPU configuration for sysfs topology generation.
   struct GpuInfo {
+    // Identification
     uint32_t gpu_id = 0;
     uint32_t gfx_target_version = 0;
+    uint32_t vendor_id = 0x1002; // AMD
+    uint32_t device_id = 0;
+    uint32_t family_id = 0;
+    uint64_t unique_id = 0;
+    uint32_t location_id = 0x0300; // PCI BDF: bus 3, dev 0, func 0
+    uint32_t domain = 0;
+    uint64_t hive_id = 0;
+    uint32_t drm_render_minor = 128;
+    const char *marketing_name = "";
+
+    // Compute unit organization
     uint32_t simd_count = 0;
-    uint32_t max_waves_per_simd = 8;
+    uint32_t max_waves_per_simd = 10;
     uint32_t num_shader_engines = 0;
     uint32_t num_shader_arrays_per_engine = 1;
     uint32_t num_cu_per_sh = 0;
     uint32_t simd_per_cu = 4;
     uint32_t wave_front_size = 64;
-    uint64_t local_mem_size = 0;
-    uint32_t vendor_id = 0x1002; // AMD
-    uint32_t device_id = 0;
-    uint32_t drm_render_minor = 128;
-    uint32_t num_sdma_engines = 2;
-    uint32_t num_cp_queues = 4;
     uint32_t num_xcc = 1;
+    uint32_t max_slots_scratch_cu = 32;
+
+    // Memory
+    uint64_t local_mem_size = 0;
+    uint32_t lds_size_kb = 64;
+    uint32_t mem_width = 4096;   // HBM interface width in bits
+    uint32_t mem_clk_max = 1200; // MHz
+
+    // Caches
     uint32_t l1_size_kb = 32;
     uint32_t l1_line_size = 128;
     uint32_t l1_assoc = 4;
     uint32_t l2_size_kb = 4096;
     uint32_t l2_line_size = 128;
     uint32_t l2_assoc = 16;
-    uint32_t lds_size_kb = 64;
+
+    // Engines and queues
+    uint32_t num_sdma_engines = 2;
+    uint32_t num_sdma_xgmi_engines = 0;
+    uint32_t num_cp_queues = 128;
+    uint32_t max_engine_clk_fcompute = 2100; // MHz
+
+    // Capability flags
+    uint32_t capability = 0; // 0 = auto-compute from defaults
+    uint32_t capability2 = 0;
+    uint64_t debug_prop = 0;
+
+    // Firmware
+    uint32_t fw_version = 0;
+    uint32_t sdma_fw_version = 0;
   };
 
   Sysfs() = default;
