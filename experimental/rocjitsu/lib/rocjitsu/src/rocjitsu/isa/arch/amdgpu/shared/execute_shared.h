@@ -23,18 +23,73 @@ namespace amdgpu {
 /// @brief Shared execute() for ds_bpermute_b32_ds (ds_permute).
 template <typename Inst>
 inline void execute_ds_bpermute_b32_ds([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {}
+                                       [[maybe_unused]] Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t vb = wf.vgpr_alloc().base;
+  // Pre-read all src0 (data0) values.
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = cu.read_vgpr(vb + inst.inst_.data0, i);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t addr_val = cu.read_vgpr(vb + inst.inst_.addr, lane);
+    uint32_t src_lane = (addr_val / 4) % wf.wf_size();
+    cu.write_vgpr(vb + inst.inst_.vdst, lane, src_data[src_lane]);
+  }
+}
 
 /// @brief Shared execute() for ds_permute_b32_ds (ds_permute).
 template <typename Inst>
 inline void execute_ds_permute_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t vb = wf.vgpr_alloc().base;
+  // Pre-read all src0 (data0) values.
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = cu.read_vgpr(vb + inst.inst_.data0, i);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t addr_val = cu.read_vgpr(vb + inst.inst_.addr, lane);
+    uint32_t src_lane = (addr_val / 4) % wf.wf_size();
+    cu.write_vgpr(vb + inst.inst_.vdst, lane, src_data[src_lane]);
+  }
 }
 
 /// @brief Shared execute() for ds_swizzle_b32_ds (ds_swizzle).
 template <typename Inst>
 inline void execute_ds_swizzle_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t src_data[64];
+  for (uint32_t i = 0; i < wf.wf_size(); ++i)
+    src_data[i] = cu.read_vgpr(vb + inst.inst_.data0, i);
+  uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t src_lane;
+    if (offset & 0x8000) {
+      // QDMode: swizzle within 4-lane quads.
+      uint32_t and_mask = offset & 0x1F;
+      uint32_t or_mask = (offset >> 5) & 0x1F;
+      uint32_t xor_mask = (offset >> 10) & 0x1F;
+      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;
+      src_lane = (lane & ~0x3) | (src_lane & 0x3); // stay in quad
+    } else {
+      // BitMode: full-wave swizzle.
+      uint32_t and_mask = offset & 0x1F;
+      uint32_t or_mask = (offset >> 5) & 0x1F;
+      uint32_t xor_mask = (offset >> 10) & 0x1F;
+      src_lane = ((lane & and_mask) | or_mask) ^ xor_mask;
+    }
+    if (src_lane < wf.wf_size())
+      cu.write_vgpr(vb + inst.inst_.vdst, lane, src_data[src_lane]);
+  }
 }
 
 /// @brief Shared execute() for image_bvh_intersect_ray_mimg (image_bvh).
@@ -381,6 +436,12 @@ inline void execute_s_ashr_i64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
   wf.write_scc(result != 0);
 }
 
+/// @brief Shared execute() for s_barrier_sopp (barrier).
+template <typename Inst>
+inline void execute_s_barrier_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.set_state(amdgpu::WfState::BARRIER);
+}
+
 /// @brief Shared execute() for s_bcnt0_i32_b32_sop1 (scalar_unary).
 template <typename Inst>
 inline void execute_s_bcnt0_i32_b32_sop1([[maybe_unused]] Inst &inst,
@@ -636,7 +697,9 @@ inline void execute_s_ceil_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]
 template <typename Inst>
 inline void execute_s_cls_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = val; // TODO: cls
+  int32_t sval = static_cast<int32_t>(val);
+  uint32_t uval = sval < 0 ? ~static_cast<uint32_t>(sval) : static_cast<uint32_t>(sval);
+  uint32_t result = uval == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;
   inst.sdst.write_scalar(wf, result);
   wf.write_scc(result != 0);
 }
@@ -645,9 +708,10 @@ inline void execute_s_cls_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_cls_i32_i64_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = val; // unhandled: cls
-  inst.sdst.write_scalar64(wf, result);
+  int64_t sval = static_cast<int64_t>(inst.ssrc0.read_scalar64(wf));
+  uint64_t uval = sval < 0 ? ~static_cast<uint64_t>(sval) : static_cast<uint64_t>(sval);
+  uint32_t result = uval == 0 ? 63u : static_cast<uint32_t>(std::countl_zero(uval)) - 1;
+  inst.sdst.write_scalar(wf, result);
   wf.write_scc(result != 0);
 }
 
@@ -656,7 +720,8 @@ template <typename Inst>
 inline void execute_s_clz_i32_u32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = val; // TODO: clz
+  uint32_t result =
+      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));
   inst.sdst.write_scalar(wf, result);
   wf.write_scc(result != 0);
 }
@@ -665,8 +730,9 @@ inline void execute_s_clz_i32_u32_sop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_clz_i32_u64_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = val; // TODO: clz64
+  uint64_t val = inst.ssrc0.read_scalar64(wf);
+  uint32_t result =
+      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(val));
   inst.sdst.write_scalar(wf, result);
   wf.write_scc(result != 0);
 }
@@ -934,7 +1000,8 @@ template <typename Inst>
 inline void execute_s_ctz_i32_b32_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint32_t val = inst.ssrc0.read_scalar(wf);
-  uint32_t result = val; // TODO: ctz
+  uint32_t result =
+      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));
   inst.sdst.write_scalar(wf, result);
   wf.write_scc(result != 0);
 }
@@ -944,8 +1011,9 @@ template <typename Inst>
 inline void execute_s_ctz_i32_b64_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t val = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = val; // unhandled: ctz
-  inst.sdst.write_scalar64(wf, result);
+  uint32_t result =
+      val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countr_zero(val));
+  inst.sdst.write_scalar(wf, result);
   wf.write_scc(result != 0);
 }
 
@@ -1879,6 +1947,43 @@ inline void execute_s_xor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
   wf.write_scc(result != 0);
 }
 
+/// @brief Shared execute() for v_accvgpr_mov_b32_vop1 (vector_mov).
+template <typename Inst>
+inline void execute_v_accvgpr_mov_b32_vop1([[maybe_unused]] Inst &inst,
+                                           [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    inst.vdst.write_lane(wf, lane, inst.src0.read_lane(wf, lane));
+  }
+}
+
+/// @brief Shared execute() for v_accvgpr_mov_b32_vop3 (vector_mov).
+template <typename Inst>
+inline void execute_v_accvgpr_mov_b32_vop3([[maybe_unused]] Inst &inst,
+                                           [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+    if (inst.inst_.abs & (1u << 0))
+      s = std::fabs(s);
+    if (inst.inst_.neg & (1u << 0))
+      s = -s;
+    if (inst.inst_.omod == 1)
+      s *= 2.0f;
+    else if (inst.inst_.omod == 2)
+      s *= 4.0f;
+    else if (inst.inst_.omod == 3)
+      s *= 0.5f;
+    if (inst.inst_.clamp)
+      s = std::clamp(s, 0.0f, 1.0f);
+    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(s));
+  }
+}
+
 /// @brief Shared execute() for v_add3_u32_vop3 (vector_ternary).
 template <typename Inst>
 inline void execute_v_add3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
@@ -1898,13 +2003,15 @@ template <typename Inst>
 inline void execute_v_add_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t sv0 = inst.src0.read_lane(wf, lane);
     uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1);
+    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
+    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
     if (wide > 0xFFFFFFFFULL)
       vcc |= (1ULL << lane);
@@ -1919,20 +2026,22 @@ template <typename Inst>
 inline void execute_v_add_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t sv0 = inst.src0.read_lane(wf, lane);
     uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1);
+    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
+    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
     if (wide > 0xFFFFFFFFULL)
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.sdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_add_co_u32_vop3 (vector_add_co).
@@ -1952,7 +2061,7 @@ inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.sdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_add_f16_vop2 (vector_binop).
@@ -2236,8 +2345,8 @@ template <typename Inst>
 inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
-  uint64_t old_vcc = vcc;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2259,8 +2368,8 @@ template <typename Inst>
 inline void execute_v_addc_co_u32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
-  uint64_t old_vcc = vcc;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2274,7 +2383,7 @@ inline void execute_v_addc_co_u32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.sdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_alignbit_b32_vop3 (vector_ternary).
@@ -2748,7 +2857,7 @@ inline void execute_v_cmp_class_f16_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_class_f16_vopc (vector_cmp_class).
@@ -2838,7 +2947,7 @@ inline void execute_v_cmp_class_f32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_class_f32_vopc (vector_cmp_class).
@@ -2928,7 +3037,7 @@ inline void execute_v_cmp_class_f64_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_class_f64_vopc (vector_cmp_class).
@@ -2998,7 +3107,7 @@ inline void execute_v_cmp_eq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_eq_f16_vopc (vector_cmp).
@@ -3042,7 +3151,7 @@ inline void execute_v_cmp_eq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_eq_f32_vopc (vector_cmp).
@@ -3086,7 +3195,7 @@ inline void execute_v_cmp_eq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_eq_f64_vopc (vector_cmp).
@@ -3122,7 +3231,7 @@ inline void execute_v_cmp_eq_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_eq_i16_vopc (vector_cmp).
@@ -3158,7 +3267,7 @@ inline void execute_v_cmp_eq_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_eq_i32_vopc (vector_cmp).
@@ -3194,7 +3303,7 @@ inline void execute_v_cmp_eq_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_eq_i64_vopc (vector_cmp).
@@ -3230,7 +3339,7 @@ inline void execute_v_cmp_eq_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_eq_u16_vopc (vector_cmp).
@@ -3266,7 +3375,7 @@ inline void execute_v_cmp_eq_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_eq_u32_vopc (vector_cmp).
@@ -3302,7 +3411,7 @@ inline void execute_v_cmp_eq_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_eq_u64_vopc (vector_cmp).
@@ -3333,7 +3442,7 @@ inline void execute_v_cmp_f_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_f_f16_vopc (vector_cmp).
@@ -3359,7 +3468,7 @@ inline void execute_v_cmp_f_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_f_f32_vopc (vector_cmp).
@@ -3385,7 +3494,7 @@ inline void execute_v_cmp_f_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_f_f64_vopc (vector_cmp).
@@ -3411,7 +3520,7 @@ inline void execute_v_cmp_f_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_f_i16_vopc (vector_cmp).
@@ -3437,7 +3546,7 @@ inline void execute_v_cmp_f_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_f_i32_vopc (vector_cmp).
@@ -3463,7 +3572,7 @@ inline void execute_v_cmp_f_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_f_i64_vopc (vector_cmp).
@@ -3489,7 +3598,7 @@ inline void execute_v_cmp_f_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_f_u16_vopc (vector_cmp).
@@ -3515,7 +3624,7 @@ inline void execute_v_cmp_f_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_f_u32_vopc (vector_cmp).
@@ -3541,7 +3650,7 @@ inline void execute_v_cmp_f_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_f_u64_vopc (vector_cmp).
@@ -3580,7 +3689,7 @@ inline void execute_v_cmp_ge_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ge_f16_vopc (vector_cmp).
@@ -3624,7 +3733,7 @@ inline void execute_v_cmp_ge_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ge_f32_vopc (vector_cmp).
@@ -3668,7 +3777,7 @@ inline void execute_v_cmp_ge_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ge_f64_vopc (vector_cmp).
@@ -3704,7 +3813,7 @@ inline void execute_v_cmp_ge_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ge_i16_vopc (vector_cmp).
@@ -3740,7 +3849,7 @@ inline void execute_v_cmp_ge_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ge_i32_vopc (vector_cmp).
@@ -3776,7 +3885,7 @@ inline void execute_v_cmp_ge_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ge_i64_vopc (vector_cmp).
@@ -3812,7 +3921,7 @@ inline void execute_v_cmp_ge_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ge_u16_vopc (vector_cmp).
@@ -3848,7 +3957,7 @@ inline void execute_v_cmp_ge_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ge_u32_vopc (vector_cmp).
@@ -3884,7 +3993,7 @@ inline void execute_v_cmp_ge_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ge_u64_vopc (vector_cmp).
@@ -3928,7 +4037,7 @@ inline void execute_v_cmp_gt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_gt_f16_vopc (vector_cmp).
@@ -3972,7 +4081,7 @@ inline void execute_v_cmp_gt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_gt_f32_vopc (vector_cmp).
@@ -4016,7 +4125,7 @@ inline void execute_v_cmp_gt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_gt_f64_vopc (vector_cmp).
@@ -4052,7 +4161,7 @@ inline void execute_v_cmp_gt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_gt_i16_vopc (vector_cmp).
@@ -4088,7 +4197,7 @@ inline void execute_v_cmp_gt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_gt_i32_vopc (vector_cmp).
@@ -4124,7 +4233,7 @@ inline void execute_v_cmp_gt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_gt_i64_vopc (vector_cmp).
@@ -4160,7 +4269,7 @@ inline void execute_v_cmp_gt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_gt_u16_vopc (vector_cmp).
@@ -4196,7 +4305,7 @@ inline void execute_v_cmp_gt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_gt_u32_vopc (vector_cmp).
@@ -4232,7 +4341,7 @@ inline void execute_v_cmp_gt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_gt_u64_vopc (vector_cmp).
@@ -4276,7 +4385,7 @@ inline void execute_v_cmp_le_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_le_f16_vopc (vector_cmp).
@@ -4320,7 +4429,7 @@ inline void execute_v_cmp_le_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_le_f32_vopc (vector_cmp).
@@ -4364,7 +4473,7 @@ inline void execute_v_cmp_le_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_le_f64_vopc (vector_cmp).
@@ -4400,7 +4509,7 @@ inline void execute_v_cmp_le_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_le_i16_vopc (vector_cmp).
@@ -4436,7 +4545,7 @@ inline void execute_v_cmp_le_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_le_i32_vopc (vector_cmp).
@@ -4472,7 +4581,7 @@ inline void execute_v_cmp_le_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_le_i64_vopc (vector_cmp).
@@ -4508,7 +4617,7 @@ inline void execute_v_cmp_le_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_le_u16_vopc (vector_cmp).
@@ -4544,7 +4653,7 @@ inline void execute_v_cmp_le_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_le_u32_vopc (vector_cmp).
@@ -4580,7 +4689,7 @@ inline void execute_v_cmp_le_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_le_u64_vopc (vector_cmp).
@@ -4624,7 +4733,7 @@ inline void execute_v_cmp_lg_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lg_f16_vopc (vector_cmp).
@@ -4668,7 +4777,7 @@ inline void execute_v_cmp_lg_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lg_f32_vopc (vector_cmp).
@@ -4712,7 +4821,7 @@ inline void execute_v_cmp_lg_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lg_f64_vopc (vector_cmp).
@@ -4756,7 +4865,7 @@ inline void execute_v_cmp_lt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lt_f16_vopc (vector_cmp).
@@ -4800,7 +4909,7 @@ inline void execute_v_cmp_lt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lt_f32_vopc (vector_cmp).
@@ -4844,7 +4953,7 @@ inline void execute_v_cmp_lt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lt_f64_vopc (vector_cmp).
@@ -4880,7 +4989,7 @@ inline void execute_v_cmp_lt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lt_i16_vopc (vector_cmp).
@@ -4916,7 +5025,7 @@ inline void execute_v_cmp_lt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lt_i32_vopc (vector_cmp).
@@ -4952,7 +5061,7 @@ inline void execute_v_cmp_lt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lt_i64_vopc (vector_cmp).
@@ -4988,7 +5097,7 @@ inline void execute_v_cmp_lt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lt_u16_vopc (vector_cmp).
@@ -5024,7 +5133,7 @@ inline void execute_v_cmp_lt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lt_u32_vopc (vector_cmp).
@@ -5060,7 +5169,7 @@ inline void execute_v_cmp_lt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_lt_u64_vopc (vector_cmp).
@@ -5096,7 +5205,7 @@ inline void execute_v_cmp_ne_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ne_i16_vopc (vector_cmp).
@@ -5132,7 +5241,7 @@ inline void execute_v_cmp_ne_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ne_i32_vopc (vector_cmp).
@@ -5168,7 +5277,7 @@ inline void execute_v_cmp_ne_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ne_i64_vopc (vector_cmp).
@@ -5204,7 +5313,7 @@ inline void execute_v_cmp_ne_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ne_u16_vopc (vector_cmp).
@@ -5240,7 +5349,7 @@ inline void execute_v_cmp_ne_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ne_u32_vopc (vector_cmp).
@@ -5276,7 +5385,7 @@ inline void execute_v_cmp_ne_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ne_u64_vopc (vector_cmp).
@@ -5321,7 +5430,7 @@ inline void execute_v_cmp_neq_f16_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_neq_f16_vopc (vector_cmp).
@@ -5367,7 +5476,7 @@ inline void execute_v_cmp_neq_f32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_neq_f32_vopc (vector_cmp).
@@ -5413,7 +5522,7 @@ inline void execute_v_cmp_neq_f64_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_neq_f64_vopc (vector_cmp).
@@ -5459,7 +5568,7 @@ inline void execute_v_cmp_nge_f16_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nge_f16_vopc (vector_cmp).
@@ -5505,7 +5614,7 @@ inline void execute_v_cmp_nge_f32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nge_f32_vopc (vector_cmp).
@@ -5551,7 +5660,7 @@ inline void execute_v_cmp_nge_f64_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nge_f64_vopc (vector_cmp).
@@ -5597,7 +5706,7 @@ inline void execute_v_cmp_ngt_f16_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ngt_f16_vopc (vector_cmp).
@@ -5643,7 +5752,7 @@ inline void execute_v_cmp_ngt_f32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ngt_f32_vopc (vector_cmp).
@@ -5689,7 +5798,7 @@ inline void execute_v_cmp_ngt_f64_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_ngt_f64_vopc (vector_cmp).
@@ -5735,7 +5844,7 @@ inline void execute_v_cmp_nle_f16_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nle_f16_vopc (vector_cmp).
@@ -5781,7 +5890,7 @@ inline void execute_v_cmp_nle_f32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nle_f32_vopc (vector_cmp).
@@ -5827,7 +5936,7 @@ inline void execute_v_cmp_nle_f64_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nle_f64_vopc (vector_cmp).
@@ -5873,7 +5982,7 @@ inline void execute_v_cmp_nlg_f16_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nlg_f16_vopc (vector_cmp).
@@ -5919,7 +6028,7 @@ inline void execute_v_cmp_nlg_f32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nlg_f32_vopc (vector_cmp).
@@ -5965,7 +6074,7 @@ inline void execute_v_cmp_nlg_f64_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nlg_f64_vopc (vector_cmp).
@@ -6011,7 +6120,7 @@ inline void execute_v_cmp_nlt_f16_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nlt_f16_vopc (vector_cmp).
@@ -6057,7 +6166,7 @@ inline void execute_v_cmp_nlt_f32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nlt_f32_vopc (vector_cmp).
@@ -6103,7 +6212,7 @@ inline void execute_v_cmp_nlt_f64_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_nlt_f64_vopc (vector_cmp).
@@ -6148,7 +6257,7 @@ inline void execute_v_cmp_o_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_o_f16_vopc (vector_cmp).
@@ -6192,7 +6301,7 @@ inline void execute_v_cmp_o_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_o_f32_vopc (vector_cmp).
@@ -6236,7 +6345,7 @@ inline void execute_v_cmp_o_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_o_f64_vopc (vector_cmp).
@@ -6267,7 +6376,7 @@ inline void execute_v_cmp_t_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_t_f16_vopc (vector_cmp).
@@ -6293,7 +6402,7 @@ inline void execute_v_cmp_t_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_t_f32_vopc (vector_cmp).
@@ -6319,7 +6428,7 @@ inline void execute_v_cmp_t_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_t_f64_vopc (vector_cmp).
@@ -6345,7 +6454,7 @@ inline void execute_v_cmp_t_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_t_i16_vopc (vector_cmp).
@@ -6371,7 +6480,7 @@ inline void execute_v_cmp_t_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_t_i32_vopc (vector_cmp).
@@ -6397,7 +6506,7 @@ inline void execute_v_cmp_t_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_t_i64_vopc (vector_cmp).
@@ -6423,7 +6532,7 @@ inline void execute_v_cmp_t_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_t_u16_vopc (vector_cmp).
@@ -6449,7 +6558,7 @@ inline void execute_v_cmp_t_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_t_u32_vopc (vector_cmp).
@@ -6475,7 +6584,7 @@ inline void execute_v_cmp_t_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_t_u64_vopc (vector_cmp).
@@ -6502,7 +6611,7 @@ inline void execute_v_cmp_tru_f16_vop3([[maybe_unused]] Inst &inst,
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_tru_f16_vopc (vector_cmp).
@@ -6530,7 +6639,7 @@ inline void execute_v_cmp_tru_f32_vop3([[maybe_unused]] Inst &inst,
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_tru_f32_vopc (vector_cmp).
@@ -6558,7 +6667,7 @@ inline void execute_v_cmp_tru_f64_vop3([[maybe_unused]] Inst &inst,
       continue;
     vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_tru_f64_vopc (vector_cmp).
@@ -6598,7 +6707,7 @@ inline void execute_v_cmp_u_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_u_f16_vopc (vector_cmp).
@@ -6642,7 +6751,7 @@ inline void execute_v_cmp_u_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_u_f32_vopc (vector_cmp).
@@ -6686,7 +6795,7 @@ inline void execute_v_cmp_u_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.vdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_cmp_u_f64_vopc (vector_cmp).
@@ -10560,7 +10669,7 @@ template <typename Inst>
 inline void execute_v_cndmask_b16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t cond = inst.src2.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10574,7 +10683,7 @@ inline void execute_v_cndmask_b16_vop3([[maybe_unused]] Inst &inst,
       s1 = std::fabs(s1);
     if (inst.inst_.neg & (1u << 1))
       s1 = -s1;
-    float val = (vcc & (1ULL << lane)) ? s1 : s0;
+    float val = (cond & (1ULL << lane)) ? s1 : s0;
     if (inst.inst_.omod == 1)
       val *= 2.0f;
     else if (inst.inst_.omod == 2)
@@ -10592,12 +10701,12 @@ template <typename Inst>
 inline void execute_v_cndmask_b32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t cond = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val =
-        (vcc & (1ULL << lane)) ? inst.vsrc1.read_lane(wf, lane) : inst.src0.read_lane(wf, lane);
+        (cond & (1ULL << lane)) ? inst.vsrc1.read_lane(wf, lane) : inst.src0.read_lane(wf, lane);
     inst.vdst.write_lane(wf, lane, val);
   }
 }
@@ -10607,7 +10716,7 @@ template <typename Inst>
 inline void execute_v_cndmask_b32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t cond = inst.src2.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10621,7 +10730,7 @@ inline void execute_v_cndmask_b32_vop3([[maybe_unused]] Inst &inst,
       s1 = std::fabs(s1);
     if (inst.inst_.neg & (1u << 1))
       s1 = -s1;
-    float val = (vcc & (1ULL << lane)) ? s1 : s0;
+    float val = (cond & (1ULL << lane)) ? s1 : s0;
     if (inst.inst_.omod == 1)
       val *= 2.0f;
     else if (inst.inst_.omod == 2)
@@ -12575,8 +12684,13 @@ inline void execute_v_dot2c_f32_f16_vop2([[maybe_unused]] Inst &inst,
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.vsrc1.read_lane(wf, lane);
     int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
-    (void)a;
-    (void)b; // dot2c needs F16/I16 support
+    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
+    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
+    float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
+    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
+    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));
+    facc += a0 * b0 + a1 * b1;
+    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
   }
 }
@@ -12592,8 +12706,13 @@ inline void execute_v_dot2c_f32_f16_vop3([[maybe_unused]] Inst &inst,
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.src1.read_lane(wf, lane);
     int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
-    (void)a;
-    (void)b; // dot2c needs F16/I16 support
+    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
+    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
+    float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
+    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
+    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));
+    facc += a0 * b0 + a1 * b1;
+    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
   }
 }
@@ -12609,8 +12728,11 @@ inline void execute_v_dot2c_i32_i16_vop2([[maybe_unused]] Inst &inst,
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.vsrc1.read_lane(wf, lane);
     int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
-    (void)a;
-    (void)b; // dot2c needs F16/I16 support
+    int16_t a0 = static_cast<int16_t>(a & 0xFFFF);
+    int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);
+    int16_t b0 = static_cast<int16_t>(b & 0xFFFF);
+    int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);
+    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
   }
 }
@@ -12626,8 +12748,11 @@ inline void execute_v_dot2c_i32_i16_vop3([[maybe_unused]] Inst &inst,
     uint32_t a = inst.src0.read_lane(wf, lane);
     uint32_t b = inst.src1.read_lane(wf, lane);
     int32_t acc = static_cast<int32_t>(inst.vdst.read_lane(wf, lane));
-    (void)a;
-    (void)b; // dot2c needs F16/I16 support
+    int16_t a0 = static_cast<int16_t>(a & 0xFFFF);
+    int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);
+    int16_t b0 = static_cast<int16_t>(b & 0xFFFF);
+    int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);
+    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
   }
 }
@@ -13461,9 +13586,9 @@ inline void execute_v_fmac_dx9_zero_f32_vop2([[maybe_unused]] Inst &inst,
       continue;
     float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(
-        wf, lane,
-        std::bit_cast<uint32_t>(sv0 * sv1 + std::bit_cast<float>(inst.vdst.read_lane(wf, lane))));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(std::fma(
+                             sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)))));
   }
 }
 
@@ -13485,7 +13610,7 @@ inline void execute_v_fmac_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
       sv1 = std::fabs(sv1);
     if (inst.inst_.neg & (1u << 1))
       sv1 = -sv1;
-    float result = sv0 * sv1 + std::bit_cast<float>(inst.vdst.read_lane(wf, lane));
+    float result = std::fma(sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)));
     if (inst.inst_.omod == 1)
       result *= 2.0f;
     else if (inst.inst_.omod == 2)
@@ -13507,9 +13632,10 @@ inline void execute_v_fmac_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
     float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane,
-                         util::f32_to_f16(sv0 * sv1 + util::f16_to_f32(static_cast<uint16_t>(
-                                                          inst.vdst.read_lane(wf, lane)))));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(std::fma(
+            sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))))));
   }
 }
 
@@ -13531,7 +13657,7 @@ inline void execute_v_fmac_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
     if (inst.inst_.neg & (1u << 1))
       sv1 = -sv1;
     float result =
-        sv0 * sv1 + util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane)));
+        std::fma(sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))));
     if (inst.inst_.omod == 1)
       result *= 2.0f;
     else if (inst.inst_.omod == 2)
@@ -13553,9 +13679,9 @@ inline void execute_v_fmac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(
-        wf, lane,
-        std::bit_cast<uint32_t>(sv0 * sv1 + std::bit_cast<float>(inst.vdst.read_lane(wf, lane))));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(std::fma(
+                             sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)))));
   }
 }
 
@@ -13576,7 +13702,7 @@ inline void execute_v_fmac_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       sv1 = std::fabs(sv1);
     if (inst.inst_.neg & (1u << 1))
       sv1 = -sv1;
-    float result = sv0 * sv1 + std::bit_cast<float>(inst.vdst.read_lane(wf, lane));
+    float result = std::fma(sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)));
     if (inst.inst_.omod == 1)
       result *= 2.0f;
     else if (inst.inst_.omod == 2)
@@ -13599,8 +13725,8 @@ inline void execute_v_fmac_f64_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]
     double sv0 = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
     double sv1 = std::bit_cast<double>(inst.vsrc1.read_lane64(wf, lane));
     inst.vdst.write_lane64(wf, lane,
-                           std::bit_cast<uint64_t>(
-                               sv0 * sv1 + std::bit_cast<double>(inst.vdst.read_lane64(wf, lane))));
+                           std::bit_cast<uint64_t>(std::fma(
+                               sv0, sv1, std::bit_cast<double>(inst.vdst.read_lane64(wf, lane)))));
   }
 }
 
@@ -13621,7 +13747,7 @@ inline void execute_v_fmac_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       sv1 = std::fabs(sv1);
     if (inst.inst_.neg & (1u << 1))
       sv1 = -sv1;
-    double result = sv0 * sv1 + std::bit_cast<double>(inst.vdst.read_lane64(wf, lane));
+    double result = std::fma(sv0, sv1, std::bit_cast<double>(inst.vdst.read_lane64(wf, lane)));
     if (inst.inst_.omod == 1)
       result *= 2.0;
     else if (inst.inst_.omod == 2)
@@ -14362,9 +14488,10 @@ inline void execute_v_mac_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
       continue;
     float sv0 = util::f16_to_f32(static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
     float sv1 = util::f16_to_f32(static_cast<uint16_t>(inst.vsrc1.read_lane(wf, lane)));
-    inst.vdst.write_lane(wf, lane,
-                         util::f32_to_f16(sv0 * sv1 + util::f16_to_f32(static_cast<uint16_t>(
-                                                          inst.vdst.read_lane(wf, lane)))));
+    inst.vdst.write_lane(
+        wf, lane,
+        util::f32_to_f16(std::fma(
+            sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))))));
   }
 }
 
@@ -14386,7 +14513,7 @@ inline void execute_v_mac_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     if (inst.inst_.neg & (1u << 1))
       sv1 = -sv1;
     float result =
-        sv0 * sv1 + util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane)));
+        std::fma(sv0, sv1, util::f16_to_f32(static_cast<uint16_t>(inst.vdst.read_lane(wf, lane))));
     if (inst.inst_.omod == 1)
       result *= 2.0f;
     else if (inst.inst_.omod == 2)
@@ -14408,9 +14535,9 @@ inline void execute_v_mac_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
       continue;
     float sv0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(inst.vsrc1.read_lane(wf, lane));
-    inst.vdst.write_lane(
-        wf, lane,
-        std::bit_cast<uint32_t>(sv0 * sv1 + std::bit_cast<float>(inst.vdst.read_lane(wf, lane))));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(std::fma(
+                             sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)))));
   }
 }
 
@@ -14431,7 +14558,7 @@ inline void execute_v_mac_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       sv1 = std::fabs(sv1);
     if (inst.inst_.neg & (1u << 1))
       sv1 = -sv1;
-    float result = sv0 * sv1 + std::bit_cast<float>(inst.vdst.read_lane(wf, lane));
+    float result = std::fma(sv0, sv1, std::bit_cast<float>(inst.vdst.read_lane(wf, lane)));
     if (inst.inst_.omod == 1)
       result *= 2.0f;
     else if (inst.inst_.omod == 2)
@@ -17734,14 +17861,16 @@ template <typename Inst>
 inline void execute_v_sub_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t sv0 = inst.src0.read_lane(wf, lane);
     uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1);
-    bool borrow = sv0 < sv1;
+    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
+    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;
+    bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
     if (borrow)
       vcc |= (1ULL << lane);
@@ -17756,21 +17885,23 @@ template <typename Inst>
 inline void execute_v_sub_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t sv0 = inst.src0.read_lane(wf, lane);
     uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1);
-    bool borrow = sv0 < sv1;
+    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
+    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;
+    bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
     if (borrow)
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.sdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_sub_co_u32_vop3 (vector_add_co).
@@ -17791,7 +17922,7 @@ inline void execute_v_sub_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.sdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_sub_f16_vop2 (vector_binop).
@@ -18030,8 +18161,8 @@ template <typename Inst>
 inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
-  uint64_t old_vcc = vcc;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -18054,8 +18185,8 @@ template <typename Inst>
 inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
-  uint64_t old_vcc = vcc;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -18070,7 +18201,7 @@ inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.sdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_subbrev_co_u32_vop2 (vector_add_co).
@@ -18078,8 +18209,8 @@ template <typename Inst>
 inline void execute_v_subbrev_co_u32_vop2([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
-  uint64_t old_vcc = vcc;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -18102,8 +18233,8 @@ template <typename Inst>
 inline void execute_v_subbrev_co_u32_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
-  uint64_t old_vcc = vcc;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -18118,7 +18249,7 @@ inline void execute_v_subbrev_co_u32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.sdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_subrev_co_ci_u32_vop2 (vector_add_co).
@@ -18126,14 +18257,16 @@ template <typename Inst>
 inline void execute_v_subrev_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = wf.vcc();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t sv0 = inst.src0.read_lane(wf, lane);
     uint32_t sv1 = inst.vsrc1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0);
-    bool borrow = sv1 < sv0;
+    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
+    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;
+    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
     if (borrow)
       vcc |= (1ULL << lane);
@@ -18148,21 +18281,23 @@ template <typename Inst>
 inline void execute_v_subrev_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
+  uint64_t old_vcc = inst.src2.read_scalar64(wf);
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t sv0 = inst.src0.read_lane(wf, lane);
     uint32_t sv1 = inst.src1.read_lane(wf, lane);
-    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0);
-    bool borrow = sv1 < sv0;
+    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;
+    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;
+    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;
     inst.vdst.write_lane(wf, lane, static_cast<uint32_t>(wide));
     if (borrow)
       vcc |= (1ULL << lane);
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.sdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_subrev_co_u32_vop3 (vector_add_co).
@@ -18184,7 +18319,7 @@ inline void execute_v_subrev_co_u32_vop3([[maybe_unused]] Inst &inst,
     else
       vcc &= ~(1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  inst.sdst.write_scalar64(wf, vcc);
 }
 
 /// @brief Shared execute() for v_subrev_f16_vop2 (vector_binop).

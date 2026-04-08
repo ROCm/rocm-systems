@@ -41,21 +41,37 @@ VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VCndmaskB32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t cond = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val = (vcc & (1ULL << lane)) ? vsrc1.read_lane(wf, lane) : src0.read_lane(wf, lane);
+    uint32_t val = (cond & (1ULL << lane)) ? vsrc1.read_lane(wf, lane) : src0.read_lane(wf, lane);
     vdst.write_lane(wf, lane, val);
   }
 }
@@ -83,15 +99,31 @@ VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VAddF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -125,15 +157,31 @@ VSubF32Vop2::VSubF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -167,15 +215,31 @@ VSubrevF32Vop2::VSubrevF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubrevF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_subrev_f32_vop2(*this, wf);
 }
 
@@ -202,15 +266,31 @@ VMulLegacyF32Vop2::VMulLegacyF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMulLegacyF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -245,15 +325,31 @@ VMulF32Vop2::VMulF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMulF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -287,15 +383,31 @@ VMulI32I24Vop2::VMulI32I24Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMulI32I24Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -329,15 +441,31 @@ VMulHiI32I24Vop2::VMulHiI32I24Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMulHiI32I24Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -371,15 +499,31 @@ VMulU32U24Vop2::VMulU32U24Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMulU32U24Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -413,15 +557,31 @@ VMulHiU32U24Vop2::VMulHiU32U24Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMulHiU32U24Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -455,15 +615,31 @@ VMinF32Vop2::VMinF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMinF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -497,15 +673,31 @@ VMaxF32Vop2::VMaxF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMaxF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -539,15 +731,31 @@ VMinI32Vop2::VMinI32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMinI32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -581,15 +789,31 @@ VMaxI32Vop2::VMaxI32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMaxI32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -623,15 +847,31 @@ VMinU32Vop2::VMinU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMinU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -665,15 +905,31 @@ VMaxU32Vop2::VMaxU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMaxU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -707,15 +963,31 @@ VLshrrevB32Vop2::VLshrrevB32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VLshrrevB32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -749,15 +1021,31 @@ VAshrrevI32Vop2::VAshrrevI32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VAshrrevI32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -791,15 +1079,31 @@ VLshlrevB32Vop2::VLshlrevB32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VLshlrevB32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -833,15 +1137,31 @@ VAndB32Vop2::VAndB32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VAndB32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -874,15 +1194,31 @@ VOrB32Vop2::VOrB32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VOrB32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -916,15 +1252,31 @@ VXorB32Vop2::VXorB32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VXorB32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -959,15 +1311,31 @@ VMacF32Vop2::VMacF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMacF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_mac_f32_vop2(*this, wf);
 }
 
@@ -996,15 +1364,31 @@ VMadmkF32Vop2::VMadmkF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMadmkF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_madmk_f32_vop2(*this, wf);
 }
 
@@ -1033,15 +1417,31 @@ VMadakF32Vop2::VMadakF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMadakF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_madak_f32_vop2(*this, wf);
 }
 
@@ -1068,15 +1468,31 @@ VAddCoU32Vop2::VAddCoU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VAddCoU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1117,15 +1533,31 @@ VSubCoU32Vop2::VSubCoU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubCoU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1167,15 +1599,31 @@ VSubrevCoU32Vop2::VSubrevCoU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubrevCoU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   uint64_t vcc = wf.vcc();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -1217,15 +1665,31 @@ VAddcCoU32Vop2::VAddcCoU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VAddcCoU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_addc_co_u32_vop2(*this, wf);
 }
 
@@ -1252,15 +1716,31 @@ VSubbCoU32Vop2::VSubbCoU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubbCoU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_subb_co_u32_vop2(*this, wf);
 }
 
@@ -1287,15 +1767,31 @@ VSubbrevCoU32Vop2::VSubbrevCoU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubbrevCoU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_subbrev_co_u32_vop2(*this, wf);
 }
 
@@ -1322,15 +1818,31 @@ VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VAddF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1364,15 +1876,31 @@ VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1406,15 +1934,31 @@ VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubrevF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1448,15 +1992,31 @@ VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMulF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1491,15 +2051,31 @@ VMacF16Vop2::VMacF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_mac_f16_vop2(*this, wf);
 }
 
@@ -1528,15 +2104,31 @@ VMadmkF16Vop2::VMadmkF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMadmkF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_madmk_f16_vop2(*this, wf);
 }
 
@@ -1565,15 +2157,31 @@ VMadakF16Vop2::VMadakF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMadakF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_madak_f16_vop2(*this, wf);
 }
 
@@ -1600,15 +2208,31 @@ VAddU16Vop2::VAddU16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VAddU16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_add_u16_vop2(*this, wf);
 }
 
@@ -1635,15 +2259,31 @@ VSubU16Vop2::VSubU16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubU16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_sub_u16_vop2(*this, wf);
 }
 
@@ -1670,15 +2310,31 @@ VSubrevU16Vop2::VSubrevU16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubrevU16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_subrev_u16_vop2(*this, wf);
 }
 
@@ -1705,15 +2361,31 @@ VMulLoU16Vop2::VMulLoU16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMulLoU16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1747,15 +2419,31 @@ VLshlrevB16Vop2::VLshlrevB16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VLshlrevB16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1789,15 +2477,31 @@ VLshrrevB16Vop2::VLshrrevB16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VLshrrevB16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1831,15 +2535,31 @@ VAshrrevI16Vop2::VAshrrevI16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VAshrrevI16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1875,15 +2595,31 @@ VMaxF16Vop2::VMaxF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMaxF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1917,15 +2653,31 @@ VMinF16Vop2::VMinF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMinF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1959,15 +2711,31 @@ VMaxU16Vop2::VMaxU16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMaxU16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2001,15 +2769,31 @@ VMaxI16Vop2::VMaxI16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMaxI16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2043,15 +2827,31 @@ VMinU16Vop2::VMinU16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMinU16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2085,15 +2885,31 @@ VMinI16Vop2::VMinI16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VMinI16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2127,15 +2943,31 @@ VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(16, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(16, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VLdexpF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2170,15 +3002,31 @@ VAddU32Vop2::VAddU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VAddU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_add_u32_vop2(*this, wf);
 }
 
@@ -2205,15 +3053,31 @@ VSubU32Vop2::VSubU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_sub_u32_vop2(*this, wf);
 }
 
@@ -2240,15 +3104,31 @@ VSubrevU32Vop2::VSubrevU32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VSubrevU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_subrev_u32_vop2(*this, wf);
 }
 
@@ -2276,15 +3156,31 @@ VDot2cF32F16Vop2::VDot2cF32F16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VDot2cF32F16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_dot2c_f32_f16_vop2(*this, wf);
 }
 
@@ -2312,15 +3208,31 @@ VDot2cI32I16Vop2::VDot2cI32I16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VDot2cI32I16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_dot2c_i32_i16_vop2(*this, wf);
 }
 
@@ -2348,15 +3260,31 @@ VDot4cI32I8Vop2::VDot4cI32I8Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VDot4cI32I8Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_dot4c_i32_i8_vop2(*this, wf);
 }
 
@@ -2384,15 +3312,31 @@ VDot8cI32I4Vop2::VDot8cI32I4Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VDot8cI32I4Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   amdgpu::execute_v_dot8c_i32_i4_vop2(*this, wf);
 }
 
@@ -2420,24 +3364,40 @@ VFmacF32Vop2::VFmacF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VFmacF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     float sv0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float sv1 = std::bit_cast<float>(vsrc1.read_lane(wf, lane));
-    vdst.write_lane(
-        wf, lane,
-        std::bit_cast<uint32_t>(sv0 * sv1 + std::bit_cast<float>(vdst.read_lane(wf, lane))));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(
+                        std::fma(sv0, sv1, std::bit_cast<float>(vdst.read_lane(wf, lane)))));
   }
 }
 
@@ -2465,15 +3425,31 @@ VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VPkFmacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   (void)wf;
 }
 
@@ -2500,15 +3476,31 @@ VXnorB32Vop2::VXnorB32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249)
-    src0 = Operand(32, OperandType::OPR_VGPR,
-                   reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst)->vsrc0);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 249) {
+    auto *sw = reinterpret_cast<const Vop2VopSdwaMachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, sw->vsrc0);
+    sdwa_src0_sel_ = sw->src0_sel;
+    sdwa_src0_sext_ = sw->src0_sext;
+    sdwa_dst_sel_ = sw->dst_sel;
+    sdwa_dst_unused_ = sw->dst_unused;
+  }
 }
 
 void VXnorB32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
+  if (inst_.src0 == 249 && sdwa_src0_sel_ != 6) {
+    auto &cu = wf.cu();
+    uint32_t ws = wf.wf_size();
+    uint32_t vb = wf.vgpr_alloc().base + src_operands_[0]->encoding_value_;
+    uint32_t result[64];
+    for (uint32_t i = 0; i < ws; ++i)
+      result[i] =
+          amdgpu::sdwa::sdwa_src_select(cu.read_vgpr(vb, i), sdwa_src0_sel_, sdwa_src0_sext_);
+    dpp_src0_ = std::make_unique<DppOperand>(*src_operands_[0], result, static_cast<int>(ws));
+    src_operands_[0] = dpp_src0_.get();
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
