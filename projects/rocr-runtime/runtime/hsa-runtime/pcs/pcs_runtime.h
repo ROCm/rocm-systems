@@ -83,6 +83,8 @@ class PcsRuntime {
     size_t buffer_size() const { return csd.buffer_size; }
     hsa_ven_amd_pcs_method_kind_t method() const { return csd.method; }
     size_t latency() const { return csd.latency; }
+    size_t interval() const { return csd.interval; }
+    hsa_ven_amd_pcs_units_t units() const { return csd.units; }
     size_t sample_size() const { return sample_size_; }
 
     void GetHsaKmtSamplingInfo(HsaPcSamplingInfo* sampleInfo);
