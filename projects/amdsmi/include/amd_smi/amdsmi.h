@@ -1371,8 +1371,9 @@ typedef struct {
 //! @cond @tag{gpu_bm_linux} @endcond
 #define AMDSMI_MAX_NUM_FREQUENCIES 33
 
-//! Maximum possible value for fan speed. Should be used as the denominator
-//! when determining fan speed percentage.
+//! Maximum possible value for fan speed for legacy hwmon GPUs.
+//! For GPUs with the gpu_od sysfs interface, use
+//! amdsmi_get_gpu_fan_speed_max() to query the actual maximum.
 //! @cond @tag{gpu_bm_linux} @endcond
 #define AMDSMI_MAX_FAN_SPEED 255
 
@@ -4208,7 +4209,7 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
 
 /**
  *  @brief Get the fan speed for the specified device as a value relative to
- *  ::AMDSMI_MAX_FAN_SPEED. It is not supported on virtual machine guest
+ *  the maximum fan speed. It is not supported on virtual machine guest
  *
  *  @ingroup tagPhysicalStateQuery
  *
@@ -4216,8 +4217,10 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
  *
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
  *  @p speed, this function will write the current fan speed (a value
- *  between 0 and the maximum fan speed, ::AMDSMI_MAX_FAN_SPEED) to the uint32_t
- *  pointed to by @p speed
+ *  between 0 and the maximum fan speed) to the uint32_t pointed to by @p speed.
+ *  For legacy hwmon GPUs the maximum is ::AMDSMI_MAX_FAN_SPEED (255).
+ *  For GPUs with the gpu_od sysfs interface, use amdsmi_get_gpu_fan_speed_max()
+ *  to query the actual maximum
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -4246,7 +4249,10 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handl
  *
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
  *  @p max_speed, this function will write the maximum fan speed possible to
- *  the uint32_t pointed to by @p max_speed
+ *  the uint32_t pointed to by @p max_speed.
+ *  For legacy hwmon GPUs this is ::AMDSMI_MAX_FAN_SPEED (255).
+ *  For GPUs with the gpu_od sysfs interface, the maximum is read from the
+ *  OD_RANGE section of the fan_minimum_pwm sysfs file (e.g. 100)
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -4333,7 +4339,9 @@ amdsmi_status_t amdsmi_get_gpu_volt_metric(amdsmi_processor_handle processor_han
  *
  *  @platform{gpu_bm_linux}
  *
- *  @details This function returns control of the fan to the system
+ *  @details This function returns control of the fan to the system.
+ *  For GPUs with the gpu_od sysfs interface, this writes the OD_RANGE minimum
+ *  value to fan_minimum_pwm and commits the change
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -4355,7 +4363,9 @@ amdsmi_status_t amdsmi_reset_gpu_fan(amdsmi_processor_handle processor_handle, u
  *  @details Given a processor handle @p processor_handle and a integer value indicating
  *  speed @p speed, this function will attempt to set the fan speed to @p speed.
  *  An error will be returned if the specified speed is outside the allowable
- *  range for the device. The maximum value is 255 and the minimum is 0.
+ *  range for the device. For legacy hwmon GPUs the range is 0-255.
+ *  For GPUs with the gpu_od sysfs interface, the valid range is determined
+ *  dynamically from the OD_RANGE (e.g. 20-100).
  *
  *  @note This function requires admin/sudo privileges
  *

@@ -27,6 +27,7 @@
 #include "constraint.hpp"
 #include "defines.hpp"
 #include "gpu.hpp"
+#include "logger/logger.hpp"
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
@@ -2193,45 +2194,54 @@ get_perfetto_backend()
 std::string
 get_perfetto_output_filename()
 {
-    static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
-    auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    const auto*  pwd                   = getenv("PWD");
+    static auto  setting               = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
+    static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
 
-    auto _pos_dir = _val.find_last_of('/');
-    auto _dir     = std::string{};
-    auto _ext     = std::string{ "proto" };
-    if(_pos_dir != std::string::npos)
+    if(setting == get_config()->end())
     {
-        _dir = _val.substr(0, _pos_dir + 1);
-        _val = _val.substr(_pos_dir + 1);
-    }
-    auto _pos_ext = _val.find_last_of('.');
-    if(_pos_ext + 1 < _val.length())
-    {
-        _ext = _val.substr(_pos_ext + 1);
-        _val = _val.substr(0, _pos_ext);
+        LOG_ERROR("Error! ROCPROFSYS_PERFETTO_FILE not found. Please check your "
+                  "environment configuration.");
+        return fmt::format("{}/perfetto-trace-{}.proto", pwd, getpid());
     }
 
-    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}'", _dir, _val, _ext);
-    LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
-    LOG_DEBUG("settings::output_prefix()='{}'", settings::output_prefix());
+    auto basename = dynamic_cast<tim::tsettings<std::string>&>(*setting->second).get();
 
-    auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(),
-                                                   settings::default_process_suffix(),
-                                                   false, _dir };
-    _val      = settings::compose_output_filename(_val, _ext, _cfg);
+    auto dir = std::string{};
+    auto ext = std::string{ "proto" };
 
-    LOG_DEBUG("After compose_output_filename: '{}'", _val);
-
-    if(!_val.empty() && _val.at(0) != '/')
+    if(const auto pos_dir = basename.find_last_of('/'); pos_dir != std::string::npos)
     {
-        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
-                                        get_config()->get_tag());
-        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
-        return _result;
+        dir      = basename.substr(0, pos_dir + 1);
+        basename = basename.substr(pos_dir + 1);
     }
 
-    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
-    return _val;
+    if(const auto pos_ext = basename.find_last_of('.'); pos_ext + 1 < basename.length())
+    {
+        ext      = basename.substr(pos_ext + 1);
+        basename = basename.substr(0, pos_ext);
+    }
+
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}'", dir, basename, ext);
+
+    static auto session_id = 0;
+    auto        cfg =
+        attach_add_session_id
+                   ? settings::compose_filename_config{ settings::use_output_suffix(),
+                                                 fmt::format("%pid%-{}", session_id++),
+                                                 false, dir }
+                   : settings::compose_filename_config{ settings::use_output_suffix(),
+                                                 settings::default_process_suffix(),
+                                                 false, dir };
+
+    auto result = settings::compose_output_filename(basename, ext, cfg);
+
+    LOG_DEBUG("After compose_output_filename: '{}'", result);
+
+    return (!result.empty() && result.at(0) != '/')
+               ? settings::format(fmt::format("{}/{}", pwd, result),
+                                  get_config()->get_tag())
+               : result;
 }
 
 double
@@ -2463,29 +2473,38 @@ get_tmpdir()
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view suffix)
 {
-    const auto* _existing_path = std::getenv("ROCPROFSYS_DATABASE_DIR");
-    auto        _dir = _existing_path ? std::string{ _existing_path } : std::string{};
-    auto        _ext = std::string{ "db" };
+    const auto*  pwd                   = getenv("PWD");
+    const auto*  existing_path         = std::getenv("ROCPROFSYS_DATABASE_DIR");
+    static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
 
-    auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(), suffix,
-                                                   false, _dir };
+    auto dir = existing_path ? std::string{ existing_path } : std::string{};
+    auto ext = std::string{ "db" };
 
-    const auto get_path = [](const std::string& path) {
-        size_t last_slash = path.find_last_of("/\\");
+    static auto session_id = 0;
+    auto        cfg =
+        attach_add_session_id
+                   ? settings::compose_filename_config{ settings::use_output_suffix(),
+                                                 fmt::format("%pid%-{}", session_id++),
+                                                 false, dir }
+                   : settings::compose_filename_config{ settings::use_output_suffix(), suffix,
+                                                 false, dir };
+
+    auto result =
+        settings::compose_output_filename(std::string{ database_name }, ext, cfg);
+
+    const auto get_dir = [](const std::string& path) {
+        const auto last_slash = path.find_last_of("/\\");
         return (last_slash != std::string::npos) ? path.substr(0, last_slash + 1)
                                                  : std::string{};
     };
 
-    auto _val =
-        settings::compose_output_filename(std::string{ database_name }, _ext, _cfg);
-    _dir = get_path(_val);
+    dir = get_dir(result);
+    setenv("ROCPROFSYS_DATABASE_DIR", dir.c_str(), 1);
 
-    setenv("ROCPROFSYS_DATABASE_DIR", _dir.c_str(), 1);
-
-    if(!_val.empty() && _val.at(0) != '/')
-        return settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+    if(!result.empty() && result.at(0) != '/')
+        return settings::format(fmt::format("{}/{}", pwd, result),
                                 get_config()->get_tag());
-    return _val;
+    return result;
 }
 
 std::string
@@ -2759,7 +2778,17 @@ get_tmp_file(std::string _basename, std::string _ext)
     _cfg.use_suffix    = true;
     _cfg.suffix        = "%pid%";
     _cfg.explicit_path = get_tmpdir();
-    _cfg.subdirectory  = fmt::format("{}/{}", settings::output_path(), "%ppid%");
+
+    // Use only basename of output_path to avoid embedding absolute paths in subdirectory.
+    // E.g. output_path="/home/user/rocprofsys-output" ->
+    // subdirectory="rocprofsys-output/%ppid%" (not
+    // "/home/user/rocprofsys-output/%ppid%"), so files go under
+    // get_tmpdir()/rocprofsys-output/.
+    auto _output_path = settings::output_path();
+    auto _pos         = _output_path.rfind('/');
+    if(_pos != std::string::npos) _output_path = _output_path.substr(_pos + 1);
+    if(_output_path.empty()) _output_path = "rocprofsys";
+    _cfg.subdirectory = fmt::format("{}/{}/", _output_path, "%ppid%");
     auto _fname =
         settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
 

@@ -8,20 +8,12 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_process.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
 
-#ifdef __linux__
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <errno.h>
-#include <sys/socket.h>
-#include <memory.h>
-#include <sys/un.h>
-#endif
+#include <chrono>
+#include <thread>
 
 namespace {
 constexpr auto wait_ms = 500;
@@ -429,38 +421,174 @@ class streamMemAllocTest {
   }
 };
 
-#ifdef __linux__
-
 #define checkSysCallErrors(result)                                                                 \
   if (result == -1) {                                                                              \
     fprintf(stderr, "Failure at %u %s\n", __LINE__, __FILE__); exit(EXIT_FAILURE);                 \
   }
 
+#if HT_WIN
+typedef HANDLE hipShareableHdl;
+#else
 #ifdef HT_AMD
 typedef int64_t hipShareableHdl;
 #else
 typedef int hipShareableHdl;
 #endif
+#endif
 
-typedef pid_t Process;
+class SharedMemory {
+  void* addr_ = nullptr;
+  size_t size_ = 0;
+#if HT_WIN
+  HANDLE shmHandle_ = nullptr;
+#else
+  int shmFd_ = -1;
+#endif
+  bool opened_ = false;
+
+public:
+  SharedMemory() = default;
+  ~SharedMemory() { close(); }
+
+  SharedMemory(const SharedMemory&) = delete;
+  SharedMemory& operator=(const SharedMemory&) = delete;
+
+  int create(const char* name, size_t sz) {
+#if HT_WIN
+    size_ = sz;
+    shmHandle_ = CreateFileMapping(INVALID_HANDLE_VALUE, NULL,
+                                    PAGE_READWRITE, 0, (DWORD)sz, name);
+    if (shmHandle_ == 0) return GetLastError();
+    addr_ = MapViewOfFile(shmHandle_, FILE_MAP_ALL_ACCESS, 0, 0, sz);
+    if (addr_ == NULL) {
+      close();
+      return GetLastError();
+    }
+#else
+    size_ = sz;
+    shmFd_ = shm_open(name, O_RDWR | O_CREAT, 0777);
+    if (shmFd_ < 0) return errno;
+    if (ftruncate(shmFd_, sz) != 0) {
+      close();
+      return errno;
+    }
+    addr_ = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd_, 0);
+    if (addr_ == MAP_FAILED) {
+      addr_ = nullptr;
+      close();
+      return errno;
+    }
+#endif
+    opened_ = true;
+    return 0;
+  }
+
+  int open(const char* name, size_t sz) {
+#if HT_WIN
+    size_ = sz;
+    shmHandle_ = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, name);
+    if (shmHandle_ == 0) return GetLastError();
+    addr_ = MapViewOfFile(shmHandle_, FILE_MAP_ALL_ACCESS, 0, 0, sz);
+    if (addr_ == NULL) {
+      close();
+      return GetLastError();
+    }
+#else
+    size_ = sz;
+    shmFd_ = shm_open(name, O_RDWR, 0777);
+    if (shmFd_ < 0) {
+      close();
+      return errno;
+    }
+    addr_ = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd_, 0);
+    if (addr_ == MAP_FAILED) {
+      addr_ = nullptr;
+      close();
+      return errno;
+    }
+#endif
+    opened_ = true;
+    return 0;
+  }
+
+  void close() {
+#if HT_WIN
+    if (addr_) { UnmapViewOfFile(addr_); addr_ = nullptr; }
+    if (shmHandle_) { CloseHandle(shmHandle_); shmHandle_ = nullptr; }
+#else
+    if (addr_) { munmap(addr_, size_); addr_ = nullptr; }
+    if (shmFd_ >= 0) { ::close(shmFd_); shmFd_ = -1; }
+#endif
+    size_ = 0;
+    opened_ = false;
+  }
+
+  void* addr() const { return addr_; }
+  size_t size() const { return size_; }
+
+  template <typename T>
+  T* as() { return reinterpret_cast<T*>(addr_); }
+};
+
+inline void barrierWait(std::atomic<int>& barrier, std::atomic<int>& sense, unsigned int n,
+                        std::chrono::seconds timeout = std::chrono::seconds(10)) {
+  int count = barrier.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+  if (static_cast<unsigned int>(count) == n) {
+    barrier.store(0, std::memory_order_release);
+    int current_sense = sense.load(std::memory_order_relaxed);
+    sense.store(1 - current_sense, std::memory_order_release);
+  } else {
+    int old_sense = sense.load(std::memory_order_relaxed);
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (sense.load(std::memory_order_acquire) == old_sense) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        WARN("barrierWait timed out after " << timeout.count() << "s waiting for "
+             << n << " threads (only " << count << " arrived)");
+        break;
+      }
+      std::this_thread::yield();
+    }
+  }
+}
+
+struct mempoolIpcShmStruct {
+  hipMemPoolPtrExportData ptrExportData;
+  hipMemAllocationHandleType handleType;
+  int device;
+  std::atomic<int> barrier;
+  std::atomic<int> sense;
+};
 
 struct ipcHdl {
+#if HT_WIN
+    HANDLE mailslot;
+#else
     int socket;
+#endif
     char *name;
 };
 
 class ipcSocketCom {
   ipcHdl *handle;
-  // method to create socket from server
+
   int createSocket() {
+#if HT_WIN
+    handle = new ipcHdl;
+    if (nullptr == handle) {
+      perror("Socket failure: Handle memory allocation failed");
+      return -1;
+    }
+    handle->mailslot = INVALID_HANDLE_VALUE;
+    handle->name = NULL;
+    return 0;
+#else
     int server_fd;
     struct sockaddr_un servaddr;
 
     char name[16];
-    // Create a unique socket name based on current pid
     sprintf(name, "%u", getpid());
 
-    // Create the socket handle
     handle = new ipcHdl;
     if (nullptr == handle) {
       perror("Socket failure: Handle memory allocation failed");
@@ -471,8 +599,7 @@ class ipcSocketCom {
     handle->socket = -1;
     handle->name = NULL;
 
-    // Creating socket
-    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == 0) {
+    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
       perror("Socket failure: Socket creation failed");
       return -1;
     }
@@ -498,9 +625,34 @@ class ipcSocketCom {
     strcpy(handle->name, name);
     handle->socket = server_fd;
     return 0;
+#endif
   }
-  // method to create socket from client
+
   int openSocket() {
+#if HT_WIN
+    handle = new ipcHdl;
+    if (nullptr == handle) {
+      perror("Socket failure: Handle memory allocation failed");
+      return -1;
+    }
+    memset(handle, 0, sizeof(*handle));
+    handle->mailslot = INVALID_HANDLE_VALUE;
+    handle->name = nullptr;
+    char name[128];
+    sprintf(name, "\\\\.\\mailslot\\hipMemPoolIPC_%lu",
+            (unsigned long)GetCurrentProcessId());
+    handle->mailslot = CreateMailslot(name, 0, MAILSLOT_WAIT_FOREVER, NULL);
+    if (handle->mailslot == INVALID_HANDLE_VALUE) {
+      fprintf(stderr, "CreateMailslot failed (%lu)\n", GetLastError());
+      if (handle->name) delete[] handle->name;
+      delete handle;
+      handle = nullptr;
+      return -1;
+    }
+    handle->name = new char[strlen(name) + 1];
+    strcpy(handle->name, name);
+    return 0;
+#else
     int sock = 0;
     struct sockaddr_un cliaddr;
 
@@ -520,7 +672,6 @@ class ipcSocketCom {
     cliaddr.sun_family = AF_UNIX;
     char name[16];
 
-    // Create a unique socket name based on current process id.
     sprintf(name, "%u", getpid());
 
     strcpy(cliaddr.sun_path, name);
@@ -534,9 +685,20 @@ class ipcSocketCom {
     strcpy(handle->name, name);
 
     return 0;
+#endif
   }
-  // method to close socket
+
   int closeSocket() {
+#if HT_WIN
+    if (!handle) return -1;
+    if (handle->mailslot != INVALID_HANDLE_VALUE) {
+      CloseHandle(handle->mailslot);
+    }
+    if (handle->name) delete[] handle->name;
+    delete handle;
+    handle = nullptr;
+    return 0;
+#else
     if (!handle) {
       return -1;
     }
@@ -548,7 +710,9 @@ class ipcSocketCom {
     close(handle->socket);
     delete handle;
     return 0;
+#endif
   }
+
 public:
   ipcSocketCom() = default;
   ipcSocketCom(bool isServer) {
@@ -563,12 +727,24 @@ public:
   int closeThisSock() {
     return closeSocket();
   }
-  // method to receive shareable handle via socket
+
   int recvShareableHdl(hipShareableHdl *shHandle) {
+#if HT_WIN
+    DWORD cbRead = 0;
+    if (!ReadFile(handle->mailslot, shHandle, sizeof(*shHandle), &cbRead, NULL)) {
+      fprintf(stderr, "ReadFile failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    if (cbRead != sizeof(*shHandle)) {
+      fprintf(stderr, "ReadFile returned unexpected size (%lu, expected %zu)\n",
+              cbRead, sizeof(*shHandle));
+      return -1;
+    }
+    return 0;
+#else
     struct msghdr msg = {};
     struct iovec iov[1];
 
-    // Union to guarantee alignment requirements for control array
     union {
       struct cmsghdr cm;
       char control[CMSG_SPACE(sizeof(int))];
@@ -606,9 +782,43 @@ public:
     }
 
     return 0;
+#endif
   }
-  // method to send shareable handle via sockets
+
   int sendShareableHdl(hipShareableHdl shareableHdl, Process process) {
+#if HT_WIN
+    HANDLE hProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, process.dwProcessId);
+    if (hProcess == NULL) {
+      fprintf(stderr, "OpenProcess failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    HANDLE hDup = INVALID_HANDLE_VALUE;
+    if (!DuplicateHandle(GetCurrentProcess(), shareableHdl, hProcess,
+                         &hDup, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+      CloseHandle(hProcess);
+      fprintf(stderr, "DuplicateHandle failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    CloseHandle(hProcess);
+
+    char slotName[128];
+    sprintf(slotName, "\\\\.\\mailslot\\hipMemPoolIPC_%lu",
+            (unsigned long)process.dwProcessId);
+    HANDLE hFile = CreateFile(slotName, GENERIC_WRITE, FILE_SHARE_READ,
+                              NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+      fprintf(stderr, "CreateFile for mailslot failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    DWORD cbWritten;
+    if (!WriteFile(hFile, &hDup, sizeof(hDup), &cbWritten, NULL)) {
+      CloseHandle(hFile);
+      fprintf(stderr, "WriteFile failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    CloseHandle(hFile);
+    return 0;
+#else
     struct msghdr msg = {};
     struct iovec iov[1];
     int dummy_data = 0;
@@ -621,12 +831,10 @@ public:
     struct cmsghdr *cmptr;
     struct sockaddr_un cliaddr;
 
-    // Construct client address to send this SHareable handle to
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
     strcpy(cliaddr.sun_path, std::to_string(process).c_str());
 
-    // Send corresponding shareable handle to the client
     int sendfd = (int)shareableHdl;
 
     msg.msg_control = control_un.control;
@@ -652,6 +860,6 @@ public:
       return -1;
     }
     return 0;
+#endif
   }
 };
-#endif

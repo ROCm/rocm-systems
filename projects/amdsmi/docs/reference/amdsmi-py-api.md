@@ -2497,7 +2497,9 @@ except AmdSmiException as e:
 ### amdsmi_get_gpu_fan_speed
 
 Description: Get the fan speed for the specified device as a value relative to
-AMDSMI_MAX_FAN_SPEED. It is not supported on virtual machine guest
+the maximum fan speed. For legacy hwmon GPUs the maximum is AMDSMI_MAX_FAN_SPEED (255).
+For GPUs with the gpu_od sysfs interface, use `amdsmi_get_gpu_fan_speed_max()` to
+query the actual maximum. It is not supported on virtual machine guest
 
 Input parameters:
 
@@ -2505,7 +2507,7 @@ Input parameters:
 * `sensor_idx` a 0-based sensor index. Normally, this will be 0. If a device has
 more than one sensor, it could be greater than 0.
 
-Output: Fan speed in relative to MAX
+Output: Fan speed as integer (relative to per-device maximum)
 
 Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed` function:
 
@@ -2538,6 +2540,8 @@ except AmdSmiException as e:
 ### amdsmi_get_gpu_fan_speed_max
 
 Description: Get the max fan speed of the device with provided device handle.
+For legacy hwmon GPUs this returns 255. For GPUs with the gpu_od sysfs interface,
+the maximum is read from the OD_RANGE (e.g. 100).
 It is not supported on virtual machine guest
 
 Input parameters:
@@ -3765,8 +3769,10 @@ except AmdSmiException as e:
 
 ### amdsmi_set_gpu_fan_speed
 
-Description: Set the fan speed for the specified device with the provided speed,
-in RPMs. It is not supported on virtual machine guest
+Description: Set the fan speed for the specified device with the provided speed.
+For legacy hwmon GPUs the valid range is 0-255. For GPUs with the gpu_od sysfs
+interface, the valid range is determined from the OD_RANGE (e.g. 20-100).
+It is not supported on virtual machine guest
 
 Input parameters:
 
@@ -3803,8 +3809,9 @@ except AmdSmiException as e:
 
 ### amdsmi_reset_gpu_fan
 
-Description: Reset the fan to automatic driver control. It is not
-supported on virtual machine guest
+Description: Reset the fan to automatic driver control. For GPUs with the gpu_od
+sysfs interface, this writes the OD_RANGE minimum value and commits the change.
+It is not supported on virtual machine guest
 
 Input parameters:
 

@@ -10,6 +10,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Support for pause and resume of profiling via `roctxProfilerPause` and `roctxProfilerResume`.
 - Support for selective region tracing via the `ROCPROFSYS_TRACE_REGION` environment variable, limiting tracing to specified regions.
+- Support for re-attaching to a previously profiled process. After detaching, `rocprof-sys-attach` can re-attach to the same PID for a new profiling session.
 
 ### Changed
 

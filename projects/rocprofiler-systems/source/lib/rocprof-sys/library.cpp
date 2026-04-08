@@ -122,8 +122,11 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-auto _timemory_manager  = tim::manager::instance();
-auto _timemory_settings = tim::settings::shared_instance();
+std::atomic<bool>  rocprofsys_init_library_done{ false };
+std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
+std::atomic<bool>  rocprofsys_finalization_done{ false };
+auto               _timemory_manager  = tim::manager::instance();
+auto               _timemory_settings = tim::settings::shared_instance();
 
 void
 set_metadata_process_start_timestamp(int64_t _ts)
@@ -494,8 +497,7 @@ rocprofsys_init_library_hidden()
     auto _tid = threading::get_id();
     (void) _tid;
 
-    static bool _once       = false;
-    auto        _debug_init = get_debug_init();
+    auto _debug_init = get_debug_init();
 
     int _selinux_mode = 0;
     {
@@ -523,8 +525,8 @@ rocprofsys_init_library_hidden()
             fmt::format("State is not PreInit :: {}", std::to_string(get_state())));
     }
 
-    if(get_state() != State::PreInit || get_state() == State::Init || _once) return;
-    _once = true;
+    if(get_state() != State::PreInit) return;
+    if(rocprofsys_init_library_done.exchange(true)) return;
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -583,19 +585,18 @@ rocprofsys_init_tooling_hidden(void)
                                                  { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
                                                  { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
 
-    static pid_t _once       = 0;
-    static auto  _debug_init = get_debug_init();
+    auto _debug_init = get_debug_init();
 
     if(_debug_init)
     {
         LOG_DEBUG("State is {}...", std::to_string(get_state()));
     }
 
-    if(get_state() != State::PreInit || get_state() == State::Init || _once == getpid())
-    {
+    if(get_state() != State::PreInit) return false;
+
+    pid_t expected = 0;
+    if(!rocprofsys_init_tooling_done.compare_exchange_strong(expected, getpid()))
         return false;
-    }
-    _once = getpid();
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -907,6 +908,13 @@ rocprofsys_reset_preload_hidden(void)
 extern "C" void
 rocprofsys_finalize_hidden(void)
 {
+    // Prevent multiple finalization calls (e.g., from atexit handlers after reset_state)
+    if(rocprofsys_finalization_done.exchange(true))
+    {
+        LOG_DEBUG("Finalization already completed. Skipping.");
+        return;
+    }
+
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
     // disable initialization callback
@@ -1201,6 +1209,12 @@ rocprofsys_finalize_hidden(void)
                tim::cereal::make_nvp("memory_maps", _maps));
         });
 
+        static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
+        static auto  session_id            = 0;
+
+        if(attach_add_session_id)
+            settings::default_process_suffix() = fmt::format("%pid%-{}", session_id++);
+
         LOG_DEBUG("Finalizing timemory...");
         tim::timemory_finalize(_timemory_manager.get());
 
@@ -1262,6 +1276,26 @@ rocprofsys_finalize_hidden(void)
         [](int) {});
 
     common::destroy_static_objects();
+
+    // Note: rocprofsys_init_library_done, rocprofsys_init_tooling_done, and state are NOT
+    // reset here. They are only reset during re-attach (in rocprofiler-sdk.cpp) when
+    // explicitly preparing for a new session. Resetting them during normal exit
+    // can cause crashes if cleanup code triggers reinitialization.
+}
+
+extern "C" void
+rocprofsys_set_finalization_done_hidden(void)
+{
+    rocprofsys_finalization_done.store(true);
+}
+
+extern "C" void
+rocprofsys_reset_for_reattach_hidden(void)
+{
+    rocprofsys_finalization_done.store(false);
+    rocprofsys_init_library_done.store(false);
+    rocprofsys_init_tooling_done.store(0);
+    ::rocprofsys::reset_state();
 }
 
 //======================================================================================//
