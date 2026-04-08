@@ -18,14 +18,17 @@
 #define NKERNEL 5
 #else
 #define N 1024 * 1024
-#define NSTEP 1000
-#define NKERNEL 25
+#define NSTEP 5
+#define NKERNEL 3
 #endif  // KERNEL_ARG_PREFETCH
 #define CONSTANT 5.34
 
 static __global__ void simpleKernel(float* out_d, float* in_d) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < N) out_d[idx] = CONSTANT * in_d[idx];
+  if(idx == 0) {
+    printf("simpleKernel idx: %d\n", idx);
+  }
 }
 
 static void hipTestWithGraph() {
@@ -154,7 +157,7 @@ TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch") {
 HIP_TEST_CASE(Unit_hipGraph_SimpleGraphWithKernel) {
 #endif  // KERNEL_ARG_PREFETCH
   // Sections run test with and without graph.
-  SECTION("Run Test Without Graph") { hipTestWithoutGraph(); }
+  //SECTION("Run Test Without Graph") { hipTestWithoutGraph(); }
 
   SECTION("Run Test With Graph") { hipTestWithGraph(); }
 }

@@ -1966,6 +1966,51 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 }
 
 // ================================================================================================
+bool VirtualGPU::runGraphSchedulerKernel(void* cmd_buffer, uint32_t packet_count) {
+  if (gpu_queue_ == nullptr || packet_count == 0) {
+    return false;
+  }
+
+  // Try HSACO path first (pre-compiled, optimized)
+  if (roc_device_.hasGraphSchedulerHSACO()) {
+    printf("[GraphScheduler] Using HSACO path: packets=%u\n", packet_count);
+    // Kernarg: cmd_buffer(8) + packet_count(4) + pad(4) + queue_ptr(8) = 24 bytes
+    struct alignas(16) {
+      uint64_t cmd_buf;
+      uint32_t count;
+      uint32_t pad;
+      uint64_t queue_ptr;
+    } *args = reinterpret_cast<decltype(args)>(allocKernArg(sizeof(*args), 256));
+    if (args == nullptr) return false;
+
+    args->cmd_buf = reinterpret_cast<uint64_t>(cmd_buffer);
+    args->count = packet_count;
+    args->pad = 0;
+    args->queue_ptr = reinterpret_cast<uint64_t>(gpu_queue_);
+
+    hsa_kernel_dispatch_packet_t pkt = {};
+    pkt.setup = 1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
+    pkt.workgroup_size_x = 1;
+    pkt.workgroup_size_y = 1;
+    pkt.workgroup_size_z = 1;
+    pkt.grid_size_x = 1;
+    pkt.grid_size_y = 1;
+    pkt.grid_size_z = 1;
+    pkt.kernel_object = roc_device_.graphSchedulerKernelObject();
+    pkt.kernarg_address = args;
+    pkt.private_segment_size = roc_device_.graphSchedulerPrivateSize();
+    pkt.group_segment_size = roc_device_.graphSchedulerGroupSize();
+
+    return dispatchGenericAqlPacket(&pkt, dispatchPacketHeader_, 1, false, false);
+  }
+
+  // Fallback: OpenCL C blit kernel path
+  printf("[GraphScheduler] Using OpenCL C fallback: packets=%u\n", packet_count);
+  return static_cast<KernelBlitManager&>(blitMgr()).runGraphScheduler(
+      cmd_buffer, packet_count, reinterpret_cast<void*>(gpu_queue_));
+}
+
+// ================================================================================================
 bool VirtualGPU::dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet,
                                           const uint32_t gfxVersion, bool blocking,
                                           const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi) {

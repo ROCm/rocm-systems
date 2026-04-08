@@ -281,7 +281,32 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
     }
 
-    __kernel void __amd_rocclr_gwsInit(uint value) { __builtin_amdgcn_ds_gws_init(value, 0); });
+    __kernel void __amd_rocclr_gwsInit(uint value) { __builtin_amdgcn_ds_gws_init(value, 0); }
+
+    __kernel void __amd_rocclr_graphScheduler(__global void* params) {
+      __global ulong* p = (__global ulong*)params;
+      __global uchar* cmd_buf = (__global uchar*)p[0];
+      uint pkt_count          = (uint)p[1];
+      __global uchar* base    = (__global uchar*)p[2];
+      uint q_size             = (uint)p[3];
+      uint q_mask             = q_size - 1;
+      volatile __global ulong* wr_id = (volatile __global ulong*)p[4];
+      volatile __global ulong* rd_id = (volatile __global ulong*)p[5];
+      volatile __global long* dbell  = (volatile __global long*)p[6];
+      ulong wr = atom_add(wr_id, (ulong)pkt_count);
+      while (wr + pkt_count - *rd_id > q_size) {}
+      for (uint i = 0; i < pkt_count; i++) {
+        ulong s = (wr + i) & (ulong)q_mask;
+        __global ulong* d = (__global ulong*)(base + s * 64);
+        __global ulong* r = (__global ulong*)(cmd_buf + i * 64);
+        d[0]=r[0]; d[1]=r[1]; d[2]=r[2]; d[3]=r[3];
+        d[4]=r[4]; d[5]=r[5]; d[6]=r[6]; d[7]=r[7];
+      }
+      mem_fence(CLK_GLOBAL_MEM_FENCE);
+      atom_xchg((__global uint*)(base + (wr & (ulong)q_mask) * 64),
+                *((__global uint*)cmd_buf));
+      *dbell = (long)(wr + pkt_count - 1);
+    });
 
 const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,
@@ -307,6 +332,31 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_initHeap(ulong heap_to_initialize, ulong initial_blocks,
                                         uint heap_size, uint number_of_initial_blocks) {
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
+    }
+
+    __kernel void __amd_rocclr_graphScheduler(__global void* params) {
+      __global ulong* p = (__global ulong*)params;
+      __global uchar* cmd_buf = (__global uchar*)p[0];
+      uint pkt_count          = (uint)p[1];
+      __global uchar* base    = (__global uchar*)p[2];
+      uint q_size             = (uint)p[3];
+      uint q_mask             = q_size - 1;
+      volatile __global ulong* wr_id = (volatile __global ulong*)p[4];
+      volatile __global ulong* rd_id = (volatile __global ulong*)p[5];
+      volatile __global long* dbell  = (volatile __global long*)p[6];
+      ulong wr = atom_add(wr_id, (ulong)pkt_count);
+      while (wr + pkt_count - *rd_id > q_size) {}
+      for (uint i = 0; i < pkt_count; i++) {
+        ulong s = (wr + i) & (ulong)q_mask;
+        __global ulong* d = (__global ulong*)(base + s * 64);
+        __global ulong* r = (__global ulong*)(cmd_buf + i * 64);
+        d[0]=r[0]; d[1]=r[1]; d[2]=r[2]; d[3]=r[3];
+        d[4]=r[4]; d[5]=r[5]; d[6]=r[6]; d[7]=r[7];
+      }
+      mem_fence(CLK_GLOBAL_MEM_FENCE);
+      atom_xchg((__global uint*)(base + (wr & (ulong)q_mask) * 64),
+                *((__global uint*)cmd_buf));
+      *dbell = (long)(wr + pkt_count - 1);
     });
 
 const char* BlitImageSourceCode = BLIT_KERNELS(

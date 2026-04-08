@@ -760,6 +760,12 @@ bool Device::create() {
     Hsa::enable_logging(logMask, outFile);
   }
 
+  // Load pre-compiled graph scheduler HSACO (non-fatal if it fails)
+  if (!loadGraphSchedulerHSACO()) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+        "[GraphScheduler] HSACO load failed, will use OpenCL C fallback");
+  }
+
   return true;
 }
 
@@ -798,6 +804,63 @@ bool Device::createBlitProgram() {
   }
 
   return result;
+}
+
+// ================================================================================================
+#include "device/rocm/graph_scheduler_blob.h"
+
+bool Device::loadGraphSchedulerHSACO() {
+  hsa_code_object_reader_t reader = {};
+  hsa_status_t st = Hsa::code_object_reader_create_from_memory(
+      graph_scheduler_gfx942_unbundled_hsaco,
+      graph_scheduler_gfx942_unbundled_hsaco_len, &reader);
+  if (st != HSA_STATUS_SUCCESS) return false;
+
+  st = Hsa::executable_create_alt(HSA_PROFILE_FULL,
+      HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
+      &graph_scheduler_executable_);
+  if (st != HSA_STATUS_SUCCESS) {
+    Hsa::code_object_reader_destroy(reader);
+    return false;
+  }
+
+  st = Hsa::executable_load_agent_code_object(
+      graph_scheduler_executable_, bkendDevice_, reader, nullptr, nullptr);
+  if (st != HSA_STATUS_SUCCESS) {
+    Hsa::executable_destroy(graph_scheduler_executable_);
+    Hsa::code_object_reader_destroy(reader);
+    return false;
+  }
+
+  Hsa::executable_freeze(graph_scheduler_executable_, nullptr);
+
+  hsa_executable_symbol_t symbol = {};
+  st = Hsa::executable_get_symbol_by_name(graph_scheduler_executable_,
+      "__amd_rocclr_graphSchedulerHIP.kd", &bkendDevice_, &symbol);
+  if (st != HSA_STATUS_SUCCESS) {
+    Hsa::executable_destroy(graph_scheduler_executable_);
+    Hsa::code_object_reader_destroy(reader);
+    return false;
+  }
+
+  Hsa::executable_symbol_get_info(symbol,
+      HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+      &graph_scheduler_kernel_object_);
+  Hsa::executable_symbol_get_info(symbol,
+      HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
+      &graph_scheduler_kernarg_size_);
+  Hsa::executable_symbol_get_info(symbol,
+      HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
+      &graph_scheduler_private_size_);
+  Hsa::executable_symbol_get_info(symbol,
+      HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE,
+      &graph_scheduler_group_size_);
+
+  Hsa::code_object_reader_destroy(reader);
+  printf("[GraphScheduler] HSACO loaded: kernel_obj=0x%lx kernarg=%u private=%u group=%u\n",
+         graph_scheduler_kernel_object_, graph_scheduler_kernarg_size_,
+         graph_scheduler_private_size_, graph_scheduler_group_size_);
+  return true;
 }
 
 device::Program* Device::createProgram(amd::Program& owner, amd::option::Options* options) {

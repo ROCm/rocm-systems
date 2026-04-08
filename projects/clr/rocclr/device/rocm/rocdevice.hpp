@@ -568,6 +568,14 @@ class Device : public NullDevice {
   //! Create internal blit program
   bool createBlitProgram();
 
+  //! Load pre-compiled graph scheduler HSACO kernel
+  bool loadGraphSchedulerHSACO();
+  uint64_t graphSchedulerKernelObject() const { return graph_scheduler_kernel_object_; }
+  uint32_t graphSchedulerPrivateSize() const { return graph_scheduler_private_size_; }
+  uint32_t graphSchedulerGroupSize() const { return graph_scheduler_group_size_; }
+  uint32_t graphSchedulerKernargSize() const { return graph_scheduler_kernarg_size_; }
+  bool hasGraphSchedulerHSACO() const { return graph_scheduler_kernel_object_ != 0; }
+
   // P2P agents avaialble for this device
   const std::vector<hsa_agent_t>& p2pAgents() const { return p2p_agents_; }
 
@@ -746,6 +754,13 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t gpu_ext_fine_grained_segment_;
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
+
+  // Pre-compiled graph scheduler kernel (HSACO)
+  hsa_executable_t graph_scheduler_executable_ = {};
+  uint64_t graph_scheduler_kernel_object_ = 0;
+  uint32_t graph_scheduler_kernarg_size_ = 0;
+  uint32_t graph_scheduler_private_size_ = 0;
+  uint32_t graph_scheduler_group_size_ = 0;
 
   size_t gpuvm_segment_max_alloc_;
   size_t alloc_granularity_;

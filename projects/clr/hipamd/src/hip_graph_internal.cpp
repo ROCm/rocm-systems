@@ -1284,6 +1284,62 @@ void GraphExecSegmented::ComputeCompletionSignalFlags() {
 }
 
 // ================================================================================================
+bool GraphExecSegmented::IsSingleBranchAllCaptured() const {
+  if (segments_.size() != 1) return false;
+  const auto& seg = segments_[0];
+  if (seg.child_graph_ptr != nullptr) return false;
+  //ToDo: check if segment has the info that all nodes are captured
+  for (auto& node : seg.nodes) {
+    if (!node->GraphCaptureEnabled()) return false;
+  }
+  return !seg.nodes.empty();
+}
+
+// ================================================================================================
+hipError_t GraphExecSegmented::BuildCommandBuffer() {
+  // Count total kernel packets from segmentBatches_
+  size_t kernel_packets = 0;
+  auto it = segmentBatches_.find(0);
+  if (it != segmentBatches_.end()) {
+    for (auto& pb : it->second.packet_batches) {
+      kernel_packets += pb.dispatchPackets.size();
+    }
+  }
+  if (kernel_packets == 0) return hipErrorInvalidValue;
+
+  cmd_buffer_.kernel_packet_count = kernel_packets;
+  cmd_buffer_.total_packet_count = kernel_packets;
+  cmd_buffer_.byte_size = kernel_packets * CommandBuffer::kPacketSize;
+
+  // Allocate device-accessible memory for the command buffer (CPU + GPU visible)
+  auto* device = g_devices[instantiateDeviceId_]->devices()[0];
+  cmd_buffer_.device_ptr = reinterpret_cast<uint8_t*>(
+      device->svmAlloc(device->context(), cmd_buffer_.byte_size, 256,
+                       CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER, nullptr));
+  if (cmd_buffer_.device_ptr == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+
+  // Copy kernel packets into slots 0..N-1
+  uint8_t* dst = cmd_buffer_.device_ptr;
+  if (it != segmentBatches_.end()) {
+    for (auto& pb : it->second.packet_batches) {
+      for (auto* pkt : pb.dispatchPackets) {
+        memcpy(dst, pkt, CommandBuffer::kPacketSize);
+        dst += CommandBuffer::kPacketSize;
+      }
+    }
+  }
+
+  cmd_buffer_.valid = true;
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+      "[GraphExec] Built command buffer: %zu kernel packets, %zu total, %zu bytes",
+      cmd_buffer_.kernel_packet_count, cmd_buffer_.total_packet_count, cmd_buffer_.byte_size);
+
+  return hipSuccess;
+}
+
+// ================================================================================================
 // DFS-based stream assignment for segment DAG.
 // Modeled after the classic path's ScheduleOneNode traversal pattern:
 //   - linear chains stay on the same stream
@@ -1661,6 +1717,10 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
 hipError_t GraphExecSegmented::Init() {
   hipError_t status = hipSuccess;
 
+  // Record the instantiation device so the command-buffer fast path can allocate
+  // device memory and gate itself to launches on the same device.
+  instantiateDeviceId_ = hip::getCurrentDevice()->deviceId();
+
   // Schedule nodes into segments for batch execution
   status = ScheduleNodesIntoBatches();
   if (status != hipSuccess) {
@@ -1724,6 +1784,16 @@ hipError_t GraphExecSegmented::Init() {
       if (status != hipSuccess) {
         return status;
       }
+    }
+  }
+
+  // For single-branch all-captured graphs, build a device-memory command buffer
+  // so GraphExecSegmented::Run can use the GPU scheduler fast path.
+  if (IsSingleBranchAllCaptured()) {
+    hipError_t cb_status = BuildCommandBuffer();
+    if (cb_status != hipSuccess) {
+      ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+          "[GraphExec] Failed to build command buffer, falling back to normal path");
     }
   }
 
@@ -3130,7 +3200,47 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
   }
 
   amd::Command* last_cmd = nullptr;
-  if (!cross_device_launch) {
+  if (cmd_buffer_.valid && !cross_device_launch &&
+      instantiateDeviceId_ == launch_stream->DeviceId()) {
+    // Command buffer fast path: single-branch, all-captured graph.
+    // A scheduler kernel copies the pre-built kernel packets to the HW queue.
+    if (lastLaunchStream_ != launch_stream) {
+      UpdateStreams(launch_stream);
+      lastLaunchStream_ = launch_stream;
+    }
+
+    // Get the internal stream (first parallel stream)
+    hip::Stream* internal_stream = nullptr;
+    if (streams_.size() > 0) {
+      internal_stream = streams_[0];  // ToDo: check if this is the correct stream
+    } else {
+      LogError("No streams are available for the graph execution!");
+      return hipErrorOutOfMemory;
+    }
+
+    // 1. Create start command — enqueue on internal stream, waits for launch stream
+    amd::Command::EventWaitList startWaitList;
+    amd::Command* lastLaunchCmd = launch_stream->getLastQueuedCommand(true);
+    if (lastLaunchCmd != nullptr) {
+      startWaitList.push_back(lastLaunchCmd);
+    }
+    auto* startCommand = new amd::Marker(*internal_stream, kMarkerDisableFlush, startWaitList);
+    startCommand->enqueue();
+    if (lastLaunchCmd != nullptr) {
+      lastLaunchCmd->release();
+    }
+
+    // 2. Dispatch scheduler kernel on internal stream
+    //    Scheduler copies N kernel packets from cmd_buffer to same HW queue
+    bool sched_ok = internal_stream->vdev()->runGraphSchedulerKernel(
+        cmd_buffer_.device_ptr + cmd_buffer_.KernelPacketsOffset(),
+        static_cast<uint32_t>(cmd_buffer_.kernel_packet_count));
+
+    if (!sched_ok) {
+      status = hipErrorUnknown;
+    }
+    startCommand->release();
+  } else if (!cross_device_launch) {
     if (max_streams_dev_.size() == 1) {
       // Single-device: pass collision-handled streams_ to EnqueueSegmentedGraph
       last_cmd = EnqueueSegmentedGraph(launch_stream, streams_, &status, &launch_signal_set);

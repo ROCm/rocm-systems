@@ -941,6 +941,10 @@ class Graph {
   //!< during multi-device graph execution scheduling.
   std::unordered_map<int, std::set<int>> streams_dev_ids_;
   int captureDeviceId_ = -1;
+  //!< Device the graph was instantiated on; used for the command-buffer fast path.
+  int instantiateDeviceId_ = -1;
+  //!< Last stream a launch used, to avoid redundant stream collision handling.
+  hip::Stream* lastLaunchStream_ = nullptr;
     //! Topological order of the graph doesn't include nodes embedded as part of the child graph
   std::vector<Node> topoOrder_;
 
@@ -1117,6 +1121,17 @@ class GraphExecSegmented : public GraphExecBase {
       signalManager_ = nullptr;
     }
 
+    if (cmd_buffer_.valid && cmd_buffer_.device_ptr != nullptr) {
+      if (instantiateDeviceId_ >= 0 &&
+          instantiateDeviceId_ < static_cast<int>(g_devices.size()) &&
+          g_devices[instantiateDeviceId_] != nullptr) {
+        auto* device = g_devices[instantiateDeviceId_]->devices()[0];
+        device->svmFree(cmd_buffer_.device_ptr);
+      }
+      cmd_buffer_.device_ptr = nullptr;
+      cmd_buffer_.valid = false;
+    }
+
     segmentBatches_.clear();
   }
 
@@ -1177,10 +1192,29 @@ class GraphExecSegmented : public GraphExecBase {
   //! onto a single stream because the cross-stream barriers multi-stream would
   //! cost outweigh the work that could actually overlap. Returns true to collapse.
   bool ShouldCollapseToSingleStream() const;
+  //! Check if graph is a single-branch, all-captured-kernel graph
+  bool IsSingleBranchAllCaptured() const;
+  //! Build device-memory command buffer from captured packets
+  hipError_t BuildCommandBuffer();
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
   }
+
+  //! Device-side command buffer for optimized single-branch graph dispatch.
+  //! Layout: [kernel_pkt_0] ... [kernel_pkt_N-1]
+  //! A scheduler kernel copies these packets to the HW queue at launch.
+  struct CommandBuffer {
+    uint8_t* device_ptr = nullptr;
+    size_t kernel_packet_count = 0;
+    size_t total_packet_count = 0;   // kernel_packet_count
+    size_t byte_size = 0;
+    bool valid = false;
+
+    static constexpr size_t kPacketSize = 64;
+    size_t KernelPacketsOffset() const { return 0; }
+  };
+  CommandBuffer cmd_buffer_;
 
  protected:
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
