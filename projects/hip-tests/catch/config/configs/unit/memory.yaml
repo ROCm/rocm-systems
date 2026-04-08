@@ -69,7 +69,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy3D_multiDevice_Negative:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, image]
   Unit_hipMemcpy3DAsync_Positive_Basic:
     <<: *level_2
     tags: [transfer]
@@ -90,10 +90,10 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy3DAsync_multiDevice_Negative:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, image]
   Unit_hipMemcpy3DAsync_multiDevice_DiffStream:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, image]
   Unit_hipMemcpyParam2D_Positive_Basic:
     <<: *level_2
     tags: [transfer]
@@ -939,7 +939,8 @@ memory:
   Unit_hipGetProcAddress_MemoryApisMemset: *level_2
   Unit_hipGetProcAddress_MemoryApisMemset2D3D: *level_2
   Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated: *level_2
-  Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated:
+  Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated: *level_2
+  Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array:
     <<: *level_2
     tags: [image]
   Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated: *level_2
@@ -1667,16 +1668,16 @@ memory:
     tags: [image]
   Unit_hipDrvMemcpy3D_HosttoDevice:
     <<: *level_2
-    tags: [transfer, image]
+    tags: [transfer]
   Unit_hipDrvMemcpy3D_Negative:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, image]
   Unit_hipDrvMemcpy3D_ExtentValidation:
     <<: *level_2
-    tags: [transfer, image]
+    tags: [transfer]
   Unit_hipDrvMemcpy3D_H2DDeviceContextChange:
     <<: *level_2
-    tags: [multigpu, transfer, image]
+    tags: [multigpu, transfer]
   Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange:
     <<: *level_2
     tags: [multigpu, transfer, image]
@@ -1685,13 +1686,13 @@ memory:
     tags: [transfer, image]
   Unit_hipDrvMemcpy3DAsync_Positive_Basic:
     <<: *level_2
-    tags: [transfer, image]
+    tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior:
     <<: *level_2
-    tags: [transfer, image]
+    tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_Positive_Parameters:
     <<: *level_2
-    tags: [transfer, image]
+    tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_Positive_Array:
     <<: *level_2
     # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
@@ -1699,13 +1700,13 @@ memory:
     tags: [transfer, image]
   Unit_hipDrvMemcpy3DAsync_Negative_Parameters:
     <<: *level_2
-    tags: [transfer, image]
+    tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_Capture:
     <<: *level_2
-    tags: [transfer, image]
+    tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange:
     <<: *level_2
-    tags: [multigpu, transfer, image]
+    tags: [multigpu, transfer]
   Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange:
     <<: *level_2
     tags: [multigpu, transfer, image]
@@ -1734,6 +1735,9 @@ memory:
     <<: *level_2
     tags: [query]
   Unit_hipPointerGetAttribute_ipc_capable:
+    <<: *level_2
+    tags: [query]
+  Unit_hipPointerGetAttribute_ipc_capable_Array:
     <<: *level_2
     tags: [query, image]
   Unit_hipDrvPtrGetAttributes_Negative:
@@ -2218,10 +2222,10 @@ memory:
     tags: [transfer]
   Unit_hipDrvMemcpy2DUnaligned_Positive_Basic:
     <<: *level_2
-    tags: [transfer, image]
+    tags: [transfer]
   Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior:
     <<: *level_2
-    tags: [transfer, image]
+    tags: [transfer]
   Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters:
     <<: *level_2
     tags: [transfer]

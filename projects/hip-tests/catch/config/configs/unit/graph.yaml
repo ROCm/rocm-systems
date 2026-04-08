@@ -233,17 +233,15 @@ graph:
   Unit_hipGraphAddMemcpyNodeToSymbol_Negative_Parameters:
     <<: *level_2
     tags: [node]
-  Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic:
-    <<: *level_2
-    tags: [image]
+  Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic: *level_2
   Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters:
     <<: *level_2
-    tags: [exec, image]
+    tags: [exec]
   Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-207
     disabled: [amd_windows, amd_wsl]
-    tags: [exec, image]
+    tags: [exec]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
     <<: *level_2
     tags: [node]
@@ -522,10 +520,9 @@ graph:
     tags: [node]
   Unit_hipGraphMemsetNodeGetParams_Negative_Parameters:
     <<: *level_2
-    tags: [query, image]
+    tags: [query]
   Unit_hipGraphMemsetNodeSetParams_Positive_Basic:
     <<: *level_2
-    tags: [image]
     # Note: Following four tests disabled due to defect - EXSWHTEC-203
     disabled: [amd_windows, amd_wsl]
   Unit_hipGraphMemsetNodeSetParams_Negative_Parameters:
@@ -881,10 +878,10 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes:
     <<: *level_2
-    tags: [query, image]
+    tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy:
     <<: *level_2
-    tags: [query, image]
+    tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams:
     <<: *level_2
     tags: [query]
@@ -905,7 +902,7 @@ graph:
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams:
     <<: *level_2
-    tags: [query, image]
+    tags: [query]
   Unit_hipGraphExecNodeSetParams_Negative_Parameters:
     <<: *level_2
     tags: [exec]
@@ -992,22 +989,21 @@ graph:
     tags: [exec]
   Unit_hipGraphAddMemsetNode_Positive_Basic:
     <<: *level_2
-    tags: [image]
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_2
     tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocPitch_2D:
     <<: *level_2
-    tags: [node, image]
+    tags: [node]
   Unit_hipGraphAddMemsetNode_hipMallocPitch_1D:
     <<: *level_2
-    tags: [node, image]
+    tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc3D_2D:
     <<: *level_2
-    tags: [node, image]
+    tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc3D_1D:
     <<: *level_2
-    tags: [node, image]
+    tags: [node]
   Unit_hipGraphAddMemsetNode_hipMalloc_1D:
     <<: *level_2
     tags: [node]
@@ -1031,7 +1027,7 @@ graph:
     tags: [node]
   Unit_hipGraphMemcpyNodeGetParams_Negative_Parameters:
     <<: *level_2
-    tags: [query, image]
+    tags: [query]
   Unit_hipGraphMemcpyNodeGetParams_Negative:
     <<: *level_2
     tags: [query, image]
@@ -1043,7 +1039,7 @@ graph:
     tags: [node, image]
   Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_2
-    tags: [node, image]
+    tags: [node]
   Unit_hipGraphKernelNodeGetParams_Negative:
     <<: *level_2
     tags: [query]
@@ -1237,7 +1233,7 @@ graph:
     tags: [userobj]
   Unit_hipGraphDebugDotPrint_Functional:
     <<: *level_2
-    tags: [query, image]
+    tags: [query]
   Unit_hipGraphDebugDotPrint_Argument_Check:
     <<: *level_2
     tags: [query]
@@ -1566,10 +1562,10 @@ graph:
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive:
     <<: *level_2
-    tags: [exec, image]
+    tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_Negative:
     <<: *level_2
-    tags: [exec, image]
+    tags: [exec]
   Unit_hipGraphAddNodeTypeMemset_Positive_Basic: *level_2
   Unit_hipGraphAddNodeTypeKernel_Positive_Basic:
     <<: *level_2
@@ -1597,7 +1593,6 @@ graph:
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_Positive_Basic:
     <<: *level_2
-    tags: [image]
   Unit_hipDrvGraphAddMemsetNode_Negative_Parameters:
     <<: *level_2
     tags: [node]
@@ -1605,22 +1600,22 @@ graph:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [node, image]
+    tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [node, image]
+    tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [node, image]
+    tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [node, image]
+    tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D:
     <<: *level_2
     # Below tests are failing PSDB
@@ -1633,13 +1628,13 @@ graph:
     tags: [node]
   Unit_hipDrvGraphAddMemcpyNode_Negative:
     <<: *level_2
-    tags: [node, image]
+    tags: [node]
   Unit_hipDrvGraphAddMemcpyNode_test:
     <<: *level_2
-    tags: [node, image]
+    tags: [node]
   Unit_hipDrvGraphAddMemcpyNode_MulitDevice:
     <<: *level_2
-    tags: [multigpu, node, image]
+    tags: [multigpu, node]
   Unit_hipDrvGraphAddMemcpyNode_Positive_Basic:
     <<: *level_2
     tags: [node]
