@@ -3109,18 +3109,8 @@ tool_detach(void* /*tool_data*/)
 {
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
 
-<<<<<<< HEAD
-    // Set process end timestamp for this detachment cycle
-    if(tool_metadata->process_end_ns == 0)
-        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
-
-    // Flush buffered records, stop the context to prevent further callbacks and
-    // finalize tracing state, then flush again to capture any final records
-    // emitted during shutdown (same pattern as tool_fini)
-=======
     // Flush all buffers, stop context to ensure in-flight GPU operations complete,
     // then flush again to capture any final events (same pattern as tool_fini)
->>>>>>> 4dbf48977c (Fix detach end timestamp ordering)
     flush();
     rocprofiler_stop_context(get_client_ctx());
     flush();
