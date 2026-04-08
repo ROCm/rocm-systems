@@ -467,6 +467,46 @@ TEST_F(NetIbMPITest, ListenAndConnect) {
     }
 }
 
+TEST_F(NetIbMPITest, MultipleSequentialConnections) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    ASSERT_EQ(InitNetIb(), ncclSuccess);
+
+    int ndev = 0;
+    ASSERT_EQ(GetDeviceCount(&ndev), ncclSuccess);
+    ASSERT_GT(ndev, 0);
+
+    int rank = MPIEnvironment::world_rank;
+    int peerRank = (rank + 1) % 2;
+
+    // Open and close multiple connections sequentially to test resource cleanup
+    const int kNumIterations = 5;
+    for (int iter = 0; iter < kNumIterations; iter++) {
+        ConnectionPair pair;
+        ASSERT_EQ(SetupConnection(0, pair, rank, peerRank), ncclSuccess)
+            << "Failed to setup connection on iteration " << iter;
+
+        NetConnectionGuard connGuard(net_);
+        if (rank == 0) {
+            connGuard.setRecvComm(pair.recvComm);
+            connGuard.setListenComm(pair.listenComm);
+            EXPECT_NE(pair.recvComm, nullptr);
+        } else {
+            connGuard.setSendComm(pair.sendComm);
+            EXPECT_NE(pair.sendComm, nullptr);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        // connGuard destructor closes connection
+    }
+
+    if (MPIEnvironment::world_rank == 0) {
+        TEST_INFO("Successfully completed %d sequential connection cycles", kNumIterations);
+    }
+}
+
 TEST_F(NetIbMPITest, ConnectWithInvalidHandle) {
     ASSERT_TRUE(validateTestPrerequisites(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
                                          kRequirePowerOfTwo, 1, kNoNodeLimit))
