@@ -9,18 +9,18 @@ if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
-# Use system GTest if available, otherwise fetch and build
-find_package(GTest)
-if(NOT GTest_FOUND)
-    include(FetchContent)
-    FetchContent_Declare(
-        googletest
-        # Originally mirrored from: https://github.com/google/googletest/releases/download/v1.16.0/googletest-1.16.0.tar.gz
-        URL https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/googletest-1.16.0.tar.gz
-        URL_HASH SHA256=78c676fc63881529bf97bf9d45948d905a66833fbfa5318ea2cd7478cb98f399
-    )
-    FetchContent_MakeAvailable(googletest)
-endif()
+# Always fetch and build googletest as static to avoid runtime dependency on libgtest.so.
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    # Originally mirrored from: https://github.com/google/googletest/releases/download/v1.16.0/googletest-1.16.0.tar.gz
+    URL https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/googletest-1.16.0.tar.gz
+    URL_HASH SHA256=78c676fc63881529bf97bf9d45948d905a66833fbfa5318ea2cd7478cb98f399
+)
+set(_saved_BUILD_SHARED_LIBS "${BUILD_SHARED_LIBS}")
+set(BUILD_SHARED_LIBS OFF)
+FetchContent_MakeAvailable(googletest)
+set(BUILD_SHARED_LIBS "${_saved_BUILD_SHARED_LIBS}")
 
 enable_testing()
 
