@@ -87,3 +87,40 @@ jobs:
             --report-path "/apps/cvs_tests/test_reports" \
             --log-destination "/logs/gfx950-dcgpu" \
             --index-file-name "index_rccl_test_report.html"
+  test_rccl_multi_node_ainic:
+    name: Test multi-node (AINIC)
+    if: ${{ inputs.amdgpu_families == 'gfx950-dcgpu' }}
+    runs-on: tw-gfx950-ainic-ROCm-scale-runner
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
+      OUTPUT_ARTIFACTS_DIR: /it-share/rccl-ci/dist_new
+      AWS_SHARED_CREDENTIALS_FILE: /apps/cvs_tests/awsconfig/credentials.ini
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: be15507d79669171fcd1da71b924356e2ad03874 # 2026-04-07 commit
+
+      - name: Run setup test environment workflow
+        uses: './.github/actions/setup_test_environment'
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: "--rccl --tests"
+          IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+
+      - name: AINIC multinode test
+        run: |
+          salloc -N 4 -p amd-tw --gres=gpu:8 \
+            --nodelist=mia1-p01-g26,mia1-p01-g27,mia1-p01-g28,mia1-p01-g29 \
+            bash -c '
+              cd /it-share/rccl-ci
+              CVS_CONFIG_FILE=/it-share/rccl-ci/configs/rccl_config_TheRock-all.json \
+              CVS_CLUSTER_FILE=/it-share/rccl-ci/configs/cluster.json \
+              ./sp.sh
+            '
