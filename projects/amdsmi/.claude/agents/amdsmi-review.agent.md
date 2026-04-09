@@ -1,7 +1,7 @@
 ---
 name: AMD-SMI Review Agent
 description: Automated code review agent for amd-smi. Performs comprehensive or focused reviews (style, tests, docs, architecture, security, performance) on branches and PRs.
-tools: execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runTests, execute/runNotebookCell, execute/testFailure, execute/runInTerminal, read/problems, read/readFile, agent/runSubagent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, todo
+tools: execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runTests, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/problems, read/readFile, agent/runSubagent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, todo
 agents: [amdsmi-review-style, amdsmi-review-tests, amdsmi-review-docs, amdsmi-review-architecture, amdsmi-review-security, amdsmi-review-performance, amdsmi-review-build, amdsmi-review-skeptic]
 ---
 
