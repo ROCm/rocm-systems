@@ -65,7 +65,7 @@ enum HIPAllocatorType {
 };
 
 #if HIP_VERSION >= 70000000
-struct hipIpcMemHandlePosix_t {
+struct HIPIpcMemHandlePosix_t {
   uint64_t fd;
   uint32_t pid;
   size_t size;
@@ -109,7 +109,7 @@ public:
   }
 
 protected:
-  std::vector<hipIpcMemHandlePosix_t> handle;
+  std::vector<HIPIpcMemHandlePosix_t> handle;
 
 };
 #endif
