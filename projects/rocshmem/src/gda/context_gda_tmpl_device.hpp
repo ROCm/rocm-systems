@@ -74,8 +74,7 @@ __device__ T GDAContext::g(const T *source, int pe) {
     ipcImpl_.ipcCopy(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T));
     return ret;
   }
-  printf("rocshmem::gda:g not implemented\n");
-  abort();
+  LOGD_ERROR_ABORT("gda::g not implemented");
   //TODO the following is incorrect because ret is not ibv registered memory
   //getmem(&ret, source, sizeof(T), pe);
   return ret;
@@ -94,7 +93,7 @@ __device__ void GDAContext::get_nbi(T *dest, const T *source, size_t nelems, int
 // Atomics
 template <typename T>
 __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
@@ -118,7 +117,7 @@ __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_set not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
@@ -148,7 +147,7 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_and not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_and not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
@@ -180,7 +179,7 @@ __device__ void GDAContext::amo_and(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_or not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_or not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
@@ -212,7 +211,7 @@ __device__ void GDAContext::amo_or(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fetch_xor not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_xor not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
@@ -244,7 +243,7 @@ __device__ void GDAContext::amo_xor(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_cas not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_cas not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
@@ -263,7 +262,7 @@ __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fadd not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
@@ -284,7 +283,7 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fcas not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fcas not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
@@ -962,7 +961,7 @@ GDA_CONTEXT_PUT_SIGNAL_DEF(_wave)
 template <typename T>
 __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_add not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -980,7 +979,7 @@ __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
 template <typename T>
 __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_fadd not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   T ret_val = 0;
   bool need_turn {true};
@@ -1000,7 +999,7 @@ __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
 template <typename T>
 __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
-  if constexpr (sizeof(T) != 8) { printf("rocshmem::gda:amo_set not implemented for non-64bit types.\n"); abort(); }//TODO:support for non-uint64t
+  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);

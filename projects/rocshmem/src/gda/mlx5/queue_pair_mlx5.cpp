@@ -208,9 +208,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
     // CQEs are initially invalid, retry until we see a valid CQE
     if (opcode == MLX5_CQE_INVALID) {
-#if defined(BUILD_DEBUG_LEVEL_DEVICE)
       LOGD_TRACE("CQ: invalid completion (%x)", opcode);
-#endif
       continue;
     }
 

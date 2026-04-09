@@ -220,30 +220,32 @@ void dprintf(const char* fmt, const Args&... args) {
 
 #ifdef BUILD_DEBUG_LEVEL_DEVICE
 
-/* Single dprintf call per macro; the ternary selects between two format
- * string literals (same args for both).  Only cost is one branch + two
- * string constants in .rodata per call site — no extra registers. */
+/* LOGD_ERROR and LOGD_ERROR_ABORT are always compiled in (not gated by
+ * BUILD_DEBUG_LEVEL_DEVICE) so that error paths are never silently
+ * compiled away.  Single dprintf call; ternary selects format string. */
 
 #define LOGD_ERROR(fmt, ...) do {                                             \
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_error)                                        \
-  rocshmem::dprintf(rocshmem::log_device.show_color                           \
-      ? "\033[1;91mE%04dw%04ut%04u\033[0m " fmt                               \
-        "\t\033[90m" __FILE__ ":%d\033[0m\n"                                  \
-      : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                         \
-      __VA_OPT__(__VA_ARGS__,) __LINE__);                                     \
+    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+        ? "\033[1;91mE%04dw%04ut%04u\033[0m " fmt                             \
+          "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
+        : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
+        __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
 } while (0)
 
 #define LOGD_ERROR_ABORT(fmt, ...) do {                                       \
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_error)                                        \
-  rocshmem::dprintf(rocshmem::log_device.show_color                           \
-      ? "\033[1;91mE%04dw%04ut%04u\033[0m " fmt                               \
-        "\t\033[90m" __FILE__ ":%d\033[0m\n"                                  \
-      : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                         \
-      __VA_OPT__(__VA_ARGS__,) __LINE__);                                     \
+    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+        ? "\033[1;91mE%04dw%04ut%04u\033[0m " fmt                             \
+          "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
+        : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
+        __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
   abort();                                                                    \
 } while (0)
+
+#ifdef BUILD_DEBUG_LEVEL_DEVICE
 
 #define LOGD_WARN(fmt, ...) do {                                              \
   rocshmem::static_assert_device_only();                                      \
@@ -292,8 +294,6 @@ void dprintf(const char* fmt, const Args&... args) {
 
 #else  /* !BUILD_DEBUG_LEVEL_DEVICE */
 
-#define LOGD_ERROR(...)       do { rocshmem::static_assert_device_only(); } while (0)
-#define LOGD_ERROR_ABORT(...) do { rocshmem::static_assert_device_only(); abort(); } while (0)
 #define LOGD_WARN(...)        do { rocshmem::static_assert_device_only(); } while (0)
 #define LOGD_INFO(...)        do { rocshmem::static_assert_device_only(); } while (0)
 #define LOGD_API(...)         do { rocshmem::static_assert_device_only(); } while (0)
