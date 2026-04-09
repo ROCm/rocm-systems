@@ -112,6 +112,12 @@ ROBackend::ROBackend(MPI_Comm comm)
       reinterpret_cast<rocshmem_team_t>(team_world_proxy_->get());
   set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 
+  /*
+   * setup_team_shared() must follow initIPC() because it uses
+   * ipcImpl.pes_with_ipc_avail to determine shared-memory membership.
+   */
+  setup_team_shared();
+
   default_block_handle_proxy_ = DefaultBlockHandleProxyT(
                                 g_ret_buffer_.get(),
                                 atomic_ret_buffer_.get(), &queue_,
@@ -200,6 +206,41 @@ __device__ bool ROBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem
 
 __device__ void ROBackend::destroy_ctx(rocshmem_ctx_t *ctx) {
   ctx_free_list.get()->push_back(static_cast<ROContext *>(ctx->ctx_opaque));
+}
+
+void ROBackend::setup_team_shared() {
+#if defined(USE_IPC)
+  if (ipcImpl.pes_with_ipc_avail == nullptr) {
+    host::ROCSHMEM_TEAM_SHARED = ROCSHMEM_TEAM_INVALID;
+    set_team_shared_device(ROCSHMEM_TEAM_INVALID);
+    return;
+  }
+
+  int shm_size = ipcImpl.shm_size;
+  int shm_rank = ipcImpl.shm_rank;
+
+  /*
+   * pe_start/stride are placeholders; actual PE-to-world mapping is handled
+   * by pe_world_map_ since shared-memory ranks may not be uniformly strided.
+   */
+  TeamInfo wrt_parent(nullptr, 0, 1, shm_size);
+  TeamInfo wrt_world(nullptr, 0, 1, shm_size);
+
+  ROTeam *team_shared{nullptr};
+  CHECK_HIP(hipMalloc(&team_shared, sizeof(ROTeam)));
+  new (team_shared) ROTeam(this, wrt_parent, wrt_world,
+                           shm_size, shm_rank, MPI_COMM_NULL);
+
+  team_shared->pe_world_map_ = ipcImpl.pes_with_ipc_avail;
+
+  team_tracker.set_team_shared(team_shared);
+
+  host::ROCSHMEM_TEAM_SHARED = reinterpret_cast<rocshmem_team_t>(team_shared);
+  set_team_shared_device(host::ROCSHMEM_TEAM_SHARED);
+#else
+  host::ROCSHMEM_TEAM_SHARED = ROCSHMEM_TEAM_INVALID;
+  set_team_shared_device(ROCSHMEM_TEAM_INVALID);
+#endif
 }
 
 void ROBackend::team_destroy(rocshmem_team_t team) {
@@ -319,6 +360,16 @@ void ROBackend::ro_net_free_runtime() {
    * Free the profiler statistics structure.
    */
   // CHECK_HIP(hipFree(bp->profiler));
+
+  /*
+   * Tear down team_shared (only allocated when IPC is enabled)
+   */
+  auto *team_shared{team_tracker.get_team_shared()};
+  if (team_shared) {
+    team_shared->pe_world_map_ = nullptr;
+    team_shared->~Team();
+    CHECK_HIP(hipFree(team_shared));
+  }
 
   /*
    * Tear down team_world

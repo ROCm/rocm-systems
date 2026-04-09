@@ -208,6 +208,14 @@ class ROBackend : public Backend {
   ROTeamProxyT *team_world_proxy_;
 
   /**
+   * @brief Allocate and initialize team shared.
+   *
+   * TEAM_SHARED contains the PEs that share a common memory domain
+   * (same node).
+   */
+  void setup_team_shared();
+
+  /**
    * @brief Workers used to poll on the device network request queues.
    */
   std::thread worker_thread{};
