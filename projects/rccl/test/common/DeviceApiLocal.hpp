@@ -5,52 +5,18 @@
  ************************************************************************/
 #pragma once
 
-#include <rccl/rccl.h>
+// Thin adapter over RCCL's generated internal device headers.
+// We reuse the source-of-truth struct layouts and only provide a tiny subset
+// of device-side helpers that those headers intentionally hide in this context.
+
 #include <hip/hip_runtime.h>
 
-#include <cstddef>
-#include <cstdint>
+#include "nccl_device/core_tmp.h"
+#include "nccl_device/impl/core__types.h"
+#include "nccl_device/impl/comm__types.h"
 
-// Minimal AMD-friendly device API shim for unit tests.
-// This mirrors the working local header pattern used by rccl-tests.
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-typedef uint32_t ncclDevResourceHandle;
-typedef ncclDevResourceHandle ncclDevResourceHandle_t;
-
-struct ncclDevComm;
-typedef struct ncclDevComm ncclDevComm_t;
-
-struct ncclTeam;
-typedef struct ncclTeam ncclTeam_t;
-
-struct ncclMultimemHandle;
-typedef struct ncclMultimemHandle ncclMultimemHandle_t;
-
-struct ncclLsaBarrierHandle;
-typedef struct ncclLsaBarrierHandle ncclLsaBarrierHandle_t;
-
-struct ncclDevResourceRequirements;
-typedef struct ncclDevResourceRequirements ncclDevResourceRequirements_t;
-
-struct ncclTeamRequirements;
-typedef struct ncclTeamRequirements ncclTeamRequirements_t;
-
-struct ncclDevCommRequirements;
-typedef struct ncclDevCommRequirements ncclDevCommRequirements_t;
-
-ncclResult_t ncclDevCommCreate(
-    ncclComm_t comm, ncclDevCommRequirements_t const* reqs, ncclDevComm_t* outDevComm
-);
-ncclResult_t ncclDevCommDestroy(ncclComm_t comm, ncclDevComm_t const* devComm);
-
-#ifdef __cplusplus
-}
-#endif
-
+#undef NCCL_DEVICE_INLINE
+#undef NCCL_HOST_DEVICE_INLINE
 #define NCCL_DEVICE_INLINE __device__ __forceinline__
 #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
 
@@ -65,100 +31,13 @@ enum memory_order
 };
 } // namespace cuda
 
-struct ncclTeam
-{
-    int nRanks, rank, stride;
-};
-
-struct ncclTeamTagLsa
-{};
-
-struct ncclDevCommRequirements
-{
-    ncclDevResourceRequirements_t* resourceRequirementsList;
-    ncclTeamRequirements_t*        teamRequirementsList;
-    bool                           lsaMultimem;
-    int                            lsaBarrierCount;
-};
-
-struct ncclDevResourceRequirements
-{
-    ncclDevResourceRequirements_t* next;
-    size_t                         bufferSize, bufferAlign;
-    ncclDevResourceHandle_t*       outBufferHandle;
-};
-
-struct ncclTeamRequirements
-{
-    ncclTeamRequirements_t* next;
-    ncclTeam_t             team;
-    bool                   multimem;
-    ncclMultimemHandle_t*  outMultimemHandle;
-};
-
-struct ncclWindow_vidmem
-{
-    void*    winHost;
-    char*    lsaFlatBase;
-    int      lsaRank;
-    int      worldRank;
-    uint32_t stride4G;
-    uint32_t mcOffset4K;
-};
-
-struct ncclMultimemHandle
-{
-    void* mcBasePtr;
-};
-
-struct ncclLsaBarrierHandle
-{
-    ncclDevResourceHandle_t bufHandle;
-    int                     nBarriers;
-};
-
-struct ncclDevCommWindowTable
-{
-    struct Entry
-    {
-        uintptr_t     base, size;
-        ncclWindow_t  window;
-    } entries[32];
-
-    struct ncclDevCommWindowTable* next;
-};
-
-struct ncclDevComm
-{
-    int      rank, nRanks;
-    uint32_t nRanks_rcp32;
-    int      lsaRank, lsaSize;
-    uint32_t lsaSize_rcp32;
-
-    struct ncclDevCommWindowTable* windowTable;
-
-    ncclWindow_t            resourceWindow;
-    struct ncclWindow_vidmem resourceWindow_inlined;
-
-    ncclMultimemHandle_t   lsaMultimem;
-    ncclLsaBarrierHandle_t lsaBarrier;
-};
-
 struct ncclCoopCta
 {
-    NCCL_DEVICE_INLINE int  thread_rank() const { return threadIdx.x; }
-    NCCL_DEVICE_INLINE int  size() const { return blockDim.x; }
+    NCCL_DEVICE_INLINE int thread_rank() const { return threadIdx.x; }
+    NCCL_DEVICE_INLINE int size() const { return blockDim.x; }
+    NCCL_DEVICE_INLINE int num_threads() const { return blockDim.x; }
     NCCL_DEVICE_INLINE void sync() const { __syncthreads(); }
 };
-
-NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamLsa(ncclDevComm const& comm)
-{
-    ncclTeam ans;
-    ans.nRanks = comm.lsaSize;
-    ans.rank   = comm.lsaRank;
-    ans.stride = 1;
-    return ans;
-}
 
 NCCL_DEVICE_INLINE char* ncclAdd4G(char* base, int delta4G)
 {
@@ -173,10 +52,22 @@ NCCL_DEVICE_INLINE char* ncclAdd4G(char* base, int delta4G)
     return tmp.ptr;
 }
 
-NCCL_DEVICE_INLINE void* ncclGetLsaPointer(ncclWindow_t window, size_t offset, int peer)
+NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamLsaLocal(ncclDevComm const& comm)
+{
+    ncclTeam ans;
+    ans.nRanks = comm.lsaSize;
+    ans.rank   = comm.lsaRank;
+    ans.stride = 1;
+    return ans;
+}
+
+NCCL_DEVICE_INLINE void* ncclGetLsaPointerLocal(ncclWindow_t window, size_t offset, int peer)
 {
     return static_cast<void*>(ncclAdd4G(window->lsaFlatBase, peer * window->stride4G) + offset);
 }
+
+#define ncclTeamLsa ncclTeamLsaLocal
+#define ncclGetLsaPointer ncclGetLsaPointerLocal
 
 template <typename Coop>
 struct ncclLsaBarrierSession

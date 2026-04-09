@@ -148,7 +148,6 @@ if(BUILD_TESTS)
     AllToAllTests.cpp
     AllToAllVTests.cpp
     BroadcastTests.cpp
-    DeviceApiTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -260,6 +259,17 @@ if(BUILD_TESTS)
     # Define ARSMI_TEST_BUILD specifically for rccl-UnitTestsAltRsmi
     target_compile_definitions(rccl-UnitTestsAltRsmi PRIVATE ARSMI_TEST_BUILD)
   endif()
+
+  # Test build to isolate fixture test failure
+  list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDeviceApi)
+
+  set(TEST_DEVICE_API_SOURCE_FILES
+    DeviceApiTests.cpp
+    common/main_fixtures.cpp
+    common/EnvVars.cpp
+  )
+
+  add_executable(rccl-UnitTestsDeviceApi ${TEST_DEVICE_API_SOURCE_FILES})
 
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
