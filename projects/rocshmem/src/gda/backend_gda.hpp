@@ -79,6 +79,7 @@ class GDABackend : public Backend {
   union ibv_gid gid;
   int port = 1;
   int gid_index = 0;
+  uint32_t gid_type = IBV_GID_TYPE_IB;
 
   uint32_t *heap_rkey = nullptr;
   struct ibv_mr *heap_mr = nullptr;
@@ -96,6 +97,7 @@ class GDABackend : public Backend {
   std::vector<struct bnxt_host_qp> bnxt_qps;
   std::vector<struct bnxt_host_cq> bnxt_scqs;
   std::vector<struct bnxt_host_cq> bnxt_rcqs;
+  HIPAllocator *qp_allocator_{nullptr};
   /* GDA_BNXT END */
 
   /* GDA_IONIC & GDA_MLX5 START */
@@ -108,6 +110,23 @@ class GDABackend : public Backend {
   uint64_t *gpu_db_cq = nullptr;
   uint64_t *gpu_db_sq = nullptr;
   /* GDA_IONIC END */
+
+  /* GDA_MLX5 START */
+  std::vector<mlx5_devx_qp> mlx5_qps;
+  /* GDA_MLX5 END */
+
+  /**
+   * Determine number of QPs to create per PE =
+   * ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX +
+   * ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX * ROCSHMEM_MAX_NUM_CONTEXTS
+   */
+  size_t num_qps_per_pe {1};
+
+  /**
+   * Total number of QPs created =
+   * num_qps_per_pe * num_pes;
+   */
+  uint32_t num_qps {1};
 
  /**
    * @brief Choose nic device according to locality/user preferences
@@ -389,6 +408,7 @@ class GDABackend : public Backend {
    */
   void create_qps(int sq_length);
   void bnxt_create_qps(int sq_length);
+  void mlx5_create_qps(int sq_length);
 
   /**
    * @brief Reorders QPs to that we map rocSHMEM contexts to the correct QPs
@@ -472,11 +492,6 @@ class GDABackend : public Backend {
    * @brief Size of the bitmask
    */
   int team_bitmask_size_{-1};
-
-  /**
-   * Fine grained memory allocator for buffers used in collectives Routines
-   */
-  HIPDefaultFinegrainedAllocator fine_grained_allocator_ {};
 
   /**
    * @brief Collective routines work/sync buffer size

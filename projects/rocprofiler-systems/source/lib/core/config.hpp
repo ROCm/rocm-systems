@@ -91,6 +91,9 @@ print_settings(
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter);
 
 void
+print_settings_json(std::ostream& _output_stream);
+
+void
 print_settings(bool include_env = true);
 
 std::string&
@@ -205,9 +208,6 @@ bool&
 get_use_causal() ROCPROFSYS_HOT;
 
 bool
-get_use_rocm() ROCPROFSYS_HOT;
-
-bool
 get_use_amd_smi() ROCPROFSYS_HOT;
 
 bool&
@@ -292,6 +292,9 @@ get_trace_delay();
 double
 get_trace_duration();
 
+std::string
+get_trace_region();
+
 double
 get_sampling_freq();
 
@@ -370,6 +373,12 @@ get_use_tmp_files();
 int
 get_kill_delay();
 
+namespace output_filtering
+{
+bool
+is_output_enabled_for_current_mpi_rank();
+}  // namespace output_filtering
+
 std::string
 get_tmpdir();
 
@@ -431,6 +440,9 @@ get_causal_fixed_speedup();
 
 std::string
 get_causal_output_filename();
+
+void
+print_output_summary();
 
 std::vector<std::string>
 get_causal_binary_scope();

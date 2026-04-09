@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from typing import Any
 
@@ -111,7 +89,7 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
 
     if table_id == 1701:
         # Special layout for L2 Cache SOL
-        pct_data = display_df[display_df["Unit"] == "Pct"]
+        pct_data = display_df[display_df["Unit"] == "Percent"]
         charts.append(
             px.bar(
                 pct_data,
@@ -261,7 +239,7 @@ def build_table_chart(
     formatted_columns = []
     for col in display_df.columns:
         col_lower = str(col).lower()
-        if col_lower in {"pct", "pop", "percentage"}:
+        if col_lower in {"pct", "pop", "percent"}:
             formatted_columns.append({
                 "id": col,
                 "name": col,

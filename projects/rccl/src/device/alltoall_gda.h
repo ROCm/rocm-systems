@@ -12,7 +12,7 @@
 #include <rocshmem/rocshmem.hpp>
 
 template<typename T, typename RedOp>
-struct RunWorkColl<ncclFuncAllToAllGda, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
+struct RunWorkColl<ncclFuncAlltoAllGda, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nThreads, struct ncclDevWorkColl* work) {
     if (blockIdx.x == 0) {
         int num_pes = rocshmem::rocshmem_n_pes();

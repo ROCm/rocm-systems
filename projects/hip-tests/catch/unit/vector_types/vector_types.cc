@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "vector_operations_common.hh"
 #if HT_AMD
@@ -55,15 +42,33 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Host", "", char1, uchar1, char2, uchar2,
-                   char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2, short3, ushort3,
-                   short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4, uint4, long1,
-                   ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1, ulonglong1,
-                   longlong2, ulonglong2, longlong3, ulonglong3, longlong4, ulonglong4, float1,
-                   float2, float3, float4, double1, double2, double3, double4) {
-  auto value = GetTestValue<decltype(TestType().x)>(0);
-  TestType vector = MakeVectorTypeHost<TestType>(value);
-  SanityCheck(vector, value);
+HIP_TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Host, char, unsigned char, short,
+                   unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
+  {
+    using VectorType1 = vector_type_helper_t<TestType, 1>;
+    auto value1 = GetTestValue<decltype(VectorType1().x)>(0);
+    VectorType1 vector1 = MakeVectorTypeHost<VectorType1>(value1);
+    SanityCheck(vector1, value1);
+  }
+  {
+    using VectorType2 = vector_type_helper_t<TestType, 2>;
+    auto value2 = GetTestValue<decltype(VectorType2().x)>(0);
+    VectorType2 vector2 = MakeVectorTypeHost<VectorType2>(value2);
+    SanityCheck(vector2, value2);
+  }
+  {
+    using VectorType3 = vector_type_helper_t<TestType, 3>;
+    auto value3 = GetTestValue<decltype(VectorType3().x)>(0);
+    VectorType3 vector3 = MakeVectorTypeHost<VectorType3>(value3);
+    SanityCheck(vector3, value3);
+  }
+  {
+    using VectorType4 = vector_type_helper_t<TestType, 4>;
+    auto value4 = GetTestValue<decltype(VectorType4().x)>(0);
+    VectorType4 vector4 = MakeVectorTypeHost<VectorType4>(value4);
+    SanityCheck(vector4, value4);
+  }
 }
 
 /**
@@ -75,7 +80,7 @@ TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Host", "", char1, uchar1,
  *        -# make_short1, make_short2, make_short3, make_short4
  *        -# make_ushort1, make_ushort2, make_ushort3, make_ushort4
  *        -# make_int1, make_int2, make_int3, make_int4
- *        -# make_uint1, make_uint2, make_uint4, make_uint4
+ *        -# make_uint1, make_uint2, make_uint3, make_uint4
  *        -# make_long1, make_long2, make_long3, make_long4
  *        -# make_ulong1, make_ulong2, make_ulong3, make_ulong4
  *        -# make_longlong1, make_longlong2, make_longlong3, make_longlong4
@@ -91,15 +96,33 @@ TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Host", "", char1, uchar1,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Device", "", char1, uchar1, char2, uchar2,
-                   char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2, short3, ushort3,
-                   short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4, uint4, long1,
-                   ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1, ulonglong1,
-                   longlong2, ulonglong2, longlong3, ulonglong3, longlong4, ulonglong4, float1,
-                   float2, float3, float4, double1, double2, double3, double4) {
-  auto value = GetTestValue<decltype(TestType().x)>(0);
-  TestType vector = MakeVectorTypeDevice<TestType>(value);
-  SanityCheck(vector, value);
+HIP_TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Device, char, unsigned char, short,
+                   unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
+  {
+    using VectorType1 = vector_type_helper_t<TestType, 1>;
+    auto value1 = GetTestValue<decltype(VectorType1().x)>(0);
+    VectorType1 vector1 = MakeVectorTypeDevice<VectorType1>(value1);
+    SanityCheck(vector1, value1);
+  }
+  {
+    using VectorType2 = vector_type_helper_t<TestType, 2>;
+    auto value2 = GetTestValue<decltype(VectorType2().x)>(0);
+    VectorType2 vector2 = MakeVectorTypeDevice<VectorType2>(value2);
+    SanityCheck(vector2, value2);
+  }
+  {
+    using VectorType3 = vector_type_helper_t<TestType, 3>;
+    auto value3 = GetTestValue<decltype(VectorType3().x)>(0);
+    VectorType3 vector3 = MakeVectorTypeDevice<VectorType3>(value3);
+    SanityCheck(vector3, value3);
+  }
+  {
+    using VectorType4 = vector_type_helper_t<TestType, 4>;
+    auto value4 = GetTestValue<decltype(VectorType4().x)>(0);
+    VectorType4 vector4 = MakeVectorTypeDevice<VectorType4>(value4);
+    SanityCheck(vector4, value4);
+  }
 }
 
 #if HT_AMD
@@ -117,47 +140,67 @@ TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Device", "", char1, uchar
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Host", "", char1, uchar1,
-                   char2, uchar2, char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2,
-                   short3, ushort3, short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4,
-                   uint4, long1, ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1,
-                   ulonglong1, longlong2, ulonglong2, longlong3, ulonglong3, longlong4, ulonglong4,
-                   float1, float2, float3, float4, double1, double2, double3, double4) {
-  auto value1 = GetTestValue<decltype(TestType().x)>(0);
-  auto value2 = GetTestValue<decltype(TestType().x)>(1);
-
-  for (const auto operation : {VectorOperation::kIncrementPrefix,
-                               VectorOperation::kIncrementPostfix,
-                               VectorOperation::kDecrementPrefix,
-                               VectorOperation::kDecrementPostfix,
-                               VectorOperation::kAddAssign,
-                               VectorOperation::kSubtractAssign,
-                               VectorOperation::kMultiplyAssign,
-                               VectorOperation::kDivideAssign,
-                               VectorOperation::kNegate,
-                               VectorOperation::kBitwiseNot,
-                               VectorOperation::kModuloAssign,
-                               VectorOperation::kBitwiseXorAssign,
-                               VectorOperation::kBitwiseOrAssign,
-                               VectorOperation::kBitwiseAndAssign,
-                               VectorOperation::kRightShiftAssign,
-                               VectorOperation::kLeftShiftAssign,
-                               VectorOperation::kAdd,
-                               VectorOperation::kSubtract,
-                               VectorOperation::kMultiply,
-                               VectorOperation::kDivide,
-                               VectorOperation::kEqual,
-                               VectorOperation::kNotEqual,
-                               VectorOperation::kModulo,
-                               VectorOperation::kBitwiseXor,
-                               VectorOperation::kBitwiseOr,
-                               VectorOperation::kBitwiseAnd,
-                               VectorOperation::kRightShift,
-                               VectorOperation::kLeftShift,
-                               VectorOperation::kSubscript}) {
-    DYNAMIC_SECTION("operation: " << to_string(operation)) {
-      TestType vector = PerformVectorOperationHost<TestType>(operation, value1, value2);
-      SanityCheck(operation, vector, value1, value2);
+HIP_TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Host, char, unsigned char,
+                   short, unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
+  const VectorOperation operations[] = {
+      VectorOperation::kIncrementPrefix,  VectorOperation::kIncrementPostfix,
+      VectorOperation::kDecrementPrefix, VectorOperation::kDecrementPostfix,
+      VectorOperation::kAddAssign,       VectorOperation::kSubtractAssign,
+      VectorOperation::kMultiplyAssign,  VectorOperation::kDivideAssign,
+      VectorOperation::kNegate,           VectorOperation::kBitwiseNot,
+      VectorOperation::kModuloAssign,     VectorOperation::kBitwiseXorAssign,
+      VectorOperation::kBitwiseOrAssign,  VectorOperation::kBitwiseAndAssign,
+      VectorOperation::kRightShiftAssign,  VectorOperation::kLeftShiftAssign,
+      VectorOperation::kAdd,              VectorOperation::kSubtract,
+      VectorOperation::kMultiply,         VectorOperation::kDivide,
+      VectorOperation::kEqual,            VectorOperation::kNotEqual,
+      VectorOperation::kModulo,           VectorOperation::kBitwiseXor,
+      VectorOperation::kBitwiseOr,        VectorOperation::kBitwiseAnd,
+      VectorOperation::kRightShift,      VectorOperation::kLeftShift,
+      VectorOperation::kSubscript};
+  {
+    using VectorType1 = vector_type_helper_t<TestType, 1>;
+    auto value1 = GetTestValue<decltype(VectorType1().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType1().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim1 operation: " << to_string(operation)) {
+        VectorType1 vector = PerformVectorOperationHost<VectorType1>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType2 = vector_type_helper_t<TestType, 2>;
+    auto value1 = GetTestValue<decltype(VectorType2().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType2().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim2 operation: " << to_string(operation)) {
+        VectorType2 vector = PerformVectorOperationHost<VectorType2>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType3 = vector_type_helper_t<TestType, 3>;
+    auto value1 = GetTestValue<decltype(VectorType3().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType3().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim3 operation: " << to_string(operation)) {
+        VectorType3 vector = PerformVectorOperationHost<VectorType3>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType4 = vector_type_helper_t<TestType, 4>;
+    auto value1 = GetTestValue<decltype(VectorType4().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType4().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim4 operation: " << to_string(operation)) {
+        VectorType4 vector = PerformVectorOperationHost<VectorType4>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
     }
   }
 }
@@ -176,25 +219,61 @@ TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Host", "", 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host", "", char1, uchar1,
-                   char2, uchar2, char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2,
-                   short3, ushort3, short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4,
-                   uint4, long1, ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1,
-                   ulonglong1, longlong2, ulonglong2, longlong3, ulonglong3, longlong4, ulonglong4,
-                   float1, float2, float3, float4, double1, double2, double3, double4) {
-  auto value1 = GetTestValue<decltype(TestType().x)>(0);
-  auto value2 = GetTestValue<decltype(TestType().x)>(1);
-
-  for (const auto operation :
-       {VectorOperation::kAddAssign, VectorOperation::kSubtractAssign,
-        VectorOperation::kMultiplyAssign, VectorOperation::kDivideAssign, VectorOperation::kAdd,
-        VectorOperation::kSubtract, VectorOperation::kMultiply, VectorOperation::kDivide,
-        VectorOperation::kEqual, VectorOperation::kNotEqual, VectorOperation::kModulo,
-        VectorOperation::kBitwiseXor, VectorOperation::kBitwiseOr, VectorOperation::kBitwiseAnd,
-        VectorOperation::kRightShift, VectorOperation::kLeftShift, VectorOperation::kSubscript}) {
-    DYNAMIC_SECTION("operation: " << to_string(operation)) {
-      TestType vector = PerformVectorOperationHost<TestType, false>(operation, value1, value2);
-      SanityCheck(operation, vector, value1, value2);
+HIP_TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host, char, unsigned char,
+                   short, unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
+  const VectorOperation operations[] = {
+      VectorOperation::kAddAssign,      VectorOperation::kSubtractAssign,
+      VectorOperation::kMultiplyAssign, VectorOperation::kDivideAssign,
+      VectorOperation::kAdd,            VectorOperation::kSubtract,
+      VectorOperation::kMultiply,       VectorOperation::kDivide,
+      VectorOperation::kEqual,          VectorOperation::kNotEqual,
+      VectorOperation::kModulo,         VectorOperation::kBitwiseXor,
+      VectorOperation::kBitwiseOr,      VectorOperation::kBitwiseAnd,
+      VectorOperation::kRightShift,     VectorOperation::kLeftShift,
+      VectorOperation::kSubscript};
+  {
+    using VectorType1 = vector_type_helper_t<TestType, 1>;
+    auto value1 = GetTestValue<decltype(VectorType1().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType1().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim1 operation: " << to_string(operation)) {
+        VectorType1 vector = PerformVectorOperationHost<VectorType1, false>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType2 = vector_type_helper_t<TestType, 2>;
+    auto value1 = GetTestValue<decltype(VectorType2().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType2().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim2 operation: " << to_string(operation)) {
+        VectorType2 vector = PerformVectorOperationHost<VectorType2, false>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType3 = vector_type_helper_t<TestType, 3>;
+    auto value1 = GetTestValue<decltype(VectorType3().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType3().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim3 operation: " << to_string(operation)) {
+        VectorType3 vector = PerformVectorOperationHost<VectorType3, false>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType4 = vector_type_helper_t<TestType, 4>;
+    auto value1 = GetTestValue<decltype(VectorType4().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType4().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim4 operation: " << to_string(operation)) {
+        VectorType4 vector = PerformVectorOperationHost<VectorType4, false>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
     }
   }
 }
@@ -213,47 +292,67 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host", "
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Device", "", char1, uchar1,
-                   char2, uchar2, char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2,
-                   short3, ushort3, short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4,
-                   uint4, long1, ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1,
-                   ulonglong1, longlong2, ulonglong2, longlong3, ulonglong3, longlong4, ulonglong4,
-                   float1, float2, float3, float4, double1, double2, double3, double4) {
-  auto value1 = GetTestValue<decltype(TestType().x)>(0);
-  auto value2 = GetTestValue<decltype(TestType().x)>(1);
-
-  for (const auto operation : {VectorOperation::kIncrementPrefix,
-                               VectorOperation::kIncrementPostfix,
-                               VectorOperation::kDecrementPrefix,
-                               VectorOperation::kDecrementPostfix,
-                               VectorOperation::kAddAssign,
-                               VectorOperation::kSubtractAssign,
-                               VectorOperation::kMultiplyAssign,
-                               VectorOperation::kDivideAssign,
-                               VectorOperation::kNegate,
-                               VectorOperation::kBitwiseNot,
-                               VectorOperation::kModuloAssign,
-                               VectorOperation::kBitwiseXorAssign,
-                               VectorOperation::kBitwiseOrAssign,
-                               VectorOperation::kBitwiseAndAssign,
-                               VectorOperation::kRightShiftAssign,
-                               VectorOperation::kLeftShiftAssign,
-                               VectorOperation::kAdd,
-                               VectorOperation::kSubtract,
-                               VectorOperation::kMultiply,
-                               VectorOperation::kDivide,
-                               VectorOperation::kEqual,
-                               VectorOperation::kNotEqual,
-                               VectorOperation::kModulo,
-                               VectorOperation::kBitwiseXor,
-                               VectorOperation::kBitwiseOr,
-                               VectorOperation::kBitwiseAnd,
-                               VectorOperation::kRightShift,
-                               VectorOperation::kLeftShift,
-                               VectorOperation::kSubscript}) {
-    DYNAMIC_SECTION("operation: " << to_string(operation)) {
-      TestType vector = PerformVectorOperationDevice<TestType>(operation, value1, value2);
-      SanityCheck(operation, vector, value1, value2);
+HIP_TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Device, char, unsigned char,
+                   short, unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
+  const VectorOperation operations[] = {
+      VectorOperation::kIncrementPrefix,  VectorOperation::kIncrementPostfix,
+      VectorOperation::kDecrementPrefix, VectorOperation::kDecrementPostfix,
+      VectorOperation::kAddAssign,       VectorOperation::kSubtractAssign,
+      VectorOperation::kMultiplyAssign,  VectorOperation::kDivideAssign,
+      VectorOperation::kNegate,           VectorOperation::kBitwiseNot,
+      VectorOperation::kModuloAssign,     VectorOperation::kBitwiseXorAssign,
+      VectorOperation::kBitwiseOrAssign,  VectorOperation::kBitwiseAndAssign,
+      VectorOperation::kRightShiftAssign,  VectorOperation::kLeftShiftAssign,
+      VectorOperation::kAdd,              VectorOperation::kSubtract,
+      VectorOperation::kMultiply,         VectorOperation::kDivide,
+      VectorOperation::kEqual,            VectorOperation::kNotEqual,
+      VectorOperation::kModulo,           VectorOperation::kBitwiseXor,
+      VectorOperation::kBitwiseOr,        VectorOperation::kBitwiseAnd,
+      VectorOperation::kRightShift,      VectorOperation::kLeftShift,
+      VectorOperation::kSubscript};
+  {
+    using VectorType1 = vector_type_helper_t<TestType, 1>;
+    auto value1 = GetTestValue<decltype(VectorType1().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType1().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim1 operation: " << to_string(operation)) {
+        VectorType1 vector = PerformVectorOperationDevice<VectorType1>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType2 = vector_type_helper_t<TestType, 2>;
+    auto value1 = GetTestValue<decltype(VectorType2().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType2().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim2 operation: " << to_string(operation)) {
+        VectorType2 vector = PerformVectorOperationDevice<VectorType2>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType3 = vector_type_helper_t<TestType, 3>;
+    auto value1 = GetTestValue<decltype(VectorType3().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType3().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim3 operation: " << to_string(operation)) {
+        VectorType3 vector = PerformVectorOperationDevice<VectorType3>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType4 = vector_type_helper_t<TestType, 4>;
+    auto value1 = GetTestValue<decltype(VectorType4().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType4().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim4 operation: " << to_string(operation)) {
+        VectorType4 vector = PerformVectorOperationDevice<VectorType4>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
     }
   }
 }
@@ -272,25 +371,61 @@ TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Device", ""
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device", "", char1, uchar1,
-                   char2, uchar2, char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2,
-                   short3, ushort3, short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4,
-                   uint4, long1, ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1,
-                   ulonglong1, longlong2, ulonglong2, longlong3, ulonglong3, longlong4, ulonglong4,
-                   float1, float2, float3, float4, double1, double2, double3, double4) {
-  auto value1 = GetTestValue<decltype(TestType().x)>(0);
-  auto value2 = GetTestValue<decltype(TestType().x)>(1);
-
-  for (const auto operation :
-       {VectorOperation::kAddAssign, VectorOperation::kSubtractAssign,
-        VectorOperation::kMultiplyAssign, VectorOperation::kDivideAssign, VectorOperation::kAdd,
-        VectorOperation::kSubtract, VectorOperation::kMultiply, VectorOperation::kDivide,
-        VectorOperation::kEqual, VectorOperation::kNotEqual, VectorOperation::kModulo,
-        VectorOperation::kBitwiseXor, VectorOperation::kBitwiseOr, VectorOperation::kBitwiseAnd,
-        VectorOperation::kRightShift, VectorOperation::kLeftShift, VectorOperation::kSubscript}) {
-    DYNAMIC_SECTION("operation: " << to_string(operation)) {
-      TestType vector = PerformVectorOperationDevice<TestType, false>(operation, value1, value2);
-      SanityCheck(operation, vector, value1, value2);
+HIP_TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device, char, unsigned char,
+                   short, unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
+  const VectorOperation operations[] = {
+      VectorOperation::kAddAssign,      VectorOperation::kSubtractAssign,
+      VectorOperation::kMultiplyAssign,  VectorOperation::kDivideAssign,
+      VectorOperation::kAdd,             VectorOperation::kSubtract,
+      VectorOperation::kMultiply,       VectorOperation::kDivide,
+      VectorOperation::kEqual,          VectorOperation::kNotEqual,
+      VectorOperation::kModulo,         VectorOperation::kBitwiseXor,
+      VectorOperation::kBitwiseOr,      VectorOperation::kBitwiseAnd,
+      VectorOperation::kRightShift,     VectorOperation::kLeftShift,
+      VectorOperation::kSubscript};
+  {
+    using VectorType1 = vector_type_helper_t<TestType, 1>;
+    auto value1 = GetTestValue<decltype(VectorType1().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType1().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim1 operation: " << to_string(operation)) {
+        VectorType1 vector = PerformVectorOperationDevice<VectorType1, false>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType2 = vector_type_helper_t<TestType, 2>;
+    auto value1 = GetTestValue<decltype(VectorType2().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType2().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim2 operation: " << to_string(operation)) {
+        VectorType2 vector = PerformVectorOperationDevice<VectorType2, false>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType3 = vector_type_helper_t<TestType, 3>;
+    auto value1 = GetTestValue<decltype(VectorType3().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType3().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim3 operation: " << to_string(operation)) {
+        VectorType3 vector = PerformVectorOperationDevice<VectorType3, false>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
+    }
+  }
+  {
+    using VectorType4 = vector_type_helper_t<TestType, 4>;
+    auto value1 = GetTestValue<decltype(VectorType4().x)>(0);
+    auto value2 = GetTestValue<decltype(VectorType4().x)>(1);
+    for (const auto operation : operations) {
+      DYNAMIC_SECTION("dim4 operation: " << to_string(operation)) {
+        VectorType4 vector = PerformVectorOperationDevice<VectorType4, false>(operation, value1, value2);
+        SanityCheck(operation, vector, value1, value2);
+      }
     }
   }
 }
@@ -307,7 +442,7 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device",
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorStructuredBindings_SanityCheck_Basic_host", "", float3, double3) {
+HIP_TEMPLATE_TEST_CASE(Unit_VectorStructuredBindings_SanityCheck_Basic_host, float3, double3) {
   auto value = GetTestValue<decltype(TestType().x)>(0);
 
   TestType vec3 = {value, value, value};
@@ -337,7 +472,7 @@ __global__ void generate_my_kernel() { static_assert(func()); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_VectorConstexpr_SanityCheck_Basic_host_device", "") {
+HIP_TEST_CASE(Unit_VectorConstexpr_SanityCheck_Basic_host_device) {
   generate_my_kernel<<<1, 1>>>();
   static_assert(func());
 }
@@ -429,7 +564,7 @@ __global__ void check_alignment_device() { check_alignment(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Vector_alignment_check", "") {
+HIP_TEST_CASE(Unit_Vector_alignment_check) {
   check_alignment_device<<<1, 1>>>();
   check_alignment();
 }
@@ -522,7 +657,7 @@ __global__ void check_size_device() { check_size(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Vector_size_check", "") {
+HIP_TEST_CASE(Unit_Vector_size_check) {
   check_size_device<<<1, 1>>>();
   check_size();
 }

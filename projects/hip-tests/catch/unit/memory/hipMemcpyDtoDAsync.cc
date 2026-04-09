@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 This testcase verifies the Basic scenario
@@ -40,7 +27,7 @@ This testcase verifies hipMemcpyDtoDAsync API
 7.DtoH copy and validating the result
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
                    double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;
@@ -91,6 +78,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
     HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
 
     HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
+    HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipFree(X_d));
     HIP_CHECK(hipFree(Y_d));
     HIP_CHECK(hipFree(Z_d));
@@ -109,18 +97,18 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemcpyDtoDAsync_Capture") {
+HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count <= 1) {
-    SUCCEED("Machine doesn't have multiple GPUs; skipping test");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
   int peer_access = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&peer_access, 0, 1));
   if (!peer_access) {
-    SUCCEED("Machine doesn't have P2P support enabled; skipping test");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     return;
   }
 

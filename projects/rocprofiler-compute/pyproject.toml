@@ -4,7 +4,7 @@ requires-python = ">=3.9"
 
 [project.optional-dependencies]
 developer = [
-    "ruff>=0.12.7",
+    "ruff>=0.14.11",
     "pre-commit",
 ]
 
@@ -21,8 +21,7 @@ extend-exclude = [
     ".misc",
     "external",
     "build-rocprof_compute",
-    "src/rocprof_compute_analyze/analysis_db.py",
-    "src/rocprof_compute_tui/widgets/splitter.py"
+    "src/vendored",
 ]
 
 [tool.ruff.lint]
@@ -65,6 +64,7 @@ docstring-code-line-length = "dynamic"
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+    "-rx",
 ]
 
 pythonpath = [
@@ -72,6 +72,7 @@ pythonpath = [
     "src",
     "src/rocprof_compute_soc",
     "src/utils",
+    "src/roofline",
     "src/rocprof_compute_analyze/utils",
     "tests"
 ]
@@ -101,7 +102,6 @@ markers = [
     "num_xcds_cli_output",
     "sets_func",
     "sets_perf",
-    "pc_sampling",
     "live_attach_detach",
     "roofline_1",
     "roofline_2",
@@ -120,4 +120,5 @@ markers = [
     "time_unit_conversion",
     "time_unit_edge_cases",
     "time_unit_integration",
+    "tui",
 ]

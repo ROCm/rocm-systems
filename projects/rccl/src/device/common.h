@@ -18,7 +18,10 @@
 
 #define __syncwarp()
 
-#ifdef __GFX9__
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define STORE(DST, SRC) \
+  { __hip_atomic_store((__attribute__((address_space(1))) __typeof__(*(DST)) *)(DST), (SRC), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); }
+#elif defined(__GFX9__)
 #define STORE(DST, SRC) \
   { __atomic_store_n((DST), (SRC), __ATOMIC_RELAXED); }
 #else
@@ -616,7 +619,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 #endif
 #ifdef ENABLE_WARP_SPEED
   if(tid == 0) {
-    ncclShmem.warpComm = args->comm->warpLevelComm;
+    ncclShmem.warpComm = args->warpLevelComm;
   }
 #endif
   __syncthreads(); // publish shmem

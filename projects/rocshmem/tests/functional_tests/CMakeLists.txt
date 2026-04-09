@@ -67,6 +67,8 @@ target_sources(
     empty_tester.cpp
     wavefront_primitives.cpp
     flood_tester.cpp
+    flood_amo_tester.cpp
+    device_bitcode_tester.cpp
 )
 
 ###############################################################################
@@ -109,3 +111,8 @@ target_link_libraries(
     $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
     hiprtc
 )
+
+###############################################################################
+# DEVICE BITCODE TESTER (put/get via HSACO + rocshmem_hipmodule_init)
+###############################################################################
+include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeDeviceBitcodeTester.cmake)

@@ -12,7 +12,7 @@
 
 TEST(ArchiveIntegrationTest, NoOpArchive) {
   std::string test_kpack =
-      test_utils::get_test_assets_dir() / "test_noop.kpack";
+      (test_utils::get_test_assets_dir() / "test_noop.kpack").string();
   ASSERT_TRUE(std::filesystem::exists(test_kpack))
       << "Test asset not found: " << test_kpack;
 
@@ -83,7 +83,7 @@ TEST(ArchiveIntegrationTest, NoOpArchive) {
 
 TEST(ArchiveIntegrationTest, ZstdArchive) {
   std::string test_kpack =
-      test_utils::get_test_assets_dir() / "test_zstd.kpack";
+      (test_utils::get_test_assets_dir() / "test_zstd.kpack").string();
   ASSERT_TRUE(std::filesystem::exists(test_kpack))
       << "Test asset not found: " << test_kpack;
 
@@ -146,7 +146,7 @@ TEST(ArchiveIntegrationTest, ZstdArchive) {
 // Test kpack_get_binary retrieves binary names correctly
 TEST(ArchiveIntegrationTest, GetBinaryNames) {
   std::string test_kpack =
-      test_utils::get_test_assets_dir() / "test_noop.kpack";
+      (test_utils::get_test_assets_dir() / "test_noop.kpack").string();
   ASSERT_TRUE(std::filesystem::exists(test_kpack))
       << "Test asset not found: " << test_kpack;
 
@@ -184,7 +184,7 @@ TEST(ArchiveIntegrationTest, GetBinaryNames) {
 // Test kpack_get_binary retrieves binaries from zstd archive
 TEST(ArchiveIntegrationTest, GetBinaryNames_Zstd) {
   std::string test_kpack =
-      test_utils::get_test_assets_dir() / "test_zstd.kpack";
+      (test_utils::get_test_assets_dir() / "test_zstd.kpack").string();
   ASSERT_TRUE(std::filesystem::exists(test_kpack))
       << "Test asset not found: " << test_kpack;
 
@@ -215,7 +215,7 @@ TEST(ArchiveIntegrationTest, GetBinaryNames_Zstd) {
 // Test that multiple kernel loads return independent copies
 TEST(ArchiveIntegrationTest, KernelCacheOverwrite) {
   std::string test_kpack =
-      test_utils::get_test_assets_dir() / "test_noop.kpack";
+      (test_utils::get_test_assets_dir() / "test_noop.kpack").string();
 
   kpack_archive_t archive;
   kpack_error_t err = kpack_open(test_kpack.c_str(), &archive);

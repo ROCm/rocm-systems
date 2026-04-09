@@ -1,36 +1,26 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 
-
-#define LEN (16 * 1024)
-#define SIZE (LEN * sizeof(float))
-
-__global__ void vectorAdd(float* Ad, float* Bd) {
+__global__ void vectorAdd(float* Ad, float* Bd, size_t num_elements) {
   extern __shared__ float sBd[];
   int tx = threadIdx.x;
-  for (int i = 0; i < LEN / 64; i++) {
-    sBd[tx + i * 64] = Ad[tx + i * 64] + 1.0f;
-    Bd[tx + i * 64] = sBd[tx + i * 64];
+  for (size_t i = 0; i < num_elements / blockDim.x; i++) {
+    sBd[tx + i * blockDim.x] = Ad[tx + i * blockDim.x] + 1.0f;
+    Bd[tx + i * blockDim.x] = sBd[tx + i * blockDim.x];
+  }
+
+  const int remainder = static_cast<int>(num_elements % blockDim.x);
+  if (tx < remainder) {
+    const int idx = (num_elements - remainder) + tx;
+    sBd[idx] = Ad[idx] + 1.0f;
+    Bd[idx] = sBd[idx];
   }
 }
 
@@ -56,35 +46,50 @@ __global__ void vectorAdd(float* Ad, float* Bd) {
  * ------------------------
  *    - HIP_VERSION >= 5.5
  */
+HIP_TEST_CASE(Unit_hipDynamicShared2) {
+  hipFuncAttributes func_attributes{};
+  HIP_CHECK(hipFuncGetAttributes(&func_attributes, reinterpret_cast<const void*>(&vectorAdd)));
 
-TEST_CASE("Unit_hipDynamicShared2") {
-  float *A, *B, *Ad, *Bd;
-  A = new float[LEN];
-  B = new float[LEN];
-  for (int i = 0; i < LEN; i++) {
+  int max_shared_memory_per_block{};
+  HIP_CHECK(hipDeviceGetAttribute(&max_shared_memory_per_block,
+                                  hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
+
+  size_t threadPerBlock = 64;
+  const size_t dynamic_shared_bytes = max_shared_memory_per_block - func_attributes.sharedSizeBytes;
+
+  REQUIRE(dynamic_shared_bytes >= threadPerBlock * sizeof(float));
+  const size_t num_elements = dynamic_shared_bytes / sizeof(float);
+
+  std::vector<float> A(num_elements);
+  std::vector<float> B(num_elements);
+  for (int i = 0; i < num_elements; i++) {
     A[i] = 1.0f;
     B[i] = 1.0f;
   }
-  HIP_CHECK(hipMalloc(&Ad, SIZE));
-  HIP_CHECK(hipMalloc(&Bd, SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
 
-  hipError_t ret = hipFuncSetAttribute(reinterpret_cast<const void*>(&vectorAdd),
-                                       hipFuncAttributeMaxDynamicSharedMemorySize, SIZE);
+  float *Ad, *Bd;
+  HIP_CHECK(hipMalloc(&Ad, dynamic_shared_bytes));
+  HIP_CHECK(hipMalloc(&Bd, dynamic_shared_bytes));
 
-  REQUIRE(ret == hipSuccess);
-  hipLaunchKernelGGL(vectorAdd, dim3(1, 1, 1), dim3(64, 1, 1), SIZE, 0, Ad, Bd);
+  HIP_CHECK(hipMemcpy(Ad, A.data(), dynamic_shared_bytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Bd, B.data(), dynamic_shared_bytes, hipMemcpyHostToDevice));
+
+  //  The sum of sharedSizeBytes (statically-allocated shared memory per block) and
+  //  hipFuncAttributeMaxDynamicSharedMemorySize (dynamically-allocated shared memory per block)
+  //  cannot exceed the size of hipDeviceAttributeMaxSharedMemoryPerBlock.
+  HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(&vectorAdd),
+                                hipFuncAttributeMaxDynamicSharedMemorySize, dynamic_shared_bytes));
+
+  hipLaunchKernelGGL(vectorAdd, dim3(1, 1, 1), dim3(threadPerBlock, 1, 1), dynamic_shared_bytes, 0,
+                     Ad, Bd, num_elements);
   HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));
-  for (int i = 0; i < LEN; i++) {
-    assert(B[i] > 1.0f && B[i] < 3.0f);
+  HIP_CHECK(hipMemcpy(B.data(), Bd, dynamic_shared_bytes, hipMemcpyDeviceToHost));
+  for (int i = 0; i < num_elements; i++) {
+    REQUIRE(B[i] > 1.0f);
+    REQUIRE(B[i] < 3.0f);
   }
   HIP_CHECK(hipFree(Ad));
   HIP_CHECK(hipFree(Bd));
-
-  delete[] A;
-  delete[] B;
 }
 
 /**

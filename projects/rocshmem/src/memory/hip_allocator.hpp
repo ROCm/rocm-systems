@@ -35,53 +35,200 @@
 #include "memory_allocator.hpp"
 
 #include <hip/hip_runtime_api.h>
+#include <hip/hip_version.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <cstdlib>
+#include <cstring>
+#include <cerrno>
 #include <limits>
+#include <map>
+#include <vector>
+#include <unistd.h>
+#include <sys/syscall.h>
 
-// `hipDeviceMallocUncached` was introduced at ROCm 5.5
-#if (HIP_VERSION_MAJOR > 5) || \
-    (HIP_VERSION_MAJOR == 5 && HIP_VERSION_MINOR >= 5)
-#define HIP_SUPPORTS_MALLOC_UNCACHED
-#elif defined USE_HEAP_DEVICE_UNCACHED
-#error "USE_HEAP_DEVICE_UNCACHED unsupported in this HIP version"
-#endif
 namespace rocshmem {
+
+enum HIPIpcHandleType {
+  HandleTypeLegacy = 0,
+  HandleTypePosix,
+  HandleTypeFabric,
+  HandleTypeLast
+};
+
+enum HIPAllocatorType {
+  AllocatorTypeCoarsegrained = 0,
+  AllocatorTypeFinegrained,
+  AllocatorTypeUncached,
+  AllocatorTypeVMM,
+  AllocatorTypeLast
+};
+
+#if HIP_VERSION >= 70000000
+struct hipIpcMemHandlePosix_t {
+  uint64_t fd;
+  uint32_t pid;
+  size_t size;
+};
+#endif
+
+class HIPIpcHandleVec {
+public:
+  virtual ~HIPIpcHandleVec() = default;
+
+  virtual HIPIpcHandleType GetIpcHandleType() = 0;
+  virtual void* GetHandleVecElem(int elem) = 0;
+};
+
+class HIPIpcHandleLegacyVec : public HIPIpcHandleVec {
+public:
+  friend class HIPAllocator;
+
+  HIPIpcHandleType GetIpcHandleType() { return HandleTypeLegacy; }
+
+  void* GetHandleVecElem(int elem)
+  {
+    return reinterpret_cast<void*> (&this->handle[elem]);
+  }
+
+protected:
+  std::vector<hipIpcMemHandle_t> handle;
+
+};
+
+#if HIP_VERSION >= 70000000
+class HIPIpcHandlePosixVec : public HIPIpcHandleVec {
+public:
+  friend class HIPAllocatorVMMPosixFd;
+
+  HIPIpcHandleType GetIpcHandleType() { return HandleTypePosix; }
+
+  void* GetHandleVecElem(int elem)
+  {
+    return reinterpret_cast<void*> (&this->handle[elem]);
+  }
+
+protected:
+  std::vector<hipIpcMemHandlePosix_t> handle;
+
+};
+#endif
 
 class HIPAllocator : public MemoryAllocator {
  public:
+
   HIPAllocator() : MemoryAllocator(hipMalloc, hipFree) {}
-};
 
-class HIPAllocatorFinegrained : public MemoryAllocator {
- public:
-  HIPAllocatorFinegrained()
-      : MemoryAllocator(hipExtMallocWithFlags, hipFree,
-                        hipDeviceMallocFinegrained) {}
-};
+  HIPAllocator(hipError_t (*hip_alloc_fn)(void**, size_t),
+               hipError_t (*hip_free_fn)(void*)) :
+      MemoryAllocator (hip_alloc_fn, hip_free_fn) {}
 
-#if defined HIP_SUPPORTS_MALLOC_UNCACHED
-class HIPAllocatorUncached : public MemoryAllocator {
- public:
-  HIPAllocatorUncached()
-      : MemoryAllocator(hipExtMallocWithFlags, hipFree,
-                        hipDeviceMallocUncached) {}
-};
+  HIPAllocator (hipError_t (*hip_alloc_fn)(void**, size_t, unsigned),
+                hipError_t (*hip_free_fn)(void*), unsigned flags) :
+    MemoryAllocator (hip_alloc_fn, hip_free_fn, flags) {}
 
-// The default fine-grained coherence allocator is the uncached allocator
-using HIPDefaultFinegrainedAllocator = HIPAllocatorUncached;
-#else
-// The default fine-grained coherence allocator is the fine-grained allocator
-using HIPDefaultFinegrainedAllocator = HIPAllocatorFinegrained;
-#endif
+  virtual ~HIPAllocator() = default;
 
-class HIPAllocatorManaged : public MemoryAllocator {
- public:
-  HIPAllocatorManaged()
-      : MemoryAllocator(hipMallocManaged, hipFree, hipMemAttachHost) {
-    _managed = true;
+  HIPAllocatorType type = AllocatorTypeCoarsegrained;
+
+  virtual hipError_t GetIpcHandle(void *dev_ptr, void *handle)
+  {
+    return hipIpcGetMemHandle(reinterpret_cast<hipIpcMemHandle_t *>(handle), dev_ptr);
+  }
+
+  virtual hipError_t OpenIpcHandle(void **dev_ptr, void *handle)
+  {
+    return hipIpcOpenMemHandle(dev_ptr, *(reinterpret_cast<hipIpcMemHandle_t *>(handle)),
+                               hipIpcMemLazyEnablePeerAccess);
+  }
+
+  virtual hipError_t CloseIpcHandle(void *dev_ptr)
+  {
+    return hipIpcCloseMemHandle(dev_ptr);
+  }
+
+  virtual size_t GetIpcHandleSize()
+  {
+    return sizeof(hipIpcMemHandle_t);
+  }
+
+  virtual HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems)
+  {
+    HIPIpcHandleLegacyVec* vec = new HIPIpcHandleLegacyVec();
+    vec->handle.resize(num_elems);
+    return vec;
+  }
+
+  virtual hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset)
+  {
+    if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) {
+      return hipErrorInvalidValue;
+    }
+
+    // Use HSA API to export dmabuf from device pointer
+    uint64_t offset = 0;
+    int fd = -1;
+    hsa_status_t status = hsa_amd_portable_export_dmabuf(dev_ptr, size, &fd, &offset);
+
+    if (status != HSA_STATUS_SUCCESS) {
+      *dmabuf_fd = -1;
+      *dmabuf_offset = 0;
+      return hipErrorInvalidValue;
+    }
+
+    *dmabuf_fd = fd;
+    *dmabuf_offset = offset;
+    return hipSuccess;
   }
 };
+
+using HIPAllocatorCoarsegrained = HIPAllocator;
+
+class HIPAllocatorFinegrained : public HIPAllocator {
+ public:
+  HIPAllocatorFinegrained()
+      : HIPAllocator(hipExtMallocWithFlags, hipFree,
+                     hipDeviceMallocFinegrained) {
+    type = AllocatorTypeFinegrained;
+  }
+};
+
+#if defined HAVE_DEVICE_MALLOC_UNCACHED
+class HIPAllocatorUncached : public HIPAllocator {
+ public:
+  HIPAllocatorUncached()
+      : HIPAllocator(hipExtMallocWithFlags, hipFree,
+                     hipDeviceMallocUncached) {
+    type = AllocatorTypeUncached;
+  }
+};
+#endif
+
+#if HIP_VERSION >= 70000000
+class HIPAllocatorVMMPosixFd : public HIPAllocator {
+ private:
+  struct VMMAllocationInfo {
+    hipMemGenericAllocationHandle_t handle;
+    size_t size;
+    int exported_fd;  // File descriptor exported for IPC, -1 if not exported
+  };
+  static std::map<void*, VMMAllocationInfo> allocations_;
+  static std::map<void*, VMMAllocationInfo> imported_allocations_;
+
+  static hipError_t VMMAlloc(void** ptr, size_t size);
+  static hipError_t VMMFree(void* ptr);
+
+ public:
+  HIPAllocatorVMMPosixFd();
+
+  hipError_t GetIpcHandle(void *dev_ptr, void *handle) override;
+  hipError_t OpenIpcHandle(void **dev_ptr, void *handle) override;
+  hipError_t CloseIpcHandle(void *dev_ptr) override;
+  size_t GetIpcHandleSize() override;
+  HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
+  hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
+};
+#endif
 
 class HIPHostAllocator : public MemoryAllocator {
  public:
@@ -89,58 +236,12 @@ class HIPHostAllocator : public MemoryAllocator {
       : MemoryAllocator(hipHostMalloc, hipFree, hipHostMallocCoherent) {}
 };
 
-class HostAllocator : public MemoryAllocator {
- public:
-  HostAllocator() : MemoryAllocator(std::malloc, std::free) {}
-};
-
 class PosixAligned64Allocator : public MemoryAllocator {
  public:
   PosixAligned64Allocator() : MemoryAllocator(posix_memalign, std::free, 64) {}
 };
 
-template <class T>
-class StdAllocatorHIP {
- public:
-  typedef T value_type;
-
-  StdAllocatorHIP() = default;
-
-  template <class U>
-  constexpr StdAllocatorHIP(const StdAllocatorHIP<U>&) noexcept {}
-
-  [[nodiscard]] T* allocate(size_t n) {
-    if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
-      throw std::bad_array_new_length();
-    }
-
-    T* p{nullptr};
-    allocator_.allocate(reinterpret_cast<void**>(&p), n * sizeof(T));
-    if (p) {
-      return p;
-    }
-
-    throw std::bad_alloc();
-  }
-
-  void deallocate(T* p, [[maybe_unused]] size_t n) noexcept {
-    allocator_.deallocate(p);
-  }
-
- private:
-  HIPDefaultFinegrainedAllocator allocator_{};
-};
-
-template <class T, class U>
-bool operator==(const StdAllocatorHIP<T>&, const StdAllocatorHIP<U>&) {
-  return true;
-}
-
-template <class T, class U>
-bool operator!=(const StdAllocatorHIP<T>&, const StdAllocatorHIP<U>&) {
-  return false;
-}
-
+using HostAllocator = PosixAligned64Allocator;
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_MEMORY_HIP_ALLOCATOR_HPP_

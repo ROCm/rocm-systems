@@ -34,6 +34,7 @@ enum class test_type_identifier_t : uint32_t
     sample_type_2    = 2,
     sample_type_3    = 3,
     sample_type_4    = 4,
+    sample_type_5    = 5,
     fragmented_space = 0xFFFF
 };
 struct test_sample_1 : public rocprofsys::trace_cache::cacheable_t
@@ -111,6 +112,21 @@ struct test_sample_4 : public rocprofsys::trace_cache::cacheable_t
     std::vector<uint32_t> data;
 
     bool operator==(const test_sample_4& other) const { return data == other.data; }
+};
+
+struct test_sample_5 : public rocprofsys::trace_cache::cacheable_t
+{
+    static constexpr test_type_identifier_t type_identifier =
+        test_type_identifier_t::sample_type_5;
+
+    test_sample_5() = default;
+    test_sample_5(std::optional<uint32_t> d)
+    : data(d)
+    {}
+
+    std::optional<uint32_t> data;
+
+    bool operator==(const test_sample_5& other) const { return data == other.data; }
 };
 
 template <>
@@ -201,6 +217,29 @@ rocprofsys::trace_cache::deserialize(uint8_t*& buffer)
 template <>
 inline size_t
 rocprofsys::trace_cache::get_size(const test_sample_4& item)
+{
+    return rocprofsys::trace_cache::utility::get_size(item.data);
+}
+
+template <>
+inline void
+rocprofsys::trace_cache::serialize(uint8_t* buffer, const test_sample_5& item)
+{
+    rocprofsys::trace_cache::utility::store_value(buffer, item.data);
+}
+
+template <>
+inline test_sample_5
+rocprofsys::trace_cache::deserialize(uint8_t*& buffer)
+{
+    test_sample_5 result;
+    rocprofsys::trace_cache::utility::parse_value(buffer, result.data);
+    return result;
+}
+
+template <>
+inline size_t
+rocprofsys::trace_cache::get_size(const test_sample_5& item)
 {
     return rocprofsys::trace_cache::utility::get_size(item.data);
 }

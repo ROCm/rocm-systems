@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "half_precision_common.hh"
 #include "casting_common.hh"
@@ -33,7 +17,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, T, Float16)                                                           \
   CAST_F2I_RZ_REF_DEF(kern_name, T, Float16)                                                       \
                                                                                                    \
-  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive") {                                      \
+  HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive) {                                     \
     T (*ref)(Float16) = kern_name##_ref;                                                           \
     CastUnaryHalfPrecisionTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<T>());           \
   }
@@ -413,7 +397,7 @@ CAST_KERNEL_DEF(__half_as_short, short, Float16)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___half_as_short_Accuracy_Positive") {
+HIP_TEST_CASE(Unit_Device___half_as_short_Accuracy_Positive) {
   short (*ref)(Float16) = type2_as_type1_ref<short, Float16>;
   CastUnaryHalfPrecisionTest(__half_as_short_kernel, ref, EqValidatorBuilderFactory<short>());
 }
@@ -433,7 +417,7 @@ CAST_KERNEL_DEF(__half_as_ushort, unsigned short, Float16)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___half_as_ushort_Accuracy_Positive") {
+HIP_TEST_CASE(Unit_Device___half_as_ushort_Accuracy_Positive) {
   unsigned short (*ref)(Float16) = type2_as_type1_ref<unsigned short, Float16>;
   CastUnaryHalfPrecisionTest(__half_as_ushort_kernel, ref,
                              EqValidatorBuilderFactory<unsigned short>());

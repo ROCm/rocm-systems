@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <stdlib.h>
 #include <stdio.h>
@@ -34,7 +22,7 @@ THE SOFTWARE.
  * Fork() a child process and verify that 2 GB has been
  * allocated in parent process.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario1") {
+HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario1) {
   constexpr size_t size = 2147483648;  // 2GB
   int fd[2], fd1[2], status;
   status = pipe(fd);
@@ -94,7 +82,7 @@ TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario1") {
  * 2 GB of device memory. Signal the parent process. Verify from the parent
  * process that 2 GB is allocated in the child process.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario2") {
+HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario2) {
   constexpr size_t size = 2147483648;  // 2GB
   int fd[2], fd2[2], status;
   status = pipe(fd);
@@ -151,7 +139,7 @@ TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario2") {
  * child process. Verify from the parent process that 2 GB is
  * freed in the child process.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario3") {
+HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario3) {
   constexpr size_t size = 2147483648;  // 2GB
   int fd[2], status;
   status = pipe(fd);
@@ -193,7 +181,7 @@ TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario3") {
  * 2 GB of device memory. Exit from child process. Verify from the parent
  * process that 2 GB is freed in the child process.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_scenario4") {
+HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_scenario4) {
   constexpr size_t size = 2147483648;  // 2GB
   pid_t child_pid;
   child_pid = fork();  // Create a new child process
@@ -219,7 +207,7 @@ TEST_CASE("Unit_hipMemGetInfo_Functional_scenario4") {
  * Fork() a child process and verify that 2 GB has been allocated from
  * parent process in every device.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5") {
+HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5) {
   constexpr size_t size = 2147483648;  // 2GB
   size_t free = 0, total = 0;
   int fd1[2], fd2[2], status;
@@ -367,7 +355,7 @@ static bool testHiddenFreeMemFromChild() {
  * in parent. Get free and total memory. Free memory available should be
  * actual (actual free - 4 GB).
  */
-TEST_CASE("Unit_hipMemGetInfo_SetHiddenFreeMemFromChild") {
+HIP_TEST_CASE(Unit_hipMemGetInfo_SetHiddenFreeMemFromChild) {
   REQUIRE(true == testHiddenFreeMemFromChild());
 }
 
@@ -375,7 +363,7 @@ TEST_CASE("Unit_hipMemGetInfo_SetHiddenFreeMemFromChild") {
  * Scenario: Set the HIP_HIDDEN_FREE_MEM to 4GB. Invoke hipMemGetInfo to
  * verify that 4GB free memory is hidden for all available GPUs.
  */
-TEST_CASE("Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu") {
+HIP_TEST_CASE(Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu) {
   int numDevices = 0;
   int64_t size_tohide = (FREE_MEM_TO_HIDE / (1024 * 1024));  // in MB
   // set environment variable from shell

@@ -26,8 +26,12 @@
 
 #include <glog/logging.h>
 
+#include <fmt/format.h>  // usually used in conjunction with logging
+#include <fmt/ranges.h>
+
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #define ROCP_LOG_LEVEL_TRACE   4

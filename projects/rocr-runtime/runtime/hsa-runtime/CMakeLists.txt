@@ -93,8 +93,36 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+## Find AMD CUID library.
+set(AMDCUID_ROOT "/opt/amdcuid" CACHE PATH "Path to AMDCUID installation")
+find_library(AMDCUID_LIB
+  NAMES amdcuid_shared
+  PATHS ${AMDCUID_ROOT}/lib
+  NO_DEFAULT_PATH
+)
+find_path(AMDCUID_INCLUDE_DIR
+  NAMES amd_cuid.h
+  PATHS ${AMDCUID_ROOT}/include
+  NO_DEFAULT_PATH
+)
+if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR) 
+  message(STATUS "Found AMDCUID lib: ${AMDCUID_LIB}")
+  message(STATUS "Found AMDCUID header: ${AMDCUID_INCLUDE_DIR}")
+  set(AMDCUID_FOUND TRUE)
+else()
+  message(WARNING "AMDCUID Library not found")
+  set(AMDCUID_FOUND FALSE)
+endif()
+
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
+
+## Enable parallel compilation on MSVC.
+if(MSVC)
+  if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+    target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE /MP$ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+  endif()
+endif()
 
 if (UNIX)
   pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
@@ -263,6 +291,16 @@ if (${PC_SAMPLING_SUPPORT})
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
 endif()
 
+if (${AMDCUID_FOUND})
+  find_package(OpenSSL REQUIRED) # Required by CUID library
+  target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+  set_target_properties(${CORE_RUNTIME_TARGET} PROPERTIES
+              BUILD_RPATH "${AMDCUID_ROOT}/lib"
+              INSTALL_RPATH "${AMDCUID_ROOT}/lib")
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_AMDCUID_SUPPORT)
+endif()
+
 if (NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64")
   set (IMAGE_SUPPORT ON)
 endif()
@@ -410,28 +448,35 @@ endif()
 
 ## Set install information
 # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
-install ( TARGETS ${CORE_RUNTIME_TARGET}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
+if (NOT WIN32)
+  install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
+
+  install ( TARGETS ${CORE_RUNTIME_TARGET}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
+endif()
 
 # Install license
 if(ENABLE_ASAN_PACKAGING)
   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
 endif()
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
+if (NOT WIN32)
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
+endif()
 
 # Install public headers
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inc/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hsa COMPONENT dev )
 
 ## Configure and install package config file
 # Record our usage data for clients find_package calls.
-install ( EXPORT ${CORE_RUNTIME_NAME}Targets
-  FILE ${CORE_RUNTIME_NAME}Targets.cmake
-  NAMESPACE ${CORE_RUNTIME_NAME}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-  COMPONENT dev)
+if (NOT WIN32)
+  install ( EXPORT ${CORE_RUNTIME_NAME}Targets
+    FILE ${CORE_RUNTIME_NAME}Targets.cmake
+    NAMESPACE ${CORE_RUNTIME_NAME}::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+    COMPONENT dev)
+endif()
 
 # Adds the target alias hsa-runtime64::hsa-runtime64 to the local cmake cache.
 # This isn't necessary today.  It's harmless preparation for some
@@ -451,9 +496,11 @@ configure_package_config_file(${CORE_RUNTIME_NAME}-config.cmake.in
 write_basic_package_version_file(${CORE_RUNTIME_NAME}-config-version.cmake
   VERSION ${SO_VERSION_STRING} COMPATIBILITY AnyNewerVersion )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config-version.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-  COMPONENT dev)
+if (NOT WIN32)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config-version.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+    COMPONENT dev)
+endif()
 
 # Install build files needed only when using a static build.
 if( NOT ${BUILD_SHARED_LIBS} )

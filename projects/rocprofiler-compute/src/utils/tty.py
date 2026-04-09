@@ -1,30 +1,9 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import copy
+import shutil
 import textwrap
 from pathlib import Path
 from typing import Any, Optional, TextIO
@@ -33,15 +12,117 @@ import pandas as pd
 from tabulate import tabulate
 
 import config
-from utils import mem_chart, parser, schema
-from utils.kernel_name_shortener import kernel_name_shortener
+from utils import mem_chart_gfx9, mem_chart_gfx11, parser, schema
+from utils.kernel_name_shortener import (
+    kernel_name_shortener,
+)
 from utils.logger import console_error, console_log, console_warning
-from utils.utils import (
+from utils.utils_analysis import (
+    NS_TO_MS,
+    CallTreeNode,
+    get_bw_scale_and_unit,
+    simplify_kernel_name,
+)
+from utils.utils_common import (
     METRIC_ID_RE,
     convert_metric_id_to_panel_info,
     get_panel_alias,
     get_uuid,
 )
+
+
+def _tty_view_is_table(args: argparse.Namespace) -> bool:
+    """True when ``--view table`` was given (plain tables; ignore cli_style)."""
+    return getattr(args, "view", None) == "table"
+
+
+KERNEL_NAME_WRAP_WIDTH = 40
+
+
+def wrap_kernel_name(name: str) -> str:
+    """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
+    return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
+
+
+def _recalculate_pct_of_peak(
+    df: pd.DataFrame,
+    idx: Any,  # noqa: ANN401
+    value_col: str,
+    peak_col: str,
+    pct_cols: list[str],
+    decimal: int,
+) -> None:
+    """Recalculate Pct of Peak = (value / peak) * 100 after BW scaling."""
+    for pct_col in pct_cols:
+        if pct_col not in df.columns:
+            continue
+        try:
+            val = df.loc[idx, value_col]
+            peak = df.loc[idx, peak_col]
+            if (
+                pd.notna(val)
+                and pd.notna(peak)
+                and val != "N/A"
+                and peak != "N/A"
+                and float(peak) != 0
+            ):
+                pct = (float(val) / float(peak)) * 100
+                df.loc[idx, pct_col] = round(pct, decimal)
+        except (ValueError, TypeError, ZeroDivisionError):
+            pass
+
+
+def scale_bw_columns(
+    df: pd.DataFrame, value_columns: list[str], decimal: int = 2
+) -> pd.DataFrame:
+    """Scale Bytes/s rows to human-readable units; recalculate Pct of Peak."""
+    if "Unit" not in df.columns:
+        return df
+
+    df_copy = df.copy()
+
+    bw_rows = df_copy["Unit"].str.lower().str.contains("bytes/s", na=False)
+    if not bw_rows.any():
+        return df_copy
+
+    pct_cols = ["Pct of Peak", "PoP"]
+    value_col = "Value" if "Value" in df_copy.columns else "Avg"
+    peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df_copy.columns else "Peak"
+
+    for idx in df_copy.index[bw_rows]:
+        # Determine scale from the primary value column
+        primary_value = None
+        for col in ["Value", "Avg"]:
+            if col in df_copy.columns:
+                try:
+                    val = df_copy.loc[idx, col]
+                    if pd.notna(val) and val != "N/A":
+                        primary_value = float(val)
+                        break
+                except (ValueError, TypeError):
+                    continue
+
+        if primary_value is None or primary_value == 0:
+            continue
+
+        divisor, unit = get_bw_scale_and_unit(primary_value)
+
+        # Scale all numeric bandwidth columns with the same divisor
+        for col in value_columns:
+            if col not in df_copy.columns:
+                continue
+            try:
+                val = df_copy.loc[idx, col]
+                if pd.notna(val) and val != "N/A":
+                    df_copy.loc[idx, col] = round(float(val) / divisor, decimal)
+            except (ValueError, TypeError):
+                pass
+
+        _recalculate_pct_of_peak(df_copy, idx, value_col, peak_col, pct_cols, decimal)
+
+        df_copy.loc[idx, "Unit"] = unit
+
+    return df_copy
 
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
@@ -66,17 +147,18 @@ def get_table_string(
     """
     Convert DataFrame to a formatted table string, wrapping specified columns.
     """
-    df_to_show = df.transpose() if transpose else df
+    df_to_show = df.transpose().copy() if transpose else df.copy()
 
-    wrap_columns = ["Description"]
-    wrap_width = 40
-    for col in wrap_columns:
-        if col in df_to_show.columns:
-            df_to_show[col] = (
-                df_to_show[col]
-                .astype(str)
-                .apply(lambda x: textwrap.fill(x, width=wrap_width))
-            )
+    if "Description" in df_to_show.columns:
+        df_to_show["Description"] = (
+            df_to_show["Description"]
+            .astype(str)
+            .apply(lambda x: textwrap.fill(x, width=40))
+        )
+    if "Kernel_Name" in df_to_show.columns:
+        df_to_show["Kernel_Name"] = (
+            df_to_show["Kernel_Name"].astype(str).apply(wrap_kernel_name)
+        )
     df_with_index = df_to_show.reset_index()
     return tabulate(
         df_with_index.values,
@@ -185,19 +267,18 @@ def is_roofline_shown(
                 if not kernel_top_df.empty and kernel_id in kernel_top_df.index:
                     kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
                     kernel_pct = (
-                        kernel_top_df.loc[kernel_id, "Pct"]
-                        if "Pct" in kernel_top_df.columns
+                        kernel_top_df.loc[kernel_id, "Percent"]
+                        if "Percent" in kernel_top_df.columns
                         else 0
                     )
                 else:
                     kernel_name = metrics.get("name", f"Kernel {kernel_id}")
                     kernel_pct = 0
 
-                display_name = (
-                    kernel_name[:80] + "..." if len(kernel_name) > 80 else kernel_name
-                )
                 print(
-                    f"\nKernel {kernel_id}: {display_name} ({kernel_pct:.1f}%)",
+                    f"\nKernel {kernel_id}: "
+                    f"{wrap_kernel_name(kernel_name)}"
+                    f" ({kernel_pct:.1f}%)",
                     file=output,
                 )
 
@@ -243,171 +324,200 @@ def is_roofline_shown(
     return True
 
 
-def extract_kernel_name(full_kernel_name: str) -> str:
-    """
-    Extract the short kernel function name from a mangled C++ kernel name.
-
-    Examples:
-    - "void at::native::vectorized_elementwise_kernel<...>"
-       -> "vectorized_elementwise_kernel"
-    - "Cijk_Ailk_Bljk_SB_MT128x128x16..." -> "Cijk_Ailk_Bljk_SB_MT128x128x16..."
-    """
-    # Remove return type prefix (void, etc.)
-    kernel_name = full_kernel_name.strip()
-    if kernel_name.startswith("void "):
-        kernel_name = kernel_name[5:]
-
-    # First, extract the main function name before any template parameters
-    # Split on '<' to get the part before template parameters
-    if "<" in kernel_name:
-        main_part = kernel_name.split("<")[0]
-    elif "(" in kernel_name:
-        main_part = kernel_name.split("(")[0]
-    else:
-        main_part = kernel_name
-
-    # Now extract the function name from namespaces
-    if "::" in main_part:
-        # Get the last part after the last :: in the main part (before templates)
-        function_name = main_part.split("::")[-1].strip()
-        return function_name if function_name else kernel_name.strip()
-
-    return main_part.strip()
-
-
-def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
-    """Display torch operator data in a properly formatted table."""
-    if df is None or df.empty:
-        console_log(f"No data available for operator: {operator_name}")
+def list_torch_operators(
+    workload_path: str,
+    call_trees: dict[str, CallTreeNode],
+) -> None:
+    """Display PyTorch operators as a unified call tree grouped by source location."""
+    if not call_trees:
+        print(f"\nPyTorch Operators in: {workload_path}")
+        print("Total: 0 operators")
         return
 
-    console_log(f"\n{operator_name}")
-    console_log("=" * len(operator_name))
+    print(f"\n{'=' * 80}")
+    print(f"PyTorch Operator Call Tree: {workload_path}")
+    print("Grouped by source location, sorted by total GPU kernel duration.")
+    print(f"{'=' * 80}")
+    show_call_tree(call_trees)
+    print(f"\n{'=' * 80}")
 
-    # Create a copy for display formatting
-    display_df = df.copy()
 
-    # Define max widths for different column types
-    column_widths = {
-        "Operator_Name": 40,
-        "Context": 35,
-        "Kernel_Name": 35,
-        "default": 20,
-    }
+def format_stats(launches: int, duration_ms: float) -> str:
+    """Format launch count and duration as an inline parenthesized string."""
+    if duration_ms < 0.01:
+        formatted_duration = f"{duration_ms * 1000:.2f} us"
+    else:
+        formatted_duration = f"{duration_ms:.2f} ms"
+    return f"(kernel_launches: {launches}, total_duration: {formatted_duration})"
 
-    # Truncate columns to reasonable widths
-    for col in display_df.columns:
-        if display_df[col].dtype == "object":  # String columns
-            max_width = column_widths.get(col, column_widths["default"])
-            display_df[col] = (
-                display_df[col]
-                .astype(str)
-                .apply(
-                    lambda x: (
-                        string_multiple_lines(x, max_width, 2)
-                        if len(x) > max_width
-                        else x
-                    )
-                )
-            )
 
-    # Reset index for row numbering
-    display_df = display_df.reset_index(drop=True)
+def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
+    """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
+    terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
+    safe_width = max(terminal_cols - 2, min_width)
+    return min(safe_width, max_width)
 
-    # Use tabulate for consistent formatting
-    table_str = tabulate(
-        display_df,
-        headers=display_df.columns,
-        tablefmt="fancy_grid",
-        showindex=True,
-        floatfmt=".2f",
-        maxcolwidths=list(column_widths.values()),
+
+def print_wrapped_tree_line(
+    prefix: str,
+    body: str,
+    width: Optional[int] = None,
+    break_long_words: bool = False,
+) -> None:
+    """Print a tree line and wrap continuation lines to preserve indentation."""
+    effective_width = get_tree_wrap_width() if width is None else width
+    print(
+        textwrap.fill(
+            body,
+            width=effective_width,
+            initial_indent=prefix,
+            subsequent_indent=" " * len(prefix),
+            break_long_words=break_long_words,
+            break_on_hyphens=False,
+        )
     )
 
-    console_log(table_str)
 
+def print_wrapped_kernel_line(
+    prefix: str,
+    kernel_name: str,
+    suffix: str,
+    width: Optional[int] = None,
+    continuation_prefix: str = "",
+) -> None:
+    """Wrap long kernel names while keeping suffix attached to final name chunk."""
+    effective_width = get_tree_wrap_width() if width is None else width
+    content_width = max(effective_width - len(prefix), 20)
 
-def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
-    """
-    Display the hierarchy for each unique operator name in the DataFrame,
-    showing marker hierarchy on the left and kernel launches on the right.
-    """
-    print(f"\n{'-' * 80}")
-    print(f"Torch Operator Hierarchy for: {operator_name}")
-    print("-" * 80)
+    inline = f"{kernel_name} {suffix}"
+    if len(inline) <= content_width:
+        print(f"{prefix}{inline}")
+        return
 
-    # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
-    # "Context_Id", etc.
+    # Reserve room so suffix is never detached on its own line.
+    name_width = max(content_width - len(suffix) - 1, 8)
+    wrapped_name = textwrap.wrap(
+        kernel_name,
+        width=name_width,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    if not wrapped_name:
+        print(f"{prefix}{suffix}")
+        return
 
-    unique_op_hierarchies = df["Operator_Name"].unique()
-    for i, op in enumerate(unique_op_hierarchies, start=1):
-        print(f"  {i:3d}. {op}")
-        print("\nOperator Hierarchy".ljust(50) + "Kernels Launched")
-        print("-" * 80)
-        parts = str(op).split("/")
+    # Build continuation with vertical pipes from parent levels
+    # Preserve parent pipes but replace branch character with spaces
+    if len(continuation_prefix) > 0:
+        # continuation_prefix has pipes, add spaces for branch chars
+        spaces_needed = len(prefix) - len(continuation_prefix)
+        continuation = continuation_prefix + " " * spaces_needed
+    else:
+        # No parent pipes, just use spaces matching the prefix
+        continuation = " " * len(prefix)
 
-        hierarchy_lines = []
-        # Display the hierarchy tree
-        for i, part in enumerate(parts):
-            if i == 0:
-                # Top level - just the module name
-                hierarchy_lines.append(f"{part}")
+    for i, chunk in enumerate(wrapped_name):
+        if i == 0:
+            if len(wrapped_name) == 1:
+                print(f"{prefix}{chunk} {suffix}")
             else:
-                indent = "  " * i
-                prefix = "└─ "
-                hierarchy_lines.append(f"{indent}{prefix}{part}")
+                print(f"{prefix}{chunk}")
+        elif i == len(wrapped_name) - 1:
+            print(f"{continuation}{chunk} {suffix}")
+        else:
+            print(f"{continuation}{chunk}")
 
-        # Get kernels for this operator hierarchy
-        kernels_info = []
-        op_data = df[df["Operator_Name"] == op]
-        # Group by extracted kernel name
-        kernel_counts = {}
-        kernel_context = {}
-        for _, row in op_data.iterrows():
-            full_kernel_name = row["Kernel_Name"]
-            kernel_name = extract_kernel_name(full_kernel_name)
 
-            if kernel_name not in kernel_counts:
-                kernel_counts[kernel_name] = 0
-                kernel_context[kernel_name] = {
-                    "full_name": full_kernel_name,
-                    "contexts": {},
-                }
-            kernel_counts[kernel_name] += 1
-            topmost_location = str(row["Context_Id"]).split("/")[0]
-            _, location = topmost_location.split("@")
-            file_name, line_num = location.split(":")
-            if file_name not in kernel_context[kernel_name]["contexts"]:
-                kernel_context[kernel_name]["contexts"][file_name] = {line_num: 1}
-            else:
-                if line_num not in kernel_context[kernel_name]["contexts"][file_name]:
-                    kernel_context[kernel_name]["contexts"][file_name][line_num] = 1
-                else:
-                    kernel_context[kernel_name]["contexts"][file_name][line_num] += 1
+def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
+    """Print the unified call tree grouped by source location."""
+    sorted_locations = sorted(
+        call_trees.items(), key=lambda kv: kv[1].total_duration_ms, reverse=True
+    )
+    for i, (location, root) in enumerate(sorted_locations):
+        if i > 0:
+            print(f"\n{'- ' * 40}")
+        stats = format_stats(root.kernel_launches, root.total_duration_ms)
+        print(f"\n{location} {stats}")
+        for child in sorted(
+            root.children.values(),
+            key=lambda c: c.total_duration_ms,
+            reverse=True,
+        ):
+            print_operator_node(child)
 
-        # Format output for each unique kernel
-        for kernel_name, num_launches in kernel_counts.items():
-            kernel_info = f"|--> {kernel_name} ({num_launches} launches)\n"
-            kernels_info.append(kernel_info)
-            for file_name, line_count in kernel_context[kernel_name][
-                "contexts"
-            ].items():
-                for line_num, count in line_count.items():
-                    kernels_info.append(
-                        f"      {file_name}:{line_num} ({count} launches)\n"
-                    )
 
-        # Print hierarchy lines (left column)
-        for line in hierarchy_lines:
-            print(f"{line.ljust(40)}|")
+def print_operator_node(
+    node: CallTreeNode, is_last: bool = True, parent_pipes: str = ""
+) -> None:
+    # Build indent with vertical pipes for parent levels
+    indent = parent_pipes
+    is_branching = len(node.children) + len(node.kernels) > 1
 
-        # Print kernel lines aligned to the deepest level
-        deepest_indent = "  " * len(parts)
-        for kernel_line in kernels_info:
-            left_padding = deepest_indent + "    "
-            print(f"{left_padding.ljust(40)}{kernel_line}")
+    # Use ├─ for non-last items, └─ for last items
+    branch_char = "└─ " if is_last else "├─ "
+    node_prefix = f"{indent}{branch_char}"
 
-        print()
+    if is_branching:
+        stats = format_stats(node.kernel_launches, node.total_duration_ms)
+        print_wrapped_tree_line(node_prefix, f"{node.name} {stats}")
+    else:
+        print_wrapped_tree_line(node_prefix, node.name)
+
+    # Build new parent_pipes for children
+    if is_last:
+        new_parent_pipes = parent_pipes + "   "  # 3 spaces
+    else:
+        new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
+
+    # Process child nodes
+    children = sorted(
+        node.children.values(), key=lambda c: c.total_duration_ms, reverse=True
+    )
+    for i, child in enumerate(children):
+        # A child is last if it's the final child AND there are no kernels after it
+        child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)
+        print_operator_node(child, is_last=child_is_last, parent_pipes=new_parent_pipes)
+
+    # Process kernels
+    for i, (kernel_name, kernel_stats) in enumerate(
+        sorted(
+            node.kernels.items(),
+            key=lambda kv: kv[1].total_duration_ns,
+            reverse=True,
+        )
+    ):
+        launches = kernel_stats.launches
+        duration_ns = kernel_stats.total_duration_ns
+        kernel_id = kernel_stats.kernel_id
+        id_suffix = f" (id {kernel_id})" if kernel_id is not None else ""
+        display_name = simplify_kernel_name(kernel_name)
+        total_ms = duration_ns * NS_TO_MS
+        stats = format_stats(launches, total_ms)
+
+        # Last kernel gets └─, others get ├─
+        kernel_is_last = i == len(node.kernels) - 1
+        kernel_branch_char = "└─ " if kernel_is_last else "├─ "
+        kernel_prefix = f"{new_parent_pipes}{kernel_branch_char}"
+
+        print_wrapped_kernel_line(
+            kernel_prefix,
+            display_name,
+            f"{id_suffix} {stats}".strip(),
+            continuation_prefix=new_parent_pipes,
+        )
+
+
+def _safe_round_value(
+    value: object,
+    decimal: int,
+) -> object:
+    """Round *value* to *decimal* places, returning ``"N/A"`` on failure."""
+    if value == "N/A":
+        return value
+    try:
+        return round(float(value), decimal)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return "N/A"
 
 
 def process_table_data(
@@ -447,16 +557,7 @@ def process_table_data(
                 in ["pmc_kernel_top.csv", "pmc_dispatch_info.csv"]
                 and header == "Kernel_Name"
             ):
-                # NB: the width of kernel name might depend
-                # on the header of the table.
-                width = 40 if table_config["source"] == "pmc_kernel_top.csv" else 80
-                max_rows = 3 if table_config["source"] == "pmc_kernel_top.csv" else 4
-
-                adjusted_names = base_df["Kernel_Name"].apply(
-                    lambda x: string_multiple_lines(x, width, max_rows)
-                )
-                result_df = pd.concat([result_df, adjusted_names], axis=1)
-
+                result_df = pd.concat([result_df, base_df["Kernel_Name"]], axis=1)
             elif table_type == "raw_csv_table" and header == "Info":
                 for run_data in runs.values():
                     cur_df = run_data.dfs[table_config["id"]]
@@ -475,7 +576,7 @@ def process_table_data(
                     table_type == "metric_table" and header not in hidden_cols
                 ):
                     if run_name != base_run:
-                        # Calculate percentage difference between current and
+                        # Calculate percent difference between current and
                         # base dataframe.
                         base_series = pd.to_numeric(
                             base_df[header], errors="coerce"
@@ -484,20 +585,20 @@ def process_table_data(
                             cur_df[header], errors="coerce"
                         ).fillna(0.0)
 
-                        # Calculate absolute and percentage differences
+                        # Calculate absolute and percent differences
                         absolute_diff = (cur_series - base_series).round(args.decimal)
-                        percentage_diff = (
+                        percent_diff = (
                             absolute_diff / base_series.replace(0, 1) * 100
                         ).round(args.decimal)
 
                         if args.verbose >= 2:
-                            console_log("---------", header, percentage_diff)
+                            console_log("---------", header, percent_diff)
 
-                        # Format as "value (percentage%)"
+                        # Format as "value (percent%)"
                         formatted_diff = (
                             cur_series.round(args.decimal).astype(str)
                             + " ("
-                            + percentage_diff.astype(str)
+                            + percent_diff.astype(str)
                             + "%)"
                         )
 
@@ -508,13 +609,13 @@ def process_table_data(
                         #       requirement
                         if (
                             header in ["Value", "Count", "Avg"]
-                            and percentage_diff.abs().gt(args.report_diff).any()
+                            and percent_diff.abs().gt(args.report_diff).any()
                         ):
                             result_df["Abs Diff"] = absolute_diff
 
                             if args.report_diff:
-                                violation_idx = percentage_diff.index[
-                                    percentage_diff.abs() > args.report_diff
+                                violation_idx = percent_diff.index[
+                                    percent_diff.abs() > args.report_diff
                                 ]
                                 console_warning(
                                     f"Dataframe diff exceeds {args.report_diff}% "
@@ -526,12 +627,25 @@ def process_table_data(
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
                         cur_df_copy[header] = [
-                            (round(float(x), args.decimal) if x != "N/A" else x)
-                            for x in base_df[header]
+                            _safe_round_value(x, args.decimal) for x in base_df[header]
                         ]
                         result_df = pd.concat([result_df, cur_df_copy[header]], axis=1)
 
     return result_df
+
+
+def _gfx115_mem_chart_heading(panel: Optional[dict[str, Any]], normal_unit: str) -> str:
+    """Section number from ``panel id // 100`` (panel 300 → ``3. Memory Chart``)."""
+    panel_id = int((panel or {}).get("id", 300))
+    return mem_chart_gfx11.format_mem_chart_heading(normal_unit, panel_id=panel_id)
+
+
+def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
+    """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
+    sources = panel.get("data source") or []
+    return bool(sources) and all(
+        tcfg.get("cli_style") == "mem_chart" for ds in sources for tcfg in ds.values()
+    )
 
 
 def format_table_output(
@@ -541,6 +655,8 @@ def format_table_output(
     table_type: str,
     runs: dict[str, Any],
     csv_dir: Optional[Path] = None,
+    gpu_arch: Optional[str] = None,
+    mem_data_override: Optional[dict[str, Any]] = None,
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
@@ -559,7 +675,12 @@ def format_table_output(
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
 
-    if "title" in table_config and table_config["title"]:
+    # mem_chart diagram mode: one merged chart, no per-table titles (3.1, 3.2, …).
+    # With --view table, keep titles so tabular output stays navigable.
+    skip_mem_chart_title = table_config.get(
+        "cli_style"
+    ) == "mem_chart" and not _tty_view_is_table(args)
+    if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
         content += f"{table_id_str} {table_config['title']}\n"
 
     if args.output_format == "csv" and csv_dir and csv_dir.is_dir():
@@ -577,6 +698,7 @@ def format_table_output(
         "pmc_dispatch_info.csv",
     ]:
         df = df.head(args.max_stat_num)
+
     # NB:
     # "columnwise: True" is a special attr of a table/df
     # For raw_csv_table, such as system_info, we transpose the
@@ -585,21 +707,51 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
-    # enable mem_chart only with single run
-    if (
-        table_config.get("cli_style") == "mem_chart"
+    # For single run and gfx115x, format BW metrics (Bytes/s) to human-readable
+    # For multiple runs (baseline comparison), keep Bytes for accurate comparison
+    is_single_run = len(runs) == 1
+    is_gfx115x = gpu_arch and gpu_arch.startswith("gfx115")
+
+    if is_single_run and is_gfx115x and "Unit" in df.columns:
+        # Identify value columns to format
+        value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
+        df = scale_bw_columns(df, value_cols, args.decimal)
+
+    # When --view table is set, force table output and ignore cli_style from config
+    use_mem_chart = (
+        not _tty_view_is_table(args)
+        and table_config.get("cli_style") == "mem_chart"
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
-    ):
-        mem_data = (
-            pd
-            .DataFrame([df["Metric"], df["Value"]])
-            .transpose()
-            .set_index("Metric")
-            .to_dict()["Value"]
-        )
-        content += mem_chart.plot_mem_chart("", args.normal_unit, mem_data) + "\n"
+    )
+
+    if use_mem_chart:
+        if mem_data_override is not None:
+            mem_data = mem_data_override
+        else:
+            mem_data = (
+                pd
+                .DataFrame([df["Metric"], df["Value"]])
+                .transpose()
+                .set_index("Metric")
+                .to_dict()["Value"]
+            )
+
+        if gpu_arch and gpu_arch.startswith("gfx115"):
+            content += (
+                mem_chart_gfx11.plot_mem_chart(
+                    "",
+                    args.normal_unit,
+                    mem_data,
+                    chart_title=_gfx115_mem_chart_heading(None, args.normal_unit),
+                )
+                + "\n"
+            )
+        else:
+            content += (
+                mem_chart_gfx9.plot_mem_chart("", args.normal_unit, mem_data) + "\n"
+            )
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
@@ -622,6 +774,14 @@ def show_all(
     comparable_columns = parser.build_comparable_columns(args.time_unit)
     raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
     csv_dir = None
+
+    # Get gpu_arch from the first run's sys_info
+    first_run = next(iter(runs.values()))
+    gpu_arch = (
+        first_run.sys_info.iloc[0]["gpu_arch"]
+        if hasattr(first_run, "sys_info") and not first_run.sys_info.empty
+        else None
+    )
 
     if isinstance(raw_filter_panel_ids, dict):
         # For backward compatibility
@@ -687,10 +847,12 @@ def show_all(
             continue
 
         # Handle roofline panel (400) with custom display logic
-        if panel_id == 400:
+        # Skip if --view table is set; tables 401/402 will be rendered as normal tables
+        if panel_id == 400 and not _tty_view_is_table(args):
             _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
+        mem_chart_data: dict[str, Any] = {}  # merged mem_chart metrics (gfx115x)
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
@@ -763,16 +925,63 @@ def show_all(
                     hidden_cols,
                 )
 
-                if not processed_df.empty:
-                    panel_content += format_table_output(
-                        args, table_config, processed_df, table_type, runs, csv_dir
-                    )
+                if processed_df.empty:
+                    continue
 
-        # Roofline printing is handled separately above in is_roofline_shown
-        if panel_content and table_config["id"] not in [401, 402]:
-            print(f"\n{'-' * 80}", file=output)
-            print(f"{panel_id // 100}. {panel['title']}", file=output)
-            print(panel_content, file=output)
+                # For gfx115x mem_chart panels, collect all tables and merge
+                # into a single chart on the first table; skip subsequent ones.
+                is_mem_chart = table_config.get(
+                    "cli_style"
+                ) == "mem_chart" and not _tty_view_is_table(args)
+                is_gfx115x = gpu_arch and gpu_arch.startswith("gfx115")
+
+                if is_mem_chart and is_gfx115x and len(runs) == 1:
+                    has_cols = (
+                        "Metric" in processed_df.columns
+                        and "Value" in processed_df.columns
+                    )
+                    if has_cols:
+                        table_mem = dict(
+                            zip(processed_df["Metric"], processed_df["Value"])
+                        )
+                        mem_chart_data.update(table_mem)
+                    # Skip individual table output; merged chart emitted below
+                    continue
+
+                panel_content += format_table_output(
+                    args,
+                    table_config,
+                    processed_df,
+                    table_type,
+                    runs,
+                    csv_dir,
+                    gpu_arch,
+                )
+
+        # Emit merged gfx115x mem_chart for the panel
+        if mem_chart_data and not _tty_view_is_table(args):
+            heading = _gfx115_mem_chart_heading(panel, args.normal_unit)
+            panel_content += (
+                mem_chart_gfx11.plot_mem_chart(
+                    "",
+                    args.normal_unit,
+                    mem_chart_data,
+                    chart_title=heading,
+                )
+                + "\n"
+            )
+
+        # Roofline printing is handled separately above in is_roofline_shown.
+        # With --view table, roofline tables (401/402) render as normal tables.
+        if panel_content and (
+            table_config["id"] not in [401, 402] or _tty_view_is_table(args)
+        ):
+            if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
+                print(panel_content, file=output)
+            else:
+                print(f"\n{'-' * 80}", file=output)
+                print(f"{panel_id // 100}. {panel['title']}", file=output)
+                print(panel_content, file=output)
 
 
 def show_roof_plot(roof_plot: str) -> None:

@@ -848,6 +848,36 @@ __device__ void rocshmem_ctx_barrier_wave(rocshmem_ctx_t ctx, rocshmem_team_t te
 __device__ void rocshmem_ctx_barrier_wg(rocshmem_ctx_t ctx, rocshmem_team_t team);
 
 /**
+ * @brief perform a collective barrier between all PEs in the team world.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be invoked by a single thread within the PE.
+ *
+ * @return void
+ */
+__device__ void rocshmem_barrier();
+
+/**
+ * @brief perform a collective barrier between all PEs in the team world.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be called as a wave-front collective.
+ *
+ * @return void
+ */
+__device__ void rocshmem_barrier_wave();
+
+/**
+ * @brief perform a collective barrier between all PEs in the team world.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @return void
+ */
+__device__ void rocshmem_barrier_wg();
+
+/**
  * @brief registers the arrival of a PE at a barrier.
  * The caller is blocked until the synchronization is resolved.
  *

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 
@@ -918,7 +902,7 @@ enum hipLimit_t {
 #define hipHostRegisterMapped 0x2
 
 /** The passed memory pointer is treated as pointing to some memory-mapped I/O space, e.g.
- * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and 
+ * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and
  * contiguous.
  * */
 #define hipHostRegisterIoMemory 0x4
@@ -3958,6 +3942,27 @@ hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device,
  */
 hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location,
                                   unsigned int flags, hipStream_t stream __dparm(0));
+
+/**
+ * @brief Prefetches a batch of memory ranges to the specified locations using HIP.
+ *
+ * @param [in] dev_ptrs      pointers to the memory ranges to prefetch
+ * @param [in] sizes      sizes in bytes of the memory ranges to prefetch
+ * @param [in] count      number of memory ranges to prefetch
+ * @param [in] prefetch_locs   locations to prefetch the memory ranges to
+ * @param [in] prefetch_loc_idxs  indices of the memory ranges to prefetch
+ * @param [in] num_prefetch_locs  number of locations to prefetch
+ * @param [in] flags      flags for future use, must be zero now.
+ * @param [in] stream    stream to enqueue the prefetch operation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * @note  This API is implemented on Linux and is under development on Microsoft Windows.
+ */
+hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                    size_t num_prefetch_locs, unsigned long long flags,
+                                    hipStream_t stream);
 /**
  * @brief Advise about the usage of a given memory range to HIP.
  *
@@ -8016,7 +8021,7 @@ const char* hipKernelNameRef(const hipFunction_t f);
  * @param [in] hostFunction Pointer of host function.
  * @param [in] stream Stream the kernel is executed on.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns The name of the passed kernel function object, or nullptr.
  *
  */
 const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
@@ -8025,7 +8030,7 @@ const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
  *
  * @param [in] stream Stream of device executed on.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns The device ID on the stream.
  *
  */
 int hipGetStreamDeviceId(hipStream_t stream);
@@ -9427,13 +9432,20 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
                                 unsigned long long flags);
 
 /**
- * @brief Creates a memory allocation described by the properties and size
+ * @brief Creates a memory handle for the allocation described by the properties and given size
  *
  * @param [out] handle - value of the returned handle.
  * @param [in] size - size of the allocation.
  * @param [in] prop - properties of the allocation.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ * 
+ * This API creates a memory allocation on the target device specified through the prop structure.
+ * The prop allocation type must be specified as either #hipMemAllocationTypePinned or
+ * #hipMemAllocationTypeUncached.
+ * The prop location type must be specified as #hipMemLocationTypeDevice or #hipMemLocationTypeHost.
+ * Any other value results in #hipErrorInvalidValue.
+ *
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.
  *

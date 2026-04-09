@@ -1,22 +1,6 @@
-# Copyright (c) 2024 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 set(TEST_SRC
     hipGetDeviceProp.cc
@@ -24,13 +8,16 @@ set(TEST_SRC
 
 
 if(HIP_PLATFORM MATCHES "nvidia")
-    set(PLATFORM_DEFINE __HIP_PLATFORM_NVIDIA__)
+  set(PLATFORM_DEFINE __HIP_PLATFORM_NVIDIA__)
+  add_compile_definitions(__HIP_PLATFORM_NVIDIA__)
 else()
-    set(PLATFORM_DEFINE __HIP_PLATFORM_AMD__)
+  set(PLATFORM_DEFINE __HIP_PLATFORM_AMD__)
+  add_compile_definitions(__HIP_PLATFORM_AMD__)
 endif()
 
 # Creating Custom object file
-add_custom_target(devprop_c_custom
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_target(devprop_c_custom
     COMMAND ${CMAKE_C_COMPILER}
             -c -Wno-deprecated-declarations -x c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
             -I${HIP_INCLUDE_DIR}
@@ -38,6 +25,18 @@ add_custom_target(devprop_c_custom
             -o hipGetDeviceProp.o
     BYPRODUCTS hipGetDeviceProp.o
 )
+else()
+  add_custom_target(devprop_c_custom
+    COMMAND ${CMAKE_C_COMPILER}
+            -c -Wno-deprecated-declarations -x c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
+            -D${PLATFORM_DEFINE}
+            -I${HIP_INCLUDE_DIR}
+            -I${CUDA_INCLUDE_DIR}
+            -o hipGetDeviceProp.o
+    BYPRODUCTS hipGetDeviceProp.o
+)
+
+endif()
 
 add_library(devprop_c OBJECT IMPORTED)
 set_property(TARGET devprop_c PROPERTY IMPORTED_OBJECTS "${CMAKE_CURRENT_BINARY_DIR}/hipGetDeviceProp.o")
@@ -46,5 +45,6 @@ hip_add_exe_to_target(NAME CTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS devprop_c)
+set_source_files_properties(${TEST_SRC} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 
 add_dependencies(CTests devprop_c_custom)

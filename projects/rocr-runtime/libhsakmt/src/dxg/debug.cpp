@@ -26,6 +26,7 @@
 #include <cassert>
 #include <cstring>
 
+#include "topology.hpp"
 
 static uint32_t runtime_capabilities_mask = 0;
 
@@ -59,8 +60,20 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgAddressWatch(
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not supported\n");
-  return HSAKMT_STATUS_NOT_SUPPORTED;
+
+  // Make sure the WDDMDevices are created.
+  HsaSystemProperties props;
+  hsaKmtAcquireSystemProperties(&props);
+  [](auto&&...) {}(props);
+
+  for (auto&& device : dxg_topology->wdevices_) {
+    if (Wkmi::KmdDbgVersion version;
+        !device->GetKmdDbgVersion(&version) || version.major != 1 || version.minor < 2) {
+       return HSAKMT_STATUS_NOT_SUPPORTED;
+     }
+  }
+
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnable(void *rDebug, bool setupTtmp) {
@@ -69,7 +82,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnable(void *rDebug, bool setupTtmp) {
   if (result)
     return result;
 
-  assert(false);
+  for (auto&& device : dxg_topology->wdevices_) {
+    if (!device->RegisterRuntimeState(1 /* always valid debug state */, rDebug, setupTtmp)) {
+      return HSAKMT_STATUS_NOT_SUPPORTED;
+    }
+  }
+
   return HSAKMT_STATUS_SUCCESS;
 }
 

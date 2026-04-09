@@ -320,6 +320,27 @@ __device__ __forceinline__ bool is_last_active_lane() {
   return is_last_active_lane(get_active_lane_mask());
 }
 
+/**
+ * Grid barrier implementation using a global counter.
+ * All the work-groups must be co-resident on the GPU for this to work
+ * correctly.
+ */
+[[maybe_unused]] __forceinline__ __device__ void grid_barrier(int* global_counter, int num_blocks) {
+  __threadfence();
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    __hip_atomic_fetch_add(&global_counter[0], 1,
+                           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    while (__hip_atomic_load(global_counter,
+                             __ATOMIC_RELAXED,
+                             __HIP_MEMORY_SCOPE_AGENT) != num_blocks);
+  }
+  __syncthreads();
+}
+
 #define SPIN_LOCK_INVALID  0xdead
 #define SPIN_LOCK_UNLOCKED 0x1234
 #define SPIN_LOCK_LOCKED   0xabcd

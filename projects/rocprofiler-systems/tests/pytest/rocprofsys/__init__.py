@@ -45,6 +45,7 @@ from .gpu import (
     lookup_gpu_category,
     get_target_gpu_arch,
     get_offload_extractor,
+    get_xnack_support,
 )
 
 __all__ = [

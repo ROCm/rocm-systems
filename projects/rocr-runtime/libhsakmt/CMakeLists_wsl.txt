@@ -145,6 +145,7 @@ target_include_directories( ${ROCDXG_TARGET}
   PRIVATE
   ${WIN_SDK}
   ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime

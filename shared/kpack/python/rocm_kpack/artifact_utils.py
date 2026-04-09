@@ -6,11 +6,13 @@ including manifest handling, directory traversal, and file classification.
 """
 
 import os
-import subprocess
 from pathlib import Path
 from typing import Iterator, Tuple, Callable, Optional
 
 from rocm_kpack.binutils import Toolchain
+from rocm_kpack.coff.surgery import CoffSurgery
+from rocm_kpack.elf.surgery import ElfSurgery
+from rocm_kpack.format_detect import detect_binary_format, UnsupportedBinaryFormat
 
 
 def read_artifact_manifest(artifact_dir: Path) -> list[str]:
@@ -96,8 +98,8 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
     """
     Check if a file is a fat binary (contains GPU device code).
 
-    For ELF binaries, this checks for the presence of a .hip_fatbin section.
-    Performs a fast ELF magic byte check before running readelf.
+    For ELF binaries, checks for .hip_fatbin section.
+    For PE/COFF binaries, checks for .hip_fat section.
 
     Args:
         file_path: Path to the file to check
@@ -107,47 +109,29 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
         True if the file contains device code, False if it's not a fat binary
 
     Raises:
-        RuntimeError: If readelf fails (corrupted file, readelf crash, etc.)
+        RuntimeError: If binary analysis fails
         FileNotFoundError: If file doesn't exist
     """
     # Fast check: Is file empty?
     try:
         if file_path.stat().st_size == 0:
-            return False  # Empty file, definitely not a fat binary
+            return False
     except FileNotFoundError:
         raise
     except OSError as e:
         raise RuntimeError(f"Cannot stat file {file_path}: {e}") from e
 
-    # Fast check: Is this even an ELF file?
     try:
-        with open(file_path, "rb") as f:
-            magic = f.read(4)
-            if magic != b"\x7fELF":
-                return False  # Not an ELF file, definitely not a fat binary
-    except FileNotFoundError:
-        raise
-    except OSError as e:
-        raise RuntimeError(f"Cannot read file {file_path}: {e}") from e
+        fmt = detect_binary_format(file_path)
+    except UnsupportedBinaryFormat:
+        return False
 
-    # It's an ELF file, now check for .hip_fatbin section
-    try:
-        output = subprocess.check_output(
-            [str(toolchain.readelf), "-S", str(file_path)],
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        return ".hip_fatbin" in output
-    except subprocess.CalledProcessError as e:
-        # readelf returns 1 for valid ELF files without sections we're looking for
-        # Returns 2+ for actual errors
-        if e.returncode == 1:
-            return False  # Valid ELF, just no .hip_fatbin section
-        raise RuntimeError(
-            f"readelf failed on {file_path} with code {e.returncode}: {e.output}"
-        ) from e
-    except FileNotFoundError as e:
-        raise RuntimeError(f"readelf not found: {toolchain.readelf}") from e
+    if fmt == "elf":
+        surgery = ElfSurgery.load(file_path)
+        return surgery.find_section(".hip_fatbin") is not None
+    else:
+        surgery = CoffSurgery.load(file_path)
+        return surgery.find_section(".hip_fat") is not None
 
 
 def extract_architecture_from_target(target: str) -> Optional[str]:

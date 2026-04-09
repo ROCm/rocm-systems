@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include <hip/texture_types.h>
@@ -34,8 +20,7 @@ namespace hip_impl {
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
     hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz) {
-  auto* function = hip::DeviceFunc::asFunction(func);
-  const auto* kernel = function->kernel();
+  const auto* kernel = hip::asKernel(func);
 
   const auto* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
   const int maxWorkGroupSize = static_cast<int>(device.info().maxWorkGroupSize_);
@@ -277,7 +262,7 @@ void __hipRegisterManagedVar(
   } else {
     HIP_INIT_VOID();
     status = ihipMallocManaged(pointer, size, align, 0);
-    var_ptr->setAllocFlag(true);
+    var_ptr->SetAllocFlag(true);
     if (status == hipSuccess) {
       hip::Stream* stream = hip::getNullStream();
       if (stream != nullptr) {
@@ -336,17 +321,17 @@ hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipSt
 // ================================================================================================
 hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem,
                                       hipStream_t stream) {
-  HIP_INIT_API(__hipPushCallConfiguration, gridDim, blockDim, sharedMem, stream);
+  HIP_INIT_API_NOLOG(__hipPushCallConfiguration);
 
   PlatformState::Instance().ConfigureCall(gridDim, blockDim, sharedMem, stream);
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN_NOLOG(hipSuccess);
 }
 
 // ================================================================================================
 hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
                                      hipStream_t* stream) {
-  HIP_INIT_API(__hipPopCallConfiguration, gridDim, blockDim, sharedMem, stream);
+  HIP_INIT_API_NOLOG(__hipPopCallConfiguration);
 
   ihipExec_t exec;
   PlatformState::Instance().PopExec(exec);
@@ -355,7 +340,7 @@ hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* shar
   *sharedMem = exec.sharedMem_;
   *stream = exec.hStream_;
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN_NOLOG(hipSuccess);
 }
 
 // ================================================================================================
@@ -475,8 +460,8 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
-  auto* function = hip::DeviceFunc::asFunction(func);
-  if (function == nullptr) {
+  amd::Kernel* func_kernel = hip::asKernel(func);
+  if (func_kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
@@ -488,7 +473,7 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
   }
 
   const amd::Device& device = *hip::getCurrentDevice()->devices()[dev_id];
-  const amd::Kernel& kernel = *function->kernel();
+  const amd::Kernel& kernel = *func_kernel;
   const auto* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
 
   const int staticSharedMemoryUsage = wrkGrpInfo->usedLDSSize_;
@@ -806,7 +791,7 @@ extern "C"
 
 // ================================================================================================
 void PlatformState::Init() {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   if (initialized_ || g_devices.empty()) {
     return;
   }
@@ -832,7 +817,7 @@ hipError_t PlatformState::LoadModule(hipModule_t* module, const char* fname, con
   *module = dynCo->getModule();
   assert(*module != nullptr);
 
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   const auto [it, inserted] = dynCO_map_.try_emplace(*module, dynCo.get());
   if (!inserted) {
     return hipErrorAlreadyMapped;
@@ -844,7 +829,7 @@ hipError_t PlatformState::LoadModule(hipModule_t* module, const char* fname, con
 
 // ================================================================================================
 hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   if (auto it = dynCO_map_.find(hmod); it == dynCO_map_.end()) {
     return hipErrorNotFound;
@@ -872,7 +857,7 @@ hipError_t PlatformState::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod,
     return hipErrorNotFound;
   }
 
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   const auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
@@ -885,7 +870,7 @@ hipError_t PlatformState::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod,
 
 // ================================================================================================
 hipError_t PlatformState::GetFuncCount(unsigned int* count, hipModule_t hmod) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   const auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
@@ -897,7 +882,7 @@ hipError_t PlatformState::GetFuncCount(unsigned int* count, hipModule_t hmod) {
 
 // ================================================================================================
 bool PlatformState::IsValidDynFunc(const void* hfunc) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   return std::any_of(dynCO_map_.begin(), dynCO_map_.end(),
                      [hfunc](const auto& entry) { return entry.second->isValidDynFunc(hfunc); });
 }
@@ -905,7 +890,7 @@ bool PlatformState::IsValidDynFunc(const void* hfunc) {
 // ================================================================================================
 hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
                                           hipDeviceptr_t* dev_ptr, size_t* size_ptr) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   if (hostVar == nullptr) {
     return hipErrorInvalidValue;
@@ -922,13 +907,13 @@ hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
   IHIP_RETURN_ONFAIL(it->second->getManagedVarPointer(hostVar, dev_ptr, size_ptr));
   // if dev_ptr is nullptr, hostvar is not in managed variable list
   if ((dev_ptr && !*dev_ptr) || (size_ptr && *size_ptr == 0)) {
-    auto* dvar = static_cast<hip::DeviceVar*>(nullptr);
-    IHIP_RETURN_ONFAIL(it->second->getDeviceVar(&dvar, hostVar));
+    amd::Memory* mem = nullptr;
+    IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, hostVar));
     if (dev_ptr) {
-      *dev_ptr = dvar->device_ptr();
+      *dev_ptr = memDevPtr(mem);
     }
     if (size_ptr) {
-      *size_ptr = dvar->size();
+      *size_ptr = mem->getSize();
     }
   }
   return hipSuccess;
@@ -937,7 +922,7 @@ hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
 // ================================================================================================
 hipError_t PlatformState::RegisterTexRef(textureReference* texRef, hipModule_t hmod,
                                          std::string name) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   texRef_map_.insert(std::make_pair(texRef, std::make_pair(hmod, name)));
   return hipSuccess;
 }
@@ -945,7 +930,7 @@ hipError_t PlatformState::RegisterTexRef(textureReference* texRef, hipModule_t h
 // ================================================================================================
 hipError_t PlatformState::GetDynTexGlobalVar(textureReference* texRef, hipDeviceptr_t* dev_ptr,
                                              size_t* size_ptr) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   const auto tex_it = texRef_map_.find(texRef);
   if (tex_it == texRef_map_.end()) {
@@ -960,10 +945,10 @@ hipError_t PlatformState::GetDynTexGlobalVar(textureReference* texRef, hipDevice
     return hipErrorNotFound;
   }
 
-  hip::DeviceVar* dvar;
-  IHIP_RETURN_ONFAIL(it->second->getDeviceVar(&dvar, tex_ref_entry.second));
-  *dev_ptr = dvar->device_ptr();
-  *size_ptr = dvar->size();
+  amd::Memory* mem = nullptr;
+  IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, tex_ref_entry.second));
+  *dev_ptr = memDevPtr(mem);
+  *size_ptr = mem->getSize();
 
   return hipSuccess;
 }
@@ -971,7 +956,7 @@ hipError_t PlatformState::GetDynTexGlobalVar(textureReference* texRef, hipDevice
 // ================================================================================================
 hipError_t PlatformState::GetDynTexRef(const char* hostVar, hipModule_t hmod,
                                        textureReference** texRef) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   const auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
@@ -979,15 +964,18 @@ hipError_t PlatformState::GetDynTexRef(const char* hostVar, hipModule_t hmod,
     return hipErrorNotFound;
   }
 
-  hip::DeviceVar* dvar;
-  IHIP_RETURN_ONFAIL(it->second->getDeviceVar(&dvar, hostVar));
+  amd::Memory* mem = nullptr;
+  IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, hostVar));
 
-  if (dvar->size() != sizeof(textureReference)) {
+  if (mem->getSize() != sizeof(textureReference)) {
     return hipErrorNotFound;
   }
 
-  dvar->shadowVptr = new texture<char>();
-  *texRef = reinterpret_cast<textureReference*>(dvar->shadowVptr);
+  hip::Var* var = it->second->getVar(hostVar);
+  if (var->shadowVptr == nullptr) {
+    var->shadowVptr = new texture<char>();
+  }
+  *texRef = reinterpret_cast<textureReference*>(var->shadowVptr);
   return hipSuccess;
 }
 
@@ -1013,7 +1001,7 @@ void PlatformState::PopExec(ihipExec_t& exec) {
 
 // ================================================================================================
 std::shared_ptr<UniqueFD> PlatformState::GetUniqueFileHandle(const std::string& file_path) {
-  amd::ScopedLock lock(ufd_lock_);
+  std::scoped_lock lock(ufd_lock_);
 
   auto it = ufd_map_.find(file_path);
   if (it != ufd_map_.end()) {
@@ -1034,7 +1022,7 @@ std::shared_ptr<UniqueFD> PlatformState::GetUniqueFileHandle(const std::string& 
 
 // ================================================================================================
 bool PlatformState::CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd) {
-  amd::ScopedLock lock(ufd_lock_);
+  std::scoped_lock lock(ufd_lock_);
 
   // if use_count is 2, then there is 1 entry in the map and the current entry is the last close.
   if (ufd.use_count() == 2) {
@@ -1048,7 +1036,7 @@ bool PlatformState::CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd) 
 
 // ================================================================================================
 void* PlatformState::GetDynamicLibraryHandle() {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   if (dynamicLibraryHandle_ != nullptr) {
     return dynamicLibraryHandle_;
@@ -1066,7 +1054,7 @@ void* PlatformState::GetDynamicLibraryHandle() {
 
 // ================================================================================================
 void PlatformState::SetDynamicLibraryHandle(void* handle) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   dynamicLibraryHandle_ = handle;
 }
 

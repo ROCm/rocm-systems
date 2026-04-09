@@ -1,22 +1,8 @@
-/* Copyright (c) 2021 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "hip_graph_internal.hpp"
@@ -208,18 +194,28 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     return hipErrorInvalidValue;
   }
   if (pMemsetParams->height == 1) {
-    status =
-        ihipMemset_validate(pMemsetParams->dst, pMemsetParams->value, pMemsetParams->elementSize,
-                            pMemsetParams->width * pMemsetParams->elementSize);
+    size_t offset = 0;
+    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset);
+    if (memObj == nullptr) {
+      return hipErrorInvalidValue;
+    }
+    status = ihipMemset_validate(memObj, pMemsetParams->value, pMemsetParams->elementSize,
+                                 pMemsetParams->width * pMemsetParams->elementSize, offset);
   } else {
     if (pMemsetParams->pitch < (pMemsetParams->width * pMemsetParams->elementSize)) {
       return hipErrorInvalidValue;
     }
     auto sizeBytes =
         pMemsetParams->width * pMemsetParams->height * depth * pMemsetParams->elementSize;
+    size_t offset = 0;
+    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset, sizeBytes);
+    if (memObj == nullptr) {
+      return hipErrorInvalidValue;
+    }
     status = ihipMemset3D_validate(
         {pMemsetParams->dst, pMemsetParams->pitch, pMemsetParams->width, pMemsetParams->height},
-        pMemsetParams->value, {pMemsetParams->width, pMemsetParams->height, depth}, sizeBytes);
+        memObj, offset, pMemsetParams->value, {pMemsetParams->width, pMemsetParams->height, depth},
+        sizeBytes);
   }
   if (status != hipSuccess) {
     return status;
@@ -1124,7 +1120,7 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
   } else {
     s->SetCaptureGraph(reinterpret_cast<hip::Graph*>(graph));
   }
-  s->SetCaptureId();
+  s->SetCaptureID();
   s->SetCaptureMode(mode);
   s->SetOriginStream();
   if (mode != hipStreamCaptureModeRelaxed) {
@@ -1620,7 +1616,7 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
   }
   hip::GraphExec* ge = reinterpret_cast<hip::GraphExec*>(pGraphExec);
   ge->release();
-  amd::ScopedLock lock(GraphExec::graphExecSetLock_);
+  std::scoped_lock lock(GraphExec::graphExecSetLock_);
   GraphExec::graphExecSet_.erase(ge);
   HIP_RETURN(hipSuccess);
 }

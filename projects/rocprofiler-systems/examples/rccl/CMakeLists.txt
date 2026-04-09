@@ -1,20 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 list(APPEND CMAKE_MESSAGE_CONTEXT "rccl-tests")
 
 project(rocprofiler-systems-rccl-example LANGUAGES CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 # Find HIP
@@ -76,6 +70,9 @@ if(hip_FOUND AND rccl_FOUND)
         return()
     endif()
 
+    # Convert CMake list (;-separated) to space-separated string for make
+    list(JOIN RCCL_GPU_TARGETS " " RCCL_GPU_TARGETS_STR)
+
     # Copy source to build directory
     file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})
 
@@ -98,7 +95,7 @@ if(hip_FOUND AND rccl_FOUND)
             ${rccl-tests_BUILD_DIR}/build/sendrecv_perf
         COMMAND
             make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
-            GPU_TARGETS=${RCCL_GPU_TARGETS} -j
+            "GPU_TARGETS=${RCCL_GPU_TARGETS_STR}" -j
         WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
         COMMENT
             "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."

@@ -57,4 +57,3 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
 
 # Uncomment if facing rate limit exceed issue with local build
 external_projects_remote_repository = ""
-

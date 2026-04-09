@@ -14,6 +14,13 @@
 #include "kpack_internal.h"
 #include "rocm_kpack/kpack.h"
 
+// Platform-appropriate path list separator (matches loader.cpp split_path_list)
+#ifdef _WIN32
+static const char PATH_SEP = ';';
+#else
+static const char PATH_SEP = ':';
+#endif
+
 // Helper to get test assets directory
 static std::string get_test_assets_dir() {
   const char* dir = std::getenv("ROCM_KPACK_TEST_ASSETS_DIR");
@@ -37,9 +44,24 @@ class CacheGuard {
   kpack_cache_t cache_;
 };
 
+// Cross-platform environment variable helpers
+static void env_set(const char* name, const char* value) {
+#ifdef _WIN32
+  _putenv_s(name, value);
+#else
+  setenv(name, value, 1);
+#endif
+}
+
+static void env_unset(const char* name) {
+#ifdef _WIN32
+  _putenv_s(name, "");
+#else
+  unsetenv(name);
+#endif
+}
+
 // RAII wrapper for environment variable
-// Note: setenv() and unsetenv() are POSIX, not C++ standard.
-// For Windows, use _putenv_s() instead.
 class EnvGuard {
  public:
   EnvGuard(const char* name, const char* value) : name_(name) {
@@ -50,14 +72,14 @@ class EnvGuard {
     } else {
       had_value_ = false;
     }
-    setenv(name, value, 1);
+    env_set(name, value);
   }
 
   ~EnvGuard() {
     if (had_value_) {
-      setenv(name_.c_str(), saved_.c_str(), 1);
+      env_set(name_.c_str(), saved_.c_str());
     } else {
-      unsetenv(name_.c_str());
+      env_unset(name_.c_str());
     }
   }
 
@@ -101,18 +123,11 @@ TEST(LoaderAPITest, DiscoverBinaryPath_ValidAddress) {
   kpack_error_t err =
       kpack_discover_binary_path(addr, path, sizeof(path), &offset);
 
-  // This should succeed on Linux
-#ifdef __linux__
   EXPECT_EQ(err, KPACK_SUCCESS);
   // Path should be non-empty and contain the test executable name
   EXPECT_GT(std::strlen(path), 0u);
-  // The path should end with the test executable name
   std::string path_str(path);
   EXPECT_NE(path_str.find("test_kpack_runtime"), std::string::npos);
-#else
-  // On Windows, we expect NOT_IMPLEMENTED until Windows support is added
-  EXPECT_EQ(err, KPACK_ERROR_NOT_IMPLEMENTED);
-#endif
 }
 
 TEST(LoaderAPITest, DiscoverBinaryPath_BufferTooSmall) {
@@ -122,12 +137,8 @@ TEST(LoaderAPITest, DiscoverBinaryPath_BufferTooSmall) {
   kpack_error_t err =
       kpack_discover_binary_path(addr, path, sizeof(path), nullptr);
 
-#ifdef __linux__
   // Should fail because buffer is too small
   EXPECT_EQ(err, KPACK_ERROR_INVALID_ARGUMENT);
-#else
-  EXPECT_EQ(err, KPACK_ERROR_NOT_IMPLEMENTED);
-#endif
 }
 
 //
@@ -153,7 +164,8 @@ TEST(LoaderAPITest, CacheDestroy_Null) {
 
 TEST(LoaderAPITest, CacheCreate_ResolvesEnvVars) {
   // Set environment variables before creating cache
-  EnvGuard path_guard("ROCM_KPACK_PATH", "/test/path1:/test/path2");
+  std::string path_val = std::string("/test/path1") + PATH_SEP + "/test/path2";
+  EnvGuard path_guard("ROCM_KPACK_PATH", path_val.c_str());
   EnvGuard prefix_guard("ROCM_KPACK_PATH_PREFIX", "/prefix/path");
 
   CacheGuard cache;
@@ -1157,9 +1169,10 @@ TEST(LoaderAPITest, EnvPath_EmptyComponents) {
     GTEST_SKIP() << "ROCM_KPACK_TEST_ASSETS_DIR not set";
   }
 
-  // Path with empty components: "path1::path2" should ignore empty
+  // Path with empty components: "path1<sep><sep>path2" should ignore empty
   std::string kpack_path = assets_dir + "/test_noop.kpack";
-  std::string path_with_empty = kpack_path + "::" + kpack_path;
+  std::string sep(2, PATH_SEP);
+  std::string path_with_empty = kpack_path + sep + kpack_path;
   EnvGuard env_guard("ROCM_KPACK_PATH", path_with_empty.c_str());
 
   CacheGuard cache;
@@ -1187,8 +1200,8 @@ TEST(LoaderAPITest, EnvPath_TrailingColon) {
     GTEST_SKIP() << "ROCM_KPACK_TEST_ASSETS_DIR not set";
   }
 
-  // Path with trailing colon should be parsed correctly
-  std::string kpack_path = assets_dir + "/test_noop.kpack:";
+  // Path with trailing separator should be parsed correctly
+  std::string kpack_path = assets_dir + "/test_noop.kpack" + PATH_SEP;
   EnvGuard env_guard("ROCM_KPACK_PATH", kpack_path.c_str());
 
   CacheGuard cache;

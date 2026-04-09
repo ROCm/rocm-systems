@@ -508,6 +508,42 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.processed_environs.emplace("periods");
     }
 
+    if(_data.environ_filter("rank_filter_id", _data))
+    {
+        _parser
+            .add_argument({ "--rank-filter-id" },
+                          "Sets the name of environment variable to read rank from for "
+                          "MPI output filtering")
+            .max_count(1)
+            .dtype("string")
+            .required({ "rank-filter-output" })
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_RANK_FILTER_ID",
+                           p.get<std::string>("rank-filter-id"));
+            });
+
+        _data.processed_environs.emplace("rank_filter_id");
+    }
+
+    if(_data.environ_filter("rank_filter_output", _data))
+    {
+        _parser
+            .add_argument({ "--rank-filter-output" },
+                          "Ranks for which file output is generated. Values should be "
+                          "separated by commas and can be explicit or ranges, e.g. "
+                          "0,1,5-8. An empty value enables output for all ranks")
+            .max_count(1)
+            .dtype("int and/or range")
+            .action([&](parser_t& p) {
+                update_env(
+                    _data, "ROCPROFSYS_RANK_FILTER_OUTPUT",
+                    fmt::format("{}",
+                                fmt::join(p.get<strvec_t>("rank-filter-output"), ",")));
+            });
+
+        _data.processed_environs.emplace("rank_filter_output");
+    }
+
     strset_t _backend_choices = { "all",        "kokkosp", "mpip", "ompt",
                                   "rcclp",      "amd-smi", "rocm", "mutex-locks",
                                   "spin-locks", "rw-locks" };
@@ -521,25 +557,14 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-    _backend_choices.erase("amd-smi");
-    _backend_choices.erase("rocm");
-    _backend_choices.erase("rcclp");
-    _backend_choices.erase("ompt");
-#endif
-
     if(gpu::device_count() == 0)
     {
         // remove GPU-specific backends
         _backend_choices.erase("rcclp");
         _backend_choices.erase("amd-smi");
         _backend_choices.erase("rocm");
-        _backend_choices.erase("ompt");
 
-#if defined(ROCPROFSYS_USE_ROCM)
         update_env(_data, "ROCPROFSYS_USE_AMD_SMI", false);
-        update_env(_data, "ROCPROFSYS_USE_ROCM", false);
-#endif
     }
 
     _parser.start_group("BACKEND OPTIONS",
@@ -561,7 +586,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
                 _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
                 _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-                _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
                 _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
                 _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
                 _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
@@ -591,7 +615,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
                 _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
                 _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-                _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
                 _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
                 _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
                 _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);

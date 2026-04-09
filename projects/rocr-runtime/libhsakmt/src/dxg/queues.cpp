@@ -81,7 +81,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
 
   switch (Type) {
   case HSA_QUEUE_COMPUTE_AQL: {
-    assert(QueueResource->ErrorReason == nullptr);
     uint64_t pkg_num = QueueSizeInBytes / 64;
     uint32_t cmdbuf_size = device_->GetCmdbufSize();
     uint32_t queue_engine = device_->GetComputeEngine();
@@ -151,23 +150,26 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId) {
   return HSAKMT_STATUS_SUCCESS;
 }
 
+// ================================================================================================
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
                                              HSAuint32 CUMaskCount,
                                              HSAuint32 *QueueCUMask) {
   CHECK_DXG_OPEN();
 
-  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
-  if (!queue_)
+  auto queue = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
+  if (!queue)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   if (CUMaskCount == 0 || !QueueCUMask || ((CUMaskCount % 32) != 0))
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  pr_warn_once("not implemented\n");
+  if (queue->SetCuMask(CUMaskCount, QueueCUMask) != HSA_STATUS_SUCCESS)
+    return HSAKMT_STATUS_ERROR;
 
   return HSAKMT_STATUS_SUCCESS;
 }
 
+// ================================================================================================
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(HSA_QUEUEID QueueId,
                                            HsaQueueInfo *QueueInfo) {
   CHECK_DXG_OPEN();
@@ -186,7 +188,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
                                              void *TrapBufferBaseAddress,
                                              HSAuint64 TrapBufferSizeInBytes) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not implemented\n");
+
+  wsl::thunk::WDDMDevice* device = get_wddmdev(Node);
+  if (device == NULL) {
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
+
+  if (!device->SetTrapHandler(reinterpret_cast<uint64_t>(TrapHandlerBaseAddress),
+                              reinterpret_cast<uint64_t>(TrapBufferBaseAddress))) {
+    return HSAKMT_STATUS_ERROR;
+  }
+
   return HSAKMT_STATUS_SUCCESS;
 }
 

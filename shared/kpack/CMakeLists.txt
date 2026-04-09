@@ -14,6 +14,22 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(BUILD_RUNTIME)
     find_package(msgpack-cxx REQUIRED)
     find_package(zstd REQUIRED)
+    # System zstd packages may only provide zstd::libzstd_shared /
+    # zstd::libzstd_static instead of the zstd::libzstd alias that TheRock's
+    # bundled build exports.  Create the alias so downstream targets can link
+    # uniformly against zstd::libzstd.
+    if(NOT TARGET zstd::libzstd)
+        if(TARGET zstd::libzstd_shared)
+            add_library(zstd::libzstd ALIAS zstd::libzstd_shared)
+        elseif(TARGET zstd::libzstd_static)
+            add_library(zstd::libzstd ALIAS zstd::libzstd_static)
+        else()
+            message(
+                FATAL_ERROR
+                "find_package(zstd) succeeded but no known target found"
+            )
+        endif()
+    endif()
 endif()
 
 # Enable testing

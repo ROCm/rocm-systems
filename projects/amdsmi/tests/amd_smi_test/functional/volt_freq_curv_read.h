@@ -27,7 +27,7 @@
 
 class TestVoltCurvRead : public TestBase {
  public:
-    TestVoltCurvRead();
+  TestVoltCurvRead();
 
   // @Brief: Destructor for test case of TestVoltCurvRead
   virtual ~TestVoltCurvRead();
@@ -38,7 +38,7 @@ class TestVoltCurvRead : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results

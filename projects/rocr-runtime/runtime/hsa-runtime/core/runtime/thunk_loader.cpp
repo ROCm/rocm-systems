@@ -608,5 +608,29 @@ ERROR:
     }
     return false;
   }
+
+  bool ThunkLoader::CheckThunkAbi() {
+    if (!IsDXG()) return true;
+
+    if (thunk_handle == nullptr) return false;
+
+    DxgAbiCheckFunc* pfnDxgAbiCheck =
+        (DxgAbiCheckFunc*)rocr::os::GetExportAddress(thunk_handle, "DxgAbiCheck");
+    if (pfnDxgAbiCheck == nullptr) {
+      // Old librocdxg without DxgAbiCheck — assume compatible.
+      debug_print("DxgAbiCheck not exported, skipping ABI check.\n");
+      return true;
+    }
+
+    HsaStructureSizes sizes = {};
+    sizes.StructureSizes = (HSAuint16)sizeof(HsaStructureSizes);
+    sizes.SizeOfHsaNodeProperties = (HSAuint16)sizeof(HsaNodeProperties);
+
+    if (pfnDxgAbiCheck(&sizes) != HSAKMT_STATUS_SUCCESS) {
+      debug_print("DxgAbiCheck failed!\n");
+      return false;
+    }
+    return true;
+  }
 }   //  namespace core
 }   //  namespace rocr

@@ -6,10 +6,9 @@ handling, directory traversal, and file classification.
 """
 
 import os
-import subprocess
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -187,9 +186,9 @@ class TestIsFatBinary:
     """Tests for fat binary detection.
 
     These tests verify that is_fat_binary() correctly identifies:
-    - Fat binaries (ELF files with .hip_fatbin section) -> True
-    - Host-only binaries (ELF files without .hip_fatbin) -> False
-    - Non-ELF files -> False
+    - Fat binaries (ELF with .hip_fatbin / PE with .hip_fat) -> True
+    - Host-only binaries (no device code section) -> False
+    - Non-binary files -> False
     - Empty files -> False
     - Missing files -> raises FileNotFoundError
     """
@@ -254,78 +253,68 @@ class TestIsFatBinary:
         result = is_fat_binary(fat_binary, toolchain)
         assert result is True
 
-    def test_is_fat_binary_with_hip_fatbin(self, tmp_path):
-        """Test detecting a binary with .hip_fatbin section."""
-        # Create a real file with ELF magic bytes
-        elf_file = tmp_path / "binary.so"
-        elf_file.write_bytes(b"\x7fELF" + b"\x00" * 100)  # ELF magic + padding
+    def test_is_fat_binary_with_hip_fatbin(self, test_assets_dir, toolchain):
+        """Test detecting a fat binary with .hip_fatbin section (ELF)."""
+        fat_binary = (
+            test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_single.exe"
+        )
+        assert fat_binary.exists(), f"Test asset not found: {fat_binary}"
 
-        mock_toolchain = Mock(spec=Toolchain)
-        mock_toolchain.readelf = "/usr/bin/readelf"
+        assert (
+            is_fat_binary(fat_binary, toolchain) is True
+        ), f"Expected fat binary: {fat_binary}"
 
-        # Mock subprocess to return output with .hip_fatbin
-        with patch("subprocess.check_output") as mock_check:
-            mock_check.return_value = """
-                Section Headers:
-                  [Nr] Name              Type
-                  [ 0]                   NULL
-                  [ 1] .text             PROGBITS
-                  [ 2] .hip_fatbin       PROGBITS
-                  [ 3] .data             PROGBITS
-            """
+    def test_is_fat_binary_without_hip_fatbin(self, test_assets_dir, toolchain):
+        """Test detecting a host-only binary without device code (ELF)."""
+        host_only = test_assets_dir / "bundled_binaries/linux/cov5/host_only.exe"
+        assert host_only.exists(), f"Test asset not found: {host_only}"
 
-            result = is_fat_binary(elf_file, mock_toolchain)
-            assert result is True
-
-    def test_is_fat_binary_without_hip_fatbin(self, tmp_path):
-        """Test detecting a regular binary without .hip_fatbin."""
-        # Create a real file with ELF magic bytes
-        elf_file = tmp_path / "binary.so"
-        elf_file.write_bytes(b"\x7fELF" + b"\x00" * 100)  # ELF magic + padding
-
-        mock_toolchain = Mock(spec=Toolchain)
-        mock_toolchain.readelf = "/usr/bin/readelf"
-
-        with patch("subprocess.check_output") as mock_check:
-            mock_check.return_value = """
-                Section Headers:
-                  [Nr] Name              Type
-                  [ 0]                   NULL
-                  [ 1] .text             PROGBITS
-                  [ 2] .data             PROGBITS
-            """
-
-            result = is_fat_binary(elf_file, mock_toolchain)
-            assert result is False
+        assert (
+            is_fat_binary(host_only, toolchain) is False
+        ), f"Expected host-only binary: {host_only}"
 
     def test_is_fat_binary_not_elf(self, tmp_path):
-        """Test handling non-ELF files."""
-        # Create a real non-ELF file (text file)
+        """Test handling non-ELF/non-PE files."""
         text_file = tmp_path / "text.txt"
-        text_file.write_text("This is not an ELF file")
+        text_file.write_text("This is not a binary file")
 
         mock_toolchain = Mock(spec=Toolchain)
-        mock_toolchain.readelf = "/usr/bin/readelf"
-
-        # Should return False immediately after checking magic bytes, without calling readelf
         result = is_fat_binary(text_file, mock_toolchain)
         assert result is False
 
-    def test_is_fat_binary_readelf_not_found(self, tmp_path):
-        """Test handling when readelf is not available."""
-        # Create a real file with ELF magic bytes
+    def test_is_fat_binary_truncated_elf(self, tmp_path):
+        """Test that truncated ELF files are handled gracefully."""
         elf_file = tmp_path / "binary.so"
-        elf_file.write_bytes(b"\x7fELF" + b"\x00" * 100)  # ELF magic + padding
+        elf_file.write_bytes(b"\x7fELF" + b"\x00" * 10)  # Too short for real ELF
 
         mock_toolchain = Mock(spec=Toolchain)
-        mock_toolchain.readelf = "/nonexistent/readelf"
+        # Should not crash — either returns False or raises a sensible error
+        try:
+            assert (
+                is_fat_binary(elf_file, mock_toolchain) is False
+            ), f"Truncated ELF should not be detected as fat: {elf_file}"
+        except (RuntimeError, ValueError):
+            pass  # Also acceptable for corrupt files
 
-        with patch("subprocess.check_output") as mock_check:
-            mock_check.side_effect = FileNotFoundError("No such file")
+    def test_is_fat_binary_coff_fat(self, test_assets_dir, toolchain):
+        """Test detecting a fat binary with .hip_fat section (PE/COFF)."""
+        fat_binary = (
+            test_assets_dir / "bundled_binaries/windows/cov5/test_kernel_single.exe"
+        )
+        assert fat_binary.exists(), f"Test asset not found: {fat_binary}"
 
-            # Should raise RuntimeError when readelf is not found
-            with pytest.raises(RuntimeError, match="readelf not found"):
-                is_fat_binary(elf_file, mock_toolchain)
+        assert (
+            is_fat_binary(fat_binary, toolchain) is True
+        ), f"Expected fat binary: {fat_binary}"
+
+    def test_is_fat_binary_coff_host_only(self, test_assets_dir, toolchain):
+        """Test detecting a host-only PE/COFF binary."""
+        host_only = test_assets_dir / "bundled_binaries/windows/cov5/host_only.exe"
+        assert host_only.exists(), f"Test asset not found: {host_only}"
+
+        assert (
+            is_fat_binary(host_only, toolchain) is False
+        ), f"Expected host-only binary: {host_only}"
 
 
 class TestExtractArchitectureFromTarget:

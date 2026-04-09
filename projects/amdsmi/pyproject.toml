@@ -1,0 +1,25 @@
+[tool.ruff]
+line-length = 100
+
+extend-exclude = [
+    "build",
+    "build-*",
+    "_build",
+    "docs",
+    "esmi_ib_library",
+    "py-interface/amdsmi_wrapper.py",
+    "third_party",
+]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["amdsmi", "amdsmi_cli"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = true
+line-ending = "auto"

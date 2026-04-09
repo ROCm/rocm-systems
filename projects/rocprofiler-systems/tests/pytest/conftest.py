@@ -32,6 +32,7 @@ from rocprofsys import (
     detect_gpu,
     get_offload_extractor,
     get_target_gpu_arch,
+    get_xnack_support,
     TestResult,
     validate_regex,
     validate_file_regex,
@@ -234,6 +235,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "python_versions: Test will be parametrized by Python version",
     )
+    config.addinivalue_line(
+        "markers",
+        "multi_gpu(num): mark test as using requiring atleast num amount of GPUs",
+    )
 
     # See pytest_collection_modifyitems
     generic_functional_markers = [
@@ -244,6 +249,8 @@ def pytest_configure(config: pytest.Config) -> None:
         "rocm",
         "python",
         "annotate",
+        "julia",
+        "xnack",
     ]
 
     # Non-functional informational markers
@@ -269,6 +276,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "rocprof_binary",
         "rocprof_config",
         "xgmi",
+        "sdma",
         "group_by_queue",
         "group_by_stream",
         "openmp",
@@ -297,6 +305,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "unit_tests",
         "hip_stream",
         "presets",
+        "hpc",
+        "hip",
+        "kfd",
+        "selective_regions",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -432,6 +444,8 @@ def pytest_collection_modifyitems(config, items) -> None:
     )
     skip_rocm = pytest.mark.skip(reason="ROCm not available")
     skip_python = pytest.mark.skip(reason="Python not available")
+    skip_julia = pytest.mark.skip(reason="Julia not available")
+    skip_xnack = pytest.mark.skip(reason="XNACK not supported")
 
     # Conditions
     overflow_available = (
@@ -449,6 +463,9 @@ def pytest_collection_modifyitems(config, items) -> None:
     python_available = (
         rocprof_config.python_versions is not None
         and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
+    )
+    xnack_available = (
+        get_xnack_support(rocprof_config.rocm_path) if rocprof_config.rocm_path else False
     )
 
     for item in items:
@@ -469,6 +486,8 @@ def pytest_collection_modifyitems(config, items) -> None:
         add_marker_if(item, "papi", cond=annotate_available, req_mark="annotate")
         add_marker_if(item, "mpi", req_mark="mpi_implementation")
         add_marker_if(item, "python", req_mark="python_versions")
+        add_marker_if(item, "gpu", req_mark="multi_gpu")
+
         # ----------------------------------------------------------------------------
         # Add corresponding runner type markers based on parametrized values ("mode")
         # Ex: If "sampling" runner is used, then sampling marker is added
@@ -507,6 +526,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(skip_rocm)
         if "python" in item.keywords and not python_available:
             item.add_marker(skip_python)
+        if "julia" in item.keywords and not rocprof_config.julia:
+            item.add_marker(skip_julia)
+        if "xnack" in item.keywords and not xnack_available:
+            item.add_marker(skip_xnack)
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
@@ -538,6 +561,14 @@ def pytest_collection_modifyitems(config, items) -> None:
             except Exception as e:
                 pytest.exit(
                     f"Invalid run_if_gpu_category marker expression: {e}", returncode=1
+                )
+        if "multi_gpu" in item.keywords:
+            num_gpu = item.get_closest_marker("multi_gpu").args[0]
+            if gpu_info.device_count < num_gpu:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"Test requires {num_gpu} GPUs but system has {gpu_info.device_count}"
+                    )
                 )
         # ----------------------------------------------------------------------------
         # Deselect tests for CI mode (TheRock)
@@ -779,11 +810,13 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
                 "Not found - Set ROCM_LLVM_OBJDUMP to path of llvm-objdump (v20+), "
                 "or to path of roc-obj-ls if llvm-objdump < v20"
             )
+        xnack_support = get_xnack_support(rocprof_config.rocm_path)
     else:
         rocm_version = "Not found"
-        rocminfo_err_msg = "Requires ROCPROFSYS_USE_ROCM=ON"
-        offload_msg = "Requires ROCPROFSYS_USE_ROCM=ON"
+        rocminfo_err_msg = "ROCm not found"
+        offload_msg = "ROCm not found"
         rocminfo_path = None
+        xnack_support = False
 
     header = [
         "",
@@ -816,6 +849,7 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         f"  Architectures:        {gpu_info.architectures if gpu_info.architectures else 'None'}",
         f"  Device count:         {gpu_info.device_count}",
         f"  Categories:           {gpu_info.categories if gpu_info.categories else 'None'}",
+        f"  XNACK support:        {xnack_support}",
         "-" * 70,
         "Directories:",
         f"  Build dir:            {rocprof_config.rocprofsys_build_dir}",
@@ -832,6 +866,7 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         f"  Avail:                {rocprof_config.rocprofsys_avail}",
         f"  Causal:               {rocprof_config.rocprofsys_causal}",
         f"  MPI exec:             {rocprof_config.mpiexec}",
+        f"  Julia:                {rocprof_config.julia}",
         f"  Offload tool:         {offload_msg}",
         "-" * 70,
         "Python:",
@@ -1583,6 +1618,7 @@ def run_test(
         target: str,
         env: Optional[dict[str, str]] = None,
         run_args: Optional[list[str]] = None,
+        pre_run_args: Optional[list[str]] = None,
         timeout: int = 300,
         mpi_ranks: int = 0,
         working_directory: Optional[Path] = None,
@@ -1651,6 +1687,7 @@ def run_test(
                 target=target,
                 output_dir=test_output_dir,
                 run_args=run_args,
+                pre_run_args=pre_run_args,
                 env=env,
                 timeout=timeout,
                 mpi_ranks=mpi_ranks,

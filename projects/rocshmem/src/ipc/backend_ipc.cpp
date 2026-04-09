@@ -112,15 +112,6 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
-  const char *arch_name = get_arch_name(hip_dev_id);
-  if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
-    fine_grained_allocator_ = new HIPAllocatorFinegrained();
-  } else {
-    fine_grained_allocator_ = new HIPDefaultFinegrainedAllocator();
-  }
-
-  setup_team_world();
-
   setup_wrk_sync_buffers();
 
   rocshmem_collective_init();
@@ -128,6 +119,8 @@ void IPCBackend::init() {
   setup_fence_buffer();
 
   teams_init();
+
+  setup_team_world();
 
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
@@ -143,19 +136,15 @@ IPCBackend::~IPCBackend() {
    */
   teams_destroy();
   cleanup_wrk_sync_buffer();
+
+  // Close IPC handles for remote heap bases
+  ipcImpl.ipcHostStop();
+
   auto *team_world{team_tracker.get_team_world()};
   team_world->~Team();
   CHECK_HIP(hipFree(team_world));
 
   CHECK_HIP(hipFree(ctx_array));
-  if (fine_grained_allocator_) {
-    const char *arch_name = get_arch_name(hip_dev_id);
-    if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
-      delete static_cast<HIPAllocatorFinegrained *>(fine_grained_allocator_);
-    } else {
-      delete static_cast<HIPDefaultFinegrainedAllocator *>(fine_grained_allocator_);
-    }
-  }
 }
 
 int IPCBackend::backend_can_run(MPI_Comm comm, TcpBootstrap* bootstrap) {
@@ -185,14 +174,14 @@ int IPCBackend::backend_can_run(MPI_Comm comm, TcpBootstrap* bootstrap) {
 }
 void IPCBackend::setup_ctxs() {
   CHECK_HIP(hipMalloc(&ctx_array, sizeof(IPCContext) * envvar::max_num_contexts));
-  // 0th context is default context
+  // 0th index is used for default context
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     new (&ctx_array[i]) IPCContext(this, i + 1);
     ctx_free_list.get()->push_back(ctx_array + i);
   }
 }
 
-__device__ bool IPCBackend::create_ctx(int64_t options, rocshmem_ctx_t *ctx) {
+__device__ bool IPCBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
   IPCContext *ctx_{nullptr};
 
   auto pop_result = ctx_free_list.get()->pop_front();
@@ -233,7 +222,8 @@ void IPCBackend::setup_team_world() {
   /**
    * Copy the address to ROCSHMEM_TEAM_WORLD.
    */
-  ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
+  host::ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
+  set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 }
 
 void IPCBackend::team_destroy(rocshmem_team_t team) {
@@ -270,7 +260,7 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
     abort();
   }
 
-  for (int i = 0; i < num_bytes; i++) {
+  for (size_t i = 0; i < num_bytes; i++) {
     outbuf[i] = tmp_buffer[i];
     for (int j = 1; j < num_pes; j++) {
       outbuf[i] &= tmp_buffer[j * num_bytes + i];
@@ -408,7 +398,7 @@ void IPCBackend::setup_wrk_sync_buffers() {
    * Allocate a buffer of size wrk_sync_pool_size_, using fine-grained
    * memory allocator
   */
-  fine_grained_allocator_->allocate((void**)&wrk_sync_pool_,
+  psync_allocator_->allocate((void**)&wrk_sync_pool_,
                                     wrk_sync_pool_size_);
   assert(wrk_sync_pool_);
   wrk_sync_pool_top_ = wrk_sync_pool_;
@@ -416,33 +406,32 @@ void IPCBackend::setup_wrk_sync_buffers() {
   /*
    * Allocate a c-array to hold the IPC handles
    */
-  hipIpcMemHandle_t *ipc_handle = reinterpret_cast<hipIpcMemHandle_t*>(
-            malloc(num_pes * sizeof(hipIpcMemHandle_t)));
+  HIPIpcHandleVec *ipc_handles = psync_allocator_->AllocateIpcHandleVec(num_pes);
 
   /*
    * Call into the hip runtime to get an IPC handle for the allocated
    * wrk_sync_pool_ buffer and store that IPC handle
    */
-  CHECK_HIP(hipIpcGetMemHandle(&ipc_handle[my_pe], wrk_sync_pool_));
+  CHECK_HIP(psync_allocator_->GetIpcHandle(wrk_sync_pool_, ipc_handles->GetHandleVecElem(my_pe)));
 
   /*
    * all-to-all exchange with each PE to share the IPC handles.
    */
+  size_t ipc_handle_size = psync_allocator_->GetIpcHandleSize();
   if (backend_comm != MPI_COMM_NULL) {
-    mpilib_ftable_.Allgather(MPI_IN_PLACE, sizeof(hipIpcMemHandle_t), MPI_CHAR,
-                             ipc_handle, sizeof(hipIpcMemHandle_t), MPI_CHAR, backend_comm);
+    mpilib_ftable_.Allgather(MPI_IN_PLACE, ipc_handle_size, MPI_CHAR,
+                             ipc_handles->GetHandleVecElem(0), ipc_handle_size, MPI_CHAR, backend_comm);
   } else {
     assert (backend_bootstr != nullptr);
-    backend_bootstr->allGather(ipc_handle, sizeof(hipIpcMemHandle_t));
+    backend_bootstr->allGather(ipc_handles->GetHandleVecElem(0), ipc_handle_size);
   }
 
   /*
    * Allocate device-side fine grained memory to hold IPC addresses of
    * work/sync buffers
    */
-  fine_grained_allocator_->allocate(
-    reinterpret_cast<void**>(&wrk_sync_pool_bases_),
-    num_pes * sizeof(char*));
+  psync_allocator_->allocate(reinterpret_cast<void**>(&wrk_sync_pool_bases_),
+			     num_pes * sizeof(char*));
   assert(wrk_sync_pool_bases_);
 
   /*
@@ -451,24 +440,24 @@ void IPCBackend::setup_wrk_sync_buffers() {
    */
   for (int i = 0; i < num_pes; i++) {
     if (i != my_pe) {
-      CHECK_HIP(hipIpcOpenMemHandle(
-          reinterpret_cast<void**>(&wrk_sync_pool_bases_[i]),
-          ipc_handle[i],
-          hipIpcMemLazyEnablePeerAccess));
+      CHECK_HIP(psync_allocator_->OpenIpcHandle(reinterpret_cast<void**>(&wrk_sync_pool_bases_[i]),
+                                                       ipc_handles->GetHandleVecElem(i)));
     } else {
       wrk_sync_pool_bases_[i] = wrk_sync_pool_;
     }
   }
+
+  delete ipc_handles;
 }
 
 void IPCBackend::cleanup_wrk_sync_buffer() {
   for (int i = 0; i < num_pes; i++) {
     if (i != my_pe) {
-      CHECK_HIP(hipIpcCloseMemHandle(wrk_sync_pool_bases_[i]));
+      CHECK_HIP(psync_allocator_->CloseIpcHandle(wrk_sync_pool_bases_[i]));
     }
   }
-  fine_grained_allocator_->deallocate(wrk_sync_pool_bases_);
-  fine_grained_allocator_->deallocate(wrk_sync_pool_);
+  psync_allocator_->deallocate(wrk_sync_pool_bases_);
+  psync_allocator_->deallocate(wrk_sync_pool_);
 }
 
 void IPCBackend::setup_fence_buffer() {
@@ -492,7 +481,7 @@ void IPCBackend::rocshmem_collective_init() {
   /*
    * Initialize the barrier synchronization array with default values.
    */
-  for (int i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
+  for (size_t i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
     barrier_sync[i] = ROCSHMEM_SYNC_VALUE;
   }
 

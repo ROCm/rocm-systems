@@ -90,8 +90,12 @@ RocVideoDecoder::~RocVideoDecoder() {
                       std::cerr << "ERROR: hipFree failed! (" << hip_status << ")" << std::endl;
                   }
               }
-              else
-                  delete[] (p_frame.frame_ptr);
+              else {
+                  hipError_t hip_status = hipHostFree(p_frame.frame_ptr);
+                  if (hip_status != hipSuccess) {
+                      std::cerr << "ERROR: hipHostFree failed! (" << hip_status << ")" << std::endl;
+                  }
+              }
               p_frame.frame_ptr = nullptr;
             }
         }
@@ -202,6 +206,7 @@ static void GetSurfaceStrideInternal(rocDecVideoSurfaceFormat surface_format, ui
 
     switch (surface_format) {
     case rocDecVideoSurfaceFormat_NV12:
+    default:
         *pitch = align(width, 256);
         *vstride = align(height, 16);
         break;
@@ -349,7 +354,7 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     videoDecodeCreateInfo.device_id = device_id_;
     videoDecodeCreateInfo.codec_type = codec_id_;
     videoDecodeCreateInfo.chroma_format = video_chroma_format_;
-    videoDecodeCreateInfo.output_format = video_surface_format_;
+    videoDecodeCreateInfo.output_format = rocDecVideoSurfaceFormat_Native; // Signal to decode that surface format will be set based on chroma format and bit depth
     videoDecodeCreateInfo.bit_depth_minus_8 = bitdepth_minus_8_;
     videoDecodeCreateInfo.num_decode_surfaces = num_decode_surfaces_;
     videoDecodeCreateInfo.width = coded_width_;
@@ -505,16 +510,18 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
         std::lock_guard<std::mutex> lock(mtx_vp_frame_);
         while(!vp_frames_.empty()) {
             DecFrameBuffer *p_frame = &vp_frames_.back();
-            // pop decoded frame
-            vp_frames_.pop_back();
             if (p_frame->frame_ptr) {
               if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                   hipError_t hip_status = hipFree(p_frame->frame_ptr);
                   if (hip_status != hipSuccess) std::cerr << "ERROR: hipFree failed! (" << hip_status << ")" << std::endl;
               }
-              else
-                  delete [] (p_frame->frame_ptr);
+              else {
+                  hipError_t hip_status = hipHostFree(p_frame->frame_ptr);
+                  if (hip_status != hipSuccess) std::cerr << "ERROR: hipHostFree failed! (" << hip_status << ")" << std::endl;
+              }
             }
+            // pop decoded frame
+            vp_frames_.pop_back();
         }
     }
     output_frame_cnt_ = 0;     // reset frame_count
@@ -550,6 +557,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
         else if (video_chroma_format_ == rocDecVideoChromaFormat_422)
             video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV422_16Bit : rocDecVideoSurfaceFormat_YUV422;
     }
+
     num_decode_surfaces_ = p_video_format->min_num_decode_surfaces;
 
     if (p_video_format->reconfig_options == ROCDEC_RECONFIG_NEW_SURFACES) {
@@ -752,7 +760,8 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
                         // allocate device memory
                         HIP_API_CALL(hipMalloc((void **)&dec_frame.frame_ptr, GetFrameSize()));
                     } else {
-                        dec_frame.frame_ptr = new uint8_t[GetFrameSize()];
+                        // Pinned host memory is used to give better performance for async Device→Host DMA copies.
+                        HIP_API_CALL(hipHostMalloc((void **)&dec_frame.frame_ptr, GetFrameSize(), hipHostMallocDefault));
                     }
                     dec_frame.pts = pDispInfo->pts;
                     dec_frame.picture_index = pDispInfo->picture_index;

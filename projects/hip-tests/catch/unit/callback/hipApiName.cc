@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
@@ -45,16 +29,18 @@ const uint32_t kApiNumber{1024};
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipApiName_Positive_Basic") {
-  std::vector<std::string> hip_api_names;
-
+HIP_TEST_CASE(Unit_hipApiName_Positive_Basic) {
+  int valid_api_count = 0;
   for (uint32_t i = 0; i < kApiNumber; ++i) {
-    if (strcmp(hipApiName(i), kUnknownApi)) {
-      hip_api_names.emplace_back(hipApiName(i));
+    const char* api_name = hipApiName(i);
+    REQUIRE(api_name != nullptr);
+    REQUIRE(strlen(api_name) > 0);
+
+    if(strcmp(hipApiName(i), kUnknownApi)) {
+      ++valid_api_count;
     }
   }
-
-  REQUIRE(!hip_api_names.empty());
+  REQUIRE(valid_api_count > 0);
 }
 
 /**
@@ -73,7 +59,7 @@ TEST_CASE("Unit_hipApiName_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipApiName_Negative_ReservedIds") {
+HIP_TEST_CASE(Unit_hipApiName_Negative_ReservedIds) {
   REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::min()),
                Catch::Matchers::Equals(kUnknownApi));
   REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::max()),

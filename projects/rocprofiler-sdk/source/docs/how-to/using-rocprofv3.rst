@@ -82,13 +82,14 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Specifies the PC sample generation frequency.
 
    * - Basic tracing
-     - | ``--hip-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br|
+     - | ``--hip-trace`` [BOOL] |br| |br| |br| |br| |br| |br|
        | ``--marker-trace`` [BOOL] |br| |br| |br| |br| |br|
        | ``--kernel-trace`` [BOOL] |br| |br|
-       | ``--memory-copy-trace`` [BOOL] |br| |br| |br| |br|
+       | ``--memory-copy-trace`` [BOOL] |br| |br| |br|
        | ``--memory-allocation-trace`` [BOOL] |br| |br| |br| |br|
+       | ``--kfd-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br| |br| |br|
        | ``--scratch-memory-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--hsa-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br| |br|
+       | ``--hsa-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br|
        | ``--rccl-trace`` [BOOL] |br| |br| |br| |br|
        | ``--kokkos-trace`` [BOOL] |br| |br| |br| |br|
        | ``--rocdecode-trace`` [BOOL]
@@ -97,6 +98,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Collects kernel dispatch traces. |br| |br|
        | Collects memory copy traces. This was a part of the HIP and HSA traces in previous ``rocprof`` versions. |br| |br|
        | Collects memory allocation traces. Displays starting address, allocation size, and the agent where allocation occurs. |br| |br|
+       | Collects ``--kfd-page-migration-trace``, ``--kfd-page-mapping-trace``, ``--kfd-queue-trace``, and ``--kfd-dropped-events-trace``. KFD (Kernel Fusion Driver) traces capture low-level driver routines involving mapping, unmapping, and migration of data between GPU and system memories, as well as eviction/restoration of GPU queues to facilitate such routines. |br| |br|
        | Collects scratch memory operations traces. Helps in determining scratch allocations and manage them efficiently. |br| |br|
        | Collects ``--hsa-core-trace``, ``--hsa-amd-trace``, ``--hsa-image-trace``, and ``--hsa-finalizer-trace``. This option only enables the HSA API tracing. Unlike previous iterations of ``rocprof``, this doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
        | Collects traces for RCCL (ROCm Communication Collectives Library), which is also pronounced as 'Rickle'. |br| |br|
@@ -107,15 +109,23 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
      - | ``--hip-runtime-trace`` [BOOL] |br| |br| |br| |br|
        | ``--hip-compiler-trace`` [BOOL] |br| |br| |br| |br|
        | ``--hsa-core-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--hsa-amd-trace`` [BOOL] |br| |br| |br| |br| |br|
+       | ``--hsa-amd-trace`` [BOOL] |br| |br| |br| |br|
        | ``--hsa-image-trace`` [BOOL] |br| |br| |br| |br| |br|
-       | ``--hsa-finalizer-trace`` [BOOL]
+       | ``--hsa-finalizer-trace`` [BOOL] |br| |br| |br| |br| |br|
+       | ``--kfd-page-migration-trace`` [BOOL] |br| |br| |br|
+       | ``--kfd-page-mapping-trace`` [BOOL] |br| |br| |br|
+       | ``--kfd-queue-trace`` [BOOL] |br| |br| |br|
+       | ``--kfd-dropped-events-trace`` [BOOL]
      - | Collects HIP Runtime API traces. For example, public HIP API functions starting with ``hip`` such as ``hipSetDevice``. |br| |br|
        | Collects HIP Compiler generated code traces. For example, HIP API functions starting with ``__hip`` such as ``__hipRegisterFatBinary``. |br| |br|
        | Collects HSA API traces (core API). For example, HSA functions prefixed with only ``hsa_`` such as ``hsa_init``. |br| |br|
        | Collects HSA API traces (AMD-extension API). For example, HSA functions prefixed with ``hsa_amd_`` such as ``hsa_amd_coherency_get_type``. |br| |br|
        | Collects HSA API traces (image-extenson API). For example, HSA functions prefixed with only ``hsa_ext_image_`` such as ``hsa_ext_image_get_capability``. |br| |br|
-       | Collects HSA API traces (Finalizer-extension API). For example, HSA functions prefixed with only ``hsa_ext_program_`` such as ``hsa_ext_program_create``.
+       | Collects HSA API traces (Finalizer-extension API). For example, HSA functions prefixed with only ``hsa_ext_program_`` such as ``hsa_ext_program_create``. |br| |br|
+       | Collects traces of KFD events involving migration of pages across device memories. |br| |br|
+       | Collects traces of KFD events involving faulting, mapping, and invalidation of pages. |br| |br|
+       | Collects traces of KFD events involving GPU queue eviction and restoration operations. |br| |br|
+       | Collects traces of KFD events dropped by the KFD device driver.
 
    * - Counter collection
      - | ``--pmc`` [PMC ...]
@@ -170,7 +180,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
    * - Display
      - | ``-L`` [BOOL] \| ``--list-avail`` [BOOL] |br| |br|
        | ``--group-by-queue`` [BOOL]
-     - | Lists the PC sampling configurations and metrics available in the counter_defs.yaml file for counter collection. In earlier ``rocprof`` versions, this was known as ``--list-basic``, ``--list-derived``, and ``--list-counters``. |br| |br|
+     - | Lists the PC sampling configurations and metrics available in the config.yaml file for counter collection. In earlier ``rocprof`` versions, this was known as ``--list-basic``, ``--list-derived``, and ``--list-counters``. |br| |br|
        | For displaying the HSA Queues that kernels and memory copy operations are submitted to rather than the default grouping of HIP Streams for perfetto.
 
    * - Other
@@ -538,11 +548,15 @@ The trace output is captured in a rocpd database file and can be converted to pf
 
 The preceding command generates a rocpd database file prefixed with the process ID which can be converted to pftrace to be visualized in Perfetto UI.
 
+
 .. code-block:: shell
 
     $ /opt/rocm/bin/rocpd2pftrace -i 163852_results.db
 
-Here is the RCCL trace visualized in Perfetto UI:
+The following image visualizes the ``RCCL`` trace for the referenced `allreduce_rccl sample application <https://github.com/bgopesh/allreduce_rccl/blob/master/nccl_allreduce.cpp>`_ using the Perfetto UI.
+The host thread track and select compute streams have been pinned in the visualization to enhance readability.
+This enables clear observation of the ``RCCL`` compute kernels launched during ``ncclAllReduce`` operations on the host thread.
+
 
 .. image:: /data/perfetto_rccl.png
 
@@ -981,7 +995,7 @@ Here is a sample input.json file for specifying counters for collection along wi
             "pmc": ["SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"]
          },
          {
-            "pmc": ["FETCH_SIZE", "WRITE_SIZE"],
+            "pmc": ["FETCH_SIZE", "SQ_WAVE_CYCLES"],
             "kernel_include_regex": ".*_kernel",
             "kernel_exclude_regex": "multiply",
             "kernel_iteration_range": "[1-2],[3-4]",
@@ -1001,7 +1015,7 @@ Here is a sample input.yaml file for counter collection:
 
   jobs:
     - pmc: ["SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"]
-    - pmc: ["FETCH_SIZE", "WRITE_SIZE"]
+    - pmc: ["SQ_WAVE_CYCLES", "WRITE_SIZE"]
       kernel_include_regex: ".*_kernel"
       kernel_exclude_regex: "multiply"
       kernel_iteration_range: "[1-2],[3-4]"
@@ -1044,11 +1058,11 @@ You can specify multiple ``--pmc`` flags to define different counter groups. Eac
 
 .. code-block:: shell
 
-   rocprofv3 --pmc SQ_WAVES FETCH_SIZE --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
+   rocprofv3 --pmc SQ_WAVES SQ_WAVE_CYCLES --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
 
 This command creates two profiling passes:
 
-- Pass 1: Collects ``SQ_WAVES`` and ``FETCH_SIZE``
+- Pass 1: Collects ``SQ_WAVES`` and ``SQ_WAVE_CYCLES``
 - Pass 2: Collects ``GRBM_COUNT`` and ``GRBM_GUI_ACTIVE``
 
 **Combining CLI and input file**
@@ -1063,14 +1077,14 @@ If ``input.txt`` contains:
 
 .. code-block:: text
 
-   pmc: FETCH_SIZE WRITE_SIZE
+   pmc: FETCH_SIZE SQ_WAVES
    pmc: GRBM_GUI_ACTIVE
 
 This creates four profiling passes:
 
 - Pass 1: ``GRBM_COUNT`` (from CLI)
 - Pass 2: ``SQ_WAVES`` (from CLI)
-- Pass 3: ``FETCH_SIZE WRITE_SIZE`` (from input file)
+- Pass 3: ``FETCH_SIZE SQ_WAVE_CYCLES`` (from input file)
 - Pass 4: ``GRBM_GUI_ACTIVE`` (from input file)
 
 **Output organization**
@@ -1871,14 +1885,6 @@ While typically used from command line, it can be scripted:
     # Combine with custom ROCm root
     rocprofv3 --rocm-root /opt/rocm-6.0 --sdk-version 2.2.0 --sys-trace -- ./app
 
-**Environment integration:**
-
-.. code-block:: bash
-
-    # Use environment variable for version
-    export ROCPROF_SDK_VERSION="2.1.3"
-    rocprofv3 --sdk-version "$ROCPROF_SDK_VERSION" --kernel-trace -- ./app
-
 Agent index
 ++++++++++++++
 
@@ -2125,7 +2131,7 @@ Output prefix keys are useful in multiple use cases but are most helpful when de
    * - ``%nid%``
      - ``%rank%`` if possible, otherwise ``%pid%``
    * - ``%launch_time%``
-     - Launch date and/or time according to ``ROCPROF_TIME_FORMAT``
+     - Launch date and/or time
    * - ``%env{NAME}%``
      - Value of ``NAME`` environment variable (``getenv(NAME)``)
    * - ``$env{NAME}``

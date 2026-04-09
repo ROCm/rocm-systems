@@ -1,22 +1,8 @@
-/* Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -218,7 +204,6 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
                     [this]() -> amd::HostQueue& { return *device_->NullStream(false); }),
         busy_heap_(device, *this),
         free_heap_(device, *this),
-        lock_pool_ops_(true),
         device_(device),
         shared_(nullptr),
         max_total_size_(0) {
@@ -284,7 +269,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
 
   /// Add a safe stream for quick looks-ups if event dependencies option is enabled
   void AddSafeStream(Stream* event_stream, Stream* wait_stream) {
-    amd::ScopedLock lock(lock_pool_ops_);
+    std::scoped_lock lock(lock_pool_ops_);
     if (EventDependencies()) {
       free_heap_.AddSafeStream(event_stream, wait_stream);
     }
@@ -349,7 +334,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   } state_;
 
   hipMemPoolProps properties_;  //!< Properties of the memory pool
-  amd::Monitor lock_pool_ops_;  //!< Access to the pool must be lock protected
+  std::recursive_mutex lock_pool_ops_;  //!< Access to the pool must be lock protected
   std::map<hip::Device*, hipMemAccessFlags>
       access_map_;  //!< Map of access to the pool from devices
 

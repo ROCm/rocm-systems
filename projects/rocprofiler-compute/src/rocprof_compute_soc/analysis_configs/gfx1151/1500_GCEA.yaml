@@ -1,0 +1,187 @@
+# =============================================================================
+# RDNA3.5 (gfx1151) - Graphics Core Efficiency Arbiter (GCEA) performance metrics
+# =============================================================================
+# GCEA (Graphics Core Efficiency Arbiter) interfaces to system memory (DRAM).
+# For APUs, this connects to system memory (DDR5/LPDDR5) instead of HBM
+# =============================================================================
+
+Panel Config:
+  id: 1500
+  title: Graphics Core Efficiency Arbiter (GCEA)
+  data source:
+  # =========================================================================
+  # GCEA DRAM (System Memory) Read Interface
+  # =========================================================================
+  - metric_table:
+      id: 1501
+      title: "DRAM Read Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        DRAM Read Requests:
+          avg: AVG(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
+          min: MIN(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
+          max: MAX(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Read Chained Requests:
+          avg: AVG(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          min: MIN(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          max: MAX(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Read Banks Active:
+          avg: AVG(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
+          min: MIN(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
+          max: MAX(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Read Size (32B increments):
+          avg: AVG(GCEA_RDRAM_SIZE_REQ_sum / $denom)
+          min: MIN(GCEA_RDRAM_SIZE_REQ_sum / $denom)
+          max: MAX(GCEA_RDRAM_SIZE_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GCEA DRAM (System Memory) Write Interface
+  # =========================================================================
+  - metric_table:
+      id: 1502
+      title: "DRAM Write Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        DRAM Write Requests:
+          avg: AVG(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
+          min: MIN(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
+          max: MAX(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Write Chained Requests:
+          avg: AVG(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          min: MIN(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          max: MAX(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Write Banks Active:
+          avg: AVG(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
+          min: MIN(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
+          max: MAX(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
+          unit: (Count + $normUnit)
+        DRAM Write Size (32B increments):
+          avg: AVG(GCEA_WDRAM_SIZE_REQ_sum / $denom)
+          min: MIN(GCEA_WDRAM_SIZE_REQ_sum / $denom)
+          max: MAX(GCEA_WDRAM_SIZE_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GCEA Arbiter Statistics
+  # =========================================================================
+  - metric_table:
+      id: 1504
+      title: "System Arbiter (SARB)"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        SARB Busy:
+          avg: AVG((100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          min: MIN((100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          max: MAX((100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          unit: Percent
+        SARB Stalled:
+          avg: AVG((100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          min: MIN((100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          max: MAX((100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          unit: Percent
+        SARB Starving:
+          avg: AVG((100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          min: MIN((100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          max: MAX((100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          unit: Percent
+        SARB Total Requests:
+          avg: AVG(GCEA_SARB_REQ_PER_VC_sum / $denom)
+          min: MIN(GCEA_SARB_REQ_PER_VC_sum / $denom)
+          max: MAX(GCEA_SARB_REQ_PER_VC_sum / $denom)
+          unit: (Count + $normUnit)
+        SARB DRAM Requests:
+          avg: AVG(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
+          min: MIN(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
+          max: MAX(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GCEA Return Interface
+  # =========================================================================
+  - metric_table:
+      id: 1505
+      title: "Return Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Read Returns:
+          avg: AVG(GCEA_RRET_VLD_sum / $denom)
+          min: MIN(GCEA_RRET_VLD_sum / $denom)
+          max: MAX(GCEA_RRET_VLD_sum / $denom)
+          unit: (Count + $normUnit)
+        Write Returns:
+          avg: AVG(GCEA_WRET_VLD_sum / $denom)
+          min: MIN(GCEA_WRET_VLD_sum / $denom)
+          max: MAX(GCEA_WRET_VLD_sum / $denom)
+          unit: (Count + $normUnit)
+        Probe Requests:
+          avg: AVG(GCEA_PRB_REQ_sum / $denom)
+          min: MIN(GCEA_PRB_REQ_sum / $denom)
+          max: MAX(GCEA_PRB_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+
+  metrics_description:
+    DRAM Read Requests: |-
+      Number of read requests sent to system memory (DRAM) per client group.
+      RDNA3.5 uses DDR5/LPDDR5 system memory instead of HBM.
+    DRAM Read Chained Requests: |-
+      Number of chained (sequential) read request chains sent to DRAM.
+      Chained requests improve memory efficiency for sequential access patterns.
+    DRAM Read Banks Active: |-
+      Number of DRAM banks with pending read requests (saturates at 16).
+      More active banks indicate better memory parallelism.
+    DRAM Read Size (32B increments): |-
+      Total size of DRAM read requests in 32-byte increments.
+    DRAM Write Requests: |-
+      Number of write requests sent to system memory (DRAM) per client group.
+    DRAM Write Chained Requests: |-
+      Number of chained (sequential) write request chains sent to DRAM.
+    DRAM Write Banks Active: |-
+      Number of DRAM banks with pending write requests (saturates at 16).
+    DRAM Write Size (32B increments): |-
+      Total size of DRAM write requests in 32-byte increments.
+    SARB Busy: |-
+      Percentage of cycles the System Arbiter was actively processing requests.
+      Per sample: 100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT (when GCEA_ALWAYS_COUNT != 0).
+      GCEA_ALWAYS_COUNT is the cycle-count denominator for these percentages.
+    SARB Stalled: |-
+      Percentage of cycles the System Arbiter was stalled (has valid request but downstream not ready).
+      Per sample: 100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT (when GCEA_ALWAYS_COUNT != 0).
+    SARB Starving: |-
+      Percentage of cycles the System Arbiter was starving (no valid requests but downstream ready).
+      Per sample: 100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT (when GCEA_ALWAYS_COUNT != 0).
+    SARB Total Requests: |-
+      Total requests per virtual channel through the System Arbiter.
+    SARB DRAM Requests: |-
+      DRAM-bound requests per virtual channel through the System Arbiter.
+    Read Returns: |-
+      Number of read data returns from the external memory interface.
+    Write Returns: |-
+      Number of write acknowledgements from the external memory interface.
+    Probe Requests: |-
+      Number of probe-invalidate requests (cache coherency operations).

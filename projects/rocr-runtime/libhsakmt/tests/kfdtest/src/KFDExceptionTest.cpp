@@ -81,7 +81,7 @@ void KFDExceptionTest::TestMemoryException(int gpuNode, HSAuint64 pSrc,
         WARN() << "Queue create failed, on gpuNode: " << gpuNode << std::endl;
         return;
     }
-    m_ChildStatus = hsaKmtCreateEvent(&eventDesc, true, false, &vmFaultEvent);
+    m_ChildStatus = HSAKMT_CALL(hsaKmtCreateEvent, m_hsakmt_current_ctx, &eventDesc, true, false, &vmFaultEvent);
     if (m_ChildStatus != HSAKMT_STATUS_SUCCESS) {
         WARN() << "Event create failed on gpuNode: " << gpuNode << std::endl;
         goto queuefail;
@@ -91,7 +91,7 @@ void KFDExceptionTest::TestMemoryException(int gpuNode, HSAuint64 pSrc,
     dispatch.SetArgs(reinterpret_cast<void *>(pSrc), reinterpret_cast<void *>(pDst));
     dispatch.Submit(queue);
 
-    m_ChildStatus = hsaKmtWaitOnEvent(vmFaultEvent, g_TestTimeOut);
+    m_ChildStatus = HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, vmFaultEvent, g_TestTimeOut);
     if (m_ChildStatus != HSAKMT_STATUS_SUCCESS) {
         WARN() << "Wait failed. No Exception triggered on gpuNode: " << gpuNode << std::endl;
         goto eventfail;
@@ -113,7 +113,7 @@ void KFDExceptionTest::TestMemoryException(int gpuNode, HSAuint64 pSrc,
     }
 
 eventfail:
-    hsaKmtDestroyEvent(vmFaultEvent);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, vmFaultEvent);
 queuefail:
     queue.Destroy();
 }
@@ -136,7 +136,7 @@ void KFDExceptionTest::TestSdmaException(int gpuNode, void *pDst) {
         return;
     }
 
-    m_ChildStatus = hsaKmtCreateEvent(&eventDesc, true, false, &vmFaultEvent);
+    m_ChildStatus = HSAKMT_CALL(hsaKmtCreateEvent, m_hsakmt_current_ctx, &eventDesc, true, false, &vmFaultEvent);
     if (m_ChildStatus != HSAKMT_STATUS_SUCCESS) {
         WARN() << "Event create failed on gpuNode: " << gpuNode << std::endl;
         goto queuefail;
@@ -146,7 +146,7 @@ void KFDExceptionTest::TestSdmaException(int gpuNode, void *pDst) {
                                                    reinterpret_cast<void *>(pDst),
                                                    0x02020202));
 
-    m_ChildStatus = hsaKmtWaitOnEvent(vmFaultEvent, g_TestTimeOut);
+    m_ChildStatus = HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, vmFaultEvent, g_TestTimeOut);
     if (m_ChildStatus != HSAKMT_STATUS_SUCCESS) {
         WARN() << "Wait failed. No Exception triggered on gpuNode: " << gpuNode << std::endl;
         goto eventfail;
@@ -166,7 +166,7 @@ void KFDExceptionTest::TestSdmaException(int gpuNode, void *pDst) {
     }
 
 eventfail:
-    hsaKmtDestroyEvent(vmFaultEvent);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, vmFaultEvent);
 queuefail:
     queue.Destroy();
 }
@@ -289,8 +289,8 @@ void KFDExceptionTest::PermissionFaultUserPointer(int gpuNode) {
          void *pBuf = mmap(NULL, PAGE_SIZE, PROT_READ,
                       MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
          ASSERT_NE(pBuf, MAP_FAILED);
-         EXPECT_SUCCESS(hsaKmtRegisterMemory(pBuf, PAGE_SIZE));
-         EXPECT_SUCCESS(hsaKmtMapMemoryToGPU(pBuf, PAGE_SIZE, NULL));
+         EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx, pBuf, PAGE_SIZE));
+         EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, pBuf, PAGE_SIZE, NULL));
          HsaMemoryBuffer srcSysBuffer(PAGE_SIZE, gpuNode, false);
 
          srcSysBuffer.Fill(0xAA55AA55);
@@ -397,15 +397,15 @@ void KFDExceptionTest::SdmaQueueException(int gpuNode) {
        // setting memory flags with default values , can be modified according to needs
         m_MemoryFlags.ui32.NonPaged = 1;                         // Paged
         m_MemoryFlags.ui32.HostAccess = 0;                       // Host accessible
-        ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode, PAGE_SIZE, m_MemoryFlags,
+        ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, PAGE_SIZE, m_MemoryFlags,
                                   reinterpret_cast<void**>(&pDb)), gpuNode);
         // verify that pDb is not null before it's being used
         ASSERT_NE_GPU(nullPtr, pDb, gpuNode) << "hsaKmtAllocMemory returned a null pointer";
-        ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(pDb, PAGE_SIZE, NULL), gpuNode);
-        EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(pDb), gpuNode);
+        ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, pDb, PAGE_SIZE, NULL), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, pDb), gpuNode);
 
         TestSdmaException(gpuNode, pDb);
-        EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pDb, PAGE_SIZE), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pDb, PAGE_SIZE), gpuNode);
 
         exit(0);
     } else {

@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -38,6 +39,7 @@
 namespace amd::dbgapi
 {
 
+class agent_t;
 class architecture_t;
 class process_t;
 class wave_t;
@@ -71,6 +73,8 @@ protected:
   uint64_t m_address;
 
 public:
+  using underlying_type_t = decltype (m_address);
+
   constexpr base_address_t () = default;
   constexpr base_address_t (uint64_t address) : m_address (address) {}
   constexpr operator uint64_t () const { return m_address; }
@@ -116,8 +120,8 @@ class global_address_t : public detail::base_address_t<global_address_t>
 public:
   constexpr global_address_t () : base_address_t (){};
   constexpr global_address_t (uint64_t address) : base_address_t (address) {}
-  operator agent_address_t () { return agent_address_t{ m_address }; }
-  operator host_address_t () { return host_address_t{ m_address }; }
+  operator agent_address_t () const { return agent_address_t{ m_address }; }
+  operator host_address_t () const { return host_address_t{ m_address }; }
 };
 
 template <> std::string to_string (agent_address_t address);
@@ -206,7 +210,7 @@ public:
      local, private_swizzled, and private_unswizzled.  */
   virtual std::pair<const address_space_t & /* lowered_address_space  */,
                     amd_dbgapi_segment_address_t /* lowered_address  */>
-  lower (amd_dbgapi_segment_address_t address) const = 0;
+  lower (const agent_t &agent, amd_dbgapi_segment_address_t address) const = 0;
 
   /* Convert an address in the given address space to an address in this
      address space.  Return both the converted address and the number of
@@ -242,7 +246,8 @@ public:
   }
 
   std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
-  lower (amd_dbgapi_segment_address_t global_address) const override;
+  lower (const agent_t &agent,
+         amd_dbgapi_segment_address_t global_address) const override;
 
   std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
   convert (const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
@@ -268,7 +273,8 @@ public:
   }
 
   std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
-  lower (amd_dbgapi_segment_address_t local_address) const override;
+  lower (const agent_t &agent,
+         amd_dbgapi_segment_address_t local_address) const override;
 
   std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
   convert (const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
@@ -311,7 +317,8 @@ public:
   }
 
   std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
-  lower (amd_dbgapi_segment_address_t private_address) const override;
+  lower (const agent_t &agent,
+         amd_dbgapi_segment_address_t private_address) const override;
 
   std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
   convert (const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
@@ -337,7 +344,8 @@ public:
   }
 
   std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
-  lower (amd_dbgapi_segment_address_t private_address) const override;
+  lower (const agent_t &agent,
+         amd_dbgapi_segment_address_t private_address) const override;
 
   std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
   convert (const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
@@ -347,35 +355,31 @@ public:
 
 class generic_address_space_t : public address_space_t
 {
-public:
-  struct aperture_t
-  {
-    agent_address_t base;
-    agent_address_t mask;
-    const address_space_t &address_space;
-  };
-
 private:
-  std::vector<aperture_t> const m_apertures;
-
   /* Return the generic address for a given segment address space, segment
      address pair.  Converting an address from an address space other than
      one in the apertures is invalid.  */
   std::optional<amd_dbgapi_segment_address_t>
   generic_address_for_address_space (
-    const address_space_t &segment_address_space,
+    const agent_t &agent, const address_space_t &segment_address_space,
     amd_dbgapi_segment_address_t segment_address) const;
 
 public:
   generic_address_space_t (amd_dbgapi_address_space_id_t address_space_id,
-                           std::string name,
-                           std::vector<aperture_t> apertures);
+                           std::string name);
 
-  amd_dbgapi_segment_address_dependency_t
-  address_dependency (amd_dbgapi_segment_address_t address) const override;
+  amd_dbgapi_segment_address_dependency_t address_dependency (
+    amd_dbgapi_segment_address_t /* address */) const override
+  {
+    /* The address dependency cannot be determined for the generic address
+       space (the generic address could be a global, local, or private_lane
+       address). The address space should be lowered before calling this.  */
+    return AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_NONE;
+  }
 
   std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
-  lower (amd_dbgapi_segment_address_t generic_address) const override;
+  lower (const agent_t &agent,
+         amd_dbgapi_segment_address_t generic_address) const override;
 
   std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
   convert (const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
@@ -401,7 +405,8 @@ public:
   }
 
   std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
-  lower (amd_dbgapi_segment_address_t local_address) const override;
+  lower (const agent_t &agent,
+         amd_dbgapi_segment_address_t local_address) const override;
 
   std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
   convert (const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
@@ -427,25 +432,16 @@ public:
   }
 
   std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
-  lower (amd_dbgapi_segment_address_t host_address) const override
+  lower (const agent_t & /* agent  */,
+         amd_dbgapi_segment_address_t host_address) const override
   {
     return { *this, host_address };
   }
 
   std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
-  convert (const wave_t & /* wave  */, amd_dbgapi_lane_id_t /* lane_id  */,
+  convert (const wave_t &wave, amd_dbgapi_lane_id_t lane_id,
            const address_space_t &from_address_space,
-           amd_dbgapi_segment_address_t from_address) const override
-  {
-    auto [lowered_address_space, lowered_address]
-      = from_address_space.lower (from_address);
-
-    if (lowered_address_space.kind () == kind_t::host)
-      return { lowered_address, last_address () - lowered_address + 1 };
-
-    throw api_error_t (
-      AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_SPACE_CONVERSION);
-  }
+           amd_dbgapi_segment_address_t from_address) const override;
 };
 
 /* Some IDs are reserved for static address spaces (global, host).  Make sure
@@ -560,5 +556,54 @@ public:
 };
 
 } /* namespace amd::dbgapi */
+
+/* Hash functions for host, agent, and global address types.  */
+
+namespace std
+{
+template <typename T> struct hash<amd::dbgapi::detail::base_address_t<T>>
+{
+  size_t operator() (
+    const amd::dbgapi::detail::base_address_t<T> &address) const noexcept
+  {
+    using underlying_type_t =
+      typename amd::dbgapi::detail::base_address_t<T>::underlying_type_t;
+    return hash<underlying_type_t>{}(static_cast<underlying_type_t> (address));
+  }
+};
+
+template <> struct hash<amd::dbgapi::host_address_t>
+{
+  size_t operator() (const amd::dbgapi::host_address_t &address) const noexcept
+  {
+    return hash<
+      amd::dbgapi::detail::base_address_t<amd::dbgapi::host_address_t>>{}(
+      address);
+  }
+};
+
+template <> struct hash<amd::dbgapi::agent_address_t>
+{
+  size_t
+  operator() (const amd::dbgapi::agent_address_t &address) const noexcept
+  {
+    return hash<
+      amd::dbgapi::detail::base_address_t<amd::dbgapi::agent_address_t>>{}(
+      address);
+  }
+};
+
+template <> struct hash<amd::dbgapi::global_address_t>
+{
+  size_t
+  operator() (const amd::dbgapi::global_address_t &address) const noexcept
+  {
+    return hash<
+      amd::dbgapi::detail::base_address_t<amd::dbgapi::global_address_t>>{}(
+      address);
+  }
+};
+
+} /* namespace std */
 
 #endif /* AMD_DBGAPI_MEMORY_H */

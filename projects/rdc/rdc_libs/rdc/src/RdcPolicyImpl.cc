@@ -218,13 +218,12 @@ void RdcPolicyImpl::rdc_policy_check_condition() {
         status = metric_fetcher_->fetch_smi_field(gpu_index, map[policy.condition.type], &value);
         if (status == RDC_ST_OK) {
           if (value.value.l_int > policy.condition.value) {
-
             bool reset = RDC_POLICY_ACTION_GPU_RESET == policy.action;
 
             // callback if needed
             if (callback) {
-              rdc_policy_callback_response_t response = {1, policy.condition, group_id,
-                                                         value.value.l_int, gpu_index, reset};
+              rdc_policy_callback_response_t response = {
+                  1, policy.condition, group_id, value.value.l_int, gpu_index, reset};
               callback(&response);
             }
 
