@@ -30,14 +30,14 @@ jobs:
     steps:
       - name: Generate GitHub App token
         id: gen_token
-        uses: actions/create-github-app-token@v2.0.6
+        uses: actions/create-github-app-token@v3.0.0
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
       - name: Checkout super‐repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           token: ${{ steps.gen_token.outputs.token }}
           fetch-depth: 0
@@ -47,7 +47,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Set up Python 3.x
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: "3.x"
 
