@@ -47,15 +47,16 @@ __host__ void SdmaOnImpl::sdmaHostInit(int pe, int num_pes, MPI_Comm comm) {
   mpilib_ftable_.Comm_size(shmcomm, &local_size);
   shm_size = local_size;
 
-  int local_rank;
   mpilib_ftable_.Comm_rank(shmcomm, &local_rank);
 
   // Read configuration from environment variables
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
+  minChunkPerChannel = static_cast<size_t>(envvar::sdma::min_chunk_per_channel);
 
-  fprintf(stdout, "PE %d: SDMA init with threshold=%zu, channels=%d, local_size=%d\n",
-          pe, sdmaThreshold, numChannels, shm_size);
+  fprintf(stdout, "PE %d: SDMA init with threshold=%zu, channels=%d, "
+          "min_chunk=%zu, local_size=%d\n",
+          pe, sdmaThreshold, numChannels, minChunkPerChannel, shm_size);
 
   // Initialize the Anvil library
   anvil::anvil.init();
@@ -64,7 +65,7 @@ __host__ void SdmaOnImpl::sdmaHostInit(int pe, int num_pes, MPI_Comm comm) {
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
 
-  // Create SDMA connections to all other local PEs
+  // Create SDMA connections to all other local PEs (numChannels per destination)
   for (int i = 0; i < shm_size; i++) {
     if (i != local_rank) {
       anvil::EnablePeerAccess(deviceId, i);
@@ -72,45 +73,55 @@ __host__ void SdmaOnImpl::sdmaHostInit(int pe, int num_pes, MPI_Comm comm) {
     }
   }
 
+  // Total number of handles: shm_size * numChannels
+  // Indexed as: deviceHandles_d[local_pe * numChannels + channel_idx]
+  int total_handles = shm_size * numChannels;
+
   // Allocate device-side array to hold SDMA queue device handles
   CHECK_HIP(hipMalloc(&deviceHandles_d,
-                      shm_size * sizeof(anvil::SdmaQueueDeviceHandle*)));
+                      total_handles * sizeof(anvil::SdmaQueueDeviceHandle*)));
 
   // Copy device handles to device memory
-  anvil::SdmaQueueDeviceHandle** handles_h = new anvil::SdmaQueueDeviceHandle*[shm_size];
+  anvil::SdmaQueueDeviceHandle** handles_h =
+      new anvil::SdmaQueueDeviceHandle*[total_handles];
   for (int i = 0; i < shm_size; i++) {
-    if (i != local_rank) {
-      anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, 0);
-      handles_h[i] = queue ? queue->deviceHandle() : nullptr;
-    } else {
-      handles_h[i] = nullptr;
+    for (int ch = 0; ch < numChannels; ch++) {
+      int idx = i * numChannels + ch;
+      if (i != local_rank) {
+        anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, ch);
+        handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
+      } else {
+        handles_h[idx] = nullptr;
+      }
     }
   }
   CHECK_HIP(hipMemcpy(deviceHandles_d, handles_h,
-                      shm_size * sizeof(anvil::SdmaQueueDeviceHandle*),
+                      total_handles * sizeof(anvil::SdmaQueueDeviceHandle*),
                       hipMemcpyHostToDevice));
   delete[] handles_h;
 
-  // Allocate signal arrays for completion tracking
-  CHECK_HIP(hipMalloc(&signalPtrs, shm_size * sizeof(uint64_t)));
-  CHECK_HIP(hipMemset(signalPtrs, 0, shm_size * sizeof(uint64_t)));
+  // Allocate signal arrays for completion tracking (one per PE per channel)
+  CHECK_HIP(hipMalloc(&signalPtrs, total_handles * sizeof(uint64_t)));
+  CHECK_HIP(hipMemset(signalPtrs, 0, total_handles * sizeof(uint64_t)));
 
-  CHECK_HIP(hipMalloc(&expectedSignals, shm_size * sizeof(uint64_t)));
-  CHECK_HIP(hipMemset(expectedSignals, 0, shm_size * sizeof(uint64_t)));
+  CHECK_HIP(hipMalloc(&expectedSignals, total_handles * sizeof(uint64_t)));
+  CHECK_HIP(hipMemset(expectedSignals, 0, total_handles * sizeof(uint64_t)));
 }
 
 __host__ void SdmaOnImpl::sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstrap) {
   my_pe = pe;
   shm_size = bootstrap->getNranksPerNode();
   auto local_ranks = bootstrap->getLocalRanks();
-  int local_rank = std::find(local_ranks.begin(), local_ranks.end(), pe) - local_ranks.begin();
+  local_rank = std::find(local_ranks.begin(), local_ranks.end(), pe) - local_ranks.begin();
 
   // Read configuration from environment variables
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
+  minChunkPerChannel = static_cast<size_t>(envvar::sdma::min_chunk_per_channel);
 
-  fprintf(stdout, "PE %d: SDMA init with threshold=%zu, channels=%d, local_size=%d\n",
-          pe, sdmaThreshold, numChannels, shm_size);
+  fprintf(stdout, "PE %d: SDMA init with threshold=%zu, channels=%d, "
+          "min_chunk=%zu, local_size=%d\n",
+          pe, sdmaThreshold, numChannels, minChunkPerChannel, shm_size);
 
   // Initialize the Anvil library
   anvil::anvil.init();
@@ -119,7 +130,7 @@ __host__ void SdmaOnImpl::sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootst
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
 
-  // Create SDMA connections to all other local PEs
+  // Create SDMA connections to all other local PEs (numChannels per destination)
   for (int i = 0; i < shm_size; i++) {
     if (i != local_rank) {
       anvil::EnablePeerAccess(deviceId, i);
@@ -127,31 +138,39 @@ __host__ void SdmaOnImpl::sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootst
     }
   }
 
+  // Total number of handles: shm_size * numChannels
+  // Indexed as: deviceHandles_d[local_pe * numChannels + channel_idx]
+  int total_handles = shm_size * numChannels;
+
   // Allocate device-side array to hold SDMA queue device handles
   CHECK_HIP(hipMalloc(&deviceHandles_d,
-                      shm_size * sizeof(anvil::SdmaQueueDeviceHandle*)));
+                      total_handles * sizeof(anvil::SdmaQueueDeviceHandle*)));
 
   // Copy device handles to device memory
-  anvil::SdmaQueueDeviceHandle** handles_h = new anvil::SdmaQueueDeviceHandle*[shm_size];
+  anvil::SdmaQueueDeviceHandle** handles_h =
+      new anvil::SdmaQueueDeviceHandle*[total_handles];
   for (int i = 0; i < shm_size; i++) {
-    if (i != local_rank) {
-      anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, 0);
-      handles_h[i] = queue ? queue->deviceHandle() : nullptr;
-    } else {
-      handles_h[i] = nullptr;
+    for (int ch = 0; ch < numChannels; ch++) {
+      int idx = i * numChannels + ch;
+      if (i != local_rank) {
+        anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, ch);
+        handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
+      } else {
+        handles_h[idx] = nullptr;
+      }
     }
   }
   CHECK_HIP(hipMemcpy(deviceHandles_d, handles_h,
-                      shm_size * sizeof(anvil::SdmaQueueDeviceHandle*),
+                      total_handles * sizeof(anvil::SdmaQueueDeviceHandle*),
                       hipMemcpyHostToDevice));
   delete[] handles_h;
 
-  // Allocate signal arrays for completion tracking
-  CHECK_HIP(hipMalloc(&signalPtrs, shm_size * sizeof(uint64_t)));
-  CHECK_HIP(hipMemset(signalPtrs, 0, shm_size * sizeof(uint64_t)));
+  // Allocate signal arrays for completion tracking (one per PE per channel)
+  CHECK_HIP(hipMalloc(&signalPtrs, total_handles * sizeof(uint64_t)));
+  CHECK_HIP(hipMemset(signalPtrs, 0, total_handles * sizeof(uint64_t)));
 
-  CHECK_HIP(hipMalloc(&expectedSignals, shm_size * sizeof(uint64_t)));
-  CHECK_HIP(hipMemset(expectedSignals, 0, shm_size * sizeof(uint64_t)));
+  CHECK_HIP(hipMalloc(&expectedSignals, total_handles * sizeof(uint64_t)));
+  CHECK_HIP(hipMemset(expectedSignals, 0, total_handles * sizeof(uint64_t)));
 }
 
 __host__ void SdmaOnImpl::sdmaHostStop() {

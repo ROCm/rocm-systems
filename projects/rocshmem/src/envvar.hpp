@@ -560,6 +560,7 @@ namespace envvar {
     template <typename T> using var = var<T, category::tag::SDMA>;
     extern const var<size_t> threshold;
     extern const var<int32_t> num_channels;
+    extern const var<size_t> min_chunk_per_channel;
   }  // namespace sdma
 
   /**
