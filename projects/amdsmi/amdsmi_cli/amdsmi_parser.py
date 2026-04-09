@@ -425,8 +425,11 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
 
                 if not perf_levels_str:
-                    raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
-                        "--clk-level", output_format
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                        sys.argv[1],
+                        clk_type,
+                        output_format,
+                        hint=f"\n--clk-level requires at least one performance level index (e.g. --clk-level {clk_type} 0 1)",
                     )
 
                 perf_levels = []
