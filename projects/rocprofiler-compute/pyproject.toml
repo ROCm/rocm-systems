@@ -20,7 +20,8 @@ extend-exclude = [
     ".github",
     ".misc",
     "external",
-    "build-rocprof_compute"
+    "build-rocprof_compute",
+    "src/vendored",
 ]
 
 [tool.ruff.lint]
@@ -71,6 +72,7 @@ pythonpath = [
     "src",
     "src/rocprof_compute_soc",
     "src/utils",
+    "src/roofline",
     "src/rocprof_compute_analyze/utils",
     "tests"
 ]

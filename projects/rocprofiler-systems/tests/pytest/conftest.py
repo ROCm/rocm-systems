@@ -94,6 +94,7 @@ ROCPROFSYS_RUNNER_NAMES = list(ROCPROFSYS_RUNNER_CLASSES.keys())
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Add custom command-line options."""
     group = parser.getgroup("rocprofsys", "rocprofiler-systems test options")
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     group.addoption(
         "--show-test-output",
         action="store",
@@ -332,6 +333,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "hip",
         "scratch_memory",
         "rocm",
+        "kfd",
         "selective_regions",
     ]
     for label in non_functional_markers + generic_functional_markers:

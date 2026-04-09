@@ -1,0 +1,299 @@
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// This file was automatically generated. Do not modify.
+
+#ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA3_SOPP_H_
+#define ROCJITSU_ISA_ARCH_AMDGPU_CDNA3_SOPP_H_
+
+#include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/operand.h"
+
+namespace rocjitsu {
+namespace cdna3 {
+
+class SNopSopp : public Sopp {
+public:
+  SNopSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SEndpgmSopp : public Sopp {
+public:
+  SEndpgmSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SBranchSopp : public Sopp {
+public:
+  SBranchSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SWakeupSopp : public Sopp {
+public:
+  SWakeupSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SCbranchScc0Sopp : public Sopp {
+public:
+  SCbranchScc0Sopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SCbranchScc1Sopp : public Sopp {
+public:
+  SCbranchScc1Sopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SCbranchVcczSopp : public Sopp {
+public:
+  SCbranchVcczSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SCbranchVccnzSopp : public Sopp {
+public:
+  SCbranchVccnzSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SCbranchExeczSopp : public Sopp {
+public:
+  SCbranchExeczSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SCbranchExecnzSopp : public Sopp {
+public:
+  SCbranchExecnzSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SBarrierSopp : public Sopp {
+public:
+  SBarrierSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SSetkillSopp : public Sopp {
+public:
+  SSetkillSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SWaitcntSopp : public Sopp {
+public:
+  SWaitcntSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SSethaltSopp : public Sopp {
+public:
+  SSethaltSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SSleepSopp : public Sopp {
+public:
+  SSleepSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SSetprioSopp : public Sopp {
+public:
+  SSetprioSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SSendmsgSopp : public Sopp {
+public:
+  SSendmsgSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SSendmsghaltSopp : public Sopp {
+public:
+  SSendmsghaltSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class STrapSopp : public Sopp {
+public:
+  STrapSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SIcacheInvSopp : public Sopp {
+public:
+  SIcacheInvSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SIncperflevelSopp : public Sopp {
+public:
+  SIncperflevelSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SDecperflevelSopp : public Sopp {
+public:
+  SDecperflevelSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class STtracedataSopp : public Sopp {
+public:
+  STtracedataSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SCbranchCdbgsysSopp : public Sopp {
+public:
+  SCbranchCdbgsysSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SCbranchCdbguserSopp : public Sopp {
+public:
+  SCbranchCdbguserSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SCbranchCdbgsysOrUserSopp : public Sopp {
+public:
+  SCbranchCdbgsysOrUserSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SCbranchCdbgsysAndUserSopp : public Sopp {
+public:
+  SCbranchCdbgsysAndUserSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SEndpgmSavedSopp : public Sopp {
+public:
+  SEndpgmSavedSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SSetGprIdxOffSopp : public Sopp {
+public:
+  SSetGprIdxOffSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SSetGprIdxModeSopp : public Sopp {
+public:
+  SSetGprIdxModeSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+class SEndpgmOrderedPsDoneSopp : public Sopp {
+public:
+  SEndpgmOrderedPsDoneSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+};
+
+class SSetValuCoexecModeSopp : public Sopp {
+public:
+  SSetValuCoexecModeSopp(const MachineInst *inst);
+  void execute(amdgpu::Wavefront &wf) override;
+
+private:
+  Operand simm16;
+};
+
+} // namespace cdna3
+} // namespace rocjitsu
+
+#endif // ROCJITSU_ISA_ARCH_AMDGPU_CDNA3_SOPP_H_

@@ -6,23 +6,13 @@
 Building and installing rocJPEG from source code
 ********************************************************************
 
-These instructions are for building rocJPEG from its source code. If you will not be contributing to the rocJPEG code base or previewing features, :doc:`package installers <./rocjpeg-package-install>` are available.
+rocJPEG is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. For TheRock installation details, refer to the `TheRock documentation <https://github.com/ROCm/TheRock#readme>`_.
 
-.. note::
-
-  ROCm must be installed before installing rocJPEG. See `Quick start installation guide <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html>`_ for detailed ROCm installation instructions.
-
-:doc:`Clone the rocJPEG project <./rocjpeg-clone-repo>`. Change directory to ``projects/rocjpeg``:
+To build rocJPEG standalone from source, :doc:`clone the rocJPEG project <./rocjpeg-clone-repo>` and change to the project directory:
 
 .. code:: shell
 
   cd rocm-systems/projects/rocjpeg
-
-Use `rocJPEG-setup.py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg/rocJPEG-setup.py>`_ to install prerequisites:
-
-.. code:: shell
-
-  python rocJPEG-setup.py  --rocm_path [ ROCm Installation Path - optional (default:/opt/rocm)]
 
 Build and install rocJPEG using the following commands:
 
@@ -35,7 +25,7 @@ Build and install rocJPEG using the following commands:
 
 After installation, the rocJPEG libraries will be copied to ``/opt/rocm/lib`` and the rocJPEG header files will be copied to ``/opt/rocm/include/rocjpeg``.
 
-Install the CTest module:
+To run the installed CTest-based verification:
 
 .. code:: shell
 
@@ -43,4 +33,4 @@ Install the CTest module:
   cmake /opt/rocm/share/rocjpeg/test/
   ctest -VV
 
-To test your build, run ``make test``. To run the test with the verbose option, run ``make test ARGS=\"-VV\"``. 
+To test your build, run ``make test``. To run the test with the verbose option, run ``make test ARGS="-VV"``.

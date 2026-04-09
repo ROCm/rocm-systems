@@ -103,7 +103,6 @@ class TestCausal(RocprofsysTest):
             causal_mode=causal_mode,
             run_args=run_args,
             causal_args=causal_args,
-            timeout=600,
         )
         self.assert_regex(result, pass_regex=self.PASS_REGEX)
 
@@ -151,7 +150,6 @@ class TestCausal(RocprofsysTest):
             causal_mode=causal_mode,
             run_args=run_args,
             causal_args=causal_args,
-            timeout=600,
         )
         self.assert_regex(result, pass_regex=self.PASS_REGEX)
 
@@ -242,7 +240,6 @@ class TestCausalE2E(RocprofsysTest):
             run_args=self.RUN_ARGS,
             causal_mode=causal_mode,
             causal_args=causal_args,
-            timeout=600,
         )
         self.assert_regex(result, pass_regex=self.PASS_REGEX)
         self.assert_causal_json(

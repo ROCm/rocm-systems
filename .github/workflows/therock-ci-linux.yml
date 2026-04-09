@@ -7,6 +7,9 @@ on:
         type: string
       projects_to_test:
         type: string
+      test_runs_on:
+        type: string
+        default: "linux-gfx942-1gpu-ossci-rocm"
 
 
 permissions:
@@ -38,7 +41,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 3272cd77d15e7972b26f68a477a3d61fe4a93591 # 2026-03-26 commit
+          ref: be15507d79669171fcd1da71b924356e2ad03874 # 2026-04-07 commit
 
       - name: Install python deps
         run: |
@@ -122,5 +125,5 @@ jobs:
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-gfx942-1gpu-ossci-rocm"
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"

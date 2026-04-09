@@ -242,7 +242,6 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "15", "-n", "5"],
-            timeout=120,
         )
         self.assert_regex(result)
         if not annotated:

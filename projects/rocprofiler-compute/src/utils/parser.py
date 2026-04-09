@@ -1825,6 +1825,29 @@ def load_pc_sampling_data(
         return pd.DataFrame()
 
 
+def nullify_unevaluated_metric_values(
+    workload: schema.Workload,
+) -> None:
+    """Replace unevaluated formula strings with "N/A" in all metric tables.
+
+    In PC-sampling-only mode ``eval_metric`` is never called, so metric
+    table cells still contain raw formula strings produced by
+    ``build_metric_value_string``.  This helper walks every
+    ``metric_table`` in *workload* and sets each ``SUPPORTED_FIELD``
+    column to ``"N/A"`` so that downstream display code (``tty``,
+    ``webui``, ``tui``) can safely format the values.
+    """
+    for df_id, df_type in workload.dfs_type.items():
+        if df_type != "metric_table":
+            continue
+        df = workload.dfs.get(df_id)
+        if df is None or df.empty:
+            continue
+        for col in df.columns:
+            if col in SUPPORTED_FIELD and col.lower() != "alias":
+                df[col] = "N/A"
+
+
 @demarcate
 def load_non_mertrics_table(
     workload: schema.Workload, dir_path: str, args: argparse.Namespace
