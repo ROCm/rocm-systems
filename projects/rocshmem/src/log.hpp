@@ -144,6 +144,16 @@ namespace rocshmem {
 } while (0)
 
 #ifdef BUILD_DEBUG_LEVEL_TRACE_HOST
+#define LOG_API(fmt, ...) do {                                                \
+  rocshmem::static_assert_host_only();                                        \
+  if (rocshmem::envvar::log_flags.show_api)                                   \
+    fprintf(stdout, rocshmem::envvar::log_flags.show_color                    \
+        ? "\033[35mA%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
+        : "A%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                              \
+        rocshmem::log_pe_number,                                              \
+        __VA_OPT__(__VA_ARGS__,)                                              \
+        __func__, __FILE__, __LINE__);                                        \
+} while (0)
 #define LOG_TRACE(fmt, ...) do {                                              \
   rocshmem::static_assert_host_only();                                        \
   if (rocshmem::envvar::log_flags.show_trace)                                 \
@@ -155,6 +165,7 @@ namespace rocshmem {
         __func__, __FILE__, __LINE__);                                        \
 } while (0)
 #else
+#define LOG_API(...) do { rocshmem::static_assert_host_only(); } while (0)
 #define LOG_TRACE(...) do { rocshmem::static_assert_host_only(); } while (0)
 #endif
 
@@ -173,6 +184,7 @@ struct log_state_device_t {
   bool show_error;
   bool show_warn;
   bool show_info;
+  bool show_api;
   bool show_trace;
   bool show_color;
 };
@@ -254,6 +266,16 @@ void dprintf(const char* fmt, const Args&... args) {
 } while (0)
 
 #if defined(BUILD_DEBUG_LEVEL_TRACE_DEVICE)
+#define LOGD_API(fmt, ...) do {                                               \
+  rocshmem::static_assert_device_only();                                      \
+  if (rocshmem::log_device.show_api)                                          \
+    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+        ? "\033[35mA%04dw%04ut%04u\033[0m " fmt                               \
+          "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
+        : "A%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
+        __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
+} while (0)
+
 #define LOGD_TRACE(fmt, ...) do {                                             \
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_trace)                                        \
@@ -264,6 +286,7 @@ void dprintf(const char* fmt, const Args&... args) {
         __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
 } while (0)
 #else
+#define LOGD_API(...) do { rocshmem::static_assert_device_only(); } while (0)
 #define LOGD_TRACE(...) do { rocshmem::static_assert_device_only(); } while (0)
 #endif
 
@@ -273,6 +296,7 @@ void dprintf(const char* fmt, const Args&... args) {
 #define LOGD_ERROR_ABORT(...) do { rocshmem::static_assert_device_only(); abort(); } while (0)
 #define LOGD_WARN(...)        do { rocshmem::static_assert_device_only(); } while (0)
 #define LOGD_INFO(...)        do { rocshmem::static_assert_device_only(); } while (0)
+#define LOGD_API(...)         do { rocshmem::static_assert_device_only(); } while (0)
 #define LOGD_TRACE(...)       do { rocshmem::static_assert_device_only(); } while (0)
 
 #endif  /* BUILD_DEBUG_LEVEL_DEVICE */

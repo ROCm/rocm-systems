@@ -297,6 +297,7 @@ namespace envvar {
         ENV,
         VERSION,
         INFO,
+        API,
         TRACE,
       };
       std::istream& operator>>(std::istream& is, debug_level& level);
@@ -316,6 +317,7 @@ namespace envvar {
         const bool show_env;
         const env_print_mode env_mode;
         const bool show_info;
+        const bool show_api;
         const bool show_warn;
         const bool show_trace;
         const bool show_color;

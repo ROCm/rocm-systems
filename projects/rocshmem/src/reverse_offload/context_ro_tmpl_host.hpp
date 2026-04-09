@@ -33,14 +33,14 @@ namespace rocshmem {
 
 template <typename T>
 __host__ void ROHostContext::p(T *dest, T value, int pe) {
-  LOG_TRACE("Function: ro_host_p");
+  LOG_TRACE("rocshmem::host::ro::p");
 
   host_interface->p<T>(dest, value, pe, context_window_info);
 }
 
 template <typename T>
 __host__ T ROHostContext::g(const T *source, int pe) {
-  LOG_TRACE("Function: ro_host_g");
+  LOG_TRACE("rocshmem::host::ro::g");
 
   return host_interface->g<T>(source, pe, context_window_info);
 }
@@ -48,7 +48,7 @@ __host__ T ROHostContext::g(const T *source, int pe) {
 template <typename T>
 __host__ void ROHostContext::put(T *dest, const T *source, size_t nelems,
                                  int pe) {
-  LOG_TRACE("Function: ro_host_put");
+  LOG_TRACE("rocshmem::host::ro::put");
 
   host_interface->put<T>(dest, source, nelems, pe, context_window_info);
 }
@@ -56,7 +56,7 @@ __host__ void ROHostContext::put(T *dest, const T *source, size_t nelems,
 template <typename T>
 __host__ void ROHostContext::get(T *dest, const T *source, size_t nelems,
                                  int pe) {
-  LOG_TRACE("Function: ro_host_get");
+  LOG_TRACE("rocshmem::host::ro::get");
 
   host_interface->get<T>(dest, source, nelems, pe, context_window_info);
 }
@@ -64,7 +64,7 @@ __host__ void ROHostContext::get(T *dest, const T *source, size_t nelems,
 template <typename T>
 __host__ void ROHostContext::put_nbi(T *dest, const T *source, size_t nelems,
                                      int pe) {
-  LOG_TRACE("Function: ro_host_put_nbi");
+  LOG_TRACE("rocshmem::host::ro::put_nbi");
 
   host_interface->put_nbi<T>(dest, source, nelems, pe, context_window_info);
 }
@@ -72,35 +72,35 @@ __host__ void ROHostContext::put_nbi(T *dest, const T *source, size_t nelems,
 template <typename T>
 __host__ void ROHostContext::get_nbi(T *dest, const T *source, size_t nelems,
                                      int pe) {
-  LOG_TRACE("Function: ro_host_get_nbi");
+  LOG_TRACE("rocshmem::host::ro::get_nbi");
 
   host_interface->get_nbi<T>(dest, source, nelems, pe, context_window_info);
 }
 
 template <typename T>
 __host__ void ROHostContext::amo_add(void *dst, T value, int pe) {
-  LOG_TRACE("Function: ro_net_host_amo_add");
+  LOG_TRACE("rocshmem::host::ro::amo_add");
 
   host_interface->amo_add(dst, value, pe, context_window_info);
 }
 
 template <typename T>
 __host__ void ROHostContext::amo_cas(void *dst, T value, T cond, int pe) {
-  LOG_TRACE("Function: ro_net_host_amo_cas");
+  LOG_TRACE("rocshmem::host::ro::amo_cas");
 
   host_interface->amo_cas(dst, value, cond, pe, context_window_info);
 }
 
 template <typename T>
 __host__ T ROHostContext::amo_fetch_add(void *dst, T value, int pe) {
-  LOG_TRACE("Function: ro_net_host_amo_fetch_add");
+  LOG_TRACE("rocshmem::host::ro::amo_fetch_add");
 
   return host_interface->amo_fetch_add(dst, value, pe, context_window_info);
 }
 
 template <typename T>
 __host__ T ROHostContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
-  LOG_TRACE("Function: ro_net_host_amo_fetch_cas");
+  LOG_TRACE("rocshmem::host::ro::amo_fetch_cas");
 
   return host_interface->amo_fetch_cas(dst, value, cond, pe,
                                        context_window_info);
@@ -111,7 +111,7 @@ __host__ void ROHostContext::broadcast(T *dest, const T *source, int nelems,
                                        int pe_root, int pe_start,
                                        int log_pe_stride, int pe_size,
                                        long *p_sync) {
-  LOG_TRACE("Function: ro_host_broadcast");
+  LOG_TRACE("rocshmem::host::ro::broadcast");
 
   host_interface->broadcast<T>(dest, source, nelems, pe_root, pe_start,
                                log_pe_stride, pe_size, p_sync);

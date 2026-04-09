@@ -82,6 +82,7 @@ void Backend::init(void) {
                                     envvar::log_flags.show_error,
                                     envvar::log_flags.show_warn,
                                     envvar::log_flags.show_info,
+                                    envvar::log_flags.show_api,
                                     envvar::log_flags.show_trace,
                                     envvar::log_flags.show_color};
   log_state_device_t* log_state_addr{nullptr};

@@ -175,7 +175,7 @@ void MPITransport::submitRequestsToMPI() {
                      next_element.status, true);
       LOG_TRACE(
           "Submitted TEAM_BROADCAST dst %p src %p size %lu "
-          "team %zd, PE_root %d \n",
+          "team %zd, PE_root %d",
           next_element.dst, next_element.src, next_element.ol1.size,
           (intptr_t)next_element.team_comm, next_element.PE_root);
       break;
@@ -305,7 +305,7 @@ MPI_Op MPITransport::get_mpi_op(ROCSHMEM_OP op) {
     case ROCSHMEM_REPLACE:
       return MPI_REPLACE;
     default:
-      LOG_ERROR_ABORT("Unknown rocSHMEM op MPI conversion %d\n", op);
+      LOG_ERROR_ABORT("Unknown rocSHMEM op MPI conversion %d", op);
   }
 }
 
@@ -334,7 +334,7 @@ static MPI_Datatype convertType(ro_net_types type) {
     case RO_NET_UNSIGNED_CHAR:
       return MPI_UNSIGNED_CHAR;
     default:
-      LOG_ERROR_ABORT("Unknown rocSHMEM type MPI conversion %d\n", type);
+      LOG_ERROR_ABORT("Unknown rocSHMEM type MPI conversion %d", type);
   }
 }
 
@@ -611,7 +611,7 @@ void MPITransport::progress() {
         outstanding[contextId]--;
         LOG_TRACE(
             "Finished op for contextId %d at status addr %p "
-            "(%d requests outstanding)\n",
+            "(%d requests outstanding)",
             contextId, status, outstanding[contextId]);
       }
 

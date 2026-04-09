@@ -44,7 +44,7 @@ namespace envvar {
       "Defines whether rocSHMEM is expected to use MPI internally when using the uniqueId based initialization. 0: Do not use MPI; 1: Use MPI",
       false);
     const var<types::debug_level> debug_level("DEBUG_LEVEL",
-      "Debug output level (NONE/ERROR, WARN, ENV, VERSION, INFO, TRACE). "
+      "Debug output level (NONE, ERROR, WARN, ENV, VERSION, INFO, API, TRACE). "
       "Append modifiers: :noversion, :noenv, :noinfo, :nowarn, :notrace to suppress categories; "
       ":env[:all|:full] to enable/control env variable output; "
       ":color (default) or :nocolor for ANSI colors (e.g. trace:noversion:nocolor, env:full)",
@@ -63,6 +63,7 @@ namespace envvar {
     bool env      = (lvl >= debug_level::ENV);
     auto env_mode = env_print_mode::MODIFIED;
     bool info     = (lvl >= debug_level::INFO);
+    bool api      = (lvl >= debug_level::API);
     bool warn     = (lvl >= debug_level::WARN);
     bool trace    = (lvl >= debug_level::TRACE);
     bool color    = true;
@@ -80,6 +81,7 @@ namespace envvar {
         else if (mod == "noversion")  ver   = false;
         else if (mod == "noenv")      env   = false;
         else if (mod == "noinfo")     info  = false;
+        else if (mod == "noapi")      api   = false;
         else if (mod == "nowarn")     warn  = false;
         else if (mod == "notrace")    trace = false;
         else if (mod == "env") {
@@ -105,7 +107,7 @@ namespace envvar {
         pos = next;
       }
     }
-    return {error, ver, env, env_mode, info, warn, trace, color};
+    return {error, ver, env, env_mode, info, api, warn, trace, color};
   }
 
   const types::debug_flags log_flags = make_debug_flags();
@@ -262,6 +264,8 @@ namespace envvar {
           level = debug_level::ENV;
         } else if (level_str == "INFO") {
           level = debug_level::INFO;
+        } else if (level_str == "API") {
+          level = debug_level::API;
         } else if (level_str == "TRACE") {
           level = debug_level::TRACE;
         } else {
@@ -286,6 +290,8 @@ namespace envvar {
           os << "ENV"; break;
         case debug_level::INFO:
           os << "INFO"; break;
+        case debug_level::API:
+          os << "API"; break;
         case debug_level::TRACE:
           os << "TRACE"; break;
         }
