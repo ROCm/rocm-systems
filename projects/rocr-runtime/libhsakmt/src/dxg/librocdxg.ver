@@ -106,6 +106,7 @@ hsaKmtMemoryVaUnmap;
 hsaKmtMemHandleFree;
 hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
+hsaKmtGetAmdGPUDeviceFd;
 amdgpu_device_initialize;
 amdgpu_device_deinitialize;
 amdgpu_query_gpu_info;

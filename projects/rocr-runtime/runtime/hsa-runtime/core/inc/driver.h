@@ -73,6 +73,10 @@ struct ShareableHandle {
   uint64_t handle{};
 
   bool IsValid() const { return handle != 0; }
+
+  bool operator()(const ShareableHandle& a, const ShareableHandle& b) const {
+    return a.handle > b.handle;
+  }
 };
 
 /// @brief Kernel driver interface.
@@ -204,7 +208,7 @@ public:
   /// @param[in] size memory size in bytes
   /// @param[out] dmabuf_fd dma-buf file descriptor
   /// @param[out] offset memory offset in bytes
-  virtual hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
+  virtual hsa_status_t ExportDMABuf(const core::Agent& agent, core::ShareableHandle *handle, size_t size, int *dmabuf_fd,
                                     size_t *offset) = 0;
 
   /// @brief Imports a memory object via dma-buf.
@@ -216,12 +220,18 @@ public:
   /// @param[out] handle handle to the imported memory
   /// @param[in] mem address of existing buffer, used to bypass import
   virtual hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
-                                    core::ShareableHandle* handle, void* mem = nullptr) = 0;
+                                    core::ShareableHandle* handle, size_t *size, void* mem = nullptr) = 0;
 
   /// @brief Destroys the handle created during @ref ImportDMABuf.
   ///
   /// @param[in] handle handle of the object to release
   virtual hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) = 0;
+
+  virtual hsa_status_t ExportFabricHandle(core::Agent& agent, core::ShareableHandle* handle,
+                                          size_t size, hsa_fabric_handle_t* fabric_handle) = 0;
+  virtual hsa_status_t ImportFabricHandle(core::Agent& agent, hsa_fabric_handle_t fabric_handle,
+                                          core::ShareableHandle* handle, int* dmabuf_fd,
+                                          size_t* size) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -344,6 +354,11 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the device
   virtual hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const = 0;
 
+  /// @brief Gets the device file descriptor for a specific node.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[out] fd
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the file descriptor
+  virtual hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const = 0;
 
   /// @brief Gets clock counters for particular Node
   /// @param[in] node_id Node ID of the agent
