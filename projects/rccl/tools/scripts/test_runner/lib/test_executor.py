@@ -7,12 +7,14 @@ Test Executor Module
 Handles test execution, build processes, and result tracking
 """
 
+import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
-import threading
+import tempfile
 import time
 import datetime
 import copy
@@ -43,7 +45,9 @@ def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str
     Map gtest process exit + stdout/stderr to a TestResult string.
 
     Google Test returns exit 0 when failures are absent, including when all
-    selected tests are SKIPPED — the runner must inspect output for [  SKIPPED ].
+    selected tests are SKIPPED. Prefer ``infer_gtest_result_from_json_file`` when
+    ``--gtest_output=json:…`` is used; this function is the stdout fallback (e.g.
+    ``[  SKIPPED ]`` / ``[  OK ]`` patterns).
     """
     if returncode == ExitCode.EXIT_TIMEOUT:
         return TestResult.RESULT_TIMEOUT.value
@@ -62,80 +66,90 @@ def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str
     return TestResult.RESULT_PASSED.value
 
 
-def run_gtest_with_live_output(cmd, cwd, env, timeout_sec):
+def _gtest_json_accumulate(obj, stats):
+    """Walk gtest JSON (--gtest_output=json); set stats keys failed/passed/skipped."""
+    if isinstance(obj, dict):
+        if "result" in obj and isinstance(obj.get("name"), str):
+            fails = obj.get("failures")
+            if isinstance(fails, list) and len(fails) > 0:
+                stats["failed"] = True
+            else:
+                res = obj.get("result")
+                if res == "SKIPPED":
+                    stats["skipped"] = True
+                elif res == "COMPLETED":
+                    stats["passed"] = True
+        for v in obj.values():
+            _gtest_json_accumulate(v, stats)
+    elif isinstance(obj, list):
+        for item in obj:
+            _gtest_json_accumulate(item, stats)
+
+
+def infer_gtest_result_from_json_file(json_path: str, returncode: int) -> str:
     """
-    Run a gtest command with merged stdout/stderr streamed to sys.stdout as it arrives,
-    while buffering a full copy for SKIPPED/PASSED inference.
+    Map gtest exit code + JSON report to TestResult.
 
-    subprocess.run(capture_output=True) only prints after the process exits, so long
-    tests that TIMEOUT appear to produce no logs; streaming fixes that.
+    When returncode is 0, inspects leaf tests for failures/SKIPPED/COMPLETED.
+    Falls back to infer_gtest_result_from_output(\"\", rc) if the file is missing
+    or invalid JSON.
     """
-    proc = subprocess.Popen(
-        cmd,
-        shell=True,
-        cwd=cwd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    chunks = []
-    timed_out = False
-
-    def reader():
-        try:
-            assert proc.stdout is not None
-            while True:
-                block = proc.stdout.read(4096)
-                if not block:
-                    break
-                chunks.append(block)
-                sys.stdout.write(block)
-                try:
-                    sys.stdout.flush()
-                except BrokenPipeError:
-                    break
-        except Exception:
-            pass
-
-    th = threading.Thread(target=reader, name="gtest-live-output", daemon=True)
-    th.start()
-
+    if returncode == ExitCode.EXIT_TIMEOUT:
+        return TestResult.RESULT_TIMEOUT.value
+    if returncode != ExitCode.EXIT_SUCCESS:
+        return TestResult.RESULT_FAILED.value
+    if not json_path or not os.path.isfile(json_path):
+        return infer_gtest_result_from_output("", returncode)
     try:
-        if timeout_sec is not None and timeout_sec > 0:
-            proc.wait(timeout=timeout_sec)
-        else:
-            proc.wait()
-    except subprocess.TimeoutExpired:
-        timed_out = True
+        with open(json_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return infer_gtest_result_from_output("", returncode)
+    stats = {"failed": False, "passed": False, "skipped": False}
+    _gtest_json_accumulate(data, stats)
+    if stats["failed"]:
+        return TestResult.RESULT_FAILED.value
+    if stats["passed"]:
+        return TestResult.RESULT_PASSED.value
+    if stats["skipped"]:
+        return TestResult.RESULT_SKIPPED.value
+    return TestResult.RESULT_PASSED.value
+
+
+def _distinct_host_count(mpi_hosts: dict) -> int:
+    """
+    Count distinct hosts from SLURM host_list or Open MPI hostfile.
+    Returns 0 if unknown (no host list / file), so callers skip the insufficient-nodes
+    check when topology cannot be determined.
+    """
+    if not mpi_hosts:
+        return 0
+    if "host_list" in mpi_hosts:
+        seen = set()
+        for part in mpi_hosts["host_list"].split(","):
+            part = part.strip()
+            if not part:
+                continue
+            host = part.split(":")[0].strip()
+            if host:
+                seen.add(host)
+        return len(seen)
+    if "hostfile" in mpi_hosts:
+        path = mpi_hosts["hostfile"]
+        seen = set()
         try:
-            proc.kill()
+            with open(path, encoding="utf-8", errors="replace") as hf:
+                for line in hf:
+                    line = line.split("#")[0].strip()
+                    if not line:
+                        continue
+                    host = line.split()[0].strip()
+                    if host:
+                        seen.add(host)
         except OSError:
-            pass
-        try:
-            proc.wait(timeout=120)
-        except subprocess.TimeoutExpired:
-            pass
-
-    th.join(timeout=60)
-
-    combined = "".join(chunks)
-    if proc.stdout and not getattr(proc.stdout, "closed", True):
-        try:
-            rest = proc.stdout.read()
-            if rest:
-                combined += rest
-                sys.stdout.write(rest)
-                sys.stdout.flush()
-        except (ValueError, OSError, TypeError):
-            pass
-
-    rc = proc.returncode
-    if rc is None:
-        rc = -1
-    if timed_out:
-        return ExitCode.EXIT_TIMEOUT, combined, True
-    return rc, combined, False
+            return 0
+        return len(seen)
+    return 0
 
 
 class TestExecutor:
@@ -628,6 +642,22 @@ class TestExecutor:
                     "error": "mpirun not available"
                 }
 
+        # Multi-node tests: skip if hostfile / SLURM provides fewer hosts than required
+        if num_ranks > 1 and num_nodes > 1:
+            avail = _distinct_host_count(self.mpi_hosts)
+            if avail > 0 and avail < num_nodes:
+                msg = (
+                    f"SKIP: test needs {num_nodes} distinct host(s), "
+                    f"hostfile/SLURM has {avail}"
+                )
+                print(msg)
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": msg,
+                }
+
         # Setup environment
         env = os.environ.copy()
 
@@ -750,6 +780,13 @@ class TestExecutor:
                 if custom_args:
                     cmd += f" {custom_args}"
 
+        gtest_json_path = None
+        if is_gtest:
+            fd, gtest_json_path = tempfile.mkstemp(
+                prefix="rccl_gtest_", suffix=".json", dir=tempfile.gettempdir()
+            )
+            os.close(fd)
+            cmd += f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
 
         if self.args.verbose:
             print(f"\n  Command: {cmd}")
@@ -757,54 +794,59 @@ class TestExecutor:
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}")
             print(f"  LLVM_PROFILE_FILE: {env.get('LLVM_PROFILE_FILE', 'Not set')}\n")
 
-        # GTest: stream stdout/stderr live (see run_gtest_with_live_output). Non-gtest: subprocess.run.
+        # Inherit stdout/stderr (no PIPE capture). For gtest, --gtest_output=json:…
+        # (temp file, removed in finally) supplies reliable SKIPPED vs PASSED on exit 0.
         start_time = time.time()
-        capture_gtest = bool(is_gtest)
+        run_kwargs = {
+            "shell": True,
+            "cwd": os.path.join(self.build_dir, "test"),
+            "env": env,
+            "capture_output": False,
+        }
+        if timeout > 0:
+            run_kwargs["timeout"] = timeout
         try:
-            if capture_gtest:
-                to = timeout if timeout > 0 else None
-                ret, combined, gtest_timed_out = run_gtest_with_live_output(
-                    cmd, os.path.join(self.build_dir, "test"), env, to
-                )
+            try:
+                result = subprocess.run(cmd, **run_kwargs)
+            except subprocess.TimeoutExpired as e:
                 duration = time.time() - start_time
-                if gtest_timed_out:
-                    test_result = TestResult.RESULT_TIMEOUT.value
-                    print(
-                        f"\n  Result: {test_result} after {timeout} seconds"
-                        if timeout > 0
-                        else f"\n  Result: {test_result}"
-                    )
-                else:
-                    test_result = infer_gtest_result_from_output(combined, ret)
-                    print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
-
+                parts = []
+                if getattr(e, "stdout", None):
+                    parts.append(e.stdout)
+                if getattr(e, "stderr", None):
+                    parts.append(e.stderr)
+                combined = "".join(parts)
+                if combined:
+                    print(combined, end="" if combined.endswith("\n") else "\n")
+                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
                 return {
                     "name": test_name,
-                    "result": test_result,
+                    "result": TestResult.RESULT_TIMEOUT.value,
                     "duration": duration,
-                    "exit_code": int(ret),
+                    "error": f"Test timed out after {timeout} seconds",
                 }
-
-            run_kwargs = {
-                "shell": True,
-                "cwd": os.path.join(self.build_dir, "test"),
-                "env": env,
-                "capture_output": False,
-            }
-            if timeout > 0:
-                run_kwargs["timeout"] = timeout
-                result = subprocess.run(cmd, **run_kwargs)
-            else:
-                result = subprocess.run(cmd, **run_kwargs)
+            except Exception as e:
+                duration = time.time() - start_time
+                print(f"\n  ERROR: {e}")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_FAILED.value,
+                    "duration": duration,
+                    "error": str(e)
+                }
 
             duration = time.time() - start_time
 
-            if result.returncode == ExitCode.EXIT_SUCCESS:
-                test_result = TestResult.RESULT_PASSED.value
-            elif result.returncode == ExitCode.EXIT_TIMEOUT:
-                test_result = TestResult.RESULT_TIMEOUT.value
+            if is_gtest:
+                rc = result.returncode if result.returncode is not None else -1
+                test_result = infer_gtest_result_from_json_file(gtest_json_path or "", rc)
             else:
-                test_result = TestResult.RESULT_FAILED.value
+                if result.returncode == ExitCode.EXIT_SUCCESS:
+                    test_result = TestResult.RESULT_PASSED.value
+                elif result.returncode == ExitCode.EXIT_TIMEOUT:
+                    test_result = TestResult.RESULT_TIMEOUT.value
+                else:
+                    test_result = TestResult.RESULT_FAILED.value
 
             print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
 
@@ -812,35 +854,14 @@ class TestExecutor:
                 "name": test_name,
                 "result": test_result,
                 "duration": duration,
-                "exit_code": result.returncode,
+                "exit_code": int(result.returncode) if result.returncode is not None else -1,
             }
-
-        except subprocess.TimeoutExpired as e:
-            duration = time.time() - start_time
-            parts = []
-            if getattr(e, "stdout", None):
-                parts.append(e.stdout)
-            if getattr(e, "stderr", None):
-                parts.append(e.stderr)
-            combined = "".join(parts)
-            if combined:
-                print(combined, end="" if combined.endswith("\n") else "\n")
-            print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
-            return {
-                "name": test_name,
-                "result": TestResult.RESULT_TIMEOUT.value,
-                "duration": duration,
-                "error": f"Test timed out after {timeout} seconds",
-            }
-        except Exception as e:
-            duration = time.time() - start_time
-            print(f"\n  ERROR: {e}")
-            return {
-                "name": test_name,
-                "result": TestResult.RESULT_FAILED.value,
-                "duration": duration,
-                "error": str(e)
-            }
+        finally:
+            if gtest_json_path:
+                try:
+                    os.unlink(gtest_json_path)
+                except OSError:
+                    pass
 
     def run_test_suite(self, suite_config):
         """
