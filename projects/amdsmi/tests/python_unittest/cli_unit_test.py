@@ -58,9 +58,9 @@ class TestAmdSmiCli(unittest.TestCase):
         # __init__ (once per test method) avoids running amd-smi during test
         # discovery, which crashes when the binary is not yet on PATH.
         cmds = [
-            ("metric",    "amd-smi metric --json"),
-            ("static",    "amd-smi static --json"),
-            ("list",      "amd-smi list --json"),
+            ("metric", "amd-smi metric --json"),
+            ("static", "amd-smi static --json"),
+            ("list", "amd-smi list --json"),
             ("partition", "amd-smi partition --current --json"),
         ]
         for name, cmd in cmds:
@@ -86,11 +86,7 @@ class TestAmdSmiCli(unittest.TestCase):
             "PID": [123],
             "NAME": ["AMD"],
             "GPU": cls.gpus,
-            "FILE": [
-                "_tmp.log",
-                "_tmp.log --overwrite",
-                "_tmp.log --append",
-            ],
+            "FILE": ["_tmp.log", "_tmp.log --overwrite", "_tmp.log --append"],
             "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
             "FOLDER": ["_tmp"],
             "FILE_LIMIT": [10],
