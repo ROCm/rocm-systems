@@ -154,7 +154,7 @@ If there arises a condition where certain flag is disabled and due to which a te
   ```cpp
   TEST_CASE("TestOnlyOnXnack") {
     if(!XNACKEnabled) {
-      HipTest::HIP_SKIP_TEST("Test only runs on system with XNACK enabled");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
       return;
     }
     // Rest of test functionality

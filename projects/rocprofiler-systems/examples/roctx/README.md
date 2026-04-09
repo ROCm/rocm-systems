@@ -16,7 +16,7 @@ This example suite demonstrates the ROCTx tracing API for annotating GPU workloa
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler
 - rocprofiler-sdk-roctx library
 

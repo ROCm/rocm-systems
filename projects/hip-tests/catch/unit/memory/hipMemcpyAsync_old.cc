@@ -128,7 +128,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, floa
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     if (deviceCount < 2) {
-      SUCCEED("deviceCount less then 2");
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       int canAccessPeer = 0;
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
@@ -144,7 +144,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, floa
         HipTest::checkTest(A_h, B_h, NUM_ELM);
 
       } else {
-        SUCCEED("P2P capability is not present");
+        WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       }
     }
   }
@@ -153,7 +153,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, floa
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
     if (deviceCount < 2) {
-      SUCCEED("deviceCount less then 2");
+      WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);
     } else {
       int canAccessPeer = 0;
       HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
@@ -173,7 +173,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, floa
         HIP_CHECK(hipFree(C_d));
 
       } else {
-        SUCCEED("P2P capability is not present");
+        WARN("Skipping section: " << HipTest::SkipReason::kPeerAccessUnavailable);
       }
     }
   }
@@ -255,8 +255,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_PinnedRegMemWithKernelLaunch, int, fl
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    SUCCEED("No of devices are less than 2");
-  } else {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
+  {
     // 1 refers to pinned Memory
     // 2 refers to register Memory
     int MallocPinType = GENERATE(0, 1);

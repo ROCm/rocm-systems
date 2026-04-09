@@ -302,7 +302,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device) {
       hipDeviceGetGraphMemAttribute_Functional_Test(i);
     }
   } else {
-    HipTest::HIP_SKIP_TEST("Skipped test as there is no device to test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
 }
 
