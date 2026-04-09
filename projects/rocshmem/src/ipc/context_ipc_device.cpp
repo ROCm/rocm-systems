@@ -87,6 +87,9 @@ __device__ void IPCContext::fence(int pe) {
 
 __device__ void IPCContext::quiet() {
   fence();
+#if defined(USE_SDMA)
+  ipcImpl_.sdmaImpl_.sdmaQuietAll();
+#endif
 }
 
 __device__ void IPCContext::pe_quiet(size_t pe) {

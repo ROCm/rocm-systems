@@ -31,6 +31,7 @@
 #include "envvar.hpp"
 #include "util.hpp"
 #include "log.hpp"
+#include "sdma_policy.hpp"
 
 namespace rocshmem {
 
@@ -132,6 +133,10 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     mpilib_ftable_.Group_free(&shm_grp);
     mpilib_ftable_.Group_free(&thread_grp);
   }
+
+#if defined(USE_SDMA)
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, thread_comm);
+#endif
 }
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
@@ -205,6 +210,10 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&pes_with_ipc_avail), shm_size * sizeof(int)));
     std::copy(shm_ranks.begin(), shm_ranks.end(), pes_with_ipc_avail);
   }
+
+#if defined(USE_SDMA)
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, bootstr);
+#endif
 }
 
 __host__ void IpcOnImpl::ipcHostStop() {
@@ -220,6 +229,10 @@ __host__ void IpcOnImpl::ipcHostStop() {
   if (nullptr != pes_with_ipc_avail) {
     CHECK_HIP(hipFree(pes_with_ipc_avail));
   }
+
+#if defined(USE_SDMA)
+  sdmaImpl_.sdmaHostStop();
+#endif
 }
 
 __device__ void IpcOnImpl::ipcCopy(void *dst, void *src, size_t size) {
