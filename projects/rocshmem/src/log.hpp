@@ -145,7 +145,7 @@ namespace rocshmem {
 
 #define LOG_WARN(fmt, ...) do {                                               \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::envvar::log_flags.show_warn) {                           \
+  if (rocshmem::envvar::log_flags.show_warn) {                                \
     if (rocshmem::log_stderr_is_tty)                                          \
       fprintf(stderr, LOG_CLR_YELLOW_ "W%04d" LOG_CLR_RESET_ " " fmt          \
               " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",               \
@@ -162,7 +162,7 @@ namespace rocshmem {
 
 #define LOG_INFO(fmt, ...) do {                                               \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::envvar::log_flags.show_info) {                           \
+  if (rocshmem::envvar::log_flags.show_info) {                                \
     if (rocshmem::log_stdout_is_tty)                                          \
       fprintf(stdout, LOG_CLR_CYAN_ "I%04d" LOG_CLR_RESET_ " " fmt            \
               " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",               \
@@ -180,7 +180,7 @@ namespace rocshmem {
 #ifdef BUILD_DEBUG_LEVEL_TRACE
 #define LOG_TRACE(fmt, ...) do {                                              \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::envvar::log_flags.show_trace) {                          \
+  if (rocshmem::envvar::log_flags.show_trace) {                               \
     if (rocshmem::log_stdout_is_tty)                                          \
       fprintf(stdout, LOG_CLR_BLUE_ "T%04d" LOG_CLR_RESET_ " " fmt            \
               " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",               \
@@ -210,7 +210,14 @@ namespace rocshmem {
 namespace rocshmem {
 
 extern __constant__ int* print_lock;
-extern __constant__ int  log_pe_number_device;
+
+struct log_state_device_t {
+  int  pe_number;
+  bool show_warn;
+  bool show_info;
+  bool show_trace;
+};
+extern __constant__ log_state_device_t log_device;
 
 template <typename... Args>
 [[maybe_unused]] __device__ void dprintf(const char* fmt, const Args&... args) {
@@ -223,7 +230,7 @@ template <typename... Args>
       while (atomicCAS(print_lock, 0, 1) == 1) {
       }
 
-      printf(fmt, log_pe_number_device, flat_wg_id, flat_thread_id, args...);
+      printf(fmt, log_device.pe_number, flat_wg_id, flat_thread_id, args...);
 
       *print_lock = 0;
     }
@@ -266,21 +273,24 @@ template <typename... Args>
 
 #define LOGD_WARN(fmt, ...) do {                                              \
   rocshmem::static_assert_device_only();                                      \
-  rocshmem::dprintf("W%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",              \
-                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
+  if (rocshmem::log_device.show_warn)                                         \
+    rocshmem::dprintf("W%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",            \
+                      __VA_OPT__(__VA_ARGS__,) __LINE__);                     \
 } while (0)
 
 #define LOGD_INFO(fmt, ...) do {                                              \
   rocshmem::static_assert_device_only();                                      \
-  rocshmem::dprintf("I%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",              \
-                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
+  if (rocshmem::log_device.show_info)                                         \
+    rocshmem::dprintf("I%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",            \
+                      __VA_OPT__(__VA_ARGS__,) __LINE__);                     \
 } while (0)
 
 #if defined(BUILD_DEBUG_LEVEL_TRACE)
 #define LOGD_TRACE(fmt, ...) do {                                             \
   rocshmem::static_assert_device_only();                                      \
-  rocshmem::dprintf("T%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",              \
-                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
+  if (rocshmem::log_device.show_trace)                                        \
+    rocshmem::dprintf("T%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",            \
+                      __VA_OPT__(__VA_ARGS__,) __LINE__);                     \
 } while (0)
 #else
 #define LOGD_TRACE(...) do { rocshmem::static_assert_device_only(); } while (0)

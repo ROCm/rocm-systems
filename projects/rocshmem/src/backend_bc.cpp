@@ -89,12 +89,16 @@ void Backend::init(void) {
                       hipMemcpyDefault));
 
   /*
-   * Copy PE number to device constant memory for device-side logging.
+   * Copy log state to device constant memory for device-side logging.
    */
-  int* pe_addr{nullptr};
-  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&pe_addr),
-                                HIP_SYMBOL(log_pe_number_device)));
-  CHECK_HIP(hipMemcpy(pe_addr, &log_pe_number, sizeof(log_pe_number),
+  log_state_device_t host_log_state{log_pe_number,
+                                    envvar::log_flags.show_warn,
+                                    envvar::log_flags.show_info,
+                                    envvar::log_flags.show_trace};
+  log_state_device_t* log_state_addr{nullptr};
+  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&log_state_addr),
+                                HIP_SYMBOL(log_device)));
+  CHECK_HIP(hipMemcpy(log_state_addr, &host_log_state, sizeof(host_log_state),
                       hipMemcpyDefault));
 
   /*

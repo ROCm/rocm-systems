@@ -26,7 +26,7 @@
 
 namespace rocshmem {
 
-__constant__ int* print_lock;
-__constant__ int  log_pe_number_device;
+__constant__ int*                 print_lock;
+__constant__ log_state_device_t  log_device;
 
 }  // namespace rocshmem
