@@ -3040,16 +3040,19 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument(
             "-q", "--process", action="store_true", required=False, help=process_help
         )
-        monitor_parser.add_argument(
-            "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
-        )
-        monitor_parser.add_argument(
-            "-switch",
-            "--brcm_switch",
-            action="store_true",
-            required=False,
-            help=switch_monitor_help,
-        )
+        # TODO(amdsmi_team): move to another PR & add to changelog
+        if self.helpers.is_brcm_nic_initialized():
+            monitor_parser.add_argument(
+                "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
+            )
+        if self.helpers.is_brcm_switch_initialized():
+            monitor_parser.add_argument(
+                "-switch",
+                "--brcm_switch",
+                action="store_true",
+                required=False,
+                help=switch_monitor_help,
+            )
         if not self.helpers.is_virtual_os():
             monitor_parser.add_argument(
                 "-V", "--violation", action="store_true", required=False, help=violation_help

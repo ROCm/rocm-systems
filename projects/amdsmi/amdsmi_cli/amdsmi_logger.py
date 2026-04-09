@@ -744,8 +744,18 @@ class AMDSMILogger:
                 with self.destination.open("w", encoding="utf-8") as output_file:
                     json.dump(self.watch_output, output_file, indent=4)
             else:
-                with self.destination.open("a", encoding="utf-8") as output_file:
-                    json.dump(json_output, output_file, indent=4)
+                # TODO(amdsmi_team): move to another PR & add to changelog
+                # Read existing content to build a valid JSON array across multiple writes
+                existing = []
+                if self.destination.exists():
+                    try:
+                        with self.destination.open("r", encoding="utf-8") as existing_file:
+                            existing = json.load(existing_file)
+                    except (json.JSONDecodeError, ValueError):
+                        existing = []
+                existing.extend(json_output)
+                with self.destination.open("w", encoding="utf-8") as output_file:
+                    json.dump(existing, output_file, indent=4)
 
     def combine_arrays_to_json(self):
         combined_json = {}
