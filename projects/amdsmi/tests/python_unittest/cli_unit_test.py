@@ -148,7 +148,7 @@ class TestAmdSmiCli(unittest.TestCase):
         self.clk_levels = ["SCLK", "MCLK", "FCLK", "SOCCLK", "PCIE"]
 
         # When parsing, ignore these entries as they are abnormal
-        self.cmd_arg_exceptions = ["--voltage"]
+        self.cmd_arg_exceptions = ["--voltage", "--brcm_nic", "--brcm_switch"]
 
         # When parsing, change these args into something else or add to arg
         self.cmd_arg_changes = [
@@ -683,7 +683,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 continue
             (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
             error_code = rc
-            if rc and len(std_err):
+            if rc and std_err:
                 items = std_err.split()
                 if "amdsmi_exception" in std_err:
                     # error code from amdsmi library exception
