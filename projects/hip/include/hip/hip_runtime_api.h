@@ -6066,9 +6066,9 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int s
 /**
  *-------------------------------------------------------------------------------------------------
  *-------------------------------------------------------------------------------------------------
- *  @defgroup GreenContext Green Context Management
+ *  @defgroup ExecutionContext Execution Context Management
  *  @{
- *  This section describes green context management functions of HIP runtime API.
+ *  This section describes execution context management functions of HIP runtime API.
  */
 hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
                                    hipDevResourceType type);

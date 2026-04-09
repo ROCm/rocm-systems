@@ -23,10 +23,10 @@ typedef struct DevResourceDesc {
   int deviceId{-1};
 } DevResourceDesc;
 
-class GreenCtx {
+class ExecutionCtx {
 public:
-  GreenCtx(int deviceId, DevResourceDesc* desc, unsigned int flags);
-  ~GreenCtx();
+  ExecutionCtx(int deviceId, DevResourceDesc* desc, unsigned int flags);
+  ~ExecutionCtx();
 
   hipError_t Create();
 
@@ -59,13 +59,13 @@ public:
   static hipError_t devResourceGenerateDesc(hipDevResourceDesc_t* phDesc,
                                             hipDevResource* resources, unsigned int nbResources);
 
-  static GreenCtx* createPrimaryCtx(int device);
+  static ExecutionCtx* createPrimaryCtx(int device);
 
 private:
-  GreenCtx(const GreenCtx&) = delete;
-  GreenCtx& operator=(const GreenCtx&) = delete;
-  GreenCtx(GreenCtx&&) = delete;
-  GreenCtx& operator=(GreenCtx&&) = delete;
+  ExecutionCtx(const ExecutionCtx&) = delete;
+  ExecutionCtx& operator=(const ExecutionCtx&) = delete;
+  ExecutionCtx(ExecutionCtx&&) = delete;
+  ExecutionCtx& operator=(ExecutionCtx&&) = delete;
 
   int deviceId_;
   unsigned int flags_;

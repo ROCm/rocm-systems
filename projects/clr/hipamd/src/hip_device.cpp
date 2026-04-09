@@ -9,7 +9,7 @@
 #include <hip/amd_detail/hip_storage.h>
 
 #include "hip_internal.hpp"
-#include "hip_greenctx.hpp"
+#include "hip_executionctx.hpp"
 #include "hip_mempool_impl.hpp"
 #include "hip_platform.hpp"
 

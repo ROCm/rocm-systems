@@ -288,7 +288,7 @@ namespace hip {
   class Device;
   class MemoryPool;
   class Event;
-  class GreenCtx;
+  class ExecutionCtx;
   class Stream : public amd::HostQueue {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
@@ -549,8 +549,8 @@ namespace hip {
 
     // --- Execution context management ---
     
-    GreenCtx* getPrimaryExecCtx() const { return primaryExecCtx_; }
-    void setPrimaryExecCtx(GreenCtx* ctx) { primaryExecCtx_ = ctx; }
+    ExecutionCtx* getPrimaryExecCtx() const { return primaryExecCtx_; }
+    void setPrimaryExecCtx(ExecutionCtx* ctx) { primaryExecCtx_ = ctx; }
     std::recursive_mutex& getLock() { return lock_; }
 
     void registerResource(uint32_t resId, uint32_t familyId, unsigned int startCU);
@@ -583,7 +583,7 @@ namespace hip {
     ObjectRegistry<hipGraphicsResource_t> mappedGraphicsResources_;
 
     // ----- Execution context state -----
-    GreenCtx* primaryExecCtx_ = nullptr;      //!< Primary execution context
+    ExecutionCtx* primaryExecCtx_ = nullptr;      //!< Primary execution context
     std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
     std::mutex resourceFamilyMapLock_;
 

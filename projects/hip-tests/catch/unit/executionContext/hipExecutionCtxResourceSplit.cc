@@ -13,7 +13,7 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
-#include "hip_greenctx_common.hh"
+#include "hip_executionctx_common.hh"
 
 #include <vector>
 
