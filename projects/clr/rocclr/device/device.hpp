@@ -1317,11 +1317,15 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   //! Init hidden heap for device memory allocations
   virtual void HiddenHeapInit() = 0;
 
-  //! Dispatches multiple AQL packets in a single batch operation
-  virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                                      const std::vector<const std::string*>& kernelNames,
-                                      amd::AccumulateCommand* vcmd = nullptr,
-                                      bool attach_signal = false) = 0;
+  //! Fast-path dispatch using a pre-built contiguous flat packet buffer.
+  virtual bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
+                                          const std::vector<uint32_t>& validFullHeaders,
+                                          amd::AccumulateCommand* vcmd = nullptr,
+                                          bool attach_signal = false,
+                                          bool blocking = false,
+                                          const std::vector<const std::string*>* kernelNames = nullptr) {
+    return false;
+  }
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
