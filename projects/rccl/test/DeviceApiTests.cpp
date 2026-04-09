@@ -13,15 +13,14 @@
 #include <cstdlib>
 #include <functional>
 #include <string>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <unordered_map>
 #include <vector>
 
 #define NCCL_ENABLE_DEVICE_HELPERS 1
 #include "nccl_device/impl/core__funcs.h"
 #include "nccl_device/impl/mem_barrier__funcs.h"
 #undef NCCL_ENABLE_DEVICE_HELPERS
+
+#include "common/ProcessIsolatedTestRunner.hpp"
 
 namespace RcclUnitTesting
 {
@@ -332,81 +331,59 @@ static void runDevCommCreateFailureTest()
         resources.ranks[0].devCommCreated = true;
 }
 
-static void runExecIsolatedDeviceApiTest(
-    const std::string&                                  testName,
-    const std::unordered_map<std::string, std::string>& environment,
-    const std::function<void()>&                        testFn
+static ProcessIsolatedTestRunner::TestConfig makeDeviceApiEnabledConfig(
+    const std::string& name, std::function<void()> testFn
 )
 {
-    const char* childTestName = std::getenv("RCCL_DEVICE_API_EXEC_CHILD");
-    if(childTestName != nullptr && testName == childTestName)
-    {
-        testFn();
-        fflush(nullptr);
-        _exit(::testing::Test::HasFailure() ? EXIT_FAILURE : EXIT_SUCCESS);
-    }
+    return ProcessIsolatedTestRunner::TestConfig(name, testFn)
+        .withEnvironment({{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_WIN_ENABLE", "1"}})
+        .withTimeout(std::chrono::seconds(60));
+}
 
-    std::array<char, 4096> executablePath = {};
-    const ssize_t          pathLength
-        = readlink("/proc/self/exe", executablePath.data(), executablePath.size() - 1);
-    ASSERT_GT(pathLength, 0) << "Failed to resolve current executable path";
-    executablePath[pathLength] = '\0';
+static ProcessIsolatedTestRunner::TestConfig makeCuMemDisabledConfig(
+    const std::string& name, std::function<void()> testFn
+)
+{
+    return ProcessIsolatedTestRunner::TestConfig(name, testFn)
+        .withEnvironment({{"NCCL_CUMEM_ENABLE", "0"}, {"NCCL_WIN_ENABLE", "1"}})
+        .withTimeout(std::chrono::seconds(60));
+}
 
-    const pid_t childPid = fork();
-    ASSERT_NE(childPid, -1) << "Failed to fork exec-isolated child for " << testName;
-
-    if(childPid == 0)
-    {
-        for(const auto& [name, value] : environment)
-            setenv(name.c_str(), value.c_str(), 1);
-        setenv("RCCL_DEVICE_API_EXEC_CHILD", testName.c_str(), 1);
-
-        const std::string filterArgument = "--gtest_filter=" + testName;
-        execl(
-            executablePath.data(),
-            executablePath.data(),
-            filterArgument.c_str(),
-            static_cast<char*>(nullptr)
-        );
-        _exit(127);
-    }
-
-    int status = 0;
-    ASSERT_EQ(waitpid(childPid, &status, 0), childPid)
-        << "Failed to wait for exec-isolated child for " << testName;
-
-    ASSERT_TRUE(WIFEXITED(status))
-        << "Exec-isolated child terminated abnormally for " << testName;
-    ASSERT_EQ(WEXITSTATUS(status), 0)
-        << "Exec-isolated child returned non-zero exit code for " << testName;
+static ProcessIsolatedTestRunner::TestConfig makeWinDisabledConfig(
+    const std::string& name, std::function<void()> testFn
+)
+{
+    return ProcessIsolatedTestRunner::TestConfig(name, testFn)
+        .withEnvironment({{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_WIN_ENABLE", "0"}})
+        .withTimeout(std::chrono::seconds(60));
 }
 
 } // namespace
 
 TEST(DeviceApi, LsaRemoteRead)
 {
-    runExecIsolatedDeviceApiTest(
-        "DeviceApi.LsaRemoteRead",
-        {{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_WIN_ENABLE", "1"}},
-        []() { runPositiveLsaRemoteReadTest(); }
+    RUN_ISOLATED_TESTS(
+        makeDeviceApiEnabledConfig(
+            "DeviceApi.LsaRemoteRead", []() { runPositiveLsaRemoteReadTest(); }
+        )
     );
 }
 
 TEST(DeviceApi, CuMemDisabled)
 {
-    runExecIsolatedDeviceApiTest(
-        "DeviceApi.CuMemDisabled",
-        {{"NCCL_CUMEM_ENABLE", "0"}, {"NCCL_WIN_ENABLE", "1"}},
-        []() { runDevCommCreateFailureTest(); }
+    RUN_ISOLATED_TESTS(
+        makeCuMemDisabledConfig(
+            "DeviceApi.CuMemDisabled", []() { runDevCommCreateFailureTest(); }
+        )
     );
 }
 
 TEST(DeviceApi, WinDisabled)
 {
-    runExecIsolatedDeviceApiTest(
-        "DeviceApi.WinDisabled",
-        {{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_WIN_ENABLE", "0"}},
-        []() { runDevCommCreateFailureTest(); }
+    RUN_ISOLATED_TESTS(
+        makeWinDisabledConfig(
+            "DeviceApi.WinDisabled", []() { runDevCommCreateFailureTest(); }
+        )
     );
 }
 

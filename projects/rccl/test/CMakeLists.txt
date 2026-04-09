@@ -267,6 +267,7 @@ if(BUILD_TESTS)
     DeviceApiTests.cpp
     common/main_fixtures.cpp
     common/EnvVars.cpp
+    common/ProcessIsolatedTestRunner.cpp
   )
 
   add_executable(rccl-UnitTestsDeviceApi ${TEST_DEVICE_API_SOURCE_FILES})
