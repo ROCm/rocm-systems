@@ -29,6 +29,16 @@ C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/`
 3. Flag O(n²) or worse patterns where linear would work
 4. Verify resource cleanup (file handles, memory, GPU resources)
 5. Check for unnecessary repeated work (regex compilation in loops, redundant device queries)
+6. If CI evidence is provided, check for timing regressions
+
+## CI Evidence (when available)
+
+If the orchestrator provides CI run data, use it to:
+- Compare **step timings** between PR run and baseline `main` run
+- Flag steps that took significantly longer (>20% regression)
+- Identify **cache misses** or changed cache behavior
+- Correlate timing anomalies with code changes in the diff
+- Note any new resource-intensive steps added
 
 ## Severity
 

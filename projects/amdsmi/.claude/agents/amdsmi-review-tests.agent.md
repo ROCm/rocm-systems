@@ -35,6 +35,16 @@ C/C++ → `src/`, `include/amd_smi/` | Python → `py-interface/`, `amdsmi_cli/`
 3. Identify missing tests for new/changed behavior
 4. Check test patterns match project conventions
 5. Run tests when possible and report results
+6. If CI evidence is provided, check for test failures and flaky tests
+
+## CI Evidence (when available)
+
+If the orchestrator provides CI run data, use it to:
+- Identify **test failures** in the PR's CI run — these are ❌ BLOCKING
+- Spot **flaky tests** (passed on retry, or failed inconsistently)
+- Compare test step results against a baseline `main` run
+- Note any **new test steps** added or **existing steps removed**
+- Flag tests that passed but took significantly longer than baseline (>2x)
 
 ## Severity
 
