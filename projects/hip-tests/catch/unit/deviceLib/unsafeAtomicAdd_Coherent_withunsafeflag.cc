@@ -14,6 +14,7 @@ This testcase works only on gfx90a.
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 #include <hip_test_features.hh>
+#include <string>
 
 #define INC_VAL 10
 #define INITIAL_VAL 5
@@ -40,7 +41,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentwithUnsafeflag, float, doubl
   std::string gfxName(prop.gcnArchName);
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
     if (prop.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h{nullptr}, *result{nullptr};
       TestType *A_d{nullptr}, *result_d{nullptr};
@@ -78,9 +79,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentwithUnsafeflag, float, doubl
       HIP_CHECK(hipHostFree(result));
     }
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, Hence"
-        "skipping the testcase for this GPU "
-        << device);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }

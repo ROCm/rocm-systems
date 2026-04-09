@@ -76,7 +76,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported:
+    ],
 }
 
 PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]

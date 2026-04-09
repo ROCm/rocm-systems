@@ -22,6 +22,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added L2 memory bandwidth derived metrics under `--membw-analysis` to allow L2 memory bandwidth specific profiling and analysis metric block 30.
 
+* Added AMD Strix Halo (gfx1151) support
+  * New memory hierarchy visualization for RDNA 3.5 (gfx115X) in analyze CLI mode.
+
 * Introduced support for MI350P GPU
 
 * ``--view table`` option in analyze mode to force all TTY output to plain tables and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables). The ``--view`` argument is reserved for future TTY views (e.g. other chart styles).
@@ -58,6 +61,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * `--path` and `--subpath` options will be removed as they are already deprecated
+
+### Known issues
+
+* For Strix Halo, the roofline metrics table will have N/A values for "peak" field
+  * This will be fixed by adding empirical benchmark support for Strix Halo in a future release
 
 ## ROCm Compute Profiler 3.5.0 for ROCm 7.12.0
 

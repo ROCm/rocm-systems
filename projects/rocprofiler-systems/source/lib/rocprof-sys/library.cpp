@@ -40,6 +40,7 @@
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
@@ -121,8 +122,11 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-auto _timemory_manager  = tim::manager::instance();
-auto _timemory_settings = tim::settings::shared_instance();
+std::atomic<bool>  rocprofsys_init_library_done{ false };
+std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
+std::atomic<bool>  rocprofsys_finalization_done{ false };
+auto               _timemory_manager  = tim::manager::instance();
+auto               _timemory_settings = tim::settings::shared_instance();
 
 void
 set_metadata_process_start_timestamp(int64_t _ts)
@@ -493,8 +497,7 @@ rocprofsys_init_library_hidden()
     auto _tid = threading::get_id();
     (void) _tid;
 
-    static bool _once       = false;
-    auto        _debug_init = get_debug_init();
+    auto _debug_init = get_debug_init();
 
     int _selinux_mode = 0;
     {
@@ -522,8 +525,8 @@ rocprofsys_init_library_hidden()
             fmt::format("State is not PreInit :: {}", std::to_string(get_state())));
     }
 
-    if(get_state() != State::PreInit || get_state() == State::Init || _once) return;
-    _once = true;
+    if(get_state() != State::PreInit) return;
+    if(rocprofsys_init_library_done.exchange(true)) return;
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -582,19 +585,18 @@ rocprofsys_init_tooling_hidden(void)
                                                  { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
                                                  { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
 
-    static pid_t _once       = 0;
-    static auto  _debug_init = get_debug_init();
+    auto _debug_init = get_debug_init();
 
     if(_debug_init)
     {
         LOG_DEBUG("State is {}...", std::to_string(get_state()));
     }
 
-    if(get_state() != State::PreInit || get_state() == State::Init || _once == getpid())
-    {
+    if(get_state() != State::PreInit) return false;
+
+    pid_t expected = 0;
+    if(!rocprofsys_init_tooling_done.compare_exchange_strong(expected, getpid()))
         return false;
-    }
-    _once = getpid();
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -906,6 +908,13 @@ rocprofsys_reset_preload_hidden(void)
 extern "C" void
 rocprofsys_finalize_hidden(void)
 {
+    // Prevent multiple finalization calls (e.g., from atexit handlers after reset_state)
+    if(rocprofsys_finalization_done.exchange(true))
+    {
+        LOG_DEBUG("Finalization already completed. Skipping.");
+        return;
+    }
+
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
     // disable initialization callback
@@ -1138,10 +1147,18 @@ rocprofsys_finalize_hidden(void)
         sampling::post_process();
     }
 
+    auto _output_registry = output_file_registry{};
+
     if(get_use_causal())
     {
         LOG_DEBUG("Finishing the causal experiments...");
         causal::finish_experimenting();
+
+        auto _base = config::get_causal_output_filename();
+        _output_registry.register_file(fmt::format("{}.json", _base),
+                                       output_format::causal_json);
+        _output_registry.register_file(fmt::format("{}.txt", _base),
+                                       output_format::causal_text);
     }
 
     if(get_use_process_sampling())
@@ -1168,13 +1185,13 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Finalizing perfetto...");
         rocprofsys::perfetto::post_process(_timemory_manager.get(),
-                                           _perfetto_output_error);
+                                           _perfetto_output_error, _output_registry);
     }
 
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         _manager.shutdown();
-        _manager.post_process_bulk();
+        _manager.post_process_bulk(_output_registry);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)
@@ -1192,6 +1209,24 @@ rocprofsys_finalize_hidden(void)
                tim::cereal::make_nvp("memory_maps", _maps));
         });
 
+        static auto* attach_add_session_id = getenv("ROCPROFSYS_REATTACH_ADD_SESSION_ID");
+        static auto  session_id            = 0;
+
+        if(attach_add_session_id)
+            settings::default_process_suffix() = fmt::format("%pid%-{}", session_id++);
+
+        // Disable Timemory file output for disabled ranks
+        if(!config::output_filtering::is_output_enabled_for_current_mpi_rank())
+        {
+            auto* _settings = tim::settings::instance();
+            if(_settings)
+            {
+                _settings->file_output() = false;
+                _settings->text_output() = false;
+                _settings->json_output() = false;
+            }
+        }
+
         LOG_DEBUG("Finalizing timemory...");
         tim::timemory_finalize(_timemory_manager.get());
 
@@ -1200,7 +1235,28 @@ rocprofsys_finalize_hidden(void)
         _cfg.suffix     = settings::default_process_suffix();
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "rocprofsys", _cfg);
+
+        if(config::get_use_timemory())
+        {
+            auto _components =
+                config::get_setting_value<std::string>("ROCPROFSYS_TIMEMORY_COMPONENTS")
+                    .value_or("wall_clock");
+
+            for(auto&& _comp_name : tim::delimit(_components, ",; "))
+            {
+                if(_comp_name.empty()) continue;
+
+                _output_registry.register_file(
+                    settings::compose_output_filename(_comp_name, "txt", _cfg),
+                    output_format::text, _comp_name);
+                _output_registry.register_file(
+                    settings::compose_output_filename(_comp_name, "json", _cfg),
+                    output_format::json, _comp_name);
+            }
+        }
     }
+
+    _output_registry.print_summary();
 
     categories::shutdown();
 
@@ -1232,6 +1288,26 @@ rocprofsys_finalize_hidden(void)
         [](int) {});
 
     common::destroy_static_objects();
+
+    // Note: rocprofsys_init_library_done, rocprofsys_init_tooling_done, and state are NOT
+    // reset here. They are only reset during re-attach (in rocprofiler-sdk.cpp) when
+    // explicitly preparing for a new session. Resetting them during normal exit
+    // can cause crashes if cleanup code triggers reinitialization.
+}
+
+extern "C" void
+rocprofsys_set_finalization_done_hidden(void)
+{
+    rocprofsys_finalization_done.store(true);
+}
+
+extern "C" void
+rocprofsys_reset_for_reattach_hidden(void)
+{
+    rocprofsys_finalization_done.store(false);
+    rocprofsys_init_library_done.store(false);
+    rocprofsys_init_tooling_done.store(0);
+    ::rocprofsys::reset_state();
 }
 
 //======================================================================================//
