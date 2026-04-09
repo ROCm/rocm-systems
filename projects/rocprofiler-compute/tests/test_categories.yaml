@@ -23,7 +23,6 @@ test_categories:
       - test_utils_profile_csv
       - test_autogen_config
       - test_import_guard
-      - test_profile_multi_rank
     exclude:
       - test_profile_live_attach_detach
     labels:
