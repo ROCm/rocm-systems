@@ -3953,6 +3953,9 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
   if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets, occupiedBuf)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
             hostcallBuffer_);
+    occupiedBuf->release();
+    dev().svmFree(dev().context(), hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
     return nullptr;
   }
   return hostcallBuffer_;

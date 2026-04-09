@@ -3371,15 +3371,17 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue,
 
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created hostcall buffer %p for hardware queue %p", buffer,
           queue->base_address);
+  if (!amd::enableHostcalls(*this, buffer, numPackets, occupiedBuf)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
+            buffer);
+    occupiedBuf->release();
+    context().svmFree(buffer);
+    return nullptr;
+  }
   if (!coop_queue) {
     qIter->second.hostcallBuffer_ = buffer;
   } else {
     coopHostcallBuffer_ = buffer;
-  }
-  if (!amd::enableHostcalls(*this, buffer, numPackets, occupiedBuf)) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
-            buffer);
-    return nullptr;
   }
   return buffer;
 }
