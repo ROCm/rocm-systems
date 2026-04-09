@@ -428,11 +428,10 @@ class Runtime {
   hsa_status_t VMemoryGetAllocPropertiesFromHandle(const hsa_amd_vmem_alloc_handle_t memoryHandle,
                                                    const core::MemoryRegion** mem_region,
                                                    hsa_amd_memory_type_t* type);
-  hsa_status_t VMemoryExportFabricHandle(hsa_fabric_handle_t *fabric_handle,
-                                               hsa_amd_vmem_alloc_handle_t handle,
-                                               const uint64_t flags);
+  hsa_status_t VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_handle,
+                                         hsa_amd_vmem_alloc_handle_t handle, uint64_t flags);
   hsa_status_t VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
-                                               hsa_amd_vmem_alloc_handle_t* handle);
+                                         hsa_amd_vmem_alloc_handle_t* handle);
 
   hsa_status_t EnableLogging(uint8_t* flags, void* file);
 
@@ -994,22 +993,16 @@ class Runtime {
 
   struct MemoryHandle {
     MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
-                 ThunkHandle thunk_handle, MemoryRegion::AllocateFlags alloc_flag)
-        : region(region),
-          size(size),
-          ref_count(1),
-          use_count(0),
-          thunk_handle(thunk_handle),
-          alloc_flag(alloc_flag) {}
+                 ShareableHandle shareable_handle, int dmabuf_fd, uint64_t mmap_offset,
+                 bool imported, MemoryRegion::AllocateFlags alloc_flag);
+    ~MemoryHandle();
 
-    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(ThunkHandle handle) {
-      hsa_amd_vmem_alloc_handle_t ret_handle = {
-          static_cast<uint64_t>(reinterpret_cast<uintptr_t>(handle))};
-      return ret_handle;
+    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(ShareableHandle handle) {
+      return hsa_amd_vmem_alloc_handle_t{handle.handle};
     }
 
-    static __forceinline ThunkHandle Convert(hsa_amd_vmem_alloc_handle_t handle) {
-      return reinterpret_cast<void*>(handle.handle);
+    static __forceinline ShareableHandle Convert(hsa_amd_vmem_alloc_handle_t handle) {
+      return ShareableHandle{handle.handle};
     }
 
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
@@ -1018,10 +1011,15 @@ class Runtime {
     size_t size;
     int ref_count;
     int use_count;
-    ThunkHandle thunk_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
+    ShareableHandle shareable_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
+    int dmabuf_fd;
+    uint64_t mmap_offset;
+    bool imported; /* True is this BO belongs to another process */
     MemoryRegion::AllocateFlags alloc_flag;
   };
-  std::map<ThunkHandle, MemoryHandle> memory_handle_map_;
+
+
+  std::map<ShareableHandle, MemoryHandle, ShareableHandle> memory_handle_map_;
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {
@@ -1042,18 +1040,15 @@ class Runtime {
 
   struct MappedHandle {
     MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
-                 uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle);
+                 uint64_t offset, size_t size,
+                 hsa_access_permission_t perm);
 
-    __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
+    __forceinline core::Agent* agentOwner() const { return mem_handle->agentOwner(); }
 
     MemoryHandle* mem_handle;
     AddressHandle* address_handle;
     uint64_t offset;
     size_t size;
-    int drm_fd;
-    void* drm_cpu_addr;  // CPU Buffer address
-    ShareableHandle shareable_handle;
     std::map<Agent*, MappedHandleAllowedAgent> allowed_agents;
   };
   std::map<const void*, MappedHandle> mapped_handle_map_;  // Indexed by VA

@@ -558,24 +558,24 @@ typedef struct _HsaMemFlags
                                           // when setting this entry to 1. Scratch allocation may fail due to limited
                                           // resources. Application code is required to work without any allocation.
                                           // Allocation fails on any node without GPU function.
-            unsigned int AtomicAccessFull: 1; // default = 0: If set, the memory will be allocated and mapped to allow 
-                                              // atomic ops processing. On AMD APU, this will use the ATC path on system 
-                                              // memory, irrespective of the NonPaged flag setting (= if NonPaged is set, 
-                                              // the memory is pagelocked but mapped through IOMMUv2 instead of GPUVM). 
+            unsigned int AtomicAccessFull: 1; // default = 0: If set, the memory will be allocated and mapped to allow
+                                              // atomic ops processing. On AMD APU, this will use the ATC path on system
+                                              // memory, irrespective of the NonPaged flag setting (= if NonPaged is set,
+                                              // the memory is pagelocked but mapped through IOMMUv2 instead of GPUVM).
                                               // All atomic ops must be supported on this memory.
-            unsigned int AtomicAccessPartial: 1; // default = 0: See above for AtomicAccessFull description, however 
-                                                 // focused on AMD discrete GPU that support PCIe atomics; the memory 
-                                                 // allocation is mapped to allow for PCIe atomics to operate on system 
-                                                 // memory, irrespective of NonPaged set or the presence of an ATC path 
-                                                 // in the system. The atomic operations supported are limited to SWAP, 
-                                                 // CompareAndSwap (CAS) and FetchAdd (this PCIe op allows both atomic 
-                                                 // increment and decrement via 2-complement arithmetic), which are the 
+            unsigned int AtomicAccessPartial: 1; // default = 0: See above for AtomicAccessFull description, however
+                                                 // focused on AMD discrete GPU that support PCIe atomics; the memory
+                                                 // allocation is mapped to allow for PCIe atomics to operate on system
+                                                 // memory, irrespective of NonPaged set or the presence of an ATC path
+                                                 // in the system. The atomic operations supported are limited to SWAP,
+                                                 // CompareAndSwap (CAS) and FetchAdd (this PCIe op allows both atomic
+                                                 // increment and decrement via 2-complement arithmetic), which are the
                                                  // only atomic ops directly supported in PCI Express.
-                                                 // On AMD APU, setting this flag will allocate the same type of memory 
-                                                 // as AtomicAccessFull, but it will be considered compatible with 
+                                                 // On AMD APU, setting this flag will allocate the same type of memory
+                                                 // as AtomicAccessFull, but it will be considered compatible with
                                                  // discrete GPU atomic operations access.
-            unsigned int ExecuteAccess: 1; // default = 0: Identifies if memory is primarily used for data or accessed 
-                                           // for executable code (e.g. queue memory) by the host CPU or the device. 
+            unsigned int ExecuteAccess: 1; // default = 0: Identifies if memory is primarily used for data or accessed
+                                           // for executable code (e.g. queue memory) by the host CPU or the device.
                                            // Influences the page attribute setting within the allocation
             unsigned int CoarseGrain : 1;  // default = 0: The memory can be accessed assuming cache
                                            // coherency maintained by link infrastructure and HSA agents.
@@ -1156,6 +1156,11 @@ typedef struct _HSA_UUID
     HSAuint8    Data4[8];
 } HSA_UUID;
 
+typedef struct _HsaFabricHandle
+{
+    HSAuint64   handle[2];
+} HsaFabricHandle;
+
 #define HSA_DEFINE_UUID(name, dw, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
     static const HSA_UUID name = {dw, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}
 #else
@@ -1539,28 +1544,30 @@ typedef enum _HsaMemoryMapFlags {
 
 /* Handle type for import */
 typedef enum _HsaExternalHandleType{
-    HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME = 0,
-    HSA_EXTERNAL_HANDLE_KMS     = 1,
-    HSA_EXTERNAL_HANDLE_DMA_BUF = 2
+    HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME  = 0,
+    HSA_EXTERNAL_HANDLE_KMS             = 1,
+    HSA_EXTERNAL_HANDLE_DMA_BUF         = 2,
+    HSA_EXTERNAL_HANDLE_FABRIC          = 3
 } HsaExternalHandleType;
 
-typedef struct _HsaExternalHandleDesc {
+typedef struct _HsaHandleImportDesc {
     HsaAMDGPUDeviceHandle device_handle; // GPU device handle (used for import only)
-    HSAint64 fd; // dmabuf fd
     HsaExternalHandleType type; // handle type
+    union {
+        HSAint64 dmabuf_fd; // dmabuf fd
+        HsaMemoryObjectHandle buf_handle; // Driver handle
+        HsaFabricHandle fabric;
+    };
     void *mem; // existing buffer address (for windows and WSL only)
     HSAuint32 metadata; // Used for IPC handles
-} HsaExternalHandleDesc;
+} HsaHandleImportDesc;
 
 typedef struct _HsaHandleImportResult {
-    HsaMemoryObjectHandle buf_handle; // Thunk buffer object handle
+    HsaMemoryObjectHandle buf_handle; // Buffer Object handle
+    int dmabuf_fd;
     HSAuint64 alloc_size; // allocation size for import
     HSAuint32 metadata; // Used for IPC handles
 } HsaHandleImportResult;
-
-typedef struct _HsaMemoryExportResult {
-    HSAint32 fd; // dmabuf fd
-} HsaMemoryExportResult;
 
 typedef struct _HsaHandleImportFlags {
     struct {
@@ -1587,6 +1594,25 @@ typedef enum _HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE {
 typedef struct _HSA_EXTERNAL_SEMAPHORE_HANDLE {
     HSAuint64 handle;  // opaque, encodes (D3DKMT syncobj << 32 | NodeId) on Windows
 } HSA_EXTERNAL_SEMAPHORE_HANDLE;
+typedef struct _HsaHandleExportDesc {
+    HsaAMDGPUDeviceHandle device_handle;
+    HsaExternalHandleType type;
+    HsaMemoryObjectHandle buf_handle; // Thunk buffer object handle
+    HSAuint64 size;
+} HsaHandleExportDesc;
+
+typedef struct _HsaMemoryExportResult {
+    union {
+        HSAint32 dmabuf_fd;
+        HsaFabricHandle fabric;
+    };
+} HsaMemoryExportResult;
+
+typedef struct _HsaHandleExportFlags {
+    struct {
+        unsigned int Reserved       : 32;
+    } ui32;
+} HsaHandleExportFlags;
 
 
 #pragma pack(pop, hsakmttypes_h)

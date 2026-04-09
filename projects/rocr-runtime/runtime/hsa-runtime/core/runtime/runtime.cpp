@@ -49,6 +49,7 @@
 #if defined(__linux__)
 #include <link.h>
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
 #endif
@@ -322,7 +323,8 @@ hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
                                      MemoryRegion::AllocateFlags alloc_flags,
                                      void** address, int agent_node_id) {
   size_t size_requested = size;  // region->Allocate(...) may align-up size to granularity
-  hsa_status_t status = region->Allocate(size, alloc_flags, address, agent_node_id);
+  uint64_t mmap_offset; //unused
+  hsa_status_t status = region->Allocate(size, alloc_flags, address, /* &mmap_offset,*/ agent_node_id);
   // Track the allocation result so that it could be freed properly.
   if (status == HSA_STATUS_SUCCESS) {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
@@ -1384,9 +1386,10 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   // deferred export will not run into this problem.
   int dmabuf_fd;
   uint64_t dmabufOffset;
-  hsa_status_t err = agent->driver().ExportDMABuf(ptr, len, &dmabuf_fd, &dmabufOffset);
+  
+  auto err = hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset);
   assert(dmabufOffset/pageSize == fragOffset && "DMA Buf inconsistent with pointer offset.");
-  if (err != HSA_STATUS_SUCCESS) return err;
+  if (err != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
     AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
@@ -1396,9 +1399,9 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     std::uniform_int_distribution<uint32_t> distr(1, 1<<15);
     handle->handle[7] = distr(gen);
 
-    HsaExternalHandleDesc desc;
+    HsaHandleImportDesc desc;
     desc.device_handle = agent_->libThunkDev();
-    desc.fd = static_cast<HSAint64>(dmabuf_fd);
+    desc.dmabuf_fd = static_cast<HSAint64>(dmabuf_fd);
     desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
     desc.metadata = handle->handle[7];
     desc.mem = ptr;
@@ -1493,9 +1496,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
       AMD::GpuAgent* agent = reinterpret_cast<AMD::GpuAgent*>(agents_by_node_[info.NodeId][0]);
 
-      HsaExternalHandleDesc desc;
+      HsaHandleImportDesc desc;
       desc.device_handle = agent->libThunkDev();
-      desc.fd = static_cast<HSAint64>(dmabuf_fd);
+      desc.dmabuf_fd = static_cast<HSAint32>(dmabuf_fd);
       desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
       desc.metadata = static_cast<HSAuint32>(shared_handle);
       desc.mem = *importAddress;
@@ -3647,9 +3650,7 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
 
         int fd;
         uint64_t off;
-        hsa_status_t err = mem->second.region->owner()->driver().ExportDMABuf(
-            const_cast<void*>(ptr), size, &fd, &off);
-
+        hsa_status_t err = (hsaKmtExportDMABufHandle(const_cast<void*>(ptr), size, &fd, &off) == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
         if (err != HSA_STATUS_SUCCESS) {
           assert((err != HSA_STATUS_ERROR_INVALID_ARGUMENT) &&
                  "Thunk does not recognize an expected allocation.");
@@ -3758,17 +3759,27 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  ThunkHandle user_mode_driver_handle;
-  hsa_status_t status =
-      region->Allocate(size, alloc_flags, &user_mode_driver_handle, 0);
-  if (status == HSA_STATUS_SUCCESS) {
-    memory_handle_map_.emplace(std::piecewise_construct,
-                               std::forward_as_tuple(user_mode_driver_handle),
-                               std::forward_as_tuple(region, size, flags_unused,
-                                                     user_mode_driver_handle,
-                                                     alloc_flags));
+  void *mem;
 
-    *memoryOnlyHandle = MemoryHandle::Convert(user_mode_driver_handle);
+  hsa_status_t status = region->Allocate(size, alloc_flags, &mem, /*&mmap_offset,*/ 0);
+  if (status == HSA_STATUS_SUCCESS) {
+    uint64_t offset;
+    uint64_t mmap_offset = 0;
+    core::ShareableHandle shareable_handle = {};
+    auto agentOwner = region->owner();
+    int dmabuf_fd;
+    auto ret = agentOwner->driver().CreateShareableHandle(nullptr, mem, size, *agentOwner, &shareable_handle, &offset, &dmabuf_fd, &mmap_offset);
+    if (ret != HSA_STATUS_SUCCESS) {
+      region->Free(mem, size);
+      return ret;
+    }
+
+    memory_handle_map_.emplace(std::piecewise_construct,
+                               std::forward_as_tuple(shareable_handle),
+                               std::forward_as_tuple(region, size, flags_unused, shareable_handle,
+                                                     dmabuf_fd, mmap_offset, false, alloc_flags));
+
+    *memoryOnlyHandle = MemoryHandle::Convert(shareable_handle);
   }
   return status;
 }
@@ -3792,7 +3803,6 @@ hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnl
 
     if (memoryHandleIt->second.use_count > 0) return HSA_STATUS_SUCCESS;
 
-    memoryHandleIt->second.region->Free(memoryHandleIt->first, memoryHandleIt->second.size);
     memory_handle_map_.erase(memoryHandleIt);
   }
   return HSA_STATUS_SUCCESS;
@@ -3832,25 +3842,13 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   if (agent->device_type() == core::Agent::DeviceType::kAmdCpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  // Create mapping
-  ShareableHandle shareable_handle;
   uint64_t offset = 0;
-  int drm_fd = 0;
-  uint64_t drm_fd_offset = 0;
-  hsa_status_t err = agent->driver().CreateShareableHandle(
-      va, memoryHandleIt->first, size, *agent, &shareable_handle, &offset, &drm_fd, &drm_fd_offset);
-  if (err != HSA_STATUS_SUCCESS) return err;
-
   // Register the mapping
-  mapped_handle_map_.emplace(
-      std::piecewise_construct, std::forward_as_tuple(va),
-      std::forward_as_tuple(&memoryHandleIt->second, addressHandle, va, offset, size, drm_fd,
-                            reinterpret_cast<void*>(drm_fd_offset), HSA_ACCESS_PERMISSION_NONE,
-                            shareable_handle));
-
+  mapped_handle_map_.emplace(std::piecewise_construct, std::forward_as_tuple(va),
+                             std::forward_as_tuple(&memoryHandleIt->second, addressHandle, va, offset, size,
+                              HSA_ACCESS_PERMISSION_NONE));
   addressHandle->use_count++;
   memoryHandleIt->second.use_count++;
-
   return HSA_STATUS_SUCCESS;
 }
 
@@ -3889,14 +3887,6 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
       agentPermsIt = mappedHandleIt.second->allowed_agents.erase(agentPermsIt);
     }
 
-    if (mappedHandleIt.second->shareable_handle.IsValid()) {
-      hsa_status_t status = mappedHandleIt.second->agentOwner()->driver().DestroyShareableHandle(
-          &(mappedHandleIt.second->shareable_handle));
-      if (status != HSA_STATUS_SUCCESS) {
-        return status;
-      }
-    }
-
     assert(mappedHandleIt.second->address_handle->use_count >= 1);
     mappedHandleIt.second->address_handle->use_count--;
     assert(mappedHandleIt.second->mem_handle->use_count >= 1);
@@ -3904,16 +3894,12 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
 
     if (!mappedHandleIt.second->mem_handle->use_count &&
         !mappedHandleIt.second->mem_handle->ref_count) {
-        // User called VMemoryHandleRelease while this mapping was still
-        // outstanding. We need to delete the MemoryHandle as it is the last
-        // MappedHandle that was using it.
-      mappedHandleIt.second->mem_handle->region->Free(mappedHandleIt.second->mem_handle->thunk_handle,
-                                                      mappedHandleIt.second->mem_handle->size);
-      memory_handle_map_.erase(mappedHandleIt.second->mem_handle->thunk_handle);
+      // User called VMemoryHandleRelease while this mapping was still
+      // outstanding. We need to delete the MemoryHandle as it is the last
+      // MappedHandle that was using it.
+      memory_handle_map_.erase(mappedHandleIt.second->mem_handle->shareable_handle);
     }
-
     mapped_handle_map_.erase(mappedHandleIt.first);
-
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -3927,30 +3913,16 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   // CPU agents have access as the memory is already mapped to the host.
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
 
-  int dmabuf_fd = 0;
-  uint64_t offset = 0;
   MemoryHandle *memHandle = mappedHandle->mem_handle;
 
   // Export memory from owner agent.
-  hsa_status_t status = memHandle->agentOwner()->driver().ExportDMABuf(
-      memHandle->thunk_handle, mappedHandle->size, &dmabuf_fd, &offset);
-  assert(status == HSA_STATUS_SUCCESS);
-  if (status != HSA_STATUS_SUCCESS)
-    return;
+  size_t alloc_size = 0; //Unused
 
-  void* reuse_handle = nullptr;
-  // If MappedHandle's public handle is same as target agent public handle
-  // reuse the existing memory handles instead of importing dmabuf_fd (only valid for WSL/Windows)
-  if (targetAgent->public_handle().handle == memHandle->agentOwner()->public_handle().handle) {
-    reuse_handle = memHandle->thunk_handle;
-  }
-  // Import to target agent.
-  status =
-      targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent, &shareable_handle, reuse_handle);
+  auto status = targetAgent->driver().ImportDMABuf(memHandle->dmabuf_fd, *targetAgent, &shareable_handle, &alloc_size);
   assert(status == HSA_STATUS_SUCCESS);
   if (status != HSA_STATUS_SUCCESS)
     return;
-  status = core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+  status = core::Runtime::runtime_singleton_->DmaBufClose(memHandle->dmabuf_fd);
   if (status != HSA_STATUS_SUCCESS)
     return;
   }
@@ -3977,16 +3949,17 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 #if defined(__linux__)
     if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
 #endif
+    auto agentOwner = mappedHandle->mem_handle->agentOwner();
+    int mmap_fd = -1;
+    if (agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-    if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
-                            reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+    if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
+                             mappedHandle->mem_handle->mmap_offset)) {
       return HSA_STATUS_ERROR;
     }
   } else {
-    hsa_status_t status = targetAgent->driver().Map(
-        shareable_handle, va, mappedHandle->offset, size, perms);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
+    hsa_status_t status = targetAgent->driver().Map(shareable_handle, va, mappedHandle->offset, size, perms);
+    if (status != HSA_STATUS_SUCCESS) return status;
   }
   permissions = perms;
   return HSA_STATUS_SUCCESS;
@@ -4012,28 +3985,56 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
 }
 
 Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *address_handle,
-                 void* va, uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
-                 hsa_access_permission_t perm, ShareableHandle shareable_handle)
+                 void* va, uint64_t offset, size_t size, hsa_access_permission_t perm)
   : mem_handle(mem_handle), address_handle(address_handle), offset(offset),
-    size(size), drm_fd(drm_fd), drm_cpu_addr(drm_cpu_addr),
-    shareable_handle(shareable_handle)
-{
+    size(size) {
   /* Create a CPU mapping with PROT_NONE */
   #if defined(__linux__)
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
   #endif
 
-  auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
-  auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
-                      std::forward_as_tuple(cpu_agent),
-                      std::forward_as_tuple(this, cpu_agent, va,
-                                            size, HSA_ACCESS_PERMISSION_NONE))
-                      .first;
+  if (!mem_handle->imported) {
+    /*
+     * Create default CPU mapping. This is needed for the kfd_peerdirect drivers
+     * to look up the VA when sharing this BO to a third party driver. We only
+     * need this in the process that owns this memory allocation.
+     */
+    auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
+    auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
+                        std::forward_as_tuple(cpu_agent),
+                        std::forward_as_tuple(this, cpu_agent, va,
+                                              size, HSA_ACCESS_PERMISSION_NONE))
+                        .first;
 
-  auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
-  if (ret != HSA_STATUS_SUCCESS)
-    throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
+    auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
+    if (ret != HSA_STATUS_SUCCESS)
+      throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
+  }
 }
+
+Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
+                 ShareableHandle /* DriverHandle */ shareable_handle, int dmabuf_fd, uint64_t mmap_offset,
+                 bool imported, MemoryRegion::AllocateFlags alloc_flag)
+          : region(region),
+          size(size),
+          ref_count(1),
+          use_count(0),
+          shareable_handle(shareable_handle),
+          dmabuf_fd(dmabuf_fd),
+          mmap_offset(mmap_offset),
+          imported(imported),
+          alloc_flag(alloc_flag) {
+
+  assert(shareable_handle.handle != 0);
+  assert(size >= 0);
+}
+
+Runtime::MemoryHandle::~MemoryHandle() {
+  agentOwner()->driver().DestroyShareableHandle(&shareable_handle);
+  if (dmabuf_fd != -1)
+    core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+}
+
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held
 hsa_status_t
@@ -4223,100 +4224,128 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  uint64_t offset;
-
-  hsa_status_t err = memoryHandle->second.region->owner()->driver().ExportDMABuf(
-      memoryHandle->second.thunk_handle, memoryHandle->second.size, dmabuf_fd, &offset);
-  if (err != HSA_STATUS_SUCCESS) return err;
+  *dmabuf_fd = fcntl(memoryHandle->second.dmabuf_fd, F_DUPFD_CLOEXEC, 0);
+  if (*dmabuf_fd == -1) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
-  std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto lookupRegion = [this](int nodeid, const AMD::MemoryRegion** ret) {
-    auto nodeAgent = agents_by_node_.find(nodeid);
-    if (nodeAgent == agents_by_node_.end()) {
-      *ret = NULL;
-      return;
-    }
+  /*
+   * We pick the first visible GPU agent to import the dmabuf_fd.
+   * Looking up the owner of a memory handle does not give the agent where the memory was
+   * allocated.
+   * If we really need to return back the allocation flags, we may have to store it in the BO metadata
+   */
+  if (!gpu_agents().size()) {
+    /* Fabric Handles only supported on GPU agents */
+    return HSA_STATUS_ERROR;
+  }
+  auto agent = gpu_agents().front();
 
-    Agent* agent = nodeAgent->second.front();
-    if (agent == nullptr || !agent->IsValid() || agent->device_type() != Agent::kAmdGpuDevice) {
-      *ret = NULL;
-      return;
-    }
-
-    for (const auto& region : agent->regions()) {
-      const AMD::MemoryRegion* amd_region = reinterpret_cast<const AMD::MemoryRegion*>(region.get());
-
-      // TODO: Verify that this works on a system with FINE_GRAINED memory.
-      // System's with FINE_GRAINED will have both COARSE and FINE grain... need to get the
-      // rigtht one.
-
-      bool alloc_allowed;
+  const MemoryRegion* region = NULL;
+  for (const auto& agent_region : agent->regions()) {
+      bool alloc_allowed = false;
       hsa_status_t status =
-          amd_region->GetInfo(HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED, &alloc_allowed);
-      if (status == HSA_STATUS_SUCCESS && alloc_allowed) *ret = amd_region;
-    }
-  };
+        agent_region.get()->GetInfo(HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED, &alloc_allowed);
+    if (status == HSA_STATUS_SUCCESS && alloc_allowed) region = agent_region.get();
+  }
 
-  HsaGraphicsResourceInfo info;
-  int ret = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(dmabuf_fd, &info, 0, NULL));
-  if (ret) return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  if (!region) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  ThunkHandle thunk_handle = info.MemoryAddress;
-  size_t size = info.SizeInBytes;
-  int gpuid = info.NodeId;
+  ShareableHandle shareable_handle;
+  size_t size;
+  auto ret = agent->driver().ImportDMABuf(dmabuf_fd, *agent, &shareable_handle, &size);
+  if (ret != HSA_STATUS_SUCCESS) return ret;
 
-
-  auto memoryHandleIt = memory_handle_map_.find(thunk_handle);
+  auto memoryHandleIt = memory_handle_map_.find(shareable_handle);
   if (memoryHandleIt != memory_handle_map_.end()) {
     /* This handle was already imported, increment ref_count and return */
     memoryHandleIt->second.ref_count++;
-    *memoryOnlyHandle = MemoryHandle::Convert(thunk_handle);
+    *memoryOnlyHandle = MemoryHandle::Convert(shareable_handle);
     return HSA_STATUS_SUCCESS;
   }
 
-  const AMD::MemoryRegion* region = NULL;
-  lookupRegion(gpuid, &region);
-  if (!region) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-
-  HsaPointerInfo ptrInfo;
-  ret = HSAKMT_CALL(hsaKmtQueryPointerInfo(info.MemoryAddress, &ptrInfo));
-  if (ret != HSA_STATUS_SUCCESS || ptrInfo.Type == HSA_POINTER_UNKNOWN)
-    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-
-  MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateNoFlags;
-  if (ptrInfo.MemFlags.ui32.NoSubstitute) alloc_flag |= core::MemoryRegion::AllocatePinned;
-
   memory_handle_map_.emplace(std::piecewise_construct,
-          std::forward_as_tuple(thunk_handle),
-          std::forward_as_tuple(region, size, 0, thunk_handle, alloc_flag));
-  *memoryOnlyHandle = MemoryHandle::Convert(thunk_handle);
+          std::forward_as_tuple(shareable_handle),
+          std::forward_as_tuple(region, size, 0, shareable_handle, dmabuf_fd, 0, true, core::MemoryRegion::AllocateNoFlags));
 
+  *memoryOnlyHandle = MemoryHandle::Convert(shareable_handle);
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t *fabric_handle,
+hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_handle,
                                                hsa_amd_vmem_alloc_handle_t handle,
-                                               const uint64_t flags) {
-
-  auto memoryHandle = memory_handle_map_.find((void*)handle.handle);
-  if (memoryHandle == memory_handle_map_.end()) {
+                                                uint64_t flags) {
+  (void)flags;
+  auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(handle));
+  if (memoryHandleIt == memory_handle_map_.end()) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  // NOT IMPLEMENTED: Call Thunk/KFD to get unique handle
-  return HSA_STATUS_ERROR;
+  auto agentOwner = memoryHandleIt->second.region->owner();
+
+  return agentOwner->driver().ExportFabricHandle(*agentOwner,
+                                                 &memoryHandleIt->second.shareable_handle,
+                        memoryHandleIt->second.size, fabric_handle);
 }
 
 hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
-                                               hsa_amd_vmem_alloc_handle_t* handle) {
-  // NOT IMPLEMENTED: Call Thunk/KFD to import
-  return HSA_STATUS_ERROR;
+                                               hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
+  /*
+   * We pick the first visible GPU agent to import the Fabric handle.
+   * Looking up the owner of a memory handle does not give the agent where the memory was
+   * allocated.
+   * If we really need to return back the allocation flags, we may have to store it in the BO
+   * metadata
+   */
+  if (!gpu_agents().size()) {
+    /* Fabric Handles only supported on GPU agents */
+    return HSA_STATUS_ERROR;
+  }
+  auto agent = gpu_agents().front();
+
+  const MemoryRegion* region = NULL;
+  for (const auto& agent_region : agent->regions()) {
+      bool alloc_allowed = false;
+      hsa_status_t status =
+        agent_region.get()->GetInfo(HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED, &alloc_allowed);
+    if (status == HSA_STATUS_SUCCESS && alloc_allowed) {
+      region = agent_region.get();
+    }
+  }
+
+  if (!region) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
+  ShareableHandle shareable_handle;
+  size_t size;
+  int dmabuf_fd;
+
+  auto ret = agent->driver().ImportFabricHandle(*agent, fabric_handle, &shareable_handle, &dmabuf_fd,
+                                                &size);
+  if (ret != HSA_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  auto memoryHandleIt = memory_handle_map_.find(shareable_handle);
+  if (memoryHandleIt != memory_handle_map_.end()) {
+    /* This handle was already imported, increment ref_count and return */
+    memoryHandleIt->second.ref_count++;
+    *memoryOnlyHandle = MemoryHandle::Convert(shareable_handle);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  memory_handle_map_.emplace(std::piecewise_construct,
+          std::forward_as_tuple(shareable_handle),
+          std::forward_as_tuple(region, size, 0, shareable_handle, dmabuf_fd, 0, true, core::MemoryRegion::AllocateNoFlags));
+
+  *memoryOnlyHandle = MemoryHandle::Convert(shareable_handle);
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
@@ -4327,8 +4356,8 @@ hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapp
 
   MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle;
   memoryHandle->ref_count++;
-  *mapped_handle = MemoryHandle::Convert(memoryHandle->thunk_handle);
-
+  *mapped_handle = MemoryHandle::Convert(memoryHandle->shareable_handle);
+  assert(memoryHandle->shareable_handle.handle != 0);
   return HSA_STATUS_SUCCESS;
 }
 

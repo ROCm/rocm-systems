@@ -74,6 +74,7 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
                                   std::vector<HsaCacheProperties>& cache_props) const override;
   hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const;
+  hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const override;
   hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const;
   hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                               const void* buffer_base, uint64_t buffer_base_size) const;
@@ -89,7 +90,7 @@ class KfdVirtioDriver final : public core::Driver {
                                   const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
                                   const uint32_t* nodes) const override;
   hsa_status_t MakeMemoryUnresident(const void* mem) const override;
-  hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
+  hsa_status_t Queue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, HsaEvent* event,
                            HsaQueueResource& queue_resource) const override;
@@ -100,10 +101,14 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t num_cu_mask,
                               uint32_t* cu_mask) const override;
   hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_GWS, uint32_t* GWS) const override;
-  hsa_status_t ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, size_t* offset) override;
+  hsa_status_t ExportDMABuf(const core::Agent& agent, core::ShareableHandle *handle, size_t size, int* dmabuf_fd, size_t* offset) override;
   hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent, core::ShareableHandle* handle,
                             void* mem) override;
   hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) override;
+  hsa_status_t ExportFabricHandle(core::Agent& agent, core::ShareableHandle* handle, size_t size,
+                                  hsa_fabric_handle_t* fabric_handle) override;
+  hsa_status_t ImportFabricHandle(core::Agent& agent, hsa_fabric_handle_t fabric_handle,
+                                  core::ShareableHandle* handle, int* dmabuf_fd, size_t* size) override;
   hsa_status_t Map(core::ShareableHandle handle, void* mem, size_t offset, size_t size,
                    hsa_access_permission_t perms) override;
   hsa_status_t Unmap(core::ShareableHandle handle, void* mem, size_t offset, size_t size) override;
