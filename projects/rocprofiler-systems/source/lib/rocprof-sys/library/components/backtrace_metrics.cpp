@@ -260,9 +260,9 @@ cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
     size_t      stack_id        = 0;
     size_t      parent_stack_id = 0;
     size_t      correlation_id  = 0;
-    const auto* event_metadata  = "";
-    const auto* call_stack      = "";
-    const auto* line_info       = "";
+    const auto* event_metadata  = "{}";
+    const auto* call_stack      = "{}";
+    const auto* line_info       = "{}";
 
     std::optional<int64_t> _system_tid{ std::nullopt };
     const auto&            _thread_info = thread_info::get(_tid, SequentTID);

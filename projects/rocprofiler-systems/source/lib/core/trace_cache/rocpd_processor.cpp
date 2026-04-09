@@ -587,6 +587,54 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
     }
 }
 
+void
+rocpd_processor_t::handle(const kfd_sample& _kfd)
+{
+    auto& n_info  = node_info::get_instance();
+    auto  process = m_metadata->get_process_info();
+    auto  thread_primary_key =
+        m_data_processor->map_thread_id_to_primary_key(_kfd.thread_id);
+
+    auto name_primary_key     = m_data_processor->insert_string(_kfd.name.c_str());
+    auto category_primary_key = m_data_processor->insert_string(_kfd.category.c_str());
+
+    size_t stack_id        = 0;
+    size_t parent_stack_id = 0;
+    size_t correlation_id  = 0;
+
+    auto event_primary_key = m_data_processor->insert_event(
+        category_primary_key, stack_id, parent_stack_id, correlation_id);
+
+    auto args = process_arguments_string(_kfd.args_str);
+    for(const auto& arg : args)
+    {
+        m_data_processor->insert_args(event_primary_key, arg.arg_number,
+                                      arg.arg_type.c_str(), arg.arg_name.c_str(),
+                                      arg.arg_value.c_str());
+    }
+
+    m_data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
+                                    _kfd.start_timestamp, _kfd.end_timestamp,
+                                    name_primary_key, event_primary_key);
+
+    try
+    {
+        auto agent_primary_key =
+            m_agent_manager
+                ->get_agent_by_type_index(_kfd.device_id,
+                                          static_cast<agent_type>(_kfd.device_type))
+                .base_id;
+
+        m_data_processor->insert_pmc_event(event_primary_key, agent_primary_key,
+                                           _kfd.pmc_info_name.c_str(), _kfd.value, "{}");
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
+                    "device_type={}: {}",
+                    _kfd.device_id, _kfd.device_type, e.what());
+    }
+}
+
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
                                      int pid, int ppid,

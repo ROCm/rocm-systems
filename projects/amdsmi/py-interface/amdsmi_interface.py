@@ -1075,7 +1075,7 @@ def amdsmi_get_socket_handles() -> List[c_void_p]:
     return sockets
 
 
-def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
+def amdsmi_get_cpu_handles() -> Dict[str, Any]:
     """
     Function that gets cpu socket handles. Wraps the same named function call.
 
@@ -1083,7 +1083,9 @@ def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
         `None`.
 
     Returns:
-        `List`: List containing all of the found cpu socket handles.
+        `Dict[str, Any]`: Dictionary with keys:
+            - ``cpu_count`` (`int`): Number of CPU socket handles found.
+            - ``processor_handles`` (`List[c_void_p]`): List of CPU socket handles.
     """
     cpu_count = ctypes.c_uint32(0)
     null_ptr = POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
@@ -1094,7 +1096,25 @@ def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
         amdsmi_wrapper.amdsmi_processor_handle(proc_handles[sock_idx])
         for sock_idx in range(cpu_count.value)
     ]
-    return cpu_handles
+    return {"cpu_count": len(cpu_handles), "processor_handles": cpu_handles}
+
+
+def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
+    """Deprecated: Use amdsmi_get_cpu_handles() instead.\
+        Will be deprecated in Rocm 8.0.
+
+    Returns:
+        `List[c_void_p]`: List of CPU socket handles (legacy format).
+    """
+    import warnings
+
+    warnings.warn(
+        "amdsmi_get_cpusocket_handles() is deprecated, use amdsmi_get_cpu_handles() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    result = amdsmi_get_cpu_handles()
+    return result["processor_handles"]
 
 
 def amdsmi_get_socket_info(socket_handle):
@@ -6705,11 +6725,6 @@ def amdsmi_get_rocm_version() -> Tuple[bool, str]:
         return False, "Could not find librocm-core.so"
     except Exception as e:
         return False, f"Unable to detect ROCm installation, Unknown Error: {e}"
-
-
-def amdsmi_get_cpu_handles() -> Dict[str, Any]:
-    cpu_handles = amdsmi_get_cpusocket_handles()
-    return {"cpu_count": len(cpu_handles), "processor_handles": cpu_handles}
 
 
 def amdsmi_get_esmi_err_msg(status: AmdSmiStatus) -> str:

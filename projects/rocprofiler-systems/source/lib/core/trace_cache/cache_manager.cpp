@@ -588,23 +588,26 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry)
         filesystem_utils::get_cache_files(root_pid, temp_directory_content);
     LOG_DEBUG("Found {} cache file pairs to process", cache_files.size());
 
-    const data::enabled_formats_t enabled_formats;
-    enabled_formats.print();
-
-    auto processor_configs =
-        processing_utils::create_processor_configs(cache_files, root_pid);
-
-    processor_configs.push_back(std::make_shared<data::processor_config_t>(
-        getpid(), root_pid, m_metadata,
-        std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
-
-    LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
-    processing_utils::dispatch_processing(processor_configs, enabled_formats,
-                                          _output_registry);
-
-    if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
+    if(config::output_filtering::is_output_enabled_for_current_mpi_rank())
     {
-        filesystem_utils::merge_perfetto_files();
+        const data::enabled_formats_t enabled_formats;
+        enabled_formats.print();
+
+        auto processor_configs =
+            processing_utils::create_processor_configs(cache_files, root_pid);
+
+        processor_configs.push_back(std::make_shared<data::processor_config_t>(
+            getpid(), root_pid, m_metadata,
+            std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
+
+        LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
+        processing_utils::dispatch_processing(processor_configs, enabled_formats,
+                                              _output_registry);
+
+        if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
+        {
+            filesystem_utils::merge_perfetto_files();
+        }
     }
 
     filesystem_utils::clear_cache_files(cache_files);
