@@ -877,7 +877,7 @@ def _ctest_generate_tests(
         "",
         'set(_INSTALL_PATH "${ROCPROFSYS_TEST_DIR}/rocprofsys-tests.pyz")',
         'set(_BUILD_PATH "${ROCPROFSYS_TEST_DIR}/../share/rocprofiler-systems/tests/pytest/")',
-        'set(_TEST_ARGS "--ctest-mode" "run")',
+        'set(_TEST_ARGS "-s" "--ctest-mode" "run")',
         "",
         'if(EXISTS "${_INSTALL_PATH}")',
         "    if(NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
@@ -1272,10 +1272,15 @@ def get_rocprof_config() -> RocprofsysConfig:
         python_versions = None
         python_root_dirs = None
         custom_output_dir = None
+        rocm_optional = False
         if pytest_config:
             custom_output_dir = pytest_config.getoption("--output-dir", default=None)
             ver_str = pytest_config.getoption("--python-versions", default=None)
             dir_str = pytest_config.getoption("--python-root-dirs", default=None)
+            # When generating the CTestTestfile.cmake in TheRock, ROCm is not present
+            rocm_optional = (
+                pytest_config.getoption("--ctest-mode", default="off") == "generate"
+            )
             if ver_str:
                 python_versions = [v.strip() for v in ver_str.split(";") if v.strip()]
             if dir_str:
@@ -1287,6 +1292,7 @@ def get_rocprof_config() -> RocprofsysConfig:
             output_dir=Path(custom_output_dir) if custom_output_dir else None,
             python_versions=python_versions,
             python_root_dirs=python_root_dirs,
+            rocm_optional=rocm_optional,
         )
     except Exception as e:
         raise RuntimeError(f"Failed to get rocprofiler-systems configuration: {e}")
@@ -1706,6 +1712,12 @@ def record_subtest_failure(request):
     return _record
 
 
+def _print_subtest_output(request, subtest_name: str, output: str) -> None:
+    """Print subtest validation output when in CTest run mode."""
+    if request.config.getoption("--ctest-mode", default="off") == "run" and output:
+        print(f"\n--- {subtest_name} ---\n{output}\n", flush=True)
+
+
 # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
 def _is_assert_disabled(request: pytest.FixtureRequest, subtest_name: str) -> bool:
     """Check if a subtest is disabled via ci_disable marker in CI mode."""
@@ -1991,6 +2003,7 @@ def assert_regex(subtests, record_subtest_failure, request):
                 else:
                     record_subtest_failure(subtest_name)
                     pytest.fail(msg)
+            _print_subtest_output(request, subtest_name, validation.message)
 
     return _assert_regex
 
@@ -2027,6 +2040,7 @@ def assert_file_regex(subtests, record_subtest_failure, request):
                 else:
                     record_subtest_failure(subtest_name)
                     pytest.fail(msg)
+            _print_subtest_output(request, subtest_name, validation.message)
 
     return _assert_file_regex
 
@@ -2118,6 +2132,7 @@ def assert_perfetto(
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
+            _print_subtest_output(request, subtest_name, output)
 
     return _assert_perfetto
 
@@ -2191,6 +2206,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
+            _print_subtest_output(request, subtest_name, output)
 
     return _assert_rocpd
 
@@ -2261,6 +2277,7 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
+            _print_subtest_output(request, subtest_name, output)
 
     return _assert_timemory
 
@@ -2298,6 +2315,11 @@ def assert_file_exists(subtests, record_subtest_failure, request):
                     else:
                         record_subtest_failure(subtest_name)
                         pytest.fail(msg)
+            _print_subtest_output(
+                request,
+                subtest_name,
+                "\n".join(f"  {p}: exists" for p in paths),
+            )
 
     return _assert_file_exists
 
@@ -2367,5 +2389,6 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
                         pytest.fail(
                             f"Fail regex found: {pattern}\n{output}", pytrace=False
                         )
+            _print_subtest_output(request, subtest_name, output)
 
     return _assert_causal_json

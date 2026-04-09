@@ -191,29 +191,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-s
 # own python discovery, even when versions differ. Unset them to prevent this.
 unset(Python3_EXECUTABLE CACHE)
 
-# TODO: This var will be deprecated once TheRock builds examples independently
-if(ROCPROFSYS_BUILD_FOR_THEROCK)
-    set(ROCPROFSYS_INSTALL_TESTING
-        ON
-        CACHE BOOL
-        "Install testing scripts and pytest package"
-        FORCE
-    )
-    # Lulesh does not build with TheRock
-    if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
-        set(ROCPROFSYS_DISABLE_EXAMPLES
-            "lulesh"
-            CACHE STRING
-            "Disable building examples"
-            FORCE
-        )
-    else()
-        if(NOT "lulesh" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-            list(APPEND ROCPROFSYS_DISABLE_EXAMPLES "lulesh")
-        endif()
-    endif()
-endif()
-
 include(Compilers) # compiler identification
 include(BuildSettings) # compiler flags
 
@@ -320,6 +297,28 @@ endif()
 
 if(ROCPROFSYS_BUILD_TESTING)
     set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+endif()
+
+if(ROCPROFSYS_BUILD_FOR_THEROCK)
+    set(ROCPROFSYS_BUILD_EXAMPLES OFF CACHE BOOL "Enable building the examples" FORCE)
+    set(ROCPROFSYS_INSTALL_EXAMPLES OFF CACHE BOOL "Install the examples" FORCE)
+
+    # TODO: Code below this point will be deprecated
+    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
+    # Lulesh does not build with TheRock
+    if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
+        set(ROCPROFSYS_DISABLE_EXAMPLES
+            "lulesh"
+            CACHE STRING
+            "Disable building examples"
+            FORCE
+        )
+    else()
+        if(NOT "lulesh" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
+            list(APPEND ROCPROFSYS_DISABLE_EXAMPLES "lulesh")
+        endif()
+    endif()
 endif()
 
 include(ProcessorCount)

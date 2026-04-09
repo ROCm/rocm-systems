@@ -52,7 +52,7 @@ class RocprofsysConfig:
     rocprofsys_sample: Path
     rocprofsys_causal: Path
     rocprofsys_avail: Path
-    rocm_path: Path
+    rocm_path: Optional[Path]
     rocprofsys_lib_dir: Path
     rocprofsys_bin_dir: Path
     rocprofsys_examples_dir: Path
@@ -302,8 +302,12 @@ class RocprofsysConfig:
         }
 
 
-def _find_rocm_path() -> Path:
-    """Find ROCm installation path."""
+def _find_rocm_path(optional: bool = False) -> Optional[Path]:
+    """Find ROCm installation path.
+
+    Args:
+        optional: If True, return None instead of raising when ROCm is not found.
+    """
     for candidate in [
         os.environ.get("ROCM_PATH"),
         "/opt/rocm",
@@ -311,19 +315,22 @@ def _find_rocm_path() -> Path:
     ]:
         if candidate and Path(candidate).exists():
             return Path(candidate).resolve()
-    # We require ROCm
+    if optional:
+        return None
     raise FileNotFoundError(
-        "Could not find ROCm installation. Set ROCM_PATH " "environment variable."
+        "Could not find ROCm installation. Set ROCM_PATH environment variable."
     )
 
 
-def _get_rocm_version() -> Optional[tuple[int, int, int]]:
+def _get_rocm_version(rocm_optional: bool = False) -> Optional[tuple[int, int, int]]:
     """Get the installed ROCm version as a tuple (major, minor, patch).
 
     Returns:
         Tuple of (major, minor, patch) or None if ROCm not found or version undetectable.
     """
-    rocm_path = _find_rocm_path()
+    rocm_path = _find_rocm_path(optional=rocm_optional)
+    if rocm_path is None:
+        return None
 
     # Check .info/version file
     version_file = rocm_path / ".info" / "version"
@@ -442,6 +449,7 @@ def discover_install_config(
     output_dir: Optional[Path] = None,
     python_versions: Optional[list[str]] = None,
     python_root_dirs: Optional[list[Path]] = None,
+    rocm_optional: bool = False,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems installation configuration.
 
@@ -462,14 +470,17 @@ def discover_install_config(
         if env_install:
             install_dir = Path(env_install).resolve()
         else:
-            for candidate in [
-                _find_rocm_path(),
+            _rocm_candidate = _find_rocm_path(optional=True)
+            _install_candidates = [
                 Path("/usr/local"),
                 Path("/usr"),
                 Path(
                     "/opt/rocprofiler-systems"
                 ),  # Standard install location from README.md
-            ]:
+            ]
+            if _rocm_candidate is not None:
+                _install_candidates.insert(0, _rocm_candidate)
+            for candidate in _install_candidates:
                 if (
                     candidate
                     and (candidate / "share" / "rocprofiler-systems" / "tests").is_dir()
@@ -515,7 +526,7 @@ def discover_install_config(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rocm_path = _find_rocm_path()
+    rocm_path = _find_rocm_path(optional=rocm_optional)
 
     search_paths = [bin_dir]
     sys_execs = _find_rocprofsys_core_executables(search_paths)
@@ -537,7 +548,7 @@ def discover_install_config(
         rocprofsys_tests_dir=tests_dir,
         rocpd_validation_rules=rocpd_validation_rules,
         test_output_dir=output_dir,
-        rocm_version=_get_rocm_version(),
+        rocm_version=_get_rocm_version(rocm_optional=rocm_optional),
         is_installed=True,
         rocprofsys_python=rocprofsys_python,
         rocprofsys_site_packages=rocprofsys_site_packages,
@@ -551,6 +562,7 @@ def discover_build_config(
     output_dir: Optional[Path] = None,
     python_versions: Optional[list[str]] = None,
     python_root_dirs: Optional[list[Path]] = None,
+    rocm_optional: bool = False,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems build configuration.
 
@@ -576,6 +588,7 @@ def discover_build_config(
             output_dir=output_dir,
             python_versions=python_versions,
             python_root_dirs=python_root_dirs,
+            rocm_optional=rocm_optional,
         )
 
     # When running from pyz package (extracted to /tmp), fall back to install config
@@ -585,6 +598,7 @@ def discover_build_config(
         return discover_install_config(
             python_versions=python_versions,
             python_root_dirs=python_root_dirs,
+            rocm_optional=rocm_optional,
         )
 
     # All files should be in the build directory
@@ -602,7 +616,7 @@ def discover_build_config(
             "  - ROCPROFSYS_INSTALL_DIR: Path to installation prefix"
         )
 
-    rocm_path = _find_rocm_path()
+    rocm_path = _find_rocm_path(optional=rocm_optional)
 
     bin_dir = build_dir / "bin"
     lib_dir = build_dir / "lib"
@@ -636,7 +650,7 @@ def discover_build_config(
         rocprofsys_tests_dir=tests_dir,
         rocpd_validation_rules=tests_dir / "rocpd-validation-rules",
         test_output_dir=output_dir,
-        rocm_version=_get_rocm_version(),
+        rocm_version=_get_rocm_version(rocm_optional=rocm_optional),
         is_installed=False,
         rocprofsys_python=rocprofsys_python,
         rocprofsys_site_packages=rocprofsys_site_packages,

@@ -25,7 +25,7 @@ class SystemCapabilities:
     rocprofsys_tests_dir: Path
     rocprofsys_examples_dir: Path
     rocprofsys_avail: Path
-    rocm_path: Path
+    rocm_path: Optional[Path]
     rocprofsys_site_packages: Optional[Path]
     _python_versions_hint: Optional[list[str]] = field(default=None, repr=False)
     _python_root_dirs_hint: Optional[list[Path]] = field(default=None, repr=False)
