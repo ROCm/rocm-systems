@@ -22,6 +22,7 @@
 import argparse
 import datetime
 import locale
+import os
 import subprocess
 import sys
 
@@ -107,6 +108,14 @@ class Util:
             if msg_in:
                 std_in = subprocess.PIPE
 
+            # Ensure the ROCm bin directory is in PATH so amd-smi is found
+            # even when invoked via sudo, which strips non-standard PATH entries.
+            # Respects ROCM_HOME/ROCM_PATH env vars, falling back to /opt/rocm.
+            rocm_root = os.getenv('ROCM_HOME', os.getenv('ROCM_PATH', '/opt/rocm'))
+            rocm_bin = os.path.join(rocm_root, 'bin')
+            env = os.environ.copy()
+            env['PATH'] = rocm_bin + ':' + env.get('PATH', '')
+
             proc = subprocess.Popen(
                 cmd,
                 encoding=self.use_encoding,
@@ -114,6 +123,7 @@ class Util:
                 stdin=std_in,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
+                env=env,
             )
 
             if msg_in:
