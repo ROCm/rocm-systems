@@ -24,9 +24,20 @@ enum OpId { OP_ID_DISPATCH = 0, OP_ID_COPY = 1, OP_ID_BARRIER = 2, OP_ID_NUMBER 
 
 namespace amd::activity_prof {
 
+// ---------------------------------------------------------------------------
+// Legacy single-callback pointer — kept for backward compatibility with
+// roctracer's hipRegisterTracerCallback() path.  New code should use the
+// clr_prof EventBus (clr_prof_event_bus.hpp) and the public C API
+// (clr_prof_interface.h) instead.
+// ---------------------------------------------------------------------------
 extern std::atomic<int (*)(activity_domain_t domain, uint32_t operation_id, void* data)>
     report_activity;
 
+// Thread-local correlation ID.
+// * Legacy path: written by api_callbacks_spawner_t from the value roctracer
+//   injects via hip_api_trace_data_t::api_data.correlation_id.
+// * New path: written by api_callbacks_spawner_t from the CLR-owned counter
+//   (EventBus::next_correlation_id()), making roctracer unnecessary.
 #if defined(__linux__)
 extern __thread activity_correlation_id_t correlation_id __attribute__((tls_model("initial-exec")));
 #elif defined(_WIN32)

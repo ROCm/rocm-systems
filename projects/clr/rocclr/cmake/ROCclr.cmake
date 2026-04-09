@@ -57,6 +57,8 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/os/os_win32.cpp
   ${ROCCLR_SRC_DIR}/os/os.cpp
   ${ROCCLR_SRC_DIR}/platform/activity.cpp
+  ${ROCCLR_SRC_DIR}/platform/clr_prof_event_bus.cpp
+  ${ROCCLR_SRC_DIR}/platform/clr_prof_writer.cpp
   ${ROCCLR_SRC_DIR}/platform/agent.cpp
   ${ROCCLR_SRC_DIR}/platform/command.cpp
   ${ROCCLR_SRC_DIR}/platform/commandqueue.cpp

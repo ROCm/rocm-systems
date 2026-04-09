@@ -499,6 +499,12 @@ global:
     hipLaunchHostFunc;
     hipLaunchHostFunc_spt;
     hipRegisterTracerCallback;
+    clr_prof_subscribe;
+    clr_prof_unsubscribe;
+    clr_prof_get_correlation_id;
+    clr_prof_api_name;
+    clr_prof_gpu_op_name;
+    clr_prof_version;
     hipGraphDebugDotPrint;
     hipGraphKernelNodeCopyAttributes;
     hipGraphNodeGetEnabled;

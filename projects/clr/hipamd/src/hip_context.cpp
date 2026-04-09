@@ -7,6 +7,7 @@
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
+#include "platform/clr_prof_writer.hpp"
 #include "platform/runtime.hpp"
 #include "rocclr/utils/flags.hpp"
 #include "rocclr/utils/versions.hpp"
@@ -91,6 +92,12 @@ void init(bool* status) {
 
   // Complete platform initialization
   PlatformState::Instance().Init();
+
+  // Initialize built-in trace writer (no-op if CLR_TRACE_OUTPUT is not set).
+  amd::clr_prof::WriterInit();
+  amd::RuntimeTearDown::RegisterTearDownCallback("clr_prof_writer",
+                                                  []() { amd::clr_prof::WriterFini(); });
+
   *status = true;
 }
 

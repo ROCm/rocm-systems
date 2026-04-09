@@ -5,6 +5,7 @@
  */
 
 #include "platform/activity.hpp"
+#include "platform/clr_prof_event_bus.hpp"
 #include "platform/command.hpp"
 #include "platform/commandqueue.hpp"
 #include "platform/command_utils.hpp"
@@ -22,8 +23,11 @@ decltype(report_activity) report_activity{nullptr};
 static void* const kCommitRecordSentinel = reinterpret_cast<void*>(uintptr_t{1});
 
 void CommitRecord(OpId operation_id) {
+  // Legacy path: signal roctracer via the old sentinel protocol.
   auto function = report_activity.load(std::memory_order_acquire);
   if (function) function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, kCommitRecordSentinel);
+  // New path: no commit-record concept; the EventBus delivers records directly
+  // on GPU completion without a pre-commitment step.
 }
 
 #if defined(__linux__)
@@ -40,79 +44,121 @@ static inline size_t linearSize(const amd::Coord3D& size3d) {
 }
 
 bool IsEnabled(OpId operation_id) {
-  if (operation_id < OP_ID_NUMBER)
-    if (auto report = report_activity.load(std::memory_order_acquire))
-      return report(ACTIVITY_DOMAIN_HIP_OPS, operation_id, nullptr) == 0;
+  if (operation_id >= OP_ID_NUMBER) return false;
+  // New path: check the EventBus subscriber count (O(1), no callback).
+  if (amd::clr_prof::EventBus::instance().gpu_activity_enabled()) return true;
+  // Legacy path: probe the roctracer callback with data=nullptr.
+  if (auto report = report_activity.load(std::memory_order_acquire))
+    return report(ACTIVITY_DOMAIN_HIP_OPS, operation_id, nullptr) == 0;
   return false;
+}
+
+// Build a clr_prof_gpu_record_t from a completed command and emit it to the
+// EventBus.  Also forward to the legacy roctracer callback when registered.
+static void EmitGpuRecord(const amd::Command& command, activity_op_t operation_id,
+                           uint64_t begin_ns, uint64_t end_ns,
+                           const char* kernel_name, size_t bytes,
+                           int device_id, uint64_t queue_id) {
+  auto& bus = amd::clr_prof::EventBus::instance();
+
+  // ── New path: EventBus ───────────────────────────────────────────────────
+  if (bus.gpu_activity_enabled()) {
+    clr_prof_gpu_record_t rec{};
+    rec.struct_size    = sizeof(clr_prof_gpu_record_t);
+    rec.op             = static_cast<clr_prof_gpu_op_t>(operation_id);
+    rec.correlation_id = command.profilingInfo().correlation_id_;
+    rec.begin_ns       = begin_ns;
+    rec.end_ns         = end_ns;
+    rec.device_id      = device_id;
+    rec.queue_id       = queue_id;
+    if (operation_id == OP_ID_DISPATCH)
+      rec.kernel_name = kernel_name;
+    else
+      rec.bytes = bytes;
+    bus.emit_gpu(rec);
+  }
+
+  // ── Legacy path: roctracer callback ─────────────────────────────────────
+  auto function = report_activity.load(std::memory_order_acquire);
+  if (function) {
+    activity_record_t legacy{};
+    legacy.domain         = ACTIVITY_DOMAIN_HIP_OPS;
+    legacy.kind           = command.type();
+    legacy.op             = operation_id;
+    legacy.correlation_id = command.profilingInfo().correlation_id_;
+    legacy.begin_ns       = begin_ns;
+    legacy.end_ns         = end_ns;
+    legacy.device_id      = device_id;
+    legacy.queue_id       = queue_id;
+    if (operation_id == OP_ID_DISPATCH)
+      legacy.kernel_name = kernel_name;
+    else
+      legacy.bytes = bytes;
+    function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &legacy);
+  }
 }
 
 void ReportActivity(const amd::Command& command) {
   assert(command.profilingInfo().enabled_ && "Profiling must be enabled for this command");
   activity_op_t operation_id = OperationId(command.type());
   if (operation_id >= OP_ID_NUMBER) {
-    // This command does not translate into a profiler activity (dispatch, memcopy, etc...), there
-    // is nothing to report to the profiler.
+    // This command does not translate into a profiler activity; nothing to report.
     return;
   }
 
-  auto function = report_activity.load(std::memory_order_acquire);
-  if (!function) return;
+  // Early-out when nothing is listening (fast path).
+  bool has_new = amd::clr_prof::EventBus::instance().gpu_activity_enabled();
+  bool has_legacy = report_activity.load(std::memory_order_acquire) != nullptr;
+  if (!has_new && !has_legacy) return;
 
   const auto* queue = command.queue();
   assert(queue != nullptr);
-  activity_record_t record{
-      ACTIVITY_DOMAIN_HIP_OPS,                  // activity domain
-      command.type(),                           // activity kind
-      operation_id,                             // operation id
-      command.profilingInfo().correlation_id_,  // activity correlation id
-      command.profilingInfo().start_,           // begin timestamp, ns
-      command.profilingInfo().end_,             // end timestamp, ns
-      {{
-          static_cast<int>(queue->device().info().driverNodeId_),  // device id
-          queue->vdev()->index()                                   // queue id
-      }},
-      {}  // copied data size for memcpy, or kernel name for dispatch
-  };
+
+  const int      device_id = static_cast<int>(queue->device().info().driverNodeId_);
+  const uint64_t queue_id  = queue->vdev()->index();
+
+  const char* kernel_name = nullptr;
+  size_t      bytes       = 0;
 
   switch (command.type()) {
     case CL_COMMAND_NDRANGE_KERNEL:
-      record.kernel_name =
+      kernel_name =
           static_cast<const amd::NDRangeKernelCommand&>(command).kernel().name().c_str();
       break;
     case CL_COMMAND_READ_BUFFER:
     case CL_COMMAND_READ_BUFFER_RECT:
-      record.bytes = linearSize(static_cast<const amd::ReadMemoryCommand&>(command).size());
+      bytes = linearSize(static_cast<const amd::ReadMemoryCommand&>(command).size());
       break;
     case CL_COMMAND_WRITE_BUFFER:
     case CL_COMMAND_WRITE_BUFFER_RECT:
-      record.bytes = linearSize(static_cast<const amd::WriteMemoryCommand&>(command).size());
+      bytes = linearSize(static_cast<const amd::WriteMemoryCommand&>(command).size());
       break;
     case CL_COMMAND_COPY_BUFFER:
     case CL_COMMAND_COPY_BUFFER_RECT:
-      record.bytes = linearSize(static_cast<const amd::CopyMemoryCommand&>(command).size());
+      bytes = linearSize(static_cast<const amd::CopyMemoryCommand&>(command).size());
       break;
     case CL_COMMAND_FILL_BUFFER:
-      record.bytes = linearSize(static_cast<const amd::FillMemoryCommand&>(command).size());
+      bytes = linearSize(static_cast<const amd::FillMemoryCommand&>(command).size());
       break;
     default:
       break;
   }
 
   if (command.type() == CL_COMMAND_TASK) {
+    // Batched graph commands: each sub-kernel has its own timestamp pair.
     auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
     const auto& kernel_names =
         static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
-    for (uint32_t i = 0; i < timestamps.size() && i < kernel_names.size(); i++) {
-      auto it = timestamps[i];
-      record.begin_ns = it.first;
-      record.end_ns = it.second;
-      record.kernel_name = kernel_names[i] != nullptr ? kernel_names[i]->c_str() : "";
-      function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
+    for (uint32_t i = 0; i < timestamps.size() && i < kernel_names.size(); ++i) {
+      const char* kn = kernel_names[i] != nullptr ? kernel_names[i]->c_str() : "";
+      EmitGpuRecord(command, operation_id,
+                    timestamps[i].first, timestamps[i].second,
+                    kn, 0, device_id, queue_id);
     }
   } else {
-    record.begin_ns = command.profilingInfo().start_;
-    record.end_ns = command.profilingInfo().end_;
-    function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
+    EmitGpuRecord(command, operation_id,
+                  command.profilingInfo().start_, command.profilingInfo().end_,
+                  kernel_name, bytes, device_id, queue_id);
   }
 }
 
