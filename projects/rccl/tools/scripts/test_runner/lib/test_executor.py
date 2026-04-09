@@ -8,9 +8,11 @@ Handles test execution, build processes, and result tracking
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import datetime
 import copy
@@ -34,6 +36,106 @@ class TestResult(str, Enum):
     RESULT_FAILED = "FAILED"
     RESULT_TIMEOUT = "TIMEOUT"
     RESULT_SKIPPED = "SKIPPED"
+
+
+def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str:
+    """
+    Map gtest process exit + stdout/stderr to a TestResult string.
+
+    Google Test returns exit 0 when failures are absent, including when all
+    selected tests are SKIPPED — the runner must inspect output for [  SKIPPED ].
+    """
+    if returncode == ExitCode.EXIT_TIMEOUT:
+        return TestResult.RESULT_TIMEOUT.value
+    if returncode != ExitCode.EXIT_SUCCESS:
+        return TestResult.RESULT_FAILED.value
+
+    out = captured_output or ""
+    if re.search(r"\[\s+FAILED\s+\]", out):
+        return TestResult.RESULT_FAILED.value
+    has_ok = re.search(r"\[\s+OK\s+\]", out) is not None
+    has_skipped = re.search(r"\[\s+SKIPPED\s+\]", out) is not None
+    if has_ok:
+        return TestResult.RESULT_PASSED.value
+    if has_skipped:
+        return TestResult.RESULT_SKIPPED.value
+    return TestResult.RESULT_PASSED.value
+
+
+def run_gtest_with_live_output(cmd, cwd, env, timeout_sec):
+    """
+    Run a gtest command with merged stdout/stderr streamed to sys.stdout as it arrives,
+    while buffering a full copy for SKIPPED/PASSED inference.
+
+    subprocess.run(capture_output=True) only prints after the process exits, so long
+    tests that TIMEOUT appear to produce no logs; streaming fixes that.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        shell=True,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    chunks = []
+    timed_out = False
+
+    def reader():
+        try:
+            assert proc.stdout is not None
+            while True:
+                block = proc.stdout.read(4096)
+                if not block:
+                    break
+                chunks.append(block)
+                sys.stdout.write(block)
+                try:
+                    sys.stdout.flush()
+                except BrokenPipeError:
+                    break
+        except Exception:
+            pass
+
+    th = threading.Thread(target=reader, name="gtest-live-output", daemon=True)
+    th.start()
+
+    try:
+        if timeout_sec is not None and timeout_sec > 0:
+            proc.wait(timeout=timeout_sec)
+        else:
+            proc.wait()
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            pass
+
+    th.join(timeout=60)
+
+    combined = "".join(chunks)
+    if proc.stdout and not getattr(proc.stdout, "closed", True):
+        try:
+            rest = proc.stdout.read()
+            if rest:
+                combined += rest
+                sys.stdout.write(rest)
+                sys.stdout.flush()
+        except (ValueError, OSError, TypeError):
+            pass
+
+    rc = proc.returncode
+    if rc is None:
+        rc = -1
+    if timed_out:
+        return ExitCode.EXIT_TIMEOUT, combined, True
+    return rc, combined, False
 
 
 class TestExecutor:
@@ -655,30 +757,48 @@ class TestExecutor:
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}")
             print(f"  LLVM_PROFILE_FILE: {env.get('LLVM_PROFILE_FILE', 'Not set')}\n")
 
-        # Execute test
+        # GTest: stream stdout/stderr live (see run_gtest_with_live_output). Non-gtest: subprocess.run.
         start_time = time.time()
+        capture_gtest = bool(is_gtest)
         try:
+            if capture_gtest:
+                to = timeout if timeout > 0 else None
+                ret, combined, gtest_timed_out = run_gtest_with_live_output(
+                    cmd, os.path.join(self.build_dir, "test"), env, to
+                )
+                duration = time.time() - start_time
+                if gtest_timed_out:
+                    test_result = TestResult.RESULT_TIMEOUT.value
+                    print(
+                        f"\n  Result: {test_result} after {timeout} seconds"
+                        if timeout > 0
+                        else f"\n  Result: {test_result}"
+                    )
+                else:
+                    test_result = infer_gtest_result_from_output(combined, ret)
+                    print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+
+                return {
+                    "name": test_name,
+                    "result": test_result,
+                    "duration": duration,
+                    "exit_code": int(ret),
+                }
+
+            run_kwargs = {
+                "shell": True,
+                "cwd": os.path.join(self.build_dir, "test"),
+                "env": env,
+                "capture_output": False,
+            }
             if timeout > 0:
-                result = subprocess.run(
-                    cmd,
-                    shell=True,
-                    cwd=os.path.join(self.build_dir, "test"),
-                    env=env,
-                    capture_output=False,
-                    timeout=timeout
-                )
+                run_kwargs["timeout"] = timeout
+                result = subprocess.run(cmd, **run_kwargs)
             else:
-                result = subprocess.run(
-                    cmd,
-                    shell=True,
-                    cwd=os.path.join(self.build_dir, "test"),
-                    env=env,
-                    capture_output=False
-                )
+                result = subprocess.run(cmd, **run_kwargs)
 
             duration = time.time() - start_time
 
-            # Determine result
             if result.returncode == ExitCode.EXIT_SUCCESS:
                 test_result = TestResult.RESULT_PASSED.value
             elif result.returncode == ExitCode.EXIT_TIMEOUT:
@@ -692,17 +812,25 @@ class TestExecutor:
                 "name": test_name,
                 "result": test_result,
                 "duration": duration,
-                "exit_code": result.returncode
+                "exit_code": result.returncode,
             }
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
             duration = time.time() - start_time
+            parts = []
+            if getattr(e, "stdout", None):
+                parts.append(e.stdout)
+            if getattr(e, "stderr", None):
+                parts.append(e.stderr)
+            combined = "".join(parts)
+            if combined:
+                print(combined, end="" if combined.endswith("\n") else "\n")
             print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
             return {
                 "name": test_name,
                 "result": TestResult.RESULT_TIMEOUT.value,
                 "duration": duration,
-                "error": f"Test timed out after {timeout} seconds"
+                "error": f"Test timed out after {timeout} seconds",
             }
         except Exception as e:
             duration = time.time() - start_time
@@ -880,6 +1008,7 @@ class TestExecutor:
             print(f"Total Tests:   {total_tests}")
             print(f"Passed:        {passed}")
             print(f"Failed:        {failed}")
+            print(f"Skipped:       {skipped}")
             print(f"Timeout:       {timeout}")
             if skipped > 0:
                 print(f"Skipped:       {skipped}")
@@ -979,7 +1108,7 @@ class TestExecutor:
         try:
             result = subprocess.run(
                 merge_cmd,
-                capture_output=True,
+                capture_output=False,
                 text=True,
                 check=True
             )
@@ -1046,7 +1175,7 @@ class TestExecutor:
         try:
             result = subprocess.run(
                 html_cmd,
-                capture_output=True,
+                capture_output=False,
                 text=True,
                 check=True
             )
