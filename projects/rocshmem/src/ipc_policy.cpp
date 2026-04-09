@@ -31,15 +31,44 @@
 #include "envvar.hpp"
 #include "util.hpp"
 #include "log.hpp"
+#include "fabric/pod_detection.hpp"
 
 namespace rocshmem {
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                      MPI_Comm thread_comm) {
-  /*
-   * Create an MPI communicator that deals only with local processes.
-   */
   MPI_Comm shmcomm;
+  std::vector<int> ipc_ranks;
+
+#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
+  // Use pod-based detection
+  PodIds localPodIds = detectLocalPodIds();
+
+  // Get communicator info
+  int all_ranks;
+  mpilib_ftable_.Comm_size(thread_comm, &all_ranks);
+  int my_rank;
+  mpilib_ftable_.Comm_rank(thread_comm, &my_rank);
+
+  // AllGather pod IDs across all ranks
+  std::vector<PodIds> allPodIds(all_ranks);
+  mpilib_ftable_.Allgather(&localPodIds, sizeof(PodIds), MPI_CHAR,
+                          allPodIds.data(), sizeof(PodIds), MPI_CHAR, thread_comm);
+
+  // Match IPC-capable ranks
+  ipc_ranks = matchIpcCapableRanks(my_rank, allPodIds);
+  shm_size = ipc_ranks.size();
+  shm_rank = std::find(ipc_ranks.begin(), ipc_ranks.end(), my_rank) - ipc_ranks.begin();
+
+  // Create a group and communicator from IPC-capable ranks
+  MPI_Group thread_grp, ipc_grp;
+  mpilib_ftable_.Comm_group(thread_comm, &thread_grp);
+  mpilib_ftable_.Group_incl(thread_grp, ipc_ranks.size(), ipc_ranks.data(), &ipc_grp);
+  mpilib_ftable_.Comm_create_group(thread_comm, ipc_grp, 0, &shmcomm);
+  mpilib_ftable_.Group_free(&ipc_grp);
+  mpilib_ftable_.Group_free(&thread_grp);
+#else
+  // Fallback to MPI_COMM_TYPE_SHARED (original implementation)
   mpilib_ftable_.Comm_split_type(thread_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
                                  &shmcomm);
 
@@ -54,6 +83,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    * Figure out how this process' rank among local processes.
    */
   mpilib_ftable_.Comm_rank(shmcomm, &shm_rank);
+#endif
 
   /*
    * Allocate a host-side c-array to hold the IPC handles.
@@ -120,6 +150,11 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   if (!disable_ipc) {
     CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&pes_with_ipc_avail), shm_size * sizeof(int)));
 
+#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
+    // In pod detection path, ipc_ranks already contains global ranks
+    std::copy(ipc_ranks.begin(), ipc_ranks.end(), pes_with_ipc_avail);
+#else
+    // In fallback path, need to translate from shmcomm ranks to thread_comm ranks
     MPI_Group thread_grp;
     MPI_Group shm_grp;
     mpilib_ftable_.Comm_group(thread_comm, &thread_grp);
@@ -131,6 +166,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     delete [] seqranks;
     mpilib_ftable_.Group_free(&shm_grp);
     mpilib_ftable_.Group_free(&thread_grp);
+#endif
   }
 }
 

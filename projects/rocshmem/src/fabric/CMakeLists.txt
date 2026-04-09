@@ -28,7 +28,6 @@
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    socket.cpp
-    bootstrap.cpp
-    utils.cpp
+    amdsmi_loader.cpp
+    pod_detection.cpp
 )
