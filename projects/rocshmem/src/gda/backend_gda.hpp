@@ -339,6 +339,15 @@ class GDABackend : public Backend {
   void setup_team_world();
 
   /**
+   * @brief Allocate and initialize team shared.
+   *
+   * TEAM_SHARED contains the PEs that share a common memory domain
+   * (same node).  The pe_start and stride are computed from the
+   * shared-memory communicator or bootstrap local-rank info.
+   */
+  void setup_team_shared();
+
+  /**
    * @brief Initialize the resources required to support teams
    */
   void setup_teams();
