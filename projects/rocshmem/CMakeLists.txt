@@ -64,8 +64,9 @@ option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (gcc only)" OFF)
-option(BUILD_DEBUG_LEVEL_TRACE "Compile in trace-level logging (host and device)" OFF)
-option(BUILD_DEBUG_LEVEL_DEVICE "Compile in device-side logging (also disable trace-level when OFF)" OFF)
+option(BUILD_DEBUG_LEVEL_TRACE_HOST "Compile in host-side trace logging (LOG_TRACE)" OFF)
+option(BUILD_DEBUG_LEVEL_TRACE_DEVICE "Compile in device-side trace logging (LOGD_TRACE)" OFF)
+option(BUILD_DEBUG_LEVEL_DEVICE "Compile in device-side logging (LOGD_ERROR/WARN/INFO)" OFF)
 
 option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)

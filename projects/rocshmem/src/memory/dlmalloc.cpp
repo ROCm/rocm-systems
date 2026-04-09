@@ -969,7 +969,7 @@ DLMALLOC_EXPORT int mspace_mallopt(int, int);
 #ifndef LACKS_ERRNO_H
 #include <errno.h>       /* for MALLOC_FAILURE_ACTION */
 #endif /* LACKS_ERRNO_H */
-#ifdef BUILD_DEBUG_LEVEL_TRACE
+#ifdef BUILD_DEBUG_LEVEL_TRACE_HOST
 #if ABORT_ON_ASSERT_FAILURE
 #undef assert
 #define assert(x) if(!(x)) ABORT

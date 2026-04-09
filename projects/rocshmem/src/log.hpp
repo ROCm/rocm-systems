@@ -55,14 +55,14 @@
  *   LOG_ERROR_ABORT — prints error, calls abort()
  *   LOG_WARN        — prints if debug_level >= WARN
  *   LOG_INFO        — prints if debug_level >= INFO
- *   LOG_TRACE       — compiled with BUILD_DEBUG_LEVEL_TRACE, prints if >= TRACE
+ *   LOG_TRACE       — compiled with BUILD_DEBUG_LEVEL_TRACE_HOST
  *
  * Device macros:
  *   LOGD_ERROR       — prints error (gated by BUILD_DEBUG_LEVEL_DEVICE)
  *   LOGD_ERROR_ABORT — prints + abort() (abort unconditional)
  *   LOGD_WARN        — gated by BUILD_DEBUG_LEVEL_DEVICE
  *   LOGD_INFO        — gated by BUILD_DEBUG_LEVEL_DEVICE
- *   LOGD_TRACE       — gated by BUILD_DEBUG_LEVEL_DEVICE + BUILD_DEBUG_LEVEL_TRACE
+ *   LOGD_TRACE       — gated by BUILD_DEBUG_LEVEL_DEVICE + BUILD_DEBUG_LEVEL_TRACE_DEVICE
  */
 
 namespace rocshmem {
@@ -143,7 +143,7 @@ namespace rocshmem {
         __func__, __FILE__, __LINE__);                                        \
 } while (0)
 
-#ifdef BUILD_DEBUG_LEVEL_TRACE
+#ifdef BUILD_DEBUG_LEVEL_TRACE_HOST
 #define LOG_TRACE(fmt, ...) do {                                              \
   rocshmem::static_assert_host_only();                                        \
   if (rocshmem::envvar::log_flags.show_trace)                                 \
@@ -201,8 +201,8 @@ void dprintf(const char* fmt, const Args&... args) {
  *
  * Callers should NOT include a trailing newline — the macros append one.
  *
- * LOGD_TRACE additionally requires BUILD_DEBUG_LEVEL_TRACE;
- * when BUILD_DEBUG_LEVEL_DEVICE is ON but BUILD_DEBUG_LEVEL_TRACE is OFF,
+ * LOGD_TRACE additionally requires BUILD_DEBUG_LEVEL_TRACE_DEVICE;
+ * when BUILD_DEBUG_LEVEL_DEVICE is ON but BUILD_DEBUG_LEVEL_TRACE_DEVICE is OFF,
  * device trace is compiled away.
  *****************************************************************************/
 
@@ -253,7 +253,7 @@ void dprintf(const char* fmt, const Args&... args) {
         __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
 } while (0)
 
-#if defined(BUILD_DEBUG_LEVEL_TRACE)
+#if defined(BUILD_DEBUG_LEVEL_TRACE_DEVICE)
 #define LOGD_TRACE(fmt, ...) do {                                             \
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_trace)                                        \

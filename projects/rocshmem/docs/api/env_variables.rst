@@ -30,7 +30,7 @@ control the behavior of rocSHMEM.
         | ``ENV:ALL``: Print all environment variables.
         | ``ENV:FULL``: Print full environment variable documentation.
         | ``INFO``: Print informational messages and above.
-        | ``TRACE``: Print all messages (requires ``BUILD_DEBUG_LEVEL_TRACE`` at build time).
+        | ``TRACE``: Print all messages (requires ``BUILD_DEBUG_LEVEL_TRACE_HOST`` and/or ``BUILD_DEBUG_LEVEL_TRACE_DEVICE`` at build time).
 
     * - | ``ROCSHMEM_HEAP_SIZE``
         | Defines the size of the rocSHMEM symmetric heap in bytes (per PE).

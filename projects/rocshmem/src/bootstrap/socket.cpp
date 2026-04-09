@@ -93,7 +93,7 @@ static int envSocketFamily(void) {
 
 static int findInterfaces(const char* prefixList, char* names, union SocketAddress* addrs,
 			  int sock_family, int maxIfNameSize, int maxIfs) {
-#ifdef BUILD_DEBUG_LEVEL_TRACE
+#ifdef BUILD_DEBUG_LEVEL_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   struct netIf userIfs[MAX_IFS];
@@ -199,7 +199,7 @@ static bool matchSubnet(struct ifaddrs local_if, union SocketAddress* remote) {
 
 int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, union SocketAddress* remoteAddr,
                              int ifNameMaxSize, int maxIfs) {
-#ifdef BUILD_DEBUG_LEVEL_TRACE
+#ifdef BUILD_DEBUG_LEVEL_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   char line_a[SOCKET_NAME_MAXLEN + 1];
@@ -456,7 +456,7 @@ void Socket::bind() {
 }
 
 void Socket::bindAndListen() {
-#ifdef BUILD_DEBUG_LEVEL_TRACE
+#ifdef BUILD_DEBUG_LEVEL_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   bind();
@@ -473,7 +473,7 @@ void Socket::bindAndListen() {
 }
 
 void Socket::connect(int64_t timeout) {
-#ifdef BUILD_DEBUG_LEVEL_TRACE
+#ifdef BUILD_DEBUG_LEVEL_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   Timer timer;
