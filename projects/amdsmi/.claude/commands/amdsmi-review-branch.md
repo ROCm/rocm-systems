@@ -1,7 +1,7 @@
 ---
 description: Review the current local branch using the AMD-SMI Review Agent
 allowed-tools: Bash(git:*), Read, Write, Glob, Grep, Task
-argument-hint: "[review-type ...] — style, tests, docs, architecture, security, performance, build (or blank for comprehensive)"
+argument-hint: "[review-type ...] — style, tests, docs, architecture, security, performance, build, skeptic (or blank for comprehensive). Add 'thorough' for two-round review with rebuttal."
 ---
 
 Review the current local branch using the AMD-SMI Review Agent.
@@ -9,7 +9,8 @@ Review the current local branch using the AMD-SMI Review Agent.
 ## Arguments
 
 - `$ARGUMENTS` contains: `[review-type ...]`
-- Valid types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`
+- Valid types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`, `skeptic`
+- Special modifier: `thorough` — triggers two-round review with rebuttal (comprehensive mode only)
 - If no types specified, perform a **comprehensive** review (all subagents)
 
 ## Process
@@ -42,6 +43,7 @@ Invoke the **AMD-SMI Review Agent** with:
 - Any CI evidence gathered
 
 The agent will dispatch to the appropriate subagent(s) and produce a formatted review.
+If `thorough` was specified, the agent will run a two-round review: Round 1 with all subagents, then a rebuttal round with the skeptic subagent.
 
 ### 5. Report Results
 
@@ -57,4 +59,6 @@ The agent will dispatch to the appropriate subagent(s) and produce a formatted r
 /amdsmi-review-branch style
 /amdsmi-review-branch tests security
 /amdsmi-review-branch build
+/amdsmi-review-branch thorough
+/amdsmi-review-branch skeptic
 ```

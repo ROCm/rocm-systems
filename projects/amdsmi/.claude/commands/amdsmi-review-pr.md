@@ -1,7 +1,7 @@
 ---
 description: Review a GitHub pull request using the AMD-SMI Review Agent
 allowed-tools: Bash(gh:*, git:*), Read, Write, Glob, Grep, WebFetch, Task
-argument-hint: "<PR_NUMBER> [review-type ...] — e.g. 1234 style tests (or just the number for comprehensive)"
+argument-hint: "<PR_NUMBER> [review-type ...] — e.g. 1234 style tests (or just the number for comprehensive). Add 'thorough' for two-round review with rebuttal."
 ---
 
 Review a GitHub pull request using the AMD-SMI Review Agent.
@@ -10,7 +10,8 @@ Review a GitHub pull request using the AMD-SMI Review Agent.
 
 - `$ARGUMENTS` contains: `<PR_NUMBER> [review-type ...]`
 - First argument: PR number (required). Construct the full URL as `https://github.com/ROCm/rocm-systems/pull/<PR_NUMBER>`
-- Remaining: optional review types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`
+- Remaining: optional review types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`, `skeptic`
+- Special modifier: `thorough` — triggers two-round review with rebuttal (comprehensive mode only)
 - If no types specified, perform a **comprehensive** review (all subagents)
 
 ## Process
@@ -68,6 +69,7 @@ Invoke the **AMD-SMI Review Agent** with:
 - Unresolved comments
 
 The agent will dispatch to the appropriate subagent(s) and produce a formatted review.
+If `thorough` was specified, the agent will run a two-round review: Round 1 with all subagents, then a rebuttal round with the skeptic subagent.
 
 ### 7. Report Results
 
@@ -82,4 +84,5 @@ The agent will dispatch to the appropriate subagent(s) and produce a formatted r
 /amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123
 /amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123 style
 /amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123 tests security performance
+/amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123 thorough
 ```
