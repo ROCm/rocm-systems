@@ -88,7 +88,8 @@ public:
 protected:
   virtual void initiate_access(Instruction &inst, Wavefront &wf) = 0;
   virtual void complete_access(Instruction &inst, Wavefront &wf) = 0;
-  virtual WaitCounterType counter_type_for(const Instruction & /*inst*/, const Wavefront & /*wf*/) const {
+  virtual WaitCounterType counter_type_for(const Instruction & /*inst*/,
+                                           const Wavefront & /*wf*/) const {
     return counter_type_;
   }
 
