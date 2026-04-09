@@ -12,6 +12,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Support for pause and resume of profiling via `roctxProfilerPause` and `roctxProfilerResume`.
 - Support for selective region tracing via the `ROCPROFSYS_TRACE_REGION` environment variable, limiting tracing to specified regions.
 - Support for re-attaching to a previously profiled process. After detaching, `rocprof-sys-attach` can re-attach to the same PID for a new profiling session.
+- MPI-rank-based file output filtering feature controlled with two new CLI arguments: `--rank-filter-output` and `--rank-filter-id`.
 - JSON-based configurable preset system with `--preset=<name>` flag, replacing the old `--<preset-name>` flags. Presets are now loaded from JSON files in `source/bin/common/presets/`, making them extensible and exportable. Use `--list-presets` to see available presets and `--explain=<name>` for detailed preset information.
 - Domain flags for composable configuration: `--gpu[=metrics]`, `--rocm[=domains]`, `--cpu[=hz]`, `--parallel[=runtimes]`. Domain flags can be combined with presets to customize profiling without editing configuration files.
 - Configuration export via `--export-config[=file]` to save resolved settings as reusable JSON configuration files. Exported configs can be loaded back with `--preset=./config.json`.
