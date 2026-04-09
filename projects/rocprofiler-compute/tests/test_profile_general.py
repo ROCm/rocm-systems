@@ -139,18 +139,8 @@ METRIC_THRESHOLDS = {
 GPU_MODEL = "MIXXX"
 GPU_ARCH = "gfx000"
 
-RANK_ENV_VARS = [
-    "SLURM_PROCID",
-    "FLUX_TASK_RANK",
-    "PMI_RANK",
-    "PMIX_RANK",
-    "MPI_RANK",
-    "MPI_LOCALRANKID",
-    "MPI_RANKID",
-    "MV2_COMM_WORLD_RANK",
-    "OMPI_COMM_WORLD_RANK",
-    "PALS_RANKID",
-]
+# SLURM rank/size env var pair used in rank-related tests
+SLURM_RANK_VAR, SLURM_SIZE_VAR = "SLURM_PROCID", "SLURM_NTASKS"
 
 # check for parallel resource allocation
 test_utils.check_resource_allocation()
@@ -560,9 +550,9 @@ def mock_load_soc_specs(self, sysinfo=None):
     self._RocProfCompute__soc[GPU_ARCH] = MockSoc()
 
 
-def clear_rank_env(monkeypatch):
-    """Remove all known MPI rank environment variables."""
-    for key in RANK_ENV_VARS:
+def clear_rank_env(monkeypatch, *env_vars):
+    """Remove the specified environment variables."""
+    for key in env_vars:
         monkeypatch.delenv(key, raising=False)
 
 
@@ -716,7 +706,7 @@ def test_output_directory_rank_ignored_without_mpi(
     """Test that %rank% is ignored when no MPI rank env var is set."""
     from rocprof_compute_base import RocProfCompute
 
-    clear_rank_env(monkeypatch)
+    clear_rank_env(monkeypatch, SLURM_RANK_VAR, SLURM_SIZE_VAR)
     monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
 
     workload_base_dir = test_utils.get_output_dir(param_id="no_rank")
@@ -734,27 +724,25 @@ def test_output_directory_rank_ignored_without_mpi(
 def test_output_directory_rank_replaced_with_mpi(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
-    """Test that %rank% is replaced with the rank value for each MPI env var."""
+    """Test that %rank% is replaced with the rank value when SLURM env vars are set."""
     from rocprof_compute_base import RocProfCompute
 
-    clear_rank_env(monkeypatch)
     rank = "3"
 
     monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+    monkeypatch.setenv(SLURM_RANK_VAR, rank)
+    monkeypatch.setenv(SLURM_SIZE_VAR, "4")
 
-    for key in RANK_ENV_VARS:
-        monkeypatch.setenv(key, rank)
+    workload_base_dir = test_utils.get_output_dir(param_id="rank_env_SLURM")
+    workload_dir = os.path.join(workload_base_dir, "%rank%_output")
 
-        workload_base_dir = test_utils.get_output_dir(param_id=f"rank_env_{key}")
-        workload_dir = os.path.join(workload_base_dir, "%rank%_output")
+    binary_handler_profile_rocprof_compute(config, workload_dir)
 
-        binary_handler_profile_rocprof_compute(config, workload_dir)
+    workload_dir = workload_dir.replace("%rank%", rank)
+    assert os.path.exists(workload_dir)
 
-        workload_dir = workload_dir.replace("%rank%", rank)
-        assert os.path.exists(workload_dir)
-
-        test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
-        monkeypatch.delenv(key, raising=False)
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+    clear_rank_env(monkeypatch, SLURM_RANK_VAR, SLURM_SIZE_VAR)
 
 
 @pytest.mark.path
@@ -817,6 +805,7 @@ def test_output_directory_all_placeholders_combined(
     monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
     monkeypatch.setenv("ENV_1", "custom_env")
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", rank)
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "4")
 
     workload_base_dir = test_utils.get_output_dir(param_id="host_gpu_env_rank")
     workload_dir = os.path.join(
@@ -859,6 +848,7 @@ def test_output_directory_default_with_rank(
     )
     monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
     monkeypatch.setenv("PMI_RANK", rank)
+    monkeypatch.setenv("PMI_SIZE", "4")
 
     workload_base_dir = test_utils.get_output_dir(param_id="rank_def_dir")
     p = Path(workload_base_dir)
@@ -892,7 +882,7 @@ def test_output_directory_default_without_rank(
     """Test default output directory layout when no MPI rank is set."""
     from rocprof_compute_base import RocProfCompute
 
-    clear_rank_env(monkeypatch)
+    clear_rank_env(monkeypatch, SLURM_RANK_VAR, SLURM_SIZE_VAR)
     original_cwd = os.getcwd()
 
     monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
@@ -3261,8 +3251,9 @@ def test_multi_rank_warning_application_replay(
     Test that a warning is printed when running a multi-rank application
     in application replay mode.
     """
-    # Set MPI environment variable to simulate multi-rank
+    # Set MPI environment variables to simulate multi-rank
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
 
     workload_dir = test_utils.get_output_dir()
 
@@ -3294,6 +3285,7 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     multi-rank application with iteration multiplexing enabled.
     """
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+    monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
 
     workload_dir = test_utils.get_output_dir()
 

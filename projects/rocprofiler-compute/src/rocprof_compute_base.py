@@ -30,8 +30,8 @@ from utils.specs import (
 from utils.utils_common import (
     build_metric_list,
     detect_rocprof,
+    get_job_rank_and_size,
     get_panel_alias,
-    get_rank,
     get_version,
     get_version_display,
     load_panel_configs,
@@ -236,9 +236,10 @@ class RocProfCompute:
             )
 
             # Add MPI rank to workload path if available
-            if get_rank() is not None:
+            mpi_rank, _ = get_job_rank_and_size()
+            if mpi_rank is not None:
                 self.__args.output_directory = str(
-                    Path(self.__args.output_directory) / f"{get_rank()}"
+                    Path(self.__args.output_directory) / f"{mpi_rank}"
                 )
             # OR, Add gpu model name to workload path
             else:
@@ -253,9 +254,10 @@ class RocProfCompute:
 
         # Add MPI rank to workload path if %rank% is not present in output directory
         # and rank is available
-        if "%rank%" not in self.__args.output_directory and get_rank() is not None:
+        mpi_rank, _ = get_job_rank_and_size()
+        if "%rank%" not in self.__args.output_directory and mpi_rank is not None:
             self.__args.output_directory = str(
-                Path(self.__args.output_directory) / f"{get_rank()}"
+                Path(self.__args.output_directory) / f"{mpi_rank}"
             )
 
         # Replace parameters with actual values in workload path
@@ -267,7 +269,7 @@ class RocProfCompute:
         self.__args.output_directory = replace_env(self.__args.output_directory)
 
         # Replace %rank% with actual rank value in workload path
-        if "%rank%" in self.__args.output_directory and get_rank() is None:
+        if "%rank%" in self.__args.output_directory and mpi_rank is None:
             console_warning(
                 "Ignoring %%rank%% placeholder in output directory"
                 " since no MPI rank was detected."

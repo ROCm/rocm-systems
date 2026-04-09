@@ -947,30 +947,69 @@ def get_panel_alias() -> dict[str, str]:
     }
 
 
-def get_rank() -> Optional[str]:
-    rank_env_vars = [
-        "SLURM_PROCID",
-        "FLUX_TASK_RANK",
-        "PMI_RANK",
-        "PMIX_RANK",
-        "PALS_RANKID",
-        "OMPI_COMM_WORLD_RANK",
-        "MV2_COMM_WORLD_RANK",
-        "MPI_RANKID",
-        "MPI_LOCALRANKID",
-        "MPI_RANK",
-    ]
-    for env_var in rank_env_vars:
-        value = os.environ.get(env_var)
-        if value is not None:
-            return value
+def get_job_rank_and_size() -> tuple[Optional[str], Optional[int]]:
+    """Detect job rank and total ranks from runtime environment variables.
 
-    return None
+    Returns a (rank, total_ranks) tuple, ensuring both values come from the same
+    runtime.
+    """
+    # Note: PMIX_RANK is intentionally excluded. PMIx has no standard size env var,
+    # and PMIx is never a standalone launcher — it always runs behind SLURM, OpenMPI,
+    # PALS, etc., which set their own paired rank/size vars checked here. If only
+    # PMIX_RANK is set, the launcher also sets generic MPI_RANK/MPI_SIZE caught below.
+    rank_size_env_vars = [
+        ("PBS_NODENUM", "PBS_O_TASKNUM"),  # PBS/Torque
+        ("SLURM_PROCID", "SLURM_NTASKS"),  # SLURM
+        ("FLUX_TASK_RANK", "FLUX_JOB_SIZE"),  # Flux
+        ("PMI_RANK", "PMI_SIZE"),  # PMI
+        ("PALS_RANKID", "PALS_WORLD_SIZE"),  # PALS (HPE Cray)
+        ("OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"),  # OpenMPI
+        ("MV2_COMM_WORLD_RANK", "MV2_COMM_WORLD_SIZE"),  # MVAPICH2
+        ("MPI_RANKID", "MPI_NRANKS"),  # Generic
+        ("MPI_LOCALRANKID", "MPI_LOCALNRANKS"),  # Generic (local)
+        ("MPI_RANK", "MPI_SIZE"),  # Generic
+    ]
+    matched_rank = None
+    matched_rank_var = None
+    matched_size = None
+    matched_size_var = None
+    for rank_var, size_var in rank_size_env_vars:
+        rank_value = os.environ.get(rank_var)
+        try:
+            _ = int(rank_value)
+        except (TypeError, ValueError):
+            continue
+
+        # Rank is valid; try to get a matching size for a complete pair
+        size_value = os.environ.get(size_var)
+        try:
+            matched_size = int(size_value)
+        except (TypeError, ValueError):
+            # Size missing or invalid — remember rank as fallback but keep
+            # searching for a runtime that provides both rank and size
+            if matched_rank is None:
+                matched_rank = rank_value
+                matched_rank_var = rank_var
+                matched_size_var = size_var
+            continue
+
+        # Complete pair found
+        matched_rank = rank_value
+        matched_rank_var = rank_var
+        matched_size_var = size_var
+        break
+
+    console_debug(
+        f"Parallel runtime detected: {matched_rank_var}='{matched_rank}',"
+        f" {matched_size_var}={matched_size}"
+    )
+
+    return (matched_rank, matched_size)
 
 
 def replace_rank(name: str) -> str:
     def rank(match: re.Match[str]) -> str:
-        value = get_rank()
+        value, _ = get_job_rank_and_size()
         if value is not None:
             return value + match.group(1)  # preserve trailing slash
         else:
