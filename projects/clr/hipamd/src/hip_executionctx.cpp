@@ -267,7 +267,6 @@ hipError_t ExecutionCtx::deviceGetDevResource(int device, hipDevResource* resour
   constexpr unsigned int kAlignment = 2;
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
   unsigned int cuCount = prop.multiProcessorCount;
-  unsigned int alignment = kAlignment;
 
   resource->sm.smCount = cuCount;
   resource->sm.minSmPartitionSize = kAlignment;
@@ -305,6 +304,8 @@ hipError_t ExecutionCtx::devSmResourceSplitByCount(
   }
 
   int inputDevId = readDeviceId(input);
+  if (inputDevId < 0) return hipErrorInvalidDevice;
+
   unsigned int inputStartCU = 0;
   const ResourceMeta* inputMeta = lookupResourceMeta(inputDevId, readResourceId(input));
   if (inputMeta != nullptr) inputStartCU = inputMeta->startCU;
@@ -373,6 +374,8 @@ hipError_t ExecutionCtx::devSmResourceSplit(
   if (assignedCUs > totalCUs) return hipErrorInvalidResourceConfiguration;
 
   int inputDevId = readDeviceId(input);
+  if (inputDevId < 0) return hipErrorInvalidDevice;
+  
   unsigned int inputStartCU = 0;
   const ResourceMeta* inputMeta = lookupResourceMeta(inputDevId, readResourceId(input));
   if (inputMeta != nullptr) inputStartCU = inputMeta->startCU;
@@ -414,7 +417,7 @@ hipError_t ExecutionCtx::devResourceGenerateDesc(hipDevResourceDesc_t* phDesc,
     return hipErrorInvalidValue;
   
   for (unsigned int i = 0; i < nbResources; i++) {
-    if (resources[i].type == hipDevResourceTypeWorkqueueConfig) {
+    if (resources[i].type != hipDevResourceTypeSm) {
       return hipErrorInvalidResourceType;
     }
   }
@@ -539,6 +542,18 @@ hipError_t hipGreenCtxCreate(hipExecutionCtx_t* phCtx, hipDevResourceDesc_t desc
 
   auto* resourceDesc = reinterpret_cast<DevResourceDesc*>(desc);
 
+  if (resourceDesc->deviceId < 0) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  
+  if (resourceDesc->deviceId != device) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  if (resourceDesc->resources.empty()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   g_devices[device]->retain();
 
   auto* greenCtx = new ExecutionCtx(device, resourceDesc, flags);
@@ -561,6 +576,15 @@ hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx) {
 
   auto* greenCtx = reinterpret_cast<ExecutionCtx*>(ctx);
   int deviceId = greenCtx->deviceId();
+
+  {
+    std::scoped_lock lock(g_devices[deviceId]->getLock());
+    if (greenCtx == g_devices[deviceId]->getPrimaryExecCtx()) {
+      // The primary execution context is managed by the Device and must not
+      // be destroyed via hipGreenCtxDestroy
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
 
   delete greenCtx;
 
@@ -586,6 +610,9 @@ hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device) {
   ExecutionCtx* primaryCtx = g_devices[device]->getPrimaryExecCtx();
   if (primaryCtx == nullptr) {
     primaryCtx = ExecutionCtx::createPrimaryCtx(device);
+    if (primaryCtx == nullptr) {
+      HIP_RETURN(hipErrorOutOfMemory);
+    }
     g_devices[device]->setPrimaryExecCtx(primaryCtx);
   }
 
