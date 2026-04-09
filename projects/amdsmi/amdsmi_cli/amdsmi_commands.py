@@ -34,10 +34,8 @@ import copy
 
 from _version import __version__
 
-# TODO(amdsmi_team): move to another PR & add to changelog
 from amdsmi_cli_exceptions import (
     AmdSmiInvalidParameterException,
-    AmdSmiInvalidParameterValueException,
     AmdSmiRequiredCommandException,
     AmdSmiInvalidCommandException,
 )
@@ -8607,12 +8605,7 @@ class AMDSMICommands:
                         )
                         self.logger.print_output()
                         self.logger.clear_multiple_devices_output()
-
-                        # TODO(amdsmi_team): move to another PR & add to changelog
-                        # Invalid profile - raise exception so the caller gets a non-zero exit code
-                        raise AmdSmiInvalidParameterValueException(
-                            sys.argv[1], args.profile, self.helpers.get_output_format()
-                        )
+                        return
 
                     # Set the profile
                     amdsmi_interface.amdsmi_set_gpu_power_profile(args.gpu, 0, profile_mask)
@@ -8832,24 +8825,13 @@ class AMDSMICommands:
                                 ", "
                             )  # Remove trailing comma and space
                         print(f"Valid SOC P-State Policies: [{policy_string}]\n")
-                        # TODO(amdsmi_team): move to another PR & add to changelog
-                        self.logger.store_output(
-                            args.gpu,
-                            "socpstate",
-                            f"[{e.get_error_info(detailed=False)}] Unable to set soc pstate dpm policy to {args.soc_pstate}",
-                        )
-                        self.logger.print_output()
-                        self.logger.clear_multiple_devices_output()
-                        raise ValueError(
-                            f"Invalid soc pstate policy {args.soc_pstate}. Valid policies: [{policy_string}]"
-                        ) from e
-                    # self.logger.store_output(
-                    #     args.gpu,
-                    #     "socpstate",
-                    #     f"[{e.get_error_info(detailed=False)}] Unable to set soc pstate dpm policy to {args.soc_pstate}",
-                    # )
-                    # self.logger.print_output()
-                    # self.logger.clear_multiple_devices_output()
+                    self.logger.store_output(
+                        args.gpu,
+                        "socpstate",
+                        f"[{e.get_error_info(detailed=False)}] Unable to set soc pstate dpm policy to {args.soc_pstate}",
+                    )
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
                     return
                 self.logger.store_output(
                     args.gpu,
@@ -8879,17 +8861,6 @@ class AMDSMICommands:
                                 ", "
                             )  # Remove trailing comma and space
                         print(f"Valid XGMI PLPD Policies: [{policy_string}]\n")
-                        # TODO(amdsmi_team): move to another PR & add to changelog
-                        self.logger.store_output(
-                            args.gpu,
-                            "xgmiplpd",
-                            f"[{e.get_error_info(detailed=False)}] Unable to set XGMI per-link power down policy to {args.xgmi_plpd}",
-                        )
-                        self.logger.print_output()
-                        self.logger.clear_multiple_devices_output()
-                        raise ValueError(
-                            f"Invalid XGMI PLPD policy {args.xgmi_plpd}. Valid policies: [{policy_string}]"
-                        ) from e
                     self.logger.store_output(
                         args.gpu,
                         "xgmiplpd",
@@ -10285,7 +10256,7 @@ class AMDSMICommands:
             args.pcie = pcie
         if process:
             args.process = process
-        # TODO(amdsmi_team): move to another PR & add to changelog
+        # TODO(amdsmi_team): add to changelog
         if self.helpers.is_brcm_nic_initialized() and (
             brcm_nic or getattr(args, "brcm_nic", False)
         ):
@@ -10300,7 +10271,7 @@ class AMDSMICommands:
                 nic_temperature=args.temperature,
             )
             return
-        # TODO(amdsmi_team): move to another PR & add to changelog
+        # TODO(amdsmi_team): add to changelog
         if self.helpers.is_brcm_switch_initialized() and (
             brcm_switch or getattr(args, "brcm_switch", False)
         ):

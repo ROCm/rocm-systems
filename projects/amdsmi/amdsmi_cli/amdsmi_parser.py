@@ -1149,11 +1149,15 @@ class AMDSMIParser(argparse.ArgumentParser):
                 if isinstance(values, str):
                     if "%" in values:
                         try:
-                            amdsmi_helpers.confirm_out_of_spec_warning()
                             # Store percentage value with is_percentage flag
                             # CLI will convert based on gpu_od availability
                             percentage_value = int(values[:-1])
                             if 0 <= percentage_value <= 100:
+                                # Making behavior consistent with recent non-percentage path changes
+                                # 1. Check input validity (0-100%)
+                                # 2. If valid, prompt out-of-spec warning. If not valid, raise argparse error without prompt.
+                                # This ensures users are only prompted for valid inputs that may be out-of-spec, not for invalid inputs.
+                                amdsmi_helpers.confirm_out_of_spec_warning()
                                 # Store as tuple: (percentage_value, is_percentage=True)
                                 setattr(args, self.dest, (percentage_value, True))
                             else:
@@ -2519,6 +2523,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "-P",
                     "--profile",
                     action="store",
+                    choices=self.helpers.get_power_profiles(),
+                    type=str.upper,
                     required=False,
                     help=set_profile_help,
                     metavar="PROFILE_LEVEL",
@@ -3045,7 +3051,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument(
             "-q", "--process", action="store_true", required=False, help=process_help
         )
-        # TODO(amdsmi_team): move to another PR & add to changelog
+        # TODO(amdsmi_team): add to changelog
         if self.helpers.is_brcm_nic_initialized():
             monitor_parser.add_argument(
                 "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
