@@ -1,7 +1,7 @@
 ---
 description: "Review a GitHub pull request using the AMD-SMI Review Agent"
 agent: "AMD-SMI Review Agent"
-argument-hint: "<PR_NUMBER> [review-type ...] — e.g. 1234 style tests (or just the number for comprehensive). Add 'fast' to skip rebuttal round."
+argument-hint: "<PR_NUMBER> [review-type ...] — e.g. 1234 style tests (or just the number for comprehensive). Add 'fast' to skip rebuttal. Add 'no-build' to skip build step."
 tools: [execute, read, edit, search, agent, web, todo]
 ---
 
@@ -13,6 +13,7 @@ Review a GitHub pull request using the AMD-SMI Review Agent.
 - First argument: PR number (required). Construct the full URL as `https://github.com/ROCm/rocm-systems/pull/<PR_NUMBER>`
 - Remaining: optional review types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`, `skeptic`
 - Special modifier: `fast` — skips the rebuttal round (comprehensive mode only)
+- Special modifier: `no-build` — skips the build & install step
 - If no types specified, perform a **comprehensive** review (all subagents, with rebuttal)
 
 ## Process
