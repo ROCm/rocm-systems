@@ -76,19 +76,6 @@ void Backend::init(void) {
   CHECK_HIP(hipDeviceGetAttribute(&num_cus, hipDeviceAttributeMultiprocessorCount, hip_dev_id));
 
   /*
-   * Initialize 'print_lock' global and copy to the device memory space.
-   */
-  CHECK_HIP(hipMalloc(&print_lock, sizeof(*print_lock)));
-  *print_lock = 0;
-
-  int* print_lock_addr{nullptr};
-  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&print_lock_addr),
-                                HIP_SYMBOL(print_lock)));
-
-  CHECK_HIP(hipMemcpy(print_lock_addr, &print_lock, sizeof(print_lock),
-                      hipMemcpyDefault));
-
-  /*
    * Copy log state to device constant memory for device-side logging.
    */
   log_state_device_t host_log_state{log_pe_number,
@@ -154,7 +141,6 @@ void Backend::destroy_remaining_ctxs() {
 }
 
 Backend::~Backend() {
-  CHECK_HIP(hipFree(print_lock));
   if (backend_comm != MPI_COMM_NULL)
     NET_CHECK(mpilib_ftable_.Comm_free(&backend_comm));
 }

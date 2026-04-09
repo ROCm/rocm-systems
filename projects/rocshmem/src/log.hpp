@@ -199,17 +199,14 @@ namespace rocshmem {
 #endif
 
 /*****************************************************************************
- * Device-side serialized printf
+ * Device-side printf
  *
- * Uses a GPU-wide spin lock (print_lock) so that output from concurrent
- * threads/waves is not interleaved.  The first 3 printf arguments are
- * the PE number, flat workgroup id, and flat thread id (consumed by the
- * leading format specifiers that callers place in the format string).
+ * The first 3 printf arguments are the PE number, flat workgroup id,
+ * and flat thread id (consumed by the leading format specifiers that
+ * callers place in the format string).
  *****************************************************************************/
 
 namespace rocshmem {
-
-extern __constant__ int* print_lock;
 
 struct log_state_device_t {
   int  pe_number;
@@ -225,16 +222,7 @@ template <typename... Args>
                        hipThreadIdx_z * hipBlockDim_x * hipBlockDim_y;
   int flat_wg_id = hipBlockIdx_x + hipBlockIdx_y * hipGridDim_x +
                    hipBlockIdx_z * hipGridDim_x * hipGridDim_y;
-  for (int i{0}; i < WF_SIZE; i++) {
-    if ((flat_thread_id % WF_SIZE) == i) {
-      while (atomicCAS(print_lock, 0, 1) == 1) {
-      }
-
-      printf(fmt, log_device.pe_number, flat_wg_id, flat_thread_id, args...);
-
-      *print_lock = 0;
-    }
-  }
+  printf(fmt, log_device.pe_number, flat_wg_id, flat_thread_id, args...);
 }
 
 }  // namespace rocshmem
@@ -244,8 +232,7 @@ template <typename... Args>
  *
  * The printf portion is gated by BUILD_DEBUG_LEVEL_DEVICE.
  * abort() in ABORT_DEVICE and ERROR_DEVICE is unconditional.
- * Device printf uses rocshmem::dprintf() (defined above) which serializes
- * output through print_lock.  rocshmem::dprintf() prepends block/thread indices
+ * Device printf uses rocshmem::dprintf() (defined above) which prepends
  * as the first 6 printf arguments, so the format string must start with
  * 6 %u specifiers to consume them.
  *
