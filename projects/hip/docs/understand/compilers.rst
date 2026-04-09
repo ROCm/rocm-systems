@@ -157,7 +157,9 @@ In this syntax:
 * Specialized matrix instructions (``v_mfma_*``) invoke the :ref:`Matrix Core
   (MFMA) hardware units <mfma_units>`.
 
-Although AMDGPU assembly can be written by hand, this is uncommon. Developers typically inspect compiler‑generated assembly when optimizing kernels, diagnosing register pressure, or tuning memory‑access patterns
+Although AMDGPU assembly can be written by hand, this is uncommon. Developers
+typically inspect compiler‑generated assembly when optimizing kernels, diagnosing
+register pressure, or tuning memory‑access patterns
 
 The ROCm disassembler (``llvm-objdump``) and ROCm profiler (``rocprofv3``)
 allow inspection of generated GFX ISA alongside high-level HIP or OpenMP source
@@ -262,7 +264,7 @@ code verification, and low-level kernel analysis, for example, when tuning
  
 The ``llvm-readobj`` utility with the ``--offloading`` flag will provide a
 listing of all available HIP fat binary offload bundle entries.  This replaces
-the funcitonality oreviously provided by ``roc-obj-ls``.
+the functionality previously provided by ``roc-obj-ls``.
  
 Together, these utilities provide developers with insight into how HIP C++ code
 is compiled, optimized, and mapped to GPU hardware. They complement profiling
