@@ -1,0 +1,136 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+//
+// FlatBuffers schema for AMDGPU simulation configuration.
+// Used for both JSON config parsing and binary serialization.
+
+namespace rocjitsu.fb;
+
+/// Configuration for a single compute unit.
+table ComputeUnitConfig {
+  num_wf_slots: uint32;   // Number of hardware wavefront slots (contexts).
+  sgprs_per_wf: uint32;   // Scalar GPRs per wavefront.
+  vgprs_per_wf: uint32;   // Vector GPRs per wavefront.
+  lds_size_kb: uint32;    // Local Data Share size in kilobytes.
+  functional_quantum: uint32;  // Max instructions per advance() in FUNCTIONAL mode (0 = unbounded).
+}
+
+/// Configuration for a command processor.
+table CommandProcessorConfig {
+  max_queued_packets: uint32;   // Maximum packets that can be queued (0 = unlimited).
+}
+
+/// Configuration for a shader engine.
+table ShaderEngineConfig {
+  num_compute_units: uint32;       // Number of CUs in this shader engine.
+  compute_unit: ComputeUnitConfig; // Shared CU configuration for all CUs.
+}
+
+/// Configuration for an Accelerator Complex Die (XCD).
+table XcdConfig {
+  num_shader_engines: uint32;        // Number of shader engines in this XCD.
+  shader_engine: ShaderEngineConfig; // Shared SE configuration for all SEs.
+  command_processor: CommandProcessorConfig;
+}
+
+/// Configuration for GPU memory.
+table GpuMemoryConfig {
+  size_mb: uint32;              // Memory size in megabytes (for future limits).
+  memory_side_cache_mb: uint32; // Memory-side cache size in MB (0 = disabled).
+}
+
+/// Top-level AMDGPU configuration.
+table AmdgpuConfig {
+  num_xcds: uint32;              // Number of Accelerator Complex Dies.
+  num_iods: uint32;              // Number of I/O Dies (0 = no IOD modeling).
+  xcd: XcdConfig;                // Shared XCD configuration for all XCDs.
+  memory: GpuMemoryConfig;
+}
+
+/// A dispatch packet describing a kernel launch.
+table DispatchConfig {
+  kernel_entry_pc: uint64;          // Byte address of kernel entry point.
+  workgroup_count: uint32;         // Number of workgroups to dispatch.
+  wfs_per_workgroup: uint32;      // Wavefronts per workgroup.
+  sgprs_per_wf: uint32;          // Scalar GPRs per wavefront.
+  vgprs_per_wf: uint32;          // Vector GPRs per wavefront.
+}
+
+/// A program binary and its dispatch configuration.
+table ProgramConfig {
+  binary_path: string;             // Path to the kernel binary file.
+  base_addr: uint64;              // Base address to load the binary at.
+  dispatches: [DispatchConfig];    // Dispatch packets to enqueue after loading.
+}
+
+/// Virtual machine hardware model configuration.
+table VirtualMachineConfig {
+  arch: string;                // ISA architecture identifier (e.g., "cdna3", "rv64i").
+  gpu: AmdgpuConfig;           // AMDGPU hardware configuration.
+  programs: [ProgramConfig];   // Programs to load and dispatch.
+}
+
+// ---------------------------------------------------------------------------
+// Declarative topology definition tables.
+// ---------------------------------------------------------------------------
+
+/// Key-value pair for component configuration.
+table ConfigEntry {
+  key: string;
+  value: string;    // All values as strings, parsed by the factory.
+}
+
+/// Port definition for dynamic ports.
+table PortDef {
+  name: string;
+  direction: string;   // "in" or "out".
+  protocol: string;    // "untyped", "memory_req", "memory_resp", "dispatch", etc.
+}
+
+/// Component definition (recursive for hierarchy).
+table ComponentDef {
+  name: string;             // Name or range pattern like "xcd[0:7]".
+  type: string;             // Registry type: "compute_unit", "l2_cache", etc.
+  config: [ConfigEntry];    // Component-specific parameters.
+  children: [ComponentDef]; // Child components (recursive).
+  ports: [PortDef];         // Optional dynamic ports.
+}
+
+/// Range variable for link pattern expansion.
+table ForRange {
+  var_name: string;   // Variable name: "i", "j", "k".
+  start: uint32;      // Range start (inclusive).
+  end: uint32;        // Range end (exclusive).
+}
+
+/// Link definition (direct or pattern-based).
+table LinkDef {
+  src: string;              // Direct source: "soc.xcd0.l2.hbm_out".
+  dst: string;              // Direct destination.
+  pattern: string;          // Pattern: "soc.xcd[i].l2 -> soc.iod[i/4].msc".
+  for_ranges: [ForRange];   // Loop variables.
+  where_expr: string;       // Filter: "i != j".
+  latency: uint32 = 1;
+  weight: uint32 = 1;
+}
+
+/// Top-level topology definition.
+table TopologyDef {
+  root: ComponentDef;
+  links: [LinkDef];
+}
+
+// ---------------------------------------------------------------------------
+// Top-level simulation configuration.
+// ---------------------------------------------------------------------------
+
+/// Top-level simulation configuration.
+table SimulationConfig {
+  max_ticks: uint64;             // Maximum simulation ticks before halting.
+  num_threads: uint32;           // Number of simulation threads (partitions).
+  exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
+  vm: VirtualMachineConfig;      // Virtual machine hardware model.
+  topology: TopologyDef;         // Declarative topology.
+}
+
+root_type SimulationConfig;

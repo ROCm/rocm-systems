@@ -19,11 +19,21 @@ control the behavior of rocSHMEM.
       - **Default value**
       - **Value**
 
+    * - | ``ROCSHMEM_DEBUG_LEVEL``
+        | Debug output level (NONE, VERSION, WARN, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)
+      - `` ``
+      -
+
     * - | ``ROCSHMEM_HEAP_SIZE``
         | Defines the size of the rocSHMEM symmetric heap in bytes (per PE).
       - ``1073741824`` (1 GB)
       - | Size in bytes (per PE).
         | Note: the heap is on GPU memory.
+
+    * - | ``ROCSHMEM_MAX_NUM_HOST_CONTEXTS``
+        | Maximum number of host-side communication contexts
+      - ``1``
+      - Maximum number of host-side contexts.
 
     * - | ``ROCSHMEM_MAX_NUM_CONTEXTS``
         | Defines the number of contexts an application can use.
@@ -44,7 +54,7 @@ control the behavior of rocSHMEM.
         | ``gda``: GPU Direct Async Backend
 
     * - | ``ROCSHMEM_UNIQUEID_WITH_MPI``
-        | Defines whether rocSHMEM is expected to use MPI when using the uniqueId based initialization.
+        | Defines whether rocSHMEM is expected to use MPI internally when using the uniqueId based initialization.
       - ``0``
       - | ``0``: Do not use MPI.
         | ``1``: Use MPI.
@@ -134,7 +144,7 @@ control the behavior of rocSHMEM.
 
     * - | ``ROCSHMEM_GDA_SQ_SIZE``
         | This environment variable sets the length of the SQ for GDA.
-      - ``4096``
+      - ``1024``
       - | Maximum number of Work Queue Entries (WQEs) posted on the Send Queue (SQ)
 
     * - | ``ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX``
@@ -146,3 +156,23 @@ control the behavior of rocSHMEM.
         | Sets the number of Queue Pairs (QPs) to create per PE for each user context.
       - ``1``
       - Number of QPs per PE for each user context.
+
+    * - | ``ROCSHMEM_MAX_WF_BUFFERS``
+        | Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)
+      - ``1024``
+      -
+
+    * - | ``ROCSHMEM_BOOTSTRAP_TIMEOUT``
+        | Bootstrap initialization timeout in seconds
+      - ``5``
+      -
+
+    * - | ``ROCSHMEM_BOOTSTRAP_HOSTID``
+        | Override host identifier for bootstrap. Empty string uses hostname.
+      - `` ``
+      -
+
+    * - | ``ROCSHMEM_BOOTSTRAP_SOCKET_FAMILY``
+        | Socket family for bootstrap (AF_UNSPEC, AF_INET, AF_INET6)
+      - ``types::socket_family::UNSPEC``
+      -

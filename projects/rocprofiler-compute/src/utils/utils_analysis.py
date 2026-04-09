@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import math
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,43 @@ from utils.logger import (
 )
 
 NS_TO_MS = 1.0 / 1_000_000.0
+
+
+def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
+    """Return the divisor and suffix for a bandwidth value in Bytes/s."""
+    if value >= 1e12:
+        return 1e12, "TB/s"
+    if value >= 1e9:
+        return 1e9, "GB/s"
+    if value >= 1e6:
+        return 1e6, "MB/s"
+    if value >= 1e3:
+        return 1e3, "KB/s"
+    return 1.0, "B/s"
+
+
+def format_bw_human_readable(
+    value: Union[int, float, str, None], unit: str = "Bytes/s", precision: int = 2
+) -> str:
+    """Format bandwidth to human-readable string (e.g. 1.5 TB/s).
+
+    Accepts Bytes/s (default) or legacy GB/s input.
+    Returns 'NaN' for NaN, 'N/A' for None/invalid.
+    """
+    if value is None:
+        return "N/A"
+
+    try:
+        numeric_value = float(value)
+    except (ValueError, TypeError):
+        return "N/A"
+
+    if math.isnan(numeric_value):
+        return "NaN"
+
+    bytes_per_sec = numeric_value * 1e9 if unit == "GB/s" else numeric_value
+    divisor, output_unit = get_bw_scale_and_unit(bytes_per_sec)
+    return f"{bytes_per_sec / divisor:.{precision}f} {output_unit}"
 
 
 @dataclass

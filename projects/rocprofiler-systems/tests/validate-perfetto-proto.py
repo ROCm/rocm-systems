@@ -253,7 +253,35 @@ if __name__ == "__main__":
         if key_count != count:
             ret = 1
 
+    if args.counter_names and args.print:
+        all_counter_tracks = tp.query(
+            "SELECT DISTINCT name FROM counter_track ORDER BY name"
+        )
+        track_names = [row.name for row in all_counter_tracks]
+        print(f"Available counter tracks ({len(track_names)}):")
+        for name in track_names:
+            print(f"  - {name}")
+
     for counter_name in args.counter_names:
+        if args.print:
+            matching_tracks = tp.query(
+                f"""SELECT counter_track.name, COUNT(counter.id) AS num_entries,
+                  SUM(counter.value) AS sum_value, MIN(counter.value) AS min_value,
+                  MAX(counter.value) AS max_value
+                  FROM counter_track JOIN counter ON counter.track_id = counter_track.id
+                  WHERE counter_track.name LIKE '%{counter_name}%'
+                  GROUP BY counter_track.name ORDER BY counter_track.name"""
+            )
+            track_rows = []
+            for row in matching_tracks:
+                track_rows.append(row)
+                print(
+                    f"  Track: {row.name} | entries={row.num_entries} "
+                    f"sum={row.sum_value} min={row.min_value} max={row.max_value}"
+                )
+            if not track_rows:
+                print(f"  No counter tracks matching '%{counter_name}%' found in trace")
+
         sum_counter_values = tp.query(
             f"""SELECT SUM(counter.value) AS total_value FROM counter_track JOIN counter ON
               counter.track_id = counter_track.id WHERE counter_track.name LIKE

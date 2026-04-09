@@ -319,7 +319,20 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
    * MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED dynamically allocates a UAR page, but these are limited
    * using MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED requires rdma-core v45 or later (released March 2023)
    * see https://github.com/linux-rdma/rdma-core/commit/bf550b9fa83374cfed51330760a583d82a7600f4 */
+  errno = 0;
   qp.uar = mlx5dv.devx_alloc_uar(ctx, MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED);
+
+  /* It is recomended that the user upgrade their network stack.
+   * However, this is a fall-back mechanism to notify the user of this issue.  */
+  if (NULL == qp.uar && EOPNOTSUPP == errno) {
+    fprintf(stderr,
+            "[Warning] Cannot provide dedicated DBs to each QP, "
+            "rocSHMEM correctness is not guaranteed "
+            "MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED is not supported by the installed rdma-core/OFED."
+            "Please upgrade network stack to rdma-core v45 or later.\n");
+
+    qp.uar = mlx5dv.devx_alloc_uar(ctx, MLX5DV_UAR_ALLOC_TYPE_BF);
+  }
   CHECK_NNULL(qp.uar, "mlx5dv_devx_alloc_uar");
 
   // create CQ

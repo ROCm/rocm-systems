@@ -1,0 +1,26 @@
+{
+    "domains": {
+        "gpu": {
+            "enabled": true
+        }
+    },
+    "metadata": {
+        "category": "general",
+        "cli_flag": "--balanced",
+        "description": "Balanced profiling mode: moderate overhead with comprehensive data collection",
+        "name": "balanced",
+        "use_case": "General-purpose profiling when you need both tracing and sampling without excessive overhead"
+    },
+    "profiling": {
+        "enabled": true
+    },
+    "sampling": {
+        "enabled": true,
+        "frequency_hz": {
+            "value": 50
+        }
+    },
+    "tracing": {
+        "enabled": true
+    }
+}

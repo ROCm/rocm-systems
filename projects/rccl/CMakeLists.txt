@@ -402,7 +402,58 @@ find_package(hsa-runtime64 REQUIRED)
 get_target_property(HSA_INCLUDE_PATH hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "HSA runtime: ${HSA_INCLUDE_PATH}")
 
+## Check for amd-smi if ROCm 7.11.0 or newer
+if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
+  find_package(amd_smi PATHS ${ROCM_PATH}/lib/cmake/amd_smi)
+  if(amd_smi_FOUND)
+    message(STATUS "amd_smi_INCLUDE_DIR: ${amd_smi_INCLUDE_DIR}")
+    message(STATUS "amd_smi_LIB_DIR: ${amd_smi_LIB_DIR}")
+    set(SMI_INCLUDE_DIR "${amd_smi_INCLUDE_DIR}" CACHE INTERNAL "amd-smi include directory")
+    set(SMI_LIB_DIR "${amd_smi_LIB_DIR}" CACHE INTERNAL "amd-smi library directory")
+    set(SMI_LIB_NAME "amd-smi-lib" CACHE INTERNAL "amd-smi-lib for packaging")
+    if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
+      message(FATAL_ERROR "amd_smi not found in ${SMI_INCLUDE_DIR}")
+    endif()
+    message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
+    set(SMI_LIBRARIES amd_smi)
+  endif()
+endif()
+
 set(USE_AMDSMI ON CACHE INTERNAL "Force enable AMD SMI path since we use lazy loading, and rsmi path is available as fallback if AMD SMI is not enabled at runtime")
+
+## Commenting this out for full deprecation in a future PR
+# if(NOT USE_AMDSMI)
+#   ## Fallback to rocm-smi if amd-smi not found or ROCm < 7.11.0
+#   message(WARNING "Could not find amd_smi. Falling back to rocm_smi.")
+#   find_package(rocm_smi PATHS ${ROCM_PATH}/lib/cmake/rocm_smi)
+#   if(rocm_smi_FOUND)
+#     set(SMI_INCLUDE_DIR "${rocm_smi_INCLUDE_DIR}" CACHE INTERNAL "rocm-smi include directory")
+#     set(SMI_LIB_DIR "${rocm_smi_LIB_DIR}" CACHE INTERNAL "rocm-smi library directory")
+#   else()
+#     message(WARNING "CMake could not find rocm-smi. Checking old include directory structure for rocm_smi")
+#     set(SMI_INCLUDE_DIR "${ROCM_PATH}/rocm_smi/include")
+#     set(SMI_LIB_DIR     "${ROCM_PATH}/rocm_smi/lib")
+#   endif()
+
+#   if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
+#     message(FATAL_ERROR "rocm_smi not found in ${SMI_INCLUDE_DIR}")
+#   endif()
+#   message(STATUS "Found rocm_smi at ${SMI_INCLUDE_DIR}")
+#   set(SMI_LIB_NAME "rocm-smi-lib" CACHE INTERNAL "rocm-smi-lib for packaging")
+#   set(SMI_LIBRARIES rocm_smi64)
+
+#   check_include_file_cxx("${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi64Config.h" HAVE_ROCM_SMI64CONFIG)
+
+#   ### Check for RSMI_INIT_FLAG_THRAD_ONLY_MUTEX support
+#   file(READ "${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi.h" rocm_smi_incl)
+#   string(FIND "${rocm_smi_incl}" "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX" matchres)
+#   if(${matchres} EQUAL -1)
+#     message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX not supported")
+#   else()
+#     message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX supported")
+#     set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
+#   endif ()
+# endif()
 
 ## Check for BFD library if custom backtrace is requested
 if(BUILD_BFD)

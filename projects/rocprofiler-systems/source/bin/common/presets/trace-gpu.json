@@ -1,0 +1,59 @@
+{
+    "domains": {
+        "gpu": {
+            "enabled": true,
+            "metrics": {
+                "busy": {
+                    "enabled": true
+                },
+                "mem_usage": {
+                    "enabled": true
+                },
+                "power": {
+                    "enabled": true
+                },
+                "temp": {
+                    "enabled": true
+                }
+            }
+        },
+        "rocm": {
+            "api_domains": {
+                "hip_runtime_api": {
+                    "enabled": true
+                },
+                "kernel_dispatch": {
+                    "enabled": true
+                },
+                "marker_api": {
+                    "enabled": true
+                },
+                "memory_copy": {
+                    "enabled": true
+                },
+                "scratch_memory": {
+                    "enabled": true
+                }
+            },
+            "enabled": true
+        }
+    },
+    "metadata": {
+        "category": "gpu",
+        "cli_flag": "--trace-gpu",
+        "description": "GPU workload analysis: trace with host functions and device activity",
+        "name": "trace-gpu",
+        "use_case": "GPU-focused profiling with device metrics and kernel tracing"
+    },
+    "profiling": {
+        "enabled": false
+    },
+    "sampling": {
+        "cpus": {
+            "value": "none"
+        }
+    },
+    "tracing": {
+        "enabled": true
+    }
+}

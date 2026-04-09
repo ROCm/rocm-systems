@@ -1016,7 +1016,7 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Currently, p2p-batching thresholds are only used for gfx950 for 16 nodes and above
 // previously, p2p-batching was causing regression on all node-counts for larger message sizes (64KB "per-rank")
 // we want to enable by default only for gfx950, so we use rcclEffectiveP2pBatchEnable helper to branch based on arch
-RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
+RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", 0);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank message size
 
 
@@ -2287,15 +2287,15 @@ static ncclResult_t topoGetAlgoInfo(
     }
   } else {
     rcclUpdateThreadThreshold(comm, nBytes, info, threadThreshold);
-    INFO(NCCL_INIT, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
+    INFO(NCCL_TUNING, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
 
     int minNChannels = ncclParamMinNchannels();
     // Ring/Tree channel tuning
-    INFO(NCCL_INIT, "minNChannels:%i", minNChannels);
+    INFO(NCCL_TUNING, "minNChannels:%i", minNChannels);
     if(nBytes < nc * nt * threadThreshold && nc > minNChannels){
       nc = std::max(1,std::max(minNChannels,(int)(nBytes/std::max(1,nt * threadThreshold))));
     }
-    INFO(NCCL_INIT, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
+    INFO(NCCL_TUNING, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
   }
 

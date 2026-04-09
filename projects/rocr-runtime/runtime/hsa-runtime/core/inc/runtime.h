@@ -383,6 +383,10 @@ class Runtime {
   hsa_status_t SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent, uint32_t num_dep_signals,
                            const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
+  hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
+                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+                                        hsa_signal_t completion_signal);
+
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
                                             uint64_t* offset, uint64_t flags);
 
