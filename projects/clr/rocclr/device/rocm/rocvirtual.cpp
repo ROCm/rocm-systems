@@ -1468,6 +1468,156 @@ bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
 }
 
 // ================================================================================================
+// Fast-path graph dispatch: pre-built flat contiguous AQL packet buffer.
+// Performs a single atomic queue reservation, a bulk memcpy (handling wrap-around),
+// sets the last packet's completion signal if required, writes valid headers
+// (inner packets first, first packet last for ordering), then rings the doorbell once per
+// written chunk to preserve CPU-GPU overlap. Falls back to per-packet dispatch when profiling
+// is active.
+bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
+                                            const std::vector<uint32_t>& validFullHeaders,
+                                            amd::AccumulateCommand* vcmd, bool attach_signal) {
+  if (vcmd == nullptr || flatPacketData.empty() || validFullHeaders.empty()) {
+    return false;
+  }
+
+  const size_t numPackets = validFullHeaders.size();
+  if (flatPacketData.size() != numPackets * 64) {
+    return false;
+  }
+
+  std::scoped_lock lock(execution());
+  profilingBegin(*vcmd);
+  dispatchBlockingWait();
+
+  // For profiling (timestamp_ != nullptr), every packet needs its own signal.
+  // Fall back to the per-pointer dispatch path in that case.
+  if (timestamp_ != nullptr) {
+    profilingEnd();
+    return false;
+  }
+
+  const uint32_t queueSize = gpu_queue_->size;
+  const uint32_t queueMask = queueSize - 1;
+  const uint32_t sw_queue_size = queueMask;
+  static constexpr size_t kPacketSize = sizeof(hsa_kernel_dispatch_packet_t);
+
+  // For graphs that exceed the queue size, fall back to the chunked path.
+  if (numPackets > sw_queue_size) {
+    profilingEnd();
+    return false;
+  }
+
+  // Reserve the slots for the batch
+  uint64_t startIndex = Hsa::queue_add_write_index_screlease(gpu_queue_, numPackets);
+  setFenceDirty(true);
+
+  // Make sure the slots for the batch are free for usage
+  while (((startIndex + numPackets - 1) - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >=
+         sw_queue_size) {
+    amd::Os::yield();
+  }
+
+  // --- Unpack first/last headers from the full dword; apply system-scope if needed ---
+  // validFullHeaders stores the AQL full_header dword: low 16 = header, high 16 = setup.
+  uint16_t firstHeader = static_cast<uint16_t>(validFullHeaders[0]);
+  uint16_t firstSetup  = static_cast<uint16_t>(validFullHeaders[0] >> 16);
+  uint16_t lastHeader  = static_cast<uint16_t>(validFullHeaders[numPackets - 1]);
+  if (addSystemScope_) {
+    firstHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+    firstHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+    lastHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    lastHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    addSystemScope_ = false;
+  }
+
+  // Update cached fence state from the last packet's release scope.
+  auto expected_fence_state =
+      extractAqlBits(lastHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
+  if (expected_fence_state == amd::Device::kCacheStateSystem) {
+    setFenceDirty(false);
+  }
+  fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
+
+  // Bulk memcpy of all packet bodies to queue
+  uint8_t* queueBase = static_cast<uint8_t*>(gpu_queue_->base_address);
+  const size_t startSlot = startIndex & queueMask;
+  const size_t endSlot = (startIndex + numPackets - 1) & queueMask;
+
+  if (startSlot + numPackets <= queueSize) {
+    // Common case: no circular-buffer wrap-around.
+    memcpy(queueBase + startSlot * kPacketSize, flatPacketData.data(),
+           numPackets * kPacketSize);
+  } else {
+    // Wrap-around: split into two memcpys.
+    const size_t firstCount = queueSize - startSlot;
+    const size_t secondCount = numPackets - firstCount;
+    memcpy(queueBase + startSlot * kPacketSize, flatPacketData.data(),
+           firstCount * kPacketSize);
+    memcpy(queueBase, flatPacketData.data() + firstCount * kPacketSize,
+           secondCount * kPacketSize);
+  }
+
+  //  Add blocking command attach signal only for the last packet if requested
+  auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+      queueBase + endSlot * kPacketSize);
+  if (attach_signal) {
+    lastSlotPtr->completion_signal = Barriers().ActiveSignal();
+  }
+
+  // Write valid headers same philosophy as the original path
+  // Commit the first chunk (packets 0..kPeriod-1) together so the GPU can
+  // start executing while the CPU writes headers for subsequent chunks.  Within each
+  // chunk the inner packets (indices > 0) are written before index 0 to preserve the
+  // AQL protocol invariant that a valid header 0 is the last thing the GPU sees.
+  // For chunk 0 specifically that means writing 1..kPeriod-1 first, then packet 0,
+  // then ringing the doorbell.  Subsequent chunks have no such ordering constraint
+  // among themselves (packet 0 is already committed), so they can be written and
+  // doorbelled sequentially.
+
+  const size_t kPeriod = DEBUG_HIP_GRAPH_BATCH_SIZE;
+  auto* first_loc =
+      reinterpret_cast<uint32_t*>(queueBase + startSlot * kPacketSize);
+
+  // Write headers for [chunkStart, chunkEnd) and ring the doorbell.
+  // commitPkt0: when true, packet 0 is skipped in the main loop and written last
+  //             (commits the entire first chunk atomically per the AQL protocol).
+  auto writeChunkAndDoorbell = [&](size_t chunkStart, size_t chunkEnd, bool commitPkt0) {
+    for (size_t i = commitPkt0 ? 1 : chunkStart; i < chunkEnd; ++i) {
+      const uint64_t idx = startIndex + i;
+      auto* aql_loc =
+          reinterpret_cast<uint32_t*>(queueBase + (idx & queueMask) * kPacketSize);
+      const uint32_t dword = validFullHeaders[i];
+      uint16_t hdr = (i == numPackets - 1) ? lastHeader : static_cast<uint16_t>(dword);
+      packet_store_release(aql_loc, hdr, static_cast<uint16_t>(dword >> 16));
+    }
+    if (commitPkt0) {
+      packet_store_release(first_loc, firstHeader, firstSetup);
+    }
+    Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, startIndex + chunkEnd - 1);
+  };
+
+  // First chunk: hold packet 0 back so the GPU sees the full chunk committed atomically
+  // when the doorbell fires. Subsequent chunks write in forward order — packet N of each
+  // chunk becomes valid as soon as its header is written, letting the GPU pipeline with
+  // the CPU while it writes the rest of the chunk.
+  const size_t firstChunkEnd = std::min(kPeriod, numPackets);
+  writeChunkAndDoorbell(0, firstChunkEnd, true);
+  // We can commit the rest of the chunks in forward order
+  for (size_t chunkStart = firstChunkEnd; chunkStart < numPackets; chunkStart += kPeriod) {
+    writeChunkAndDoorbell(chunkStart, std::min(chunkStart + kPeriod, numPackets), false);
+  }
+  hasPendingDispatch_ = true;
+
+  // Track progress using the last queue slot.
+  TrackQueueProgress(*lastSlotPtr, startIndex + numPackets - 1);
+
+  profilingEnd();
+  return true;
+}
+
+// ================================================================================================
 bool VirtualGPU::dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet,
                                           const uint32_t gfxVersion, bool blocking,
                                           const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi) {

@@ -1322,6 +1322,14 @@ class VirtualDevice : public amd::ReferenceCountedObject {
                                       const std::vector<const std::string*>& kernelNames,
                                       amd::AccumulateCommand* vcmd = nullptr,
                                       bool attach_signal = false) = 0;
+
+  //! Fast-path dispatch using a pre-built contiguous flat packet buffer.
+  virtual bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
+                                          const std::vector<uint32_t>& validFullHeaders,
+                                          amd::AccumulateCommand* vcmd = nullptr,
+                                          bool attach_signal = false) {
+    return false;
+  }
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
