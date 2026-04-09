@@ -39,7 +39,6 @@ public:
   std::recursive_mutex& lock() { return lock_; }
 
   void addStream(hip::Stream* stream);
-  void removeStream(hip::Stream* stream);
 
   hipError_t synchronize();
   hipError_t recordEvent(hipEvent_t event);

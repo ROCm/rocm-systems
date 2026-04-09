@@ -396,6 +396,7 @@ typedef enum __HIP_NODISCARD hipError_t {
   hipErrorInvalidResourceType = 914,       ///< Resource type is not valid for the operation.
   hipErrorInvalidResourceConfiguration = 915,  ///< Resource configuration is not valid for
                                                ///< the operation.
+  hipErrorStreamDetached = 916,            ///< The stream is detached.                                              
   hipErrorUnknown = 999,                   ///< Unknown error.
   // HSA Runtime Error Codes start here.
   hipErrorRuntimeMemory = 1052,  ///< HSA runtime memory call returned error.  Typically not seen

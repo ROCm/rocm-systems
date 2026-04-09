@@ -53,6 +53,7 @@ hipError_t ExecutionCtx::Create() {
 ExecutionCtx::~ExecutionCtx() {
   delete resourceDesc_;
   resourceDesc_ = nullptr;
+  streams_.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -62,12 +63,6 @@ void ExecutionCtx::addStream(hip::Stream* stream) {
   std::unique_lock lk(streamSetLock_);
   streams_.insert(stream);
 }
-
-void ExecutionCtx::removeStream(hip::Stream* stream) {
-  std::unique_lock lk(streamSetLock_);
-  streams_.erase(stream);
-}
-
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -429,33 +424,33 @@ hipError_t ExecutionCtx::devResourceGenerateDesc(hipDevResourceDesc_t* phDesc,
   bool familyChecked = false;
   int refDeviceId = -1;
   for (unsigned int i = 0; i < nbResources; i++) {
-      // Validate SM Resource Alignment
-      if (resources[i].sm.smCount == 0)
-        return hipErrorInvalidResourceConfiguration;
-      if (refSmAlignment == 0) {
-        refSmAlignment = resources[i].sm.smCoscheduledAlignment;
-      } else if (resources[i].sm.smCoscheduledAlignment != refSmAlignment) {
-        return hipErrorInvalidResourceConfiguration;
-      }
-      // Validate SM Resource Device ID
-      int devId = readDeviceId(&resources[i]);
-      if (refDeviceId == -1) {
-        refDeviceId = devId;
-      } else if (devId != refDeviceId ){
-        return hipErrorInvalidResourceConfiguration;
-      }
-      uint32_t resId = readResourceId(&resources[i]);
-      if (resId != 0) {
-        const auto* meta = lookupResourceMeta(devId, resId);
-        if (meta != nullptr) {
-          if (!familyChecked) {
-            refFamilyId = meta->familyId;
-            familyChecked = true;
-          } else if (meta->familyId != refFamilyId) {
-            return hipErrorInvalidResourceConfiguration;
-          }
+    // Validate SM Resource Alignment
+    if (resources[i].sm.smCount == 0)
+      return hipErrorInvalidResourceConfiguration;
+    if (refSmAlignment == 0) {
+      refSmAlignment = resources[i].sm.smCoscheduledAlignment;
+    } else if (resources[i].sm.smCoscheduledAlignment != refSmAlignment) {
+      return hipErrorInvalidResourceConfiguration;
+    }
+    // Validate SM Resource Device ID
+    int devId = readDeviceId(&resources[i]);
+    if (refDeviceId == -1) {
+      refDeviceId = devId;
+    } else if (devId != refDeviceId ){
+      return hipErrorInvalidResourceConfiguration;
+    }
+    uint32_t resId = readResourceId(&resources[i]);
+    if (resId != 0) {
+      const auto* meta = lookupResourceMeta(devId, resId);
+      if (meta != nullptr) {
+        if (!familyChecked) {
+          refFamilyId = meta->familyId;
+          familyChecked = true;
+        } else if (meta->familyId != refFamilyId) {
+          return hipErrorInvalidResourceConfiguration;
         }
       }
+    }
   }
 
   auto* desc = new DevResourceDesc();
@@ -699,7 +694,7 @@ hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource
         resource->sm.smCount = prop.multiProcessorCount;
       } else {
         unsigned int cnt = 0;
-        for (auto word : cuMask) cnt += __builtin_popcount(word);
+        for (auto word : cuMask) cnt += amd::countBitsSet32(word);
         resource->sm.smCount = cnt;
       }
       resource->sm.smCoscheduledAlignment = 2;

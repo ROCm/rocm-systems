@@ -1182,6 +1182,8 @@ inline static hipError_t hipCUDAErrorTohipError(cudaError_t cuError) {
       return hipErrorInvalidResourceType;
     case cudaErrorInvalidResourceConfiguration:
       return hipErrorInvalidResourceConfiguration;
+    case cudaErrorStreamDetached:
+      return hipErrorStreamDetached;
     case cudaErrorUnknown:
     default:
       return hipErrorUnknown;  // Note - translated error.
@@ -1312,6 +1314,8 @@ inline static hipError_t hipCUResultTohipError(CUresult cuError) {
       return hipErrorStreamCaptureWrongThread;
     case CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE:
       return hipErrorGraphExecUpdateFailure;
+    case CUDA_ERROR_STREAM_DETACHED:
+      return hipErrorStreamDetached;
     case CUDA_ERROR_UNKNOWN:
     default:
       return hipErrorUnknown;  // Note - translated error.
@@ -1442,6 +1446,8 @@ inline static CUresult hipErrorToCUResult(hipError_t hError) {
       return CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD;
     case hipErrorGraphExecUpdateFailure:
       return CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE;
+    case hipErrorStreamDetached:
+      return CUDA_ERROR_STREAM_DETACHED;
     case hipErrorUnknown:
     default:
       return CUDA_ERROR_UNKNOWN;  // Note - translated error.
@@ -1636,6 +1642,8 @@ inline static cudaError_t hipErrorToCudaError(hipError_t hError) {
       return cudaErrorInvalidResourceType;
     case hipErrorInvalidResourceConfiguration:
       return cudaErrorInvalidResourceConfiguration;
+    case hipErrorStreamDetached:
+      return cudaErrorStreamDetached;
     // HSA: does not exist in CUDA
     case hipErrorRuntimeMemory:
     // HSA: does not exist in CUDA

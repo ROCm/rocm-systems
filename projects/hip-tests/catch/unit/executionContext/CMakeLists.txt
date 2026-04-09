@@ -1,5 +1,6 @@
 set(TEST_SRC
   hipGreenCtxCreate.cc
+  hipExecutionCtxStreamCreate.cc
   hipExecutionCtxRecordEvent.cc
   hipExecutionCtxResourceSplit.cc
 )
