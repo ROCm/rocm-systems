@@ -22,8 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "envvar.hpp"
-
 #include "build_info.hpp"
 #if defined(USE_GDA)
 #include "gda/topology.hpp"
