@@ -67,6 +67,7 @@ public:
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_freq_sample& sample);
     void handle(const backtrace_region_sample& sample);
+    void handle(const kfd_sample& sample);
 
 private:
     void       initialize_perfetto();

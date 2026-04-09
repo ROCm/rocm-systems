@@ -1215,6 +1215,18 @@ rocprofsys_finalize_hidden(void)
         if(attach_add_session_id)
             settings::default_process_suffix() = fmt::format("%pid%-{}", session_id++);
 
+        // Disable Timemory file output for disabled ranks
+        if(!config::output_filtering::is_output_enabled_for_current_mpi_rank())
+        {
+            auto* _settings = tim::settings::instance();
+            if(_settings)
+            {
+                _settings->file_output() = false;
+                _settings->text_output() = false;
+                _settings->json_output() = false;
+            }
+        }
+
         LOG_DEBUG("Finalizing timemory...");
         tim::timemory_finalize(_timemory_manager.get());
 
