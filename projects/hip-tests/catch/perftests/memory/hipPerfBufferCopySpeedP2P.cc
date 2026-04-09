@@ -120,8 +120,7 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
   if (gpuCount < 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   vector<double> timeMs(gpuCount * gpuCount, 0.);
   vector<double> bandWidth(gpuCount * gpuCount, 0.);
@@ -263,8 +262,7 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
   if (gpuCount < 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   }
   vector<double> timeMs(gpuCount * gpuCount, 0.);
   vector<double> bandWidth(gpuCount * gpuCount, 0.);

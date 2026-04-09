@@ -48,8 +48,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
     int isPageableHMM = 0;
     HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
     if (!isPageableHMM) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
     }
 #endif
 
@@ -91,7 +90,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
 
     REQUIRE(IfTestPassed);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -144,7 +143,7 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
     }
     HIP_CHECK(hipFree(Hmm));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -189,6 +188,6 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
     HIP_CHECK(hipFree(Hmm));
     delete[] OutData;
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }

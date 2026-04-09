@@ -211,8 +211,7 @@ HIP_TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
   int isPageableHMM = 0;
   HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
   if (!isPageableHMM) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
   }
 #endif
 

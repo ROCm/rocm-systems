@@ -106,15 +106,13 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count <= 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   int peer_access = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&peer_access, 0, 1));
   if (!peer_access) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
   constexpr size_t kNumElements = NUM_ELM;

@@ -84,8 +84,7 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -144,8 +143,7 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -224,8 +222,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));

@@ -152,7 +152,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_MaskedDevices) {
     ret = hipDeviceGetPCIBusIdTests::testWithMaskedDevices(count);
     REQUIRE(ret == true);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
@@ -198,8 +198,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci) {
     pclose(fpipe);
 
     if (lspciCheck == nullptr) {
-      HipTest::HIP_SKIP_TEST("lspci is not available on this system.");
-      return;
+      HIP_SKIP_TEST("lspci is not available on this system.");
     }
   }
 
