@@ -3296,8 +3296,13 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
   }
 }
 
-void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
+void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue,
+                                        bool coop_queue,
                                         const std::vector<uint32_t>& cuMask) {
+  // Ensure the transfer queue exists before taking active_queue_access_,
+  // since fillBuffer needs it and its creation also takes the same lock.
+  xferQueue();
+
   decltype(queuePool_)::value_type::iterator qIter;
   bool found = false;
 
@@ -3335,6 +3340,35 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
             "Failed to create hostcall buffer for hardware queue %p", queue->base_address);
     return nullptr;
   }
+
+  // Allocate the occupied bitfield in device-local memory
+  uint32_t occupiedWords = (numPackets + 31) / 32;
+  size_t occupiedSize = occupiedWords * sizeof(uint32_t);
+  amd::Buffer* occupiedBuf = new (context()) amd::Buffer(context(), CL_MEM_READ_WRITE,
+                                                         occupiedSize, nullptr);
+  if (!occupiedBuf || !occupiedBuf->create()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to allocate occupied bitfield for hostcall buffer");
+    if (occupiedBuf) occupiedBuf->release();
+    context().svmFree(buffer);
+    return nullptr;
+  }
+
+  device::Memory* occupiedMem = occupiedBuf->getDeviceMemory(*this);
+  if (!occupiedMem) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to get device memory for occupied bitfield");
+    occupiedBuf->release();
+    context().svmFree(buffer);
+    return nullptr;
+  }
+
+  // Zero-initialize the occupied bitfield
+  uint32_t zero = 0;
+  xferMgr().fillBuffer(*occupiedMem, &zero, sizeof(zero),
+                       amd::Coord3D(occupiedSize, 1, 1), amd::Coord3D(0, 0, 0),
+                       amd::Coord3D(occupiedSize, 1, 1), true);
+
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created hostcall buffer %p for hardware queue %p", buffer,
           queue->base_address);
   if (!coop_queue) {
@@ -3342,7 +3376,7 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
   } else {
     coopHostcallBuffer_ = buffer;
   }
-  if (!amd::enableHostcalls(*this, buffer, numPackets)) {
+  if (!amd::enableHostcalls(*this, buffer, numPackets, occupiedBuf)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
             buffer);
     return nullptr;
