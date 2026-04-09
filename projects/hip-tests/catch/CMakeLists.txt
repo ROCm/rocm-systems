@@ -374,6 +374,7 @@ if(HIP_PLATFORM STREQUAL "nvidia")
 endif()
 
 add_custom_target(build_tests ALL)
+add_dependencies(build_tests hip_tests_config)
 add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
 add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
 # Tests folder
