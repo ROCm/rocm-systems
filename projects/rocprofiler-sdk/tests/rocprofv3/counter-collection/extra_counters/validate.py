@@ -77,69 +77,67 @@ def test_validate_counter_collection_pmc1_extra_counters(input_data: pd.DataFram
 
 def test_mixed_valid_invalid_counters(input_data: pd.DataFrame):
     """
-    Verify that valid counters work even when the YAML file contains invalid ones.
-    This tests graceful degradation - invalid entries should be skipped without
-    breaking the collection of valid counters.
+    Verify that valid counters are still collected when the YAML file also
+    contains invalid counter definitions. Invalid entries should be skipped
+    without breaking collection of valid ones.
     """
     df = input_data
 
-    # Basic sanity checks
     assert not df.empty
-    assert len(df["Counter_Value"]) > 0
 
-    # Get all counter names that were actually collected
+    required_cols = {"Counter_Name", "Counter_Value"}
+    missing = required_cols - set(df.columns)
+    assert not missing, f"Missing expected columns: {missing}"
+
     collected_counters = set(df["Counter_Name"].unique())
 
-    # The valid counter should be present
     assert (
         "TEST_YAML_LOAD" in collected_counters
-    ), f"Expected TEST_YAML_LOAD counter, got: {collected_counters}"
+    ), f"Expected TEST_YAML_LOAD in collected counters, got: {collected_counters}"
 
-    # Invalid counter should NOT be present
     assert (
         "INVALID_COUNTER_NO_PAYLOAD" not in collected_counters
     ), "Invalid counter should not appear in output"
 
-    # All collected counter values should be valid (non-negative)
-    assert (df["Counter_Value"].astype(int).values >= 0).all()
+    # In this test, only the valid counter should be collected
+    assert (
+        df["Counter_Name"] == "TEST_YAML_LOAD"
+    ).all(), f"Unexpected counter names found: {df['Counter_Name'].unique().tolist()}"
 
-    # Ensure all counter names are TEST_YAML_LOAD (invalid ones should be skipped)
-    assert df["Counter_Name"].str.contains("TEST_YAML_LOAD").all()
+    values = pd.to_numeric(df["Counter_Value"], errors="raise")
+    assert (values >= 0).all(), "Found negative counter values"
 
 
 def test_duplicate_counter_handling(input_data: pd.DataFrame):
     """
-    Verify that duplicate counter definitions don't create corrupt output.
-    The tool should handle duplicates gracefully - either using the first definition
-    or producing a clean error, but not generating invalid data.
+    Verify that duplicate counter definitions do not corrupt output.
+    Expected behavior: the duplicate definition is ignored and the counter
+    is collected cleanly once per dispatch.
     """
     df = input_data
 
-    # Basic sanity checks
     assert not df.empty
 
-    # Get unique counter names
-    counter_names = df["Counter_Name"].unique().tolist()
+    required_cols = {"Counter_Name", "Counter_Value", "Dispatch_Id"}
+    missing = required_cols - set(df.columns)
+    assert not missing, f"Missing expected columns: {missing}"
 
-    # The duplicate counter should appear in output
-    assert "TEST_YAML_LOAD" in counter_names
+    # Only the requested counter should appear in this test
+    assert (
+        df["Counter_Name"] == "TEST_YAML_LOAD"
+    ).all(), f"Unexpected counter names found: {df['Counter_Name'].unique().tolist()}"
 
-    # Verify all counter values are valid
-    assert (df["Counter_Value"].astype(int).values >= 0).all()
+    # Values should be numeric and non-negative
+    values = pd.to_numeric(df["Counter_Value"], errors="raise")
+    assert (values >= 0).all(), "Found negative counter values"
 
-    # Ensure all counter names are TEST_YAML_LOAD (duplicates should be resolved)
-    assert df["Counter_Name"].str.contains("TEST_YAML_LOAD").all()
-
-    # Check that duplicate doesn't cause malformed output
-    # Each dispatch should have a consistent set of counters
-    for dispatch_id in df["Dispatch_Id"].unique():
-        dispatch_data = df[df["Dispatch_Id"] == dispatch_id]
-        # All rows for this dispatch should have the same counter name
-        # (no duplicate columns for the same counter)
-        counter_counts = dispatch_data["Counter_Name"].value_counts()
-        assert (
-            counter_counts <= 1
-        ).all(), f"Duplicate counter appears multiple times in dispatch {dispatch_id}: {counter_counts}"
+    # Ensure duplicate definitions do not produce repeated rows for the same
+    # dispatch/counter combination
+    dup_rows = df.duplicated(subset=["Dispatch_Id", "Counter_Name"], keep=False)
+    assert not dup_rows.any(), (
+        "Found duplicate rows for the same Dispatch_Id and Counter_Name:\n"
+        f"{df.loc[dup_rows, ['Dispatch_Id', 'Counter_Name', 'Counter_Value']]}"
+    )
 
 
 if __name__ == "__main__":
