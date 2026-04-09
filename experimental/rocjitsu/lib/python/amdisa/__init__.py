@@ -3,7 +3,7 @@
 
 """AMD machine-readable ISA specification parser and C++ code generator."""
 
-from amdisa.codegen import CodegenConfig, CodeGenerator, CppFile
+from amdisa.codegen import CodegenConfig, CodeGenerator, CppFile, gen_wait_counter_policy
 from amdisa.gpuisa import (
     InstEncoding,
     Instruction,

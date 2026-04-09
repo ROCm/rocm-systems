@@ -241,6 +241,17 @@ _CDNA_BASELINE: dict[str, list[tuple[str, int]]] = {
 
 _CDNA_ARCHES = {'cdna1', 'cdna2', 'cdna3', 'cdna4'}
 
+# Mapping from ISA name to the C++ WaitCounterType enum value used for
+# store-only vector memory operations.  ISAs not listed here use VMCNT.
+_VECTOR_STORE_COUNTER: dict[str, str] = {
+    'rdna1':  'VSCNT',
+    'rdna2':  'VSCNT',
+    'cdna4':  'STORECNT',
+    'rdna3':  'STORECNT',
+    'rdna3_5': 'STORECNT',
+    'rdna4':  'STORECNT',
+}
+
 
 class CodeGenerator:
     """Generates C++ code from a parsed machine-readable ISA specification.
@@ -5529,3 +5540,96 @@ class CodeGenerator:
             self.isa_spec.arch_name,
         )
         isa_struct_file.gen_code()
+
+
+def gen_wait_counter_policy(out_path: str) -> None:
+    """Generate ``shared/wait_counter_policy.h`` from the ISA counter table.
+
+    Produces two inline helpers:
+    - ``uses_split_vector_store_counter(rj_code_arch_t)`` — true when
+      the architecture tracks stores separately from loads.
+    - ``vector_store_counter_type(rj_code_arch_t)`` — returns the
+      ``WaitCounterType`` enum value for a pure store on the given arch.
+
+    Called automatically during ``--multi`` generation.
+    """
+    import os
+    import sys
+
+    shared_dir = os.path.join(out_path, 'shared')
+    os.makedirs(shared_dir, exist_ok=True)
+
+    # Build switch-case arms from the mapping table.
+    split_cases: list[str] = []
+    vscnt_cases: list[str] = []
+    storecnt_cases: list[str] = []
+    for isa_name, counter in sorted(_VECTOR_STORE_COUNTER.items()):
+        enum_name = f'ROCJITSU_CODE_ARCH_{isa_name.upper()}'
+        split_cases.append(f'  case {enum_name}:')
+        if counter == 'VSCNT':
+            vscnt_cases.append(f'  case {enum_name}:')
+        else:
+            storecnt_cases.append(f'  case {enum_name}:')
+
+    guard = 'ROCJITSU_ISA_ARCH_AMDGPU_SHARED_WAIT_COUNTER_POLICY_H_'
+    lines = [
+        '// Copyright (c) 2026 Advanced Micro Devices, Inc.',
+        '// SPDX-License-Identifier: MIT',
+        '',
+        '// Automatically generated — do not modify.',
+        '// Regenerate via: python -m amdisa --multi ... --gen-all',
+        '',
+        '/// @file wait_counter_policy.h',
+        '/// @brief Arch-specific wait counter type selection for AMDGPU memory ops.',
+        '',
+        f'#ifndef {guard}',
+        f'#define {guard}',
+        '',
+        '#include "rocjitsu/code/rj_code.h"',
+        '#include "rocjitsu/vm/amdgpu/wait_counters.h"',
+        '',
+        'namespace rocjitsu {',
+        'namespace amdgpu {',
+        '',
+        '/// @brief Return true if @p arch uses a dedicated counter for vector stores.',
+        'inline bool uses_split_vector_store_counter(rj_code_arch_t arch) {',
+        '  switch (arch) {',
+    ]
+    lines.extend(split_cases)
+    lines += [
+        '    return true;',
+        '  default:',
+        '    return false;',
+        '  }',
+        '}',
+        '',
+        '/// @brief Return the wait counter type for a store-only vector memory op.',
+        'inline WaitCounterType vector_store_counter_type(rj_code_arch_t arch) {',
+        '  switch (arch) {',
+    ]
+    if vscnt_cases:
+        lines.extend(vscnt_cases)
+        lines.append('    return WaitCounterType::VSCNT;')
+    if storecnt_cases:
+        lines.extend(storecnt_cases)
+        lines.append('    return WaitCounterType::STORECNT;')
+    lines += [
+        '  default:',
+        '    return WaitCounterType::VMCNT;',
+        '  }',
+        '}',
+        '',
+        '} // namespace amdgpu',
+        '} // namespace rocjitsu',
+        '',
+        f'#endif // {guard}',
+        '',
+    ]
+
+    filepath = os.path.join(shared_dir, 'wait_counter_policy.h')
+    with open(filepath, 'w') as f:
+        f.write('\n'.join(lines))
+
+    print(f'Generated shared/wait_counter_policy.h '
+          f'({len(_VECTOR_STORE_COUNTER)} split-counter arches)',
+          file=sys.stderr)

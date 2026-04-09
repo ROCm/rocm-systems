@@ -21,6 +21,7 @@ from amdisa import (
     Rdna4Profile,
 )
 from amdisa import xml_schema as xs
+from amdisa.codegen import gen_wait_counter_policy
 from amdisa.cross_isa import CrossIsaAnalyzer
 from amdisa.semantics import derive_all_semantics
 
@@ -116,6 +117,9 @@ def _run_multi(args) -> None:
         writer._write_shared_execute_templates()
 
     # Single unified shared execute header — no per-encoding stubs needed.
+
+    # Generate shared/wait_counter_policy.h (arch-specific store counter mapping).
+    gen_wait_counter_policy(args.output)
 
 
 def main() -> None:

@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// Automatically generated — do not modify.
+// Regenerate via: python -m amdisa --multi ... --gen-all
+
 /// @file wait_counter_policy.h
 /// @brief Arch-specific wait counter type selection for AMDGPU memory ops.
 
@@ -14,15 +17,11 @@ namespace rocjitsu {
 namespace amdgpu {
 
 /// @brief Return true if @p arch uses a dedicated counter for vector stores.
-///
-/// RDNA1/2 split stores into VSCNT; CDNA4, RDNA3/3.5, and RDNA4 split them
-/// into STORECNT. Older CDNA (1-3) and any unknown arch use VMCNT for
-/// everything.
 inline bool uses_split_vector_store_counter(rj_code_arch_t arch) {
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA4:
   case ROCJITSU_CODE_ARCH_RDNA1:
   case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA4:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
@@ -32,21 +31,19 @@ inline bool uses_split_vector_store_counter(rj_code_arch_t arch) {
   }
 }
 
-/// @brief Return the wait counter type for a store-only vector memory op on
-///        @p arch.
-///
-/// Callers should first check that the instruction is a pure store (not an
-/// atomic or load).  If `uses_split_vector_store_counter(arch)` is false the
-/// result is VMCNT.
+/// @brief Return the wait counter type for a store-only vector memory op.
 inline WaitCounterType vector_store_counter_type(rj_code_arch_t arch) {
-  if (!uses_split_vector_store_counter(arch))
-    return WaitCounterType::VMCNT;
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA1:
   case ROCJITSU_CODE_ARCH_RDNA2:
     return WaitCounterType::VSCNT;
-  default:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
     return WaitCounterType::STORECNT;
+  default:
+    return WaitCounterType::VMCNT;
   }
 }
 
