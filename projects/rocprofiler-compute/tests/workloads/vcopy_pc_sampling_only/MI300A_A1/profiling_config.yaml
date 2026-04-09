@@ -32,7 +32,6 @@ roof_only: false
 set_selected: null
 spatial_multiplexing: null
 specs: false
-subpath: gpu_model
 target: null
 torch_trace: false
 verbose: 1

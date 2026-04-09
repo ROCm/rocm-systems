@@ -954,7 +954,9 @@ class OmniSoC_Base:
                 try:
                     bench = load_bench([self.get_args().device])
                     result = bench.run_on_devices([self.get_args().device])
-                    bench.dump_csv(result, f"{self.get_args().output_directory}/roofline.csv")
+                    bench.dump_csv(
+                        result, f"{self.get_args().output_directory}/roofline.csv"
+                    )
                 except Exception as e:
                     console_error(
                         "roofline",
