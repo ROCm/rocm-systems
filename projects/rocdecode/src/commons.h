@@ -87,7 +87,13 @@ private:
 
 // Single global logger instance shared across all components. Log level is
 // controlled via the ROCDEC_LOG_LEVEL environment variable (default: critical).
-inline RocDecLogger g_rocdec_logger;
+// Meyer's singleton: initialized on first use (avoids static init order fiasco),
+// thread-safe by C++11 §6.7.
+inline RocDecLogger& RocDecGetLogger() {
+    static RocDecLogger instance;
+    return instance;
+}
+#define g_rocdec_logger (RocDecGetLogger())
 
 // RAII helper for function-scope entry/exit logging.
 // Keeps the start timestamp per call-scope (stack variable), making it
