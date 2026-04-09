@@ -58,22 +58,22 @@ namespace rocshmem
     long const retCode = numa.move_pages(0, numPages, pages.data(), NULL, status.data(), 0);
     if (retCode) {
       LOG_ERROR("Unable to collect page table information for allocated memory. "
-              "Ensure NUMA library is installed properly\n");
+                "Ensure NUMA library is installed properly");
       return -1;
     }
 
     size_t mistakeCount = 0;
     for (size_t i = 0; i < numPages; i++) {
       if (status[i] < 0) {
-        LOG_ERROR("Unexpected page status (%d) for page %zu\n", status[i], i);
+        LOG_ERROR("Unexpected page status (%d) for page %zu", status[i], i);
         return -1;
       }
       if (status[i] != targetId) mistakeCount++;
     }
     if (mistakeCount > 0) {
-      LOG_ERROR("%zu out of %zu pages for memory allocation were not on NUMA node %d.\n"
-              " This could be due to hardware memory issues, or the use of numa-rebalancing daemons such as numad\n",
-              mistakeCount, numPages, targetId);
+      LOG_ERROR("%zu out of %zu pages for memory allocation were not on NUMA node %d\n"
+                "  This could be due to hardware memory issues, or the use of numa-rebalancing daemons such as numad\n",
+                mistakeCount, numPages, targetId);
       return -1;
     }
     return ROCSHMEM_SUCCESS;

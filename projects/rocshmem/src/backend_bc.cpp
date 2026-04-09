@@ -79,6 +79,7 @@ void Backend::init(void) {
    * Copy log state to device constant memory for device-side logging.
    */
   log_state_device_t host_log_state{log_pe_number,
+                                    envvar::log_flags.show_error,
                                     envvar::log_flags.show_warn,
                                     envvar::log_flags.show_info,
                                     envvar::log_flags.show_trace,

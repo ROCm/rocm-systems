@@ -292,7 +292,7 @@ namespace envvar {
     inline namespace _debug {
       enum class debug_level {
         NONE,
-        ERROR = NONE,
+        ERROR,
         WARN,
         ENV,
         VERSION,
@@ -311,6 +311,7 @@ namespace envvar {
       enum class env_print_mode { MODIFIED, ALL, FULL };
 
       struct debug_flags {
+        const bool show_error;
         const bool show_version;
         const bool show_env;
         const env_print_mode env_mode;

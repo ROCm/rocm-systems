@@ -58,6 +58,7 @@ namespace envvar {
     using types::env_print_mode;
     auto lvl = envvar::debug_level.get_value();
 
+    bool error    = (lvl >= debug_level::ERROR);
     bool ver      = (lvl >= debug_level::VERSION);
     bool env      = (lvl >= debug_level::ENV);
     auto env_mode = env_print_mode::MODIFIED;
@@ -75,7 +76,8 @@ namespace envvar {
         size_t next = val.find(':', pos + 1);
         std::string mod = val.substr(pos + 1, next == std::string::npos ? next : next - pos - 1);
         std::transform(mod.begin(), mod.end(), mod.begin(), ::tolower);
-        if      (mod == "noversion")  ver   = false;
+        if      (mod == "noerror")    error = false;
+        else if (mod == "noversion")  ver   = false;
         else if (mod == "noenv")      env   = false;
         else if (mod == "noinfo")     info  = false;
         else if (mod == "nowarn")     warn  = false;
@@ -103,7 +105,7 @@ namespace envvar {
         pos = next;
       }
     }
-    return {ver, env, env_mode, info, warn, trace, color};
+    return {error, ver, env, env_mode, info, warn, trace, color};
   }
 
   const types::debug_flags log_flags = make_debug_flags();
@@ -272,8 +274,10 @@ namespace envvar {
 
       std::ostream& operator<<(std::ostream& os, const debug_level& level) {
         switch (level) {
-        case debug_level::NONE:  // also debug_level::ERROR
+        case debug_level::NONE:
           os << "NONE"; break;
+        case debug_level::ERROR:
+          os << "ERROR"; break;
         case debug_level::VERSION:
           os << "VERSION"; break;
         case debug_level::WARN:
