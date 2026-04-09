@@ -144,7 +144,8 @@ bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext
 }
 
 // ================================================================================================
-bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset) {
+bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset,
+            void *image_srd, const unsigned image_srd_size) {
   assert(mem->getInteropObj() != nullptr);
   assert(mem->getInteropObj()->asGLObject() != nullptr);
 
@@ -181,7 +182,13 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
     return false;
   *handle = reinterpret_cast<hsa_handle_t>(glResourceData.handle);
   *offset = static_cast<int>(glResourceData.offset);
-
+  if (image_srd_size >= glResourceData.textureSRDSize) {
+    std::memcpy(image_srd, glResourceData.textureSRD, glResourceData.textureSRDSize);
+  } else {
+    LogError("image_srd_size %u < glResourceData.textureSRDSize %u", image_srd_size,
+             glResourceData.textureSRDSize);
+    return false;
+  }
   return true;
 }
 
