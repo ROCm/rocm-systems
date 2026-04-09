@@ -400,7 +400,7 @@ class TestBuildAnalysisResultKeyMapping:
 
 
 # ---------------------------------------------------------------------------
-# ROCM-21399: str path coercion (analyze_database, analyze_source, validate_database)
+# str path coercion (analyze_database, analyze_source, validate_database)
 # ---------------------------------------------------------------------------
 
 
