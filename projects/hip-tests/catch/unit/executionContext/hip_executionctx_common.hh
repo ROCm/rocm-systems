@@ -36,7 +36,7 @@ inline void RunVectorAddOnResource(hipDevResource* resource, int device) {
   hipDevResourceDesc_t desc{};
   HIP_CHECK(hipDevResourceGenerateDesc(&desc, resource, 1));
 
-  hipGreenCtx_t ctx = nullptr;
+  hipExecutionCtx_t ctx = nullptr;
   HIP_CHECK(hipGreenCtxCreate(&ctx, desc, device, 0));
   REQUIRE(ctx != nullptr);
 

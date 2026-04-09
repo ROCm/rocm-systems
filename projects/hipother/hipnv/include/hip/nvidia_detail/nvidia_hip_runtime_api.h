@@ -463,7 +463,7 @@ typedef enum cudaLimit hipLimit_t;
 typedef enum cudaFuncAttribute hipFuncAttribute;
 typedef enum cudaFuncCache hipFuncCache_t;
 typedef CUcontext hipCtx_t;
-typedef cudaExecutionContext_t hipGreenCtx_t;
+typedef cudaExecutionContext_t hipExecutionCtx_t;
 typedef cudaDevResourceDesc_t hipDevResourceDesc_t;
 typedef cudaDevResource hipDevResource;
 typedef cudaDevSmResourceGroupParams hipDevSmResourceGroupParams;
@@ -3600,34 +3600,34 @@ inline static hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResou
   return hipCUDAErrorTohipError(cudaDeviceGetDevResource(device, resource, type));
 }
 
-inline static hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc,
+inline static hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc,
                                            int device, unsigned int flags) {
   return hipCUDAErrorTohipError(cudaGreenCtxCreate(ctx, desc, device, flags));
 }
 
-inline static hipError_t hipExecutionCtxDestroy(hipGreenCtx_t ctx) {
+inline static hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx) {
   return hipCUDAErrorTohipError(cudaExecutionCtxDestroy(ctx));
 }
 
-inline static hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
+inline static hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
                                                       unsigned int flags, int priority) {
   return hipCUDAErrorTohipError(cudaExecutionCtxStreamCreate(stream, greenctx, flags, priority));
 }
 
-inline static hipError_t hipDeviceGetExecutionCtx(hipGreenCtx_t* ctx, int device) {
+inline static hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device) {
   return hipCUDAErrorTohipError(cudaDeviceGetExecutionCtx(ctx, device));
 }
 
-inline static hipError_t hipExecutionCtxGetDevResource(hipGreenCtx_t ctx, hipDevResource* resource,
+inline static hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
                                                         hipDevResourceType type) {
   return hipCUDAErrorTohipError(cudaExecutionCtxGetDevResource(ctx, resource, type));
 }
 
-inline static hipError_t hipExecutionCtxGetDevice(int* device, hipGreenCtx_t ctx) {
+inline static hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx) {
   return hipCUDAErrorTohipError(cudaExecutionCtxGetDevice(device, ctx));
 }
 
-inline static hipError_t hipExecutionCtxGetId(hipGreenCtx_t ctx, unsigned long long* ctxId) {
+inline static hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId) {
   return hipCUDAErrorTohipError(cudaExecutionCtxGetId(ctx, ctxId));
 }
 
@@ -3636,15 +3636,15 @@ inline static hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevReso
   return hipCUDAErrorTohipError(cudaStreamGetDevResource(hStream, resource, type));
 }
 
-inline static hipError_t hipExecutionCtxRecordEvent(hipGreenCtx_t ctx, hipEvent_t event) {
+inline static hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   return hipCUDAErrorTohipError(cudaExecutionCtxRecordEvent(ctx, event));
 }
 
-inline static hipError_t hipExecutionCtxSynchronize(hipGreenCtx_t ctx) {
+inline static hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx) {
   return hipCUDAErrorTohipError(cudaExecutionCtxSynchronize(ctx));
 }
 
-inline static hipError_t hipExecutionCtxWaitEvent(hipGreenCtx_t ctx, hipEvent_t event) {
+inline static hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   return hipCUDAErrorTohipError(cudaExecutionCtxWaitEvent(ctx, event));
 }
 

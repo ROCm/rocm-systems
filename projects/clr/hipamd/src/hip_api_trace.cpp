@@ -885,10 +885,10 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
                                  hipDevice_t dev);
 hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
-hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags);
-hipError_t hipExecutionCtxDestroy(hipGreenCtx_t ctx);
-hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
+hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
                                         unsigned int flags, int priority);
 hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
                                    hipDevResourceType type);
@@ -903,16 +903,16 @@ hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
 hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* desc,
                                        hipDevResource* resources,
                                        unsigned int nbResources);
-hipError_t hipDeviceGetExecutionCtx(hipGreenCtx_t* ctx, int device);
-hipError_t hipExecutionCtxGetDevResource(hipGreenCtx_t ctx, hipDevResource* resource,
+hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device);
+hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
                                           hipDevResourceType type);
-hipError_t hipExecutionCtxGetDevice(int* device, hipGreenCtx_t ctx);
-hipError_t hipExecutionCtxGetId(hipGreenCtx_t ctx, unsigned long long* ctxId);
+hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId);
 hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
                                     hipDevResourceType type);
-hipError_t hipExecutionCtxRecordEvent(hipGreenCtx_t ctx, hipEvent_t event);
-hipError_t hipExecutionCtxSynchronize(hipGreenCtx_t ctx);
-hipError_t hipExecutionCtxWaitEvent(hipGreenCtx_t ctx, hipEvent_t event);
+hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 }  // namespace hip
 
 namespace hip {

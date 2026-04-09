@@ -5,9 +5,9 @@
  */
 
 /**
- * @addtogroup hipGreenCtxResourceSplit hipGreenCtxResourceSplit
+ * @addtogroup hipExecutionCtxResourceSplit hipExecutionCtxResourceSplit
  * @{
- * @ingroup GreenContextTest
+ * @ingroup ExecutionContextTest
  * `hipDevSmResourceSplit` and `hipDevSmResourceSplitByCount` APIs
  */
 
@@ -23,7 +23,7 @@
  *  - Splits device SM resources into 2 explicit groups via hipDevSmResourceSplit
  *    and verifies the output resource counts match the request.
  */
-HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Sanity) {
+HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Sanity) {
   HIP_CHECK(hipSetDevice(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Sanity) {
  *    mode (result=NULL) to query possible groups, then performs the actual split
  *    and verifies group counts and SM totals.
  */
-HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Sanity) {
+HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Sanity) {
   HIP_CHECK(hipSetDevice(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -101,7 +101,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Sanity) {
  *    NULL input, NULL groupParams, non-zero flags, wrong resource type,
  *    smCount < 2, and smCount exceeding total SMs.
  */
-HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Negative) {
+HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Negative) {
   HIP_CHECK(hipSetDevice(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -159,10 +159,10 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Negative) {
  * ------------------------
  *  - Splits SM resources into 2 explicit groups via hipDevSmResourceSplit using
  *    a 60/40 split.  Any SMs left over due to alignment are captured in the
- *    remainder.  Creates a green context and stream from each partition, runs a
+ *    remainder.  Creates a execution context and stream from each partition, runs a
  *    vectorADD kernel, and verifies correctness.
  */
-HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Functional) {
+HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Functional) {
   HIP_CHECK(hipSetDevice(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -204,7 +204,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Functional) {
  *  - Validates error codes from hipDevSmResourceSplitByCount for invalid
  *    parameters: NULL nbGroups, NULL input, and wrong resource type.
  */
-HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Negative) {
+HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Negative) {
   HIP_CHECK(hipSetDevice(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -234,11 +234,11 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Negative) {
  * ------------------------
  *  - Splits SM resources via hipDevSmResourceSplitByCount into 2 partitions
  *    using a minCount of ~40% of total SMs.  Any SMs left over due to
- *    alignment are captured in the remainder.  Creates a green context and
+ *    alignment are captured in the remainder.  Creates a execution context and
  *    stream from each partition, runs a vectorADD kernel, and verifies
  *    correctness.
  */
-HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Functional) {
+HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Functional) {
   HIP_CHECK(hipSetDevice(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -281,7 +281,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_By_Count_Functional) {
  *    all remaining CUs.  Verifies that the remainder has 0 CUs and runs a
  *    vectorADD kernel on each partition.
  */
-HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Backfill_Functional) {
+HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Backfill_Functional) {
   HIP_CHECK(hipSetDevice(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -316,11 +316,11 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Backfill_Functional) {
  * Test Description
  * ------------------------
  *  - Splits SM resources into 3 equal groups via hipDevSmResourceSplit, creates
- *    a green context and stream from each partition, retrieves CU masks via
+ *    a execution context and stream from each partition, retrieves CU masks via
  *    hipExtStreamGetCUMask, and verifies that every pair of masks is disjoint
  *    (bitwise AND is zero).
  */
-HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Disjoint_Sets) {
+HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Disjoint_Sets) {
   HIP_CHECK(hipSetDevice(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -349,7 +349,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Disjoint_Sets) {
 
   unsigned int maskWords = (totalSMs + 31) / 32;
   std::vector<std::vector<uint32_t>> masks(3);
-  hipGreenCtx_t ctx[3] = {};
+  hipExecutionCtx_t ctx[3] = {};
   hipStream_t stream[3] = {};
 
   for (int i = 0; i < 3; i++) {
@@ -379,6 +379,6 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Disjoint_Sets) {
 }
 #endif
 /**
- * End doxygen group hipGreenCtxResourceSplit.
+ * End doxygen group hipExecutionCtxResourceSplit.
  * @}
  */

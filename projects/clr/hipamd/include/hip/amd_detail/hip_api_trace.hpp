@@ -1121,10 +1121,10 @@ typedef hipError_t (*t_hipMemGetMemPool)(hipMemPool_t* pool, hipMemLocation* loc
                                          hipMemAllocationType type);
 typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements)(
     hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device);
-typedef hipError_t (*t_hipGreenCtxCreate)(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+typedef hipError_t (*t_hipGreenCtxCreate)(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                                          unsigned int flags);
-typedef hipError_t (*t_hipExecutionCtxDestroy)(hipGreenCtx_t ctx);
-typedef hipError_t (*t_hipExecutionCtxStreamCreate)(hipStream_t* stream, hipGreenCtx_t greenctx,
+typedef hipError_t (*t_hipExecutionCtxDestroy)(hipExecutionCtx_t ctx);
+typedef hipError_t (*t_hipExecutionCtxStreamCreate)(hipStream_t* stream, hipExecutionCtx_t greenctx,
                                                      unsigned int flags, int priority);
 typedef hipError_t (*t_hipDeviceGetDevResource)(hipDevice_t device, hipDevResource* resource,
                                                 hipDevResourceType type);
@@ -1140,16 +1140,16 @@ typedef hipError_t (*t_hipDevSmResourceSplit)(hipDevResource* result, unsigned i
 typedef hipError_t (*t_hipDevResourceGenerateDesc)(hipDevResourceDesc_t* phDesc,
                                                     hipDevResource* resources,
                                                     unsigned int nbResources);
-typedef hipError_t (*t_hipDeviceGetExecutionCtx)(hipGreenCtx_t* ctx, int device);
-typedef hipError_t (*t_hipExecutionCtxGetDevResource)(hipGreenCtx_t ctx, hipDevResource* resource,
+typedef hipError_t (*t_hipDeviceGetExecutionCtx)(hipExecutionCtx_t* ctx, int device);
+typedef hipError_t (*t_hipExecutionCtxGetDevResource)(hipExecutionCtx_t ctx, hipDevResource* resource,
                                                       hipDevResourceType type);
-typedef hipError_t (*t_hipExecutionCtxGetDevice)(int* device, hipGreenCtx_t ctx);
-typedef hipError_t (*t_hipExecutionCtxGetId)(hipGreenCtx_t ctx, unsigned long long* ctxId);
+typedef hipError_t (*t_hipExecutionCtxGetDevice)(int* device, hipExecutionCtx_t ctx);
+typedef hipError_t (*t_hipExecutionCtxGetId)(hipExecutionCtx_t ctx, unsigned long long* ctxId);
 typedef hipError_t (*t_hipStreamGetDevResource)(hipStream_t hStream, hipDevResource* resource,
                                                 hipDevResourceType type);
-typedef hipError_t (*t_hipExecutionCtxRecordEvent)(hipGreenCtx_t ctx, hipEvent_t event);
-typedef hipError_t (*t_hipExecutionCtxSynchronize)(hipGreenCtx_t ctx);
-typedef hipError_t (*t_hipExecutionCtxWaitEvent)(hipGreenCtx_t ctx, hipEvent_t event);
+typedef hipError_t (*t_hipExecutionCtxRecordEvent)(hipExecutionCtx_t ctx, hipEvent_t event);
+typedef hipError_t (*t_hipExecutionCtxSynchronize)(hipExecutionCtx_t ctx);
+typedef hipError_t (*t_hipExecutionCtxWaitEvent)(hipExecutionCtx_t ctx, hipEvent_t event);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {

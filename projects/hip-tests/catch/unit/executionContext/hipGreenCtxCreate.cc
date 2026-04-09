@@ -5,10 +5,10 @@
  */
 
 /**
- * @addtogroup hipGreenCtx hipGreenCtx
+ * @addtogroup hipExecutionCtx hipExecutionCtx
  * @{
- * @ingroup GreenContextTest
- * `hipGreenCtx*` APIs - basic sanity tests
+ * @ingroup ExecutionContextTest
+ * `hipExecutionCtx*` APIs - basic sanity tests
  */
 
 #include <hip_test_common.hh>
@@ -29,7 +29,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxCreateDestroy_Sanity) {
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
-  hipGreenCtx_t green_ctx = nullptr;
+  hipExecutionCtx_t green_ctx = nullptr;
   HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
   REQUIRE(green_ctx != nullptr);
   HIP_CHECK(hipExecutionCtxDestroy(green_ctx));
@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamCreate_Sanity) {
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
-  hipGreenCtx_t green_ctx = nullptr;
+  hipExecutionCtx_t green_ctx = nullptr;
   HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
   REQUIRE(green_ctx != nullptr);
 
@@ -65,18 +65,18 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamCreate_Sanity) {
 /**
  * Test Description
  * ------------------------
- *  - Launches a vectorADD kernel on a green context stream
+ *  - Launches a vectorADD kernel on a execution context stream
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-HIP_TEST_CASE(Unit_hipGreenCtxKernelLaunch_Basic) {
+HIP_TEST_CASE(Unit_hipGreenCtx_kernelLaunch_Basic) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
-  hipGreenCtx_t green_ctx = nullptr;
+  hipExecutionCtx_t green_ctx = nullptr;
   HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
   REQUIRE(green_ctx != nullptr);
 
@@ -142,7 +142,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxKernelLaunch_Basic) {
 HIP_TEST_CASE(Unit_hipGreenCtxCreate_Negative) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
-  hipGreenCtx_t green_ctx = nullptr;
+  hipExecutionCtx_t green_ctx = nullptr;
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
@@ -164,7 +164,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxCreate_Negative) {
 /**
  * Test Description
  * ------------------------
- *  - Negative parameter validation for hipExecutionCtxStreamCreate and hipStreamGetGreenCtx
+ *  - Negative parameter validation for hipExecutionCtxStreamCreate and hipStreamGetExecutionCtx
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
@@ -175,7 +175,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamCreate_Negative) {
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
-  hipGreenCtx_t green_ctx = nullptr;
+  hipExecutionCtx_t green_ctx = nullptr;
   HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
   REQUIRE(green_ctx != nullptr);
   
@@ -190,7 +190,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamCreate_Negative) {
   }
 
   SECTION("stream create with invalid green context") {
-    hipGreenCtx_t invalid_green_ctx = nullptr;
+    hipExecutionCtx_t invalid_green_ctx = nullptr;
     HIP_CHECK_ERROR(hipExecutionCtxStreamCreate(&stream, invalid_green_ctx, hipStreamNonBlocking, 0x0),
                      hipErrorInvalidValue);
   }
@@ -206,6 +206,6 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamCreate_Negative) {
 }
 
 /**
- * End doxygen group hipGreenCtx.
+ * End doxygen group hipExecutionCtx.
  * @}
  */

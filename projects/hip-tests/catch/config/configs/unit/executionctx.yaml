@@ -1,10 +1,10 @@
 ---
-greenctx:
+executionctx:
   Unit_hipGreenCtxCreateDestroy_Sanity:
     <<: *level_2
   Unit_hipExecutionCtxStreamCreate_Sanity:
     <<: *level_2
-  Unit_hipGreenCtxKernelLaunch_Basic:
+  Unit_hipGreenCtx_kernelLaunch_Basic:
     <<: *level_2
   Unit_hipGreenCtxCreate_Negative:
     <<: *level_2
@@ -16,20 +16,20 @@ greenctx:
     <<: *level_2
   Unit_hipExecutionCtxRecordWait_Blocking:
     <<: *level_2
-  Unit_hipGreenCtxResourceSplit_Sanity:
+  Unit_hipExecutionCtxResourceSplit_Sanity:
     <<: *level_2
-  Unit_hipGreenCtxResourceSplit_By_Count_Sanity:
+  Unit_hipExecutionCtxResourceSplit_By_Count_Sanity:
     <<: *level_2
-  Unit_hipGreenCtxResourceSplit_Negative:
+  Unit_hipExecutionCtxResourceSplit_Negative:
     <<: *level_2
-  Unit_hipGreenCtxResourceSplit_Functional:
+  Unit_hipExecutionCtxResourceSplit_Functional:
     <<: *level_2
-  Unit_hipGreenCtxResourceSplit_By_Count_Negative:
+  Unit_hipExecutionCtxResourceSplit_By_Count_Negative:
     <<: *level_2
-  Unit_hipGreenCtxResourceSplit_By_Count_Functional:
+  Unit_hipExecutionCtxResourceSplit_By_Count_Functional:
     <<: *level_2
-  Unit_hipGreenCtxResourceSplit_Backfill_Functional:
+  Unit_hipExecutionCtxResourceSplit_Backfill_Functional:
     <<: *level_2
-  Unit_hipGreenCtxResourceSplit_Disjoint_Sets:
+  Unit_hipExecutionCtxResourceSplit_Disjoint_Sets:
     <<: *level_2
     disabled: [nvidia_linux]

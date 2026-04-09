@@ -1699,8 +1699,8 @@ typedef struct hip_api_data_s {
       hipDevResourceType type;
     } hipDeviceGetDevResource;
     struct {
-      hipGreenCtx_t* ctx;
-      hipGreenCtx_t ctx__val;
+      hipExecutionCtx_t* ctx;
+      hipExecutionCtx_t ctx__val;
       int device;
     } hipDeviceGetExecutionCtx;
     struct {
@@ -1924,10 +1924,10 @@ typedef struct hip_api_data_s {
       hipEvent_t event;
     } hipEventSynchronize;
     struct {
-      hipGreenCtx_t ctx;
+      hipExecutionCtx_t ctx;
     } hipExecutionCtxDestroy;
     struct {
-      hipGreenCtx_t ctx;
+      hipExecutionCtx_t ctx;
       hipDevResource* resource;
       hipDevResource resource__val;
       hipDevResourceType type;
@@ -1935,29 +1935,29 @@ typedef struct hip_api_data_s {
     struct {
       int* device;
       int device__val;
-      hipGreenCtx_t ctx;
+      hipExecutionCtx_t ctx;
     } hipExecutionCtxGetDevice;
     struct {
-      hipGreenCtx_t ctx;
+      hipExecutionCtx_t ctx;
       unsigned long long* ctxId;
       unsigned long long ctxId__val;
     } hipExecutionCtxGetId;
     struct {
-      hipGreenCtx_t ctx;
+      hipExecutionCtx_t ctx;
       hipEvent_t event;
     } hipExecutionCtxRecordEvent;
     struct {
       hipStream_t* stream;
       hipStream_t stream__val;
-      hipGreenCtx_t greenctx;
+      hipExecutionCtx_t greenctx;
       unsigned int flags;
       int priority;
     } hipExecutionCtxStreamCreate;
     struct {
-      hipGreenCtx_t ctx;
+      hipExecutionCtx_t ctx;
     } hipExecutionCtxSynchronize;
     struct {
-      hipGreenCtx_t ctx;
+      hipExecutionCtx_t ctx;
       hipEvent_t event;
     } hipExecutionCtxWaitEvent;
     struct {
@@ -2762,8 +2762,8 @@ typedef struct hip_api_data_s {
       hipGraphicsResource_t resource;
     } hipGraphicsUnregisterResource;
     struct {
-      hipGreenCtx_t* ctx;
-      hipGreenCtx_t ctx__val;
+      hipExecutionCtx_t* ctx;
+      hipExecutionCtx_t ctx__val;
       hipDevResourceDesc_t desc;
       int device;
       unsigned int flags;
@@ -4511,9 +4511,9 @@ typedef struct hip_api_data_s {
   cb_data.args.hipDeviceGetDevResource.resource = (hipDevResource*)resource; \
   cb_data.args.hipDeviceGetDevResource.type = (hipDevResourceType)type; \
 };
-// hipDeviceGetExecutionCtx[('hipGreenCtx_t*', 'ctx'), ('int', 'device')]
+// hipDeviceGetExecutionCtx[('hipExecutionCtx_t*', 'ctx'), ('int', 'device')]
 #define INIT_hipDeviceGetExecutionCtx_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipDeviceGetExecutionCtx.ctx = (hipGreenCtx_t*)ctx; \
+  cb_data.args.hipDeviceGetExecutionCtx.ctx = (hipExecutionCtx_t*)ctx; \
   cb_data.args.hipDeviceGetExecutionCtx.device = (int)device; \
 };
 // hipDeviceGetGraphMemAttribute[('int', 'device'), ('hipGraphMemAttributeType', 'attr'), ('void*', 'value')]
@@ -4747,45 +4747,45 @@ typedef struct hip_api_data_s {
 #define INIT_hipEventSynchronize_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipEventSynchronize.event = (hipEvent_t)event; \
 };
-// hipExecutionCtxDestroy[('hipGreenCtx_t', 'ctx')]
+// hipExecutionCtxDestroy[('hipExecutionCtx_t', 'ctx')]
 #define INIT_hipExecutionCtxDestroy_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipExecutionCtxDestroy.ctx = (hipGreenCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxDestroy.ctx = (hipExecutionCtx_t)ctx; \
 };
-// hipExecutionCtxGetDevResource[('hipGreenCtx_t', 'ctx'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
+// hipExecutionCtxGetDevResource[('hipExecutionCtx_t', 'ctx'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
 #define INIT_hipExecutionCtxGetDevResource_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipExecutionCtxGetDevResource.ctx = (hipGreenCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxGetDevResource.ctx = (hipExecutionCtx_t)ctx; \
   cb_data.args.hipExecutionCtxGetDevResource.resource = (hipDevResource*)resource; \
   cb_data.args.hipExecutionCtxGetDevResource.type = (hipDevResourceType)type; \
 };
-// hipExecutionCtxGetDevice[('int*', 'device'), ('hipGreenCtx_t', 'ctx')]
+// hipExecutionCtxGetDevice[('int*', 'device'), ('hipExecutionCtx_t', 'ctx')]
 #define INIT_hipExecutionCtxGetDevice_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipExecutionCtxGetDevice.device = (int*)device; \
-  cb_data.args.hipExecutionCtxGetDevice.ctx = (hipGreenCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxGetDevice.ctx = (hipExecutionCtx_t)ctx; \
 };
-// hipExecutionCtxGetId[('hipGreenCtx_t', 'ctx'), ('unsigned long long*', 'ctxId')]
+// hipExecutionCtxGetId[('hipExecutionCtx_t', 'ctx'), ('unsigned long long*', 'ctxId')]
 #define INIT_hipExecutionCtxGetId_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipExecutionCtxGetId.ctx = (hipGreenCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxGetId.ctx = (hipExecutionCtx_t)ctx; \
   cb_data.args.hipExecutionCtxGetId.ctxId = (unsigned long long*)ctxId; \
 };
-// hipExecutionCtxRecordEvent[('hipGreenCtx_t', 'ctx'), ('hipEvent_t', 'event')]
+// hipExecutionCtxRecordEvent[('hipExecutionCtx_t', 'ctx'), ('hipEvent_t', 'event')]
 #define INIT_hipExecutionCtxRecordEvent_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipExecutionCtxRecordEvent.ctx = (hipGreenCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxRecordEvent.ctx = (hipExecutionCtx_t)ctx; \
   cb_data.args.hipExecutionCtxRecordEvent.event = (hipEvent_t)event; \
 };
-// hipExecutionCtxStreamCreate[('hipStream_t*', 'stream'), ('hipGreenCtx_t', 'greenctx'), ('unsigned int', 'flags'), ('int', 'priority')]
+// hipExecutionCtxStreamCreate[('hipStream_t*', 'stream'), ('hipExecutionCtx_t', 'greenctx'), ('unsigned int', 'flags'), ('int', 'priority')]
 #define INIT_hipExecutionCtxStreamCreate_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipExecutionCtxStreamCreate.stream = (hipStream_t*)stream; \
-  cb_data.args.hipExecutionCtxStreamCreate.greenctx = (hipGreenCtx_t)greenctx; \
+  cb_data.args.hipExecutionCtxStreamCreate.greenctx = (hipExecutionCtx_t)greenctx; \
   cb_data.args.hipExecutionCtxStreamCreate.flags = (unsigned int)flags; \
   cb_data.args.hipExecutionCtxStreamCreate.priority = (int)priority; \
 };
-// hipExecutionCtxSynchronize[('hipGreenCtx_t', 'ctx')]
+// hipExecutionCtxSynchronize[('hipExecutionCtx_t', 'ctx')]
 #define INIT_hipExecutionCtxSynchronize_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipExecutionCtxSynchronize.ctx = (hipGreenCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxSynchronize.ctx = (hipExecutionCtx_t)ctx; \
 };
-// hipExecutionCtxWaitEvent[('hipGreenCtx_t', 'ctx'), ('hipEvent_t', 'event')]
+// hipExecutionCtxWaitEvent[('hipExecutionCtx_t', 'ctx'), ('hipEvent_t', 'event')]
 #define INIT_hipExecutionCtxWaitEvent_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipExecutionCtxWaitEvent.ctx = (hipGreenCtx_t)ctx; \
+  cb_data.args.hipExecutionCtxWaitEvent.ctx = (hipExecutionCtx_t)ctx; \
   cb_data.args.hipExecutionCtxWaitEvent.event = (hipEvent_t)event; \
 };
 // hipExtDisableLogging[]
@@ -5577,9 +5577,9 @@ typedef struct hip_api_data_s {
 #define INIT_hipGraphicsUnregisterResource_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipGraphicsUnregisterResource.resource = (hipGraphicsResource_t)resource; \
 };
-// hipGreenCtxCreate[('hipGreenCtx_t*', 'ctx'), ('hipDevResourceDesc_t', 'desc'), ('int', 'device'), ('unsigned int', 'flags')]
+// hipGreenCtxCreate[('hipExecutionCtx_t*', 'ctx'), ('hipDevResourceDesc_t', 'desc'), ('int', 'device'), ('unsigned int', 'flags')]
 #define INIT_hipGreenCtxCreate_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipGreenCtxCreate.ctx = (hipGreenCtx_t*)phCtx; \
+  cb_data.args.hipGreenCtxCreate.ctx = (hipExecutionCtx_t*)phCtx; \
   cb_data.args.hipGreenCtxCreate.desc = (hipDevResourceDesc_t)desc; \
   cb_data.args.hipGreenCtxCreate.device = (int)device; \
   cb_data.args.hipGreenCtxCreate.flags = (unsigned int)flags; \
@@ -7356,7 +7356,7 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipDeviceGetDevResource:
       if (data->args.hipDeviceGetDevResource.resource) data->args.hipDeviceGetDevResource.resource__val = *(data->args.hipDeviceGetDevResource.resource);
       break;
-// hipDeviceGetExecutionCtx[('hipGreenCtx_t*', 'ctx'), ('int', 'device')]
+// hipDeviceGetExecutionCtx[('hipExecutionCtx_t*', 'ctx'), ('int', 'device')]
     case HIP_API_ID_hipDeviceGetExecutionCtx:
       if (data->args.hipDeviceGetExecutionCtx.ctx) data->args.hipDeviceGetExecutionCtx.ctx__val = *(data->args.hipDeviceGetExecutionCtx.ctx);
       break;
@@ -7529,32 +7529,32 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipEventSynchronize[('hipEvent_t', 'event')]
     case HIP_API_ID_hipEventSynchronize:
       break;
-// hipExecutionCtxDestroy[('hipGreenCtx_t', 'ctx')]
+// hipExecutionCtxDestroy[('hipExecutionCtx_t', 'ctx')]
     case HIP_API_ID_hipExecutionCtxDestroy:
       break;
-// hipExecutionCtxGetDevResource[('hipGreenCtx_t', 'ctx'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
+// hipExecutionCtxGetDevResource[('hipExecutionCtx_t', 'ctx'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
     case HIP_API_ID_hipExecutionCtxGetDevResource:
       if (data->args.hipExecutionCtxGetDevResource.resource) data->args.hipExecutionCtxGetDevResource.resource__val = *(data->args.hipExecutionCtxGetDevResource.resource);
       break;
-// hipExecutionCtxGetDevice[('int*', 'device'), ('hipGreenCtx_t', 'ctx')]
+// hipExecutionCtxGetDevice[('int*', 'device'), ('hipExecutionCtx_t', 'ctx')]
     case HIP_API_ID_hipExecutionCtxGetDevice:
       if (data->args.hipExecutionCtxGetDevice.device) data->args.hipExecutionCtxGetDevice.device__val = *(data->args.hipExecutionCtxGetDevice.device);
       break;
-// hipExecutionCtxGetId[('hipGreenCtx_t', 'ctx'), ('unsigned long long*', 'ctxId')]
+// hipExecutionCtxGetId[('hipExecutionCtx_t', 'ctx'), ('unsigned long long*', 'ctxId')]
     case HIP_API_ID_hipExecutionCtxGetId:
       if (data->args.hipExecutionCtxGetId.ctxId) data->args.hipExecutionCtxGetId.ctxId__val = *(data->args.hipExecutionCtxGetId.ctxId);
       break;
-// hipExecutionCtxRecordEvent[('hipGreenCtx_t', 'ctx'), ('hipEvent_t', 'event')]
+// hipExecutionCtxRecordEvent[('hipExecutionCtx_t', 'ctx'), ('hipEvent_t', 'event')]
     case HIP_API_ID_hipExecutionCtxRecordEvent:
       break;
-// hipExecutionCtxStreamCreate[('hipStream_t*', 'stream'), ('hipGreenCtx_t', 'greenctx'), ('unsigned int', 'flags'), ('int', 'priority')]
+// hipExecutionCtxStreamCreate[('hipStream_t*', 'stream'), ('hipExecutionCtx_t', 'greenctx'), ('unsigned int', 'flags'), ('int', 'priority')]
     case HIP_API_ID_hipExecutionCtxStreamCreate:
       if (data->args.hipExecutionCtxStreamCreate.stream) data->args.hipExecutionCtxStreamCreate.stream__val = *(data->args.hipExecutionCtxStreamCreate.stream);
       break;
-// hipExecutionCtxSynchronize[('hipGreenCtx_t', 'ctx')]
+// hipExecutionCtxSynchronize[('hipExecutionCtx_t', 'ctx')]
     case HIP_API_ID_hipExecutionCtxSynchronize:
       break;
-// hipExecutionCtxWaitEvent[('hipGreenCtx_t', 'ctx'), ('hipEvent_t', 'event')]
+// hipExecutionCtxWaitEvent[('hipExecutionCtx_t', 'ctx'), ('hipEvent_t', 'event')]
     case HIP_API_ID_hipExecutionCtxWaitEvent:
       break;
 // hipExtDisableLogging[]
@@ -8087,7 +8087,7 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipGraphicsUnregisterResource[('hipGraphicsResource_t', 'resource')]
     case HIP_API_ID_hipGraphicsUnregisterResource:
       break;
-// hipGreenCtxCreate[('hipGreenCtx_t*', 'ctx'), ('hipDevResourceDesc_t', 'desc'), ('int', 'device'), ('unsigned int', 'flags')]
+// hipGreenCtxCreate[('hipExecutionCtx_t*', 'ctx'), ('hipDevResourceDesc_t', 'desc'), ('int', 'device'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipGreenCtxCreate:
       if (data->args.hipGreenCtxCreate.ctx) data->args.hipGreenCtxCreate.ctx__val = *(data->args.hipGreenCtxCreate.ctx);
       break;

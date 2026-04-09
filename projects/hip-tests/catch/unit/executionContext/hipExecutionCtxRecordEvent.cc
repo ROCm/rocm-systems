@@ -7,7 +7,7 @@
 /**
  * @addtogroup hipExecutionCtxRecordEvent hipExecutionCtxRecordEvent
  * @{
- * @ingroup GreenContextTest
+ * @ingroup ExecutionContextTest
  * `hipExecutionCtxRecordEvent` and `hipExecutionCtxWaitEvent` APIs
  */
 
@@ -28,7 +28,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxRecordWaitEvent_Sanity) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
-  hipGreenCtx_t green_ctx = nullptr;
+  hipExecutionCtx_t green_ctx = nullptr;
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
@@ -52,7 +52,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxRecordWaitEvent_Sanity) {
 /**
  * Test Description
  * ------------------------
- *  - Validates record/wait behavior with real work in green context streams
+ *  - Validates record/wait behavior with real work in execution context streams
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.2
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxRecordEventFunctional) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
-  hipGreenCtx_t green_ctx = nullptr;
+  hipExecutionCtx_t green_ctx = nullptr;
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxRecordWait_Blocking) {
   HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
-  hipGreenCtx_t green_ctx = nullptr;
+  hipExecutionCtx_t green_ctx = nullptr;
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 

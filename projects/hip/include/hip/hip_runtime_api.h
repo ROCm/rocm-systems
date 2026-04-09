@@ -672,7 +672,7 @@ extern "C" {
 //---
 // API-visible structures
 typedef struct ihipCtx_t* hipCtx_t;
-typedef struct ihipGreenCtx_t* hipGreenCtx_t;
+typedef struct ihipExecutionCtx_t* hipExecutionCtx_t;
 typedef struct ihipDevResourceDesc_t* hipDevResourceDesc_t;
 typedef enum hipDevResourceType {
   hipDevResourceTypeInvalid = 0,
@@ -6081,21 +6081,21 @@ hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
                                  hipDevSmResourceGroupParams* groupParams);
 hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
                                        unsigned int nbResources);
-hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags);
-hipError_t hipExecutionCtxDestroy(hipGreenCtx_t ctx);
-hipError_t hipDeviceGetExecutionCtx(hipGreenCtx_t* ctx, int device);
-hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
+hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx);
+hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device);
+hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
                                         unsigned int flags, int priority);
-hipError_t hipExecutionCtxGetDevResource(hipGreenCtx_t ctx, hipDevResource* resource,
+hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
                                           hipDevResourceType type);
-hipError_t hipExecutionCtxGetDevice(int* device, hipGreenCtx_t ctx);
-hipError_t hipExecutionCtxGetId(hipGreenCtx_t ctx, unsigned long long* ctxId);
+hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId);
 hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
                                     hipDevResourceType type);
-hipError_t hipExecutionCtxRecordEvent(hipGreenCtx_t ctx, hipEvent_t event);
-hipError_t hipExecutionCtxSynchronize(hipGreenCtx_t ctx);
-hipError_t hipExecutionCtxWaitEvent(hipGreenCtx_t ctx, hipEvent_t event);
+hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
+hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 /**
  * @}
  */
