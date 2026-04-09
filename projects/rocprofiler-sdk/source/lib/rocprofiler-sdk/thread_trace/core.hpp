@@ -202,6 +202,8 @@ public:
 
     const auto& get_agents() const { return agents; }
 
+    friend void flush_and_stop();
+
 private:
     std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
@@ -217,6 +219,11 @@ initialize(HsaApiTable* table);
 /// Tear down shared resources when the runtime shuts down.
 void
 finalize();
+
+/// Stop and join all active producer/consumer threads, flushing any pending
+/// data.  Safe to call before hsa_shut_down; prevents new traces from starting.
+void
+flush_and_stop();
 
 }  // namespace thread_trace
 }  // namespace rocprofiler

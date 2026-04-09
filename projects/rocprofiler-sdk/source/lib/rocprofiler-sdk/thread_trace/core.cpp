@@ -138,7 +138,7 @@ ThreadTracerAgent::~ThreadTracerAgent()
     else
         ROCP_WARNING << "Thread tracer being destroyed with thread trace active";
 
-    if(worker_flag) worker_flag->store(WORKER_FLAG_DESTRUCTOR);
+    if(auto flag = worker_flag) flag->store(WORKER_FLAG_DESTRUCTOR);
     stop_thread_trace();
 }
 
@@ -538,7 +538,7 @@ DeviceThreadTracer::start_context()
     }
 
     int expected = WORKER_FLAG_STOP;
-    worker_flag->compare_exchange_strong(expected, WORKER_FLAG_RUNNING);
+    CHECK_NOTNULL(worker_flag)->compare_exchange_strong(expected, WORKER_FLAG_RUNNING);
     auto wait_list = std::vector<std::shared_ptr<Signal>>{};
 
     for(auto& [_, tracer] : agents)
@@ -558,7 +558,7 @@ DeviceThreadTracer::stop_context()
     ROCP_INFO << "Stopping device thread trace context";
 
     int expected = WORKER_FLAG_RUNNING;
-    if(worker_flag) worker_flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
+    if(auto flag = worker_flag) flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
     auto wait_list = std::vector<std::unique_ptr<Signal>>{};
 
@@ -580,6 +580,21 @@ initialize(HsaApiTable* table)
     {
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_init();
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_init();
+    }
+}
+
+void
+flush_and_stop()
+{
+    ROCP_TRACE << "flush_and_stop called";
+    for(auto& ctx : context::get_registered_contexts())
+    {
+        if(ctx->device_thread_trace)
+        {
+            CHECK_NOTNULL(ctx->device_thread_trace->worker_flag)->store(WORKER_FLAG_DESTRUCTOR);
+            ctx->device_thread_trace->stop_context();
+        }
+        if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->stop_context();
     }
 }
 
