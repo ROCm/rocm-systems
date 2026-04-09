@@ -139,6 +139,8 @@ if(BUILD_SHARED_LIBS)
     # conditionally include the HSA export block instead of invoking the C
     # preprocessor at build time (cl.exe does not support GCC-style -E -P -o).
     if(ROCCLR_ENABLE_HSA)
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def")
       file(READ "${CMAKE_CURRENT_LIST_DIR}/hsa_exports.def" HSA_EXPORTS)
     else()
       set(HSA_EXPORTS "")
