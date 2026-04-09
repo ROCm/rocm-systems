@@ -150,10 +150,7 @@ src/utils/.config_hashes.json
 > It is used to safely modify YAML files while preserving comments, ordering,
 > and formatting. The workflow scripts will not function correctly without it.
 >
-> Install it via:
-> ```bash
-> pip install ruamel.yaml
-> ```
+> See [Development dependencies](../../README.md#development-dependencies) for install instructions.
 
 ### 1. Validate the current state
 
@@ -292,12 +289,7 @@ docs/data/metrics/
   └── gfx{908,90a,942,950,1151}_metrics.yaml               # rst + unit (generated)
 ```
 
-**Dependencies:** `metric_description_manager.py` requires **ruamel.yaml** (declared in
-``pyproject.toml`` under optional dependency **developer**). Install with:
-
-```bash
-pip install -e ".[developer]"
-```
+**Dependencies:** `metric_description_manager.py` requires **ruamel.yaml** (see [Development dependencies](../../README.md#development-dependencies)).
 
 **After editing panel `metrics_description` sections:**
 ```bash
