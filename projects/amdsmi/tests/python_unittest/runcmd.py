@@ -114,7 +114,8 @@ class Util:
             rocm_root = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH", "/opt/rocm"))
             rocm_bin = os.path.join(rocm_root, "bin")
             env = os.environ.copy()
-            env["PATH"] = rocm_bin + ":" + env.get("PATH", "")
+            existing_path = env.get("PATH", "")
+            env["PATH"] = os.pathsep.join([rocm_bin, existing_path]) if existing_path else rocm_bin
 
             proc = subprocess.Popen(
                 cmd,

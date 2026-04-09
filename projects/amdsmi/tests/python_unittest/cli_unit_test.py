@@ -41,11 +41,10 @@ try:
 except ImportError:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"')
 
-# Module-level defaults; __main__ overwrites these with the actual parsed values.
-# They must exist at module scope so setUpClass/setUp can reference them before
+# Module-level default; __main__ overwrites this with the actual parsed value.
+# It must exist at module scope so setUpClass/setUp can reference it before
 # __main__ runs (e.g. when loaded by an external test runner).
 verbose = 1
-has_info_printed = False
 
 
 class TestAmdSmiCli(unittest.TestCase):
@@ -67,10 +66,14 @@ class TestAmdSmiCli(unittest.TestCase):
             (rc, data, std_err) = cls.util.RunCmdSync(cmd)
             if rc:
                 raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+            if not data:
+                raise RuntimeError(f'Empty JSON output from "{cmd}". stderr: {std_err}')
             try:
                 setattr(cls, f"{name}_data", json.loads(data))
-            except json.JSONDecodeError as e:
-                raise RuntimeError(f'Error decoding JSON from "{cmd}": {e}') from e
+            except (json.JSONDecodeError, TypeError) as e:
+                raise RuntimeError(
+                    f'Error decoding JSON from "{cmd}": {e}. stderr: {std_err}'
+                ) from e
 
         cls.gpus = ["all"]
         for entry in cls.list_data:
@@ -1387,7 +1390,6 @@ if __name__ == "__main__":
         verbose = 0
     elif "-v" in sys.argv or "--verbose" in sys.argv:
         verbose = 2
-    has_info_printed = False
 
     if verbose:
         print("AMD SMI CLI Tests")
