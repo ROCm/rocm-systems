@@ -271,47 +271,4 @@ void dprintf(const char* fmt, const Args&... args) {
 
 #endif  /* BUILD_DEBUG_LEVEL_DEVICE */
 
-/*****************************************************************************
- * Template infrastructure for compile-time log level selection
- *
- * Use log_config<Level> to generate multiple instantiations of hot-path
- * functions with different checking levels from the same template source.
- *
- * Example:
- *   template <log_level L>
- *   __device__ void my_operation() {
- *     if constexpr (log_config<L>::enable_trace) {
- *       LOGD_TRACE("entering my_operation");
- *     }
- *     // ... work ...
- *     if constexpr (log_config<L>::enable_error) {
- *       // error checking code
- *     }
- *   }
- *
- *   // Instantiate fast (no checks) and debug (full checks) versions:
- *   template void my_operation<log_level::NONE>();
- *   template void my_operation<log_level::TRACE>();
- *****************************************************************************/
-
-namespace rocshmem {
-
-enum class log_level : int {
-  NONE  = 0,
-  ERROR = 1,
-  WARN  = 2,
-  INFO  = 3,
-  TRACE = 4,
-};
-
-template <log_level MinLevel = log_level::TRACE>
-struct log_config {
-  static constexpr bool enable_trace = (MinLevel >= log_level::TRACE);
-  static constexpr bool enable_info  = (MinLevel >= log_level::INFO);
-  static constexpr bool enable_warn  = (MinLevel >= log_level::WARN);
-  static constexpr bool enable_error = (MinLevel >= log_level::ERROR);
-};
-
-}  // namespace rocshmem
-
 #endif  // LIBRARY_SRC_LOG_HPP_
