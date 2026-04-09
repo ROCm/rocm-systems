@@ -148,15 +148,10 @@ docker run -v "$(cd .. && pwd)":/home/development                               
 Inside the container, clean, build, and install the project with testing enabled using the following commands:
 
 ```shell
-rm -rf rocprof-sys-build
-cmake -B rocprof-sys-build -S .                                                  \
-       -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems                          \
-       -D ROCPROFSYS_USE_PYTHON=ON      -D ROCPROFSYS_BUILD_DYNINST=ON           \
-       -D ROCPROFSYS_BUILD_TBB=ON       -D ROCPROFSYS_BUILD_BOOST=ON             \
-       -D ROCPROFSYS_BUILD_ELFUTILS=ON  -D ROCPROFSYS_BUILD_LIBIBERTY=ON         \
-       -D ROCPROFSYS_BUILD_TESTING=ON
-cmake --build rocprof-sys-build --target all --parallel 8
-cmake --build rocprof-sys-build --target install
+rm -rf build/debug-optimized
+cmake --preset debug-optimized
+cmake --build build/debug-optimized --target all --parallel $(nproc)
+cmake --build build/debug-optimized --target install
 source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 ```
 
@@ -176,7 +171,7 @@ source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 Then, use the following command to start automated testing:
 
 ```shell
-ctest --test-dir rocprof-sys-build --output-on-failure
+ctest --test-dir build/debug-optimized --output-on-failure
 ```
 
 To enable MPI testing inside the container, set the following environment variables:
@@ -186,7 +181,7 @@ export OMPI_ALLOW_RUN_AS_ROOT=1
 export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 ```
 
-For manual testing, you can find the executables in `rocprof-sys-build/bin`.
+For manual testing, you can find the executables in `build/debug-optimized/bin`.
 
 ### ROCm Systems Profiler settings
 
@@ -214,7 +209,7 @@ you can override them via environment variables or by specifying an alternative 
 ### Call-Stack sampling
 
 The `rocprof-sys-sample` executable is used to execute call-stack sampling on a target application without binary instrumentation.
-Use a double-hypen (`--`) to separate the command-line arguments for `rocprof-sys-sample` from the target application and it's arguments.
+Use a double-hyphen (`--`) to separate the command-line arguments for `rocprof-sys-sample` from the target application and it's arguments.
 
 ```shell
 rocprof-sys-sample --help
@@ -290,7 +285,7 @@ All binaries now feature structured help organized by skill level:
 The `rocprof-sys-instrument` executable is used to instrument an existing binary. Call-stack sampling can be enabled alongside
 the execution an instrumented binary, to help "fill in the gaps" between the instrumentation via setting the `ROCPROFSYS_USE_SAMPLING`
 configuration variable to `ON`.
-Similar to `rocprof-sys-sample`, use a double-hypen (`--`) to separate the command-line arguments for `rocprof-sys-instrument` from the target application and it's arguments.
+Similar to `rocprof-sys-sample`, use a double-hyphen (`--`) to separate the command-line arguments for `rocprof-sys-instrument` from the target application and it's arguments.
 
 ```shell
 rocprof-sys-instrument --help
@@ -318,7 +313,7 @@ export LD_LIBRARY_PATH=${PWD}/lib:${LD_LIBRARY_PATH}
 > Verify via `ldd` that your executable will load the instrumented library. If you built your executable with an RPATH to the original library's directory, then prefixing `LD_LIBRARY_PATH` will have no effect.
 
 Once you have rewritten your executable and/or libraries with instrumentation, you can just run the (instrumented) executable
-or exectuable which loads the instrumented libraries normally, e.g.:
+or executable which loads the instrumented libraries normally, e.g.:
 
 ```shell
 rocprof-sys-run -- ./app.inst
@@ -365,7 +360,7 @@ rocprof-sys-instrument -E 'rocr::atomic|rocr::core|rocr::HSA' --  /path/to/app
 ### Python profiling and tracing
 
 Use the `rocprof-sys-python` script to profile/trace Python interpreter function calls.
-Use a double-hypen (`--`) to separate the command-line arguments for `rocprof-sys-python` from the target script and it's arguments.
+Use a double-hyphen (`--`) to separate the command-line arguments for `rocprof-sys-python` from the target script and it's arguments.
 
 ```shell
 rocprof-sys-python --help
