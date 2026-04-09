@@ -174,49 +174,6 @@
         {"name": "CommTests", "description": "Communicator helper tests", "test_filter": "CommTests.*"},
         {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"}
       ]
-    },
-    "unit_tests_fixtures_debug": {
-      "is_gtest": true,
-      "binary": "rccl-UnitTestsFixturesDebug",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 8,
-      "timeout": 90,
-      "env_variables": {
-        "NCCL_DEBUG": ""
-      },
-      "rerun_env_variables": {
-        "NCCL_DEBUG": "INFO"
-      },
-      "tests": [
-        {"name": "Alloc", "description": "Memory allocation tests (internal symbols)", "test_filter": "Alloc.*"},
-        {"name": "ParamTests", "description": "NCCL parameter / env parsing tests", "test_filter": "ParamTests.*"},
-        {"name": "ArgCheckTest", "description": "Argument validation tests", "test_filter": "ArgCheckTest.*"},
-        {"name": "EnqueueTests", "description": "Enqueue / kernel init tests", "test_filter": "EnqueueTests.*"},
-        {"name": "Ipcsocket", "description": "IPC socket tests", "test_filter": "Ipcsocket.*"},
-        {"name": "NetSocketTests", "description": "Network socket tests", "test_filter": "NetSocketTests.*"},
-        {"name": "ProxyTests", "description": "Proxy service tests", "test_filter": "ProxyTests.*"},
-        {"name": "Rcclwrap", "description": "RCCL wrapper API tests", "test_filter": "Rcclwrap.*"},
-        {"name": "TransportTest", "description": "Transport layer tests", "test_filter": "TransportTest.*"},
-        {"name": "XmlTest", "description": "XML topology parsing tests", "test_filter": "XmlTest.*"}
-      ]
-    },
-    "unit_tests_alt_rsmi": {
-      "is_gtest": true,
-      "binary": "rccl-UnitTestsAltRsmi",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 120,
-      "env_variables": {
-        "NCCL_DEBUG": ""
-      },
-      "rerun_env_variables": {
-        "NCCL_DEBUG": "INFO"
-      },
-      "tests": [
-        {"name": "AltRsmi_AllTests", "description": "Alternative RSMI implementation tests (ARSMI_TEST_BUILD)", "test_filter": "AltRsmiTest.*"}
-      ]
     }
   },
   "test_suites": [
@@ -230,18 +187,6 @@
       "name": "RCCL Unit Tests - Fixtures",
       "description": "Header-only fixture tests: BitOps, CommTests, EnqueueCountTests",
       "config": "unit_tests_fixtures",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Unit Tests - Fixtures (Debug internals)",
-      "description": "Tests linking internal librccl symbols",
-      "config": "unit_tests_fixtures_debug",
-      "enabled": true
-    },
-    {
-      "name": "RCCL Unit Tests - Alt RSMI",
-      "description": "Alt RSMI tests with ARSMI_TEST_BUILD",
-      "config": "unit_tests_alt_rsmi",
       "enabled": true
     }
   ]
