@@ -720,7 +720,7 @@ class CodeGenerator:
             return '  (void)wf;'
 
         if cls == 'endpgm':
-            L.append('  wf.halt();')
+            L.append('  wf.end();')
             return '\n'.join(L)
 
         if cls == 'waitcnt':
