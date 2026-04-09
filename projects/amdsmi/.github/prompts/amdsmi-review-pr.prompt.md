@@ -1,7 +1,8 @@
 ---
-description: Review a GitHub pull request using the AMD-SMI Review Agent
-allowed-tools: Bash(gh:*, git:*), Read, Write, Glob, Grep, WebFetch, Task
+description: "Review a GitHub pull request using the AMD-SMI Review Agent"
+agent: "AMD-SMI Review Agent"
 argument-hint: "<PR_NUMBER> [review-type ...] — e.g. 1234 style tests (or just the number for comprehensive). Add 'fast' to skip rebuttal round."
+tools: [execute, read, edit, search, agent, web, todo]
 ---
 
 Review a GitHub pull request using the AMD-SMI Review Agent.
@@ -45,7 +46,6 @@ gh run view <RUN_ID> --json jobs
 ```
 
 Find a recent baseline run on `main` for comparison:
-
 ```bash
 gh run list --branch main --workflow <WORKFLOW> --limit 1 --json databaseId,conclusion
 ```
@@ -63,7 +63,6 @@ Extract unresolved review comments for the unresolved comments analysis.
 ### 6. Dispatch Review
 
 Invoke the **AMD-SMI Review Agent** with:
-
 - PR metadata (title, author, files, +/- lines)
 - The diff
 - The review type(s) from `$ARGUMENTS` (or "comprehensive" if none)
@@ -82,9 +81,9 @@ By default, comprehensive reviews include a rebuttal round (Round 2) with the sk
 
 ## Examples
 
-``` bash
-/amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123
-/amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123 style
-/amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123 tests security performance
-/amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123 fast
+```
+/amdsmi-review-pr 123
+/amdsmi-review-pr 123 style
+/amdsmi-review-pr 123 tests security performance
+/amdsmi-review-pr 123 fast
 ```

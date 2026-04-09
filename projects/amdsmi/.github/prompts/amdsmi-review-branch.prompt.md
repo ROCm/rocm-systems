@@ -1,7 +1,8 @@
 ---
-description: Review the current local branch using the AMD-SMI Review Agent
-allowed-tools: Bash(git:*), Read, Write, Glob, Grep, Task
+description: "Review the current local branch using the AMD-SMI Review Agent"
+agent: "AMD-SMI Review Agent"
 argument-hint: "[review-type ...] — style, tests, docs, architecture, security, performance, build, skeptic (or blank for comprehensive). Add 'fast' to skip rebuttal round."
+tools: [execute, read, edit, search, agent, todo]
 ---
 
 Review the current local branch using the AMD-SMI Review Agent.
@@ -38,7 +39,6 @@ If a CI system is configured, attempt to fetch recent run data for this branch t
 ### 4. Dispatch Review
 
 Invoke the **AMD-SMI Review Agent** with:
-
 - The diff
 - The review type(s) from `$ARGUMENTS` (or "comprehensive" if none)
 - Any CI evidence gathered
@@ -55,7 +55,7 @@ By default, comprehensive reviews include a rebuttal round (Round 2) with the sk
 
 ## Examples
 
-``` bash
+```
 /amdsmi-review-branch
 /amdsmi-review-branch style
 /amdsmi-review-branch tests security

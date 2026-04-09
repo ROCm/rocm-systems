@@ -1,7 +1,7 @@
 ---
 name: AMD-SMI Review Agent
 description: Automated code review agent for amd-smi. Performs comprehensive or focused reviews (style, tests, docs, architecture, security, performance) on branches and PRs.
-tools: execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runTests, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/problems, read/readFile, agent/runSubagent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, todo
+tools: execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runTests, execute/testFailure, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/problems, read/readFile, agent, agent/runSubagent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, todo
 agents: [amdsmi-review-style, amdsmi-review-tests, amdsmi-review-docs, amdsmi-review-architecture, amdsmi-review-security, amdsmi-review-performance, amdsmi-review-build, amdsmi-review-skeptic]
 ---
 
@@ -27,17 +27,20 @@ You are an automated code review orchestrator for the **amd-smi** project (AMD S
 
 **Focused reviews:** Dispatch to the single matching subagent, then format its findings into the standard template.
 
-**Comprehensive reviews (standard):**
+**Comprehensive reviews (default — includes rebuttal):**
 1. Gather CI evidence (if PR review): fetch run data via `gh`, compare against `develop` baseline
 2. Dispatch all 8 subagents in parallel with the changed files/diff (pass CI evidence to tests & performance)
 3. Collect findings from each — renumber sequentially (F-1, F-2, …)
 4. Deduplicate overlapping findings (same file+line from multiple subagents)
 5. Add PR split assessment and unresolved comments analysis (done by you, not subagents)
 6. Synthesize into the standard template with overall status
+7. Continue to rebuttal round (below) unless the user said "fast"
 
-**Comprehensive reviews with rebuttal (thorough mode):**
+**Fast mode (no rebuttal):**
 
-Triggered when the user says "thorough", "with rebuttal", or "two-round". Extends the standard flow with a rebuttal round.
+Triggered when the user says "fast" or "no rebuttal". Stops after step 6 — skips the rebuttal round.
+
+**Rebuttal round (default, skipped in fast mode):**
 
 1. **Round 1** — Execute steps 1-6 of the standard comprehensive review above. Produce the full findings table and triage decisions.
 2. **Triage summary** — Prepare a triage document for the skeptic:
