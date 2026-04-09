@@ -39,21 +39,21 @@ namespace rocshmem {
 template <typename T>
 __host__ void HostInterface::p(T* dest, T value, int pe,
                                WindowInfo* window_info) {
-  LOG_API("rocshmem::host::p");
+  LOG_API("host::p");
   putmem(dest, &value, sizeof(T), pe, window_info);
 }
 
 template <typename T>
 __host__ void HostInterface::put(T* dest, const T* source, size_t nelems,
                                  int pe, WindowInfo* window_info) {
-  LOG_API("rocshmem::host::put");
+  LOG_API("host::put");
   putmem(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
 template <typename T>
 __host__ void HostInterface::put_nbi(T* dest, const T* source, size_t nelems,
                                      int pe, WindowInfo* window_info) {
-  LOG_API("rocshmem::host::put_nbi");
+  LOG_API("host::put_nbi");
   putmem_nbi(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
@@ -63,7 +63,7 @@ __host__ T HostInterface::g(const T* source, int pe, WindowInfo* window_info) {
   if (!window_info_mpi) {
     abort();
   }
-  LOG_API("rocshmem::host::g");
+  LOG_API("host::g");
 
   T ret{};
 
@@ -83,14 +83,14 @@ __host__ T HostInterface::g(const T* source, int pe, WindowInfo* window_info) {
 template <typename T>
 __host__ void HostInterface::get(T* dest, const T* source, size_t nelems,
                                  int pe, WindowInfo* window_info) {
-  LOG_API("rocshmem::host::get");
+  LOG_API("host::get");
   getmem(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
 template <typename T>
 __host__ void HostInterface::get_nbi(T* dest, const T* source, size_t nelems,
                                      int pe, WindowInfo* window_info) {
-  LOG_API("rocshmem::host::get_nbi");
+  LOG_API("host::get_nbi");
   getmem_nbi(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
@@ -161,7 +161,7 @@ template <typename T>
 __host__ void HostInterface::broadcast_internal(MPI_Comm mpi_comm, T* dest,
                                                 const T* source, int nelems,
                                                 int pe_root) {
-  LOG_API("rocshmem::host::broadcast_internal");
+  LOG_API("host::broadcast_internal");
 
   /*
    * Choose the right pointer for my buffer depending
@@ -194,7 +194,7 @@ __host__ void HostInterface::broadcast(T* dest, const T* source, int nelems,
                                        int pe_root, int pe_start,
                                        int log_pe_stride, int pe_size,
                                        [[maybe_unused]] long* p_sync) {
-  LOG_API("rocshmem::host::broadcast");
+  LOG_API("host::broadcast");
 
   /*
    * Get an MPI communicator for active set of PEs
@@ -212,7 +212,7 @@ template <typename T>
 __host__ void HostInterface::broadcast(rocshmem_team_t team, T* dest,
                                        const T* source, int nelems,
                                        int pe_root) {
-  LOG_API("rocshmem::host::broadcast");
+  LOG_API("host::broadcast");
 
   /*
    * Get the MPI communicator of this team
@@ -351,7 +351,7 @@ __host__ T HostInterface::amo_fetch_cas(void* dst, T value, T cond, int pe,
 template <typename T, ROCSHMEM_OP Op>
 __host__ void HostInterface::to_all_internal(MPI_Comm mpi_comm, T* dest,
                                              const T* source, int nreduce) {
-  LOG_API("rocshmem::host::to_all_internal");
+  LOG_API("host::to_all_internal");
 
   MPI_Op mpi_op{get_mpi_op(Op)};
 
@@ -379,7 +379,7 @@ __host__ void HostInterface::to_all(T* dest, const T* source, int nreduce,
                                     int pe_start, int log_pe_stride,
                                     int pe_size, [[maybe_unused]] T* p_wrk,
                                     [[maybe_unused]] long* p_sync) {
-  LOG_API("rocshmem::host::to_all");
+  LOG_API("host::to_all");
 
   /*
    * Get an MPI communicator for active set of PEs
@@ -396,7 +396,7 @@ __host__ void HostInterface::to_all(T* dest, const T* source, int nreduce,
 template <typename T, ROCSHMEM_OP Op>
 __host__ int HostInterface::reduce(rocshmem_team_t team, T* dest,
                                     const T* source, int nreduce) {
-  LOG_API("rocshmem::host::reduce");
+  LOG_API("host::reduce");
 
   /*
    * Get the MPI communicator of this team
@@ -470,7 +470,7 @@ __host__ void HostInterface::wait_until(T *ivars, int cmp, T val,
   if (!window_info_mpi) {
     abort();
   }
-  LOG_API("rocshmem::host::wait_until");
+  LOG_API("host::wait_until");
 
   /*
    * Find the offset of this memory in the window
@@ -528,7 +528,7 @@ __host__ size_t HostInterface::wait_until_any(T* ivars, size_t nelems,
                                               const int *status,
                                               int cmp, T val,
                                               WindowInfo* window_info) {
-  LOG_API("rocshmem::host::wait_until_any");
+  LOG_API("host::wait_until_any");
 
   // zero nelems error condition
   if (!nelems) {
@@ -560,7 +560,7 @@ __host__ void HostInterface::wait_until_all(T* ivars, size_t nelems,
                                             const int *status,
                                             int cmp, T val,
                                             WindowInfo* window_info) {
-  LOG_API("rocshmem::host::wait_until_all");
+  LOG_API("host::wait_until_all");
 
   // zero nelems error condition
   if (!nelems) {
@@ -589,7 +589,7 @@ __host__ size_t HostInterface::wait_until_some(T* ivars, size_t nelems,
                                              const int *status,
                                              int cmp, T val,
                                              WindowInfo* window_info) {
-  LOG_API("rocshmem::host::wait_until_some");
+  LOG_API("host::wait_until_some");
 
   // zero nelems error condition
   if (!nelems) {
@@ -626,7 +626,7 @@ __host__ void HostInterface::wait_until_all_vector(T* ivars, size_t nelems,
                                                    const int *status,
                                                    int cmp, T* vals,
                                                    WindowInfo* window_info) {
-  LOG_API("rocshmem::host::wait_until_all_vector");
+  LOG_API("host::wait_until_all_vector");
 
   // zero nelems error condition
   if (!nelems) {
@@ -654,7 +654,7 @@ __host__ size_t HostInterface::wait_until_any_vector(T* ivars, size_t nelems,
                                                      const int *status,
                                                      int cmp, T* vals,
                                                      WindowInfo* window_info) {
-  LOG_API("rocshmem::host::wait_until_any_vector");
+  LOG_API("host::wait_until_any_vector");
 
   // zero nelems error condition
   if (!nelems) {
@@ -688,7 +688,7 @@ __host__ size_t HostInterface::wait_until_some_vector(T* ivars, size_t nelems,
                                                       const int *status,
                                                       int cmp, T* vals,
                                                       WindowInfo* window_info) {
-  LOG_API("rocshmem::host::wait_until_some_vector");
+  LOG_API("host::wait_until_some_vector");
 
   // zero nelems error condition
   if (!nelems) {
@@ -727,7 +727,7 @@ __host__ int HostInterface::test(T* ivars, int cmp, T val,
   if (!window_info_mpi) {
     abort();
   }
-  LOG_API("rocshmem::host::test");
+  LOG_API("host::test");
 
   /*
    * Find the offset of this memory in the window

@@ -67,46 +67,39 @@ __host__ ROHostContext::~ROHostContext() {
 
 __host__ void ROHostContext::putmem_nbi(void *dest, const void *source,
                                         size_t nelems, int pe) {
-  LOG_TRACE("rocshmem::host::ro::putmem_nbi");
 
   host_interface->putmem_nbi(dest, source, nelems, pe, context_window_info);
 }
 
 __host__ void ROHostContext::getmem_nbi(void *dest, const void *source,
                                         size_t nelems, int pe) {
-  LOG_TRACE("rocshmem::host::ro::getmem_nbi");
 
   host_interface->getmem_nbi(dest, source, nelems, pe, context_window_info);
 }
 
 __host__ void ROHostContext::putmem(void *dest, const void *source,
                                     size_t nelems, int pe) {
-  LOG_TRACE("rocshmem::host::ro::putmem");
 
   host_interface->putmem(dest, source, nelems, pe, context_window_info);
 }
 
 __host__ void ROHostContext::getmem(void *dest, const void *source,
                                     size_t nelems, int pe) {
-  LOG_TRACE("rocshmem::host::ro::getmem");
 
   host_interface->getmem(dest, source, nelems, pe, context_window_info);
 }
 
 __host__ void ROHostContext::fence() {
-  LOG_TRACE("rocshmem::host::ro::fence");
 
   host_interface->fence(context_window_info);
 }
 
 __host__ void ROHostContext::quiet() {
-  LOG_TRACE("rocshmem::host::ro::quiet");
 
   host_interface->quiet(context_window_info);
 }
 
 __host__ void *ROHostContext::shmem_ptr(const void *dest, int pe) {
-  LOG_TRACE("rocshmem::host::ro::shmem_ptr");
 
   void *ret = nullptr;
   int local_pe{-1};
@@ -120,13 +113,11 @@ __host__ void *ROHostContext::shmem_ptr(const void *dest, int pe) {
 }
 
 __host__ void ROHostContext::sync_all() {
-  LOG_TRACE("rocshmem::host::ro::sync_all");
 
   host_interface->sync_all(context_window_info);
 }
 
 __host__ void ROHostContext::barrier_all() {
-  LOG_TRACE("rocshmem::host::ro::barrier_all");
 
   host_interface->fence(context_window_info);
 
@@ -134,7 +125,6 @@ __host__ void ROHostContext::barrier_all() {
 }
 
 __host__ void ROHostContext::barrier_all_on_stream(hipStream_t stream) {
-  LOG_TRACE("rocshmem::host::ro::barrier_all_on_stream");
 
   host_interface->barrier_all_on_stream(stream);
 }
@@ -144,7 +134,6 @@ __host__ void ROHostContext::alltoallmem_on_stream(rocshmem_team_t team,
                                                     const void *source,
                                                     size_t size,
                                                     hipStream_t stream) {
-  LOG_TRACE("rocshmem::host::ro::alltoallmem_on_stream");
 
   host_interface->alltoallmem_on_stream(team, dest, source, size, stream);
 }
@@ -154,7 +143,6 @@ __host__ void ROHostContext::broadcastmem_on_stream(rocshmem_team_t team,
                                                     const void *source,
                                                     size_t nelems, int pe_root,
                                                     hipStream_t stream) {
-  LOG_TRACE("rocshmem::host::ro::broadcastmem_on_stream");
 
   host_interface->broadcastmem_on_stream(team, dest, source, nelems, pe_root,
                                          stream);
@@ -163,7 +151,6 @@ __host__ void ROHostContext::broadcastmem_on_stream(rocshmem_team_t team,
 __host__ void ROHostContext::getmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
-  LOG_TRACE("rocshmem::host::ro::getmem_on_stream");
 
   host_interface->getmem_on_stream(dest, source, nelems, pe, stream);
 }
@@ -171,7 +158,6 @@ __host__ void ROHostContext::getmem_on_stream(void *dest, const void *source,
 __host__ void ROHostContext::putmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
-  LOG_TRACE("rocshmem::host::ro::putmem_on_stream");
 
   host_interface->putmem_on_stream(dest, source, nelems, pe, stream);
 }
@@ -179,7 +165,6 @@ __host__ void ROHostContext::putmem_on_stream(void *dest, const void *source,
 __host__ void ROHostContext::putmem_signal_on_stream(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe, hipStream_t stream) {
-  LOG_TRACE("rocshmem::host::ro::putmem_signal_on_stream");
 
   host_interface->putmem_signal_on_stream(dest, source, nelems, sig_addr,
                                           signal, sig_op, pe, stream);
@@ -189,7 +174,6 @@ __host__ void ROHostContext::signal_wait_until_on_stream(uint64_t *sig_addr,
                                                          int cmp,
                                                          uint64_t cmp_value,
                                                          hipStream_t stream) {
-  LOG_TRACE("rocshmem::host::ro::signal_wait_until_on_stream");
 
   host_interface->signal_wait_until_on_stream(sig_addr, cmp, cmp_value, stream);
 }
