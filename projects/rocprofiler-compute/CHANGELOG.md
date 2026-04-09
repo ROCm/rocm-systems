@@ -58,6 +58,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed roofline benchmark MFMA FP16/BF16/INT8 peaks for MI 350
 
+* Fixed issue where pc sampling profiling fails with multi-argument commands and live process attachment
+
 ### Upcoming changes
 
 * `--path` and `--subpath` options will be removed as they are already deprecated
