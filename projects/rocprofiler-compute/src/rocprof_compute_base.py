@@ -210,19 +210,7 @@ class RocProfCompute:
             if self.__args.name is None and self.__args.output_directory == str(
                 Path.cwd() / "workloads"
             ):
-                # Remove if statement and the else code block in a future release.
-                if self.__args.path == str(Path.cwd() / "workloads"):
-                    console_error("Either --output-directory or --name is required")
-                else:
-                    console_warning(
-                        "--path is deprecated and will be removed in future releases."
-                    )
-
-                if self.__args.subpath != "gpu_model":
-                    console_warning(
-                        "--subpath is deprecated and will be "
-                        "removed in future releases."
-                    )
+                console_error("Either --output-directory or --name is required")
 
             if self.__args.name is not None and "/" in self.__args.name:
                 console_error('"/" is not permitted in profile name')
@@ -486,18 +474,7 @@ class RocProfCompute:
     def run_profiler(self) -> None:
         self.print_graphic()
 
-        # Replace parameters in output directory when either:
-        # 1. --output-directory is explicitly given by user
-        # 2. --path and --output-directory are set to default workload directory.
-        # NOTE: --output-directory is given higher priority than --path
-        # as --path is deprecated and will be removed in future releases.
-        if self.__args.output_directory != str(
-            Path.cwd() / "workloads"
-        ) or self.__args.path == str(Path.cwd() / "workloads"):
-            self.replace_parameters_in_output_directory()
-            # Set path to output_directory for roofline
-            # Remove this while removing roofline from profiling mode
-            self.__args.path = self.__args.output_directory
+        self.replace_parameters_in_output_directory()
 
         self.load_soc_specs()
 
@@ -509,7 +486,7 @@ class RocProfCompute:
             console_error(str(e))
 
         # Create workload directory if it does not exist
-        p = Path(self.__args.path)
+        p = Path(self.__args.output_directory)
         if not p.exists():
             try:
                 p.mkdir(parents=True, exist_ok=False)
@@ -517,7 +494,7 @@ class RocProfCompute:
                 console_error("Directory already exists.")
 
         # enable file-based logging
-        setup_file_handler(self.__args.loglevel, self.__args.path)
+        setup_file_handler(self.__args.loglevel, self.__args.output_directory)
 
         profiler.pre_processing()
 

@@ -1841,7 +1841,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             rocprofiler_sdk_tool_path="sdk_tool",
             roof_only=True,
             format_rocprof_output="format",
-            path="path",
+            output_directory="path",
             remaining="remaining",
             iteration_multiplexing=None,
             attach_pid=None,
