@@ -528,6 +528,7 @@ namespace envvar {
     extern const var<bool> merge_nics;
     extern const var<std::string> net_merge_level;
     extern const var<std::string> net_force_merge;
+    extern const var<std::string> nic_policy;
   }  // namespace gda
 
   /**

@@ -37,7 +37,7 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 
   NicDevice &nic = nic_for_qp(conn_num);
   int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp_row(conn_num / num_pes);
+  int nic_idx = nic_idx_for_qp(conn_num);
 
   ib_qp = qps[conn_num];
 

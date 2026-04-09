@@ -83,12 +83,23 @@ void GDABackend::init() {
 
   select_nics();
 
-  // Effective QPs per PE per context type: at least num_nics_ so each NIC
-  // gets a dedicated QP row.
-  qps_per_pe_default_ctx_ = std::max(envvar::gda::num_qps_per_pe_default_ctx.get_value(),
-                                     static_cast<size_t>(num_nics_));
-  qps_per_pe_usr_ctx_     = std::max(envvar::gda::num_qps_per_pe_usr_ctx.get_value(),
-                                     static_cast<size_t>(num_nics_));
+  const std::string &policy_str = envvar::gda::nic_policy.get_value();
+  if (policy_str == "PER_CONTEXT") {
+    nic_policy_ = NicPolicy::PER_CONTEXT;
+  } else {
+    nic_policy_ = NicPolicy::ROUND_ROBIN;
+  }
+
+  qps_per_pe_default_ctx_ = envvar::gda::num_qps_per_pe_default_ctx.get_value();
+  qps_per_pe_usr_ctx_     = envvar::gda::num_qps_per_pe_usr_ctx.get_value();
+
+  if (nic_policy_ == NicPolicy::ROUND_ROBIN && num_nics_ > 1) {
+    int cap = std::max(qps_per_pe_default_ctx_, qps_per_pe_usr_ctx_);
+    if (cap < num_nics_) {
+      nic_devices_.resize(cap);
+      num_nics_ = cap;
+    }
+  }
 
   // Determine number of QPs to create per PE
   num_qps_per_pe = qps_per_pe_default_ctx_ +
@@ -97,6 +108,17 @@ void GDABackend::init() {
 
   // Total number of QPs created
   num_qps = num_qps_per_pe * num_pes;
+
+  if (envvar::debug_level.get_value() >= envvar::types::debug_level::INFO) {
+    fprintf(stdout,
+      "[rocSHMEM] Info: PE %d QP config: num_nics=%d, "
+      "qps_per_pe_default_ctx=%zu, qps_per_pe_usr_ctx=%zu, "
+      "num_qps_per_pe=%zu, num_qps=%u, nic_policy=%s\n",
+      my_pe, num_nics_, qps_per_pe_default_ctx_, qps_per_pe_usr_ctx_,
+      num_qps_per_pe, num_qps,
+      nic_policy_ == NicPolicy::PER_CONTEXT ? "PER_CONTEXT" : "ROUND_ROBIN");
+    fflush(stdout);
+  }
 
   //TODO setup_host_interface();
   /* Initialize the host interface */
@@ -240,15 +262,37 @@ void GDABackend::setup_default_ctx() {
   default_context_proxy_ = GDADefaultContextProxyT(this, tinfo, gda_provider);
 }
 
+void GDABackend::log_ctx_nics(unsigned int ctx_id, size_t qps_per_pe,
+                               int qp_offset) {
+  fprintf(stdout, "[rocSHMEM] Info: PE %d ctx %u qps_per_pe=%zu NICs=[",
+          my_pe, ctx_id, qps_per_pe);
+  for (size_t r = 0; r < qps_per_pe; r++) {
+    int nidx = nic_idx_for_qp(qp_offset + static_cast<int>(r) * num_pes);
+    fprintf(stdout, "%s%s", r ? " " : "", nic_devices_[nidx].nic_name.c_str());
+  }
+  fprintf(stdout, "]\n");
+  fflush(stdout);
+}
+
 void GDABackend::setup_ctxs() {
   setup_host_ctx();
   setup_default_ctx();
 
+  bool verbose = envvar::debug_level.get_value() >= envvar::types::debug_level::INFO;
+  if (verbose) log_ctx_nics(0, qps_per_pe_default_ctx_, 0);
+
   CHECK_HIP(hipMalloc(&ctx_array, sizeof(GDAContext) * envvar::max_num_contexts));
   // 0th context is default context
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
-    new (&ctx_array[i]) GDAContext(this, i + 1, gda_provider);
+    unsigned int cid = static_cast<unsigned int>(i + 1);
+    new (&ctx_array[i]) GDAContext(this, cid, gda_provider);
     ctx_free_list.get()->push_back(ctx_array + i);
+
+    if (verbose) {
+      int offset = (qps_per_pe_default_ctx_ +
+                    qps_per_pe_usr_ctx_ * (cid - 1)) * num_pes;
+      log_ctx_nics(cid, qps_per_pe_usr_ctx_, offset);
+    }
   }
 
   rocshmem_ctx_t *rocshmem_ctx_array_device = nullptr;
