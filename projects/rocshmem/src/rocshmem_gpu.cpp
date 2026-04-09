@@ -492,7 +492,7 @@ template <typename T>
 __device__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
   LOGD_API("device::p (ctx=%zd, dest=%p, value=%g, pe=%d w%d)",
-    ctx.ctx_opaque, dest, value, pe, pe_in_world);
+    ctx.ctx_opaque, dest, (double)value, pe, pe_in_world);
 
   get_internal_ctx(ctx)->p(dest, value, pe_in_world);
 }
@@ -629,7 +629,7 @@ template <typename T>
 __device__ void rocshmem_ctx_alltoall_wg(rocshmem_ctx_t ctx,
                                          rocshmem_team_t team, T *dest,
                                          const T *source, int nelem) {
-  LOGD_API("device::ctx_alltoall_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d",
+  LOGD_API("device::ctx_alltoall_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d)",
               ctx.ctx_opaque, team, dest, source, nelem);
 
   get_internal_ctx(ctx)->alltoall<T>(team, dest, source, nelem);
@@ -638,7 +638,7 @@ __device__ void rocshmem_ctx_alltoall_wg(rocshmem_ctx_t ctx,
 template <typename T>
 __device__ void rocshmem_alltoall_wg(rocshmem_team_t team, T *dest,
                                      const T *source, int nelem) {
-  LOGD_API("device::alltoall_wg (team=%zd, dest=%p, source=%p, nelem=%d",
+  LOGD_API("device::alltoall_wg (team=%zd, dest=%p, source=%p, nelem=%d)",
               team, dest, source, nelem);
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->alltoall<T>(team, dest, source, nelem);
@@ -650,7 +650,7 @@ __device__ void rocshmem_alltoallv_wg(rocshmem_team_t team,
                                       const size_t dest_displs[],
                                       T *source, const size_t source_nelems[],
                                       const size_t source_displs[]) {
-  LOGD_API("device::alltoallv_wg(team=%zd, dest=%p, source=%p",
+  LOGD_API("device::alltoallv_wg(team=%zd, dest=%p, source=%p)",
               team, dest, source);
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->alltoallv<T>(team,
