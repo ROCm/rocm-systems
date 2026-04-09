@@ -33,6 +33,7 @@ namespace rocshmem {
 
 namespace host {
     rocshmem_team_t ROCSHMEM_TEAM_WORLD = nullptr;
+    rocshmem_team_t ROCSHMEM_TEAM_SHARED = nullptr;
 }
 
 __host__ __device__ Team* get_internal_team(rocshmem_team_t team) {
@@ -95,6 +96,13 @@ __host__ Team::Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
 }
 
 __host__ __device__ int Team::get_pe_in_world(int pe) {
+  if (pe_world_map_) {
+    if (pe < 0 || pe >= num_pes) {
+      return -1;
+    }
+    return pe_world_map_[pe];
+  }
+
   int pe_start{tinfo_wrt_world->pe_start};
   int stride{tinfo_wrt_world->stride};
 
@@ -102,6 +110,15 @@ __host__ __device__ int Team::get_pe_in_world(int pe) {
 }
 
 __host__ __device__ int Team::get_pe_in_my_team(int pe_in_world) {
+  if (pe_world_map_) {
+    for (int i = 0; i < num_pes; i++) {
+      if (pe_world_map_[i] == pe_in_world) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   int pe_start{tinfo_wrt_world->pe_start};
   int stride{tinfo_wrt_world->stride};
 

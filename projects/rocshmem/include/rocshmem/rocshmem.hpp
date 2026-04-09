@@ -364,9 +364,10 @@ __host__ int rocshmem_team_split_strided(rocshmem_team_t parent_team,
  * created from the referenced team.
  *
  * @param[in] team The team to destroy. The behavior is undefined if
- *                 the input team is ROCSHMEM_TEAM_WORLD or any other
- *                 invalid team. If the input is ROCSHMEM_TEAM_INVALID,
- *                 this function will not perform any operation.
+ *                 the input team is ROCSHMEM_TEAM_WORLD,
+ *                 ROCSHMEM_TEAM_SHARED, or any other invalid team.
+ *                 If the input is ROCSHMEM_TEAM_INVALID, this function
+ *                 will not perform any operation.
  *
  * @return None.
  */
