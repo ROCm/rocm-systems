@@ -243,20 +243,27 @@ The ROCm binary utilities are a collection of command-line tools for examining
 and manipulating GPU binaries produced by ``amdclang++`` or other ROCm build
 tools. These utilities allow developers to inspect, disassemble, and analyze
 AMDGPU code objects, the compiled GPU kernels embedded in host executables or
-distributed as standalone ``.hsaco`` files.
-
+distributed as standalone ``.hsaco`` files.  Prior releases had ``roc-obj-ls``,
+``roc-obj-extract``, and ``roc-obj`` tools that have been deprecated in favor
+new functionality in existing llvm object tools, like ``llvm-objdump`` and ``llvm-readobj``.
+ 
 The ``llvm-objdump`` utility provides multiple capabilities for analyzing GPU
 binaries. With the ``--offloading`` flag, it can list and extract information
 from the contents of ROCm binaries, including code object metadata, kernel
 symbols, target architectures (for example, ``gfx90a``, ``gfx1100``), and
 linkage details. It supports both standalone ``.hsaco`` files and "fat
-binaries" embedded within host executables. With the ``--triple=amdgcn`` flag,
-it can disassemble GPU kernels into human-readable AMDGPU ISA, allowing
-inspection of instruction sequences, register allocation, and control flow.
-These capabilities are essential for performance debugging, code verification,
-and low-level kernel analysis, for example, when tuning :ref:`MFMA
-<mfma_units>` instructions or checking compiler optimizations.
-
+binaries" embedded within host executables. In latest releases it also extracts
+HIP fat binary bundle entries into separate code object files.  With the
+``--triple=amdgcn`` flag, it can disassemble GPU kernels into human-readable
+AMDGPU ISA, allowing inspection of instruction sequences, register allocation,
+and control flow.  These capabilities are essential for performance debugging,
+code verification, and low-level kernel analysis, for example, when tuning
+:ref:`MFMA <mfma_units>` instructions or checking compiler optimizations.
+ 
+The ``llvm-readobj`` utility with the ``--offloading`` flag will provide a
+listing of all available HIP fat binary offload bundle entries.  This replaces
+the funcitonality oreviously provided by ``roc-obj-ls``.
+ 
 Together, these utilities provide developers with insight into how HIP C++ code
 is compiled, optimized, and mapped to GPU hardware. They complement profiling
 tools like ``rocprofv3`` by exposing the static structure of compiled GPU
