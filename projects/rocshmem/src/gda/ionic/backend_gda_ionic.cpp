@@ -112,7 +112,7 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 
   gpu_qp->qp_num = qps[conn_num]->qp_num;
   int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp_row(conn_num / num_pes);
+  int nic_idx = nic_idx_for_qp(conn_num);
   gpu_qp->lkey = nic.heap_mr->lkey;
   gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
   gpu_qp->inline_threshold = 32;

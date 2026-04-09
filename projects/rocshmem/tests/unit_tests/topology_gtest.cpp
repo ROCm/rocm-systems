@@ -24,6 +24,7 @@
 
 #include <cstdlib>
 #include "topology_gtest.hpp"
+#include "gda/nic_policy.hpp"
 
 using namespace rocshmem;
 
@@ -644,19 +645,24 @@ TEST_F(DeviceTypeTestFixture, IbvDeviceNameAtIndex) {
 }
 
 TEST_F(TopologyTestFixture, BuildFilteredNicAddressesNoFilter) {
-  auto addrs = BuildFilteredNicAddresses(nullptr);
   auto const& devList = GetIbvDeviceList();
+  if (devList.empty()) GTEST_SKIP() << "No IB devices available";
+
+  auto addrs = BuildFilteredNicAddresses(nullptr);
   EXPECT_EQ(addrs.size(), devList.size());
+  int active_count = 0;
   for (size_t i = 0; i < devList.size(); i++) {
     if (devList[i].hasActivePort) {
       EXPECT_FALSE(addrs[i].empty());
+      active_count++;
     }
   }
+  if (active_count == 0) GTEST_SKIP() << "No active IB ports; skipping test";
 }
 
 TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithExclude) {
   auto const& devList = GetIbvDeviceList();
-  if (devList.empty()) return;
+  if (devList.empty()) GTEST_SKIP() << "No IB devices available";
 
   std::string excl = "^" + devList[0].name;
   auto addrs = BuildFilteredNicAddresses(excl.c_str());
@@ -665,7 +671,7 @@ TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithExclude) {
 
 TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithInclude) {
   auto const& devList = GetIbvDeviceList();
-  if (devList.empty()) return;
+  if (devList.empty()) GTEST_SKIP() << "No IB devices available";
 
   std::string incl = devList[0].name;
   auto addrs = BuildFilteredNicAddresses(incl.c_str());
@@ -679,7 +685,7 @@ TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithInclude) {
 
 TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithMultiInclude) {
   auto const& devList = GetIbvDeviceList();
-  if (devList.size() < 2) return;
+  if (devList.size() < 2) GTEST_SKIP() << "Need at least 2 IB devices";
 
   std::string incl = devList[0].name + "," + devList[1].name;
   auto addrs = BuildFilteredNicAddresses(incl.c_str());
@@ -688,5 +694,100 @@ TEST_F(TopologyTestFixture, BuildFilteredNicAddressesWithMultiInclude) {
       EXPECT_TRUE(addrs[i].empty())
           << "NIC " << devList[i].name << " should be excluded by include list";
     }
+  }
+}
+
+// ---------- ComputeNicIdxForQp tests ----------
+
+TEST(NicPolicyTest, RoundRobin_SingleNic) {
+  // 4 PEs, 1 NIC, 2 QP rows per PE -> all map to NIC 0
+  for (int qp = 0; qp < 8; qp++) {
+    EXPECT_EQ(ComputeNicIdxForQp(qp, 4, 1, 2, 1, NicPolicy::ROUND_ROBIN), 0);
+  }
+}
+
+TEST(NicPolicyTest, RoundRobin_TwoNics_FourRows) {
+  // 2 PEs, 2 NICs, 4 QP rows per PE default, 0 user
+  // row 0 -> NIC 0, row 1 -> NIC 1, row 2 -> NIC 0, row 3 -> NIC 1
+  int num_pes = 2, num_nics = 2, def_qps = 4, usr_qps = 0;
+  for (int row = 0; row < 4; row++) {
+    for (int pe = 0; pe < num_pes; pe++) {
+      int qp_idx = row * num_pes + pe;
+      int expected_nic = row % num_nics;
+      EXPECT_EQ(ComputeNicIdxForQp(qp_idx, num_pes, num_nics, def_qps, usr_qps,
+                                    NicPolicy::ROUND_ROBIN), expected_nic)
+          << "row=" << row << " pe=" << pe;
+    }
+  }
+}
+
+TEST(NicPolicyTest, RoundRobin_FourNics_OneRow) {
+  // 2 PEs, 4 NICs, 1 QP row per PE -> all map to NIC 0 (not enough QPs)
+  int num_pes = 2, num_nics = 4, def_qps = 1, usr_qps = 1;
+  for (int pe = 0; pe < num_pes; pe++) {
+    EXPECT_EQ(ComputeNicIdxForQp(pe, num_pes, num_nics, def_qps, usr_qps,
+                                  NicPolicy::ROUND_ROBIN), 0);
+  }
+}
+
+TEST(NicPolicyTest, PerContext_TwoNics_TwoContexts) {
+  // 2 PEs, 2 NICs, 2 QP rows default, 2 QP rows per user ctx
+  // Layout: [default: 2*2=4 QPs] [usr_ctx_1: 2*2=4 QPs] [usr_ctx_2: 2*2=4 QPs]
+  int num_pes = 2, num_nics = 2, def_qps = 2, usr_qps = 2;
+  auto P = NicPolicy::PER_CONTEXT;
+
+  // Default ctx (ctx_id=0): QPs 0..3 -> NIC 0
+  for (int i = 0; i < 4; i++) {
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 0)
+        << "qp_idx=" << i << " (default ctx)";
+  }
+  // User ctx 1 (ctx_id=1): QPs 4..7 -> NIC 1
+  for (int i = 4; i < 8; i++) {
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 1)
+        << "qp_idx=" << i << " (usr ctx 1)";
+  }
+  // User ctx 2 (ctx_id=2): QPs 8..11 -> NIC 0 (wraps)
+  for (int i = 8; i < 12; i++) {
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 0)
+        << "qp_idx=" << i << " (usr ctx 2)";
+  }
+}
+
+TEST(NicPolicyTest, PerContext_FourNics_FourContexts) {
+  // 2 PEs, 4 NICs, 1 QP row default, 1 QP row per user ctx
+  // ctx 0 -> NIC 0, ctx 1 -> NIC 1, ctx 2 -> NIC 2, ctx 3 -> NIC 3
+  int num_pes = 2, num_nics = 4, def_qps = 1, usr_qps = 1;
+  auto P = NicPolicy::PER_CONTEXT;
+
+  // Default (QPs 0..1)
+  for (int i = 0; i < 2; i++)
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 0);
+  // User ctx 1 (QPs 2..3)
+  for (int i = 2; i < 4; i++)
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 1);
+  // User ctx 2 (QPs 4..5)
+  for (int i = 4; i < 6; i++)
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 2);
+  // User ctx 3 (QPs 6..7)
+  for (int i = 6; i < 8; i++)
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 3);
+}
+
+TEST(NicPolicyTest, PerContext_SingleNic) {
+  // 2 PEs, 1 NIC -> all contexts map to NIC 0
+  int num_pes = 2, num_nics = 1, def_qps = 2, usr_qps = 2;
+  auto P = NicPolicy::PER_CONTEXT;
+  for (int i = 0; i < 12; i++) {
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 0);
+  }
+}
+
+TEST(NicPolicyTest, PerContext_ZeroUsrQps) {
+  // Edge case: no user context QPs (usr_qps = 0), only default
+  int num_pes = 2, num_nics = 2, def_qps = 2, usr_qps = 0;
+  auto P = NicPolicy::PER_CONTEXT;
+  for (int i = 0; i < 4; i++) {
+    EXPECT_EQ(ComputeNicIdxForQp(i, num_pes, num_nics, def_qps, usr_qps, P), 0)
+        << "qp_idx=" << i;
   }
 }

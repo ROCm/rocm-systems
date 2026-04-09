@@ -818,10 +818,12 @@ namespace rocshmem
 
   NicPathType ParseNicMergeLevel(const std::string &level_str)
   {
-    if (level_str == "PIX") return NIC_PATH_PIX;
-    if (level_str == "PXB") return NIC_PATH_PXB;
-    if (level_str == "PHB") return NIC_PATH_PHB;
-    if (level_str == "SYS") return NIC_PATH_SYS;
+    std::string upper = level_str;
+    std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+    if (upper == "PIX") return NIC_PATH_PIX;
+    if (upper == "PXB") return NIC_PATH_PXB;
+    if (upper == "PHB") return NIC_PATH_PHB;
+    if (upper == "SYS") return NIC_PATH_SYS;
     LOG_WARN("Unknown NET_MERGE_LEVEL '%s', defaulting to SYS",
              level_str.c_str());
     return NIC_PATH_SYS;
@@ -1060,8 +1062,9 @@ namespace rocshmem
       if (pathType > max_path_type) continue;
 
       int dist = GetBusIdDistance(hipPciBusId, ibvAddressList[i]);
+      constexpr int kUnknownDistance = 9999;
       candidates.push_back(
-          {static_cast<int>(i), dist >= 0 ? dist : 9999, pathType});
+          {static_cast<int>(i), dist >= 0 ? dist : kUnknownDistance, pathType});
     }
 
     std::sort(candidates.begin(), candidates.end(),

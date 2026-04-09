@@ -43,7 +43,6 @@
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <filesystem>
 #include <fstream>
 
@@ -295,7 +294,7 @@ namespace rocshmem
    *
    * @param[in] gpuIndex Index of the GPU to query
    * @param[in] hca_list Include list of device names that can be used (Exclude if prefixed by ^)
-   * @param[out] dev_name Name of of IB Verbs capable NIC index closest to GPU gpuIndex
+   * @param[out] dev_name Name of the IB Verbs capable NIC index closest to GPU gpuIndex
    * @returns index of IB Verbs capable NIC index closest to GPU gpuIndex, or -1 if unable to detect
    */
   int GetClosestNicToGpu(int gpuIndex, const char *hca_list,

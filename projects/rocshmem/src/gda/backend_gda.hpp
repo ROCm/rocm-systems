@@ -27,6 +27,7 @@
 
 #include <dlfcn.h>
 #include "ibv_core.hpp"
+#include "gda/nic_policy.hpp"
 
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
@@ -118,8 +119,10 @@ class GDABackend : public Backend {
   std::vector<mlx5_devx_qp> mlx5_qps;
   /* GDA_MLX5 END */
 
+  NicPolicy nic_policy_ {NicPolicy::ROUND_ROBIN};
+
   /**
-   * Effective QPs per PE per context type, after max(env, num_nics_).
+   * Effective QPs per PE per context type.
    * Exposed so GDAContext can read them.
    */
   size_t qps_per_pe_default_ctx_ {1};
@@ -143,13 +146,20 @@ class GDABackend : public Backend {
    *        Populates nic_devices_ (always at least 1 entry).
    */
   void select_nics();
+  
+  void configure_nic_policy();
+  void log_ctx_nics(unsigned int ctx_id, size_t qps_per_pe, int qp_offset);
 
-  int nic_idx_for_qp_row(int qp_row) const {
-    return qp_row % num_nics_;
+  int nic_idx_for_qp(int qp_idx) const {
+    return ComputeNicIdxForQp(
+        qp_idx, num_pes, num_nics_,
+        static_cast<int>(qps_per_pe_default_ctx_),
+        static_cast<int>(qps_per_pe_usr_ctx_),
+        nic_policy_);
   }
 
   NicDevice& nic_for_qp(int qp_idx) {
-    return nic_devices_[nic_idx_for_qp_row(qp_idx / num_pes)];
+    return nic_devices_[nic_idx_for_qp(qp_idx)];
   }
 
   /**
@@ -500,7 +510,7 @@ class GDABackend : public Backend {
   char *team_pool_bitmask_{nullptr};
 
   /**
-   * @brief Bitmask to store the reduced result of bitmasks on pariticipating
+   * @brief Bitmask to store the reduced result of bitmasks on participating
    * PEs
    *
    * With no thread-safety for this bitmask, multithreaded creation of teams is

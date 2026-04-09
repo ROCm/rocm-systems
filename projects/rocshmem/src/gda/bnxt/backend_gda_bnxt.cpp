@@ -38,7 +38,7 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 
   NicDevice &nic = nic_for_qp(conn_num);
   int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp_row(conn_num / num_pes);
+  int nic_idx = nic_idx_for_qp(conn_num);
 
   ib_qp = qps[conn_num];
 
@@ -142,7 +142,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
     cq_init_attr.ncqe        = cq_attr.ncqe;
 
     bnxt_scqs[i].cq = bnxt_re_dv.create_cq(ctx, &cq_init_attr);
-    CHECK_NNULL(bnxt_scqs[i].cq, "bnxt_re_dv_create_cq (SCQ) ");
+    CHECK_NNULL(bnxt_scqs[i].cq, "bnxt_re_dv_create_cq (SCQ)");
   }
 
   /* Create RCQs */

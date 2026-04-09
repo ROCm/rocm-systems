@@ -204,6 +204,10 @@ namespace envvar {
       "PIX");
     const var<std::string> net_force_merge("NET_FORCE_MERGE",
       "Force-merge specific NICs by name. Comma-separated list, semicolon-separated rank groups");
+    const var<std::string> nic_policy("NIC_POLICY",
+      "NIC-to-QP binding mode. ROUND_ROBIN: QPs within a context spread across NICs; "
+      "PER_CONTEXT: all QPs in a context use one NIC, multi-NIC via multiple contexts",
+      "ROUND_ROBIN");
   }  // namespace gda
 
   namespace _detail {
