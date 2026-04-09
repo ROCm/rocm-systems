@@ -13,6 +13,7 @@ from amdisa.gpuisa import (
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     EncodingModifier,
     IsaProfile,

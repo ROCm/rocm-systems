@@ -19,9 +19,10 @@ from amdisa import (
     Rdna3Profile,
     Rdna3_5Profile,
     Rdna4Profile,
+    Cdna4Profile
 )
+from amdisa import IsaProfile
 from amdisa import xml_schema as xs
-from amdisa.isa_profile import gen_wait_counter_policy
 from amdisa.cross_isa import CrossIsaAnalyzer
 from amdisa.semantics import derive_all_semantics
 
@@ -30,7 +31,7 @@ _PROFILES = {
     'cdna1': Cdna1Profile,
     'cdna2': Cdna2Profile,
     'cdna3': CdnaProfile,
-    'cdna4': CdnaProfile,
+    'cdna4': Cdna4Profile,
     'rdna1': Rdna1Profile,
     'rdna2': Rdna2Profile,
     'rdna3': Rdna3Profile,
@@ -119,7 +120,8 @@ def _run_multi(args) -> None:
     # Single unified shared execute header — no per-encoding stubs needed.
 
     # Generate shared/wait_counter_policy.h (arch-specific store counter mapping).
-    gen_wait_counter_policy(args.output)
+    profiles = [(name, spec.profile) for name, spec, _ in specs]
+    IsaProfile.gen_wait_counter_policy(args.output, profiles)
 
 
 def main() -> None:
