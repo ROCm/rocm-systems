@@ -93,7 +93,7 @@ jobs:
       ROCPROFSYS_CI: ON
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
-      ROCPROFSYS_KEEP_TEST_OUTPUT: 0
+      ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
     permissions:
       packages: read
     container:

@@ -47,7 +47,7 @@ env:
   ROCPROFSYS_MAX_THREADS: '64'
   OMPI_ALLOW_RUN_AS_ROOT: 1
   OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
-  ROCPROFSYS_KEEP_TEST_OUTPUT: 0
+  ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
 
 jobs:
   rhel:
@@ -183,14 +183,6 @@ jobs:
           echo "✓ No buffered storage files found in /tmp"
         fi
 
-    - name: Test Clean Up
-      timeout-minutes: 10
-      working-directory: projects/rocprofiler-systems/
-      run: |
-        du /tmp -d 1 -h
-        du build/rocprof-sys-pytest-output -d 1 -h || true
-        df -h
-        rm -fr /tmp/* build/rocprof-sys-pytest-output/*
 
     - name: Install
       timeout-minutes: 10
