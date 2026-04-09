@@ -31,13 +31,13 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
-#include <amd_smi/amdsmi.h>
 
 #include "bootstrap.hpp"
 #include "log.hpp"
 #include "utils.hpp"
 #include "util.hpp"
 #include "socket.hpp"
+#include "amdsmi_loader.hpp"
 
 namespace rocshmem {
 
@@ -600,8 +600,15 @@ std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
 
   DPRINTF("Rank %d using device %d with BDF ID: %s\n", rank_, device, bdfId);
 
+  // Load AMD SMI library dynamically
+  AmdsmiLoader amdsmi;
+  if (!amdsmi.isLoaded()) {
+    DPRINTF("Failed to load AMD SMI library\n");
+    return ipcCapableRanks;
+  }
+
   // Initialize AMD SMI library
-  amdsmi_status_t status = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+  amdsmi_status_t status = amdsmi.init(AMDSMI_INIT_AMD_GPUS);
   if (status != AMDSMI_STATUS_SUCCESS) {
     DPRINTF("Failed to initialize AMD SMI: %d\n", status);
     return ipcCapableRanks;
@@ -609,10 +616,10 @@ std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
 
   // Get processor handle from BDF ID
   amdsmi_processor_handle gpuHandle;
-  status = amdsmi_get_processor_handle_from_bdf(bdfId, &gpuHandle);
+  status = amdsmi.get_processor_handle_from_bdf(bdfId, &gpuHandle);
   if (status != AMDSMI_STATUS_SUCCESS) {
     DPRINTF("Failed to get processor handle from BDF %s: %d\n", bdfId, status);
-    amdsmi_shut_down();
+    amdsmi.shut_down();
     return ipcCapableRanks;
   }
 
@@ -620,10 +627,10 @@ std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
 
   // Get fabric information for the GPU
   amdsmi_gpu_fabric_info_t fabricInfo;
-  status = amdsmi_get_gpu_fabric_info(gpuHandle, &fabricInfo);
+  status = amdsmi.get_gpu_fabric_info(gpuHandle, &fabricInfo);
   if (status != AMDSMI_STATUS_SUCCESS) {
     DPRINTF("Failed to get fabric info for BDF %s: %d\n", bdfId, status);
-    amdsmi_shut_down();
+    amdsmi.shut_down();
     return ipcCapableRanks;
   }
 
@@ -662,7 +669,7 @@ std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
   DPRINTF("Rank %d found %zu IPC-capable ranks\n", rank_, ipcCapableRanks.size());
 
   // Cleanup AMD SMI
-  amdsmi_shut_down();
+  amdsmi.shut_down();
 
   return ipcCapableRanks;
 }

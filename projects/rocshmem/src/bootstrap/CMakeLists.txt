@@ -31,4 +31,5 @@ target_sources(
     socket.cpp
     bootstrap.cpp
     utils.cpp
+    amdsmi_loader.cpp
 )
