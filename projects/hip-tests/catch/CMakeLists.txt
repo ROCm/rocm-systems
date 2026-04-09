@@ -374,7 +374,6 @@ if(HIP_PLATFORM STREQUAL "nvidia")
 endif()
 
 add_custom_target(build_tests ALL)
-<<<<<<< HEAD
 add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
 add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
 # Tests folder
@@ -385,20 +384,6 @@ if(BUILD_UNIT_TESTS)
     if(UNIX)
       add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
     endif()
-=======
-add_dependencies(build_tests hip_tests_config)
-
-# Tests folder
-if(BUILD_UNIT_TESTS)
-  add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
-  add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
-  add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
-  add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
-  add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
-  if(UNIX)
-    add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)
-  endif()
->>>>>>> origin/develop
 endif()
 if(BUILD_PERF_TESTS)
   add_subdirectory(perftests ${CATCH_BUILD_DIR}/perftests)
