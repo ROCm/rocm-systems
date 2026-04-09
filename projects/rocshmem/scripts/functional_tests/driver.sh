@@ -603,10 +603,10 @@ ValidateInput() {
   INPUT_COUNT=$1
   if [ $INPUT_COUNT -lt 3 ] ; then
     echo "This script must be run with at least 3 arguments."
-    echo "Usage: ${0} <executable> <test_suit | test_name | test_config> <log_dir> [hostfile]"
+    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile]"
     echo
     echo "    <executable>  : path to the tester executable"
-    echo "    <test_suit>   : test suit to run, e.g. 'all', 'rma', or 'put'"
+    echo "    <test_suite>  : test suite to run, e.g. 'all', 'rma', or 'put'"
     echo "    <test_name>   : name of test to run, e.g. 'putnbi' or 'amo_fadd'"
     echo "    <test_config> : quoted test configuration to run, in the format"
     echo '                    "<test_name> <ranks> <workgroups> <threads> [max_msg_size]"'
