@@ -23,81 +23,87 @@
 #ifndef _GFX12_BLOCKINFO_H_
 #define _GFX12_BLOCKINFO_H_
 
-namespace gfxip {
-namespace gfx12 {
+namespace gfxip
+{
+namespace gfx12
+{
 #define __BLOCK_ID_HSA(block) HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_##block
-#define __BLOCK_ID(block) AQLPROFILE_BLOCK_NAME_##block
-enum CounterBlockId {
-  // Counters retrieved by KFD
-  IommuV2CounterBlockId = AQLPROFILE_BLOCKS_NUMBER,
-  KernelDriverCounterBlockId,
+#define __BLOCK_ID(block)     AQLPROFILE_BLOCK_NAME_##block
+enum CounterBlockId
+{
+    // Counters retrieved by KFD
+    IommuV2CounterBlockId = AQLPROFILE_BLOCKS_NUMBER,
+    KernelDriverCounterBlockId,
 
-  CpPipeStatsCounterBlockId,
-  HwInfoCounterBlockId,
+    CpPipeStatsCounterBlockId,
+    HwInfoCounterBlockId,
 
-  LastCounterBlockId = HwInfoCounterBlockId,
+    LastCounterBlockId = HwInfoCounterBlockId,
 };
 
 // Define SPM Counter BlockId
-enum SpmGlobalBlockId {
-  SPM_GLOBAL_BLOCK_NAME_FIRST = 0,
-  SPM_GLOBAL_BLOCK_NAME_CPG = SPM_GLOBAL_BLOCK_NAME_FIRST,
-  SPM_GLOBAL_BLOCK_NAME_CPC,
-  SPM_GLOBAL_BLOCK_NAME_CPF,
-  SPM_GLOBAL_BLOCK_NAME_GDS,
-  SPM_GLOBAL_BLOCK_NAME_GCR,
-  SPM_GLOBAL_BLOCK_NAME_PH,
-  SPM_GLOBAL_BLOCK_NAME_GE1,
-  SPM_GLOBAL_BLOCK_NAME_GL2A,
-  SPM_GLOBAL_BLOCK_NAME_GL2C,
-  SPM_GLOBAL_BLOCK_NAME_SDMA,
-  SPM_GLOBAL_BLOCK_NAME_GUS,
-  SPM_GLOBAL_BLOCK_NAME_EA,
-  SPM_GLOBAL_BLOCK_NAME_CHA,
-  SPM_GLOBAL_BLOCK_NAME_CHC,
-  SPM_GLOBAL_BLOCK_NAME_CHCG,
-  SPM_GLOBAL_BLOCK_NAME_ATCL2,
-  SPM_GLOBAL_BLOCK_NAME_VML2,
-  SPM_GLOBAL_BLOCK_NAME_GE2_SE,
-  SPM_GLOBAL_BLOCK_NAME_GE2_DIST,
-  SPM_GLOBAL_BLOCK_NAME_FFBM,
-  SPM_GLOBAL_BLOCK_NAME_CANE,
-  SPM_GLOBAL_BLOCK_NAME_LAST = SPM_GLOBAL_BLOCK_NAME_CANE,
+enum SpmGlobalBlockId
+{
+    SPM_GLOBAL_BLOCK_NAME_FIRST = 0,
+    SPM_GLOBAL_BLOCK_NAME_CPG   = SPM_GLOBAL_BLOCK_NAME_FIRST,
+    SPM_GLOBAL_BLOCK_NAME_CPC,
+    SPM_GLOBAL_BLOCK_NAME_CPF,
+    SPM_GLOBAL_BLOCK_NAME_GDS,
+    SPM_GLOBAL_BLOCK_NAME_GCR,
+    SPM_GLOBAL_BLOCK_NAME_PH,
+    SPM_GLOBAL_BLOCK_NAME_GE1,
+    SPM_GLOBAL_BLOCK_NAME_GL2A,
+    SPM_GLOBAL_BLOCK_NAME_GL2C,
+    SPM_GLOBAL_BLOCK_NAME_SDMA,
+    SPM_GLOBAL_BLOCK_NAME_GUS,
+    SPM_GLOBAL_BLOCK_NAME_EA,
+    SPM_GLOBAL_BLOCK_NAME_CHA,
+    SPM_GLOBAL_BLOCK_NAME_CHC,
+    SPM_GLOBAL_BLOCK_NAME_CHCG,
+    SPM_GLOBAL_BLOCK_NAME_ATCL2,
+    SPM_GLOBAL_BLOCK_NAME_VML2,
+    SPM_GLOBAL_BLOCK_NAME_GE2_SE,
+    SPM_GLOBAL_BLOCK_NAME_GE2_DIST,
+    SPM_GLOBAL_BLOCK_NAME_FFBM,
+    SPM_GLOBAL_BLOCK_NAME_CANE,
+    SPM_GLOBAL_BLOCK_NAME_LAST = SPM_GLOBAL_BLOCK_NAME_CANE,
 };
 
-enum SpmSeBlockId {
-  SPM_SE_BLOCK_NAME_FIRST = 0,
-  SPM_SE_BLOCK_NAME_CB = SPM_SE_BLOCK_NAME_FIRST,
-  SPM_SE_BLOCK_NAME_DB,
-  SPM_SE_BLOCK_NAME_PA,
-  SPM_SE_BLOCK_NAME_SX,
-  SPM_SE_BLOCK_NAME_SC,
-  SPM_SE_BLOCK_NAME_TA,
-  SPM_SE_BLOCK_NAME_TD,
-  SPM_SE_BLOCK_NAME_TCP,
-  SPM_SE_BLOCK_NAME_SPI,
-  SPM_SE_BLOCK_NAME_SQG,
-  SPM_SE_BLOCK_NAME_GL1A,
-  SPM_SE_BLOCK_NAME_RMI,
-  SPM_SE_BLOCK_NAME_GL1C,
-  SPM_SE_BLOCK_NAME_GL1CG,
-  SPM_SE_BLOCK_NAME_CBR,
-  SPM_SE_BLOCK_NAME_DBR,
-  SPM_SE_BLOCK_NAME_GL1H,
-  SPM_SE_BLOCK_NAME_SQC,
-  SPM_SE_BLOCK_NAME_PC,
-  SPM_SE_BLOCK_NAME_EA,
-  SPM_SE_BLOCK_NAME_GE,
-  SPM_SE_BLOCK_NAME_GL2A,
-  SPM_SE_BLOCK_NAME_GL2C,
-  SPM_SE_BLOCK_NAME_WGS,
-  SPM_SE_BLOCK_NAME_GL1XA,
-  SPM_SE_BLOCK_NAME_GL1XC,
-  SPM_SE_BLOCK_NAME_UTCL1,
-  SPM_SE_BLOCK_NAME_LAST = SPM_SE_BLOCK_NAME_UTCL1,
+enum SpmSeBlockId
+{
+    SPM_SE_BLOCK_NAME_FIRST = 0,
+    SPM_SE_BLOCK_NAME_CB    = SPM_SE_BLOCK_NAME_FIRST,
+    SPM_SE_BLOCK_NAME_DB,
+    SPM_SE_BLOCK_NAME_PA,
+    SPM_SE_BLOCK_NAME_SX,
+    SPM_SE_BLOCK_NAME_SC,
+    SPM_SE_BLOCK_NAME_TA,
+    SPM_SE_BLOCK_NAME_TD,
+    SPM_SE_BLOCK_NAME_TCP,
+    SPM_SE_BLOCK_NAME_SPI,
+    SPM_SE_BLOCK_NAME_SQG,
+    SPM_SE_BLOCK_NAME_GL1A,
+    SPM_SE_BLOCK_NAME_RMI,
+    SPM_SE_BLOCK_NAME_GL1C,
+    SPM_SE_BLOCK_NAME_GL1CG,
+    SPM_SE_BLOCK_NAME_CBR,
+    SPM_SE_BLOCK_NAME_DBR,
+    SPM_SE_BLOCK_NAME_GL1H,
+    SPM_SE_BLOCK_NAME_SQC,
+    SPM_SE_BLOCK_NAME_PC,
+    SPM_SE_BLOCK_NAME_EA,
+    SPM_SE_BLOCK_NAME_GE,
+    SPM_SE_BLOCK_NAME_GL2A,
+    SPM_SE_BLOCK_NAME_GL2C,
+    SPM_SE_BLOCK_NAME_WGS,
+    SPM_SE_BLOCK_NAME_GL1XA,
+    SPM_SE_BLOCK_NAME_GL1XC,
+    SPM_SE_BLOCK_NAME_UTCL1,
+    SPM_SE_BLOCK_NAME_LAST = SPM_SE_BLOCK_NAME_UTCL1,
 };
 
-namespace gfx1200 {
+namespace gfx1200
+{
 // ip_block : athub_4_1_0
 // ip_block : gc_12_0_0
 // ip_block : sdma_7_0_0
@@ -132,8 +138,8 @@ static const uint32_t TcpCounterBlockNumInstances      = 2;
 static const uint32_t TdCounterBlockNumInstances       = 2;
 static const uint32_t Utcl1CounterBlockNumInstances    = 2;
 
-// Number of block counter registers - Auto-generated from chip_offset_byte.h, edit with extra caution
-// Reference: chip_offset_byte.h (from gfxip header file package)
+// Number of block counter registers - Auto-generated from chip_offset_byte.h, edit with extra
+// caution Reference: chip_offset_byte.h (from gfxip header file package)
 static const uint32_t ChaCounterBlockNumCounters      = 4;
 static const uint32_t ChcCounterBlockNumCounters      = 4;
 static const uint32_t CpcCounterBlockNumCounters      = 2;
@@ -193,7 +199,8 @@ static const uint32_t TdCounterBlockMaxEvent       = 271;
 static const uint32_t Utcl1CounterBlockMaxEvent    = 71;
 }  // namespace gfx1200
 
-namespace gfx1201 {
+namespace gfx1201
+{
 // ip_block : athub_4_1_0
 // ip_block : gc_12_0_1
 // ip_block : sdma_7_0_1
@@ -205,8 +212,8 @@ static const uint32_t GcEaSeCounterBlockNumInstances   = 4;
 static const uint32_t Gl2cCounterBlockNumInstances     = 32;
 }  // namespace gfx1201
 
-static const uint32_t SdmaCounterBlockMaxInstances     = 8;
-static const uint32_t UmcCounterBlockMaxInstances      = 32;
+static const uint32_t SdmaCounterBlockMaxInstances = 8;
+static const uint32_t UmcCounterBlockMaxInstances  = 32;
 
 }  // namespace gfx12
 }  // namespace gfxip

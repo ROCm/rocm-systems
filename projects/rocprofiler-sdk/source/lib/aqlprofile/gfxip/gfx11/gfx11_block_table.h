@@ -23,122 +23,215 @@
 #ifndef _GFX11_BLOCKTABLE_H_
 #define _GFX11_BLOCKTABLE_H_
 
-namespace gfxip {
-namespace gfx11 {
-
+namespace gfxip
+{
+namespace gfx11
+{
 /*
  * CPC    CORRECT
  */
-static const CounterRegInfo CpcCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER1_HI), REG_32B_NULL}};
+static const CounterRegInfo CpcCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER0_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER0_LO),
+                                                    REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER0_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER1_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER1_LO),
+                                                    REG_32B_ADDR(GC, 0, regCPC_PERFCOUNTER1_HI),
+                                                    REG_32B_NULL}};
 
 /*
  * CPF    CORRECT
  */
-static const CounterRegInfo CpfCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER1_HI), REG_32B_NULL}};
+static const CounterRegInfo CpfCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER0_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER0_LO),
+                                                    REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER0_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER1_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER1_LO),
+                                                    REG_32B_ADDR(GC, 0, regCPF_PERFCOUNTER1_HI),
+                                                    REG_32B_NULL}};
 
 /*
  * GDS     CORRECT
  */
-static const CounterRegInfo GdsCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER1_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER2_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER2_LO), REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER2_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER3_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER3_LO), REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER3_HI), REG_32B_NULL}};
+static const CounterRegInfo GdsCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER0_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER0_LO),
+                                                    REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER0_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER1_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER1_LO),
+                                                    REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER1_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER2_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER2_LO),
+                                                    REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER2_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER3_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER3_LO),
+                                                    REG_32B_ADDR(GC, 0, regGDS_PERFCOUNTER3_HI),
+                                                    REG_32B_NULL}};
 /*
  * GRBM     CORRECT
  */
 static const CounterRegInfo GrbmCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER1_HI), REG_32B_NULL}};
+    {REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER0_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER0_LO),
+     REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER0_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER1_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER1_LO),
+     REG_32B_ADDR(GC, 0, regGRBM_PERFCOUNTER1_HI),
+     REG_32B_NULL}};
 
 /*
  * GRBM_SE    CORRECT
  */
 static const CounterRegInfo GrbmSeCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regGRBM_SE0_PERFCOUNTER_SELECT), REG_32B_NULL,
+    {REG_32B_ADDR(GC, 0, regGRBM_SE0_PERFCOUNTER_SELECT),
+     REG_32B_NULL,
      REG_32B_ADDR(GC, 0, regGRBM_SE0_PERFCOUNTER_LO),
-     REG_32B_ADDR(GC, 0, regGRBM_SE0_PERFCOUNTER_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGRBM_SE1_PERFCOUNTER_SELECT), REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGRBM_SE0_PERFCOUNTER_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGRBM_SE1_PERFCOUNTER_SELECT),
+     REG_32B_NULL,
      REG_32B_ADDR(GC, 0, regGRBM_SE1_PERFCOUNTER_LO),
-     REG_32B_ADDR(GC, 0, regGRBM_SE1_PERFCOUNTER_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGRBM_SE2_PERFCOUNTER_SELECT), REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGRBM_SE1_PERFCOUNTER_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGRBM_SE2_PERFCOUNTER_SELECT),
+     REG_32B_NULL,
      REG_32B_ADDR(GC, 0, regGRBM_SE2_PERFCOUNTER_LO),
-     REG_32B_ADDR(GC, 0, regGRBM_SE2_PERFCOUNTER_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGRBM_SE3_PERFCOUNTER_SELECT), REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGRBM_SE2_PERFCOUNTER_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGRBM_SE3_PERFCOUNTER_SELECT),
+     REG_32B_NULL,
      REG_32B_ADDR(GC, 0, regGRBM_SE3_PERFCOUNTER_LO),
-     REG_32B_ADDR(GC, 0, regGRBM_SE3_PERFCOUNTER_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGRBM_SE4_PERFCOUNTER_SELECT), REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGRBM_SE3_PERFCOUNTER_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGRBM_SE4_PERFCOUNTER_SELECT),
+     REG_32B_NULL,
      REG_32B_ADDR(GC, 0, regGRBM_SE4_PERFCOUNTER_LO),
-     REG_32B_ADDR(GC, 0, regGRBM_SE4_PERFCOUNTER_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGRBM_SE5_PERFCOUNTER_SELECT), REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGRBM_SE4_PERFCOUNTER_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGRBM_SE5_PERFCOUNTER_SELECT),
+     REG_32B_NULL,
      REG_32B_ADDR(GC, 0, regGRBM_SE5_PERFCOUNTER_LO),
-     REG_32B_ADDR(GC, 0, regGRBM_SE5_PERFCOUNTER_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGRBM_SE6_PERFCOUNTER_SELECT), REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGRBM_SE5_PERFCOUNTER_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGRBM_SE6_PERFCOUNTER_SELECT),
+     REG_32B_NULL,
      REG_32B_ADDR(GC, 0, regGRBM_SE6_PERFCOUNTER_LO),
-     REG_32B_ADDR(GC, 0, regGRBM_SE6_PERFCOUNTER_HI), REG_32B_NULL}};
+     REG_32B_ADDR(GC, 0, regGRBM_SE6_PERFCOUNTER_HI),
+     REG_32B_NULL}};
 
 /*
  * SPI        CORRECT
  */
-static const CounterRegInfo SpiCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER1_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER2_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER2_LO), REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER2_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER3_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER3_LO), REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER3_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER4_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER4_LO), REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER4_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER5_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER5_LO), REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER5_HI), REG_32B_NULL}};
+static const CounterRegInfo SpiCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER0_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER0_LO),
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER0_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER1_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER1_LO),
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER1_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER2_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER2_LO),
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER2_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER3_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER3_LO),
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER3_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER4_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER4_LO),
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER4_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER5_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER5_LO),
+                                                    REG_32B_ADDR(GC, 0, regSPI_PERFCOUNTER5_HI),
+                                                    REG_32B_NULL}};
 /*
  * SQ        CORRECT
  */
-static const CounterRegInfo SqCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT), REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_LO), REG_32B_NULL, REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_SELECT), REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER1_LO), REG_32B_NULL, REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_SELECT), REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_LO), REG_32B_NULL, REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_SELECT), REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER3_LO), REG_32B_NULL, REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER8_SELECT), REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_LO), REG_32B_NULL, REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER10_SELECT), REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER5_LO), REG_32B_NULL, REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER12_SELECT), REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_LO), REG_32B_NULL, REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER14_SELECT), REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER7_LO), REG_32B_NULL, REG_32B_NULL}};
+static const CounterRegInfo SqCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER1_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER3_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER8_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER10_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER5_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER12_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER14_SELECT),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER7_LO),
+                                                   REG_32B_NULL,
+                                                   REG_32B_NULL}};
 /*
  * SX       CORRECT
  */
-static const CounterRegInfo SxCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER1_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER2_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER2_LO), REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER2_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER3_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER3_LO), REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER3_HI), REG_32B_NULL}};
+static const CounterRegInfo SxCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER0_SELECT),
+                                                   REG_32B_NULL,
+                                                   REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER0_LO),
+                                                   REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER0_HI),
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER1_SELECT),
+                                                   REG_32B_NULL,
+                                                   REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER1_LO),
+                                                   REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER1_HI),
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER2_SELECT),
+                                                   REG_32B_NULL,
+                                                   REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER2_LO),
+                                                   REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER2_HI),
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER3_SELECT),
+                                                   REG_32B_NULL,
+                                                   REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER3_LO),
+                                                   REG_32B_ADDR(GC, 0, regSX_PERFCOUNTER3_HI),
+                                                   REG_32B_NULL}};
 
 /*
  * GCEA
@@ -146,87 +239,155 @@ static const CounterRegInfo SxCounterRegAddr[] = {
 static const CounterRegInfo GceaCounterRegAddr[] = {
     {REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER0_CFG),
      REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_RSLT_CNTL),
-     REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_LO), REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_HI), REG_32B_NULL},
+     REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_LO),
+     REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_HI),
+     REG_32B_NULL},
     {REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER1_CFG),
      REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_RSLT_CNTL),
-     REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_LO), REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_HI), REG_32B_NULL}};
+     REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_LO),
+     REG_32B_ADDR(GC, 0, regGCEA_PERFCOUNTER_HI),
+     REG_32B_NULL}};
 
 // Define GFX10 specific blocks table entries like GC caches blocks
 /*
  * GCR    CORRECT
  */
-static const CounterRegInfo GcrCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER0_SELECT), REG_32B_ADDR(GC, 0, regGCR_GENERAL_CNTL),
-     REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER1_SELECT), REG_32B_ADDR(GC, 0, regGCR_GENERAL_CNTL),
-     REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER1_HI), REG_32B_NULL}};
+static const CounterRegInfo GcrCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER0_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regGCR_GENERAL_CNTL),
+                                                    REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER0_LO),
+                                                    REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER0_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER1_SELECT),
+                                                    REG_32B_ADDR(GC, 0, regGCR_GENERAL_CNTL),
+                                                    REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER1_LO),
+                                                    REG_32B_ADDR(GC, 0, regGCR_PERFCOUNTER1_HI),
+                                                    REG_32B_NULL}};
 
 /*
  * TCP
  */
-static const CounterRegInfo TcpCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER1_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER2_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER2_LO), REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER2_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER3_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER3_LO), REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER3_HI), REG_32B_NULL}};
+static const CounterRegInfo TcpCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER0_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER0_LO),
+                                                    REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER0_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER1_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER1_LO),
+                                                    REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER1_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER2_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER2_LO),
+                                                    REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER2_HI),
+                                                    REG_32B_NULL},
+                                                   {REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER3_SELECT),
+                                                    REG_32B_NULL,
+                                                    REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER3_LO),
+                                                    REG_32B_ADDR(GC, 0, regTCP_PERFCOUNTER3_HI),
+                                                    REG_32B_NULL}};
 /*
  * GL1A    CORRECT
  */
 static const CounterRegInfo Gl1aCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER1_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER2_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER2_LO), REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER2_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER3_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER3_LO), REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER3_HI), REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER0_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER0_LO),
+     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER0_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER1_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER1_LO),
+     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER1_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER2_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER2_LO),
+     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER2_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER3_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER3_LO),
+     REG_32B_ADDR(GC, 0, regGL1A_PERFCOUNTER3_HI),
+     REG_32B_NULL},
 };
 
 /*
  * GL1C    CORRECT
  */
 static const CounterRegInfo Gl1cCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER1_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER2_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER2_LO), REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER2_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER3_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER3_LO), REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER3_HI), REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER0_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER0_LO),
+     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER0_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER1_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER1_LO),
+     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER1_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER2_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER2_LO),
+     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER2_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER3_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER3_LO),
+     REG_32B_ADDR(GC, 0, regGL1C_PERFCOUNTER3_HI),
+     REG_32B_NULL},
 };
 
 /*
  * GL2A     CORRECT
  */
 static const CounterRegInfo Gl2aCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER1_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER2_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER2_LO), REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER2_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER3_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER3_LO), REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER3_HI), REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER0_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER0_LO),
+     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER0_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER1_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER1_LO),
+     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER1_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER2_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER2_LO),
+     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER2_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER3_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER3_LO),
+     REG_32B_ADDR(GC, 0, regGL2A_PERFCOUNTER3_HI),
+     REG_32B_NULL},
 };
 
 /*
  * GL2C     CORRECT
  */
 static const CounterRegInfo Gl2cCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER1_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER2_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER2_LO), REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER2_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER3_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER3_LO), REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER3_HI), REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER0_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER0_LO),
+     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER0_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER1_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER1_LO),
+     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER1_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER2_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER2_LO),
+     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER2_HI),
+     REG_32B_NULL},
+    {REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER3_SELECT),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER3_LO),
+     REG_32B_ADDR(GC, 0, regGL2C_PERFCOUNTER3_HI),
+     REG_32B_NULL},
 };
 
 /*
@@ -234,21 +395,30 @@ static const CounterRegInfo Gl2cCounterRegAddr[] = {
  */
 static const CounterRegInfo GusCounterRegAddr[] = {
     {REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER0_CFG),
-     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER_RSLT_CNTL), REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER_LO),
-     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER_HI), REG_32B_NULL},
+     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER_RSLT_CNTL),
+     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER_LO),
+     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER_HI),
+     REG_32B_NULL},
     {REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER1_CFG),
-     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER_RSLT_CNTL), REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER2_LO),
-     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER2_HI), REG_32B_NULL},
+     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER_RSLT_CNTL),
+     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER2_LO),
+     REG_32B_ADDR(GC, 0, regGUS_PERFCOUNTER2_HI),
+     REG_32B_NULL},
 };
 
 /*
  * TA            CORRECT
  */
-static const CounterRegInfo TaCounterRegAddr[] = {
-    {REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER0_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER0_LO), REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER0_HI), REG_32B_NULL},
-    {REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER1_SELECT), REG_32B_NULL,
-     REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER1_LO), REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER1_HI), REG_32B_NULL}};
+static const CounterRegInfo TaCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER0_SELECT),
+                                                   REG_32B_NULL,
+                                                   REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER0_LO),
+                                                   REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER0_HI),
+                                                   REG_32B_NULL},
+                                                  {REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER1_SELECT),
+                                                   REG_32B_NULL,
+                                                   REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER1_LO),
+                                                   REG_32B_ADDR(GC, 0, regTA_PERFCOUNTER1_HI),
+                                                   REG_32B_NULL}};
 
 // Counter block CPC
 static const GpuBlockInfo CpcCounterBlockInfo = {

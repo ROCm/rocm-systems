@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #ifndef SRC_CORE_AMD_AQL_PM4_IB_PACKET_H_
 #define SRC_CORE_AMD_AQL_PM4_IB_PACKET_H_
 
@@ -34,13 +33,14 @@ static const uint32_t AMD_AQL_PM4_IB_DW_COUNT_REMAIN = 10;
 static const uint32_t AMD_AQL_PM4_IB_RESERVED_COUNT = 8;
 
 // AQL Vendor Specific Packet which carry PM4 IB command
-typedef struct {
-  uint16_t header;
-  uint16_t pm4_ib_format;
-  uint32_t pm4_ib_command[4];
-  uint32_t dw_count_remain;
-  uint32_t reserved[AMD_AQL_PM4_IB_RESERVED_COUNT];
-  hsa_signal_t completion_signal;
+typedef struct
+{
+    uint16_t     header;
+    uint16_t     pm4_ib_format;
+    uint32_t     pm4_ib_command[4];
+    uint32_t     dw_count_remain;
+    uint32_t     reserved[AMD_AQL_PM4_IB_RESERVED_COUNT];
+    hsa_signal_t completion_signal;
 } amd_aql_pm4_ib_packet_t;
 
 #endif  // SRC_CORE_AMD_AQL_PM4_IB_PACKET_H_

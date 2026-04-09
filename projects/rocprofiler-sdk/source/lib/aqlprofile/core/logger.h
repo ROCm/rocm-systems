@@ -28,15 +28,15 @@
 #include <stdlib.h>
 #include <time.h>
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
+#    ifndef NOMINMAX
+#        define NOMINMAX
+#    endif
+#    include <windows.h>
 #else
-#include <sys/file.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-#include <unistd.h>
+#    include <sys/file.h>
+#    include <sys/syscall.h>
+#    include <sys/types.h>
+#    include <unistd.h>
 #endif
 
 #include <exception>
@@ -47,160 +47,179 @@
 #include <sstream>
 #include <string>
 
-namespace aql_profile {
+namespace aql_profile
+{
+class Logger
+{
+public:
+    typedef std::recursive_mutex mutex_t;
 
-class Logger {
- public:
-  typedef std::recursive_mutex mutex_t;
+    template <typename T>
+    Logger& operator<<(const T& m)
+    {
+        std::ostringstream oss;
+        oss << m;
+        if(!streaming_)
+            Log(oss.str());
+        else
+            Put(oss.str());
+        streaming_ = true;
+        return *this;
+    }
 
-  template <typename T>
-  Logger& operator<<(const T& m) {
-    std::ostringstream oss;
-    oss << m;
-    if (!streaming_)
-      Log(oss.str());
-    else
-      Put(oss.str());
-    streaming_ = true;
-    return *this;
-  }
+    typedef void (*manip_t)();
+    Logger& operator<<(manip_t f)
+    {
+        f();
+        return *this;
+    }
 
-  typedef void (*manip_t)();
-  Logger& operator<<(manip_t f) {
-    f();
-    return *this;
-  }
+    static void begm() { Instance().messaging_ = true; }
+    static void endl() { Instance().ResetStreaming(); }
 
-  static void begm() { Instance().messaging_ = true; }
-  static void endl() { Instance().ResetStreaming(); }
+    static const std::string& LastMessage()
+    {
+        Logger&                  logger = Instance();
+        std::lock_guard<mutex_t> lck(mutex_);
+        return logger.message_[GetTid()];
+    }
 
-  static const std::string& LastMessage() {
-    Logger& logger = Instance();
-    std::lock_guard<mutex_t> lck(mutex_);
-    return logger.message_[GetTid()];
-  }
+    static Logger& Instance()
+    {
+        std::lock_guard<mutex_t> lck(mutex_);
+        if(instance_ == NULL) instance_ = new Logger();
+        return *instance_;
+    }
 
-  static Logger& Instance() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ == NULL) instance_ = new Logger();
-    return *instance_;
-  }
+    static void Destroy()
+    {
+        std::lock_guard<mutex_t> lck(mutex_);
+        if(instance_ != NULL) delete instance_;
+        instance_ = NULL;
+    }
 
-  static void Destroy() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ != NULL) delete instance_;
-    instance_ = NULL;
-  }
-
- private:
+private:
 #ifdef _WIN32
-  static uint32_t GetPid() { return static_cast<uint32_t>(GetCurrentProcessId()); }
-  static uint32_t GetTid() { return static_cast<uint32_t>(GetCurrentThreadId()); }
+    static uint32_t GetPid() { return static_cast<uint32_t>(GetCurrentProcessId()); }
+    static uint32_t GetTid() { return static_cast<uint32_t>(GetCurrentThreadId()); }
 #else
-  static uint32_t GetPid() { return syscall(__NR_getpid); }
-  static uint32_t GetTid() { return syscall(__NR_gettid); }
+    static uint32_t GetPid() { return syscall(__NR_getpid); }
+    static uint32_t GetTid() { return syscall(__NR_gettid); }
 #endif
 
-  Logger() : file_(NULL), dirty_(false), streaming_(false), messaging_(false) {
-    const char* path = getenv("HSA_VEN_AMD_AQLPROFILE_LOG");
-    if (path != NULL) {
+    Logger()
+    : file_(NULL)
+    , dirty_(false)
+    , streaming_(false)
+    , messaging_(false)
+    {
+        const char* path = getenv("HSA_VEN_AMD_AQLPROFILE_LOG");
+        if(path != NULL)
+        {
 #ifdef _WIN32
-      char tmp_path[MAX_PATH];
-      DWORD tmp_len = GetTempPathA(MAX_PATH, tmp_path);
-      std::string log_path = (tmp_len > 0)
-          ? std::string(tmp_path) + "aql_profile_log.txt"
-          : std::string("aql_profile_log.txt");
-      file_ = fopen(log_path.c_str(), "a");
+            char        tmp_path[MAX_PATH];
+            DWORD       tmp_len  = GetTempPathA(MAX_PATH, tmp_path);
+            std::string log_path = (tmp_len > 0) ? std::string(tmp_path) + "aql_profile_log.txt"
+                                                 : std::string("aql_profile_log.txt");
+            file_                = fopen(log_path.c_str(), "a");
 #else
-      file_ = fopen("/tmp/aql_profile_log.txt", "a");
+            file_ = fopen("/tmp/aql_profile_log.txt", "a");
 #endif
+        }
+        ResetStreaming();
     }
-    ResetStreaming();
-  }
 
-  ~Logger() {
-    if (file_ != NULL) {
-      if (dirty_) Put("\n");
-      fclose(file_);
+    ~Logger()
+    {
+        if(file_ != NULL)
+        {
+            if(dirty_) Put("\n");
+            fclose(file_);
+        }
     }
-  }
 
-  void ResetStreaming() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (messaging_) {
-      message_[GetTid()] = "";
+    void ResetStreaming()
+    {
+        std::lock_guard<mutex_t> lck(mutex_);
+        if(messaging_)
+        {
+            message_[GetTid()] = "";
+        }
+        messaging_ = false;
+        streaming_ = false;
     }
-    messaging_ = false;
-    streaming_ = false;
-  }
 
-  void Put(const std::string& m) {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (messaging_) {
-      message_[GetTid()] += m;
-    }
-    if (file_ != NULL) {
-      dirty_ = true;
+    void Put(const std::string& m)
+    {
+        std::lock_guard<mutex_t> lck(mutex_);
+        if(messaging_)
+        {
+            message_[GetTid()] += m;
+        }
+        if(file_ != NULL)
+        {
+            dirty_ = true;
 #ifndef _WIN32
-      flock(fileno(file_), LOCK_EX);
+            flock(fileno(file_), LOCK_EX);
 #endif
-      fprintf(file_, "%s", m.c_str());
-      fflush(file_);
+            fprintf(file_, "%s", m.c_str());
+            fflush(file_);
 #ifndef _WIN32
-      flock(fileno(file_), LOCK_UN);
+            flock(fileno(file_), LOCK_UN);
 #endif
+        }
     }
-  }
 
-  void Log(const std::string& m) {
-    const time_t rawtime = time(NULL);
-    tm tm_info;
+    void Log(const std::string& m)
+    {
+        const time_t rawtime = time(NULL);
+        tm           tm_info;
 #ifdef _WIN32
-    localtime_s(&tm_info, &rawtime);
+        localtime_s(&tm_info, &rawtime);
 #else
-    localtime_r(&rawtime, &tm_info);
+        localtime_r(&rawtime, &tm_info);
 #endif
-    char tm_str[26];
-    strftime(tm_str, 26, "%Y-%m-%d %H:%M:%S", &tm_info);
-    std::ostringstream oss;
-    oss << "\n<" << tm_str << std::dec << " pid" << GetPid() << " tid" << GetTid() << "> " << m;
-    Put(oss.str());
-  }
+        char tm_str[26];
+        strftime(tm_str, 26, "%Y-%m-%d %H:%M:%S", &tm_info);
+        std::ostringstream oss;
+        oss << "\n<" << tm_str << std::dec << " pid" << GetPid() << " tid" << GetTid() << "> " << m;
+        Put(oss.str());
+    }
 
-  FILE* file_;
-  bool dirty_;
-  bool streaming_;
-  bool messaging_;
+    FILE* file_;
+    bool  dirty_;
+    bool  streaming_;
+    bool  messaging_;
 
-  static mutex_t mutex_;
-  static Logger* instance_;
-  std::map<uint32_t, std::string> message_;
+    static mutex_t                  mutex_;
+    static Logger*                  instance_;
+    std::map<uint32_t, std::string> message_;
 };
 
 }  // namespace aql_profile
 
-#define ERR_LOGGING                \
-  (aql_profile::Logger::Instance() \
-   << aql_profile::Logger::endl    \
-   << "Error: " << __FUNCTION__ << "(): " << aql_profile::Logger::begm)
-#define ERR2_LOGGING                                            \
-  (aql_profile::Logger::Instance() << aql_profile::Logger::endl \
-                                   << "Error: " << __FUNCTION__ << "(): ")
-#define INFO_LOGGING               \
-  (aql_profile::Logger::Instance() \
-   << aql_profile::Logger::endl    \
-   << "Info: " << __FUNCTION__ << "(): " << aql_profile::Logger::begm)
+#define ERR_LOGGING                                                                                \
+    (aql_profile::Logger::Instance()                                                               \
+     << aql_profile::Logger::endl                                                                  \
+     << "Error: " << __FUNCTION__ << "(): " << aql_profile::Logger::begm)
+#define ERR2_LOGGING                                                                               \
+    (aql_profile::Logger::Instance() << aql_profile::Logger::endl                                  \
+                                     << "Error: " << __FUNCTION__ << "(): ")
+#define INFO_LOGGING                                                                               \
+    (aql_profile::Logger::Instance()                                                               \
+     << aql_profile::Logger::endl                                                                  \
+     << "Info: " << __FUNCTION__ << "(): " << aql_profile::Logger::begm)
 
-#define WARN_LOGGING               \
-  (aql_profile::Logger::Instance() \
-   << aql_profile::Logger::endl    \
-   << "Warning: " << __FUNCTION__ << "(): " << aql_profile::Logger::begm)
+#define WARN_LOGGING                                                                               \
+    (aql_profile::Logger::Instance()                                                               \
+     << aql_profile::Logger::endl                                                                  \
+     << "Warning: " << __FUNCTION__ << "(): " << aql_profile::Logger::begm)
 
 #ifdef DEBUG
-#define DBG_LOGGING                                                                      \
-  (aql_profile::Logger::Instance() << aql_profile::Logger::endl                          \
-                                   << "Debug: in " << __FUNCTION__ << " at " << __FILE__ \
-                                   << " line " << __LINE__ << aql_profile::Logger::begm)
+#    define DBG_LOGGING                                                                            \
+        (aql_profile::Logger::Instance() << aql_profile::Logger::endl                              \
+                                         << "Debug: in " << __FUNCTION__ << " at " << __FILE__     \
+                                         << " line " << __LINE__ << aql_profile::Logger::begm)
 #endif
 
 #endif  // SRC_CORE_LOGGER_H_

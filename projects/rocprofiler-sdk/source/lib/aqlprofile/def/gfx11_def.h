@@ -37,4 +37,3 @@
 
 using namespace gfxip::gfx11;
 #endif  // _GFX11_DEF_H_
-

@@ -24,49 +24,53 @@
 #define _GFX9_FACTORY_H_
 #include "core/pm4_factory.h"
 
-namespace aql_profile {
-
+namespace aql_profile
+{
 // Gfx9 factory class
-class Gfx9Factory : public Pm4Factory {
- public:
-  explicit Gfx9Factory(const AgentInfo* agent_info)
-      : Pm4Factory(BlockInfoMap(block_table_, sizeof(block_table_))) {
-    Init(agent_info);
-  }
-  Gfx9Factory(const GpuBlockInfo** table, const uint32_t& size, const AgentInfo* agent_info)
-      : Pm4Factory(BlockInfoMap(table, size)) {
-    Init(agent_info);
-  }
+class Gfx9Factory : public Pm4Factory
+{
+public:
+    explicit Gfx9Factory(const AgentInfo* agent_info)
+    : Pm4Factory(BlockInfoMap(block_table_, sizeof(block_table_)))
+    {
+        Init(agent_info);
+    }
+    Gfx9Factory(const GpuBlockInfo** table, const uint32_t& size, const AgentInfo* agent_info)
+    : Pm4Factory(BlockInfoMap(table, size))
+    {
+        Init(agent_info);
+    }
 
-  bool IsGFX9() const override { return true; }
+    bool IsGFX9() const override { return true; }
 
- protected:
-  void Init(const AgentInfo* agent_info);
-  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+protected:
+    void                       Init(const AgentInfo* agent_info);
+    static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 
-  static void Print(const GpuBlockInfo* block_info);
-  const uint32_t* spm_block_delay_global[AQLPROFILE_BLOCKS_NUMBER];
-  const uint32_t* spm_block_delay_se[AQLPROFILE_BLOCKS_NUMBER];
-  void InitSpmBlockDelay(GpuBlockInfo* block_info);
-  size_t cu_block_delay_table_size;
+    static void     Print(const GpuBlockInfo* block_info);
+    const uint32_t* spm_block_delay_global[AQLPROFILE_BLOCKS_NUMBER];
+    const uint32_t* spm_block_delay_se[AQLPROFILE_BLOCKS_NUMBER];
+    void            InitSpmBlockDelay(GpuBlockInfo* block_info);
+    size_t          cu_block_delay_table_size;
 };
 
 // Mi100 factory class
-class Mi100Factory : public Gfx9Factory {
- public:
-  explicit Mi100Factory(const AgentInfo* agent_info);
- 
- virtual int GetAccumLowID() const override { return 1; }
- 
- virtual int GetAccumHiID() const override { return 158; }
+class Mi100Factory : public Gfx9Factory
+{
+public:
+    explicit Mi100Factory(const AgentInfo* agent_info);
 
- virtual uint32_t GetSpmSampleDelayMax() { return 0x34; }
+    virtual int GetAccumLowID() const override { return 1; }
 
- protected:
-  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+    virtual int GetAccumHiID() const override { return 158; }
 
- private:
-  void InitSpmBlockDelayTable();
+    virtual uint32_t GetSpmSampleDelayMax() { return 0x34; }
+
+protected:
+    static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+
+private:
+    void InitSpmBlockDelayTable();
 };
 
 }  // namespace aql_profile

@@ -36,63 +36,74 @@ using domain_bdf_t = std::pair<uint32_t, uint32_t>;
 
 // Hash function for domain_bdf_t
 template <>
-struct std::hash<domain_bdf_t> {
-  std::size_t operator()(const domain_bdf_t& key) const {
-    return std::hash<uint32_t>()(key.first) ^ (std::hash<uint32_t>()(key.second) << 1);
-  }
+struct std::hash<domain_bdf_t>
+{
+    std::size_t operator()(const domain_bdf_t& key) const
+    {
+        return std::hash<uint32_t>()(key.first) ^ (std::hash<uint32_t>()(key.second) << 1);
+    }
 };
 
 // Map from (Domain, BDF) to reg_base_offset_table*
 using reg_base_offset_table_cache = std::unordered_map<domain_bdf_t, const reg_base_offset_table*>;
 
-class locked_ip_offset_table_cache {
- public:
-  const reg_base_offset_table* get(const AgentInfo* agent_info) {
+class locked_ip_offset_table_cache
+{
+public:
+    const reg_base_offset_table* get(const AgentInfo* agent_info)
     {
-      std::shared_lock lock{mutex};
-      auto it = cache.find(std::make_pair(agent_info->domain, agent_info->bdf_id));
-      if (it != cache.end()) return it->second;
-    }
-    {
-      std::string_view gfxip(agent_info->gfxip);
-      std::unique_lock lock{mutex};
-      const reg_base_offset_table* table = nullptr;
-
-      if (auto gfxip_prefix = gfxip.substr(0, 4); gfxip_prefix == "gfx9")
-        table = vega20_reg_base_init();
-      else {
-        if (auto gfxip_prefix = gfxip.substr(0, 5);
-            gfxip_prefix == "gfx10" || gfxip_prefix == "gfx11" || gfxip_prefix == "gfx12") {
-          table = navi_ip_offset_table_discovery_sysfs(agent_info->domain, agent_info->bdf_id);
-          if (!table) table = sienna_cichlid_reg_base_init();
+        {
+            std::shared_lock lock{mutex};
+            auto it = cache.find(std::make_pair(agent_info->domain, agent_info->bdf_id));
+            if(it != cache.end()) return it->second;
         }
-      }
+        {
+            std::string_view             gfxip(agent_info->gfxip);
+            std::unique_lock             lock{mutex};
+            const reg_base_offset_table* table = nullptr;
 
-      if (table) cache.emplace(std::make_pair(agent_info->domain, agent_info->bdf_id), table);
-      return table;
+            if(auto gfxip_prefix = gfxip.substr(0, 4); gfxip_prefix == "gfx9")
+                table = vega20_reg_base_init();
+            else
+            {
+                if(auto gfxip_prefix = gfxip.substr(0, 5);
+                   gfxip_prefix == "gfx10" || gfxip_prefix == "gfx11" || gfxip_prefix == "gfx12")
+                {
+                    table = navi_ip_offset_table_discovery_sysfs(agent_info->domain,
+                                                                 agent_info->bdf_id);
+                    if(!table) table = sienna_cichlid_reg_base_init();
+                }
+            }
+
+            if(table) cache.emplace(std::make_pair(agent_info->domain, agent_info->bdf_id), table);
+            return table;
+        }
     }
-  }
 
-  static locked_ip_offset_table_cache& get_instance() {
-    // Note: never cleanup, keep in memory to prevent issue with global destructor
-    static auto* cache = new locked_ip_offset_table_cache{};
-    return *cache;
-  }
+    static locked_ip_offset_table_cache& get_instance()
+    {
+        // Note: never cleanup, keep in memory to prevent issue with global destructor
+        static auto* cache = new locked_ip_offset_table_cache{};
+        return *cache;
+    }
 
- private:
-  std::shared_mutex mutex;
-  reg_base_offset_table_cache cache;
+private:
+    std::shared_mutex           mutex;
+    reg_base_offset_table_cache cache;
 };
 
 // acquire the IP offset table for the device using the domain and bdf_id
-const reg_base_offset_table* acquire_ip_offset_table(const AgentInfo* agent_info) {
-  auto ip_offset_table = locked_ip_offset_table_cache::get_instance().get(agent_info);
-  if (ip_offset_table == nullptr) {
-    throw std::runtime_error(
-        "Failed to acquire the IP offset table for the device. Possible reasons include:\n"
-        "  1. Incorrect or incomplete ROCm setup. Please verify your installation.\n"
-        "  2. The device is not supported.\n"
-        "  3. An internal error or bug.\n");
-  }
-  return ip_offset_table;
+const reg_base_offset_table*
+acquire_ip_offset_table(const AgentInfo* agent_info)
+{
+    auto ip_offset_table = locked_ip_offset_table_cache::get_instance().get(agent_info);
+    if(ip_offset_table == nullptr)
+    {
+        throw std::runtime_error(
+            "Failed to acquire the IP offset table for the device. Possible reasons include:\n"
+            "  1. Incorrect or incomplete ROCm setup. Please verify your installation.\n"
+            "  2. The device is not supported.\n"
+            "  3. An internal error or bug.\n");
+    }
+    return ip_offset_table;
 }

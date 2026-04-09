@@ -24,12 +24,12 @@
 #define AQLPROFILE_SOC15_COMMON_H
 
 #define REG_32B_ADDR(ip, inst, reg) Register(ip##_HWIP, inst, reg, reg##_BASE_IDX)
-#define REG_32B_NULL Register()
+#define REG_32B_NULL                Register()
 
-#define SET_REG_FIELD_BITS(reg_name, field_name, value) \
-  (((unsigned)(value) << reg_name##__##field_name##__SHIFT) & reg_name##__##field_name##_MASK)
+#define SET_REG_FIELD_BITS(reg_name, field_name, value)                                            \
+    (((unsigned) (value) << reg_name##__##field_name##__SHIFT) & reg_name##__##field_name##_MASK)
 
-#define GET_REG_FIELD_BITS(reg_name, field_name, value) \
-  (((unsigned)(value)&reg_name##__##field_name##_MASK) >> reg_name##__##field_name##__SHIFT)
+#define GET_REG_FIELD_BITS(reg_name, field_name, value)                                            \
+    (((unsigned) (value) &reg_name##__##field_name##_MASK) >> reg_name##__##field_name##__SHIFT)
 
 #endif

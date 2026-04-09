@@ -30,93 +30,117 @@
 #include "util/hsa_rsrc_factory.h"
 
 /* Define the HW IP blocks will be used in driver , add more if necessary */
-enum amd_hw_ip_block_type {
-  GC_HWIP = 1,
-  HDP_HWIP,
-  SDMA0_HWIP,
-  SDMA1_HWIP,
-  SDMA2_HWIP,
-  SDMA3_HWIP,
-  SDMA4_HWIP,
-  SDMA5_HWIP,
-  SDMA6_HWIP,
-  SDMA7_HWIP,
-  LSDMA_HWIP,
-  MMHUB_HWIP,
-  ATHUB_HWIP,
-  NBIO_HWIP,
-  MP0_HWIP,
-  MP1_HWIP,
-  UVD_HWIP,
-  VCN_HWIP = UVD_HWIP,
-  JPEG_HWIP = VCN_HWIP,
-  VCN1_HWIP,
-  VCE_HWIP,
-  VPE_HWIP,
-  DF_HWIP,
-  DCE_HWIP,
-  OSSSYS_HWIP,
-  SMUIO_HWIP,
-  PWR_HWIP,
-  NBIF_HWIP,
-  THM_HWIP,
-  CLK_HWIP,
-  UMC_HWIP,
-  RSMU_HWIP,
-  XGMI_HWIP,
-  DCI_HWIP,
-  PCIE_HWIP,
-  ISP_HWIP,
-  MAX_HWIP
+enum amd_hw_ip_block_type
+{
+    GC_HWIP = 1,
+    HDP_HWIP,
+    SDMA0_HWIP,
+    SDMA1_HWIP,
+    SDMA2_HWIP,
+    SDMA3_HWIP,
+    SDMA4_HWIP,
+    SDMA5_HWIP,
+    SDMA6_HWIP,
+    SDMA7_HWIP,
+    LSDMA_HWIP,
+    MMHUB_HWIP,
+    ATHUB_HWIP,
+    NBIO_HWIP,
+    MP0_HWIP,
+    MP1_HWIP,
+    UVD_HWIP,
+    VCN_HWIP  = UVD_HWIP,
+    JPEG_HWIP = VCN_HWIP,
+    VCN1_HWIP,
+    VCE_HWIP,
+    VPE_HWIP,
+    DF_HWIP,
+    DCE_HWIP,
+    OSSSYS_HWIP,
+    SMUIO_HWIP,
+    PWR_HWIP,
+    NBIF_HWIP,
+    THM_HWIP,
+    CLK_HWIP,
+    UMC_HWIP,
+    RSMU_HWIP,
+    XGMI_HWIP,
+    DCI_HWIP,
+    PCIE_HWIP,
+    ISP_HWIP,
+    MAX_HWIP
 };
 
 #define HWIP_MAX_INSTANCE 44
-#define HWIP_MAX_SEGMENT 32
+#define HWIP_MAX_SEGMENT  32
 
-struct Register {
-  uint32_t hwip;
-  uint32_t ip_inst;
-  uint32_t offset;
-  uint32_t base_idx;
+struct Register
+{
+    uint32_t hwip;
+    uint32_t ip_inst;
+    uint32_t offset;
+    uint32_t base_idx;
 
-  explicit constexpr Register()
-      : hwip(MAX_HWIP), ip_inst(HWIP_MAX_INSTANCE), offset(0), base_idx(HWIP_MAX_SEGMENT) {}
+    explicit constexpr Register()
+    : hwip(MAX_HWIP)
+    , ip_inst(HWIP_MAX_INSTANCE)
+    , offset(0)
+    , base_idx(HWIP_MAX_SEGMENT)
+    {}
 
-  explicit constexpr Register(uint32_t value)
-      : hwip(MAX_HWIP), ip_inst(HWIP_MAX_INSTANCE), offset(value), base_idx(HWIP_MAX_SEGMENT) {}
+    explicit constexpr Register(uint32_t value)
+    : hwip(MAX_HWIP)
+    , ip_inst(HWIP_MAX_INSTANCE)
+    , offset(value)
+    , base_idx(HWIP_MAX_SEGMENT)
+    {}
 
-  explicit constexpr Register(uint32_t hwip_val, uint32_t ip_inst_val, uint32_t offset_val,
-                              uint32_t base_idx_val)
-      : hwip(hwip_val), ip_inst(ip_inst_val), offset(offset_val), base_idx(base_idx_val) {}
+    explicit constexpr Register(uint32_t hwip_val,
+                                uint32_t ip_inst_val,
+                                uint32_t offset_val,
+                                uint32_t base_idx_val)
+    : hwip(hwip_val)
+    , ip_inst(ip_inst_val)
+    , offset(offset_val)
+    , base_idx(base_idx_val)
+    {}
 };
 
-inline bool operator==(const Register& lhs, const Register& rhs) {
-  return lhs.hwip == rhs.hwip && lhs.ip_inst == rhs.ip_inst && lhs.offset == rhs.offset &&
-         lhs.base_idx == rhs.base_idx;
+inline bool
+operator==(const Register& lhs, const Register& rhs)
+{
+    return lhs.hwip == rhs.hwip && lhs.ip_inst == rhs.ip_inst && lhs.offset == rhs.offset &&
+           lhs.base_idx == rhs.base_idx;
 }
 
-struct reg_base_offset_table {
-  using segment_array_t = std::array<uint32_t, HWIP_MAX_SEGMENT>;
-  using instance_array_t = std::array<segment_array_t, HWIP_MAX_INSTANCE>;
-  using hwip_array_t = std::array<instance_array_t, MAX_HWIP>;
+struct reg_base_offset_table
+{
+    using segment_array_t  = std::array<uint32_t, HWIP_MAX_SEGMENT>;
+    using instance_array_t = std::array<segment_array_t, HWIP_MAX_INSTANCE>;
+    using hwip_array_t     = std::array<instance_array_t, MAX_HWIP>;
 
-  hwip_array_t reg_offset{};
+    hwip_array_t reg_offset{};
 
-  reg_base_offset_table() {}
+    reg_base_offset_table() {}
 
-  uint32_t operator[](const Register& reg) const {
-    try {
-      return reg_offset.at(reg.hwip).at(reg.ip_inst).at(reg.base_idx) + reg.offset;
-    } catch (const std::out_of_range& e) {
-      std::cerr << "Invalid Register used: hwip=" + std::to_string(reg.hwip) +
-                       ", ip_inst=" + std::to_string(reg.ip_inst) +
-                       ", base_idx=" + std::to_string(reg.base_idx) + ". Exception: " + e.what()
-                << std::endl;
-      std::abort();
+    uint32_t operator[](const Register& reg) const
+    {
+        try
+        {
+            return reg_offset.at(reg.hwip).at(reg.ip_inst).at(reg.base_idx) + reg.offset;
+        } catch(const std::out_of_range& e)
+        {
+            std::cerr << "Invalid Register used: hwip=" + std::to_string(reg.hwip) +
+                             ", ip_inst=" + std::to_string(reg.ip_inst) +
+                             ", base_idx=" + std::to_string(reg.base_idx) +
+                             ". Exception: " + e.what()
+                      << std::endl;
+            std::abort();
+        }
     }
-  }
 };
 
-const reg_base_offset_table* acquire_ip_offset_table(const AgentInfo* agent_info);
+const reg_base_offset_table*
+acquire_ip_offset_table(const AgentInfo* agent_info);
 
 #endif

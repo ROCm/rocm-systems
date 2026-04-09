@@ -35,17 +35,19 @@ using base_addr_segments_t = std::array<uint32_t, HWIP_MAX_SEGMENT>;
 
 // Represents a single entry in the discovery table, containing information about a specific IP
 // block.
-struct discovery_table_entry_t {
-  int die{0};                       // Die index
-  base_addr_segments_t segments{};  // Base address segments
-  int major{0};                     // Major version of the IP
-  int minor{0};                     // Minor version of the IP
-  int revision{0};                  // Revision number of the IP
-  int instance{0};                  // Instance ID of the IP
-  std::string ipname{};             // Name of the IP block
+struct discovery_table_entry_t
+{
+    int                  die{0};       // Die index
+    base_addr_segments_t segments{};   // Base address segments
+    int                  major{0};     // Major version of the IP
+    int                  minor{0};     // Minor version of the IP
+    int                  revision{0};  // Revision number of the IP
+    int                  instance{0};  // Instance ID of the IP
+    std::string          ipname{};     // Name of the IP block
 };
 
 using discovery_table_t = std::vector<discovery_table_entry_t>;
-discovery_table_t parse_ip_discovery(uint32_t domain, uint32_t bdf);
+discovery_table_t
+parse_ip_discovery(uint32_t domain, uint32_t bdf);
 
 #endif

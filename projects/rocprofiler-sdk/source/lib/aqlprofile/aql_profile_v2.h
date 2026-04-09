@@ -20,15 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #pragma once
 
 #ifdef _WIN32
-#include <hsa.h>
-#include <hsa_ven_amd_aqlprofile.h>
+#    include <hsa.h>
+#    include <hsa_ven_amd_aqlprofile.h>
 #else
-#include <hsa/hsa.h>
-#include <hsa/hsa_ven_amd_aqlprofile.h>
+#    include <hsa/hsa.h>
+#    include <hsa/hsa_ven_amd_aqlprofile.h>
 #endif
 
 #include "aqlprofile-sdk/version.h"
@@ -37,24 +36,27 @@
 extern "C" {
 #endif
 
-typedef struct {
-  uint64_t handle;
+typedef struct
+{
+    uint64_t handle;
 } aqlprofile_handle_t;
 
-typedef enum {
-  AQLPROFILE_MEMORY_HINT_NONE = 0,
-  AQLPROFILE_MEMORY_HINT_HOST = 1,
-  AQLPROFILE_MEMORY_HINT_DEVICE_UNCACHED = 2,
-  AQLPROFILE_MEMORY_HINT_DEVICE_COHERENT = 3,
-  AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT = 4,
-  AQLPROFILE_MEMORY_HINT_LAST
+typedef enum
+{
+    AQLPROFILE_MEMORY_HINT_NONE               = 0,
+    AQLPROFILE_MEMORY_HINT_HOST               = 1,
+    AQLPROFILE_MEMORY_HINT_DEVICE_UNCACHED    = 2,
+    AQLPROFILE_MEMORY_HINT_DEVICE_COHERENT    = 3,
+    AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT = 4,
+    AQLPROFILE_MEMORY_HINT_LAST
 } aqlprofile_memory_hint_t;
 
-typedef enum {
-  AQLPROFILE_AGENT_VERSION_NONE = 0,
-  AQLPROFILE_AGENT_VERSION_V0 = 1,
-  AQLPROFILE_AGENT_VERSION_V1 = 2,
-  AQLPROFILE_AGENT_VERSION_LAST
+typedef enum
+{
+    AQLPROFILE_AGENT_VERSION_NONE = 0,
+    AQLPROFILE_AGENT_VERSION_V0   = 1,
+    AQLPROFILE_AGENT_VERSION_V1   = 2,
+    AQLPROFILE_AGENT_VERSION_LAST
 } aqlprofile_agent_version_t;
 
 /**
@@ -63,54 +65,57 @@ typedef enum {
  * enum consistency between mainline and npi.
  * TODO: Move all counter blocks here from hsa_ven_amd_aqlprofile.h
  */
-typedef enum {
-  // Blocks reserved for NPI support
-  AQLPROFILE_BLOCK_NAME_RESERVED_0 = HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER,
-  AQLPROFILE_BLOCK_NAME_RESERVED_1,
-  AQLPROFILE_BLOCK_NAME_RESERVED_2,
-  AQLPROFILE_BLOCK_NAME_RESERVED_3,
-  AQLPROFILE_BLOCK_NAME_RESERVED_4,
-  AQLPROFILE_BLOCK_NAME_RESERVED_5,
+typedef enum
+{
+    // Blocks reserved for NPI support
+    AQLPROFILE_BLOCK_NAME_RESERVED_0 = HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER,
+    AQLPROFILE_BLOCK_NAME_RESERVED_1,
+    AQLPROFILE_BLOCK_NAME_RESERVED_2,
+    AQLPROFILE_BLOCK_NAME_RESERVED_3,
+    AQLPROFILE_BLOCK_NAME_RESERVED_4,
+    AQLPROFILE_BLOCK_NAME_RESERVED_5,
 
-  // Blocks available for most ASICs, but not currently in use
-  AQLPROFILE_BLOCK_NAME_CPG,
-  AQLPROFILE_BLOCK_NAME_RLC,
+    // Blocks available for most ASICs, but not currently in use
+    AQLPROFILE_BLOCK_NAME_CPG,
+    AQLPROFILE_BLOCK_NAME_RLC,
 
-  // New blocks for gc_12_0_x
-  AQLPROFILE_BLOCK_NAME_CHA,
-  AQLPROFILE_BLOCK_NAME_CHC,
-  AQLPROFILE_BLOCK_NAME_GC_CANE,
-  AQLPROFILE_BLOCK_NAME_GC_FFBM,
-  AQLPROFILE_BLOCK_NAME_GC_L2TLB,
-  AQLPROFILE_BLOCK_NAME_GC_UTCL1,
-  AQLPROFILE_BLOCK_NAME_GC_UTCL2,
-  AQLPROFILE_BLOCK_NAME_GC_VML2,
-  AQLPROFILE_BLOCK_NAME_GC_VML2_SPM,
-  AQLPROFILE_BLOCK_NAME_GCEA_SE,
-  AQLPROFILE_BLOCK_NAME_GRBMH,
-  AQLPROFILE_BLOCK_NAME_SQG,
+    // New blocks for gc_12_0_x
+    AQLPROFILE_BLOCK_NAME_CHA,
+    AQLPROFILE_BLOCK_NAME_CHC,
+    AQLPROFILE_BLOCK_NAME_GC_CANE,
+    AQLPROFILE_BLOCK_NAME_GC_FFBM,
+    AQLPROFILE_BLOCK_NAME_GC_L2TLB,
+    AQLPROFILE_BLOCK_NAME_GC_UTCL1,
+    AQLPROFILE_BLOCK_NAME_GC_UTCL2,
+    AQLPROFILE_BLOCK_NAME_GC_VML2,
+    AQLPROFILE_BLOCK_NAME_GC_VML2_SPM,
+    AQLPROFILE_BLOCK_NAME_GCEA_SE,
+    AQLPROFILE_BLOCK_NAME_GRBMH,
+    AQLPROFILE_BLOCK_NAME_SQG,
 
-  // Blocks reserved for NPI support
-  AQLPROFILE_BLOCK_NAME_RESERVED_6,
-  AQLPROFILE_BLOCK_NAME_RESERVED_7,
-  AQLPROFILE_BLOCK_NAME_RESERVED_8,
-  AQLPROFILE_BLOCK_NAME_RESERVED_9,
+    // Blocks reserved for NPI support
+    AQLPROFILE_BLOCK_NAME_RESERVED_6,
+    AQLPROFILE_BLOCK_NAME_RESERVED_7,
+    AQLPROFILE_BLOCK_NAME_RESERVED_8,
+    AQLPROFILE_BLOCK_NAME_RESERVED_9,
 
-  // Add new blocks above
-  AQLPROFILE_BLOCKS_NUMBER
+    // Add new blocks above
+    AQLPROFILE_BLOCKS_NUMBER
 } aqlprofile_block_name_t;
 
 /**
  * @brief Flags to describe which agents can access given buffer.
  */
-typedef union {
-  uint32_t raw;
-  struct {
-    uint32_t device_access : 1;
-    uint32_t host_access : 1;
-    uint32_t memory_hint : 6;  // One of aqlprofile_memory_hint_t
-    uint32_t _reserved : 24;
-  };
+typedef union
+{
+    uint32_t raw;
+    struct
+    {
+        uint32_t device_access : 1;
+        uint32_t host_access   : 1;
+        uint32_t memory_hint   : 6;  // One of aqlprofile_memory_hint_t
+        uint32_t _reserved     : 24;
+    };
 } aqlprofile_buffer_desc_flags_t;
 
 /**
@@ -123,9 +128,10 @@ typedef union {
  * @retval HSA_STATUS_SUCCESS if successful
  * @retval HSA_STATUS_ERROR if memory could not be allocated
  */
-typedef hsa_status_t (*aqlprofile_memory_alloc_callback_t)(void** ptr, uint64_t size,
+typedef hsa_status_t (*aqlprofile_memory_alloc_callback_t)(void**                         ptr,
+                                                           uint64_t                       size,
                                                            aqlprofile_buffer_desc_flags_t flags,
-                                                           void* userdata);
+                                                           void*                          userdata);
 
 /**
  * @brief Callback to dealloc memory requested via aqlprofile_memory_alloc_callback_t
@@ -136,11 +142,12 @@ typedef hsa_status_t (*aqlprofile_memory_alloc_callback_t)(void** ptr, uint64_t 
  */
 typedef void (*aqlprofile_memory_dealloc_callback_t)(void* ptr, void* userdata);
 
-typedef enum {
-  AQLPROFILE_ACCUMULATION_NONE = 0, /** Do not accumulate event */
-  AQLPROFILE_ACCUMULATION_LO_RES,   /**< The event should be integrated over quad-cycles */
-  AQLPROFILE_ACCUMULATION_HI_RES,   /**< The event should be integrated every cycle */
-  AQLPROFILE_ACCUMULATION_LAST,
+typedef enum
+{
+    AQLPROFILE_ACCUMULATION_NONE = 0, /** Do not accumulate event */
+    AQLPROFILE_ACCUMULATION_LO_RES,   /**< The event should be integrated over quad-cycles */
+    AQLPROFILE_ACCUMULATION_HI_RES,   /**< The event should be integrated every cycle */
+    AQLPROFILE_ACCUMULATION_LAST,
 } aqlprofile_accumulation_type_t;
 
 typedef enum
@@ -173,11 +180,12 @@ typedef union
 /**
  * @brief Struct containing all necessary information of an event (counter).
  */
-typedef struct {
-  uint32_t block_index;                           /**< Block channel. */
-  uint32_t event_id;                              /**< Event ID as fined by XML */
-  aqlprofile_pmc_event_flags_t flags;             /**< Special event flags e.g. accumulation */
-  hsa_ven_amd_aqlprofile_block_name_t block_name; /**< Block name as defined by block indexes */
+typedef struct
+{
+    uint32_t                            block_index; /**< Block channel. */
+    uint32_t                            event_id;    /**< Event ID as fined by XML */
+    aqlprofile_pmc_event_flags_t        flags;       /**< Special event flags e.g. accumulation */
+    hsa_ven_amd_aqlprofile_block_name_t block_name;  /**< Block name as defined by block indexes */
 } aqlprofile_pmc_event_t;
 
 /**
@@ -185,15 +193,17 @@ typedef struct {
  * to the describe the agent to profile. Information can be obtained either from HSA
  * (if loaded) or the KFD topology.
  */
-typedef struct {
-  const char* agent_gfxip; /**< Agent GFXIP (HSA_AGENT_INFO_NAME or KFD.product_name) */
-  uint32_t xcc_num;        /**< XCC's on the agent (HSA_AMD_AGENT_INFO_NUM_XCC or KFD.num_xcc) */
-  uint32_t se_num;         /**< SE's on the agent (HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES or
-                              KFD.num_shader_banks) */
-  uint32_t cu_num; /**< CU's on the agent (HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT or KFD.cu_count) */
-  uint32_t shader_arrays_per_se; /**< Shader arrays per SE of agent
-                                    (HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE or
-                                    KFD.simd_arrays_per_engine)*/
+typedef struct
+{
+    const char* agent_gfxip; /**< Agent GFXIP (HSA_AGENT_INFO_NAME or KFD.product_name) */
+    uint32_t    xcc_num;     /**< XCC's on the agent (HSA_AMD_AGENT_INFO_NUM_XCC or KFD.num_xcc) */
+    uint32_t    se_num;      /**< SE's on the agent (HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES or
+                                KFD.num_shader_banks) */
+    uint32_t
+        cu_num; /**< CU's on the agent (HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT or KFD.cu_count) */
+    uint32_t shader_arrays_per_se; /**< Shader arrays per SE of agent
+                                      (HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE or
+                                      KFD.simd_arrays_per_engine)*/
 } aqlprofile_agent_info_t;
 
 /**
@@ -201,35 +211,39 @@ typedef struct {
  * to the describe the agent to profile. Information can be obtained either from HSA
  * (if loaded) or the KFD topology.
  */
-typedef struct {
-  const char* agent_gfxip; /**< Agent GFXIP (HSA_AGENT_INFO_NAME or KFD.product_name) */
-  uint32_t xcc_num;        /**< XCC's on the agent (HSA_AMD_AGENT_INFO_NUM_XCC or KFD.num_xcc) */
-  uint32_t se_num;         /**< SE's on the agent (HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES or
-                              KFD.num_shader_banks) */
-  uint32_t cu_num; /**< CU's on the agent (HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT or KFD.cu_count) */
-  uint32_t shader_arrays_per_se; /**< Shader arrays per SE of agent
-                                    (HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE or
-                                    KFD.simd_arrays_per_engine)*/
-  uint32_t domain; /**< PCI domain of the GPU agent (HSA_AMD_AGENT_INFO_DOMAIN or KFD.domain) */
-  uint32_t location_id; /**< BDF (Bus/Device/function number) of the GPU agent
-                           (HSA_AMD_AGENT_INFO_BDFID or KFD.location_id)*/
+typedef struct
+{
+    const char* agent_gfxip; /**< Agent GFXIP (HSA_AGENT_INFO_NAME or KFD.product_name) */
+    uint32_t    xcc_num;     /**< XCC's on the agent (HSA_AMD_AGENT_INFO_NUM_XCC or KFD.num_xcc) */
+    uint32_t    se_num;      /**< SE's on the agent (HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES or
+                                KFD.num_shader_banks) */
+    uint32_t
+        cu_num; /**< CU's on the agent (HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT or KFD.cu_count) */
+    uint32_t shader_arrays_per_se; /**< Shader arrays per SE of agent
+                                      (HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE or
+                                      KFD.simd_arrays_per_engine)*/
+    uint32_t domain; /**< PCI domain of the GPU agent (HSA_AMD_AGENT_INFO_DOMAIN or KFD.domain) */
+    uint32_t location_id; /**< BDF (Bus/Device/function number) of the GPU agent
+                             (HSA_AMD_AGENT_INFO_BDFID or KFD.location_id)*/
 } aqlprofile_agent_info_v1_t;
 
 /**
  * @brief Struct containing a handle to a registered agent
  *
  */
-typedef struct {
-  uint64_t handle;
+typedef struct
+{
+    uint64_t handle;
 } aqlprofile_agent_handle_t;
 
 /**
  * @brief Versioning info.
  */
-typedef struct aqlprofile_version_t {
-  uint32_t major;
-  uint32_t minor;
-  uint32_t patch;
+typedef struct aqlprofile_version_t
+{
+    uint32_t major;
+    uint32_t minor;
+    uint32_t patch;
 } aqlprofile_version_t;
 
 /**
@@ -238,7 +252,8 @@ typedef struct aqlprofile_version_t {
  * @retval HSA_STATUS_SUCCESS returned when version is a valid pointer
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if version is a null
  */
-hsa_status_t aqlprofile_get_version(aqlprofile_version_t* version);
+hsa_status_t
+aqlprofile_get_version(aqlprofile_version_t* version);
 
 /**
  * @brief Registers an agent to be used with AQL profile.
@@ -247,8 +262,9 @@ hsa_status_t aqlprofile_get_version(aqlprofile_version_t* version);
  * @retval HSA_STATUS_SUCCESS registration ok
  * @retval HSA_STATUS_ERROR registration failed
  */
-hsa_status_t aqlprofile_register_agent(aqlprofile_agent_handle_t* agent_id,
-                                       const aqlprofile_agent_info_t* agent_info);
+hsa_status_t
+aqlprofile_register_agent(aqlprofile_agent_handle_t*     agent_id,
+                          const aqlprofile_agent_info_t* agent_info);
 
 /**
  * @brief Registers an agent to be used with AQL profile.
@@ -258,72 +274,82 @@ hsa_status_t aqlprofile_register_agent(aqlprofile_agent_handle_t* agent_id,
  * @retval HSA_STATUS_SUCCESS registration ok
  * @retval HSA_STATUS_ERROR registration failed
  */
-hsa_status_t aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
-                                            const void* agent_info,
-                                            aqlprofile_agent_version_t version);
+hsa_status_t
+aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
+                               const void*                agent_info,
+                               aqlprofile_agent_version_t version);
 /**
  * @brief AQLprofile struct containing information for perfmon events
  */
-typedef struct {
-  aqlprofile_agent_handle_t agent;
-  const aqlprofile_pmc_event_t* events;
-  uint32_t event_count;
+typedef struct
+{
+    aqlprofile_agent_handle_t     agent;
+    const aqlprofile_pmc_event_t* events;
+    uint32_t                      event_count;
 } aqlprofile_pmc_profile_t;
 
 // Profile attributes
-typedef enum {
-  AQLPROFILE_INFO_COMMAND_BUFFER_SIZE = 0,  // get_info returns uint32_t value
-  AQLPROFILE_INFO_PMC_DATA_SIZE = 1,        // get_info returns uint32_t value
-  AQLPROFILE_INFO_PMC_DATA = 2,             // get_info returns PMC uint64_t value
-                                            // in info_data object
-  AQLPROFILE_INFO_BLOCK_COUNTERS = 4,       // get_info returns number of block counter
-  AQLPROFILE_INFO_BLOCK_ID = 5,             // get_info returns block id, instances
-                                            // by name string using _id_query_t
-  AQLPROFILE_INFO_ENABLE_CMD = 6,           // get_info returns size/pointer for
-                                            // counters enable command buffer
-  AQLPROFILE_INFO_DISABLE_CMD = 7,          // get_info returns size/pointer for
-                                            // counters disable command buffer
+typedef enum
+{
+    AQLPROFILE_INFO_COMMAND_BUFFER_SIZE = 0,  // get_info returns uint32_t value
+    AQLPROFILE_INFO_PMC_DATA_SIZE       = 1,  // get_info returns uint32_t value
+    AQLPROFILE_INFO_PMC_DATA            = 2,  // get_info returns PMC uint64_t value
+                                              // in info_data object
+    AQLPROFILE_INFO_BLOCK_COUNTERS = 4,       // get_info returns number of block counter
+    AQLPROFILE_INFO_BLOCK_ID       = 5,       // get_info returns block id, instances
+                                              // by name string using _id_query_t
+    AQLPROFILE_INFO_ENABLE_CMD = 6,           // get_info returns size/pointer for
+                                              // counters enable command buffer
+    AQLPROFILE_INFO_DISABLE_CMD = 7,          // get_info returns size/pointer for
+                                              // counters disable command buffer
 } aqlprofile_pmc_info_type_t;
 
-hsa_status_t aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
-                                     aqlprofile_pmc_info_type_t attribute, void* value);
+hsa_status_t
+aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
+                        aqlprofile_pmc_info_type_t      attribute,
+                        void*                           value);
 
 typedef enum aqlprofile_att_parameter_rt_timestamp_t
 {
-  AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DEFAULT = 0,
-  AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_ENABLE,
-  AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE
+    AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DEFAULT = 0,
+    AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_ENABLE,
+    AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE
 } aqlprofile_att_parameter_rt_timestamp_t;
 
 typedef enum aqlprofile_att_parameter_name_ext_t
 {
-  /**
-   * HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE + 1
-   */
-  AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH = 11,
-  AQLPROFILE_ATT_PARAMETER_NAME_RT_TIMESTAMP,  // one of aqlprofile_att_parameter_rt_timestamp_t
-  AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS
+    /**
+     * HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE + 1
+     */
+    AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH = 11,
+    AQLPROFILE_ATT_PARAMETER_NAME_RT_TIMESTAMP,  // one of aqlprofile_att_parameter_rt_timestamp_t
+    AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS
 } aqlprofile_att_parameter_name_ext_t;
 
 // Profile parameter object
-typedef struct {
-  hsa_ven_amd_aqlprofile_parameter_name_t parameter_name;  // Or aqlprofile_att_parameter_name_ext_t
-  union {
-    uint32_t value;
-    struct {
-      uint32_t counter_id : 28;
-      uint32_t simd_mask : 4;
+typedef struct
+{
+    hsa_ven_amd_aqlprofile_parameter_name_t
+        parameter_name;  // Or aqlprofile_att_parameter_name_ext_t
+    union
+    {
+        uint32_t value;
+        struct
+        {
+            uint32_t counter_id : 28;
+            uint32_t simd_mask  : 4;
+        };
     };
-  };
 } aqlprofile_att_parameter_t;
 
 /**
  * @brief AQLprofile struct containing information for Advanced Thread Trace
  */
-typedef struct {
-  hsa_agent_t agent;
-  const aqlprofile_att_parameter_t* parameters;
-  uint32_t parameter_count;
+typedef struct
+{
+    hsa_agent_t                       agent;
+    const aqlprofile_att_parameter_t* parameters;
+    uint32_t                          parameter_count;
 } aqlprofile_att_profile_t;
 
 /**
@@ -336,8 +362,9 @@ typedef struct {
  * @retval HSA_STATUS_ERROR to stop callback iteration
  */
 typedef hsa_status_t (*aqlprofile_pmc_data_callback_t)(aqlprofile_pmc_event_t event,
-                                                       uint64_t counter_id, uint64_t counter_value,
-                                                       void* userdata);
+                                                       uint64_t               counter_id,
+                                                       uint64_t               counter_value,
+                                                       void*                  userdata);
 
 /**
  * @brief Data callback for thread trace. This will be called at least once per shader engine
@@ -348,8 +375,10 @@ typedef hsa_status_t (*aqlprofile_pmc_data_callback_t)(aqlprofile_pmc_event_t ev
  * @retval HSA_STATUS_SUCCESS to continue iteration
  * @retval HSA_STATUS_ERROR to stop callback iteration
  */
-typedef hsa_status_t (*aqlprofile_att_data_callback_t)(uint32_t shader, void* buffer, uint64_t size,
-                                                       void* callback_data);
+typedef hsa_status_t (*aqlprofile_att_data_callback_t)(uint32_t shader,
+                                                       void*    buffer,
+                                                       uint64_t size,
+                                                       void*    callback_data);
 
 /**
  * @brief Memory copy fn for aqlprofile to copy data.
@@ -360,8 +389,10 @@ typedef hsa_status_t (*aqlprofile_att_data_callback_t)(uint32_t shader, void* bu
  * @retval HSA_STATUS_SUCCESS on success
  * @retval HSA_STATUS_ERROR on failure
  */
-typedef hsa_status_t (*aqlprofile_memory_copy_t)(void* dst, const void* src, size_t size,
-                                                 void* userdata);
+typedef hsa_status_t (*aqlprofile_memory_copy_t)(void*       dst,
+                                                 const void* src,
+                                                 size_t      size,
+                                                 void*       userdata);
 
 /**
  * @brief Validates the event for the agent.
@@ -371,8 +402,10 @@ typedef hsa_status_t (*aqlprofile_memory_copy_t)(void* dst, const void* src, siz
  * @retval HSA_STATUS_SUCCESS if the event was validated.
  * @retval HSA_STATUS_ERROR if the event was not validated.
  */
-hsa_status_t aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t agent,
-                                           const aqlprofile_pmc_event_t* event, bool* result);
+hsa_status_t
+aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t     agent,
+                              const aqlprofile_pmc_event_t* event,
+                              bool*                         result);
 
 /**
  * @brief Iterate_data() will parse the event data and call @callback with the resulting event data
@@ -383,16 +416,19 @@ hsa_status_t aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t agent,
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
-hsa_status_t aqlprofile_pmc_iterate_data(aqlprofile_handle_t handle,
-                                         aqlprofile_pmc_data_callback_t callback, void* userdata);
+hsa_status_t
+aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
+                            aqlprofile_pmc_data_callback_t callback,
+                            void*                          userdata);
 
 /**
  * @brief Struct to be returned by aqlprofile_pmc_create_packets
  */
-typedef struct {
-  hsa_ext_amd_aql_pm4_packet_t start_packet; /**< Reset counters and start incrementing */
-  hsa_ext_amd_aql_pm4_packet_t stop_packet;  /**< Pause counters from incrementing */
-  hsa_ext_amd_aql_pm4_packet_t read_packet;  /**< Retrieve results from device */
+typedef struct
+{
+    hsa_ext_amd_aql_pm4_packet_t start_packet; /**< Reset counters and start incrementing */
+    hsa_ext_amd_aql_pm4_packet_t stop_packet;  /**< Pause counters from incrementing */
+    hsa_ext_amd_aql_pm4_packet_t read_packet;  /**< Retrieve results from device */
 } aqlprofile_pmc_aql_packets_t;
 
 /**
@@ -404,18 +440,21 @@ typedef struct {
  * @param[in] dealloc_cb Function to free memory allocated by alloc_cb
  * @param[in] userdata Data passed back to user via memory alloc callback
  */
-hsa_status_t aqlprofile_pmc_create_packets(aqlprofile_handle_t* handle,
-                                           aqlprofile_pmc_aql_packets_t* packets,
-                                           aqlprofile_pmc_profile_t profile,
-                                           aqlprofile_memory_alloc_callback_t alloc_cb,
-                                           aqlprofile_memory_dealloc_callback_t dealloc_cb,
-                                           aqlprofile_memory_copy_t memcpy_cb, void* userdata);
+hsa_status_t
+aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 handle,
+                              aqlprofile_pmc_aql_packets_t*        packets,
+                              aqlprofile_pmc_profile_t             profile,
+                              aqlprofile_memory_alloc_callback_t   alloc_cb,
+                              aqlprofile_memory_dealloc_callback_t dealloc_cb,
+                              aqlprofile_memory_copy_t             memcpy_cb,
+                              void*                                userdata);
 
 /**
  * @brief Function to delete AQL packets after creation by aqlprofile_pmc_create_packets
  * @param[in] handle Returned by aqlprofile_pmc_create_packets()
  */
-void aqlprofile_pmc_delete_packets(aqlprofile_handle_t handle);
+void
+aqlprofile_pmc_delete_packets(aqlprofile_handle_t handle);
 
 /**
  * @brief Iterates over thread trace data and the data to user
@@ -426,15 +465,18 @@ void aqlprofile_pmc_delete_packets(aqlprofile_handle_t handle);
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
-hsa_status_t aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
-                                         aqlprofile_att_data_callback_t callback, void* userdata);
+hsa_status_t
+aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
+                            aqlprofile_att_data_callback_t callback,
+                            void*                          userdata);
 
 /**
  * @brief Struct containing AQLpackets to start and stop thread trace
  */
-typedef struct {
-  hsa_ext_amd_aql_pm4_packet_t start_packet; /**< Packet to start thread trace */
-  hsa_ext_amd_aql_pm4_packet_t stop_packet;  /**< Packet to stop thread trace and flush data */
+typedef struct
+{
+    hsa_ext_amd_aql_pm4_packet_t start_packet; /**< Packet to start thread trace */
+    hsa_ext_amd_aql_pm4_packet_t stop_packet;  /**< Packet to stop thread trace and flush data */
 } aqlprofile_att_control_aql_packets_t;
 
 /**
@@ -446,21 +488,24 @@ typedef struct {
  * @retval HSA_STATUS_SUCCESS if all packets created succesfully
  * @retval HSA_STATUS_ERROR otherwise
  */
-hsa_status_t aqlprofile_att_create_packets(aqlprofile_handle_t* handle,
-                                           aqlprofile_att_control_aql_packets_t* packets,
-                                           aqlprofile_att_profile_t profile,
-                                           aqlprofile_memory_alloc_callback_t alloc_cb,
-                                           aqlprofile_memory_dealloc_callback_t dealloc_cb,
-                                           aqlprofile_memory_copy_t memcpy_cb, void* userdata);
+hsa_status_t
+aqlprofile_att_create_packets(aqlprofile_handle_t*                  handle,
+                              aqlprofile_att_control_aql_packets_t* packets,
+                              aqlprofile_att_profile_t              profile,
+                              aqlprofile_memory_alloc_callback_t    alloc_cb,
+                              aqlprofile_memory_dealloc_callback_t  dealloc_cb,
+                              aqlprofile_memory_copy_t              memcpy_cb,
+                              void*                                 userdata);
 
-void aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
+void
+aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
 
 /**
  * @brief Fn to create query and swap packets in case of double buffering.
  * The caller must pool information by sending a query_status packet, followed by a call
  * to aqlprofile_att_get_buffer_status(). If aqlprofile_att_buffer_status_t.is_full, then
  * a buffer_swap packet must be inserted into the queue.
- * 
+ *
  * @param[out] header If not zero, must be inserted as first 8 bytes.
  * @param[out] query_status To be inserted before calls to aqlprofile_att_get_buffer_status
  * @param[out] buffer_swap array of AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS transition packets
@@ -471,23 +516,24 @@ void aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
  * @retval HSA_STATUS_SUCCESS if all packets created succesfully
  * @retval HSA_STATUS_ERROR otherwise
  */
-hsa_status_t aqlprofile_att_get_buffer_packets(uint64_t* header,
-                                               hsa_ext_amd_aql_pm4_packet_t* query_status,
-                                               hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
-                                               uint64_t* num_buffer_swap,
-                                               aqlprofile_handle_t handle,
-                                               int shader_engine_id,
-                                               int flags);
+hsa_status_t
+aqlprofile_att_get_buffer_packets(uint64_t*                      header,
+                                  hsa_ext_amd_aql_pm4_packet_t*  query_status,
+                                  hsa_ext_amd_aql_pm4_packet_t** buffer_swap,
+                                  uint64_t*                      num_buffer_swap,
+                                  aqlprofile_handle_t            handle,
+                                  int                            shader_engine_id,
+                                  int                            flags);
 
 struct aqlprofile_att_buffer_status_t
 {
-  uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_t)
-  void*    data;        // Read data from, if is full
-  uint64_t read_size;   // Number of bytes to read, if is full
-  uint64_t num_swaps;   // For verification purposes. Number of swaps previously executed.
-  bool     needs_swap;  // If buffer requires swap
-  bool     is_too_late;
-  bool     error;
+    uint64_t _size;       // sizeof(aqlprofile_att_buffer_status_t)
+    void*    data;        // Read data from, if is full
+    uint64_t read_size;   // Number of bytes to read, if is full
+    uint64_t num_swaps;   // For verification purposes. Number of swaps previously executed.
+    bool     needs_swap;  // If buffer requires swap
+    bool     is_too_late;
+    bool     error;
 };
 
 /**
@@ -500,10 +546,11 @@ struct aqlprofile_att_buffer_status_t
  * @retval HSA_STATUS_SUCCESS if all packets created succesfully
  * @retval HSA_STATUS_ERROR otherwise
  */
-hsa_status_t aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
-                                                 aqlprofile_handle_t handle,
-                                                 int shader_engine_id,
-                                                 int flags);
+hsa_status_t
+aqlprofile_att_update_buffer_status(aqlprofile_att_buffer_status_t* out,
+                                    aqlprofile_handle_t             handle,
+                                    int                             shader_engine_id,
+                                    int                             flags);
 
 /**
  * @brief Callback for iteration of all possible event coordinate IDs and coordinate names.
@@ -525,8 +572,8 @@ typedef hsa_status_t (*aqlprofile_eventname_callback_t)(int id, const char* name
  * @retval OTHERS If @ref aqlprofile_eventname_callback_t returns non-HSA_STATUS_SUCCESS,
  *         that value is returned.
  */
-hsa_status_t aqlprofile_iterate_event_ids(aqlprofile_eventname_callback_t callback,
-                                          void* user_data);
+hsa_status_t
+aqlprofile_iterate_event_ids(aqlprofile_eventname_callback_t callback, void* user_data);
 
 /**
  * @brief Iterate over all event coordinates for a given agent_t and event_t.
@@ -537,9 +584,12 @@ hsa_status_t aqlprofile_iterate_event_ids(aqlprofile_eventname_callback_t callba
  * @param name Coordinate name as in _iterate_event_ids.
  * @param userdata Userdata returned from _iterate_event_coord function.
  */
-typedef hsa_status_t (*aqlprofile_coordinate_callback_t)(int position, int id, int extent,
-                                                         int coordinate, const char* name,
-                                                         void* userdata);
+typedef hsa_status_t (*aqlprofile_coordinate_callback_t)(int         position,
+                                                         int         id,
+                                                         int         extent,
+                                                         int         coordinate,
+                                                         const char* name,
+                                                         void*       userdata);
 
 /**
  * @brief Iterate over all event coordinates for a given agent_t and event_t.
@@ -549,18 +599,21 @@ typedef hsa_status_t (*aqlprofile_coordinate_callback_t)(int position, int id, i
  * @param[in] callback Callback function to return the coordinates.
  * @param[in] userdata Arbitrary data pointer to be sent back to the user via callback.
  */
-hsa_status_t aqlprofile_iterate_event_coord(aqlprofile_agent_handle_t agent,
-                                            aqlprofile_pmc_event_t event, uint64_t sample_id,
-                                            aqlprofile_coordinate_callback_t callback,
-                                            void* userdata);
+hsa_status_t
+aqlprofile_iterate_event_coord(aqlprofile_agent_handle_t        agent,
+                               aqlprofile_pmc_event_t           event,
+                               uint64_t                         sample_id,
+                               aqlprofile_coordinate_callback_t callback,
+                               void*                            userdata);
 
-typedef struct {
-  uint64_t id;
-  uint64_t addr;
-  uint64_t size;
-  hsa_agent_t agent;
-  uint32_t isUnload : 1;
-  uint32_t fromStart : 1;
+typedef struct
+{
+    uint64_t    id;
+    uint64_t    addr;
+    uint64_t    size;
+    hsa_agent_t agent;
+    uint32_t    isUnload  : 1;
+    uint32_t    fromStart : 1;
 } aqlprofile_att_codeobj_data_t;
 
 /**
@@ -572,12 +625,13 @@ typedef struct {
  * @param[in] dealloc_cb Callback to free data allocated by alloc_cb()
  * @param[in] userdata Userdata to be passed back to memory callbacks
  */
-hsa_status_t aqlprofile_att_codeobj_marker(hsa_ext_amd_aql_pm4_packet_t* packet,
-                                           aqlprofile_handle_t* handle,
-                                           aqlprofile_att_codeobj_data_t data,
-                                           aqlprofile_memory_alloc_callback_t alloc_cb,
-                                           aqlprofile_memory_dealloc_callback_t dealloc_cb,
-                                           void* userdata);
+hsa_status_t
+aqlprofile_att_codeobj_marker(hsa_ext_amd_aql_pm4_packet_t*        packet,
+                              aqlprofile_handle_t*                 handle,
+                              aqlprofile_att_codeobj_data_t        data,
+                              aqlprofile_memory_alloc_callback_t   alloc_cb,
+                              aqlprofile_memory_dealloc_callback_t dealloc_cb,
+                              void*                                userdata);
 
 /**
  * @brief Struct to be returned by aqlprofile_spm_create_packets
@@ -605,7 +659,6 @@ typedef enum
     AQLPROFILE_SPM_PARAMETER_TYPE_LAST,
 } aqlprofile_spm_parameter_type_t;
 
-
 typedef enum
 {
     AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_NONE = 0,
@@ -613,12 +666,11 @@ typedef enum
     AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK,
 } aqlprofile_spm_parameter_interval_mode_t;
 
-
 typedef struct aqlprofile_spm_available_configuration_t
 {
-    aqlprofile_spm_parameter_type_t        type =  AQLPROFILE_SPM_PARAMETER_TYPE_NONE;
-    uint64_t                               min_interval = 0;
-    uint64_t                               max_interval = 0;
+    aqlprofile_spm_parameter_type_t type         = AQLPROFILE_SPM_PARAMETER_TYPE_NONE;
+    uint64_t                        min_interval = 0;
+    uint64_t                        max_interval = 0;
 } aqlprofile_spm_available_configuration_t;
 
 typedef struct
@@ -640,9 +692,11 @@ typedef struct
     size_t                        parameter_count;
     size_t                        reserved;  // For future use
 
-    aqlprofile_memory_alloc_callback_t alloc_cb;  // Memory allocation, usually a wrapper for hsa_amd_memory_pool_allocate
+    aqlprofile_memory_alloc_callback_t
+        alloc_cb;  // Memory allocation, usually a wrapper for hsa_amd_memory_pool_allocate
     aqlprofile_memory_dealloc_callback_t dealloc_cb;  // Frees memory allocated by alloc_cb
-    aqlprofile_memory_copy_t memcpy_cb;  // Copy memory in and out of GPU memory allocated by alloc_cb
+    aqlprofile_memory_copy_t
+          memcpy_cb;  // Copy memory in and out of GPU memory allocated by alloc_cb
     void* userdata;   // Passed back to user in the memory callbacks
 } aqlprofile_spm_profile_t;
 
@@ -763,12 +817,14 @@ bool
 aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event);
 
 typedef hsa_status_t (*aqlprofile_spm_available_configurations_cb_t)(
-    const aqlprofile_spm_available_configuration_t*    config,
-    size_t                                         num_config,
-    void*                                         user_data);
+    const aqlprofile_spm_available_configuration_t* config,
+    size_t                                          num_config,
+    void*                                           user_data);
 
 hsa_status_t
-aqlprofile_spm_query_agent_capabilities(aqlprofile_agent_handle_t agent, aqlprofile_spm_available_configurations_cb_t cb, void* userdata);
+aqlprofile_spm_query_agent_capabilities(aqlprofile_agent_handle_t                    agent,
+                                        aqlprofile_spm_available_configurations_cb_t cb,
+                                        void*                                        userdata);
 
 #ifdef __cplusplus
 }

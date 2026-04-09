@@ -24,37 +24,41 @@
 #define _GFX11_FACTORY_H_
 #include "core/pm4_factory.h"
 
-namespace aql_profile {
-
+namespace aql_profile
+{
 // Gfx11 factory class
-class Gfx11Factory : public Pm4Factory {
- public:
-  explicit Gfx11Factory(const AgentInfo* agent_info)
-      : Pm4Factory(BlockInfoMap(block_table_, sizeof(block_table_))) {
-    Init(agent_info);
-  }
-  Gfx11Factory(const GpuBlockInfo** table, const uint32_t& size, const AgentInfo* agent_info)
-      : Pm4Factory(BlockInfoMap(table, size)) {
-    Init(agent_info);
-  }
-  bool IsGFX11() const override { return true; }
+class Gfx11Factory : public Pm4Factory
+{
+public:
+    explicit Gfx11Factory(const AgentInfo* agent_info)
+    : Pm4Factory(BlockInfoMap(block_table_, sizeof(block_table_)))
+    {
+        Init(agent_info);
+    }
+    Gfx11Factory(const GpuBlockInfo** table, const uint32_t& size, const AgentInfo* agent_info)
+    : Pm4Factory(BlockInfoMap(table, size))
+    {
+        Init(agent_info);
+    }
+    bool IsGFX11() const override { return true; }
 
-  virtual int GetAccumLowID() const override { return 1; }
-  virtual int GetAccumHiID() const override { return 1; }
+    virtual int GetAccumLowID() const override { return 1; }
+    virtual int GetAccumHiID() const override { return 1; }
 
- protected:
-  void Init(const AgentInfo* agent_info);
-  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+protected:
+    void                       Init(const AgentInfo* agent_info);
+    static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 };
 
 // Gfx11.5 factory class
-class Gfx115xFactory : public Gfx11Factory {
- public:
-  explicit Gfx115xFactory(const AgentInfo* agent_info);
-  virtual ~Gfx115xFactory();
+class Gfx115xFactory : public Gfx11Factory
+{
+public:
+    explicit Gfx115xFactory(const AgentInfo* agent_info);
+    virtual ~Gfx115xFactory();
 
- protected:
-  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+protected:
+    static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 };
 
 }  // namespace aql_profile

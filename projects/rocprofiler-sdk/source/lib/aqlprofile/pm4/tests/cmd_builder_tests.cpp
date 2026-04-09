@@ -25,13 +25,15 @@
 
 using pm4_builder::CmdBuffer;
 
-struct DummyPacket {
+struct DummyPacket
+{
     uint32_t a;
     uint32_t b;
 };
 
-TEST(CmdBufferTest, AppendSinglePacket) {
-    CmdBuffer buf;
+TEST(CmdBufferTest, AppendSinglePacket)
+{
+    CmdBuffer   buf;
     DummyPacket pkt{0x12345678, 0x9abcdef0};
     buf.Append(pkt);
 
@@ -44,8 +46,9 @@ TEST(CmdBufferTest, AppendSinglePacket) {
     EXPECT_EQ(data[1], 0x9abcdef0u);
 }
 
-TEST(CmdBufferTest, AppendMultiplePackets) {
-    CmdBuffer buf;
+TEST(CmdBufferTest, AppendMultiplePackets)
+{
+    CmdBuffer   buf;
     DummyPacket pkt1{1, 2};
     DummyPacket pkt2{3, 4};
     buf.Append(pkt1, pkt2);
@@ -58,9 +61,10 @@ TEST(CmdBufferTest, AppendMultiplePackets) {
     EXPECT_EQ(data[3], 4u);
 }
 
-TEST(CmdBufferTest, AppendRawData) {
+TEST(CmdBufferTest, AppendRawData)
+{
     CmdBuffer buf;
-    uint32_t raw[3] = {10, 20, 30};
+    uint32_t  raw[3] = {10, 20, 30};
     buf.Append(raw, 3);
 
     EXPECT_EQ(buf.DwSize(), 4u);

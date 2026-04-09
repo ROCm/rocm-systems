@@ -24,10 +24,13 @@
 #define SRC_CORE_IP_OFFSET_TABLE_INIT_H_
 
 // static IP offset table init functions
-const reg_base_offset_table* vega20_reg_base_init();
-const reg_base_offset_table* sienna_cichlid_reg_base_init();
+const reg_base_offset_table*
+vega20_reg_base_init();
+const reg_base_offset_table*
+sienna_cichlid_reg_base_init();
 
 // dynamic IP offset table functions
-const reg_base_offset_table* navi_ip_offset_table_discovery_sysfs(uint32_t domain, uint32_t bdf);
+const reg_base_offset_table*
+navi_ip_offset_table_discovery_sysfs(uint32_t domain, uint32_t bdf);
 
 #endif  // SRC_CORE_IP_OFFSET_TABLE_INIT_H_
