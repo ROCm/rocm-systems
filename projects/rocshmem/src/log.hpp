@@ -175,7 +175,8 @@ struct log_state_device_t {
 extern __constant__ log_state_device_t log_device;
 
 template <typename... Args>
-[[maybe_unused]] __device__ void dprintf(const char* fmt, const Args&... args) {
+[[maybe_unused]] __device__ __attribute__((noinline))
+void dprintf(const char* fmt, const Args&... args) {
   int flat_thread_id = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x +
                        hipThreadIdx_z * hipBlockDim_x * hipBlockDim_y;
   int flat_wg_id = hipBlockIdx_x + hipBlockIdx_y * hipGridDim_x +
