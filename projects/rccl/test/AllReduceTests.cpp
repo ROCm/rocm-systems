@@ -193,7 +193,7 @@ namespace RcclUnitTesting
         for (int scalarMode = 0; scalarMode <= 1 && isCorrect; ++scalarMode)
         {
           if (testBed.ev.showNames)
-            TEST_INFO("%s %d-ranks AllReduce (custom-scalar Mode %d %s)\n",
+            TEST_INFO("%s %d-ranks AllReduce (custom-scalar Mode %d %s)",
                  isMultiProcess ? "MP" : "SP",
                  totalRanks, scalarMode, ncclDataTypeNames[dataType]);
 
@@ -273,8 +273,6 @@ namespace RcclUnitTesting
   }
 
 #ifdef RCCL_ALLREDUCE_WITH_BIAS
-  // Note: All bias tests require:
-  // nRanks >= 2 (bias NOT supported for single rank)
 
   // Named constants for bias test configuration
   namespace BiasTestConstants
@@ -313,7 +311,7 @@ namespace RcclUnitTesting
       // Check if architecture is gfx94 (covers gfx942) or gfx95 (covers gfx950)
       if (!testBed.ev.isGfx94 && !testBed.ev.isGfx95)
       {
-          TEST_INFO("SKIPPED: AllReduce with Bias is only supported on gfx942 or gfx950 architectures.\n");
+          TEST_INFO("SKIPPED: AllReduce with Bias is only supported on gfx942 or gfx950 architectures.");
           return;
       }
 
@@ -331,9 +329,6 @@ namespace RcclUnitTesting
 
       for(int totalRanks : testBed.ev.GetNumGpusList())
       {
-          if(totalRanks < 2)
-              continue;
-
           int const               numProcesses     = totalRanks;
           bool const              isMultiProcess   = true;
           const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
@@ -355,7 +350,7 @@ namespace RcclUnitTesting
                                                              inPlace,
                                                              useManagedMem,
                                                              useHipGraph);
-                  TEST_INFO("  %s (with bias, count=%d)\n", name.c_str(), numElem);
+                  TEST_INFO("  %s (with bias, count=%d)", name.c_str(), numElem);
               }
 
               options.biasNumElements = numElem;
@@ -711,7 +706,7 @@ namespace RcclUnitTesting
   // If RCCL_ALLREDUCE_WITH_BIAS is not defined, skip all bias tests
   TEST(AllReduce, BiasNotAvailable)
   {
-      TEST_INFO("SKIPPED: RCCL_ALLREDUCE_WITH_BIAS not defined - bias tests skipped\n");
+      TEST_INFO("SKIPPED: RCCL_ALLREDUCE_WITH_BIAS not defined - bias tests skipped");
       return;
   }
 #endif

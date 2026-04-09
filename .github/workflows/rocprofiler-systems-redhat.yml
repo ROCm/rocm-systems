@@ -61,7 +61,7 @@ jobs:
         build-type: ['Release']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-systems/
 
@@ -84,7 +84,7 @@ jobs:
           fi
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21' &&
+          python3 -m pip install 'cmake==3.25' &&
           for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages
@@ -198,7 +198,7 @@ jobs:
     - name: CTest Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
         path: |
@@ -207,7 +207,7 @@ jobs:
     - name: Data Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |

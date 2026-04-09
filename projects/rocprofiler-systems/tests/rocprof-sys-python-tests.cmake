@@ -82,17 +82,17 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PYTHON_VERSION ${_VERSION}
         FILE ${CMAKE_SOURCE_DIR}/examples/code-coverage/code-coverage.py
         RUN_ARGS
-            -i
-            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-binary-rewrite/coverage.json
-            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-hybrid-runtime-instrument/coverage.json
-            -o
-            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-summary/coverage.json
+        -i
+        ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-binary-rewrite/coverage.json
+        ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-hybrid-runtime-instrument/coverage.json
+        -o
+        ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-summary/coverage.json
         DEPENDS code-coverage-basic-blocks-binary-rewrite
-                code-coverage-basic-blocks-binary-rewrite-run
-                code-coverage-basic-blocks-hybrid-runtime-instrument
+        code-coverage-basic-blocks-binary-rewrite-run
+        code-coverage-basic-blocks-hybrid-runtime-instrument
         FIXTURES_REQUIRED
-            code-coverage-basic-blocks-binary-rewrite-fixture
-            code-coverage-basic-blocks-hybrid-runtime-instrument-fixture
+        code-coverage-basic-blocks-binary-rewrite-fixture
+        code-coverage-basic-blocks-hybrid-runtime-instrument-fixture
         LABELS "code-coverage"
         ENVIRONMENT "${_python_environment}"
     )
@@ -100,15 +100,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     # ---------------------------------------------------------------------------------- #
     # python output tests
     # ---------------------------------------------------------------------------------- #
-    if(CMAKE_VERSION VERSION_LESS "3.18.0")
-        find_program(ROCPROFSYS_CAT_EXE NAMES cat PATH_SUFFIXES bin)
-
-        if(ROCPROFSYS_CAT_EXE)
-            set(ROCPROFSYS_CAT_COMMAND ${ROCPROFSYS_CAT_EXE})
-        endif()
-    else()
-        set(ROCPROFSYS_CAT_COMMAND ${CMAKE_COMMAND} -E cat)
-    endif()
+    set(ROCPROFSYS_CAT_COMMAND ${CMAKE_COMMAND} -E cat)
 
     if(ROCPROFSYS_CAT_COMMAND)
         rocprofiler_systems_add_python_test(
@@ -117,7 +109,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             PYTHON_VERSION ${_VERSION}
             FILE rocprof-sys-tests-output/python-external/${_VERSION}/trip_count.txt
             PASS_REGEX
-                "(\\\[compile\\\]).*(\\\| \\\|0>>> \\\[run\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[fib\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[inefficient\\\]\\\[external.py\\\])"
+            "(\\\[compile\\\]).*(\\\| \\\|0>>> \\\[run\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[fib\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[inefficient\\\]\\\[external.py\\\])"
             DEPENDS python-external-${_VERSION}
             ENVIRONMENT "${_python_environment}"
         )
@@ -184,27 +176,27 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         rocprofiler_systems_add_python_test(
             NAME ${TEST_NAME}-validate-timemory
             COMMAND
-                ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
-                -m ${TEST_TIMEMORY_METRIC} ${_TIMEMORY_VALIDATION_ARGS} -i
+            ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
+            -m ${TEST_TIMEMORY_METRIC} ${_TIMEMORY_VALIDATION_ARGS} -i
             PYTHON_VERSION ${_VERSION}
             FILE rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_TIMEMORY_FILE}
             DEPENDS ${TEST_NAME}-${_VERSION}
             PASS_REGEX
-                "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_TIMEMORY_FILE} validated"
+            "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_TIMEMORY_FILE} validated"
             ENVIRONMENT "${_python_environment}"
         )
 
         rocprofiler_systems_add_python_test(
             NAME ${TEST_NAME}-validate-perfetto
             COMMAND
-                ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
-                -m ${TEST_PERFETTO_METRIC} ${_PERFETTO_VALIDATION_ARGS} -p -t
-                /opt/trace_processor/bin/trace_processor_shell -i
+            ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
+            -m ${TEST_PERFETTO_METRIC} ${_PERFETTO_VALIDATION_ARGS} -p -t
+            /opt/trace_processor/bin/trace_processor_shell -i
             PYTHON_VERSION ${_VERSION}
             FILE rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE}
             DEPENDS ${TEST_NAME}-${_VERSION}
             PASS_REGEX
-                "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE} validated"
+            "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE} validated"
             ENVIRONMENT "${_python_environment}"
         )
 
@@ -217,13 +209,13 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             rocprofiler_systems_add_python_test(
                 NAME ${TEST_NAME}-validate-rocpd
                 COMMAND
-                    ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
-                    -r ${TEST_ROCPD_RULES} -db
+                ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
+                -r ${TEST_ROCPD_RULES} -db
                 PYTHON_VERSION ${_VERSION}
                 FILE rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_ROCPD_FILE}
                 DEPENDS ${TEST_NAME}-${_VERSION}
                 PASS_REGEX
-                    "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_ROCPD_FILE} validated"
+                "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_ROCPD_FILE} validated"
                 ENVIRONMENT "${_python_environment}"
                 LABELS "rocpd"
             )
@@ -297,12 +289,12 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PERFETTO_FILE "perfetto-trace.proto"
         PERFETTO_METRIC ${python_source_categories}
         TIMEMORY_ARGS -l ${python_source_timemory_labels} -c ${python_source_timemory_count} -d
-                      ${python_source_timemory_depth}
+        ${python_source_timemory_depth}
         PERFETTO_ARGS -l ${python_source_perfetto_labels} -c ${python_source_perfetto_count} -d
-                      ${python_source_perfetto_depth}
+        ${python_source_perfetto_depth}
         ROCPD_FILE "rocpd.db"
         ROCPD_RULES
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-source-rules.json"
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-source-rules.json"
     )
 
     # Timemory validation uses hierarchical output with multiple entries at different depths
@@ -366,12 +358,12 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PERFETTO_METRIC "python"
         PERFETTO_FILE "perfetto-trace.proto"
         TIMEMORY_ARGS -l ${python_builtin_timemory_labels} -c ${python_builtin_timemory_count} -d
-             ${python_builtin_timemory_depth}
+        ${python_builtin_timemory_depth}
         PERFETTO_ARGS -l ${python_builtin_perfetto_labels} -c ${python_builtin_perfetto_count} -d
-             ${python_builtin_perfetto_depth}
+        ${python_builtin_perfetto_depth}
         ROCPD_FILE "rocpd.db"
         ROCPD_RULES
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-builtin-rules.json"
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-builtin-rules.json"
     )
 
     list(GET ROCPROFSYS_PYTHON_ROOT_DIRS ${_INDEX} Python3_ROOT_DIR)

@@ -9,26 +9,25 @@ import sys
 import sqlite3
 from pathlib import Path
 
-# Add script directory to Python path for local module imports
-script_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, script_dir)
-
-# Import AMD-SMI data collection functions
-from amd_smi_data_parse import (
-    collect_supported_metrics,
-    is_metric_supported,
-)
-
 
 class validation_rule:
     """Class to represent a validation rule as defined in JSON file"""
 
-    def __init__(self, description, query, expected_result, comparison, error_message):
+    def __init__(
+        self,
+        description,
+        query,
+        expected_result,
+        comparison,
+        error_message,
+        requires=None,
+    ):
         self.description = description
         self.query = query
         self.expected_result = expected_result
         self.comparison = comparison
         self.error_message = error_message
+        self.requires = requires
 
     def __repr__(self):
         return f"validation_rule(description={self.description}, query={self.query})"
@@ -127,7 +126,7 @@ def print_help():
     """)
 
 
-def validate_table(cursor, rule, tables) -> bool:
+def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
     """
     Validates a database table against a set of rules.
     This function checks if a table specified by `rule` exists in the provided `tables` list,
@@ -205,6 +204,18 @@ def validate_table(cursor, rule, tables) -> bool:
 
             all_queries_passed = True
             for validation_query in rule.validation_queries:
+                # Check if metric is available (based on union across all GPUs for now)
+                if (
+                    validation_query.requires
+                    and available_metrics is not None
+                    and validation_query.requires not in available_metrics
+                ):
+                    print(
+                        f"⏭️  Skipping '{validation_query.description}' on '{table_name}' "
+                        f"(requires '{validation_query.requires}', not available)"
+                    )
+                    continue
+
                 try:
                     query = validation_query.query.replace("{table_name}", table_name)
                     cursor.execute(query)
@@ -245,7 +256,7 @@ def validate_table(cursor, rule, tables) -> bool:
     return all_tables_passed
 
 
-def validate_rocpd(cursor, rules, tables) -> bool:
+def validate_rocpd(cursor, rules, tables, available_metrics=None) -> bool:
     """
     Validation of a ROCPD database by applying a set of validation rules to specified tables.
     It iterates through each rule, validates the corresponding table, and provides feedback on the validation status.
@@ -265,7 +276,7 @@ def validate_rocpd(cursor, rules, tables) -> bool:
 
     for rule in rules:
         print(f"\nValidating table: {rule.get_table_identifier()}")
-        table_valid = validate_table(cursor, rule, tables)
+        table_valid = validate_table(cursor, rule, tables, available_metrics)
         db_valid = db_valid and table_valid
 
     if db_valid:
@@ -300,11 +311,6 @@ def load_validation_rules(validation_rules) -> list:
                 )
                 return []
 
-            # Check if this rules file is amd-smi-rules.json
-            is_amd_smi_rules_file = "amd-smi-rules.json" in str(rules_file)
-            metrics_list = None
-            if is_amd_smi_rules_file:
-                metrics_list = collect_supported_metrics()
             with open(rules_path, "r") as f:
                 rules_data = json.load(f)
                 rules = []
@@ -312,26 +318,13 @@ def load_validation_rules(validation_rules) -> list:
                 for table_data in rules_data["required_tables"]:
                     validation_queries = []
                     for vq in table_data.get("validation_queries", []):
-                        # Check if metric is supported (for amd-smi-rules.json)
-                        if is_amd_smi_rules_file:
-                            supported, metric_name = is_metric_supported(
-                                vq["query"], metrics_list
-                            )
-                            if metric_name is not None and not supported:
-                                print(
-                                    f"Skipping validation for unsupported metric: '{metric_name}'"
-                                )
-                                continue
-                            elif metric_name is not None:
-                                print(
-                                    f"Adding validation for supported metric: '{metric_name}'"
-                                )
                         validation_query_obj = validation_rule(
                             description=vq["description"],
                             query=vq["query"],
                             expected_result=vq["expected_result"],
                             comparison=vq.get("comparison", "equals"),
                             error_message=vq["error_message"],
+                            requires=vq.get("requires", None),
                         )
                         validation_queries.append(validation_query_obj)
 
@@ -395,7 +388,43 @@ if __name__ == "__main__":
 
         sys.exit(os.EX_USAGE)
 
+    # Auto-detect available GPU metrics via amd-smi
+    available_metrics = None
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from check_amd_smi_metrics import get_available_metrics
+
+        gpus = get_available_metrics()
+        available_metrics = set()
+        from check_amd_smi_metrics import collect_metric_names
+
+        print("\n--- Platform GPU Metric Availability ---")
+        for gpu in gpus:
+            gpu_metrics = collect_metric_names(gpu)
+            available_metrics |= gpu_metrics
+            print(f"GPU {gpu.gpu_id}:")
+            print(
+                f"  Activity:    gfx={gpu.gfx_activity}  umc={gpu.umc_activity}  mm={gpu.mm_activity}"
+            )
+            print(
+                f"  Temperature: hotspot={gpu.hotspot_temperature}  edge={gpu.edge_temperature}"
+            )
+            print(f"  Power:       socket={gpu.current_socket_power}")
+            print(
+                f"  VCN/JPEG:    vcn_activity={gpu.vcn_activity}  vcn_busy={gpu.vcn_busy}  jpeg_activity={gpu.jpeg_activity}  jpeg_busy={gpu.jpeg_busy}"
+            )
+            print(
+                f"  Other:       mem_usage={gpu.mem_usage}  xgmi={gpu.xgmi}  pcie={gpu.pcie}"
+            )
+        print(
+            f"Detected available metrics (union): {', '.join(sorted(available_metrics))}"
+        )
+        print("---\n")
+    except Exception as e:
+        print(f"Warning: Could not detect GPU metrics ({e}), running all queries")
+
     print(f"Validating ROCPD. Database file: {args.database}")
+
     db_path = args.database
     validation_rules_files = args.validation_rules
     rules = load_validation_rules(validation_rules_files)
@@ -418,7 +447,7 @@ if __name__ == "__main__":
         cursor.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
         tables = cursor.fetchall()
 
-        validation_result = validate_rocpd(cursor, rules, tables)
+        validation_result = validate_rocpd(cursor, rules, tables, available_metrics)
 
         conn.close()
 

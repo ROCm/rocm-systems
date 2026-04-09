@@ -12,6 +12,10 @@ profiling. Your level of familiarity with the profiled application, computing
 environment, and experience with ROCm Compute Profiler should inform the analysis method you
 choose.
 
+.. note::
+
+   Analyze mode merges separate counter collection files (pmc_perf_*.csv or results_*.csv) into a unified pmc_perf.csv for analysis.
+
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.
 

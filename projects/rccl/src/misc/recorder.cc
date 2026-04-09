@@ -609,8 +609,22 @@ void parseJsonEntry(const char* entry, std::vector<rcclApiCall>& calls)
   // TODO: parse comma too
   rcclApiCall call;
   std::string str(entry);
+
+  // Handle empty string case
+  if (str.empty()) {
+    printf("[ERROR] parseJsonEntry: empty entry string\n");
+    return;
+  }
+
   size_t begin = str.find_first_not_of(' ');
   size_t end = str.find(" : ");
+
+  // Validate that we found the delimiter and positions are valid
+  if (begin == std::string::npos || end == std::string::npos || end <= begin) {
+    printf("[ERROR] parseJsonEntry: invalid entry format: '%s'\n", entry);
+    return;
+  }
+
   rcclCall_t type = getFuncType(str.substr(begin, end-begin));
   call.type = type;
   switch(type) {

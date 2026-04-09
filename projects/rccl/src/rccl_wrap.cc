@@ -26,13 +26,10 @@ THE SOFTWARE.
 #include "enqueue.h"
 #include <algorithm>
 #include "debug.h"
+#include "amdsmi_wrap.h"
 #include "include/graph.h"
+#include "register.h"
 
-#ifdef USE_AMDSMI
-#include "amd_smi/amdsmi.h"
-#else
-#include "rocm_smi/rocm_smi.h"
-#endif
 
 // Use this param to experiment pipelining new data types besides bfloat16
 // Make sure you generate the device code with the new data type (i.e. in generate.py)
@@ -42,7 +39,9 @@ RCCL_PARAM(PipelineAllDTypes, "PIPELINE_ALL_DATA_TYPES", 0);
 // Otherwise, it is automatically set for certain archs, datatypes and reduction collectives
 RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
-RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 2097152);
+RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
+RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
+RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -414,13 +413,14 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Check if user explicitly disabled direct AllGather
-  static int userDirectAllGatherInput = -2;
-  if (userDirectAllGatherInput == -2) {
-    const char *inputStr = getenv("RCCL_DIRECT_ALLGATHER_DISABLE");
-    userDirectAllGatherInput = !inputStr ? 0 : 1;
+  static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
+  if (userDirectAllGatherInput != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled by environment variable.");
+    return false;
   }
-  if (userDirectAllGatherInput == 1) {
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled.");
+
+  // Direct AllGather incompatible with UBR
+  if (ncclParamLocalRegister()) {
     return false;
   }
 
@@ -457,14 +457,11 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // Direct ReduceScatter is supported for MI350 (gfx950):
   // Only if PXN is enabled
   // - 2 nodes: enable for 128KiB .. 2MiB
-  // - 4 and 8 nodes: enable up to 2MiB
-  static int userDirectReduceScatterInput = -2;
-  if (userDirectReduceScatterInput == -2) {
-    const char *inputStr = getenv("RCCL_DIRECT_REDUCE_SCATTER_DISABLE");
-    userDirectReduceScatterInput = !inputStr ? 0 : 1;
-  }
-  if (userDirectReduceScatterInput == 1) {
-    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled.");
+  // - 4 nodes: enable up to 4MiB
+  // - 8 and 16 nodes: enable up to 8MiB
+  static int userDirectReduceScatterInput = rcclParamDirectReduceScatterDisable();
+  if (userDirectReduceScatterInput !=0) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled by environment variable.");
     return false;
   }
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
@@ -478,19 +475,21 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 
   size_t threshold = rcclParamDirectReduceScatterThreshold();
   if (threshold > -1) { 
-    // Set threshold to 2MiB hard limit
+    // Set threshold to 8MiB hard limit
     // NOTE: If the DirectReduceScatterThreshold / hard-limit is increased, ensure TEMP_BUFF_SIZE (init.cc)
     // is increased accordingly -> TEMP_BUFF_SIZE >= 2 * (max enabled msgSize) for headroom.
-    threshold = std::min(threshold, (size_t)2097152);
+    threshold = std::min(threshold, (size_t)8388608);
   } else {
-    threshold = 2097152;
+    threshold = 8388608;
   }
   INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER threshold set to: %zu", threshold);
 
   if (msgSize > threshold) return false;
   // for 2 nodes, enable if msgSize is in 128KiB .. 2MiB range
-  if (comm->nNodes == 2) return msgSize >= (size_t)131072;
-  if (comm->nNodes == 8 || comm->nNodes == 4) return true;
+  if (comm->nNodes == 2) return (msgSize >= (size_t)131072) && (msgSize <= (size_t)2097152);
+  // for 4 nodes, enable if msgSize is up to 4MiB
+  if (comm->nNodes == 4) return (msgSize <= (size_t)4194304);
+  if (comm->nNodes == 8 || comm->nNodes == 16) return true;
   return false;
 }
 
@@ -609,12 +608,20 @@ bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
   return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) && (rcclParamWarpSpeedAutoMode() != 0);
 }
 
-void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
+ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskColl* info){
+  if(info->useWarpSpeed && comm->nChannels > (MAXCHANNELS)/2){
+    WARN("WarpSpeed does not support more than %d channels. Current number of channels is %d. To avoid hang, run with RCCL_WARP_SPEED_AUTO=0", MAXCHANNELS/2, comm->nChannels);
+    return ncclInvalidArgument;
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
   info->useWarpSpeed = false;
   static bool unrollFactorSet = getenv("RCCL_UNROLL_FACTOR") != nullptr;
-  if(!comm->topo->warpSpeedEnabled) return;
+  if(!comm->topo->warpSpeedEnabled) return ncclSuccess;
   commSetUnrollFactor(comm);  // TODO: reset unroll factor per task rather than per comm
-  if(!rcclCollSupportsRing(info->func)) return;
+  if(!rcclCollSupportsRing(info->func)) return ncclSuccess;
   if (rcclParamWarpSpeedForceEnable() > 0) { // Manual performance mode
     if(info->algorithm != NCCL_ALGO_RING) {
       INFO(NCCL_TUNING, "Overriding %s algorithm with RING for nccl%s at %zu bytes as WarpSpeed is requested and only supports RING", ncclAlgoToString(info->algorithm), ncclFuncToString(info->func), nBytes);
@@ -628,7 +635,7 @@ void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size
     // to allow unroll factor to be reverted to default.
     // This can be changed once per-task unroll factor setting is implemented.
     if(info->algorithm != NCCL_ALGO_RING) {
-      return; // If Ring is not selected, assume it is suboptimal and return
+      return ncclSuccess; // If Ring is not selected, assume it is suboptimal and return
     }
     if(info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
        // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
@@ -641,6 +648,8 @@ void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size
       info->useWarpSpeed = true;
     }
   }
+  NCCLCHECK(validChannelsForWarpSpeed(comm, info));
+  return ncclSuccess;
 }
 
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm) {
@@ -749,50 +758,11 @@ ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
 }
 
 int getFirmwareVersion() {
-  uint64_t fw_version = -1;
-
-#ifdef USE_AMDSMI
-  amdsmi_status_t ret;
-  ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    ERROR("Could not initialize amd-smi");
+  uint64_t fw_version = 0;
+  ncclResult_t res = amd_smi_getFirmwareVersion(0, &fw_version);
+  if (res != ncclSuccess) {
     return -1;
   }
-
-  uint32_t socket_count = 0;
-  amdsmi_get_socket_handles(&socket_count, nullptr);
-  std::vector<amdsmi_socket_handle> sockets(socket_count);
-  amdsmi_get_socket_handles(&socket_count, sockets.data());
-
-  uint32_t num_gpus_per_socket = 0;
-  amdsmi_get_processor_handles(sockets[0], &num_gpus_per_socket, nullptr);
-  std::vector<amdsmi_processor_handle> processor_handles(num_gpus_per_socket);
-  amdsmi_get_processor_handles(sockets[0], &num_gpus_per_socket, processor_handles.data());
-
-  amdsmi_fw_info_t info;
-  ret = amdsmi_get_fw_info(processor_handles[0], &info);
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    ERROR("Could not query firmware info using amd-smi");
-    return -1;
-  }
-
-  fw_version = info.fw_info_list[0].fw_version;
-
-#else
-  rsmi_status_t ret;
-  ret = rsmi_init(0);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    ERROR("Could not initialize rocm-smi");
-    return -1;
-  }
-
-  ret = rsmi_dev_firmware_version_get(0, RSMI_FW_BLOCK_MEC, &fw_version);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    ERROR("Could not query firmware info using rocm-smi");
-    return -1;
-  }
-#endif
-
   return fw_version;
 }
 

@@ -15,6 +15,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
@@ -45,6 +46,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/mpi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp

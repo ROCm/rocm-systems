@@ -565,7 +565,7 @@ class Device : public NullDevice {
   //! Initialize memory in AMD HMM on the current device or keeps it in the host memory
   bool SvmAllocInit(void* memory, size_t size) const;
 
-  void getGlobalCUMask(std::string cuMaskStr);
+  void getGlobalCUMask(std::string_view cuMaskStr);
 
   static hsa_status_t BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data);
 
@@ -612,6 +612,9 @@ class Device : public NullDevice {
 
   //! Returns true if PM4 emulation is enabled
   bool IsPm4Emulation() const { return pm4_emulation_; }
+
+  //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
+  void WaitForHsaAsyncHandlersIdle();
 
  private:
   bool create();

@@ -38,7 +38,7 @@ When run with `--help`, it reports the available subcommands:
 ~$ amd-smi --help
 usage: amd-smi [-h] [--rocm-smi]  ...
 
-AMD System Management Interface | Version: 26.3.0 | ROCm version: 7.12.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 26.4.0 | ROCm version: 7.13.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -531,7 +531,7 @@ Topology arguments:
   -o, --hops               Displays the number of hops between GPUs
   -t, --link-type          Displays the link type between GPUs
   -b, --numa-bw            Display max and min bandwidth between nodes
-  -c, --coherent           Display cache coherant (or non-coherant) link capability between nodes
+  -c, --coherent           Display cache coherent (or non-coherent) link capability between nodes
   -n, --atomics            Display 32 and 64-bit atomic io link capability between nodes
   -d, --dma                Display P2P direct memory access (DMA) link capability between nodes
   -z, --bi-dir             Display P2P bi-directional link capability between nodes
@@ -589,7 +589,9 @@ Requires 'sudo' privileges.
 
 Set Arguments:
   -h, --help                                  show this help message and exit
-  -f, --fan %                                 Set GPU fan speed (0-255 or 0-100%)
+  -f, --fan %                                 Set GPU fan speed :
+                                                GPU 0: 0-255 or 0-100%
+                                                GPU 1: 20-100 or 0-100%
   -l, --perf-level LEVEL                      Set one of the following performance levels:
                                                 AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
   -P, --profile PROFILE_LEVEL                 Set power profile level (#) or choose one of available profiles:
