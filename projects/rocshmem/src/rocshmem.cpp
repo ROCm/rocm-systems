@@ -187,19 +187,16 @@ static void setFilesLimit() {
   // Print build info and/or environment variables based on DEBUG_LEVEL.
   // Only PE 0 prints to avoid duplicated output.
   if (mpi_instance->get_rank() == 0) {
-    using rocshmem::envvar::types::debug_level;
-    auto debug_val = envvar::debug_level.get_value();
-    if (debug_val >= debug_level::VERSION) {
+    if (envvar::log_flags.show_version) {
       print_build_info(std::cout);
     }
-    if (debug_val >= debug_level::ENV) {
+    if (envvar::log_flags.show_env) {
+      using rocshmem::envvar::types::env_print_mode;
       envvar::print_mode mode;
-      if (debug_val == debug_level::ENV_ALL) {
-        mode = envvar::print_mode::ALL_VALUES;
-      } else if (debug_val == debug_level::ENV_FULL) {
-        mode = envvar::print_mode::FULL_DOCUMENTATION;
-      } else {
-        mode = envvar::print_mode::MODIFIED;
+      switch (envvar::log_flags.env_mode) {
+      case env_print_mode::ALL:  mode = envvar::print_mode::ALL_VALUES; break;
+      case env_print_mode::FULL: mode = envvar::print_mode::FULL_DOCUMENTATION; break;
+      default:                   mode = envvar::print_mode::MODIFIED; break;
       }
       envvar::print_envvars(mode, std::cout);
     }
@@ -317,19 +314,16 @@ static void setFilesLimit() {
   // Print build info and/or environment variables based on DEBUG_LEVEL.
   // Only PE 0 prints to avoid duplicated output.
   if (bootstrap->getRank() == 0) {
-    using rocshmem::envvar::types::debug_level;
-    auto debug_val = envvar::debug_level.get_value();
-    if (debug_val >= debug_level::VERSION) {
+    if (envvar::log_flags.show_version) {
       print_build_info(std::cout);
     }
-    if (debug_val >= debug_level::ENV) {
+    if (envvar::log_flags.show_env) {
+      using rocshmem::envvar::types::env_print_mode;
       envvar::print_mode mode;
-      if (debug_val == debug_level::ENV_ALL) {
-        mode = envvar::print_mode::ALL_VALUES;
-      } else if (debug_val == debug_level::ENV_FULL) {
-        mode = envvar::print_mode::FULL_DOCUMENTATION;
-      } else {
-        mode = envvar::print_mode::MODIFIED;
+      switch (envvar::log_flags.env_mode) {
+      case env_print_mode::ALL:  mode = envvar::print_mode::ALL_VALUES; break;
+      case env_print_mode::FULL: mode = envvar::print_mode::FULL_DOCUMENTATION; break;
+      default:                   mode = envvar::print_mode::MODIFIED; break;
       }
       envvar::print_envvars(mode, std::cout);
     }

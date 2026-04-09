@@ -145,8 +145,7 @@ namespace rocshmem {
 
 #define LOG_WARN(fmt, ...) do {                                               \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::envvar::debug_level.get_value() >=                            \
-      rocshmem::envvar::types::debug_level::WARN) {                           \
+  if (rocshmem::envvar::log_flags.show_warn) {                           \
     if (rocshmem::log_stderr_is_tty)                                          \
       fprintf(stderr, LOG_CLR_YELLOW_ "W%04d" LOG_CLR_RESET_ " " fmt          \
               " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",               \
@@ -163,8 +162,7 @@ namespace rocshmem {
 
 #define LOG_INFO(fmt, ...) do {                                               \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::envvar::debug_level.get_value() >=                            \
-      rocshmem::envvar::types::debug_level::INFO) {                           \
+  if (rocshmem::envvar::log_flags.show_info) {                           \
     if (rocshmem::log_stdout_is_tty)                                          \
       fprintf(stdout, LOG_CLR_CYAN_ "I%04d" LOG_CLR_RESET_ " " fmt            \
               " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",               \
@@ -182,8 +180,7 @@ namespace rocshmem {
 #ifdef BUILD_DEBUG_LEVEL_TRACE
 #define LOG_TRACE(fmt, ...) do {                                              \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::envvar::debug_level.get_value() >=                            \
-      rocshmem::envvar::types::debug_level::TRACE) {                          \
+  if (rocshmem::envvar::log_flags.show_trace) {                          \
     if (rocshmem::log_stdout_is_tty)                                          \
       fprintf(stdout, LOG_CLR_BLUE_ "T%04d" LOG_CLR_RESET_ " " fmt            \
               " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",               \

@@ -295,14 +295,29 @@ namespace envvar {
         ERROR = NONE,
         WARN,
         ENV,
-        ENV_ALL,
-        ENV_FULL,
         VERSION,
         INFO,
         TRACE,
       };
       std::istream& operator>>(std::istream& is, debug_level& level);
       std::ostream& operator<<(std::ostream& os, const debug_level& level);
+
+      /**
+       * @brief Per-category suppression flags parsed from ROCSHMEM_DEBUG_LEVEL modifiers.
+       *
+       * Format: ROCSHMEM_DEBUG_LEVEL=<level>[:<modifier>]*
+       * Modifiers: noversion, noenv, noinfo, nowarn, notrace, env:all, env:full
+       */
+      enum class env_print_mode { MODIFIED, ALL, FULL };
+
+      struct debug_flags {
+        const bool show_version;
+        const bool show_env;
+        const env_print_mode env_mode;
+        const bool show_info;
+        const bool show_warn;
+        const bool show_trace;
+      };
     }  // inline namespace _debug
   }  // namespace types
 
@@ -464,6 +479,9 @@ namespace envvar {
   private:
     _detail::var_list_t::const_iterator var_map_pos;
   };
+
+  /** Per-category suppression flags from ROCSHMEM_DEBUG_LEVEL modifiers */
+  extern const types::debug_flags log_flags;
 
   inline namespace _base {
     extern const var<bool> uniqueid_with_mpi;
