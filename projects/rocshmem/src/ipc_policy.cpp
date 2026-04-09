@@ -136,8 +136,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                      TcpBootstrap *bootstr) {
-  shm_size = bootstr->getNranksPerNode();
-  auto shm_ranks = bootstr->getLocalRanks();
+  auto shm_ranks = bootstr->getIpcCapableRanks();
+  shm_size = shm_ranks.size();
   shm_rank = std::find(shm_ranks.begin(), shm_ranks.end(), my_pe) - shm_ranks.begin();
 
   /*

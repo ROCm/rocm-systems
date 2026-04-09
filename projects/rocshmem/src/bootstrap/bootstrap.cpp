@@ -30,6 +30,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hip/hip_runtime.h>
+#include <amd_smi/amdsmi.h>
+
 #include "bootstrap.hpp"
 #include "log.hpp"
 #include "utils.hpp"
@@ -177,6 +180,7 @@ class TcpBootstrap::Impl {
   int getNranks();
   int getNranksPerNode();
   std::vector<int> getLocalRanks();
+  std::vector<int> getIpcCapableRanks();
   void allGather(void* allData, int size);
   void send(void* data, int size, int peer, int tag);
   void recv(void* data, int size, int peer, int tag);
@@ -202,6 +206,7 @@ class TcpBootstrap::Impl {
   std::unordered_map<std::pair<int, int>, std::shared_ptr<Socket>, PairHash> peerSendSockets_;
   std::unordered_map<std::pair<int, int>, std::shared_ptr<Socket>, PairHash> peerRecvSockets_;
   std::vector<int> localRanks_;
+  std::vector<int> ipcCapableRanks_;
 
   void netSend(Socket* sock, const void* data, int size);
   void netRecv(Socket* sock, void* data, int size);
@@ -211,6 +216,7 @@ class TcpBootstrap::Impl {
 
   static void assignPortToUniqueId(UniqueIdInternal& uniqueId);
   static void netInit(std::string ipPortPair, std::string interface, SocketAddress& netIfAddr);
+  std::vector<int> detectIpcCapableRanks();
 
   void bootstrapCreateRoot();
   void bootstrapRoot();
@@ -253,6 +259,19 @@ int TcpBootstrap::Impl::getRank() { return rank_; }
 int TcpBootstrap::Impl::getNranks() { return nRanks_; }
 
 std::vector<int>  TcpBootstrap::Impl::getLocalRanks() { return localRanks_; }
+
+std::vector<int>  TcpBootstrap::Impl::getIpcCapableRanks() {
+#ifdef ROCSHMEM_USE_POD_CAPABILITY_DETECTION
+  // Lazy initialization: detect IPC-capable ranks on first call
+  if (ipcCapableRanks_.empty()) {
+    ipcCapableRanks_ = detectIpcCapableRanks();
+  }
+  return ipcCapableRanks_;
+#else
+  // Default implementation: assume all local ranks are IPC-capable
+  return localRanks_;
+#endif
+}
 
 void TcpBootstrap::Impl::initialize(const rocshmem_uniqueid_t& uniqueId, int64_t timeoutSec) {
   if (!netInitialized) {
@@ -555,6 +574,99 @@ int TcpBootstrap::Impl::getNranksPerNode() {
   return nRanksPerNode_;
 }
 
+std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
+  // Return cached result if already computed
+  if (!ipcCapableRanks_.empty()) {
+    return ipcCapableRanks_;
+  }
+
+  std::vector<int> ipcCapableRanks;
+
+  // Get the current HIP device
+  int device;
+  hipError_t err = hipGetDevice(&device);
+  if (err != hipSuccess) {
+    DPRINTF("Failed to get current HIP device: %s\n", hipGetErrorString(err));
+    return ipcCapableRanks;
+  }
+
+  // Get the BDF ID (PCI Bus ID) of the current device
+  char bdfId[64];
+  err = hipDeviceGetPCIBusId(bdfId, sizeof(bdfId), device);
+  if (err != hipSuccess) {
+    DPRINTF("Failed to get PCI Bus ID for device %d: %s\n", device, hipGetErrorString(err));
+    return ipcCapableRanks;
+  }
+
+  DPRINTF("Rank %d using device %d with BDF ID: %s\n", rank_, device, bdfId);
+
+  // Initialize AMD SMI library
+  amdsmi_status_t status = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    DPRINTF("Failed to initialize AMD SMI: %d\n", status);
+    return ipcCapableRanks;
+  }
+
+  // Get processor handle from BDF ID
+  amdsmi_processor_handle gpuHandle;
+  status = amdsmi_get_processor_handle_from_bdf(bdfId, &gpuHandle);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    DPRINTF("Failed to get processor handle from BDF %s: %d\n", bdfId, status);
+    amdsmi_shut_down();
+    return ipcCapableRanks;
+  }
+
+  DPRINTF("Rank %d obtained processor handle for BDF %s\n", rank_, bdfId);
+
+  // Get fabric information for the GPU
+  amdsmi_gpu_fabric_info_t fabricInfo;
+  status = amdsmi_get_gpu_fabric_info(gpuHandle, &fabricInfo);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    DPRINTF("Failed to get fabric info for BDF %s: %d\n", bdfId, status);
+    amdsmi_shut_down();
+    return ipcCapableRanks;
+  }
+
+  DPRINTF("Rank %d obtained fabric info for BDF %s\n", rank, bdfId);
+
+  // Extract physical and virtual pod IDs from fabric info
+  struct PodIds {
+    uint32_t physicalPodId;
+    uint32_t virtualPodId;
+  };
+
+  PodIds podIds;
+  podIds.physicalPodId = fabricInfo.info.v1.ppod_id;
+  podIds.virtualPodId = fabricInfo.info.v1.vpod_id;
+
+  DPRINTF("Rank %d BDF %s: ppod_id=%u, vpod_id=%u\n",
+          rank_, bdfId, podIds.physicalPodId, podIds.virtualPodId);
+
+  // Gather all PodIds from all ranks
+  std::vector<PodIds> allPodIds(nRanks_);
+  allPodIds[rank_] = podIds;
+  allGather(allPodIds.data(), sizeof(PodIds));
+
+  DPRINTF("Rank %d completed allGather of PodIds\n", rank_);
+
+  // Determine IPC-capable ranks based on matching pod IDs
+  for (int i = 0; i < nRanks_; i++) {
+    if (allPodIds[i].physicalPodId == podIds.physicalPodId &&
+        allPodIds[i].virtualPodId == podIds.virtualPodId) {
+      ipcCapableRanks.push_back(i);
+      DPRINTF("Rank %d: rank %d is IPC-capable (ppod=%u, vpod=%u)\n",
+              rank_, i, allPodIds[i].physicalPodId, allPodIds[i].virtualPodId);
+    }
+  }
+
+  DPRINTF("Rank %d found %zu IPC-capable ranks\n", rank_, ipcCapableRanks.size());
+
+  // Cleanup AMD SMI
+  amdsmi_shut_down();
+
+  return ipcCapableRanks;
+}
+
 void TcpBootstrap::Impl::allGather(void* allData, int size) {
   char* data = static_cast<char*>(allData);
   int rank = rank_;
@@ -661,6 +773,8 @@ void TcpBootstrap::Impl::close() {
  int TcpBootstrap::getNranksPerNode() { return pimpl_->getNranksPerNode(); }
 
  std::vector<int> TcpBootstrap::getLocalRanks() { return pimpl_->getLocalRanks(); }
+
+ std::vector<int> TcpBootstrap::getIpcCapableRanks() { return pimpl_->getIpcCapableRanks(); }
 
  void TcpBootstrap::send(void* data, int size, int peer, int tag) {
   pimpl_->send(data, size, peer, tag);
