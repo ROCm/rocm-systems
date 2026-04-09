@@ -132,7 +132,7 @@ else()
     # If we didn't find a suitable version on the system, then download one from the web
     rocprofiler_systems_add_cache_option(
         ELFUTILS_DOWNLOAD_VERSION "Version of elfutils to download and install" STRING
-        "0.188"
+        "0.194"
     )
     set(ELFUTILS_DOWNLOAD_VERSION ${ElfUtils_DOWNLOAD_VERSION})
 
