@@ -21,7 +21,7 @@ from amdisa import (
     Rdna4Profile,
 )
 from amdisa import xml_schema as xs
-from amdisa.codegen import gen_wait_counter_policy
+from amdisa.isa_profile import gen_wait_counter_policy
 from amdisa.cross_isa import CrossIsaAnalyzer
 from amdisa.semantics import derive_all_semantics
 
