@@ -317,6 +317,7 @@ namespace envvar {
         const bool show_info;
         const bool show_warn;
         const bool show_trace;
+        const bool show_color;
       };
     }  // inline namespace _debug
   }  // namespace types

@@ -81,7 +81,8 @@ void Backend::init(void) {
   log_state_device_t host_log_state{log_pe_number,
                                     envvar::log_flags.show_warn,
                                     envvar::log_flags.show_info,
-                                    envvar::log_flags.show_trace};
+                                    envvar::log_flags.show_trace,
+                                    envvar::log_flags.show_color};
   log_state_device_t* log_state_addr{nullptr};
   CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&log_state_addr),
                                 HIP_SYMBOL(log_device)));

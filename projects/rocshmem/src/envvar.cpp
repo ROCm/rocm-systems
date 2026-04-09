@@ -46,7 +46,8 @@ namespace envvar {
     const var<types::debug_level> debug_level("DEBUG_LEVEL",
       "Debug output level (NONE/ERROR, WARN, ENV, VERSION, INFO, TRACE). "
       "Append modifiers: :noversion, :noenv, :noinfo, :nowarn, :notrace to suppress categories; "
-      ":env[:all|:full] to enable/control env variable output (e.g. trace:noversion, env:full)",
+      ":env[:all|:full] to enable/control env variable output; "
+      ":color (default) or :nocolor for ANSI colors (e.g. trace:noversion:nocolor, env:full)",
       types::debug_level::WARN);
   }  // close _base temporarily to define log_flags after debug_level
 
@@ -63,6 +64,7 @@ namespace envvar {
     bool info     = (lvl >= debug_level::INFO);
     bool warn     = (lvl >= debug_level::WARN);
     bool trace    = (lvl >= debug_level::TRACE);
+    bool color    = true;
 
     // Apply :modifier overrides
     const char* envstr = std::getenv("ROCSHMEM_DEBUG_LEVEL");
@@ -96,10 +98,12 @@ namespace envvar {
         else if (mod == "all")      env_mode = env_print_mode::ALL;
         else if (mod == "full")     env_mode = env_print_mode::FULL;
         else if (mod == "modified") env_mode = env_print_mode::MODIFIED;
+        else if (mod == "color")    color = true;
+        else if (mod == "nocolor")  color = false;
         pos = next;
       }
     }
-    return {ver, env, env_mode, info, warn, trace};
+    return {ver, env, env_mode, info, warn, trace, color};
   }
 
   const types::debug_flags log_flags = make_debug_flags();

@@ -27,7 +27,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <unistd.h>
 
 #include <hip/hip_runtime.h>
 
@@ -68,8 +67,6 @@
 
 namespace rocshmem {
   inline int log_pe_number = -1;
-  inline bool log_stderr_is_tty = isatty(STDERR_FILENO);
-  inline bool log_stdout_is_tty = isatty(STDOUT_FILENO);
 
   // Calling static_assert_host_only from __device__/__global__ code produces a
   // compile error ("reference to __host__ function in __device__").
@@ -80,119 +77,79 @@ namespace rocshmem {
   __device__ inline void static_assert_device_only() {}
 }  // namespace rocshmem
 
-/* ANSI color codes for log level letter and file:line:func suffix */
-#define LOG_CLR_RED_    "\033[31m"
-#define LOG_CLR_YELLOW_ "\033[33m"
-#define LOG_CLR_GREEN_  "\033[32m"
-#define LOG_CLR_CYAN_   "\033[36m"
-#define LOG_CLR_BLUE_   "\033[34m"
-#define LOG_CLR_GRAY_   "\033[90m"
-#define LOG_CLR_RESET_  "\033[0m"
-
 /*****************************************************************************
  * Host-side logging macros
  *
- * When the output stream is a TTY, the level letter is colored and the
- * func@file:line suffix is printed in gray.
+ * When :color modifier is active (default), the level letter and PE are
+ * colored and the func@file:line suffix is printed in gray.
+ * Use :nocolor to disable.  Single fprintf per call site; the ternary
+ * selects between colored and plain format strings (same args).
  *****************************************************************************/
 
 #define LOG_ERROR(fmt, ...) do {                                              \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::log_stderr_is_tty)                                            \
-    fprintf(stderr, LOG_CLR_RED_ "E%04d" LOG_CLR_RESET_ " " fmt               \
-            " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",                 \
-            rocshmem::log_pe_number,                                          \
-            __VA_OPT__(__VA_ARGS__,)                                          \
-            __func__, __FILE__, __LINE__);                                    \
-  else                                                                        \
-    fprintf(stderr, "E%04d " fmt " %s@%s:%d\n",                               \
-            rocshmem::log_pe_number,                                          \
-            __VA_OPT__(__VA_ARGS__,)                                          \
-            __func__, __FILE__, __LINE__);                                    \
+  fprintf(stderr, rocshmem::envvar::log_flags.show_color                      \
+      ? "\033[31mE%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n"   \
+      : "E%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                                \
+      rocshmem::log_pe_number,                                                \
+      __VA_OPT__(__VA_ARGS__,)                                                \
+      __func__, __FILE__, __LINE__);                                          \
 } while (0)
 
 #define LOG_ERROR_EXIT(fmt, ...) do {                                         \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::log_stderr_is_tty)                                            \
-    fprintf(stderr, LOG_CLR_RED_ "E%04d" LOG_CLR_RESET_ " " fmt               \
-            " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",                 \
-            rocshmem::log_pe_number,                                          \
-            __VA_OPT__(__VA_ARGS__,)                                          \
-            __func__, __FILE__, __LINE__);                                    \
-  else                                                                        \
-    fprintf(stderr, "E%04d " fmt " %s@%s:%d\n",                               \
-            rocshmem::log_pe_number,                                          \
-            __VA_OPT__(__VA_ARGS__,)                                          \
-            __func__, __FILE__, __LINE__);                                    \
+  fprintf(stderr, rocshmem::envvar::log_flags.show_color                      \
+      ? "\033[31mE%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n"   \
+      : "E%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                                \
+      rocshmem::log_pe_number,                                                \
+      __VA_OPT__(__VA_ARGS__,)                                                \
+      __func__, __FILE__, __LINE__);                                          \
   exit(EXIT_FAILURE);                                                         \
 } while (0)
 
 #define LOG_ERROR_ABORT(fmt, ...) do {                                        \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::log_stderr_is_tty)                                            \
-    fprintf(stderr, LOG_CLR_RED_ "E%04d" LOG_CLR_RESET_ " " fmt               \
-            " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",                 \
-            rocshmem::log_pe_number,                                          \
-            __VA_OPT__(__VA_ARGS__,)                                          \
-            __func__, __FILE__, __LINE__);                                    \
-  else                                                                        \
-    fprintf(stderr, "E%04d " fmt " %s@%s:%d\n",                               \
-            rocshmem::log_pe_number,                                          \
-            __VA_OPT__(__VA_ARGS__,)                                          \
-            __func__, __FILE__, __LINE__);                                    \
+  fprintf(stderr, rocshmem::envvar::log_flags.show_color                      \
+      ? "\033[31mE%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n"   \
+      : "E%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                                \
+      rocshmem::log_pe_number,                                                \
+      __VA_OPT__(__VA_ARGS__,)                                                \
+      __func__, __FILE__, __LINE__);                                          \
   abort();                                                                    \
 } while (0)
 
 #define LOG_WARN(fmt, ...) do {                                               \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::envvar::log_flags.show_warn) {                                \
-    if (rocshmem::log_stderr_is_tty)                                          \
-      fprintf(stderr, LOG_CLR_YELLOW_ "W%04d" LOG_CLR_RESET_ " " fmt          \
-              " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",               \
-              rocshmem::log_pe_number,                                        \
-              __VA_OPT__(__VA_ARGS__,)                                        \
-              __func__, __FILE__, __LINE__);                                  \
-    else                                                                      \
-      fprintf(stderr, "W%04d " fmt " %s@%s:%d\n",                             \
-              rocshmem::log_pe_number,                                        \
-              __VA_OPT__(__VA_ARGS__,)                                        \
-              __func__, __FILE__, __LINE__);                                  \
-  }                                                                           \
+  if (rocshmem::envvar::log_flags.show_warn)                                  \
+    fprintf(stderr, rocshmem::envvar::log_flags.show_color                    \
+        ? "\033[33mW%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
+        : "W%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                              \
+        rocshmem::log_pe_number,                                              \
+        __VA_OPT__(__VA_ARGS__,)                                              \
+        __func__, __FILE__, __LINE__);                                        \
 } while (0)
 
 #define LOG_INFO(fmt, ...) do {                                               \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::envvar::log_flags.show_info) {                                \
-    if (rocshmem::log_stdout_is_tty)                                          \
-      fprintf(stdout, LOG_CLR_CYAN_ "I%04d" LOG_CLR_RESET_ " " fmt            \
-              " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",               \
-              rocshmem::log_pe_number,                                        \
-              __VA_OPT__(__VA_ARGS__,)                                        \
-              __func__, __FILE__, __LINE__);                                  \
-    else                                                                      \
-      fprintf(stdout, "I%04d " fmt " %s@%s:%d\n",                             \
-              rocshmem::log_pe_number,                                        \
-              __VA_OPT__(__VA_ARGS__,)                                        \
-              __func__, __FILE__, __LINE__);                                  \
-  }                                                                           \
+  if (rocshmem::envvar::log_flags.show_info)                                  \
+    fprintf(stdout, rocshmem::envvar::log_flags.show_color                    \
+        ? "\033[32mI%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
+        : "I%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                              \
+        rocshmem::log_pe_number,                                              \
+        __VA_OPT__(__VA_ARGS__,)                                              \
+        __func__, __FILE__, __LINE__);                                        \
 } while (0)
 
 #ifdef BUILD_DEBUG_LEVEL_TRACE
 #define LOG_TRACE(fmt, ...) do {                                              \
   rocshmem::static_assert_host_only();                                        \
-  if (rocshmem::envvar::log_flags.show_trace) {                               \
-    if (rocshmem::log_stdout_is_tty)                                          \
-      fprintf(stdout, LOG_CLR_BLUE_ "T%04d" LOG_CLR_RESET_ " " fmt            \
-              " " LOG_CLR_GRAY_ "%s@%s:%d" LOG_CLR_RESET_ "\n",               \
-              rocshmem::log_pe_number,                                        \
-              __VA_OPT__(__VA_ARGS__,)                                        \
-              __func__, __FILE__, __LINE__);                                  \
-    else                                                                      \
-      fprintf(stdout, "T%04d " fmt " %s@%s:%d\n",                             \
-              rocshmem::log_pe_number,                                        \
-              __VA_OPT__(__VA_ARGS__,)                                        \
-              __func__, __FILE__, __LINE__);                                  \
-  }                                                                           \
+  if (rocshmem::envvar::log_flags.show_trace)                                 \
+    fprintf(stdout, rocshmem::envvar::log_flags.show_color                    \
+        ? "\033[34mT%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
+        : "T%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                              \
+        rocshmem::log_pe_number,                                              \
+        __VA_OPT__(__VA_ARGS__,)                                              \
+        __func__, __FILE__, __LINE__);                                        \
 } while (0)
 #else
 #define LOG_TRACE(...) do { rocshmem::static_assert_host_only(); } while (0)
@@ -213,6 +170,7 @@ struct log_state_device_t {
   bool show_warn;
   bool show_info;
   bool show_trace;
+  bool show_color;
 };
 extern __constant__ log_state_device_t log_device;
 
@@ -245,39 +203,58 @@ template <typename... Args>
 
 #ifdef BUILD_DEBUG_LEVEL_DEVICE
 
+/* Single dprintf call per macro; the ternary selects between two format
+ * string literals (same args for both).  Only cost is one branch + two
+ * string constants in .rodata per call site — no extra registers. */
+
 #define LOGD_ERROR(fmt, ...) do {                                             \
   rocshmem::static_assert_device_only();                                      \
-  rocshmem::dprintf("E%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",              \
-                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
+  rocshmem::dprintf(rocshmem::log_device.show_color                           \
+      ? "\033[31mE%04dw%04ut%04u\033[0m " fmt                                 \
+        "\t\033[90m" __FILE__ ":%d\033[0m\n"                                  \
+      : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                         \
+      __VA_OPT__(__VA_ARGS__,) __LINE__);                                     \
 } while (0)
 
 #define LOGD_ERROR_ABORT(fmt, ...) do {                                       \
   rocshmem::static_assert_device_only();                                      \
-  rocshmem::dprintf("E%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",              \
-                    __VA_OPT__(__VA_ARGS__,) __LINE__);                       \
+  rocshmem::dprintf(rocshmem::log_device.show_color                           \
+      ? "\033[31mE%04dw%04ut%04u\033[0m " fmt                                 \
+        "\t\033[90m" __FILE__ ":%d\033[0m\n"                                  \
+      : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                         \
+      __VA_OPT__(__VA_ARGS__,) __LINE__);                                     \
   abort();                                                                    \
 } while (0)
 
 #define LOGD_WARN(fmt, ...) do {                                              \
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_warn)                                         \
-    rocshmem::dprintf("W%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",            \
-                      __VA_OPT__(__VA_ARGS__,) __LINE__);                     \
+    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+        ? "\033[33mW%04dw%04ut%04u\033[0m " fmt                               \
+          "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
+        : "W%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
+        __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
 } while (0)
 
 #define LOGD_INFO(fmt, ...) do {                                              \
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_info)                                         \
-    rocshmem::dprintf("I%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",            \
-                      __VA_OPT__(__VA_ARGS__,) __LINE__);                     \
+    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+        ? "\033[32mI%04dw%04ut%04u\033[0m " fmt                               \
+          "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
+        : "I%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
+        __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
 } while (0)
 
 #if defined(BUILD_DEBUG_LEVEL_TRACE)
 #define LOGD_TRACE(fmt, ...) do {                                             \
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_trace)                                        \
-    rocshmem::dprintf("T%04dw%04ut%04u " fmt " " __FILE__ ":%d\n",            \
-                      __VA_OPT__(__VA_ARGS__,) __LINE__);                     \
+    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+        ? "\033[36mT%04dw%04ut%04u\033[0m " fmt                               \
+          "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
+        : "T%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
+        __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
 } while (0)
 #else
 #define LOGD_TRACE(...) do { rocshmem::static_assert_device_only(); } while (0)
