@@ -298,19 +298,30 @@ Use the following command to view the available domains:
 
    * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
    * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
-   * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
-   * ``scratch_memory`` can be used to enable scratch memory tracing.
-   * ``memory_allocation`` can be used to enable memory allocation tracing.
-   * ``memory_copy`` can be used to enable memory copy tracing.
-   * ``kernel_dispatch`` can be used to enable kernel dispatch tracing.
-   * ``rocdecode_api`` can be used to enable rocdecode API tracing.
-   * ``rocjpeg_api`` can be used to enable rocjpeg API tracing.
+   * ``kfd_events`` which will enable all Kernel Fusion Driver (KFD) domains, ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``, ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1`` and an XNACK-capable GPU and ROCProfiler-SDK version 1.2.1 or above.
 
 For example, the following is a valid configuration:
 
 .. code-block:: shell
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
+
+
+For KFD event tracing, first check whether your GPU supports XNACK by running
+``rocminfo | grep xnack``. If the output contains ``xnack-``, XNACK is available
+but disabled by default. Enable it by setting the environment variable
+``HSA_XNACK=1``; running ``rocminfo`` again should then show ``xnack+``.
+
+.. code-block:: shell
+
+   export HSA_XNACK=1
+
+Then add ``kfd_events`` to ``ROCPROFSYS_ROCM_DOMAINS`` in your configuration file
+or on the command line. For example:
+
+.. code-block:: shell
+
+   ROCPROFSYS_ROCM_DOMAINS=kfd_events
 
 ROCPROFSYS_TRACE_REGION
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
