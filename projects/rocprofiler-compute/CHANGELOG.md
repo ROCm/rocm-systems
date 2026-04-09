@@ -10,6 +10,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Removed
 
+* ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
+
 ### Optimized
 
 ### Resolved issues
@@ -48,8 +50,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Removed
 
 * Removed HIP API tracing since it's out-of-scope for ROCm Compute Profiler and the trace files were not being analyzed.
-
-* ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
 
 ### Optimized
 
