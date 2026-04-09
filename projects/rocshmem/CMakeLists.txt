@@ -109,7 +109,7 @@ if(USE_HEAP_DEVICE_VMM_POSIX)
 endif()
 
 #############################################################################
-# DETECT POD CAPABILITY DETECTION SUPPORT
+# DETECT POD CAPABILITY
 #############################################################################
 # Try to find AMD SMI library
 find_library(AMDSMI_LIBRARY

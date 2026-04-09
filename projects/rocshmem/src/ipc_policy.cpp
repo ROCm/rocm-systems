@@ -40,55 +40,58 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   MPI_Comm shmcomm;
   std::vector<int> ipc_ranks;
 
-#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
-  // Use pod-based detection
-  PodIds localPodIds = detectLocalPodIds();
+  // Check if we should use pod-based detection (for VMM Fabric allocator)
+  HIPAllocator *allocator = get_default_allocator();
+  bool use_pod_detection = (allocator->type == AllocatorTypeVMMFabric);
 
-  // Get communicator info
-  int all_ranks;
-  mpilib_ftable_.Comm_size(thread_comm, &all_ranks);
-  int my_rank;
-  mpilib_ftable_.Comm_rank(thread_comm, &my_rank);
+  if (use_pod_detection) {
+    // Use pod-based detection
+    PodIds localPodIds = detectLocalPodIds();
 
-  // AllGather pod IDs across all ranks
-  std::vector<PodIds> allPodIds(all_ranks);
-  mpilib_ftable_.Allgather(&localPodIds, sizeof(PodIds), MPI_CHAR,
-                          allPodIds.data(), sizeof(PodIds), MPI_CHAR, thread_comm);
+    // Get communicator info
+    int all_ranks;
+    mpilib_ftable_.Comm_size(thread_comm, &all_ranks);
+    int my_rank;
+    mpilib_ftable_.Comm_rank(thread_comm, &my_rank);
 
-  // Match IPC-capable ranks
-  ipc_ranks = matchIpcCapableRanks(my_rank, allPodIds);
-  shm_size = ipc_ranks.size();
-  shm_rank = std::find(ipc_ranks.begin(), ipc_ranks.end(), my_rank) - ipc_ranks.begin();
+    // AllGather pod IDs across all ranks
+    std::vector<PodIds> allPodIds(all_ranks);
+    mpilib_ftable_.Allgather(&localPodIds, sizeof(PodIds), MPI_CHAR,
+                            allPodIds.data(), sizeof(PodIds), MPI_CHAR, thread_comm);
 
-  // Create a group and communicator from IPC-capable ranks
-  MPI_Group thread_grp, ipc_grp;
-  mpilib_ftable_.Comm_group(thread_comm, &thread_grp);
-  mpilib_ftable_.Group_incl(thread_grp, ipc_ranks.size(), ipc_ranks.data(), &ipc_grp);
-  mpilib_ftable_.Comm_create_group(thread_comm, ipc_grp, 0, &shmcomm);
-  mpilib_ftable_.Group_free(&ipc_grp);
-  mpilib_ftable_.Group_free(&thread_grp);
-#else
-  // Fallback to MPI_COMM_TYPE_SHARED (original implementation)
-  mpilib_ftable_.Comm_split_type(thread_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
-                                 &shmcomm);
+    // Match IPC-capable ranks
+    ipc_ranks = matchIpcCapableRanks(my_rank, allPodIds);
+    shm_size = ipc_ranks.size();
+    shm_rank = std::find(ipc_ranks.begin(), ipc_ranks.end(), my_rank) - ipc_ranks.begin();
 
-  /*
-   * Figure out how many local process there are.
-   */
-  int Shm_size;
-  mpilib_ftable_.Comm_size(shmcomm, &Shm_size);
-  shm_size = Shm_size;
+    // Create a group and communicator from IPC-capable ranks
+    MPI_Group thread_grp, ipc_grp;
+    mpilib_ftable_.Comm_group(thread_comm, &thread_grp);
+    mpilib_ftable_.Group_incl(thread_grp, ipc_ranks.size(), ipc_ranks.data(), &ipc_grp);
+    mpilib_ftable_.Comm_create_group(thread_comm, ipc_grp, 0, &shmcomm);
+    mpilib_ftable_.Group_free(&ipc_grp);
+    mpilib_ftable_.Group_free(&thread_grp);
+  } else {
+    // Fallback to MPI_COMM_TYPE_SHARED (original implementation)
+    mpilib_ftable_.Comm_split_type(thread_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
+                                   &shmcomm);
 
-  /*
-   * Figure out how this process' rank among local processes.
-   */
-  mpilib_ftable_.Comm_rank(shmcomm, &shm_rank);
-#endif
+    /*
+     * Figure out how many local process there are.
+     */
+    int Shm_size;
+    mpilib_ftable_.Comm_size(shmcomm, &Shm_size);
+    shm_size = Shm_size;
+
+    /*
+     * Figure out how this process' rank among local processes.
+     */
+    mpilib_ftable_.Comm_rank(shmcomm, &shm_rank);
+  }
 
   /*
    * Allocate a host-side c-array to hold the IPC handles.
    */
-  HIPAllocator *allocator = get_default_allocator();
   HIPIpcHandleVec *vec_ipc_handle = allocator->AllocateIpcHandleVec(shm_size);
 
   /*
@@ -150,36 +153,40 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   if (!disable_ipc) {
     CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&pes_with_ipc_avail), shm_size * sizeof(int)));
 
-#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
-    // In pod detection path, ipc_ranks already contains global ranks
-    std::copy(ipc_ranks.begin(), ipc_ranks.end(), pes_with_ipc_avail);
-#else
-    // In fallback path, need to translate from shmcomm ranks to thread_comm ranks
-    MPI_Group thread_grp;
-    MPI_Group shm_grp;
-    mpilib_ftable_.Comm_group(thread_comm, &thread_grp);
-    mpilib_ftable_.Comm_group(shmcomm, &shm_grp);
-    int *seqranks = new int[shm_size];
-    for(int i = 0; i < shm_size; i++)
-      seqranks[i] = i;
-    mpilib_ftable_.Group_translate_ranks(shm_grp, shm_size, seqranks, thread_grp, pes_with_ipc_avail);
-    delete [] seqranks;
-    mpilib_ftable_.Group_free(&shm_grp);
-    mpilib_ftable_.Group_free(&thread_grp);
-#endif
+    if (use_pod_detection) {
+      // In pod detection path, ipc_ranks already contains global ranks
+      std::copy(ipc_ranks.begin(), ipc_ranks.end(), pes_with_ipc_avail);
+    } else {
+      // In fallback path, need to translate from shmcomm ranks to thread_comm ranks
+      MPI_Group thread_grp;
+      MPI_Group shm_grp;
+      mpilib_ftable_.Comm_group(thread_comm, &thread_grp);
+      mpilib_ftable_.Comm_group(shmcomm, &shm_grp);
+      int *seqranks = new int[shm_size];
+      for(int i = 0; i < shm_size; i++)
+        seqranks[i] = i;
+      mpilib_ftable_.Group_translate_ranks(shm_grp, shm_size, seqranks, thread_grp, pes_with_ipc_avail);
+      delete [] seqranks;
+      mpilib_ftable_.Group_free(&shm_grp);
+      mpilib_ftable_.Group_free(&thread_grp);
+    }
   }
 }
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                      TcpBootstrap *bootstr) {
-  auto shm_ranks = bootstr->getIpcCapableRanks();
+  // Check if we should use pod-based detection (for VMM Fabric allocator)
+  HIPAllocator *allocator = get_default_allocator();
+  bool use_pod_detection = (allocator->type == AllocatorTypeVMMFabric);
+
+  // For VMM_FABRIC, use pod-based IPC capability detection; otherwise use local ranks
+  auto shm_ranks = use_pod_detection ? bootstr->getIpcCapableRanks() : bootstr->getLocalRanks();
   shm_size = shm_ranks.size();
   shm_rank = std::find(shm_ranks.begin(), shm_ranks.end(), my_pe) - shm_ranks.begin();
 
   /*
    * Allocate a host-side c-array to hold the IPC handles.
    */
-  HIPAllocator *allocator = get_default_allocator();
   HIPIpcHandleVec *vec_ipc_handle = allocator->AllocateIpcHandleVec(shm_size);
 
   /*

@@ -30,8 +30,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <hip/hip_runtime.h>
-
 #include "bootstrap.hpp"
 #include "log.hpp"
 #include "utils.hpp"
@@ -259,7 +257,13 @@ int TcpBootstrap::Impl::getRank() { return rank_; }
 
 int TcpBootstrap::Impl::getNranks() { return nRanks_; }
 
-std::vector<int>  TcpBootstrap::Impl::getLocalRanks() { return localRanks_; }
+std::vector<int>  TcpBootstrap::Impl::getLocalRanks() {
+  // Ensure localRanks_ is populated
+  if (localRanks_.empty() && nRanksPerNode_ == 0) {
+    getNranksPerNode();  // This populates localRanks_
+  }
+  return localRanks_;
+}
 
 std::vector<int>  TcpBootstrap::Impl::getIpcCapableRanks() {
 #ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
@@ -269,8 +273,11 @@ std::vector<int>  TcpBootstrap::Impl::getIpcCapableRanks() {
   }
   return ipcCapableRanks_;
 #else
-  // Default implementation: assume all local ranks are IPC-capable
-  return localRanks_;
+  // This function should not be called without HAVE_AMDSMI_GPU_FABRIC_INFO
+  // Callers should check allocator type and call getLocalRanks() instead
+  fprintf(stderr, "ROCSHMEM_ERROR: getIpcCapableRanks() called but HAVE_AMDSMI_GPU_FABRIC_INFO is not defined.\n"
+                  "This is a programming error. Use getLocalRanks() instead.\n");
+  abort();
 #endif
 }
 

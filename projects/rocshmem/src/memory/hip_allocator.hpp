@@ -60,7 +60,8 @@ enum HIPAllocatorType {
   AllocatorTypeCoarsegrained = 0,
   AllocatorTypeFinegrained,
   AllocatorTypeUncached,
-  AllocatorTypeVMM,
+  AllocatorTypeVMMPosix,
+  AllocatorTypeVMMFabric,
   AllocatorTypeLast
 };
 

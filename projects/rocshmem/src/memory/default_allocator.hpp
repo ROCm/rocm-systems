@@ -56,6 +56,14 @@ using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorVMMPosixFd;
 #endif
 #endif
 
+#if defined USE_HEAP_DEVICE_VMM_FABRIC
+#if HIP_VERSION >= 70000000
+using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorVMMFabric;
+#else
+#error "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.0 or newer (HIP_VERSION >= 70000000)"
+#endif
+#endif
+
 namespace rocshmem {
   extern HIPAllocator *default_allocator_;
 
@@ -99,6 +107,11 @@ namespace rocshmem {
 #if defined USE_HEAP_DEVICE_VMM_POSIX
 #if HIP_VERSION >= 70000000
     default_allocator_ = new HIPAllocatorVMMPosixFd();
+#endif
+#endif
+#if defined USE_HEAP_DEVICE_VMM_FABRIC
+#if HIP_VERSION >= 70000000
+    default_allocator_ = new HIPAllocatorVMMFabric();
 #endif
 #endif
   }

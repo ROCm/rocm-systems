@@ -87,7 +87,7 @@ hipError_t HIPAllocatorVMMFabric::VMMFree(void* ptr)
 HIPAllocatorVMMFabric::HIPAllocatorVMMFabric()
     : HIPAllocator(VMMAlloc, VMMFree)
 {
-  type = AllocatorTypeVMM;
+  type = AllocatorTypeVMMFabric;
 
   // Check if the device supports fabric handles
   int device_id;

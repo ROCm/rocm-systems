@@ -30,6 +30,10 @@
 #include "dlmalloc.hpp"
 #include "default_allocator.hpp"
 
+#if defined USE_HEAP_DEVICE_VMM_FABRIC
+#include "hip_allocator_vmm_fabric.hpp"
+#endif
+
 namespace rocshmem {
 
 HIPAllocator *default_allocator_{nullptr};
@@ -45,8 +49,13 @@ SingleHeap::SingleHeap() {
     heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
   }
 #if defined USE_HEAP_DEVICE_VMM_POSIX
-  else if (allocator->type == AllocatorTypeVMM) {
+  else if (allocator->type == AllocatorTypeVMMPosix) {
     heap_mem_ = new HeapMemoryType<HIPAllocatorVMMPosixFd>(envvar::heap_size.get_value());
+  }
+#endif
+#if defined USE_HEAP_DEVICE_VMM_FABRIC
+  else if (allocator->type == AllocatorTypeVMMFabric) {
+    heap_mem_ = new HeapMemoryType<HIPAllocatorVMMFabric>(envvar::heap_size.get_value());
   }
 #endif
   else {
@@ -62,8 +71,13 @@ SingleHeap::SingleHeap() {
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorUncached>>(reinterpret_cast<HeapMemoryType<HIPAllocatorUncached> *>(heap_mem_));
   }
 #if defined USE_HEAP_DEVICE_VMM_POSIX
-  else if (heap_mem_->type_ == AllocatorTypeVMM){
+  else if (heap_mem_->type_ == AllocatorTypeVMMPosix){
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMPosixFd>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMPosixFd> *>(heap_mem_));
+  }
+#endif
+#if defined USE_HEAP_DEVICE_VMM_FABRIC
+  else if (heap_mem_->type_ == AllocatorTypeVMMFabric){
+    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMFabric>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMFabric> *>(heap_mem_));
   }
 #endif
   else {
