@@ -1140,7 +1140,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           // Reserve space to avoid reallocations during insertion
           newBatch.dispatchPackets.reserve(startIndex + packetCount);
           newBatch.dispatchKernelNames.reserve(startIndex + packetCount);
-          newBatch.flatPacketData.reserve((startIndex + packetCount) * kAqlPktSize);
+          newBatch.flatPacketData.reserve((startIndex + packetCount) * PacketBatch::kAqlPktSize);
           newBatch.validPacketFullHeaders.reserve(startIndex + packetCount);
 
           // Add to dispatch lists (initially all enabled)
