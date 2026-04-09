@@ -156,7 +156,7 @@ SBarrierSopp::SBarrierSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SBarrierSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBarrierSopp::execute_impl(amdgpu::Wavefront &wf) { wf.set_state(amdgpu::WfState::BARRIER); }
 
 SSetkillSopp::SSetkillSopp(const MachineInst *inst)
     : Sopp("s_setkill", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSetkillSopp>()),

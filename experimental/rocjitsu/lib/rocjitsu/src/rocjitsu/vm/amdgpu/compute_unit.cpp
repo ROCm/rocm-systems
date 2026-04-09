@@ -248,6 +248,26 @@ bool ComputeUnitCore::step() {
   }
 
   if (active == nullptr) {
+    // Check for barrier resolution: if all non-halted wavefronts in a
+    // workgroup are at BARRIER, resume them all to RUNNING.
+    for (auto &w : wfs_) {
+      if (w->state() != WfState::BARRIER)
+        continue;
+      uint32_t wg = w->wg_id();
+      bool all_at_barrier = true;
+      for (auto &w2 : wfs_) {
+        if (w2->wg_id() == wg && w2->state() != WfState::HALTED &&
+            w2->state() != WfState::BARRIER) {
+          all_at_barrier = false;
+          break;
+        }
+      }
+      if (all_at_barrier) {
+        for (auto &w2 : wfs_)
+          if (w2->wg_id() == wg && w2->state() == WfState::BARRIER)
+            w2->set_state(WfState::RUNNING);
+      }
+    }
     retire_halted_wfs();
     return has_active_wfs();
   }

@@ -157,8 +157,9 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   using namespace rocr::llvm::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  // CDNA3 (GFX940+) uses VGPR granularity 8 (not 4).
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 4) - 1));
+                  ((256 / 8) - 1));
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   ((104 / 8) - 1));
   AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);

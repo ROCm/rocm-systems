@@ -33,6 +33,12 @@ public:
       : Exception(std::string("Unimplemented instruction: ").append(mnemonic)) {}
 };
 
+class ConfigError : public Exception {
+public:
+  explicit ConfigError(std::string_view msg)
+      : Exception(std::string("Config error: ").append(msg)) {}
+};
+
 } // namespace util
 
 #endif // UTIL_EXCEPT_H_

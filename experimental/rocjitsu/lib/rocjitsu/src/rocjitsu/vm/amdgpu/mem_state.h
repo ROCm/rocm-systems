@@ -34,7 +34,8 @@ enum class AtomicOp : uint8_t {
   SWAP,     ///< Exchange.
   CMPSWAP,  ///< Compare-and-swap (data[0] = src, data[1] = cmp).
   ADD,      ///< Atomic add.
-  SUB,      ///< Atomic subtract.
+  SUB,      ///< Atomic subtract (mem - data).
+  RSUB,     ///< Atomic reverse subtract (data - mem).
   SMIN,     ///< Signed minimum.
   UMIN,     ///< Unsigned minimum.
   SMAX,     ///< Signed maximum.

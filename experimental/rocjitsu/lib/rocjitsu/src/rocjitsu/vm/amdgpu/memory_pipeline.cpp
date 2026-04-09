@@ -87,6 +87,8 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
     return old_val + src_val;
   case AtomicOp::SUB:
     return old_val - src_val;
+  case AtomicOp::RSUB:
+    return src_val - old_val;
   case AtomicOp::SMIN:
     return static_cast<T>(std::min(static_cast<S>(old_val), static_cast<S>(src_val)));
   case AtomicOp::UMIN:
