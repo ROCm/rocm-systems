@@ -9,4 +9,4 @@
 
 ## CDNA4 XML Source
 
-- The `amdgpu_isa_cdna4.xml` input should be obtained from the GPUOpen Machine-Readable ISA download page: https://gpuopen.com/download/machine-readable-isa/latest/
+- `python scripts/download_machine_readable_isa.py --force` extracts the latest MR ISA XMLs under `third_party/machine-readable-isa/`.
