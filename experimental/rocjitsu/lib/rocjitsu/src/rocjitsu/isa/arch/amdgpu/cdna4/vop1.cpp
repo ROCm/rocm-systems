@@ -5,7 +5,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -2164,7 +2163,12 @@ void VMovB64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
-  amdgpu::execute_v_mov_b64_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    vdst.write_lane64(wf, lane, src0.read_lane64(wf, lane));
+  }
 }
 
 VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
@@ -3171,7 +3175,13 @@ void VCvtF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
-  amdgpu::execute_v_cvt_f32_fp8_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>(src0.read_lane(wf, lane) & 0xFF));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+  }
 }
 
 VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
@@ -3204,7 +3214,13 @@ void VCvtF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == 250)
     amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                            dpp_bound_ctrl_, dpp_src0_, wf);
-  amdgpu::execute_v_cvt_f32_bf8_vop1(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>(src0.read_lane(wf, lane) & 0xFF));
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(r));
+  }
 }
 
 VCvtPkF32Fp8Vop1::VCvtPkF32Fp8Vop1(const MachineInst *inst)
