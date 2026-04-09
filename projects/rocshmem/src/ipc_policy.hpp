@@ -36,6 +36,7 @@
 #include "util.hpp"
 #include "bootstrap/bootstrap.hpp"
 #include "atomic.hpp"
+#include "sdma_policy.hpp"
 
 namespace rocshmem {
 
@@ -53,6 +54,10 @@ class IpcOnImpl {
   char **ipc_bases{nullptr};
 
   int *pes_with_ipc_avail{nullptr};
+
+#if defined(USE_SDMA)
+  SdmaImpl sdmaImpl_;
+#endif
 
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm);
@@ -88,6 +93,33 @@ class IpcOnImpl {
   __device__ __forceinline__ void ipcFence() {
     detail::atomic::threadfence<scope, order>();
   }
+
+#if defined(USE_SDMA)
+  // SDMA-aware copy methods with size-based routing
+  __device__ void ipcCopyWithSdma(void *dst, void *src, size_t size, int pe) {
+    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
+      sdmaImpl_.sdmaCopy(dst, src, size, pe);
+      return;
+    }
+    memcpy_lane(dst, src, size);
+  }
+
+  __device__ void ipcCopyWithSdma_wg(void *dst, void *src, size_t size, int pe) {
+    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
+      sdmaImpl_.sdmaCopy_wg(dst, src, size, pe);
+      return;
+    }
+    memcpy_wg(dst, src, size);
+  }
+
+  __device__ void ipcCopyWithSdma_wave(void *dst, void *src, size_t size, int pe) {
+    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
+      sdmaImpl_.sdmaCopy_wave(dst, src, size, pe);
+      return;
+    }
+    memcpy_wave(dst, src, size);
+  }
+#endif
 
   template <typename T>
   __device__ void ipcAMOAdd(T *val, T value) {
