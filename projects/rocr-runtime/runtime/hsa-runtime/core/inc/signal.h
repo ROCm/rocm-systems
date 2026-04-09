@@ -50,6 +50,7 @@
 #include <memory>
 #include <vector>
 #include <utility>
+#include <mutex>
 
 #include "hsakmt/hsakmt.h"
 
@@ -104,10 +105,14 @@ inline void CheckAbortTimeout(const timer::fast_clock::time_point& start_time,
   }
 }
 
-inline void DoMwaitx(int64_t* addr, uint32_t timeout, bool timer_enable = false) {
+inline void DoMwaitx(int64_t* addr, int64_t val_on_last_check, uint32_t timeout, bool timer_enable) {
 #if defined(__i386__) || defined(__x86_64__)
   _mm_monitorx(addr, 0, 0);
-  _mm_mwaitx(0, timeout, timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0);
+  if (atomic::Load(addr, std::memory_order_relaxed) != val_on_last_check) {
+    return;
+  }
+  // args are extensions (ecx), hints (eax), clock (ebx)
+  _mm_mwaitx(timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0, 0, timeout);
 #endif
 }
 } // namespace timer
@@ -499,7 +504,7 @@ class Signal {
   core::Agent* async_copy_agent_;
 
  private:
-  static KernelMutex ipcLock_;
+  static std::mutex ipcLock_;
   static std::map<decltype(hsa_signal_t::handle), Signal*> ipcMap_;
 
   static Signal* lookupIpc(hsa_signal_t signal);

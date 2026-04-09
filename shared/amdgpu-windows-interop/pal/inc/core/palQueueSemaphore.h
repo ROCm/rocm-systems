@@ -229,7 +229,7 @@ public:
         const QueueSemaphoreExportInfo& exportInfo) const = 0;
 #endif
 
-#if defined(_WIN32)
+#if ( PAL_KMT_BUILD)
     /// Returns an OS-specific handle which can be used by another device to access the semaphore object.
     ///
     /// @returns An OS-specific handle which can be used by another device to access the semaphore object.

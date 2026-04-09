@@ -38,6 +38,7 @@ void NpKit::CpuTimestampUpdateThread() {
 }
 
 ncclResult_t NpKit::Init(int rank) {
+  WARN("NPKit is deprecated and will be removed in a future version of RCCL. Please consider using alternative profiling tools.");
   uint64_t i = 0;
   NpKitEventCollectContext ctx;
   ctx.event_buffer_head = 0;

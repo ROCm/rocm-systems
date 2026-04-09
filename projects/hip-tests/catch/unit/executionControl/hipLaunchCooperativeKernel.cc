@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "execution_control_common.hh"
 
@@ -27,9 +11,9 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipLaunchCooperativeKernel_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     return;
   }
 
@@ -54,9 +38,9 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernel_Positive_Parameters") {
+HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     return;
   }
 
@@ -79,9 +63,9 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Positive_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernel_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     return;
   }
 
@@ -164,7 +148,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Negative_Parameters") {
                                                            reinterpret_cast<void*>(kernel), 1, 0));
     const unsigned int multiproc_count =
         GetDeviceAttribute(hipDeviceAttributeMultiprocessorCount, 0);
-    const unsigned int dim = std::ceil(std::cbrt(max_blocks * multiproc_count));
+    const unsigned int dim = std::ceil(std::cbrt(max_blocks * multiproc_count)) + 1u;
     HIP_CHECK_ERROR(hipLaunchCooperativeKernel(reinterpret_cast<void*>(kernel), dim3{dim, dim, dim},
                                                dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorCooperativeLaunchTooLarge);
@@ -178,9 +162,9 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernel_Verify_Capture") {
+HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Verify_Capture) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     return;
   }
 

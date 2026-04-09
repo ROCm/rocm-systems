@@ -159,6 +159,9 @@ def write_otf2(importData, config):
                             tree_node = archive.definitions.system_tree_node(
                                 name=command, class_name=hostname, parent=None
                             )
+                            archive.definitions.system_tree_node_domain(
+                                tree_node, otf2.SystemTreeDomain.SHARED_MEMORY
+                            )
                             cpu_location_group = archive.definitions.location_group(
                                 name=command,
                                 location_group_type=LocationGroupType.PROCESS,
@@ -238,6 +241,16 @@ def write_otf2(importData, config):
                             )
                             for row in cursor:
                                 id, name, type = row
+                                # Create ACCELERATOR_DEVICE system tree node as required by OTF2
+                                device_node = archive.definitions.system_tree_node(
+                                    name=f"Node {id}",
+                                    class_name=f"AMD {type}",
+                                    parent=tree_node,
+                                )
+                                archive.definitions.system_tree_node_domain(
+                                    device_node, otf2.SystemTreeDomain.ACCELERATOR_DEVICE
+                                )
+
                                 agents[id] = (
                                     (
                                         f"{type} Agent-{id}"
@@ -247,7 +260,8 @@ def write_otf2(importData, config):
                                     archive.definitions.location_group(
                                         name=name,
                                         location_group_type=LocationGroupType.ACCELERATOR,
-                                        system_tree_parent=tree_node,
+                                        system_tree_parent=device_node,
+                                        creating_location_group=cpu_location_group,
                                     ),
                                 )
 

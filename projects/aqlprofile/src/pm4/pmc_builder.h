@@ -577,7 +577,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
         // skip
       } else {
         const uint32_t se_end_index = (block_info->attr & CounterBlockSeAttr) ? se_number_ : 1;
-        const uint32_t sa_end_index = (block_info->attr & CounterBlockSaAttr) ? 2 : 1;
+        const uint32_t sa_end_index = (block_info->attr & CounterBlockSaAttr) ? sarrays_per_se : 1;
         for (uint32_t se_index = 0; se_index < se_end_index; ++se_index)
           for (uint32_t sarray = 0; sarray < sa_end_index; ++sarray) {
             uint32_t grbm_value = Primitives::grbm_broadcast_value();

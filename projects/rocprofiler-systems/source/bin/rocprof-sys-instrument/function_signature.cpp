@@ -22,6 +22,8 @@
 
 #include "function_signature.hpp"
 
+#include "core/demangler.hpp"
+
 function_signature::function_signature(std::string_view _ret, std::string_view _name,
                                        std::string_view _file, location_t _row,
                                        location_t _col, bool _loop, bool _info_beg,
@@ -32,7 +34,7 @@ function_signature::function_signature(std::string_view _ret, std::string_view _
 , m_row(std::move(_row))
 , m_col(std::move(_col))
 , m_return(_ret)
-, m_name(tim::demangle(_name.data()))
+, m_name(rocprofsys::utility::demangle(_name.data()))
 , m_file(_file)
 {
     if(m_file.find('/') != std::string_view::npos)

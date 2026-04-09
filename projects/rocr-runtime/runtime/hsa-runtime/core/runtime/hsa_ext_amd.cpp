@@ -62,6 +62,7 @@
 #include "core/inc/ipc_signal.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
+#include "core/inc/counted_queue_manager.h"
 
 namespace rocr {
 
@@ -338,6 +339,215 @@ hsa_status_t hsa_amd_memory_async_copy_on_engine(void* dst, hsa_agent_t dst_agen
   CATCH;
 }
 
+hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* copy_ops,
+                                             uint32_t num_copy_ops,
+                                             uint32_t num_dep_signals,
+                                             const hsa_signal_t* dep_signals) {
+  TRY;
+
+  if (copy_ops == nullptr || num_copy_ops == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  if ((num_dep_signals == 0 && dep_signals != nullptr) ||
+      (num_dep_signals > 0 && dep_signals == nullptr)) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Convert dependency signals
+  std::vector<core::Signal*> dep_signal_list(num_dep_signals);
+  if (num_dep_signals > 0) {
+    for (size_t i = 0; i < num_dep_signals; ++i) {
+      core::Signal* dep_signal_obj = core::Signal::Convert(dep_signals[i]);
+      IS_VALID(dep_signal_obj);
+      dep_signal_list[i] = dep_signal_obj;
+    }
+  }
+
+  bool rev_copy_dir = core::Runtime::runtime_singleton_->flag().rev_copy_dir();
+
+  // Validate all ops and group by copy_agent.
+  std::map<core::Agent*, std::vector<hsa_amd_memory_copy_op_t>> agent_batches;
+
+  for (uint32_t i = 0; i < num_copy_ops; ++i) {
+    const hsa_amd_memory_copy_op_t& op = copy_ops[i];
+
+    if (op.version != HSA_AMD_MEMORY_COPY_OP_VERSION)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    core::Signal* sig = core::Signal::Convert(op.completion_signal);
+    IS_VALID(sig);
+
+    IS_BAD_PTR(op.src);
+
+    core::Agent* src_agent = core::Agent::Convert(op.src_agent);
+    IS_VALID(src_agent);
+
+    if (op.type > HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    for (const auto& r : op.reserved1) {
+      if (r != 0)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    const bool is_indirect =
+        (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC ||
+         op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST ||
+         op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+
+    // Validate wait parameters (orthogonal to type).
+    if (op.wait.reserved != 0)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (op.wait.function > HSA_AMD_MEMORY_COPY_WAIT_GT)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (op.wait.scope > HSA_FENCE_SCOPE_SYSTEM)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (op.wait.function != HSA_AMD_MEMORY_COPY_WAIT_ALWAYS &&
+        op.wait.addr == nullptr)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (op.wait.function == HSA_AMD_MEMORY_COPY_WAIT_ALWAYS) {
+      if (op.wait.addr != nullptr || op.wait.value != 0 || op.wait.mask != 0)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      if (!is_indirect && op.wait.scope != 0)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // Validate signal parameters (orthogonal to type).
+    if (op.signal.reserved != 0)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (op.signal.operation > HSA_AMD_MEMORY_COPY_SIGNAL_SUB)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (op.signal.scope > HSA_FENCE_SCOPE_SYSTEM)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (op.signal.operation != HSA_AMD_MEMORY_COPY_SIGNAL_NONE &&
+        op.signal.addr == nullptr)
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if (op.signal.operation == HSA_AMD_MEMORY_COPY_SIGNAL_NONE) {
+      if (op.signal.addr != nullptr || op.signal.data != 0 || op.signal.scope != 0)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // Per-type field validation.
+    core::Agent* dst_agent = nullptr;
+    switch (op.type) {
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR:
+      if (op.num_entries > 0) {
+        // Multi-linear: arrays of src/dst/size, one signal for all entries.
+        if (op.src_list == nullptr || op.dst_list == nullptr ||
+            op.dst_agent_list == nullptr || op.size_list == nullptr ||
+            op.num_entries > 1024 || op.reserved0 != 0)
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        for (uint32_t d = 0; d < op.num_entries; ++d) {
+          IS_BAD_PTR(op.src_list[d]);
+          IS_BAD_PTR(op.dst_list[d]);
+          core::Agent* da = core::Agent::Convert(op.dst_agent_list[d]);
+          IS_VALID(da);
+          if (op.size_list[d] == 0)
+            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+      } else {
+        // Single linear copy.
+        IS_BAD_PTR(op.dst);
+        dst_agent = core::Agent::Convert(op.dst_agent);
+        IS_VALID(dst_agent);
+        if (op.unused_size != 0)
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
+      break;
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
+      IS_BAD_PTR(op.dst);
+      dst_agent = core::Agent::Convert(op.dst_agent);
+      IS_VALID(dst_agent);
+      if (op.num_entries != 0 || op.unused_size != 0)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      break;
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+      if (op.dst_list == nullptr || op.dst_agent_list == nullptr ||
+          op.num_entries == 0 || op.num_entries > 1024 || op.unused_size != 0)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      for (uint32_t d = 0; d < op.num_entries; ++d) {
+        IS_BAD_PTR(op.dst_list[d]);
+        core::Agent* da = core::Agent::Convert(op.dst_agent_list[d]);
+        IS_VALID(da);
+      }
+      break;
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+      if (op.num_entries > 0) {
+        if (op.src_list == nullptr || op.dst_list == nullptr ||
+            op.dst_agent_list == nullptr || op.size_list == nullptr ||
+            op.num_entries > 1024 || op.reserved0 != 0)
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        for (uint32_t d = 0; d < op.num_entries; ++d) {
+          IS_BAD_PTR(op.src_list[d]);
+          IS_BAD_PTR(op.dst_list[d]);
+          core::Agent* da = core::Agent::Convert(op.dst_agent_list[d]);
+          IS_VALID(da);
+          if (op.size_list[d] == 0)
+            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+      } else {
+        IS_BAD_PTR(op.dst);
+        dst_agent = core::Agent::Convert(op.dst_agent);
+        IS_VALID(dst_agent);
+        if (op.src_size == 0 || op.dst_size == 0)
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
+      break;
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    const bool is_multi =
+        (op.num_entries > 0);
+
+    bool has_work;
+    if (is_multi)
+      has_work = true;
+    else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP)
+      has_work = (op.src_size > 0);
+    else
+      has_work = (op.size > 0);
+
+    if (has_work) {
+      core::Agent* copy_agent = nullptr;
+      if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST || is_multi) {
+        if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+          return HSA_STATUS_ERROR_INVALID_AGENT;
+        copy_agent = src_agent;
+      } else {
+        core::Agent* eff_dst = rev_copy_dir ? src_agent : dst_agent;
+        core::Agent* eff_src = rev_copy_dir ? dst_agent : src_agent;
+        const bool src_gpu =
+            (eff_src->device_type() == core::Agent::DeviceType::kAmdGpuDevice);
+        copy_agent = src_gpu ? eff_src : eff_dst;
+      }
+
+      agent_batches[copy_agent].push_back(op);
+    }
+  }
+
+  // Dispatch each agent's batch via DmaCopyBatch.
+  for (auto& [copy_agent, ops] : agent_batches) {
+    if (copy_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    }
+
+    hsa_status_t status = copy_agent->DmaCopyBatch(ops.data(),
+                                                    static_cast<uint32_t>(ops.size()),
+                                                    dep_signal_list);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
+  }
+
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
 hsa_status_t hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent_handle,
                                                hsa_agent_t src_agent_handle,
                                                uint32_t *engine_ids_mask) {
@@ -438,6 +648,23 @@ hsa_status_t hsa_amd_profiling_async_copy_enable(bool enable) {
     if (err != HSA_STATUS_SUCCESS) ret = err;
   }
   return ret;
+
+  CATCH;
+}
+
+hsa_status_t hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
+  TRY;
+  IS_OPEN();
+
+  core::Agent* agent_ptr = core::Agent::Convert(agent);
+  IS_VALID(agent_ptr);
+
+  if (agent_ptr->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(agent_ptr);
+  return gpu_agent->Preload(flags);
 
   CATCH;
 }
@@ -714,6 +941,10 @@ hsa_status_t hsa_amd_queue_cu_set_mask(const hsa_queue_t* queue, uint32_t num_cu
 
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
+
+  // Check if this a counted queue; NACK if it is
+  if (cmd_queue->is_counted_queue) return HSA_STATUS_ERROR_INVALID_QUEUE;
+
   if (num_cu_mask_count != 0) IS_BAD_PTR(cu_mask);
   if (num_cu_mask_count % 32 != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   return cmd_queue->SetCUMasking(num_cu_mask_count, cu_mask);
@@ -759,7 +990,7 @@ hsa_status_t hsa_amd_memory_lock(void* host_ptr, size_t size,
   }
 
   const AMD::MemoryRegion* system_region = static_cast<const AMD::MemoryRegion*>(
-      core::Runtime::runtime_singleton_->system_regions_coarse()[0]);
+      core::Runtime::runtime_singleton_->system_regions_coarse()[0].get());
 
   return system_region->Lock(num_agent, agents, host_ptr, size, 0, agent_ptr);
   CATCH;
@@ -799,7 +1030,7 @@ hsa_status_t hsa_amd_memory_unlock(void* host_ptr) {
 
   const AMD::MemoryRegion* system_region =
       reinterpret_cast<const AMD::MemoryRegion*>(
-          core::Runtime::runtime_singleton_->system_regions_fine()[0]);
+          core::Runtime::runtime_singleton_->system_regions_fine()[0].get());
 
   return system_region->Unlock(host_ptr);
   CATCH;
@@ -992,19 +1223,15 @@ hsa_status_t hsa_amd_agent_memory_pool_get_info(
   CATCH;
 }
 
-hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
-                                        hsa_agent_t* agents,
-                                        hsa_handle_t interop_handle,
-                                        uint32_t flags, size_t* size,
-                                        void** ptr, size_t* metadata_size,
-                                        const void** metadata) {
-  static const int tinyArraySize=8;
+hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
+                                        hsa_handle_t interop_handle, uint32_t flags, size_t* size,
+                                        void** ptr, size_t* metadata_size, const void** metadata) {
+  static const int tinyArraySize = 8;
   TRY;
   IS_OPEN();
   IS_BAD_PTR(agents);
   IS_BAD_PTR(size);
   IS_BAD_PTR(ptr);
-  if (flags != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (num_agents == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   core::Agent* short_agents[tinyArraySize];
@@ -1025,8 +1252,8 @@ hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
   }
 
   auto ret = core::Runtime::runtime_singleton_->InteropMap(
-      num_agents, core_agents, interop_handle, flags, size, ptr, metadata_size,
-      metadata);
+      num_agents, core_agents, interop_handle, static_cast<hsa_interop_map_flag_t>(flags), size,
+      ptr, metadata_size, metadata);
 
   return ret;
   CATCH;
@@ -1187,22 +1414,13 @@ hsa_status_t hsa_amd_queue_set_priority(hsa_queue_t* queue,
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
 
-  // Highest queue priority allowed for HSA user is HSA_QUEUE_PRIORITY_HIGH
-  // HSA_QUEUE_PRIORITY_MAXIMUM is reserved for PC Sampling and can only be allocated internally
-  // in ROCR
-  static std::map<hsa_amd_queue_priority_t, HSA_QUEUE_PRIORITY> ext_kmt_priomap = {
-      {HSA_AMD_QUEUE_PRIORITY_LOW, HSA_QUEUE_PRIORITY_MINIMUM},
-      {HSA_AMD_QUEUE_PRIORITY_NORMAL, HSA_QUEUE_PRIORITY_NORMAL},
-      {HSA_AMD_QUEUE_PRIORITY_HIGH, HSA_QUEUE_PRIORITY_HIGH},
-  };
+  // Check if this a counted queue; NACK if it is
+  if (cmd_queue->is_counted_queue) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
-  auto priority_it = ext_kmt_priomap.find(priority);
+  // Convert to ROCR internal priority type
+  HSA::hsa_amd_queue_priority_internal_t priority_ = static_cast<HSA::hsa_amd_queue_priority_internal_t>(priority);
 
-  if (priority_it == ext_kmt_priomap.end()) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  return cmd_queue->SetPriority(priority_it->second);
+  return cmd_queue->SetPriority(priority_);
   CATCH;
 }
 
@@ -1365,7 +1583,8 @@ hsa_status_t hsa_amd_vmem_address_reserve_align(void** va, size_t size, uint64_t
   TRY;
   IS_OPEN();
   IS_ZERO(size);
-  IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
+  if (!(flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER))
+    IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
   return core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, alignment, flags);
   CATCH;
 }
@@ -1578,6 +1797,99 @@ hsa_status_t hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devic
 
   return (ret == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
   CATCH;
+}
+
+hsa_status_t HSA_API
+hsa_amd_counted_queue_acquire(hsa_agent_t agent,
+                              hsa_queue_type_t type,
+                              hsa_amd_queue_priority_t priority,
+                              void (*callback)(hsa_status_t status,
+                                               hsa_queue_t* source,
+                                               void* data),
+                              void* data,
+                              uint64_t flags,
+                              hsa_queue_t** queue) {
+  TRY;
+  IS_OPEN();
+  // Basic validation
+  if (queue == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Check priority
+  if (priority < HSA_AMD_QUEUE_PRIORITY_LOW || priority > HSA_AMD_QUEUE_PRIORITY_HIGH) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Only support multi-producer queues
+  if (type != HSA_QUEUE_TYPE_MULTI) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+  }
+
+  // Convert handle to internal agent
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  IS_VALID(core_agent);
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
+
+  // Convert to ROCR internal priority type
+  HSA::hsa_amd_queue_priority_internal_t priority_ = static_cast<HSA::hsa_amd_queue_priority_internal_t>(priority);
+
+  // Call the queue pool manager
+  return gpu_agent->AcquireCountedQueue(type, priority_, callback, data, flags, queue);
+  CATCH;
+}
+
+hsa_status_t HSA_API
+hsa_amd_counted_queue_release(hsa_queue_t* queue) {
+  TRY;
+  IS_OPEN();
+  // Basic validation
+  if (queue == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  core::Queue* core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  core::Agent* core_agent = core_queue->GetAgent();
+  IS_VALID(core_agent);
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
+
+  return gpu_agent->ReleaseCountedQueue(queue);
+  CATCH;
+}
+
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
+                                               uint32_t num_dep_signals,
+                                               const hsa_signal_t* dep_signals,
+                                               hsa_signal_t completion_signal) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(ptrs);
+  IS_BAD_PTR(sizes);
+  IS_ZERO(count);
+  
+  if (!core::Runtime::runtime_singleton_->XnackEnabled()) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_XNACK_DISABLED);
+  }
+
+  // Check if dep_signals and num_dep_signals are consistent
+  if ((num_dep_signals == 0 && dep_signals != nullptr) || 
+      (num_dep_signals > 0 && dep_signals == nullptr)) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  return core::Runtime::runtime_singleton_->SvmBatchDiscard(ptrs, sizes, count, 
+                                                num_dep_signals, dep_signals,
+                                                completion_signal);
+
+  CATCH;                                       
 }
 
 hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void *file) {

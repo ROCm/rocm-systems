@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 /*
 Testcase Scenarios :
 Unit_hipMemcpy2DToArray_Positive_Default - Test basic memcpy between host/device
@@ -33,7 +21,7 @@ unsuccessful execution of hipMemcpy2DToArray api when parameters are invalid
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpy2DToArray_Positive_Default", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArray_Positive_Default) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -85,7 +73,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Positive_Default", "[multigpu]") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemcpy2DToArray_Positive_Synchronization_Behavior") {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArray_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -111,7 +99,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Positive_Synchronization_Behavior") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemcpy2DToArray_Positive_ZeroWidthHeight") {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArray_Positive_ZeroWidthHeight) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -146,7 +134,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Positive_ZeroWidthHeight") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpy2DToArray_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArray_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -255,7 +243,7 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpy2DToArray_Capture") {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArray_Capture) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = 16;

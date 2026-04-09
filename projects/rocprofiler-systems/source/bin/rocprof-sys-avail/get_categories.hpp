@@ -23,6 +23,7 @@
 #pragma once
 
 #include "common.hpp"
+#include "core/demangler.hpp"
 
 #include <timemory/utility/demangle.hpp>
 #include <timemory/utility/type_list.hpp>
@@ -43,7 +44,7 @@ get_categories(type_list<Tp...>)
     };
     (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
 
-    auto _vec = str_vec_t{ _cleanup(demangle<Tp>(), "tim::")... };
+    auto _vec = str_vec_t{ _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::")... };
     std::sort(_vec.begin(), _vec.end(), [](const auto& lhs, const auto& rhs) {
         // prioritize project category
         auto lpos = lhs.find("project::");

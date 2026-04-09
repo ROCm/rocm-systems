@@ -206,6 +206,16 @@ rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_fiel
       ->rdc_group_field_create(num_field_ids, field_ids, field_group_name, rdc_field_group_id);
 }
 
+rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle,
+                                       rdc_field_grp_t rdc_field_group_id, rdc_field_t field_id) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_group_field_add_field(rdc_field_group_id, field_id);
+}
+
 rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle, rdc_field_grp_t rdc_field_group_id,
                                       rdc_field_group_info_t* field_group_info) {
   if (!p_rdc_handle) {
@@ -373,6 +383,10 @@ const char* rdc_status_string(rdc_status_t result) {
       return "Insufficient permission to complete operation";
     case RDC_ST_CORRUPTED_EEPROM:
       return "EEPROM is corrupted";
+    case RDC_ST_GROUP_NOT_FOUND:
+      return "Group not found";
+    case RDC_ST_FLDGROUP_NOT_FOUND:
+      return "Fieldgroup not found";
     case RDC_ST_UNKNOWN_ERROR:
       return "Unknown error";
     default:

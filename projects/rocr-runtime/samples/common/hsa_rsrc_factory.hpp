@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef HSA_RSRC_FACTORY_H_
 #define HSA_RSRC_FACTORY_H_
 
@@ -99,7 +99,7 @@ typedef struct {
 
   // Handle of Agent
   hsa_agent_t dev_id;
-  
+
   // Agent type - Cpu = 0, Gpu = 1 or Dsp = 2
   uint32_t dev_type;
 
@@ -249,33 +249,33 @@ class HsaRsrcFactory {
 
   // Returns the number of work-items that can execute per wave
   static uint32_t GetNumOfWorkItemsPerWave( );
-  
+
   // Returns the number of times kernel loop body should execute.
   static uint32_t GetKernelLoopCount();
-  
+
   // Returns boolean flag to indicate if debug info should be printed
   static uint32_t GetPrintDebugInfo();
 
  private:
- 
+
   // Number of queues to create
   uint32_t num_queues_;
 
   // Used to maintain a list of Hsa Queue handles
   std::vector<hsa_queue_t *> queue_list_;
- 
+
   // Number of Signals to create
   uint32_t num_signals_;
- 
+
   // Used to maintain a list of Hsa Signal handles
   std::vector<hsa_signal_t *> signal_list_;
- 
+
   // Number of agents reported by platform
   uint32_t num_agents_;
- 
+
   // Used to maintain a list of Hsa Gpu Agent Info
   std::vector<AgentInfo *> gpu_list_;
- 
+
   // Used to maintain a list of Hsa Cpu Agent Info
   std::vector<AgentInfo *> cpu_list_;
 
@@ -311,11 +311,11 @@ class HsaRsrcFactory {
 
   // Print the various fields of Hsa Gpu Agents
   bool PrintGpuAgents( );
-  
+
   // Process command line arguments. The method will capture
   // various user command line parameters for tests to use
   static void ProcessCmdline( );
-  
+
   // Prints the help banner on user arg keys
   static void PrintHelpMsg( );
 

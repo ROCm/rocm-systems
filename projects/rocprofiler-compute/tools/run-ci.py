@@ -1,27 +1,6 @@
 #!/usr/bin/env python3
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import glob
@@ -143,12 +122,12 @@ def generate_dashboard_script(args):
             ctest_submit(PARTS Coverage RETURN_VALUE _submit_ret)
         endif()
 
-        # Report test failures but don't fail the build, post results to CDash
-        if(NOT ${{_test_ret}} EQUAL 0)
-            message(WARNING "Some tests failed (see CDash for details)")
-        endif()
-
         ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+
+        # After all submissions complete, fail if tests failed
+        if(NOT ${{_test_ret}} EQUAL 0)
+            message(FATAL_ERROR "Some tests failed (see CDash for details)")
+        endif()
         """
     return _script
 

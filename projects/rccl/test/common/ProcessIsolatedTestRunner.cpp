@@ -191,8 +191,8 @@ int ProcessIsolatedTestRunner::runTestInProcess(const TestConfig& config)
             if(std::chrono::steady_clock::now() - start > timeout)
             {
                 // Test timed out
-                INFO(
-                    "Test '%s' TIMED OUT after %ld seconds\n",
+                TEST_INFO(
+                    "Test '%s' TIMED OUT after %ld seconds",
                     config.name.c_str(),
                     timeout.count()
                 );
@@ -233,14 +233,14 @@ int ProcessIsolatedTestRunner::runTestInProcess(const TestConfig& config)
     }
     catch(const std::exception& e)
     {
-        INFO("Test '%s' FAILED with exception: %s\n", config.name.c_str(), e.what());
+        TEST_INFO("Test '%s' FAILED with exception: %s", config.name.c_str(), e.what());
         std::cerr << "Exception in test '" << config.name << "': " << e.what() << std::endl;
         fflush(NULL);
         return RCCL_TEST_FAILURE;
     }
     catch(...)
     {
-        INFO("Test '%s' FAILED with unknown exception\n", config.name.c_str());
+        TEST_INFO("Test '%s' FAILED with unknown exception", config.name.c_str());
         std::cerr << "Unknown exception in test '" << config.name << "'" << std::endl;
         fflush(NULL);
         return RCCL_TEST_UNKNOWN_EXCEPTION;
@@ -402,6 +402,9 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             continue;
         }
 
+        // Flush all output before fork to prevent child from inheriting unflushed buffers
+        fflush(NULL);
+
         pid_t pid = fork();
 
         if(pid == 0)
@@ -424,8 +427,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                         envVars += ", ";
                     envVars += name + "=" + value;
                 }
-                INFO(
-                    "Running isolated test '%s' (PID: %d) with env: %s\n",
+                TEST_INFO(
+                    "Running isolated test '%s' (PID: %d) with env: %s",
                     testConfig.name.c_str(),
                     pid,
                     envVars.c_str()
@@ -433,14 +436,21 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             }
             else
             {
-                INFO("Running isolated test '%s' (PID: %d)\n", testConfig.name.c_str(), pid);
+                TEST_INFO("Running isolated test '%s' (PID: %d)", testConfig.name.c_str(), pid);
             }
+            // Flush parent's output before reading from child pipes to ensure proper ordering
+            fflush(stdout);
+            fflush(stderr);
+
             int            status;
             CapturedOutput output = captureProcessOutput(stdout_fd, stderr_fd, pid, &status);
 
             auto endTime = std::chrono::steady_clock::now();
             auto duration
                 = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+
+            // Display captured output BEFORE status messages for proper sequencing
+            displayCapturedOutput(output, testConfig.name);
 
             TestResult testResult;
             testResult.testName  = testConfig.name;
@@ -456,12 +466,12 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
 
                 if(exitCode == RCCL_TEST_SUCCESS)
                 {
-                    INFO("Test '%s' PASSED (%ld ms)\n", testConfig.name.c_str(), duration.count());
+                    TEST_INFO("Test '%s' PASSED (%ld ms)", testConfig.name.c_str(), duration.count());
                 }
                 else if(exitCode == RCCL_TEST_TIMEOUT)
                 {
-                    INFO(
-                        "Test '%s' (PID: %d) TIMED OUT after %ld ms\n",
+                    TEST_INFO(
+                        "Test '%s' (PID: %d) TIMED OUT after %ld ms",
                         testConfig.name.c_str(),
                         pid,
                         duration.count()
@@ -470,8 +480,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                 }
                 else if(exitCode == RCCL_TEST_SKIPPED)
                 {
-                    INFO(
-                        "Test '%s' (PID: %d) SKIPPED in %ld ms\n",
+                    TEST_INFO(
+                        "Test '%s' (PID: %d) SKIPPED in %ld ms",
                         testConfig.name.c_str(),
                         pid,
                         duration.count()
@@ -480,8 +490,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                 }
                 else
                 {
-                    INFO(
-                        "Test '%s' (PID: %d) FAILED with exit code %d after %ld ms\n",
+                    TEST_INFO(
+                        "Test '%s' (PID: %d) FAILED with exit code %d after %ld ms",
                         testConfig.name.c_str(),
                         pid,
                         exitCode,
@@ -504,7 +514,7 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                     testResult.passed   = true;
                     testResult.skipped  = false;
                     testResult.exitCode = RCCL_TEST_SUCCESS;
-                    INFO("Test '%s' PASSED (%ld ms)\n", testConfig.name.c_str(), duration.count());
+                    TEST_INFO("Test '%s' PASSED (%ld ms)", testConfig.name.c_str(), duration.count());
                 }
                 else
                 {
@@ -513,8 +523,8 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                     testResult.skipped      = false;
                     testResult.exitCode     = -signal;
                     testResult.errorMessage = "Terminated by signal " + std::to_string(signal);
-                    INFO(
-                        "Test '%s' (PID: %d) terminated by signal %d after %ld ms\n",
+                    TEST_INFO(
+                        "Test '%s' (PID: %d) terminated by signal %d after %ld ms",
                         testConfig.name.c_str(),
                         pid,
                         signal,
@@ -529,8 +539,6 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
                 testResult.exitCode     = RCCL_TEST_INVALID;
                 testResult.errorMessage = "Failed to wait for process";
             }
-
-            displayCapturedOutput(output, testConfig.name);
 
             recordTestResult(testResult);
 
@@ -553,7 +561,7 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
             testResult.errorMessage = "Failed to fork process";
 
             recordTestResult(testResult);
-            INFO("Failed to fork process for test '%s'\n", testConfig.name.c_str());
+            TEST_INFO("Failed to fork process for test '%s'", testConfig.name.c_str());
 
             if(options.stopOnFirstFailure)
             {
@@ -613,8 +621,8 @@ bool ProcessIsolatedTestRunner::generateReport(const ExecutionOptions& options)
     // Report summary only if there are failures or multiple tests
     if(failedTests > 0 || totalTests > 1)
     {
-        INFO(
-            "Process-Isolated Tests: %d passed, %d failed, %d skipped (%ld ms total)\n",
+        TEST_INFO(
+            "Process-Isolated Tests: %d passed, %d failed, %d skipped (%ld ms total)",
             passedTests,
             failedTests,
             skippedTests,
@@ -628,8 +636,8 @@ bool ProcessIsolatedTestRunner::generateReport(const ExecutionOptions& options)
             {
                 if(!result.passed && !result.skipped)
                 {
-                    INFO(
-                        "  Failed: %s - %s\n",
+                    TEST_INFO(
+                        "  Failed: %s - %s",
                         result.testName.c_str(),
                         result.errorMessage.c_str()
                     );

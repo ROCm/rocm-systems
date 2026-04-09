@@ -422,7 +422,7 @@ private:
   Executable(const Executable &e);
   Executable& operator=(const Executable &e);
 
-  static std::vector<Executable*> executables;
+  static std::vector<std::shared_ptr<Executable>> executables;
   static std::mutex executables_mutex;
 };
 

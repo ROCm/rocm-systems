@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 This testcase verifies the hipMemcpyDtoD basic scenario
@@ -38,7 +25,7 @@ This testcase verifies hipMemcpyDtoD API
 6.Kernel Launch
 7.DtoH copy and validating the result
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "[multigpu]", int, float,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoD_Basic, int, float,
                    double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;
@@ -50,11 +37,11 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "[multigpu]", int, float,
     int canAccessPeer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
     HIP_CHECK(hipSetDevice(0));
-    if (canAccessPeer) {
-      HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
-    } else {
-      INFO("Machine does not have P2P Capabilities");
+    if (!canAccessPeer) {
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      return;
     }
+    HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
     HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
     HIP_CHECK(hipSetDevice(1));
     HIP_CHECK(hipMalloc(&X_d, Nbytes));
@@ -64,7 +51,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "[multigpu]", int, float,
     HIP_CHECK(hipSetDevice(0));
     HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), NUM_ELM, 0, 0,
                        static_cast<const TestType*>(A_d), static_cast<const TestType*>(B_d), C_d,
                        NUM_ELM);
     HIP_CHECK(hipGetLastError());
@@ -81,7 +68,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "[multigpu]", int, float,
     END_CAPTURE_SYNC(memcpy_err);
 
     if (memcpy_err == hipSuccess) {
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), NUM_ELM, 0, 0,
                          static_cast<const TestType*>(X_d), static_cast<const TestType*>(Y_d), Z_d,
                          NUM_ELM);
       HIP_CHECK(hipGetLastError());
@@ -90,9 +77,10 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "[multigpu]", int, float,
       HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
     }
 
-    HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
     HIP_CHECK(hipFree(X_d));
     HIP_CHECK(hipFree(Y_d));
     HIP_CHECK(hipFree(Z_d));
+    (void)hipGetLastError();
   }
+  HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }

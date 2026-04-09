@@ -3,6 +3,6 @@
 /coverage/
 build/
 ext/
-
+src/transport/net_ib_rocm.cc
 # Visual Studio Code
 .vscode

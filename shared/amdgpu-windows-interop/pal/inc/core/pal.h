@@ -48,19 +48,19 @@ struct _SECURITY_ATTRIBUTES;
 namespace Pal
 {
 
-typedef Util::int8    int8;     ///< 8-bit integer.
-typedef Util::int16   int16;    ///< 16-bit integer.
-typedef Util::int32   int32;    ///< 32-bit integer.
-typedef Util::int64   int64;    ///< 64-bit integer.
-typedef Util::uint8   uint8;    ///< Unsigned 8-bit integer.
-typedef Util::uint16  uint16;   ///< Unsigned 16-bit integer.
-typedef Util::uint32  uint32;   ///< Unsigned 32-bit integer.
-typedef Util::uint64  uint64;   ///< Unsigned 64-bit integer.
-typedef Util::gpusize gpusize;  ///< Used to specify GPU addresses and sizes of GPU allocations.  This differs from
-                                ///  size_t since the GPU still uses 64-bit addresses on a 32-bit OS.
-typedef Util::Result  Result;   ///< The PAL core and utility companion share the same result codes for convenience.
-
-typedef Util::Rational Rational; ///< A ratio of two unsigned integers.
+// Alias a bunch of fundamental Util types from palUtil.h into Pal.
+using Util::int8;
+using Util::int16;
+using Util::int32;
+using Util::int64;
+using Util::uint8;
+using Util::uint16;
+using Util::uint32;
+using Util::uint64;
+using Util::gpusize;
+using Util::Result;
+using Util::Rational;
+using Util::StickyResult;
 
 #if defined(_WIN32)
 typedef HMONITOR__* OsDisplayHandle;  ///< OsDisplayHandle corresponds to an HMONITOR on Windows.

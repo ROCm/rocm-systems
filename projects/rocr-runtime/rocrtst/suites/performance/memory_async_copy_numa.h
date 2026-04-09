@@ -46,6 +46,7 @@
 #ifndef ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_NUMA_H_
 #define ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_NUMA_H_
 
+#if ENABLE_COPY_NUMA
 #include <hwloc.h>
 
 #include <vector>
@@ -70,5 +71,6 @@ class MemoryAsyncCopyNUMA : public MemoryAsyncCopy {
   // @Brief: Run for Benchmark mode with verification
   virtual void RunBenchmarkWithVerification(Transaction *t);
 };
+#endif  // ENABLE_COPY_NUMA
 
 #endif  // ROCRTST_SUITES_PERFORMANCE_MEMORY_ASYNC_COPY_NUMA_H_

@@ -102,12 +102,12 @@ class KFDQMTest : public KFDBaseComponentTest {
     void PM4EventInterrupt(int gpuNode);
     void SdmaEventInterrupt(int gpuNode);
     void GPUDoorbellWrite(int gpuNode);
+    void GpuMemCopyTest(int gpuNode);
 
  protected:
     virtual void SetUp();
     virtual void TearDown();
-
-    void SyncDispatch(const HsaMemoryBuffer& isaBuffer, void* pSrcBuf, void* pDstBuf, int node = -1);
+    void SyncDispatch(const HsaMemoryBuffer& isaBuffer, void* arg0, void* arg1, int node = -1);
     HSAint64 TimeConsumedwithCUMask(int node, uint32_t *mask, uint32_t mask_count);
     HSAint64 GetAverageTimeConsumedwithCUMask(int node, uint32_t *mask, uint32_t mask_count, int iterations);
     void testQueuePriority(int gpuNode, bool isSamePipe);

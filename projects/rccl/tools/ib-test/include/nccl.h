@@ -303,9 +303,9 @@ ncclResult_t pncclScatter(const void* sendbuff, void* recvbuff,
  *
  * In-place operation will happen if sendbuff == recvbuff.
  */
-ncclResult_t  ncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
+ncclResult_t  ncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
-ncclResult_t pncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
+ncclResult_t pncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 
 /*

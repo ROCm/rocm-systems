@@ -103,7 +103,7 @@ class IPCSignal : private SharedMemorySignal, public BusyWaitSignal {
     static int rtti_id_ = 0;
       return rtti_id_;
   }
-  static KernelMutex lock_;
+  static std::mutex lock_;
 
   explicit IPCSignal(SharedMemorySignal&& abi_block)
       : SharedMemorySignal(std::move(abi_block)), BusyWaitSignal(signal(), true) {}

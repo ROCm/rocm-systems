@@ -118,6 +118,38 @@ void Sampler::Destroy(const Sampler* sampler) {
   assert(status == HSA_STATUS_SUCCESS);
 }
 
+MipmappedArray* MipmappedArray::Create(hsa_agent_t agent) {
+  hsa_amd_memory_pool_t pool = ImageRuntime::instance()->kernarg_pool();
+
+  MipmappedArray* mipmapped_array = NULL;
+
+  hsa_status_t status = AMD::hsa_amd_memory_pool_allocate(
+      pool, sizeof(MipmappedArray), 0, reinterpret_cast<void**>(&mipmapped_array));
+  assert(status == HSA_STATUS_SUCCESS);
+
+  if (status != HSA_STATUS_SUCCESS) return nullptr;
+
+  new (mipmapped_array) MipmappedArray();
+
+  // Allow agent access to the image data
+  status = AMD::hsa_amd_agents_allow_access(1, &agent, nullptr, mipmapped_array);
+  if (status != HSA_STATUS_SUCCESS) {
+    MipmappedArray::Destroy(mipmapped_array);
+    return nullptr;
+  }
+
+  return mipmapped_array;
+}
+
+void MipmappedArray::Destroy(const MipmappedArray* mipmapped_array) {
+  assert(mipmapped_array != NULL);
+  mipmapped_array->~MipmappedArray();
+
+  hsa_status_t status = AMD::hsa_amd_memory_pool_free(
+                        const_cast<MipmappedArray*>(mipmapped_array));
+  assert(status == HSA_STATUS_SUCCESS);
+}
+
 ImageManager::ImageManager() {}
 
 ImageManager::~ImageManager() {}

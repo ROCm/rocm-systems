@@ -27,13 +27,14 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
 
+#include "logger/debug.hpp"
+
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <memory>
-#include <sstream>
 #include <string>
 
 namespace rocprofsys
@@ -67,12 +68,13 @@ public:
             throw std::runtime_error("TypeProcessing is nullptr");
         }
 
+        LOG_DEBUG("Loading storage from file: {}", m_filename);
+
         std::ifstream ifs(m_filename, std::ios::binary);
         if(!ifs.good())
         {
-            std::stringstream ss;
-            ss << "Error opening file for reading: " << m_filename << "\n";
-            throw std::runtime_error(ss.str());
+            throw std::runtime_error(
+                fmt::format("Error opening file for reading: {}", m_filename));
         }
 
         struct __attribute__((packed)) sample_header
@@ -91,9 +93,8 @@ public:
         {
             if(!ifs.good())
             {
-                throw std::runtime_error(
-                    std::string("Stream not in good state, stopping parse. File: ") +
-                    m_filename + "\n");
+                throw std::runtime_error(fmt::format(
+                    "Stream not in good state, stopping parse. File: {}", m_filename));
             }
 
             ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
@@ -115,13 +116,14 @@ public:
             if(ifs.fail())
             {
                 throw std::runtime_error(
-                    std::string("Bad read while consuming buffered storage. Filename: ") +
-                    m_filename + " Bytes read: " +
-                    std::to_string(static_cast<int>(ifs.tellg())) + "\n");
+                    fmt::format("Bad read while consuming buffered storage. Filename: {} "
+                                "Bytes read: {}",
+                                m_filename, static_cast<int>(ifs.tellg())));
             }
 
             if(header.type == TypeIdentifierEnum::fragmented_space)
             {
+                LOG_TRACE("Skipping fragmented space in storage");
                 continue;
             }
 
@@ -139,11 +141,13 @@ public:
             }
             else
             {
+                LOG_TRACE("Unknown sample type encountered, skipping");
                 continue;
             }
         }
 
         ifs.close();
+        LOG_DEBUG("Storage parsing complete from {}", m_filename);
     }
 
 private:

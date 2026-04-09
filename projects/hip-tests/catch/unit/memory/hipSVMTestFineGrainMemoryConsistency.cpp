@@ -227,7 +227,7 @@ void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int n
 *  - Fine grain access and atomics supported on devices and host
 *  - HIP_VERSION >= 5.7
 */
-TEST_CASE("test_svm_fine_grain_memory_consistency", "[multigpu]") {
+HIP_TEST_CASE(Unit_svm_fine_grain_memory_consistency) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 
@@ -235,8 +235,7 @@ TEST_CASE("test_svm_fine_grain_memory_consistency", "[multigpu]") {
     int pcieAtomic = 0;
     HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
     if (!pcieAtomic) {
-      fprintf(stderr, "Device doesn't support pcie atomic, Skipped\n");
-      REQUIRE(true);
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
       return;
     }
   }

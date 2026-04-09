@@ -3,6 +3,11 @@
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+if(NOT ROCPROFSYS_GFX_TARGETS)
+    rocprofiler_systems_message(WARNING "No GPU targets detected/set. Disabling OpenMP target example...")
+    return()
+endif()
+
 if(NOT OMP_TARGET_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
@@ -36,7 +41,7 @@ set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 find_package(Threads REQUIRED)
 
 function(add_offload_flags tgt)
-    foreach(arch IN LISTS GPU_TARGETS)
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
         target_compile_options(${tgt} PRIVATE --offload-arch=${arch})
         target_link_options(${tgt} PUBLIC --offload-arch=${arch})
     endforeach()
@@ -71,7 +76,7 @@ endif()
 # Use the directory that actually contains the library we found
 get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
 set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
-set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN")
+set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN;$ORIGIN/lib")
 if(ROCmVersion_DIR)
     list(APPEND _COMMON_RPATH "${ROCmVersion_DIR}/llvm/lib")
 endif()
@@ -126,3 +131,15 @@ rocprofiler_systems_custom_compilation(
 rocprofiler_systems_custom_compilation(TARGET openmp-target
                                        COMPILER ${OMP_TARGET_COMPILER}
 )
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    if(TARGET openmp-target AND TARGET openmp-target-lib)
+        install(
+            TARGETS openmp-target openmp-target-lib
+            RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            LIBRARY
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/lib
+                COMPONENT rocprofiler-systems-examples
+        )
+    endif()
+endif()

@@ -1,21 +1,9 @@
 /*
- * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
+
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 /* @addtogroup hipMemcpy3DPeerAsync hipMemcpy3DPeerAsync
@@ -40,7 +28,7 @@
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpy3DPeerAsync_BasicFunctional") {
+HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_BasicFunctional) {
   CHECK_IMAGE_SUPPORT
   constexpr int numW = 16;
   constexpr int numH = 16;
@@ -49,23 +37,22 @@ TEST_CASE("Unit_hipMemcpy3DPeerAsync_BasicFunctional") {
   hipExtent extent = make_hipExtent(numW, numH, depth);
   const auto device_count = HipTest::getDeviceCount();
   if (device_count <= 1) {
-    std::string msg = "Invalid Device Count. Hence Skipping the test.. ";
-    HipTest::HIP_SKIP_TEST(msg.c_str());
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
   const auto src_device = GENERATE_COPY(range(0, device_count));
   const auto dst_device = GENERATE_COPY(range(0, device_count));
   if (src_device == dst_device) {
-    std::string msg = "Both Source and Destination device ids are same.";
     INFO("Src device: " << src_device << ", Dst device: " << dst_device);
-    HipTest::HIP_SKIP_TEST(msg.c_str());
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemcpyPeerSameSrcDstDevice);
+    return;
   }
   HIP_CHECK(hipSetDevice(src_device));
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
   if (!can_access_peer) {
-    std::string msg = "Skipped as peer access cannot be enabled between devices " +
-        std::to_string(src_device) + " " + std::to_string(dst_device);
-    HipTest::HIP_SKIP_TEST(msg.c_str());
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    return;
   }
   // Array-1 Memory allocation
   hipChannelFormatDesc channelDesc_1 = hipCreateChannelDesc<char>();
@@ -144,7 +131,7 @@ TEST_CASE("Unit_hipMemcpy3DPeerAsync_BasicFunctional") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpy3DPeerAsync_NegativeTsts") {
+HIP_TEST_CASE(Unit_hipMemcpy3DPeerAsync_NegativeTsts) {
   CHECK_IMAGE_SUPPORT
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));

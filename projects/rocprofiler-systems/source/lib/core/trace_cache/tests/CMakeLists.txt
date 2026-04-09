@@ -28,13 +28,18 @@ set(trace_cache_tests_sources
     test_flush_worker.cpp
     test_cache_integration.cpp
     test_sample_type.cpp
+    test_kfd_args.cpp
+    test_rocpd_xcp_output.cpp
 )
 
 add_library(trace-cache-tests OBJECT ${trace_cache_tests_sources})
 
 target_link_libraries(
     trace-cache-tests
-    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
 )
 
 target_include_directories(

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  *  @file  amd_detail/amd_hip_cooperative_groups.h
@@ -96,6 +80,8 @@ class thread_group {
   __CG_QUALIFIER__ unsigned int cg_type() const { return _type; }
   //! Rank of the calling thread within [0, \link num_threads() num_threads() \endlink).
   __CG_QUALIFIER__ __hip_uint32_t thread_rank() const;
+  //! Rank of the block in calling thread within [0, \link num_threads() num_threads() \endlink).
+  __CG_QUALIFIER__ __hip_uint32_t block_rank() const;
   //! Returns true if the group has not violated any API constraints.
   __CG_QUALIFIER__ bool is_valid() const;
 
@@ -203,11 +189,26 @@ class grid_group : public thread_group {
  public:
   //! @copydoc thread_group::thread_rank
   __CG_QUALIFIER__ __hip_uint32_t thread_rank() const { return internal::grid::thread_rank(); }
+  //! @copydoc thread_group::block_rank
+  __CG_QUALIFIER__ __hip_uint32_t block_rank() const { return internal::grid::block_rank(); }
   //! @copydoc thread_group::is_valid
   __CG_QUALIFIER__ bool is_valid() const { return internal::grid::is_valid(); }
   //! @copydoc thread_group::sync
   __CG_QUALIFIER__ void sync() const { internal::grid::sync(); }
   __CG_QUALIFIER__ dim3 group_dim() const { return internal::grid::grid_dim(); }
+  struct arrival_token {
+    unsigned int signal;
+  };
+  //! Arrive at a barrier
+  __CG_QUALIFIER__ arrival_token barrier_arrive() const {
+    arrival_token t;
+    t.signal = internal::grid::barrier_signal();
+    return t;
+  }
+  //! Arrive at a barrier
+  __CG_QUALIFIER__ void barrier_wait(arrival_token&& t) const {
+    internal::grid::barrier_wait(t.signal);
+  }
 };
 
 /** \ingroup CooperativeGConstruct
@@ -275,6 +276,10 @@ class thread_block : public thread_group {
   __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
     return internal::workgroup::thread_rank();
   }
+  //! @copydoc thread_group::block_rank
+  __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
+    return internal::workgroup::block_rank();
+  }
   //! @copydoc thread_group::num_threads
   __CG_STATIC_QUALIFIER__ __hip_uint32_t num_threads() {
     return internal::workgroup::num_threads();
@@ -287,6 +292,14 @@ class thread_block : public thread_group {
   __CG_STATIC_QUALIFIER__ void sync() { internal::workgroup::sync(); }
   //! Returns the group dimensions.
   __CG_QUALIFIER__ dim3 group_dim() { return internal::workgroup::block_dim(); }
+  struct arrival_token {};
+  //! Arrive at a barrier
+  __CG_QUALIFIER__ arrival_token barrier_arrive() const {
+    internal::workgroup::barrier_arrive();
+    return arrival_token{};
+  }
+  //! Arrive at a barrier
+  __CG_QUALIFIER__ void barrier_wait(arrival_token&&) const { internal::workgroup::barrier_wait(); }
 };
 
 /** \ingroup CooperativeGConstruct
@@ -353,7 +366,6 @@ class tiled_group : public thread_group {
   __CG_QUALIFIER__ unsigned int thread_rank() const {
     return (internal::workgroup::thread_rank() & (coalesced_info.tiled_info.num_threads - 1));
   }
-
   //! @copydoc thread_group::sync
   __CG_QUALIFIER__ void sync() const { internal::tiled_group::sync(); }
 };
@@ -1202,7 +1214,7 @@ template <unsigned int size> struct tiled_partition_internal<size, thread_block>
 template <unsigned int size, unsigned int ParentSize, class GrandParentCGTy>
 struct tiled_partition_internal<size, thread_block_tile<ParentSize, GrandParentCGTy> >
     : public thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> > {
-  static_assert(size <= ParentSize, "Sub tile size must be <= parent tile size in tiled_partition");
+  static_assert(size < ParentSize, "Sub tile size must be < parent tile size in tiled_partition");
 
   __CG_QUALIFIER__ tiled_partition_internal(const thread_block_tile<ParentSize, GrandParentCGTy>& g)
       : thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> >(g) {}
@@ -1271,6 +1283,54 @@ __CG_QUALIFIER__ coalesced_group binary_partition(const thread_block_tile<size, 
     return coalesced_group(tgrp.build_mask() ^ mask);
   }
 }
+
+template <class T>
+struct plus {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs + rhs;
+  }
+};
+
+template <class T>
+struct less {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs < rhs? lhs : rhs;
+  }
+};
+
+template <class T>
+struct greater {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs < rhs? rhs : lhs;
+  }
+};
+
+template <class T>
+struct bit_and {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs & rhs;
+  }
+};
+
+template <class T>
+struct bit_xor {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs ^ rhs;
+  }
+};
+
+template <class T>
+struct bit_or {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs | rhs;
+  }
+};
 #endif
 }  // namespace cooperative_groups
 

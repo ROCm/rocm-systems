@@ -26,7 +26,7 @@
 #include "binary/symbol.hpp"
 #include "common/defines.h"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "library/causal/components/backtrace.hpp"
 #include "library/causal/components/progress_point.hpp"
@@ -46,6 +46,8 @@
 #include <timemory/tpls/cereal/types.hpp>
 #include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
+
+#include "logger/debug.hpp"
 
 #include <chrono>
 #include <ratio>
@@ -127,7 +129,7 @@ experiment::sample::serialize(ArchiveT& ar, const unsigned)
 
     if constexpr(concepts::is_output_archive<ArchiveT>::value)
     {
-        ar(cereal::make_nvp("dfunc", demangle(name)),
+        ar(cereal::make_nvp("dfunc", rocprofsys::utility::demangle(name)),
            cereal::make_nvp("dwarf_info", std::vector<binary::dwarf_entry>{}));
     }
     ar(cereal::make_nvp("inlines", inlines));
@@ -139,8 +141,8 @@ experiment::sample::serialize(ArchiveT& ar, const unsigned)
 std::string
 experiment::sample::get_identifier() const
 {
-    return (lineno > 0 && !location.empty()) ? join(":", location, lineno)
-                                             : demangle(name);
+    return (lineno > 0 && !location.empty()) ? fmt::format("{}:{}", location, lineno)
+                                             : rocprofsys::utility::demangle(name);
 }
 
 template <typename ArchiveT>
@@ -251,8 +253,7 @@ experiment::start()
     init_progress   = component::progress_point::get_progress_points();
     start_time      = tracing::now();
 
-    ROCPROFSYS_VERBOSE(0, "Starting causal experiment #%-3u: %s\n", index,
-                       as_string().c_str());
+    LOG_INFO("Starting causal experiment #{}: {}", index, as_string());
 
     if(get_state() < State::Finalized)
     {
@@ -320,34 +321,30 @@ experiment::stop()
 
     if(_lowv <= 3 && (_mean < 5 || _medi < 5))
     {
-        ROCPROFSYS_VERBOSE(2,
-                           "[progress points] increasing experiment time :: low: %6.3f, "
-                           "high: %6.3f, mean: %6.3f, median: %zi\n",
-                           _lowv, _high, _mean, _medi);
+        LOG_DEBUG("[progress points] increasing experiment time :: low: {}, high: {}, "
+                  "mean: {}, median: {}",
+                  _lowv, _high, _mean, _medi);
         global_scaling *= 2;
         ++global_scaling_increments;  // keep track of how many successive increments have
                                       // been performed
     }
     else if(_mean > 10 && _lowv >= 8 && global_scaling > 1)
     {
-        ROCPROFSYS_VERBOSE(2,
-                           "[progress points] decreasing experiment time :: low: %6.3f, "
-                           "high: %6.3f, mean: %6.3f, median: %zi\n",
-                           _lowv, _high, _mean, _medi);
+        LOG_DEBUG("[progress points] decreasing experiment time :: low: {}, high: {}, "
+                  "mean: {}, median: {}",
+                  _lowv, _high, _mean, _medi);
         global_scaling /= 2;
         global_scaling_increments = 0;
     }
 
     if(ROCPROFSYS_UNLIKELY(global_scaling_increments >= 5))
     {
-        ROCPROFSYS_WARNING(
-            0,
-            "Warning! causal experimentation hasn't seen at least 5 progress points "
-            "in the last %li experiments. Progress points are necessary for measuring "
+        LOG_WARNING(
+            "causal experimentation hasn't seen at least 5 progress points "
+            "in the last {} experiments. Progress points are necessary for measuring "
             "the effect of the virtual speed-up. Please visit "
             "https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/ for "
-            "documentation on progress "
-            "points and how to add them\n",
+            "documentation on progress points and how to add them",
             global_scaling_increments);
     }
 
@@ -370,9 +367,9 @@ experiment::as_string() const
     if(!config::get_causal_end_to_end())
         _ss << ", duration: " << std::setw(5) << std::fixed << std::setprecision(3)
             << _dur << " sec";
-    _ss << " :: experiment: " << as_hex(selection.address) << " ";
+    _ss << " :: experiment: " << fmt::format("0x{:X}", selection.address) << " ";
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
-        _ss << "(symbol@" << as_hex(selection.symbol_address) << ") ";
+        _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
         _ss << "[" << filepath::basename(selection.symbol.file) << ":"
             << selection.symbol.line << "]";
@@ -391,7 +388,7 @@ experiment::as_string() const
         }
         return _v;
     };
-    auto _func = _patch(demangle(selection.symbol.func));
+    auto _func = _patch(rocprofsys::utility::demangle(selection.symbol.func));
     _ss << "['" << _func << "']";
 
     return _ss.str();
@@ -522,8 +519,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             }
         }
 
-        ROCPROFSYS_VERBOSE_F(1, "Processing line info for %zu sampled addresses...\n",
-                             _total_samples.size());
+        LOG_DEBUG("Processing line info for {} sampled addresses...",
+                  _total_samples.size());
 
         for(const auto& itr : _total_samples)
         {
@@ -570,8 +567,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         }
         else
         {
-            ROCPROFSYS_THROW("Error opening causal experiments output file: %s",
-                             _fname.c_str());
+            throw std::runtime_error(
+                fmt::format("Error opening causal experiments output file: %s", _fname));
         }
     }
 
@@ -609,18 +606,22 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             auto& _selection = itr.selection;
             auto& _line_info = _selection.symbol;
 
-            std::string _name = (_selection.symbol_address > 0)
-                                    ? _line_info.func
-                                    : join(":", _line_info.file, _line_info.line);
+            std::string _name =
+                (_selection.symbol_address > 0)
+                    ? _line_info.func
+                    : fmt::format("{}:{}", _line_info.file, _line_info.line);
 
-            ROCPROFSYS_CONDITIONAL_THROW(
-                _name.empty(),
-                "Error! causal experiment selection has no name: address=%s, file=%s, "
-                "line=%u, func=%s",
-                as_hex(_line_info.address).c_str(), _line_info.file.c_str(),
-                _line_info.line, _line_info.func.c_str());
+            if(_name.empty())
+            {
+                throw std::runtime_error(fmt::format("Error! causal experiment selection "
+                                                     "has no name: address={}, file={}, "
+                                                     "line={}, func={}",
+                                                     _line_info.address.as_hex(),
+                                                     _line_info.file, _line_info.line,
+                                                     _line_info.func));
+            }
 
-            ofs << "experiment\tselected=" << demangle(_name)
+            ofs << "experiment\tselected=" << rocprofsys::utility::demangle(_name)
                 << "\tspeedup=" << std::setprecision(2)
                 << static_cast<double>(itr.virtual_speedup / 100.0)
                 << "\tduration=" << itr.duration << "\tselected-samples=" << itr.selected
@@ -637,7 +638,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                 if(pitr.second.is_throughput_point() && pitr.second.get_delta() != 0)
                 {
                     ofs << "throughput-point\tname="
-                        << tim::demangle(tim::get_hash_identifier(pitr.first))
+                        << rocprofsys::utility::demangle(
+                               tim::get_hash_identifier(pitr.first))
                         << "\tdelta=" << pitr.second.get_delta() << "\n";
                     if(get_causal_end_to_end()) break;
                 }
@@ -646,7 +648,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                     if(get_causal_end_to_end()) continue;
                     auto _delta = std::max<int64_t>(pitr.second.get_latency_delta(), 1);
                     ofs << "latency-point\tname="
-                        << tim::demangle(tim::get_hash_identifier(pitr.first))
+                        << rocprofsys::utility::demangle(
+                               tim::get_hash_identifier(pitr.first))
                         << "\tarrivals=" << pitr.second.get_arrival()
                         << "\tdepartures=" << pitr.second.get_departure()
                         << "\tdifference=" << _delta << "\n";
@@ -660,14 +663,15 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         {
             ofs << "samples\tlocation=" << itr.get_identifier()
                 << "\tcount=" << itr.count;
-            if(config::get_debug()) ofs << "\taddress=" << as_hex(itr.address);
+            if(config::get_debug())
+                ofs << "\taddress=" << fmt::format("0x{:X}", itr.address);
             ofs << "\n";
         }
     }
     else
     {
-        ROCPROFSYS_THROW("Error opening causal experiments output file: %s",
-                         _fname.c_str());
+        throw std::runtime_error(
+            fmt::format("Error opening causal experiments output file: {}", _fname));
     }
 }
 
@@ -704,8 +708,8 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
     {
         if(_throw_on_error)
         {
-            ROCPROFSYS_THROW("Error opening causal experiments input file: %s",
-                             _fname.c_str());
+            throw std::runtime_error(
+                fmt::format("Error opening causal experiments input file: %s", _fname));
         }
     }
 

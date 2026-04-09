@@ -23,7 +23,6 @@
 #include "library/causal/components/backtrace.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
@@ -43,6 +42,8 @@
 #include <timemory/process/threading.hpp>
 #include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
+
+#include "logger/debug.hpp"
 
 #include <atomic>
 #include <ctime>
@@ -218,7 +219,7 @@ backtrace::sample(int _sig)
     }
     else
     {
-        ROCPROFSYS_THROW("unhandled signal %i\n", _sig);
+        throw std::runtime_error(fmt::format("Unhandled signal {}", _sig));
     }
 
     ++_protect_flag;

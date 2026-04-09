@@ -11,16 +11,28 @@ on:
     paths:
       - '.github/workflows/rocprofiler-sdk-rocm_release_compatibility.yml'
       - 'projects/rocprofiler-sdk/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-sdk-rocm_release_compatibility.yml'
       - 'projects/rocprofiler-sdk/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

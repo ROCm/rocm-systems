@@ -21,16 +21,17 @@
 // SOFTWARE.
 
 #include "library/rocprofiler-sdk/fwd.hpp"
-#include "core/debug.hpp"
 #include "core/state.hpp"
 
-#include <timemory/utility/join.hpp>
+#include "logger/debug.hpp"
 
 #include <exception>
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+
+#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <utility>
@@ -93,18 +94,34 @@ get_agent_counter_info(const tool_agent_vec_t& _agents)
     {
         const auto& _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
 
-        ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
-            _agent_id, counters_supported_callback, &_data));
+        auto status = rocprofiler_iterate_agent_supported_counters(
+            _agent_id, counters_supported_callback, &_data);
 
-        std::sort(_data.at(_agent_id).begin(), _data.at(_agent_id).end(),
-                  [](const auto& lhs, const auto& rhs) {
-                      return (lhs.id.handle < rhs.id.handle);
-                  });
-
-        for(auto& citr : _data.at(_agent_id))
+        if(status != ROCPROFILER_STATUS_SUCCESS)
         {
-            std::sort(citr.dimension_info.begin(), citr.dimension_info.end(),
-                      [](const auto& lhs, const auto& rhs) { return (lhs.id < rhs.id); });
+            LOG_WARNING(
+                "rocprofiler_iterate_agent_supported_counters failed for agent {} "
+                "with status {} (Agent HW architecture may not be supported)",
+                _agent_id.handle, static_cast<int>(status));
+            // Skip processing for this agent if it's not supported
+            continue;
+        }
+
+        // Only process if the agent was successfully added to the map
+        auto agent_it = _data.find(_agent_id);
+        if(agent_it != _data.end())
+        {
+            std::sort(agent_it->second.begin(), agent_it->second.end(),
+                      [](const auto& lhs, const auto& rhs) {
+                          return (lhs.id.handle < rhs.id.handle);
+                      });
+
+            for(auto& citr : agent_it->second)
+            {
+                std::sort(
+                    citr.dimension_info.begin(), citr.dimension_info.end(),
+                    [](const auto& lhs, const auto& rhs) { return (lhs.id < rhs.id); });
+            }
         }
     }
 
@@ -131,9 +148,15 @@ client_data::initialize()
 void
 client_data::initialize_event_info()
 {
-    if(get_agent_manager_instance().get_agents().empty())
+    auto& agent_mngr = get_agent_manager_instance();
+
+    if(agent_mngr.get_agents().empty())
     {
         initialize();
+    }
+    else if(gpu_agents.empty() && cpu_agents.empty())
+    {
+        set_agents();
     }
 
     if(agent_counter_info.size() != gpu_agents.size())
@@ -148,13 +171,23 @@ client_data::initialize_event_info()
         {
             auto        _dev_index = aitr.device_id;
             const auto& _agent_id  = rocprofiler_agent_id_t{ aitr.agent->handle };
-            auto        _device_qualifier_sym = JOIN("", ":device=", _dev_index);
+            auto        _device_qualifier_sym = fmt::format(":device={}", _dev_index);
             auto        _device_qualifier =
                 tim::hardware_counters::qualifier{ true, static_cast<int>(_dev_index),
                                                    _device_qualifier_sym,
-                                                   JOIN(" ", "Device", _dev_index) };
+                                                   fmt::format("Device {}", _dev_index) };
 
-            auto _counter_info = agent_counter_info.at(_agent_id);
+            // Check if agent info is available ( i.e., counters are supported)
+            auto agent_info_it = agent_counter_info.find(_agent_id);
+            if(agent_info_it == agent_counter_info.end())
+            {
+                LOG_WARNING("Skipping GPU device {} ({}, handle=0x{:X}) due to "
+                            "counter not found for the specified architecture",
+                            _dev_index, aitr.agent->name, aitr.agent->handle);
+                continue;
+            }
+
+            auto _counter_info = agent_info_it->second;
             std::sort(_counter_info.begin(), _counter_info.end(),
                       [](const rocprofiler_tool_counter_info_t& lhs,
                          const rocprofiler_tool_counter_info_t& rhs) {
@@ -186,8 +219,9 @@ client_data::initialize_event_info()
                 }
                 else if(ditr.is_derived)
                 {
-                    auto _sym        = JOIN("", ditr.name, _device_qualifier_sym);
-                    auto _short_desc = JOIN("", "Derived counter: ", ditr.expression);
+                    auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
+                    auto _short_desc =
+                        fmt::format("Derived counter: {}", ditr.expression);
                     events_info.emplace_back(hardware_counter_info(
                         true, tim::hardware_counters::api::rocm, events_info.size(), 0,
                         _sym, _pysym, _short_desc, _long_desc, _units,
@@ -199,21 +233,19 @@ client_data::initialize_event_info()
 
                     for(const auto& itr : ditr.dimension_info)
                     {
-                        auto _info = (itr.instance_size > 1)
-                                         ? JOIN("", itr.name, "[", 0, ":",
-                                                itr.instance_size - 1, "]")
-                                         : std::string{};
+                        auto _info =
+                            (itr.instance_size > 1)
+                                ? fmt::format("{}[0:{}]", itr.name, itr.instance_size - 1)
+                                : std::string{};
                         if(!_info.empty()) _dim_info.emplace_back(_info);
                     }
 
-                    auto _sym        = JOIN("", ditr.name, _device_qualifier_sym);
-                    auto _short_desc = JOIN("", ditr.name, " on device ", _dev_index);
+                    auto _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
+                    auto _short_desc =
+                        fmt::format("{} on device {}", ditr.name, _dev_index);
                     if(!_dim_info.empty())
                     {
-                        namespace join = ::timemory::join;
-                        _short_desc += JOIN(
-                            "", ". ",
-                            join::join(join::array_config{ ", ", "", "" }, _dim_info));
+                        _short_desc += fmt::format("{}", fmt::join(_dim_info, ". "));
                     }
                     events_info.emplace_back(hardware_counter_info(
                         true, tim::hardware_counters::api::rocm, events_info.size(), 0,
@@ -224,7 +256,7 @@ client_data::initialize_event_info()
         }
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_WARNING_F(1, "Constructing ROCm event info failed: %s\n", _e.what());
+        LOG_WARNING("Constructing ROCm event info failed: {}", _e.what());
     }
 }
 

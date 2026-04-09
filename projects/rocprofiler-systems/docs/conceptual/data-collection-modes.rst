@@ -30,7 +30,7 @@ ROCm Systems Profiler supports several modes of recording trace and profiling da
 |                             | dynamic library/executable, like ``pthread_mutex_lock`` |
 |                             | in ``libpthread.so`` or ``MPI_Init`` in the MPI library |
 +-----------------------------+---------------------------------------------------------+
-| User API                    | User-defined regions and controls for User API ROCm     |
+| User API (deprecated)       | User-defined regions and controls for User API ROCm     |
 |                             | Systems Profiler                                        |
 +-----------------------------+---------------------------------------------------------+
 
@@ -176,7 +176,13 @@ Primary collection modes
 Trace mode (default)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled using ``ROCPROFSYS_TRACE=true`` or ``ROCPROFSYS_MODE=trace`` setting.
+Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled using ``ROCPROFSYS_TRACE=true``, ``ROCPROFSYS_MODE=trace``, or by using the ``--trace`` / ``-T`` CLI flag.
+
+ROCm Systems Profiler provides two tracing implementations:
+
+- **Cached Mode (default)**: By default, when tracing is enabled, ROCm Systems Profiler uses deferred trace generation with minimal runtime overhead. Trace data is buffered during execution and written after the application completes, significantly reducing performance impact during profiling.
+
+- **Legacy Mode**: ``ROCPROFSYS_TRACE_LEGACY=true`` or ``--trace-legacy`` / ``-L`` enables direct mode where trace data is written immediately during execution. This mode provides real-time trace generation but has higher runtime overhead compared to cached mode.
 
 Additional configuration options to control the tracing behavior include:
 

@@ -23,7 +23,6 @@
 #include "library/causal/components/progress_point.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
-#include "core/debug.hpp"
 #include "core/timemory.hpp"
 #include "library/causal/experiment.hpp"
 #include "library/thread_data.hpp"

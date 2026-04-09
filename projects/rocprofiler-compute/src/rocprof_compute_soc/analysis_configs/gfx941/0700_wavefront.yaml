@@ -17,12 +17,12 @@ Panel Config:
           avg: AVG(Grid_Size)
           min: MIN(Grid_Size)
           max: MAX(Grid_Size)
-          unit: Work Items
+          unit: Work-items
         Workgroup Size:
           avg: AVG(Workgroup_Size)
           min: MIN(Workgroup_Size)
           max: MAX(Workgroup_Size)
-          unit: Work Items
+          unit: Work-items
         Total Wavefronts:
           avg: AVG(SPI_CSN_WAVE)
           min: MIN(SPI_CSN_WAVE)
@@ -62,7 +62,7 @@ Panel Config:
           avg: AVG(Scratch_Per_Workitem)
           min: MIN(Scratch_Per_Workitem)
           max: MAX(Scratch_Per_Workitem)
-          unit: Bytes/Workitem
+          unit: Bytes per Work-item
   - metric_table:
       id: 702
       title: Wavefront Runtime Stats
@@ -77,17 +77,17 @@ Panel Config:
           avg: AVG((End_Timestamp - Start_Timestamp))
           min: MIN((End_Timestamp - Start_Timestamp))
           max: MAX((End_Timestamp - Start_Timestamp))
-          unit: ns
+          unit: Nanoseconds
         Kernel Time (Cycles):
           avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
           min: MIN($GRBM_GUI_ACTIVE_PER_XCD)
           max: MAX($GRBM_GUI_ACTIVE_PER_XCD)
-          unit: Cycle
+          unit: Cycles
         Instructions per wavefront:
           avg: AVG((SQ_INSTS / SQ_WAVES))
           min: MIN((SQ_INSTS / SQ_WAVES))
           max: MAX((SQ_INSTS / SQ_WAVES))
-          unit: Instr/wavefront
+          unit: Instructions per Wavefront
         Wave Cycles:
           avg: AVG(((4 * SQ_WAVE_CYCLES) / $denom))
           min: MIN(((4 * SQ_WAVE_CYCLES) / $denom))

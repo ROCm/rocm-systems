@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  *  @file  amd_detail/hip_cooperative_groups_helper.h
@@ -182,6 +166,11 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
   return (num_threads_till_current_workgroup + local_thread_rank);
 }
 
+__CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
+  return static_cast<__hip_uint32_t>((blockIdx.z * gridDim.y * gridDim.x) +
+                                     (blockIdx.y * gridDim.x) + (blockIdx.x));
+}
+
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_is_valid()); }
 
 __CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }
@@ -191,6 +180,9 @@ __CG_STATIC_QUALIFIER__ dim3 grid_dim() {
                static_cast<__hip_uint32_t>(gridDim.z)));
 }
 
+__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_arrive(); }
+
+__CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
 
 /**
@@ -219,6 +211,11 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
                                       (threadIdx.y * blockDim.x) + (threadIdx.x)));
 }
 
+__CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
+  return (static_cast<__hip_uint32_t>((blockIdx.z * gridDim.x * gridDim.y) +
+                                      (blockIdx.y * gridDim.x) + (blockIdx.x)));
+}
+
 __CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
 __CG_STATIC_QUALIFIER__ void sync() { __syncthreads(); }
@@ -228,6 +225,23 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
                static_cast<__hip_uint32_t>(blockDim.z)));
 }
 
+__CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
+    __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  __builtin_amdgcn_s_barrier_signal(-1);
+#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
+}
+
+__CG_STATIC_QUALIFIER__ void barrier_wait() {
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
+    __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  __builtin_amdgcn_s_barrier_wait(-1);
+#else
+  __builtin_amdgcn_s_barrier();
+#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+}
 }  // namespace workgroup
 
 namespace tiled_group {

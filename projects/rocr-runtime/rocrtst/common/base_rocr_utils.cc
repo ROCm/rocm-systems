@@ -52,6 +52,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdexcept>
 #include <string>
 #include "common/base_rocr.h"
 #include "common/helper_funcs.h"
@@ -282,24 +283,53 @@ bool CheckProfile(BaseRocR const* test) {
   }
 }
 
-/// Locate file using local and device named file paths.
+// Get the directory containing the executable
+static std::string GetExecutableDir() {
+  char* path = realpath("/proc/self/exe", nullptr);
+  if (path) {
+    std::string result(path);
+    free(path);
+    size_t last_slash = result.rfind('/');
+    if (last_slash != std::string::npos) {
+      return result.substr(0, last_slash);
+    }
+  }
+  return ".";
+}
+
+// Locate file using local and device named file paths.
 std::string LocateKernelFile(std::string filename, hsa_agent_t agent) {
   char agent_name[64];
   std::string obj_file;
   hsa_status_t err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name);
   RET_IF_HSA_UTILS_ERR_RET(err, obj_file);
 
+  // Try current directory
   obj_file = "./" + filename;
   int file_handle = open(obj_file.c_str(), O_RDONLY);
-  if (file_handle < 0) {
-    obj_file = "./" + std::string(agent_name) + "/" + filename;
-    file_handle = open(obj_file.c_str(), O_RDONLY);
-    if(file_handle < 0)
-      std::runtime_error("Could not open file.\n");
+  if (file_handle >= 0) {
+    close(file_handle);
+    return obj_file;
   }
 
-  close(file_handle);
-  return obj_file;
+  // Try ./<agent_name>/<filename>
+  obj_file = "./" + std::string(agent_name) + "/" + filename;
+  file_handle = open(obj_file.c_str(), O_RDONLY);
+  if (file_handle >= 0) {
+    close(file_handle);
+    return obj_file;
+  }
+
+  // Try <exe_dir>/../share/rocrtst/<agent_name>/<filename>
+  std::string exe_dir = GetExecutableDir();
+  obj_file = exe_dir + "/../share/rocrtst/" + std::string(agent_name) + "/" + filename;
+  file_handle = open(obj_file.c_str(), O_RDONLY);
+  if (file_handle >= 0) {
+    close(file_handle);
+    return obj_file;
+  }
+
+  throw std::runtime_error("Could not open kernel file: " + filename);
 }
 
 // Load the specified kernel code from the specified file, inspect and fill

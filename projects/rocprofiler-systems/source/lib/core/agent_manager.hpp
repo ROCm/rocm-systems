@@ -23,6 +23,7 @@
 #pragma once
 #include <cstddef>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "agent.hpp"
@@ -54,9 +55,9 @@ struct agent_manager
     size_t get_cpu_agents_count() const;
 
 private:
-    std::vector<std::shared_ptr<agent>> _agents;
-    size_t                              _gpu_agents_cnt{ 0 };
-    size_t                              _cpu_agents_cnt{ 0 };
+    size_t                                 get_agent_count(agent_type type) const;
+    std::vector<std::shared_ptr<agent>>    _agents;
+    std::unordered_map<agent_type, size_t> _agent_counts;
 };
 
 agent_manager&

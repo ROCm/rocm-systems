@@ -47,6 +47,7 @@
 
 #include <assert.h>
 #include <vector>
+#include <mutex>
 
 #include "core/inc/checked.h"
 #include "core/inc/isa.h"
@@ -213,6 +214,29 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
     return HSA_STATUS_ERROR;
   }
 
+  // @brief Submit a batch of DMA copy operations.
+  //
+  // @details Takes hsa_amd_memory_copy_op_t directly from the public API.
+  // The implementation resolves agents, signals, and preferred SDMA engines
+  // internally using rec_sdma_eng_id_peers_info_. Operations sharing the
+  // same copy_agent are grouped by the caller. Future optimizations can
+  // group items by engine to reduce redundant packets.
+  //
+  // @param [in] ops Array of copy operations (public API structs).
+  // @param [in] num_ops Number of operations in the array.
+  // @param [in] dep_signals Array of signal dependencies shared by all ops.
+  //
+  // The completion signal is obtained from each op's completion_signal field.
+  // All ops in a single call must share the same completion signal.
+  //
+  // @retval HSA_STATUS_SUCCESS All copies submitted successfully.
+  virtual hsa_status_t DmaCopyBatch(
+      const hsa_amd_memory_copy_op_t* ops,
+      uint32_t num_ops,
+      std::vector<core::Signal*>& dep_signals) {
+    return HSA_STATUS_ERROR;
+  }
+
   // @brief Submit DMA command to set the content of a pointer and wait
   // until it is finished.
   //
@@ -290,8 +314,11 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   virtual hsa_status_t GetInfo(hsa_agent_info_t attribute,
                                void* value) const = 0;
 
+  // @brief Initialize secondary CUID for this agent.
+  virtual void InitDerivedCuid() = 0;
+
   // @brief Returns an array of regions owned by the agent.
-  virtual const std::vector<const core::MemoryRegion*>& regions() const = 0;
+  virtual const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const = 0;
 
   // @brief Returns the ISA's supported by the agent.
   // @details The returned vector is a list of pointers to the supported ISA,
@@ -336,7 +363,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   __forceinline void Disable() { enabled_ = false; }
 
   virtual void Trim() {
-    for (auto region : regions()) region->Trim();
+    for (const auto& region : regions()) region.get()->Trim();
   }
 
   virtual void ReleaseResources() { }
@@ -385,7 +412,7 @@ protected:
   // Serial memory operations are needed to ensure, among other things, that allocation failures are
   // due to true OOM conditions and per region caching (Trim and Allocate must be serial and
   // exclusive to ensure this).
-  KernelMutex agent_memory_lock_;
+  std::mutex agent_memory_lock_;
 
   // Forbid copying and moving of this object
   DISALLOW_COPY_AND_ASSIGN(Agent);

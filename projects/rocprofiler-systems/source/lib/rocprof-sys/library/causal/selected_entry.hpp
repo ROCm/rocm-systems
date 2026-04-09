@@ -25,7 +25,6 @@
 #include "binary/dwarf_entry.hpp"
 #include "binary/symbol.hpp"
 #include "core/binary/fwd.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "library/causal/fwd.hpp"
 

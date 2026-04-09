@@ -1,48 +1,52 @@
-
-ARG DISTRO
-ARG VERSION
+ARG DISTRO=ubuntu
+ARG VERSION=22.04
 FROM ${DISTRO}:${VERSION}
 
-ENV HOME /root
-ENV LANG C.UTF-8
-ENV SHELL /bin/bash
-ENV BASH_ENV /etc/bash.bashrc
-ENV DEBIAN_FRONTEND noninteractive
+ENV HOME=/root
+ENV LANG=C.UTF-8
+ENV SHELL=/bin/bash
+ENV BASH_ENV=/etc/bash.bashrc
+ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
 ARG EXTRA_PACKAGES=""
-# ARG ELFUTILS_DOWNLOAD_VERSION="0.186"
-# ARG BOOST_DOWNLOAD_VERSION="1.79.0"
-# ARG NJOBS="12"
-ARG PYTHON_VERSIONS="6 7 8 9 10 11 12"
 
-ENV PATH /usr/local/bin:${PATH}
-ENV LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}
-ENV LD_LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH}
-ENV CMAKE_PREFIX_PATH /usr/local:${CMAKE_PREFIX_PATH}
-
+ENV PATH="/usr/local/bin:${PATH}"
+ENV LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
+ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64"
+ENV CMAKE_PREFIX_PATH="/usr/local"
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
     apt-get install -y autoconf autotools-dev bash-completion build-essential bzip2 cmake curl environment-modules git-core gnupg2 gzip libtool locales lsb-release m4 python3-pip unzip wget zip zlib1g-dev && \
-    python3 -m pip install 'cmake==3.28.4' && \
     apt-get autoclean && \
-    locale -a && \
-    wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
-    bash miniconda.sh -b -p /opt/conda && \
-    export PATH="/opt/conda/bin:${PATH}" && \
-    conda config --set always_yes yes --set changeps1 no && \
-    conda update -c defaults -n base conda && \
-    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip numpy; done && \
-    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy pandas dataclasses; done && \
-    conda clean -a -y && \
-    cd /tmp && \
-    shopt -s dotglob extglob && \
-    rm -rf *
+    locale -a
 
+RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+    OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+    if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
+        python3 -m pip install 'cmake==3.21'; \
+    else \
+        python3 -m pip install --break-system-packages 'cmake==3.21'; \
+    fi
 
-ENV LC_ALL C.UTF-8
+# The Rock Tarball
+ARG GPU_TYPE=""
+ARG GPU_TARBALL=""
+RUN if [ -n "$GPU_TYPE" ] && [ -n "$GPU_TARBALL" ]; then \
+        VERSION=$(echo "$GPU_TARBALL" | sed -nE 's/.*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'); \
+        if [ -z "$VERSION" ]; then \
+            echo "Error: Could not extract version from GPU_TARBALL ('$GPU_TARBALL')." >&2; \
+            exit 1; \
+        fi; \
+        pip install --upgrade pip; \
+        pip install awscli --break-system-packages; \
+        aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${VERSION}-${GPU_TYPE}.tar.gz --no-sign-request; \
+        mv rocm-${VERSION}-${GPU_TYPE}.tar.gz /opt/rocm-${VERSION}-${GPU_TYPE}.tar.gz; \
+    fi
+
+ENV LC_ALL=C.UTF-8
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]

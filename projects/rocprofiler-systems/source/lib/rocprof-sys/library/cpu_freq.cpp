@@ -25,7 +25,6 @@
 #include "core/agent_manager.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
@@ -40,6 +39,8 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/procfs/cpuinfo.hpp>
 #include <timemory/utility/type_list.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstddef>
 #include <cstdlib>
@@ -93,8 +94,7 @@ metadata_initialize_cpu_freq_tracks()
 {
     do_for_enabled_cpus([&](size_t cpu_id) {
         trace_cache::get_metadata_registry().add_track(
-            { trace_cache::info::annotate_with_device_id<category::cpu_freq>(cpu_id)
-                  .c_str(),
+            { trace_cache::info::format_track_name<category::cpu_freq>(cpu_id).c_str(),
               std::nullopt, "{}" });
     });
 }
@@ -136,8 +136,7 @@ metadata_initialize_cpu_freq_pmc(size_t dev_id)
     do_for_enabled_cpus([&](size_t cpu_id) {
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trace_cache::info::annotate_with_device_id<category::cpu_freq>(cpu_id)
-                  .c_str(),
+              trace_cache::info::format_track_name<category::cpu_freq>(cpu_id).c_str(),
               "Frequency", trait::name<category::cpu_freq>::description, LONG_DESCRIPTION,
               COMPONENT, component::cpu_freq::display_unit().c_str(),
               rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
@@ -283,6 +282,20 @@ void
 shutdown()
 {}
 
+void
+pause()
+{
+    if(get_state() >= State::Finalized) return;
+
+    auto current_timestamp = tim::get_clock_real_now<size_t, std::nano>();
+    const component::cpu_freq zero_freq;
+
+    trace_cache::get_buffer_storage().store(trace_cache::cpu_freq_sample{
+        current_timestamp, 0, 0, 0, 0, 0, 0, 0, serialize_freqs(zero_freq) });
+
+    data.emplace_back(current_timestamp, 0, 0, 0, 0, 0, 0, 0, zero_freq);
+}
+
 namespace
 {
 template <typename... Types, size_t N = sizeof...(Types)>
@@ -299,7 +312,9 @@ config_perfetto_counter_tracks(type_list<Types...>, std::array<const char*, N> _
         constexpr auto _idx = tim::index_of<type, type_list<Types...>>::value;
         if(!track::exists(0))
         {
-            auto addendum = [&](const char* _v) { return JOIN(" ", "CPU", _v, "(S)"); };
+            auto addendum = [&](const char* _v) {
+                return fmt::format("CPU [{}] (S)", _v);
+            };
             track::emplace(0, addendum(_labels.at(_idx)), _units.at(_idx));
         }
     };
@@ -332,9 +347,8 @@ write_perfetto_counter_track(index&& _idx, Args... _args)
 void
 post_process()
 {
-    ROCPROFSYS_VERBOSE(1,
-                       "Post-processing %zu cpu frequency and memory usage entries...\n",
-                       data.size());
+    LOG_DEBUG("Post-processing {} cpu frequency and memory usage entries...",
+              data.size());
 
     auto& enabled_cpus = component::cpu_freq::get_enabled_cpus();
 
@@ -342,13 +356,16 @@ post_process()
         using freq_track = perfetto_counter_track<category::cpu_freq>;
 
         const auto& _thread_info = thread_info::get(0, InternalTID);
-        ROCPROFSYS_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+        if(get_is_continuous_integration() && !_thread_info)
+        {
+            throw std::runtime_error("Missing thread info for thread 0");
+        }
         if(!_thread_info) return;
 
         if(!freq_track::exists(_idx))
         {
             auto addendum = [&](const char* _v) {
-                return JOIN(" ", "CPU", _v, JOIN("", '[', _idx, ']'), "(S)");
+                return fmt::format("CPU {} [{}] (S)", _v, _idx);
             };
             freq_track::emplace(_idx, addendum("Frequency"), "MHz");
         }
@@ -379,7 +396,10 @@ post_process()
         }
 
         const auto& _thread_info = thread_info::get(0, InternalTID);
-        ROCPROFSYS_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+        if(get_is_continuous_integration() && !_thread_info)
+        {
+            throw std::runtime_error("Missing thread info for thread 0");
+        }
         if(!_thread_info) return;
 
         for(auto& itr : data)

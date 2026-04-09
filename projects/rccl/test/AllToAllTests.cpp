@@ -10,12 +10,12 @@
 
 namespace RcclUnitTesting
 {
-  TEST(AllToAll, OutOfPlace)
+  TEST(AlltoAll, OutOfPlace)
   {
     TestBed testBed;
 
     // Configuration
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllToAll};
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
     std::vector<ncclDataType_t> const dataTypes       = {ncclFloat16, ncclFloat32};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
@@ -29,12 +29,12 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
-  TEST(AllToAll, OutOfPlaceGraph)
+  TEST(AlltoAll, OutOfPlaceGraph)
   {
     TestBed testBed;
 
     // Configuration
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllToAll};
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
     std::vector<ncclDataType_t> const dataTypes       = {ncclFloat64, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
@@ -48,12 +48,12 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
-  TEST(AllToAll, ManagedMem)
+  TEST(AlltoAll, ManagedMem)
   {
     TestBed testBed;
 
     // Configuration
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllToAll};
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
     std::vector<ncclDataType_t> const dataTypes       = {ncclUint8};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
@@ -67,12 +67,12 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
-  TEST(AllToAll, ManagedMemGraph)
+  TEST(AlltoAll, ManagedMemGraph)
   {
     TestBed testBed;
 
     // Configuration
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllToAll};
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
     std::vector<ncclDataType_t> const dataTypes       = {ncclUint32, ncclUint64};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
@@ -86,13 +86,13 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
-    TEST(AllToAll, Channels)
+    TEST(AlltoAll, Channels)
   {
     TestBed testBed;
     if(testBed.ev.maxGpus >= 8) {
       if(testBed.ev.isGfx94) {
         // Configuration
-        std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllToAll};
+        std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
         std::vector<ncclDataType_t> const dataTypes       = {ncclBfloat16};
         std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
         std::vector<int>            const roots           = {0};

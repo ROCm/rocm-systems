@@ -23,6 +23,7 @@
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <gtest/gtest.h>
 
 #include <cstddef>

@@ -6,13 +6,25 @@ on:
       - develop
     paths:
       - 'projects/rocprofiler-register/**'
-      - '!projects/rocprofiler-register/*.md'
       - '.github/workflows/rocprofiler-register-continuous-integration.yml'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
   pull_request:
     paths:
       - 'projects/rocprofiler-register/**'
-      - '!projects/rocprofiler-register/*.md'
       - '.github/workflows/rocprofiler-register-continuous-integration.yml'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

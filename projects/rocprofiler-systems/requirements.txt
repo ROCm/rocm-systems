@@ -1,0 +1,19 @@
+# Requirements for rocprofiler-systems pytest test suite
+#
+# Install with:
+#   pip install -r requirements.txt
+
+# Core testing framework
+pytest>=7.4.0
+pytest-subtests>=0.10.0
+pytest-timeout>=2.0.0
+pytest-xdist>=3.0.0
+
+# Optional: Coverage reporting
+pytest-cov>=4.0.0
+
+# Perfetto trace processing (optional, for trace validation)
+perfetto>=0.7.0
+
+# Type checking support (optional)
+typing-extensions>=4.0.0

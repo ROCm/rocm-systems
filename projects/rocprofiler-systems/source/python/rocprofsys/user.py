@@ -44,7 +44,6 @@ from .libpyrocprofsys.user import pop_region
 from .common import _initialize
 from .common import _file
 
-
 __all__ = [
     "region",
     "Region",

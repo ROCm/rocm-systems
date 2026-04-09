@@ -66,9 +66,14 @@
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
+ * - 1.16 - hsa_amd_counted_queue APIs
+ * - 1.17 - hsa_amd_memory_async_batch_copy
+ * - 1.18 - hsa_amd_pointer_info: Added alloc_flags field to hsa_amd_pointer_info_t
+ * - 1.19 - hsa_amd_agent_preload
+ * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 15
+#define HSA_AMD_INTERFACE_VERSION_MINOR 20
 
 #ifdef __cplusplus
 extern "C" {
@@ -393,9 +398,11 @@ typedef struct hsa_amd_aie_ert_packet_s {
    */
   uint64_t reserved4;
   /**
-   * Reserved. Must be 0.
+   * Signal used to indicate completion of the command. When the command has
+   * finished, the runtime decrements the signal value. The application can use
+   * the special signal handle 0 to indicate that no completion signal is used.
    */
-  uint64_t reserved5;
+  hsa_signal_t completion_signal;
   /**
    * Address of packet data payload. ERT commands contain arbitrarily sized
    * data payloads.
@@ -458,6 +465,12 @@ enum {
    * Request is not supported by this system
    */
   HSA_STATUS_ERROR_NOT_SUPPORTED = 47,
+
+  /**
+   * Xnack is disabled on this system, but required 
+   * by the requested operation.
+   */
+  HSA_STATUS_ERROR_XNACK_DISABLED = 48,
 };
 
 /** @} */
@@ -715,6 +728,15 @@ typedef enum hsa_amd_agent_info_s {
    * valid on Windows. The type of this attribute is LUID.
    */
   HSA_AMD_AGENT_INFO_LUID = 0xA11A,
+  /**
+   * The agent supports expert scheduling mode. The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE = 0xA11B,
+  /**
+   * Queries the secondary CUID (128-bit UUID (16 bytes) in UUIDv8 format) 
+   * of a CPU/GPU agent. The type of this attribute is uint8_t[16].
+   */
+  HSA_AMD_AGENT_INFO_CUID = 0xA11C,
 } hsa_amd_agent_info_t;
 
 /**
@@ -928,6 +950,43 @@ hsa_status_t HSA_API
  */
 hsa_status_t HSA_API
     hsa_amd_profiling_async_copy_enable(bool enable);
+
+/**
+ * @brief Flags for hsa_amd_agent_preload.
+ *
+ * @details By default, hsa_amd_agent_preload preloads all resources.
+ * These flags can be used to skip specific resources.
+ */
+typedef enum hsa_amd_agent_preload_flag_s {
+  /**
+   * Skip preloading clock synchronization data.
+   */
+  HSA_AMD_AGENT_PRELOAD_SKIP_CLOCK_SYNC = (1 << 0),
+  /**
+   * Skip preloading blit kernel objects.
+   */
+  HSA_AMD_AGENT_PRELOAD_SKIP_BLITS = (1 << 1)
+} hsa_amd_agent_preload_flag_t;
+
+/**
+ * @brief Performance hint to preload agent resources.
+ *
+ * @details Trigger early initialization of agent resources. By default,
+ * all resources are preloaded. Use flags to skip specific resources.
+ *
+ * @param[in] agent The agent to preload resources for. Must be a GPU agent.
+ *
+ * @param[in] flags A bitwise OR of ::hsa_amd_agent_preload_flag_t values
+ * specifying which resources to skip.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU.
+ */
+hsa_status_t HSA_API hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags);
 
 /**
  * @brief Retrieve packet processing time stamps.
@@ -1808,6 +1867,242 @@ hsa_status_t HSA_API
                               hsa_signal_t completion_signal,
                               hsa_amd_sdma_engine_id_t engine_id,
                               bool force_copy_on_sdma);
+
+/**
+ * @brief Type of memory copy operation within a batch.
+ */
+typedef enum {
+  HSA_AMD_MEMORY_COPY_OP_LINEAR               = 0,  /**< Linear copy (num_entries==0: single; num_entries>0: multi) */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST     = 1,  /**< Linear broadcast: single src -> multiple dsts */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP          = 2,  /**< Linear swap: exchange contents of src and dst */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC     = 3,  /**< Source address resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST     = 4,  /**< Destination address resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST  = 5,  /**< Both src and dst resolved via indirection */
+} hsa_amd_memory_copy_op_type_t;
+
+/**
+ * @brief Wait comparison functions for copy operations.
+ *
+ * Maps to the SDMA WAIT_FUNCTION field. The SDMA engine polls
+ * (*wait.addr & wait.mask) against wait.value using the specified
+ * comparison before starting the copy.  Orthogonal to operation type:
+ * any copy can optionally wait.
+ */
+typedef enum {
+  HSA_AMD_MEMORY_COPY_WAIT_ALWAYS = 0,  /**< Always pass (no wait) */
+  HSA_AMD_MEMORY_COPY_WAIT_LT     = 1,  /**< Less than */
+  HSA_AMD_MEMORY_COPY_WAIT_LE     = 2,  /**< Less than or equal */
+  HSA_AMD_MEMORY_COPY_WAIT_EQ     = 3,  /**< Equal */
+  HSA_AMD_MEMORY_COPY_WAIT_NE     = 4,  /**< Not equal */
+  HSA_AMD_MEMORY_COPY_WAIT_GE     = 5,  /**< Greater than or equal */
+  HSA_AMD_MEMORY_COPY_WAIT_GT     = 6,  /**< Greater than */
+} hsa_amd_memory_copy_wait_function_t;
+
+/**
+ * @brief Signal operations for copy completion notification.
+ *
+ * Maps to the SDMA SIGNAL_OPERATION field. After the copy completes,
+ * the SDMA engine performs the specified atomic operation on signal.addr.
+ * This is a raw GPU-side signal, separate from the HSA completion_signal.
+ */
+typedef enum {
+  HSA_AMD_MEMORY_COPY_SIGNAL_NONE  = 0,   /**< No signal operation */
+  HSA_AMD_MEMORY_COPY_SIGNAL_WRITE = 1,   /**< 64b write: *addr = data */
+  HSA_AMD_MEMORY_COPY_SIGNAL_ADD   = 2,   /**< 64b add: *addr += data */
+  HSA_AMD_MEMORY_COPY_SIGNAL_SUB   = 3,   /**< 64b sub: *addr -= data */
+} hsa_amd_memory_copy_signal_op_t;
+
+/**
+ * @brief Version of the hsa_amd_memory_copy_op_t structure.
+ *
+ * Callers must set the @c version field to this value.  The runtime rejects
+ * operations whose version it does not recognise.
+ */
+#define HSA_AMD_MEMORY_COPY_OP_VERSION 1
+
+/**
+ * @brief Describes a single copy operation within a batch.
+ *
+ * The @c version field must be set to @c HSA_AMD_MEMORY_COPY_OP_VERSION.
+ *
+ * Common fields (all operation types):
+ *   version         -- must be HSA_AMD_MEMORY_COPY_OP_VERSION
+ *   type            -- one of hsa_amd_memory_copy_op_type_t
+ *   completion_signal -- per-operation completion signal
+ *   traffic_class   -- QoS traffic class (0 = default/unspecified)
+ *   reserved[]      -- must be zero
+ *
+ * Wait-before-copy (orthogonal, any operation type):
+ *   wait.function   -- comparison function (hsa_amd_memory_copy_wait_function_t).
+ *                      SDMA polls (*wait.addr & wait.mask) against wait.value using
+ *                      this comparison before starting the copy.  ALWAYS (0) = no wait.
+ *   wait.scope      -- coherency scope (hsa_fence_scope_t) for pre-copy memory reads:
+ *                      wait address polling and indirect address resolution.
+ *                      Must be 0 when function is ALWAYS and type is not INDIRECT_*.
+ *   wait.addr       -- address to poll (NULL when function is ALWAYS)
+ *   wait.value      -- reference value for the comparison
+ *   wait.mask       -- AND mask applied to the polled value before comparison
+ *
+ * Signal-after-copy (orthogonal, any operation type):
+ *   signal.operation -- signal operation (hsa_amd_memory_copy_signal_op_t).
+ *                       NONE (0) = no signal.  This is a raw GPU-side atomic,
+ *                       separate from the HSA completion_signal.
+ *   signal.scope     -- coherency scope for the signal write (hsa_fence_scope_t)
+ *   signal.addr      -- target address for the atomic (NULL when operation is NONE)
+ *   signal.data      -- data value for the atomic operation
+ *
+ * Field usage per operation type:
+ *
+ * LINEAR (default, single copy when num_entries == 0):
+ *   src, src_agent  -- source pointer and agent
+ *   dst, dst_agent  -- destination pointer and agent
+ *   size            -- copy size in bytes
+ *   num_entries        -- 0
+ *
+ * LINEAR (multi-copy when num_entries > 0, one signal for all entries):
+ *   src_list         -- caller-owned array of num_entries source pointers
+ *   src_agent        -- common source agent (must be GPU)
+ *   dst_list         -- caller-owned array of num_entries destination pointers
+ *   dst_agent_list   -- caller-owned array of num_entries destination agents
+ *   size_list        -- caller-owned array of num_entries copy sizes in bytes
+ *   num_entries         -- number of entries (>= 1, <= 1024)
+ *
+ * LINEAR_BROADCAST (single source -> multiple destinations):
+ *   src, src_agent    -- source pointer and agent (must be GPU)
+ *   dst_list          -- caller-owned array of num_entries destination pointers
+ *   dst_agent_list    -- caller-owned array of num_entries destination agents
+ *   size              -- copy size in bytes (same for every destination)
+ *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 1024)
+ *
+ * LINEAR_SWAP (exchange contents of two buffers, multi-entry when num_entries > 0):
+ *   src_list         -- caller-owned array of num_entries source pointers
+ *   src_agent        -- common agent for routing
+ *   dst_list         -- caller-owned array of num_entries destination pointers
+ *   dst_agent_list   -- caller-owned array of num_entries destination agents
+ *   size_list        -- caller-owned array of num_entries swap sizes in bytes
+ *   num_entries      -- number of entries (>= 1, <= 1024)
+ *
+ * LINEAR_SWAP (single, when num_entries == 0):
+ *   src, src_agent  -- first buffer pointer and agent (modified in place)
+ *   dst, dst_agent  -- second buffer pointer and agent (modified in place)
+ *   src_size        -- size of the source region in bytes
+ *   dst_size        -- size of the destination region in bytes
+ *   num_entries     -- 0
+ *
+ * LINEAR_INDIRECT_SRC (source address resolved via indirection):
+ *   src             -- void** pointing to the actual source address
+ *   dst             -- regular destination pointer
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * LINEAR_INDIRECT_DST (destination address resolved via indirection):
+ *   src             -- regular source pointer
+ *   dst             -- void** pointing to the actual destination address
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * LINEAR_INDIRECT_SRCDST (both addresses resolved via indirection):
+ *   src             -- void** pointing to the actual source address
+ *   dst             -- void** pointing to the actual destination address
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * For all INDIRECT_* types:
+ *   src_agent, dst_agent -- source and destination agents
+ *   size            -- copy size in bytes
+ *   num_entries        -- must be 0
+ *
+ * Future-proofing unions (reserved, must not be used):
+ *   src_agent_list           -- reserved for future gather operations
+ *   unused_size              -- must be 0 for non-SWAP types; for LINEAR multi, use size_list instead
+ */
+typedef struct hsa_amd_memory_copy_op_s {
+  uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
+  uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
+  uint16_t num_entries;                    /**< LINEAR multi / BROADCAST / SWAP: number of entries; others: must be 0 */
+  uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
+  hsa_signal_t completion_signal;         /**< Completion signal for this operation */
+  union {
+    void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
+    void** src_list;                      /**< LINEAR multi: caller-owned array of num_entries source pointers */
+  };
+  union {
+    hsa_agent_t src_agent;                /**< Source agent */
+    hsa_agent_t* src_agent_list;          /**< Reserved for future use */
+  };
+  union {
+    hsa_agent_t dst_agent;                /**< Destination agent (single-dst types) */
+    hsa_agent_t* dst_agent_list;          /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination agents */
+  };
+  union {
+    void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
+    void** dst_list;                      /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination pointers */
+  };
+  union {
+    struct {
+      size_t size;                        /**< Copy size in bytes (LINEAR single / BROADCAST / INDIRECT) */
+      size_t unused_size;                 /**< Must be 0 for non-SWAP types; unused for LINEAR multi */
+    };
+    struct {
+      size_t src_size;                    /**< SWAP: source region size in bytes */
+      size_t dst_size;                    /**< SWAP: destination region size in bytes */
+    };
+    struct {
+      size_t* size_list;                  /**< LINEAR multi: caller-owned array of num_entries copy sizes */
+      size_t reserved0;                   /**< Must be 0 for LINEAR multi */
+    };
+  };
+  /** Wait-before-copy. Set to {0} to disable. */
+  struct {
+    uint16_t function;                    /**< Comparison (hsa_amd_memory_copy_wait_function_t) */
+    uint16_t scope;                       /**< Scope (hsa_fence_scope_t) */
+    uint32_t reserved;                    /**< Must be 0 */
+    void*    addr;                        /**< Address to poll (NULL = no wait) */
+    uint64_t value;                       /**< Reference value for wait comparison */
+    uint64_t mask;                        /**< AND mask applied before comparison */
+  } wait;                                 /**< Wait-before-copy descriptor */
+  /** Signal-after-copy (raw GPU-side atomic, separate from completion_signal). Set to {0} to disable. */
+  struct {
+    uint16_t operation;                   /**< Signal op (hsa_amd_memory_copy_signal_op_t) */
+    uint16_t scope;                       /**< Scope for signal write (hsa_fence_scope_t) */
+    uint32_t reserved;                    /**< Must be 0 */
+    void*    addr;                        /**< Target address for atomic (NULL = no signal) */
+    uint64_t data;                        /**< Data value for the atomic operation */
+  } signal;                               /**< Signal-after-copy descriptor */
+  uint64_t reserved1[1];                  /**< Reserved for future use. Must be zero. */
+} hsa_amd_memory_copy_op_t;
+
+/**
+ * @brief Submits a batch of asynchronous memory copy operations.
+ *
+ * @details Submits multiple memory copy operations as a batch. Each operation
+ * carries its own completion signal in @c hsa_amd_memory_copy_op_t.completion_signal.
+ * All operations within a single batch must share the same completion signal.
+ * The caller must initialise the signal value to @p num_copy_ops before calling
+ * this function; the runtime decrements it once per completed operation.
+ *
+ * Each operation is self-describing via its @c type field. A BROADCAST operation
+ * is a single op that copies one source to multiple destinations via @c dst_list
+ * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
+ * @c dst_size.
+ *
+ * @param[in] copy_ops Array of copy operation descriptors.
+ *
+ * @param[in] num_copy_ops Number of copy operations in the array.
+ *
+ * @param[in] num_dep_signals Number of dependent signals.
+ *
+ * @param[in] dep_signals Array of dependent signals that all copy operations
+ * must wait on before starting.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The batch copy was submitted successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT copy_ops is NULL, num_copy_ops
+ * is 0, any src/dst pointers are NULL, or completion_signal is invalid.
+ */
+hsa_status_t HSA_API
+    hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* copy_ops,
+                              uint32_t num_copy_ops,
+                              uint32_t num_dep_signals,
+                              const hsa_signal_t* dep_signals);
+
 /**
  * @brief Reports the availability of SDMA copy engines.
  *
@@ -2307,7 +2602,8 @@ hsa_status_t HSA_API
  *
  * @param[in] agents List of accessing agents.
  *
- * @param[in] interop_handle Handle of interop buffer (dmabuf handle in Linux)
+ * @param[in] interop_handle interop buffer handle (FD on Linux and HANDLE on
+ * Windows)
  *
  * @param [in] flags Reserved, must be 0
  *
@@ -2328,14 +2624,10 @@ hsa_status_t HSA_API
  *
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT all other errors
  */
-hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents,
-                                        hsa_agent_t* agents,
-                                        hsa_handle_t interop_handle,
-                                        uint32_t flags,
-                                        size_t* size,
-                                        void** ptr,
-                                        size_t* metadata_size,
-                                        const void** metadata);
+hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
+                                                hsa_handle_t interop_handle, uint32_t flags,
+                                                size_t* size, void** ptr, size_t* metadata_size,
+                                                const void** metadata);
 
 /**
  * @brief Removes a previously mapped interop object from HSA's flat address space.
@@ -2382,13 +2674,50 @@ typedef enum {
 } hsa_amd_pointer_type_t;
 
 /**
+ * @brief Allocation flags reported by hsa_amd_pointer_info.
+ *
+ * These flags describe properties of the memory allocation as reported by
+ * the kernel driver.  The value of this attribute is a bitmask.
+ */
+typedef enum hsa_amd_pointer_info_alloc_flag_s {
+  /**
+   * Memory was allocated with executable permission.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE = (1 << 0),
+  /**
+   * Memory was allocated as physically contiguous.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_CONTIGUOUS = (1 << 1),
+  /**
+   * Memory is non-paged (pinned/page-locked).
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_NONPAGED = (1 << 2),
+  /**
+   * Memory has read-only access.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY = (1 << 3),
+  /**
+   * Memory is accessible by the host CPU.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS = (1 << 4),
+  /**
+   * Memory supports full system-scope atomic operations.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL = (1 << 5),
+  /**
+   * Memory supports partial (PCIe) atomic operations.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL = (1 << 6),
+} hsa_amd_pointer_info_alloc_flag_t;
+
+/**
  * @brief Describes a memory allocation known to ROCr.
  * Within a ROCr major version this structure can only grow.
  */
 typedef struct hsa_amd_pointer_info_s {
   /*
   Size in bytes of this structure.  Used for version control within a major ROCr
-  revision.  Set to sizeof(hsa_amd_pointer_t) prior to calling
+  revision.  Set to sizeof(hsa_amd_pointer_info_t) prior to calling
   hsa_amd_pointer_info.  If the runtime supports an older version of pointer
   info then size will be smaller on return.  Members starting after the return
   value of size will not be updated by hsa_amd_pointer_info.
@@ -2440,6 +2769,15 @@ typedef struct hsa_amd_pointer_info_s {
   HSA_EXT_POINTER_TYPE_UNKNOWN.
   */
   bool registered;
+
+  /*
+  Contains a bitmask of hsa_amd_pointer_info_alloc_flag_t values.
+  Reports the allocation property flags for the memory as reported by the
+  kernel driver.  This field is not meaningful if the type of the allocation
+  is HSA_EXT_POINTER_TYPE_UNKNOWN.
+  Added in version 1.18.
+  */
+  uint32_t alloc_flags;
 } hsa_amd_pointer_info_t;
 
 /**
@@ -3134,6 +3472,47 @@ hsa_status_t hsa_amd_svm_prefetch_async(void* ptr, size_t size, hsa_agent_t agen
                                         uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                         hsa_signal_t completion_signal);
 
+/**
+ * @brief Discards a batch of SVM memory ranges asynchronously.
+ *
+ * Schedules the discard of multiple SVM ranges in a single batched operation.
+ * The physical pages backing the virtual address ranges may be released and reclaimed
+ * by the system under memory pressure. The discard will be scheduled when all @p dep_signals
+ * have been resolved.
+ *
+ * Only pointers allocated using ::hsa_amd_vmem_address_reserve can be discarded.
+ *
+ * 
+ * @param[in] ptrs Array of @p count pointers to SVM memory ranges to discard.
+ * Must not be NULL.
+ *
+ * @param[in] sizes Array of @p ptr sizes, specifying the length of each memory range
+ * to discard. Must not be NULL.
+ *
+ * @param[in] count Number of memory ranges in the @p ptrs and @p sizes arrays. Must not be 0.
+ *
+ * @param[in] num_dep_signals Number of dependent signals. Can be 0.
+ *
+ * @param[in] dep_signals List of dependency signals to wait for before the discard operation
+ * starts. Can be NULL.
+ *
+ * @param[in] completion_signal Signal used to indicate completion of the discard operation.
+ * May be a NULL signal if no completion signal is required.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Discard operation was successfully scheduled.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED HSA runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptrs is NULL, @p sizes is
+ * NULL, @p count is 0, @p dep_signals and @p num_dep_signals are inconsistent.
+ *
+ * @retval ::HSA_STATUS_ERROR_XNACK_DISABLED Cannot run this API on a system with XNACK disabled.
+ */
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
+                                                     uint32_t num_dep_signals,
+                                                     const hsa_signal_t* dep_signals,
+                                                     hsa_signal_t completion_signal);
+
 /** @} */
 
 /** \addtogroup profile Profiling
@@ -3409,7 +3788,7 @@ typedef enum {
  * To minimize internal memory fragmentation, align the size to the recommended allocation granule
  * size, see HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE
  *
- * @param[in] pool memory to use
+ * @param[in] pool memory to use. Only GPU agent pools are supported.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
  * @param[in] flags - currently unsupported
@@ -3665,6 +4044,18 @@ typedef enum {
    * The type of this attribute is uint64_t.
    */
   HSA_AMD_QUEUE_INFO_DOORBELL_ID,
+  /*
+  * Returns how many times the underlying hardware queue has been shared.
+  * @p value will be set to -1 if this queue was not allocated using
+  * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
+  */
+  HSA_QUEUE_INFO_USE_COUNT,
+  /*
+  * Returns a unique ID representing the HW resource used by a counted queue. Two queues
+  * with the same HW_ID use the same underlying hardware queue. This query can be
+  * used on counted and non-counted queues. The type of this attribute is uint32_t.
+  */
+  HSA_QUEUE_INFO_HW_ID,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
@@ -3758,6 +4149,82 @@ hsa_status_t HSA_API hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, vo
 hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devicePtr,
                                            uint64_t size, int64_t file_offset,
                                            uint64_t *size_copied, int32_t *status);
+
+/**
+ * @brief Create a queue that is limited by the GPU_MAX_HW_QUEUES environment variable.
+ *
+ * This underlying hardware queue returned by this function may be shared by other queues. For
+ * each priority this function will create a new hardware queue as long as the number of queues
+ * is less than GPU_MAX_HW_QUEUES. Once the GPU_MAX_HW_QUEUES limit is reached, this function will
+ * stop creating new hardware queues and return a reference to an existing queue of the requested
+ * @p priority instead. Each successful call will return a different @p queue handle.
+ * The hsa_amd_queue_get_info API can be used to determine whether this queue is currently shared.
+ *
+ * When there are multiple eligible hardware queues available, the queue with the lowest
+ * HSA_QUEUE_INFO_USE_COUNT will be returned.
+ *
+ * For each successful call, hsa_amd_counted_queue_release should be called to release the
+ * HSA_QUEUE_INFO_USE_COUNT. After release, the queue handle becomes invalid and must not be used.
+ *
+ * hsa_amd_queue_set_priority and hsa_amd_queue_cu_set_mask cannot be used on counted queues.
+ *
+ * @param[in] agent Agent where to create the queue
+ *
+ * @param[in] type  For future use. HSA_QUEUE_TYPE_MULTI is the only valid option.
+ * HSA_QUEUE_TYPE_COOPERATIVE queues are not supported.
+ *
+ * @param[in] priority Associated priority. The GPU_MAX_HW_QUEUES limit is counted for each priority
+ *
+ * @param[in] callback callback invoked by the HSA runtime for every asynchronous event related to
+ * the newly created queue. May be NULL. The HSA runtime passes three arguments to the callback: a
+ * code identifying the event that triggered the invocation, a pointer to the queue where the event
+ * originated, and the application data.
+ *
+ * @param[in] data Application data that is passed to @p callback on every iteration. May be NULL.
+ *
+ * @param[in] flags For future use. Ignored.
+ *
+ * @param[out] queue Unique handle to reference the newly created queue.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES There is failure to allocate the resources required
+ * by the implementation.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU agent.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p type is not HSA_QUEUE_TYPE_MULTI.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid priority or NULL queue pointer.
+ */
+hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
+                                           hsa_amd_queue_priority_t priority,
+                                           void (*callback)(hsa_status_t status,
+                                                            hsa_queue_t* source, void* data),
+                                           void* data, uint64_t flags, hsa_queue_t** queue);
+
+/**
+ * @brief Release a counted queue and decrements its use count.
+ *
+ * Releases a queue that was previously acquired using hsa_amd_counted_queue_acquire.
+ * Each call to this API decrements the internal use count HSA_QUEUE_INFO_USE_COUNT
+ * of the underlying hardware. After this call, queue handle is invalid and must not be used.
+ * Once created, the hardware queue is retained until hsa_shutdown is called to avoid costly
+ * overhead of repeatedly creating new hardware queues, allowing them to be reused.
+ *
+ *
+ * @param[in] queue Counted queue handle returned from hsa_amd_counted_queue_acquire.
+ * Must not be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR Invalid queue or queue was already released.
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT The @p queue is NULL or previously released.
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The queue's agent is invalid or not a GPU agent.
+ */
+hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
 /**
  * @brief logging types

@@ -98,11 +98,14 @@ extern "C"
     bool rocprofsys_init_tooling_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_init_hidden(const char*, bool, const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_finalize_hidden(void) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_set_finalization_done_hidden(void) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_reset_for_reattach_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_reset_preload_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_set_env_hidden(const char*, const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_set_mpi_hidden(bool, bool) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_trace_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_pop_trace_hidden(const char*) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_flush_pending_region_cache_hidden() ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_region_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_pop_region_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_category_region_hidden(rocprofsys_category_t, const char*,
@@ -118,4 +121,8 @@ extern "C"
     void rocprofsys_progress_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_annotated_progress_hidden(const char*, rocprofsys_annotation_t*,
                                               size_t) ROCPROFSYS_HIDDEN_API;
+
+    /// registers external pause/resume callbacks (e.g. from the Python profiler).
+    void rocprofsys_external_register_pause_callbacks(void (*)(),
+                                                      void (*)()) ROCPROFSYS_PUBLIC_API;
 }

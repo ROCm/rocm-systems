@@ -48,8 +48,28 @@ The L2 cache’s speed-of-light table contains a few key metrics about the
 performance of the L2 cache, aggregated over all the L2 channels, as a
 comparison with the peak achievable values of those metrics:
 
-.. jinja:: l2-sol
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: l2-sol-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: l2-sol-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: l2-sol-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: l2-sol-gfx950
+         :file: _templates/metrics_table.j2
 
 .. note::
 
@@ -69,8 +89,28 @@ This section details the incoming requests to the L2 cache from the
 :doc:`vL1D <vector-l1-cache>` and other clients -- for instance, the
 :ref:`sL1D <desc-sL1D>` and :ref:`L1I <desc-l1i>` caches.
 
-.. jinja:: l2-cache-accesses
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: l2-cache-accesses-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: l2-cache-accesses-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: l2-cache-accesses-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: l2-cache-accesses-gfx950
+         :file: _templates/metrics_table.j2
 
 .. note::
 
@@ -162,8 +202,28 @@ Metrics
 
  The following metrics are reported for the L2-Fabric interface:
 
-.. jinja:: l2-fabric-metrics
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: l2-fabric-metrics-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: l2-fabric-metrics-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: l2-fabric-metrics-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: l2-fabric-metrics-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _l2-detailed-metrics:
 
@@ -173,8 +233,28 @@ Detailed transaction metrics
 The following metrics are available in the detailed L2-Fabric
 transaction breakdown table:
 
-.. jinja:: l2-detailed-metrics
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: l2-detailed-metrics-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: l2-detailed-metrics-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: l2-detailed-metrics-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: l2-detailed-metrics-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _l2-fabric-stalls:
 
@@ -188,8 +268,28 @@ what types of requests in a kernel caused a stall (like read versus write), and
 to which locations -- for instance, to the accelerator’s local memory, or to
 remote accelerators or CPUs.
 
-.. jinja:: l2-fabric-stalls
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: l2-fabric-stalls-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: l2-fabric-stalls-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: l2-fabric-stalls-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: l2-fabric-stalls-gfx950
+         :file: _templates/metrics_table.j2
 
 .. warning::
 

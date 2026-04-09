@@ -37,6 +37,8 @@ extern "C" {
 
 #define vhsakmt_atomic_inc_return(ptr) (atomic_fetch_add((ptr), 1) + 1)
 #define vhsakmt_atomic_dec_return(ptr) (atomic_fetch_sub((ptr), 1) - 1)
+#define vhsakmt_atomic_inc(ptr) ((void)atomic_fetch_add((ptr), 1))
+#define vhsakmt_atomic_dec(ptr) ((void)atomic_fetch_sub((ptr), 1))
 
 #define VHSA_VPTR_TO_UINT64(vptr) ((uint64_t)(unsigned long)(vptr))
 #define VHSA_UINT64_TO_VPTR(v) ((void*)(unsigned long)(v))
@@ -73,7 +75,7 @@ extern vhsakmt_device_handle dev_list;
 #define VHSA_BO_QUEUE_RW_PTR 1 << 4   /* queue read write ptr, from host map to guest*/
 /* allocated from KFD, but used for AQL queue read write ptr */
 #define VHSA_BO_QUEUE_AQL_RW_PTR 1 << 5
-#define VHSA_BO_CLGL 1 << 6 /* CLGL memory, imported from mesa GL */
+#define VHSA_BO_AMDGPU 1 << 6 /* amdgpu bo */
 /* allocated from KFD, but is scratch memory, do not need map and unmap in ioctrl */
 #define VHSA_BO_SCRATCH 1 << 7
 #define VHSA_BO_QUEUE 1 << 8
@@ -92,6 +94,8 @@ struct vhsakmt_node {
   void* doorbell_base;
   uint64_t scratch_start;
   uint64_t scratch_size;
+  HsaAMDGPUDeviceHandle amdgpu_device_handle;
+  int amdgpu_fd;
 };
 
 struct vhsakmt_device {
@@ -143,7 +147,16 @@ struct vhsakmt_bo {
   vHsaEvent* event;
   uint64_t queue_id;
   vhsakmt_bo_handle rw_bo;
-  void* gl_meta_data;
+  struct
+  {
+    void* gl_meta_data;
+    uint64_t import_size;
+    bool imported : 1;
+    int refcount;
+    pthread_mutex_t lock;  /* protects imported, import_size and refcount operations */
+  } amdgpu_bo;
+
+  void* user_data;
 };
 
 /*hsakmt_virtio_memory.c*/
@@ -179,10 +192,12 @@ int vhsakmt_set_node_doorbell(vhsakmt_device_handle dev, uint32_t node, void* do
 void* vhsakmt_node_doorbell(vhsakmt_device_handle dev, uint32_t node);
 bool vhsakmt_is_scratch_mem(vhsakmt_device_handle dev, void* addr);
 bool vhsakmt_is_userptr(vhsakmt_device_handle dev, void* addr);
+struct vhsakmt_node* vhsakmt_get_node_by_id(vhsakmt_device_handle dev, uint32_t node_id);
 
 /*hsakmt_virtio_device.c*/
 int vhsakmt_execbuf_cpu(vhsakmt_device_handle dev, struct vhsakmt_ccmd_req* req, const char* from);
 void* vhsakmt_alloc_rsp(vhsakmt_device_handle dev, struct vhsakmt_ccmd_req* req, uint32_t sz);
+int vhsakmt_handle_to_resid(vhsakmt_device_handle dev, uint32_t handle, uint32_t* res_id, uint32_t* bo_handle);
 
 /*hsakmt_virtio_event.c*/
 void* vhsakmt_event_host_handle(HsaEvent* h);

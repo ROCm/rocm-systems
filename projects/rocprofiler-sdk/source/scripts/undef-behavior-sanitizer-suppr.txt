@@ -1,0 +1,66 @@
+#
+# UndefinedBehaviorSanitizer suppressions file for rocprofiler project.
+#
+# UBSAN suppressions use the format: type:pattern
+# where type can be: alignment, bool, bounds, enum, float-cast-overflow,
+# float-divide-by-zero, function, integer-divide-by-zero, null, object-size,
+# pointer-overflow, return, returns-nonnull-attribute, shift, signed-integer-overflow,
+# unreachable, unsigned-integer-overflow, vla-bound, vptr
+#
+
+# Suppress undefined behavior in HSA runtime
+vptr:libhsa-runtime64.so
+function:libhsa-runtime64.so
+
+# Suppress undefined behavior in HIP runtime
+vptr:libamdhip64.so
+function:libamdhip64.so
+
+# Suppress undefined behavior in ROCm SMI
+vptr:librocm_smi64.so
+
+# Suppress undefined behavior in comgr
+vptr:libamd_comgr.so
+
+# Suppress alignment issues in external libraries
+alignment:libhsa-runtime64.so
+alignment:libamdhip64.so
+
+# Suppress issues in perfetto (includes TracingMuxer and protozero)
+vptr:perfetto::
+function:perfetto::
+vptr:protozero::
+function:protozero::
+vptr:perfetto::internal::
+function:perfetto::internal::
+vptr:perfetto::protos::
+function:perfetto::protos::
+
+# Suppress issues arising from OpenMP
+vptr:__kmp_resume_template
+function:__kmp_resume_template
+vptr:__kmp_suspend_initialize_thread
+function:__kmp_suspend_initialize_thread
+
+# Suppress issues in google logging
+vptr:google::LogMessageTime::CalcGmtOffset
+function:google::LogMessageTime::CalcGmtOffset
+vptr:tzset_internal
+function:tzset_internal
+
+# Suppress issues in PTL TaskGroup
+vptr:PTL::TaskGroup
+function:PTL::TaskGroup
+vptr:PTL::PackagedTask
+function:PTL::PackagedTask
+vptr:rocprofiler::internal_threading::TaskGroup
+function:rocprofiler::internal_threading::TaskGroup
+
+# Suppress issues in synchronized.hpp
+vptr:source/lib/common/synchronized.hpp
+function:source/lib/common/synchronized.hpp
+
+# Suppress issues in AQL profile library
+vptr:libhsa-amd-aqlprofile64.so
+function:libhsa-amd-aqlprofile64.so
+alignment:libhsa-amd-aqlprofile64.so

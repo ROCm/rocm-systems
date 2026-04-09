@@ -12,22 +12,26 @@ Follow our install/build guides to ensure the Python API is installed correctly 
 
 ## How to Run
 ### Basic How To
-The 2 tests are in this PATH:
+The 3 tests are in this PATH:
 ```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py```
+```/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py```
 
 The recommended method to run the tests:
 <u>Unittest only (not verbose)</u>
 ```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -b -v```
 
 <u>Unittest verbose</u>
 ```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v```
 
 <u>Unittest filter and verbose</u>
 ```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "testname" -v```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "testname" -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -k "testname" -v```
 
 ## Unittest Run Options
 The Unittest Run calls the tests directly. The cache provider will always be used.
@@ -43,15 +47,16 @@ options:
 Runs all tests. Silence print statements to stdout. Lists tests results.
 This is also the best way to list all tests available.
 
-```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v```
-```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b```
+```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b```
+```/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -b```
 
 ex.
 <details open>
   <summary>Click for example: <i><b>Unittest: not verbose</i></b></summary>
 
 ~~~shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v
+/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b
 test_check_res (__main__.TestAmdSmiPythonBDF) ... ok
 test_format_bdf (__main__.TestAmdSmiPythonBDF) ... ok
 test_parse_bdf (__main__.TestAmdSmiPythonBDF) ... ok
@@ -69,6 +74,7 @@ Helpful to see print outs of Python.
 
 ```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v```
 ```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v```
 
 
 ex.

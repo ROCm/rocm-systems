@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "arithmetic_common.hh"
 #include "atomicCAS_negative_kernels_rtc.hh"
@@ -31,11 +15,49 @@ THE SOFTWARE.
  * @ingroup AtomicsTest
  */
 
-#ifdef HT_NVIDIA
-#define TYPES
-#else
-#define TYPES , float, double
-#endif
+// Helper function to run atomicCAS tests (single kernel)
+template <typename TestType> static void runAtomicCASTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, cache_line_size);
+    }
+  }
+}
+
+// Helper function to run atomicCAS tests (multiple kernels)
+template <typename TestType> static void runAtomicCASMultiKernelTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, 1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
+                                                                         sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
+                                                                         cache_line_size);
+    }
+  }
+}
 
 /**
  * Test Description
@@ -62,25 +84,15 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned long long,
-                   unsigned short int TYPES) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, cache_line_size);
-    }
-  }
+HIP_TEST_CASE(Unit_atomicCAS_Positive) {
+  SECTION("int") { runAtomicCASTest<int>(); }
+  SECTION("unsigned int") { runAtomicCASTest<unsigned int>(); }
+  SECTION("unsigned long long") { runAtomicCASTest<unsigned long long>(); }
+  SECTION("unsigned short int") { runAtomicCASTest<unsigned short int>(); }
+#ifndef HT_NVIDIA
+  SECTION("float") { runAtomicCASTest<float>(); }
+  SECTION("double") { runAtomicCASTest<double>(); }
+#endif
 }
 
 /**
@@ -107,27 +119,15 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned lo
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive_Multi_Kernel", "", int, unsigned int,
-                   unsigned long long, unsigned short int TYPES) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
-                                                                         sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
-                                                                         cache_line_size);
-    }
-  }
+HIP_TEST_CASE(Unit_atomicCAS_Positive_Multi_Kernel) {
+  SECTION("int") { runAtomicCASMultiKernelTest<int>(); }
+  SECTION("unsigned int") { runAtomicCASMultiKernelTest<unsigned int>(); }
+  SECTION("unsigned long long") { runAtomicCASMultiKernelTest<unsigned long long>(); }
+  SECTION("unsigned short int") { runAtomicCASMultiKernelTest<unsigned short int>(); }
+#ifndef HT_NVIDIA
+  SECTION("float") { runAtomicCASMultiKernelTest<float>(); }
+  SECTION("double") { runAtomicCASMultiKernelTest<double>(); }
+#endif
 }
 
 /**
@@ -142,7 +142,7 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive_Multi_Kernel", "", int, unsigned int
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicCAS_Negative_Parameters_RTC") {
+HIP_TEST_CASE(Unit_atomicCAS_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicCAS_int, kAtomicCAS_uint, kAtomicCAS_ulong,

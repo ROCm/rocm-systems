@@ -168,25 +168,24 @@ function(ROCPROFILER_SYSTEMS_STRIP_TARGET)
     endif()
 endfunction()
 
-# ------------------------------------------------------------------------------#
-# function add_rocprofiler_systems_test_target()
-#
-# Creates a target which runs ctest but depends on all the tests being built.
-#
-# function(ADD_ROCPROFSYS_TEST_TARGET) if(NOT TARGET rocprofiler-systems-test)
-# add_custom_target( rocprofiler-systems-test COMMAND ${CMAKE_COMMAND} --build
-# ${PROJECT_BINARY_DIR} --target test WORKING_DIRECTORY ${PROJECT_BINARY_DIR} COMMENT
-# "Running tests...") endif() endfunction()
-
 # ----------------------------------------------------------------------------------------#
-# macro rocprofiler_systems_checkout_git_submodule()
+# function rocprofiler_systems_checkout_git_submodule()
 #
-# Run "git submodule update" if a file in a submodule does not exist
+# Ensures a git submodule (or external repo) is checked out. If TEST_FILE exists in the
+# submodule directory, returns immediately. Otherwise:
 #
-# ARGS: RECURSIVE (option) -- add "--recursive" flag RELATIVE_PATH (one value) --
-# typically the relative path to submodule from PROJECT_SOURCE_DIR WORKING_DIRECTORY (one
-# value) -- (default: PROJECT_SOURCE_DIR) TEST_FILE (one value) -- file to check for
-# (default: CMakeLists.txt) ADDITIONAL_CMDS (many value) -- any addition commands to pass
+#   - If .gitmodules exists: runs "git submodule update --init" for the submodule.
+#   - If REPO_URL is provided: clones the repo with "git clone -b REPO_BRANCH", then
+#     optionally runs "git submodule update --init --recursive" when RECURSIVE is set.
+#
+# ARGS:
+#   RECURSIVE (option)       -- add "--recursive" to git submodule update
+#   RELATIVE_PATH (one)      -- path to submodule, relative to WORKING_DIRECTORY
+#   WORKING_DIRECTORY (one)  -- base directory (default: PROJECT_SOURCE_DIR)
+#   TEST_FILE (one)         -- file whose existence indicates checkout (default: CMakeLists.txt)
+#   REPO_URL (one)          -- fallback: clone this URL when submodule dir missing
+#   REPO_BRANCH (one)       -- branch for REPO_URL clone (default: master)
+#   ADDITIONAL_CMDS (many)  -- extra args passed to git submodule update or clone
 #
 function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     # parse args
@@ -245,6 +244,11 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     set(_HAS_REPO_URL OFF)
     if(NOT "${CHECKOUT_REPO_URL}" STREQUAL "")
         set(_HAS_REPO_URL ON)
+    endif()
+
+    set(_RECURSE "")
+    if(CHECKOUT_RECURSIVE)
+        set(_RECURSE "--recursive")
     endif()
 
     # if the module has not been checked out
@@ -579,6 +583,148 @@ function(ROCPROFILER_SYSTEMS_PRINT_FEATURES)
     rocprofiler_systems_report_feature_changes()
     rocprofiler_systems_print_enabled_features()
     rocprofiler_systems_print_disabled_features()
+endfunction()
+
+# ----------------------------------------------------------------------------
+# function check_rocminfo()
+# Searches for a given regex in the output of rocminfo, returns true if found, false otherwise.
+# By default, returns a boolean, but if GET_OUTPUT is present, returns the output of rocminfo with the regex applied
+#
+# ARGS:
+#   _REGEX: The regex to search for
+#   _RESULT_VARIABLE: The variable to store the result
+#   GET_OUTPUT: If present, return the output of rocminfo
+#
+# Returns:
+#   Default: true if the regex is found, false otherwise
+#   GET_OUTPUT: output of rocminfo is returned in _RESULT_VARIABLE (empty string if error)
+#       Note: If regex empty, it is ignored
+#
+function(CHECK_ROCMINFO _REGEX _RESULT_VARIABLE)
+    cmake_parse_arguments(ARG "GET_OUTPUT" "" "" ${ARGN})
+    find_program(
+        rocminfo_EXECUTABLE
+        NAMES rocminfo
+        HINTS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
+        PATHS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
+        PATH_SUFFIXES bin
+    )
+
+    if(NOT DEFINED ARG_GET_OUTPUT AND _REGEX STREQUAL "")
+        message(FATAL_ERROR "Regex is empty, but GET_OUTPUT is not defined")
+    endif()
+
+    set(_result FALSE)
+    set(_failure FALSE)
+
+    if(rocminfo_EXECUTABLE)
+        execute_process(
+            COMMAND ${rocminfo_EXECUTABLE}
+            RESULT_VARIABLE rocminfo_RET
+            OUTPUT_VARIABLE rocminfo_OUTPUT
+            ERROR_VARIABLE rocminfo_ERROR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+
+        if(rocminfo_RET EQUAL 0)
+            if(NOT _REGEX STREQUAL "")
+                string(REGEX MATCHALL "${_REGEX}" rocminfo_OUTPUT "${rocminfo_OUTPUT}")
+                if(rocminfo_OUTPUT)
+                    set(_result TRUE)
+                endif()
+            endif()
+        else()
+            message(
+                AUTHOR_WARNING
+                "${rocminfo_EXECUTABLE} failed with error code ${rocminfo_RET}\nstderr:\n${rocminfo_ERROR}\nstdout:\n${rocminfo_OUTPUT}"
+            )
+            set(_failure TRUE)
+        endif()
+    else()
+        message(AUTHOR_WARNING "rocminfo not found")
+        set(_failure TRUE)
+    endif()
+
+    if(ARG_GET_OUTPUT)
+        if(NOT _failure)
+            set(${_RESULT_VARIABLE} "${rocminfo_OUTPUT}" PARENT_SCOPE)
+        else()
+            set(${_RESULT_VARIABLE} "" PARENT_SCOPE)
+        endif()
+        return()
+    endif()
+
+    set(${_RESULT_VARIABLE} ${_result} PARENT_SCOPE)
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
+# function rocprofiler_systems_get_gfx_archs()
+# If a regex is provided, it will be used to filter the architectures.
+# Otherwise, all architectures will be returned.
+#
+# Arguments:
+#   _VAR      - Output variable to store detected architectures
+#   ECHO      - If present, print detected architectures to console
+#   PREFIX    - Prefix for echo message (default: [${PROJECT_NAME}])
+#   DELIM     - Delimiter between architectures (default: ", ")
+#   GFX_MATCH - Regex to filter architectures
+#
+function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
+    cmake_parse_arguments(ARG "ECHO" "PREFIX;DELIM;GFX_MATCH" "" ${ARGN})
+
+    if(NOT DEFINED ARG_DELIM)
+        set(ARG_DELIM ", ")
+    endif()
+
+    if(NOT DEFINED ARG_PREFIX)
+        set(ARG_PREFIX "[${PROJECT_NAME}] ")
+    endif()
+
+    # Match only "Name:" lines to avoid matching gfx in marketing names/descriptions.
+    check_rocminfo("Name:[ \t]+gfx[0-9A-Fa-f][0-9A-Fa-f]+" _RAW_GFXINFO GET_OUTPUT)
+    if(NOT _RAW_GFXINFO)
+        message(AUTHOR_WARNING "Could not get system architectures")
+        return()
+    endif()
+
+    # Extract just the gfx architecture from each "Name: gfxXXXX" match
+    set(_GFXINFO "")
+    foreach(_match IN LISTS _RAW_GFXINFO)
+        string(REGEX MATCH "gfx[0-9A-Fa-f]+" _arch "${_match}")
+        if(_arch)
+            list(APPEND _GFXINFO "${_arch}")
+        endif()
+    endforeach()
+
+    list(REMOVE_ITEM _GFXINFO "gfx000")
+    list(REMOVE_DUPLICATES _GFXINFO)
+
+    # Filter architectures if GFX_MATCH regex is provided
+    if(DEFINED ARG_GFX_MATCH)
+        set(_FILTERED_GFXINFO "")
+        foreach(_arch IN LISTS _GFXINFO)
+            if(_arch MATCHES "${ARG_GFX_MATCH}")
+                list(APPEND _FILTERED_GFXINFO "${_arch}")
+            endif()
+        endforeach()
+        set(_GFXINFO "${_FILTERED_GFXINFO}")
+    endif()
+
+    # Echo detected architectures if requested
+    if(ARG_ECHO)
+        string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${_GFXINFO}")
+        if(DEFINED ARG_GFX_MATCH)
+            message(
+                STATUS
+                "${ARG_PREFIX}System architectures (filtered: ${ARG_GFX_MATCH}): ${_GFXINFO_ECHO}"
+            )
+        else()
+            message(STATUS "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}")
+        endif()
+    endif()
+
+    set(${_VAR} "${_GFXINFO}" PARENT_SCOPE)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
@@ -1001,6 +1147,81 @@ function(COMPUTE_POW2_CEIL _OUTPUT _VALUE)
     else()
         set(${_OUTPUT} "-1" PARENT_SCOPE)
     endif()
+endfunction()
+
+# ----------------------------------------------------------------------------
+# function rocprofiler_systems_lookup_gfx()
+# Classifies AMD GPU architectures (gfx IDs) into instinct, radeon, and apu.
+#
+# ARGS:
+#   _TARGET: The gfx ID to classify
+#   _OUTPUT_LIST: The list of categories the target belongs to
+#                 (instinct, radeon, apu)
+#
+# Note: If architecture is unknown, defaults to instinct
+#
+function(ROCPROFILER_SYSTEMS_LOOKUP_GFX _TARGET _OUTPUT_LIST)
+    set(INSTINCT_LIST
+        "gfx900"
+        "gfx906" # MI50/MI60
+        "gfx908"
+        "gfx90a"
+        "gfx942"
+        "gfx950"
+    )
+
+    # Also includes PRO GPUs
+    # We ignore Radeon VII (gfx906)
+    set(RADEON_LIST
+        "gfx1012"
+        "gfx1011"
+        "gfx1010"
+        "gfx1032"
+        "gfx1031"
+        "gfx1030"
+        "gfx1102"
+        "gfx1101"
+        "gfx1100"
+        "gfx1200"
+        "gfx1201"
+        "gfx1202"
+    )
+
+    set(APU_LIST
+        "gfx1035"
+        "gfx1036"
+        "gfx1103"
+        "gfx1151"
+        "gfx1152"
+        "gfx1153"
+    )
+
+    set(_CATEGORIES "")
+
+    if(_TARGET IN_LIST INSTINCT_LIST)
+        list(APPEND _CATEGORIES "instinct")
+        # Some instinct GPUs may also be an APU (ex: MI300A)
+        check_rocminfo("APU" _is_apu)
+        if(_is_apu)
+            list(APPEND _CATEGORIES "apu")
+        endif()
+    endif()
+    if(_TARGET IN_LIST RADEON_LIST)
+        list(APPEND _CATEGORIES "radeon")
+    endif()
+    if(_TARGET IN_LIST APU_LIST)
+        list(APPEND _CATEGORIES "apu")
+    endif()
+
+    if(_CATEGORIES STREQUAL "")
+        rocprofiler_systems_message(
+            AUTHOR_WARNING
+            "Unknown GFX target: ${_TARGET}. Defaulting to instinct"
+        )
+        list(APPEND _CATEGORIES "instinct")
+    endif()
+
+    set(${_OUTPUT_LIST} "${_CATEGORIES}" PARENT_SCOPE)
 endfunction()
 
 cmake_policy(POP)

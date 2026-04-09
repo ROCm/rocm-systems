@@ -1,29 +1,14 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip/hip_runtime.h"
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <cstring>
 #include "hip_helper.h"
 
 #define fileName "tex2dKernel.code"
@@ -119,7 +104,7 @@ template <typename T> bool runTest(hipModule_t& module, const char* refName, con
   unsigned int height = 256;
   unsigned int size = width * height * sizeof(T);
   T* hData = (T*)malloc(size);
-  memset(hData, 0, size);
+  std::memset(hData, 0, size);
   for (int i = 0; i < height; i++) {
     for (int j = 0; j < width; j++) {
       initVal(hData[i * width + j]);
@@ -136,12 +121,12 @@ template <typename T> bool runTest(hipModule_t& module, const char* refName, con
                                     hipMemcpyHostToDevice));
 
   hipResourceDesc resDesc;
-  memset(&resDesc, 0, sizeof(resDesc));
+  std::memset(&resDesc, 0, sizeof(resDesc));
   resDesc.resType = hipResourceTypeArray;
   resDesc.res.array.array = array;
 
   hipTextureDesc texDesc;
-  memset(&texDesc, 0, sizeof(texDesc));
+  std::memset(&texDesc, 0, sizeof(texDesc));
   texDesc.addressMode[0] = hipAddressModeClamp;
   texDesc.addressMode[1] = hipAddressModeClamp;
   texDesc.filterMode = hipFilterModePoint;
@@ -180,7 +165,7 @@ template <typename T> bool runTest(hipModule_t& module, const char* refName, con
   checkHipErrors(hipDeviceSynchronize());
 
   T* hOutputData = (T*)malloc(size);
-  memset(hOutputData, 0, size);
+  std::memset(hOutputData, 0, size);
   checkHipErrors(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
 
   for (int i = 0; i < height; i++) {

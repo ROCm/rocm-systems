@@ -44,9 +44,17 @@
 #define HSA_RUNTIME_CORE_INC_HSA_INTERNAL_H
 
 #include "inc/hsa.h"
+#include "inc/hsa_ext_amd.h"
 
 namespace rocr {
 namespace HSA {
+
+  typedef enum hsa_amd_queue_priority_internal_s {
+    HSA_AMD_QUEUE_PRIORITY_LOW = HSA_AMD_QUEUE_PRIORITY_LOW,
+    HSA_AMD_QUEUE_PRIORITY_NORMAL = HSA_AMD_QUEUE_PRIORITY_NORMAL,
+    HSA_AMD_QUEUE_PRIORITY_HIGH = HSA_AMD_QUEUE_PRIORITY_HIGH,
+    HSA_AMD_QUEUE_PRIORITY_MAXIMUM  = HSA_AMD_QUEUE_PRIORITY_HIGH + 1,
+  } hsa_amd_queue_priority_internal_t;
 
   // Define core namespace interfaces - copy of function declarations in hsa.h
   hsa_status_t hsa_init();

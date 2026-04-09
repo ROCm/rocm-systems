@@ -2,12 +2,33 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
+## Unreleased - RCCL 2.28.3 for ROCm 7.11
+
+### Known issues
+* AllGather regression for small message sizes (less than 1 MB) due to the Direct algorithm.
+* ROCTx feature needs to be verified.
+* Profiler plugin needs to be verified.
+
+### Changed
+* Compatibility with NCCL 2.28.3.
+* The MSCCL feature is now disabled by default. The `--disable-msccl-kernel` build flag is replaced with `--enable-msccl-kernel` in the `rccl/install.sh` script.
+* MSCCL and NPKIT are deprecated and will be removed in a future release of RCCL.
+* Changed GPU Direct RDMA mode selection logic to prefer peermem over DMAbuf by default. `NCCL_DMABUF_ENABLE` now defaults to 1 (previously 0). When both peermem and DMAbuf are available, RCCL will use peermem. If peermem is unavailable, RCCL will automatically fall back to DMAbuf (if available and enabled). Setting `RCCL_FORCE_ENABLE_DMABUF=1` forces DMAbuf usage exclusively, skipping peermem even if available, and disables GPU Direct RDMA if DMAbuf is unavailable.
+
+### Resolved Issues
+* Fixed MSCCLPP_ENABLE_CLIP CMake build flag, which was not being properly honored.
+
 ## Unreleased - RCCL 2.27.7 for ROCm 7.2.0
 
 ### Changed
-
 * RCCL error messages have been made more verbose in several cases. RCCL now prints out fatal error messages by default. Fatal error messages can be suppressed by setting `NCCL_DEBUG=NONE`.
 * Disabled `reduceCopyPacks` pipelining for `gfx950`.
+* Experimental support for traffic shaping using warp specialization (also known as WarpSpeed) is now available for the Ring algorithm.
+* Enabling WarpSpeed in auto mode using RCCL_WARP_SPEED_AUTO optimizes performance and reduces the CU count by 50% on a single node for AllReduce, AllGather from 64MB, and ReduceScatter from 256MB.
+* The following configuration knobs control WarpSpeed behavior for debugging purposes: `RCCL_WARP_SPEED_ENABLE`, `RCCL_UNROLL_FACTOR`, `RCCL_WARP_SPEED_CU_COUNT`, and `RCCL_THREADS_PER_BLOCK`. Note that the effective unroll factor is calculated as 2 raised to the value of `RCCL_UNROLL_FACTOR`.
+
+### Known issues
+* AllToAllv/AlltoAll for single GPU is hanging.
 
 ## Unreleased - RCCL 2.27.7 for ROCm 7.1.1
 

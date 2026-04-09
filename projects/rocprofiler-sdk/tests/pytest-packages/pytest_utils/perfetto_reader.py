@@ -31,7 +31,6 @@ import pandas as pd
 from collections import OrderedDict
 from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
 
-
 PerfettoTraceProcessorShellPath = os.path.join(
     os.path.dirname(__file__), "trace_processor_shell"
 )
@@ -283,8 +282,7 @@ class PerfettoReader:
             "SELECT slice_id, track_id, category, depth, stack_id, parent_stack_id, ts, dur, name FROM slice"
         )
 
-        counter_df = self.query_tp(
-            """SELECT
+        counter_df = self.query_tp("""SELECT
                 counter_track.id as slice_id,
                 counter.track_id,
                 counter_track.name as track_name,
@@ -299,8 +297,7 @@ class PerfettoReader:
             JOIN counter ON counter.track_id = counter_track.id
             WHERE counter_track.name LIKE 'AGENT%'
             AND counter.value > 0
-            GROUP BY counter.track_id"""
-        )
+            GROUP BY counter.track_id""")
 
         # Transform counter data to match the main dataframe schema
         if not counter_df.empty:
@@ -343,8 +340,7 @@ class PerfettoReader:
                 [self.dataframe, counter_collection_df], ignore_index=True
             )
 
-        scratch_df = self.query_tp(
-            """WITH Pairs AS(
+        scratch_df = self.query_tp("""WITH Pairs AS(
                   SELECT
                      counter.id as slice_id,
                      track_id,
@@ -366,8 +362,7 @@ class PerfettoReader:
                ts,
                dur,
                Pairs.track_name as name
-            FROM Pairs WHERE (rn % 2 == 1) ORDER BY slice_id"""
-        )
+            FROM Pairs WHERE (rn % 2 == 1) ORDER BY slice_id""")
 
         # Transform scratch memory data to match the main dataframe schema
         if not scratch_df.empty:

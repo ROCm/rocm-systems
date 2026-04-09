@@ -58,7 +58,7 @@
 namespace rocr {
 namespace core {
 
-KernelMutex Signal::ipcLock_;
+std::mutex Signal::ipcLock_;
 std::map<decltype(hsa_signal_t::handle), Signal*> Signal::ipcMap_;
 
 void SharedSignalPool_t::clear() {
@@ -76,7 +76,7 @@ void SharedSignalPool_t::clear() {
 }
 
 SharedSignal* SharedSignalPool_t::alloc() {
-  ScopedAcquire<HybridMutex> lock(&lock_);
+  std::lock_guard<HybridMutex> lock(lock_);
   if (free_list_.empty()) {
     SharedSignal* block = reinterpret_cast<SharedSignal*>(
         allocate_()(block_size_ * sizeof(SharedSignal), __alignof(SharedSignal), core::MemoryRegion::AllocateNonPaged, 0));
@@ -109,7 +109,7 @@ void SharedSignalPool_t::free(SharedSignal* ptr) {
   if (ptr == nullptr) return;
 
   ptr->~SharedSignal();
-  ScopedAcquire<HybridMutex> lock(&lock_);
+  std::lock_guard<HybridMutex> lock(lock_);
 
   ifdebug {
     bool valid = false;
@@ -134,7 +134,7 @@ LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable)
 }
 
 void Signal::registerIpc() {
-  ScopedAcquire<KernelMutex> lock(&ipcLock_);
+  std::lock_guard<std::mutex> lock(ipcLock_);
   auto handle = Convert(this);
   assert(ipcMap_.find(handle.handle) == ipcMap_.end() &&
          "Can't register the same IPC signal twice.");
@@ -142,7 +142,7 @@ void Signal::registerIpc() {
 }
 
 bool Signal::deregisterIpc() {
-  ScopedAcquire<KernelMutex> lock(&ipcLock_);
+  std::lock_guard<std::mutex> lock(ipcLock_);
   if (refcount_ != 0) return false;
   auto handle = Convert(this);
   const auto& it = ipcMap_.find(handle.handle);
@@ -152,14 +152,14 @@ bool Signal::deregisterIpc() {
 }
 
 Signal* Signal::lookupIpc(hsa_signal_t signal) {
-  ScopedAcquire<KernelMutex> lock(&ipcLock_);
+  std::lock_guard<std::mutex> lock(ipcLock_);
   const auto& it = ipcMap_.find(signal.handle);
   if (it == ipcMap_.end()) return nullptr;
   return it->second;
 }
 
 Signal* Signal::duplicateIpc(hsa_signal_t signal) {
-  ScopedAcquire<KernelMutex> lock(&ipcLock_);
+  std::lock_guard<std::mutex> lock(ipcLock_);
   const auto& it = ipcMap_.find(signal.handle);
   if (it == ipcMap_.end()) return nullptr;
   it->second->refcount_++;

@@ -14,7 +14,13 @@
 
 #include "core.h"
 
-#if CUDART_VERSION < 12030
+
+// #define HIP_FABRIC_API
+#ifdef HIP_FABRIC_API // enable based on the HIP version that adds support for fabric handles
+#define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED hipDeviceAttributeHandleTypeFabricSupported
+#define CU_MEM_HANDLE_TYPE_FABRIC hipMemHandleTypeFabric
+typedef hipMemFabricHandle_t CUmemFabricHandle;
+#elif CUDART_VERSION < 12030
 // MNNVL: FABRIC handle support lifted from CUDA 12.3
 #define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED ((CUdevice_attribute)128)
 #define CU_MEM_HANDLE_TYPE_FABRIC ((CUmemAllocationHandleType)0x8ULL)

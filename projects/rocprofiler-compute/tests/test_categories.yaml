@@ -1,0 +1,159 @@
+test_categories:
+  quick:
+    description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
+    test_patterns:
+      - test_profile_misc
+      - test_metric_validation
+      - test_profile_section
+      - test_pc_sampling
+      - test_analyze_workloads
+      - test_profile_iteration_multiplexing_1
+      - test_profile_sets_func
+      - test_utils
+      - test_pc_sampling_analysis
+      - test_tui_components
+      - test_analysis_db
+      - test_torch_trace
+      - test_L1_cache_counters
+      - test_data_imputation
+      - test_roofline_calc_ai_analyze
+      - test_num_xcds_spec_class
+      - test_profiler_base
+      - test_num_xcds_cli_output
+      - test_utils_profile_csv
+      - test_autogen_config
+      - test_import_guard
+    exclude:
+      - test_profile_live_attach_detach
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Core functionality - Run on every PR (target: < 30 min)"
+    test_patterns:
+      - test_data_imputation
+      - test_profile_dispatch
+      - test_profile_kernel_execution
+      - test_profile_join
+      - test_pc_sampling
+      - test_profile_roofline_1
+      - test_profile_section
+      - test_profile_sets_func
+      - test_profile_sort
+      - test_profile_iteration_multiplexing_1
+      - test_profile_iteration_multiplexing_2
+      - test_metric_validation
+      - test_autogen_config
+      - test_analyze_commands
+      - test_analyze_workloads
+      - test_num_xcds_cli_output
+      - test_num_xcds_spec_class
+      - test_utils
+      - test_L1_cache_counters
+      - test_roofline_calc_ai_analyze
+      - test_torch_trace
+      - test_tui_components
+      - test_import_guard
+      - test_profile_multi_rank
+      - test_analysis_db
+      - test_pc_sampling_analysis
+      - test_utils_profile_csv
+      - test_profiler_base
+    exclude:
+      - test_profile_live_attach_detach
+    labels:
+      - "standard"
+      - "pr"
+
+  comprehensive:
+    description: "Extended testing - Run nightly (target: < 2 hours)"
+    test_patterns:
+      - test_data_imputation
+      - test_profile_dispatch
+      - test_profile_kernel_execution
+      - test_profile_join
+      - test_profile_misc
+      - test_profile_path
+      - test_pc_sampling
+      - test_profile_roofline_1
+      - test_profile_roofline_2
+      - test_profile_section
+      - test_profile_sets_func
+      - test_profile_sort
+      - test_profile_iteration_multiplexing_1
+      - test_profile_iteration_multiplexing_2
+      - test_profile_iteration_multiplexing_stochastic
+      - test_metric_validation
+      - test_autogen_config
+      - test_analyze_commands
+      - test_analyze_workloads
+      - test_num_xcds_cli_output
+      - test_num_xcds_spec_class
+      - test_utils
+      - test_L1_cache_counters
+      - test_roofline_calc_ai_analyze
+      - test_torch_trace
+      - test_tui_components
+      - test_import_guard
+      - test_profile_multi_rank
+      - test_analysis_db
+      - test_pc_sampling_analysis
+      - test_utils_profile_csv
+      - test_profiler_base
+    exclude:
+      - test_profile_live_attach_detach
+    labels:
+      - "comprehensive"
+      - "nightly"
+
+  full:
+    description: "Full testing - Run weekly (target: < 4 hours)"
+    test_patterns:
+      - test_data_imputation
+      - test_profile_dispatch
+      - test_profile_kernel_execution
+      - test_profile_join
+      - test_profile_misc
+      - test_profile_path
+      - test_pc_sampling
+      - test_profile_roofline_1
+      - test_profile_roofline_2
+      - test_profile_section
+      - test_profile_sets_func
+      - test_profile_sort
+      - test_profile_iteration_multiplexing_1
+      - test_profile_iteration_multiplexing_2
+      - test_profile_iteration_multiplexing_stochastic
+      - test_metric_validation
+      - test_autogen_config
+      - test_analyze_commands
+      - test_analyze_workloads
+      - test_num_xcds_cli_output
+      - test_num_xcds_spec_class
+      - test_utils
+      - test_L1_cache_counters
+      - test_roofline_calc_ai_analyze
+      - test_torch_trace
+      - test_tui_components
+      - test_import_guard
+      - test_profile_multi_rank
+      - test_analysis_db
+      - test_pc_sampling_analysis
+      - test_utils_profile_csv
+      - test_profiler_base
+    exclude:
+      - test_profile_live_attach_detach
+    labels:
+      - "full"
+      - "weekly"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
+  category_timeouts:
+    quick: 300          # 5 minutes
+    standard: 1800      # 30 minutes
+    comprehensive: 7200 # 2 hours
+    full: 14400         # 4 hours

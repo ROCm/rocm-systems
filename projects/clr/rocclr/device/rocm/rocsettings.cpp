@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "os/os.hpp"
@@ -79,9 +65,7 @@ Settings::Settings() {
 
   rocr_backend_ = true;
 
-  cpu_wait_for_signal_ = !AMD_DIRECT_DISPATCH;
-  cpu_wait_for_signal_ =
-      (!flagIsDefault(ROC_CPU_WAIT_FOR_SIGNAL)) ? ROC_CPU_WAIT_FOR_SIGNAL : cpu_wait_for_signal_;
+  cpu_wait_for_signal_ = ROC_CPU_WAIT_FOR_SIGNAL;
   system_scope_signal_ = ROC_SYSTEM_SCOPE_SIGNAL;
 
   // Use coarse grain system memory for kernel arguments by default (to keep GPU cache)
@@ -91,9 +75,13 @@ Settings::Settings() {
   gwsInitSupported_ = true;
   limit_blit_wg_ = 16;
 
-  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : false;
+  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : 0;
   // note: OCL user events don't allow CPU blocking calls in DD mode
-  blocking_blit_ = amd::IS_HIP || !AMD_DIRECT_DISPATCH;
+  blocking_blit_ = amd::IS_HIP;
+
+  max_hw_queues_ = GPU_MAX_HW_QUEUES;
+
+  queue_pipe_dist_ = false;
 }
 
 // ================================================================================================
@@ -153,6 +141,11 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
     // Enable Barrier Value packet is only for MI2XX/300
     barrier_value_packet_ = true;
+    queue_pipe_dist_ = DEBUG_HIP_DYNAMIC_QUEUES == 2 ? true : false;
+  }
+
+  if (gfxipMajor == 9 && gfxipMinor >= 4) {
+    sdma_swap_supported_ = true;
   }
 
   setKernelArgImpl(isa, isXgmi, hasValidHDPFlush);
@@ -160,7 +153,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if (gfxipMajor >= 10) {
     enableWave32Mode_ = true;
     enableWgpMode_ = GPU_ENABLE_WGP_MODE;
-    if (gfxipMinor == 1) {
+    if (gfxipMajor == 10 && gfxipMinor == 1) {
       // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
       // TODO: This should be updated when ROCr support custom pitch
       imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
@@ -177,6 +170,10 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     gwsInitSupported_ = false;
   }
 
+  if (GPU_MIPMAP) {
+    enableExtension(ClKhrMipMapImage);
+    enableExtension(ClKhrMipMapImageWrites);
+  }
   // Override current device settings
   override();
 
@@ -262,7 +259,5 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
   }
-
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", kernel_arg_impl_);
 }
 }  // namespace amd::roc

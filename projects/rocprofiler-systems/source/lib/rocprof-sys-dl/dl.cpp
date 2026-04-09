@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #if !defined(ROCPROFSYS_DL_SOURCE)
 #    define ROCPROFSYS_DL_SOURCE 1
@@ -45,23 +26,19 @@
 #include <timemory/utility/filepath.hpp>
 
 #include <cassert>
-#include <chrono>
 #include <gnu/libc-version.h>
 #include <link.h>
 #include <linux/limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 
-#if !defined(ROCPROFSYS_USE_ROCM)
-#    define ROCPROFSYS_USE_ROCM 0
-#endif
-
-#if ROCPROFSYS_USE_ROCM > 0
+#include <rocprofiler-sdk/version.h>
+#if __has_include(<rocprofiler-sdk/experimental/registration.h>)
+#    include <rocprofiler-sdk/experimental/registration.h>
+#else
 #    include <rocprofiler-sdk/registration.h>
 #endif
-
 //--------------------------------------------------------------------------------------//
 
 #define ROCPROFSYS_DLSYM(VARNAME, HANDLE, FUNCNAME)                                      \
@@ -311,6 +288,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(rocprofsys_progress_f, m_omnihandle, "rocprofsys_progress");
         ROCPROFSYS_DLSYM(rocprofsys_annotated_progress_f, m_omnihandle,
                          "rocprofsys_annotated_progress");
+        ROCPROFSYS_DLSYM(rocprofsys_register_pause_callbacks_f, m_omnihandle,
+                         "rocprofsys_external_register_pause_callbacks");
 
         ROCPROFSYS_DLSYM(kokkosp_print_help_f, m_omnihandle, "kokkosp_print_help");
         ROCPROFSYS_DLSYM(kokkosp_parse_args_f, m_omnihandle, "kokkosp_parse_args");
@@ -359,8 +338,10 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(kokkosp_dual_view_modify_f, m_omnihandle,
                          "kokkosp_dual_view_modify");
 
-#if ROCPROFSYS_USE_ROCM > 0
         ROCPROFSYS_DLSYM(rocprofiler_configure_f, m_omnihandle, "rocprofiler_configure");
+#if ROCPROFILER_VERSION >= 10200
+        ROCPROFSYS_DLSYM(rocprofiler_configure_attach_f, m_omnihandle,
+                         "rocprofiler_configure_attach");
 #endif
 
 #if ROCPROFSYS_USE_OMPT == 0
@@ -415,6 +396,7 @@ public:
     void (*rocprofsys_progress_f)(const char*)                                 = nullptr;
     void (*rocprofsys_annotated_progress_f)(const char*, rocprofsys_annotation_t*,
                                             size_t)                            = nullptr;
+    void (*rocprofsys_register_pause_callbacks_f)(void (*)(), void (*)())      = nullptr;
 
     // librocprof-sys-user functions
     int (*rocprofsys_user_configure_f)(int, user_cb_t, user_cb_t*) = nullptr;
@@ -453,8 +435,10 @@ public:
     void (*kokkosp_dual_view_sync_f)(const char*, const void* const, bool)    = nullptr;
     void (*kokkosp_dual_view_modify_f)(const char*, const void* const, bool)  = nullptr;
 
-#if ROCPROFSYS_USE_ROCM > 0
     rocprofiler_tool_configure_result_t* (*rocprofiler_configure_f)(
+        uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
+#if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* (*rocprofiler_configure_attach_f)(
         uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
 #endif
 
@@ -887,6 +871,13 @@ extern "C"
                                     _annotations, _annotation_count);
     }
 
+    void rocprofsys_external_register_pause_callbacks(void (*pause_fn)(),
+                                                      void (*resume_fn)())
+    {
+        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_register_pause_callbacks_f,
+                             pause_fn, resume_fn);
+    }
+
     void rocprofsys_set_instrumented(int _mode)
     {
         ROCPROFSYS_DL_LOG(2, "%s(%i)\n", __FUNCTION__, _mode);
@@ -1073,13 +1064,21 @@ extern "C"
     //
     //----------------------------------------------------------------------------------//
 
-#if ROCPROFSYS_USE_ROCM > 0
     rocprofiler_tool_configure_result_t* rocprofiler_configure(
         uint32_t version, const char* runtime_version, uint32_t priority,
         rocprofiler_client_id_t* client_id)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_f, version,
                                     runtime_version, priority, client_id);
+    }
+
+#if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
+        uint32_t version, const char* runtime_version, uint32_t priority,
+        rocprofiler_client_id_t* client_id)
+    {
+        return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_attach_f,
+                                    version, runtime_version, priority, client_id);
     }
 #endif
 

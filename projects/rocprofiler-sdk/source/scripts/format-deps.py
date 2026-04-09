@@ -24,8 +24,12 @@
 
 
 import argparse
+import io
 import os
 import sys
+from pathlib import Path
+
+from ruamel.yaml import YAML
 
 
 class FormatSource(argparse.Action):
@@ -64,6 +68,23 @@ class FormatPython(argparse.Action):
         exit(0)
 
 
+class FormatYAML(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        yaml.width = 100
+        yaml.indent(mapping=2, sequence=4, offset=2)
+        config = (
+            Path(os.path.dirname(__file__))
+            / "../../source/share/rocprofiler-sdk/config.yaml"
+        ).resolve()
+        data = yaml.load(config.read_text())
+        stream = io.StringIO()
+        yaml.dump(data, stream)
+        config.write_text(stream.getvalue())
+        exit(0)
+
+
 class FormatAll(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         os.system(
@@ -87,18 +108,17 @@ class FormatAll(argparse.Action):
             + "/../../external/*\" | egrep 'CMakeLists.txt|\.cmake$')"
         )
         os.system("black " + os.path.dirname(__file__) + "/../..")
+        FormatYAML.__call__(FormatYAML, parser, namespace, values, option_string)
         exit(0)
 
 
 class InstallDepsUbuntu(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
-        os.system(
-            "sudo apt-get update; \
+        os.system("sudo apt-get update; \
             sudo apt-get install -y python3-pip software-properties-common wget curl clang-format-11; \
             python3 -m pip install -U cmake-format; \
             python -m pip install --upgrade pip; \
-            python -m pip install black"
-        )
+            python -m pip install black")
         exit(0)
 
 
@@ -120,6 +140,13 @@ parser.add_argument(
     "-p", "--python", nargs=0, help="format python files", action=FormatPython
 )
 parser.add_argument(
-    "-a", "--all", nargs=0, help="format cmake, source and python files", action=FormatAll
+    "-cc", "--counter-config", nargs=0, help="format config.yaml", action=FormatYAML
+)
+parser.add_argument(
+    "-a",
+    "--all",
+    nargs=0,
+    help="format cmake, source, python, and yaml files",
+    action=FormatAll,
 )
 parser.parse_args()

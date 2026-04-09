@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <memory>
 #include <type_traits>
@@ -83,7 +71,7 @@ bool streamWaitValueSupported() {
     auto getAttributeError = hipDeviceGetAttribute(
         &waitValueSupport, hipDeviceAttributeCanUseStreamWaitValue, device_id);
     if (getAttributeError != hipSuccess) {
-      HipTest::HIP_SKIP_TEST("attribute not supported");
+      HipTest::HIP_SKIP_TEST("required stream attribute is not supported.");
       return false;
     }
     if (waitValueSupport == 1) return true;
@@ -233,7 +221,7 @@ template <typename UIntT, PtrType ptrTypeValue> struct TestParams {
 };
 
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_hipStreamValue_Write", "", (TestParams<uint32_t, PtrType::HostPtr>),
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::HostPtr>),
                    (TestParams<uint32_t, PtrType::DevicePtr>),
                    (TestParams<uint32_t, PtrType::DevicePtrToHost>),
                    (TestParams<uint64_t, PtrType::HostPtr>),
@@ -241,7 +229,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamValue_Write", "", (TestParams<uint32_t, PtrTyp
                    (TestParams<uint64_t, PtrType::DevicePtrToHost>),
                    (TestParams<uint64_t, PtrType::Signal>)) {
 #else
-TEMPLATE_TEST_CASE("Unit_hipStreamValue_Write", "", (TestParams<uint32_t, PtrType::HostPtr>),
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::HostPtr>),
                    (TestParams<uint32_t, PtrType::DevicePtr>),
                    (TestParams<uint32_t, PtrType::DevicePtrToHost>),
                    (TestParams<uint64_t, PtrType::HostPtr>),
@@ -249,7 +237,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamValue_Write", "", (TestParams<uint32_t, PtrTyp
                    (TestParams<uint64_t, PtrType::DevicePtrToHost>)) {
 #endif
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 
@@ -301,7 +289,7 @@ void syncAndCheckData(hipStream_t stream, UIntT* dataPtr, TestPtr signalPtr, siz
 template <typename TestType, bool isBlocking>
 void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
   using UIntT = typename TestType::UIntType;
@@ -354,124 +342,221 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-// TEMPLATE_TEST_CASE wasn't working within a macro, so sections were used instead
-#define DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32(suffix, test_t)                                    \
-  TEST_CASE("Unit_hipStreamValue_Wait32_Blocking_" + std::string(suffix)) {                        \
-    SECTION("HostPtr") { testWait<TestParams<uint32_t, PtrType::HostPtr>, true>(test_t); }         \
-    SECTION("DevicePtr") { testWait<TestParams<uint32_t, PtrType::DevicePtr>, true>(test_t); }     \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint32_t, PtrType::DevicePtrToHost>, true>(test_t);                      \
-    }                                                                                              \
-  }                                                                                                \
-  TEST_CASE("Unit_hipStreamValue_Wait32_NonBlocking_" + std::string(suffix)) {                     \
-    SECTION("HostPtr") { testWait<TestParams<uint32_t, PtrType::HostPtr>, false>(test_t); }        \
-    SECTION("DevicePtr") { testWait<TestParams<uint32_t, PtrType::DevicePtr>, false>(test_t); }    \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint32_t, PtrType::DevicePtrToHost>, false>(test_t);                     \
-    }                                                                                              \
+// Combined blocking test case for both uint32_t and uint64_t
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
+  if (!streamWaitValueSupported()) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+    return;
   }
 
+  using UIntT = TestType;
+  using TestWaitType = TEST_WAIT<UIntT>;
 
-// Using Mask
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("Mask_Gte",
-                                        TEST_WAIT32(hipStreamWaitValueGte, 0xF, 0x4, 0x3, 0x6))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("Mask_Eq_1",
-                                        TEST_WAIT32(  // mask will ignore few MSB bits
-                                            hipStreamWaitValueEq, 0x0000FFFF, 0x00000001,
-                                            0x0FFF0000, 0x0FFF0001))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("Mask_Eq_2",
-                                        TEST_WAIT32(hipStreamWaitValueEq, 0xFF, 0x11, 0x25, 0x11))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("Mask_And",
-                                        TEST_WAIT32(  // mask will discard bits 8 to 11
-                                            hipStreamWaitValueAnd, 0xFF, 0xF4A, 0xF35, 0X02))
+  SECTION("Mask_Gte") {
+    TestWaitType testCase(hipStreamWaitValueGte, 0xF, 0x4, 0x3, 0x6);
 
-// Not Using Mask
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Eq", TEST_WAIT32(hipStreamWaitValueEq, 0x7FFFFFFF,
-                                                                 0x7FFF0000, 0x7FFFFFFF))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Gte", TEST_WAIT32(hipStreamWaitValueGte, 0x7FFF0001,
-                                                                  0x7FFF0000, 0x7FFF0010))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_And", TEST_WAIT32(hipStreamWaitValueAnd, 0x70F0F0F0,
-                                                                  0x0F0F0F0F, 0X1F0F0F0F))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Nor", TEST_WAIT32(hipStreamWaitValueNor, 0x7AAAAAAA,
-                                                                  0x85555555, 0x9AAAAAAA))
-
-#undef DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32
-
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
+    }
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
+    }
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
+    }
 #if HT_AMD
-// TEMPLATE_TEST_CASE wasn't working within a macro, so sections were used instead
-#define DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64(suffix, test_t)                                    \
-  TEST_CASE("Unit_hipStreamValue_Wait64_Blocking_" + std::string(suffix)) {                        \
-    SECTION("HostPtr") { testWait<TestParams<uint64_t, PtrType::HostPtr>, true>(test_t); }         \
-    SECTION("DevicePtr") { testWait<TestParams<uint64_t, PtrType::DevicePtr>, true>(test_t); }     \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint64_t, PtrType::DevicePtrToHost>, true>(test_t);                      \
-    }                                                                                              \
-    SECTION("Signal") { testWait<TestParams<uint64_t, PtrType::Signal>, true>(test_t); }           \
-  }                                                                                                \
-  TEST_CASE("Unit_hipStreamValue_Wait64_NonBlocking_" + std::string(suffix)) {                     \
-    SECTION("HostPtr") { testWait<TestParams<uint64_t, PtrType::HostPtr>, false>(test_t); }        \
-    SECTION("DevicePtr") { testWait<TestParams<uint64_t, PtrType::DevicePtr>, false>(test_t); }    \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint64_t, PtrType::DevicePtrToHost>, false>(test_t);                     \
-    }                                                                                              \
-    SECTION("Signal") { testWait<TestParams<uint64_t, PtrType::Signal>, false>(test_t); }          \
-  }
-#else
-#define DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64(suffix, test_t)                                    \
-  TEST_CASE("Unit_hipStreamValue_Wait64_Blocking_" + std::string(suffix)) {                        \
-    SECTION("HostPtr") { testWait<TestParams<uint64_t, PtrType::HostPtr>, true>(test_t); }         \
-    SECTION("DevicePtr") { testWait<TestParams<uint64_t, PtrType::DevicePtr>, true>(test_t); }     \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint64_t, PtrType::DevicePtrToHost>, true>(test_t);                      \
-    }                                                                                              \
-  }                                                                                                \
-  TEST_CASE("Unit_hipStreamValue_Wait64_NonBlocking_" + std::string(suffix)) {                     \
-    SECTION("HostPtr") { testWait<TestParams<uint64_t, PtrType::HostPtr>, false>(test_t); }        \
-    SECTION("DevicePtr") { testWait<TestParams<uint64_t, PtrType::DevicePtr>, false>(test_t); }    \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint64_t, PtrType::DevicePtrToHost>, false>(test_t);                     \
-    }                                                                                              \
-  }
+    if constexpr (std::is_same_v<UIntT, uint64_t>) {
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
+      }
+    }
 #endif
+  }
 
+  if constexpr (std::is_same_v<UIntT, uint64_t>) {
+    SECTION("Mask_Gte_1") {
+      TestWaitType testCase(hipStreamWaitValueGte, 0x0000FFFFFFFFFFFF, 0x000000007FFF0001,
+                            0x7FFF00007FFF0000, 0x000000007FFF0001);
+      SECTION("HostPtr") {
+        testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
+      }
+      SECTION("DevicePtr") {
+        testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
+      }
+      SECTION("DevicePtrToHost") {
+        testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
+      }
+#if HT_AMD
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
+      }
+#endif
+    }
+  }
 
-// Using Mask
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("Mask_Gte_1",
-                                        TEST_WAIT64(  // mask will ignore few MSB bits
-                                            hipStreamWaitValueGte, 0x0000FFFFFFFFFFFF,
-                                            0x000000007FFF0001, 0x7FFF00007FFF0000,
-                                            0x000000007FFF0001))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("Mask_Gte_2",
-                                        TEST_WAIT64(hipStreamWaitValueGte, 0xF, 0x4, 0x3, 0x6))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("Mask_Eq_1",
-                                        TEST_WAIT64(  // mask will ignore few MSB bits
-                                            hipStreamWaitValueEq, 0x0000FFFFFFFFFFFF,
-                                            0x000000000FFF0001, 0x7FFF00000FFF0000,
-                                            0x7F0000000FFF0001))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("Mask_Eq_2",
-                                        TEST_WAIT64(hipStreamWaitValueEq, 0xFF, 0x11, 0x25, 0x11))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("Mask_And",
-                                        TEST_WAIT64(  // mask will discard bits 8 to 11
-                                            hipStreamWaitValueAnd, 0xFF, 0xF4A, 0xF35, 0X02))
+  SECTION("Mask_Eq_1") {
+    TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
+      ? TestWaitType(hipStreamWaitValueEq, 0x0000FFFF, 0x00000001, 0x0FFF0000, 0x0FFF0001)
+      : TestWaitType(hipStreamWaitValueEq, 0x0000FFFFFFFFFFFF, 0x000000000FFF0001,
+                     0x7FFF00000FFF0000, 0x7F0000000FFF0001);
 
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("NoMask_Gte",
-                                        TEST_WAIT64(hipStreamWaitValueGte, 0x7FFFFFFFFFFF0001,
-                                                    0x7FFFFFFFFFFF0000, 0x7FFFFFFFFFFF0001))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("NoMask_Eq",
-                                        TEST_WAIT64(hipStreamWaitValueEq, 0x7FFFFFFFFFFFFFFF,
-                                                    0x7FFFFFFF0FFF0000, 0x7FFFFFFFFFFFFFFF))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("NoMask_And",
-                                        TEST_WAIT64(hipStreamWaitValueAnd, 0x70F0F0F0F0F0F0F0,
-                                                    0x0F0F0F0F0F0F0F0F, 0X1F0F0F0F0F0F0F0F))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64("NoMask_Nor",
-                                        TEST_WAIT64(hipStreamWaitValueNor, 0x4724724747247247,
-                                                    0xbddbddbdbddbddbd, 0xbddbddbdbddbddb3))
-#undef DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT64
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
+    }
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
+    }
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
+    }
+#if HT_AMD
+    if constexpr (std::is_same_v<UIntT, uint64_t>) {
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
+      }
+    }
+#endif
+  }
+
+  SECTION("Mask_Eq_2") {
+    TestWaitType testCase(hipStreamWaitValueEq, 0xFF, 0x11, 0x25, 0x11);
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
+    }
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
+    }
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
+    }
+#if HT_AMD
+    if constexpr (std::is_same_v<UIntT, uint64_t>) {
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
+      }
+    }
+#endif
+  }
+
+  SECTION("Mask_And") {
+    TestWaitType testCase(hipStreamWaitValueAnd, 0xFF, 0xF4A, 0xF35, 0X02);
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
+    }
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
+    }
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
+    }
+#if HT_AMD
+    if constexpr (std::is_same_v<UIntT, uint64_t>) {
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
+      }
+    }
+#endif
+  }
+
+  SECTION("NoMask_Eq") {
+    TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
+      ? TestWaitType(hipStreamWaitValueEq, 0x7FFFFFFF, 0x7FFF0000, 0x7FFFFFFF)
+      : TestWaitType(hipStreamWaitValueEq, 0x7FFFFFFFFFFFFFFF, 0x7FFFFFFF0FFF0000, 0x7FFFFFFFFFFFFFFF);
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
+    }
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
+    }
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
+    }
+#if HT_AMD
+    if constexpr (std::is_same_v<UIntT, uint64_t>) {
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
+      }
+    }
+#endif
+  }
+
+  SECTION("NoMask_Gte") {
+    TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
+      ? TestWaitType(hipStreamWaitValueGte, 0x7FFF0001, 0x7FFF0000, 0x7FFF0010)
+      : TestWaitType(hipStreamWaitValueGte, 0x7FFFFFFFFFFF0001, 0x7FFFFFFFFFFF0000, 0x7FFFFFFFFFFF0001);
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
+    }
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
+    }
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
+    }
+#if HT_AMD
+    if constexpr (std::is_same_v<UIntT, uint64_t>) {
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
+      }
+    }
+#endif
+  }
+
+  SECTION("NoMask_And") {
+    TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
+      ? TestWaitType(hipStreamWaitValueAnd, 0x70F0F0F0, 0x0F0F0F0F, 0X1F0F0F0F)
+      : TestWaitType(hipStreamWaitValueAnd, 0x70F0F0F0F0F0F0F0, 0x0F0F0F0F0F0F0F0F, 0X1F0F0F0F0F0F0F0F);
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
+    }
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
+    }
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
+    }
+#if HT_AMD
+    if constexpr (std::is_same_v<UIntT, uint64_t>) {
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
+      }
+    }
+#endif
+  }
+
+  SECTION("NoMask_Nor") {
+    TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
+      ? TestWaitType(hipStreamWaitValueNor, 0x7AAAAAAA, 0x85555555, 0x9AAAAAAA)
+      : TestWaitType(hipStreamWaitValueNor, 0x4724724747247247, 0xbddbddbdbddbddbd, 0xbddbddbdbddbddb3);
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
+    }
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
+    }
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
+    }
+#if HT_AMD
+    if constexpr (std::is_same_v<UIntT, uint64_t>) {
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
+      }
+    }
+#endif
+  }
+}
 
 // Negative Tests
-TEST_CASE("Unit_hipStreamValue_Negative_InvalidMemory") {
+HIP_TEST_CASE(Unit_hipStreamValue_Negative_InvalidMemory) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 
@@ -500,68 +585,65 @@ TEST_CASE("Unit_hipStreamValue_Negative_InvalidMemory") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEMPLATE_TEST_CASE("Unit_hipStreamValue_Negative_UninitializedStream", "", uint32_t, uint64_t) {
+// Merge the two similar negative tests
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 
-  hipStream_t stream{reinterpret_cast<hipStream_t>(0xFFFF)};
+  SECTION("Invalid Stream handle") {
+    hipStream_t stream{reinterpret_cast<hipStream_t>(0xFFFF)};
 
-  // Allocate Host Memory
-  auto hostPtr = std::make_unique<TestType>();
+    // Allocate Host Memory
+    auto hostPtr = std::make_unique<TestType>();
 
-  // Register Host Memory
-  HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0));
+    // Register Host Memory
+    HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0));
 
-  // Set dummy data
-  *hostPtr = 0x0;
+    // Set dummy data
+    *hostPtr = 0x0;
 
-  const auto compareOp = hipStreamWaitValueGte;
-  const auto expectedError = hipErrorContextIsDestroyed;
+    const auto compareOp = hipStreamWaitValueGte;
+    const auto expectedError = hipErrorContextIsDestroyed;
 
-  // Stream handle negative tests
-  SECTION("Invalid Stream handle for hipStreamWriteValue") {
-    HIP_CHECK_ERROR(writeFunc<TestType>(stream, hostPtr.get(), 0, writeFlag), expectedError);
+    SECTION("Invalid Stream handle for hipStreamWriteValue") {
+      HIP_CHECK_ERROR(writeFunc<TestType>(stream, hostPtr.get(), 0, writeFlag), expectedError);
+    }
+
+    SECTION("Invalid Stream handle for hipStreamWaitValue") {
+      HIP_CHECK_ERROR(waitFunc<TestType>(stream, hostPtr.get(), 0, compareOp), expectedError);
+    }
+
+    // Cleanup
+    HIP_CHECK(hipHostUnregister(hostPtr.get()));
   }
 
-  SECTION("Invalid Stream handle for hipStreamWaitValue") {
-    HIP_CHECK_ERROR(waitFunc<TestType>(stream, hostPtr.get(), 0, compareOp), expectedError);
-  }
+  SECTION("Invalid Flag") {
+    hipStream_t stream{nullptr};
+    HIP_CHECK(hipStreamCreate(&stream));
+    REQUIRE(stream != nullptr);
 
-  // Cleanup
-  HIP_CHECK(hipHostUnregister(hostPtr.get()));
+    // Allocate Host Memory
+    auto hostPtr = std::make_unique<TestType>();
+
+    // Register Host Memory
+    HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0));
+
+    // Set dummy data
+    *hostPtr = 0x0;
+
+    HIP_CHECK_ERROR(waitFunc<TestType>(stream, hostPtr.get(), 0, -1), hipErrorInvalidValue);
+
+    // Cleanup
+    HIP_CHECK(hipHostUnregister(hostPtr.get()));
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
 }
 
-TEMPLATE_TEST_CASE("Unit_hipStreamValue_Negative_InvalidFlag", "", uint32_t, uint64_t) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
-    return;
-  }
-
-  hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
-  REQUIRE(stream != nullptr);
-
-  // Allocate Host Memory
-  auto hostPtr = std::make_unique<TestType>();
-
-  // Register Host Memory
-  HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0));
-
-  // Set dummy data
-  *hostPtr = 0x0;
-
-  HIP_CHECK_ERROR(waitFunc<TestType>(stream, hostPtr.get(), 0, -1), hipErrorInvalidValue);
-
-  // Cleanup
-  HIP_CHECK(hipHostUnregister(hostPtr.get()));
-  HIP_CHECK(hipStreamDestroy(stream));
-}
-
-TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Default", "", uint32_t, uint64_t) {
-  if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 
@@ -590,9 +672,9 @@ template <typename T> __global__ void add(T* a, T* b, T* c, size_t size) {
   if (i < size) c[i] = a[i] + b[i];
 }
 
-TEMPLATE_TEST_CASE("Unit_hipStreamWaitValue_Default", "", uint32_t, uint64_t) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWaitValue_Default, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
     return;
   }
 

@@ -39,6 +39,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>

@@ -37,6 +37,7 @@
 #include <unistd.h>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -477,8 +478,27 @@ context::is_tracing(KindT _kind) const
         return (buffered_tracer && buffered_tracer->domains(_kind));
 }
 
+template <typename KindT>
+bool
+context::is_tracing(KindT _kind, uint32_t _operation) const
+{
+    constexpr auto is_callback_tracing =
+        std::is_same<KindT, rocprofiler_callback_tracing_kind_t>::value;
+    constexpr auto is_buffered_tracing =
+        std::is_same<KindT, rocprofiler_buffer_tracing_kind_t>::value;
+    static_assert(is_callback_tracing || is_buffered_tracing, "Unsupported domain type");
+
+    if constexpr(is_callback_tracing)
+        return (callback_tracer && callback_tracer->domains(_kind, _operation));
+    else if constexpr(is_buffered_tracing)
+        return (buffered_tracer && buffered_tracer->domains(_kind, _operation));
+}
+
 // explicitly instantiate
 template bool context::is_tracing(rocprofiler_callback_tracing_kind_t) const;
 template bool context::is_tracing(rocprofiler_buffer_tracing_kind_t) const;
+
+template bool context::is_tracing(rocprofiler_callback_tracing_kind_t, uint32_t) const;
+template bool context::is_tracing(rocprofiler_buffer_tracing_kind_t, uint32_t) const;
 }  // namespace context
 }  // namespace rocprofiler

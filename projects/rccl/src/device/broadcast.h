@@ -19,7 +19,12 @@ namespace {
     const int bid = ncclShmem.channelId - work->channelLo;
     int npKitCtxIdx = bid; // unused variable - compiler warning
 #endif
+#ifdef ENABLE_WARP_SPEED
+    int warp = threadIdx.x / WARP_SIZE;
+    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+#else
     ncclRing *ring = &ncclShmem.channel.ring;
+#endif
     const int rank = ring->userRanks[0];
     const int nextRank = ring->userRanks[1];
     const int root = work->root;
@@ -27,7 +32,11 @@ namespace {
     ssize_t chunkCount;
     ssize_t channelCount;
     ssize_t gridOffset;
+#ifdef ENABLE_WARP_SPEED
+    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+#else
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+#endif
     size_t offset;
     int nelem;
     int workNthreads;
@@ -63,7 +72,7 @@ namespace {
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0>
+      Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0>
         prims(tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work);
 
 #if defined(ENABLE_NPKIT)

@@ -1,22 +1,6 @@
-# Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.16.8)
 
@@ -201,7 +185,7 @@ else()
   set(HIP_RUNTIME_DEB_STDPKG_DEPENDENCIES "${HIP_RUNTIME_DEB_STDPKG_DEPENDENCIES}, libgcc-s1")
 endif()
 
-set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "${HIP_RUNTIME_ROCM_PKG_DEPENDENCIES}, ${HIP_RUNTIME_DEB_STDPKG_DEPENDENCIES}, libsimde-dev")
+set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "${HIP_RUNTIME_ROCM_PKG_DEPENDENCIES}, ${HIP_RUNTIME_DEB_STDPKG_DEPENDENCIES}")
 
 set(CPACK_DEBIAN_BINARY_PACKAGE_PROVIDES "hip-rocclr (= ${CPACK_PACKAGE_VERSION})")
 set(CPACK_DEBIAN_BINARY_PACKAGE_REPLACES "hip-rocclr (= ${CPACK_PACKAGE_VERSION})")
@@ -223,7 +207,7 @@ else()
   endif()
 endif()
 
-set(CPACK_RPM_BINARY_PACKAGE_REQUIRES "${HIP_RUNTIME_ROCM_PKG_DEPENDENCIES}, ${HIP_RUNTIME_RPM_STDPKG_DEPENDENCIES}, simde-devel")
+set(CPACK_RPM_BINARY_PACKAGE_REQUIRES "${HIP_RUNTIME_ROCM_PKG_DEPENDENCIES}, ${HIP_RUNTIME_RPM_STDPKG_DEPENDENCIES}")
 
 set(CPACK_RPM_BINARY_PACKAGE_PROVIDES "hip-rocclr = ${HIP_BASE_VERSION}")
 set(CPACK_RPM_BINARY_PACKAGE_OBSOLETES "hip-rocclr = ${HIP_BASE_VERSION}")

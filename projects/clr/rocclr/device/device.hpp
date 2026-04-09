@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef DEVICE_HPP_
 #define DEVICE_HPP_
@@ -64,6 +50,7 @@ class WriteMemoryCommand;
 class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
+class BatchCopyMemoryCommand;
 class MapMemoryCommand;
 class UnmapMemoryCommand;
 class MigrateMemObjectsCommand;
@@ -88,6 +75,7 @@ class SvmFillMemoryCommand;
 class SvmMapMemoryCommand;
 class SvmUnmapMemoryCommand;
 class SvmPrefetchAsyncCommand;
+class SvmPrefetchBatchAsyncCommand;
 class StreamOperationCommand;
 class BatchMemoryOperationCommand;
 class VirtualMapCommand;
@@ -652,7 +640,6 @@ struct Info : public amd::EmbeddedObject {
   bool virtualMemoryManagement_;       //!< Virtual memory management support
   size_t virtualMemAllocGranularityMinimum_;  //!< minimum virtual memory allocation size/addr granularity
   size_t virtualMemAllocGranularityRecommended_;  //!< recommended virtual memory allocation size/addr granularity
-
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
@@ -667,6 +654,10 @@ struct Info : public amd::EmbeddedObject {
   size_t scratchLimitMax;  //! Maximum size of scratch limit of this device memory in bytes.
 
   uint32_t numberOfXccs_;  //! The number of XCC(s) on the device
+
+  bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
+
+  bool dmabufSupported_;  //!< DMABuf support flag
 };
 
 //! Device settings
@@ -703,7 +694,8 @@ class Settings : public amd::HeapObject {
       uint gwsInitSupported_ : 1;             //!< Check if GWS is supported on this machine.
       uint kernel_arg_opt_ : 1;               //!< Enables kernel arg optimization for blit kernels
       uint kernel_arg_impl_ : 2;              //!< Kernel argument implementation
-      uint reserved_ : 14;
+      uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
+      uint reserved_ : 13;
     };
     uint value_;
   };
@@ -889,7 +881,7 @@ class Memory : public amd::HeapObject {
 
   const WriteMapInfo* writeMapInfo(const void* mapAddress) const {
     // Unmap must be serialized.
-    amd::ScopedLock lock(owner()->lockMemoryOps());
+    std::scoped_lock lock(owner()->lockMemoryOps());
 
     auto it = writeMapInfo_.find(mapAddress);
     if (it == writeMapInfo_.end()) {
@@ -907,7 +899,7 @@ class Memory : public amd::HeapObject {
   //! Clear memory object as mapped read only
   void clearUnmapInfo(const void* mapAddress) {
     // Unmap must be serialized.
-    amd::ScopedLock lock(owner()->lockMemoryOps());
+    std::scoped_lock lock(owner()->lockMemoryOps());
     auto it = writeMapInfo_.find(mapAddress);
     if (it == writeMapInfo_.end()) {
       // Get the first map info
@@ -1256,12 +1248,7 @@ class ThreadTrace : public amd::HeapObject {
 class VirtualDevice : public amd::ReferenceCountedObject {
  public:
   //! Construct a new virtual device for the given physical device.
-  VirtualDevice(amd::Device& device)
-      : device_(device),
-        blitMgr_(NULL),
-        execution_(true) /* Virtual device execution lock */
-        ,
-        index_(0) {}
+  VirtualDevice(amd::Device& device) : device_(device), blitMgr_(NULL), index_(0) {}
 
   //! Destroy this virtual device.
   virtual ~VirtualDevice() {}
@@ -1273,6 +1260,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitWriteMemory(amd::WriteMemoryCommand& cmd) = 0;
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
+  virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
   virtual void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) = 0;
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
@@ -1297,6 +1285,9 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitSignal(amd::SignalCommand& cmd) = 0;
   virtual void submitMakeBuffersResident(amd::MakeBuffersResidentCommand& cmd) = 0;
   virtual void submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) { ShouldNotReachHere(); }
+  virtual void SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& cmd) {
+    ShouldNotReachHere();
+  }
   virtual void submitStreamOperation(amd::StreamOperationCommand& cmd) { ShouldNotReachHere(); }
   virtual void submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cmd) {
     ShouldNotReachHere();
@@ -1305,6 +1296,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitUserEvent(amd::UserEvent& vcmd) { ShouldNotReachHere(); }
 
   virtual address allocKernelArguments(size_t size, size_t alignment) { return nullptr; }
+  virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
 
@@ -1312,7 +1304,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   device::BlitManager& blitMgr() const { return *blitMgr_; }
 
   //! Returns the monitor object for execution access by VirtualGPU
-  amd::Monitor& execution() { return execution_; }
+  std::recursive_mutex& execution() { return execution_; }
 
   //! Returns the virtual device unique index
   uint index() const { return index_; }
@@ -1327,8 +1319,9 @@ class VirtualDevice : public amd::ReferenceCountedObject {
 
   //! Dispatches multiple AQL packets in a single batch operation
   virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                                      const std::vector<std::string>& kernelNames,
-                                      amd::AccumulateCommand* vcmd = nullptr) = 0 ;
+                                      const std::vector<const std::string*>& kernelNames,
+                                      amd::AccumulateCommand* vcmd = nullptr,
+                                      bool attach_signal = false) = 0;
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1345,9 +1338,42 @@ class VirtualDevice : public amd::ReferenceCountedObject {
  protected:
   device::BlitManager* blitMgr_;  //!< Blit manager
 
-  amd::Monitor execution_;  //!< Lock to serialise access to all device objects
+  std::recursive_mutex execution_;  //!< Lock to serialise access to all device objects
   uint index_;              //!< The virtual device unique index
   mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
+
+  //! Creates buffer object from image
+  amd::Memory* createBufferFromImage(
+      amd::Memory& amdImage  //! The parent image object(untiled images only)
+  ) {
+    amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
+    mem->setVirtualDevice(this);
+    if ((mem != nullptr) && !mem->create()) {
+      mem->release();
+    }
+    return mem;
+  }
+
+  //! Get copy command type from original copy command type and memory object types
+  cl_command_type getCopyCommandType(cl_command_type type, const cl_mem_object_type srcType,
+                                 const cl_mem_object_type dstType) {
+    if (srcType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (dstType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_BUFFER_TO_IMAGE;
+      }
+    } else if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (srcType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_IMAGE_TO_BUFFER;
+      }
+    }
+    return type;
+  }
 };
 
 extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue);
@@ -1384,7 +1410,7 @@ class MemObjMap : public AllStatic {
   static void RemoveMemObj(const void* k);
 
   //!< Find the mem object based on the input pointer, outputs the offset
-  static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr);
+  static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
   static void UpdateAccess(amd::Device* peerDev);
   //!< Purge all user allocated memories on the given device
   static void Purge(amd::Device* dev);
@@ -1403,13 +1429,14 @@ class MemObjMap : public AllStatic {
   //!< Same as FindMemObj but for ipc handle to MemObj mapping
   static amd::Memory* FindIpcHandleMemObj(const IpcMemHandle& k);
 
+  //!< Shared read/write lock for all MemObjMap operations (including per-device maps)
+  static std::shared_mutex AllocatedLock_;
+
  private:
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> VirtualMemObjMap_;
-  //!< Shared read/write lock
-  static std::shared_mutex AllocatedLock_;
   //!< the ipc handle<->mem object information container
   static std::map<IpcMemHandle, amd::Memory*> IpcHandleMemObjMap_;
 };
@@ -2005,6 +2032,7 @@ class Device : public RuntimeObject {
   }
 
   virtual void ReleaseGlobalSignal(void* signal) const {}
+  virtual void RetainGlobalSignal(void* signal) const {}
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
   }
@@ -2091,7 +2119,7 @@ class Device : public RuntimeObject {
   amd::Context& GlbCtx() const { return *glb_ctx_; }
 
   //! Lock protect P2P staging operations
-  Monitor& P2PStageOps() const { return p2p_stage_ops_; }
+  std::recursive_mutex& P2PStageOps() const { return p2p_stage_ops_; }
 
   //! Staging buffer for P2P transfer
   Memory* P2PStage() const { return p2p_stage_; }
@@ -2172,8 +2200,20 @@ class Device : public RuntimeObject {
   // Removes a memory object from hostcall tracking.
   void RemoveHostcallMemory(amd::Memory* memory);
 
+  //! Clears hostcall memory tracking list without releasing.
+  void ClearHostcallMemories();
+
   //! Enable the specified extension
   char* getExtensionString();
+
+  //! Adds object<->vaddr mapping for this device
+  void AddDevMemObj(const void* k, amd::Memory* memObj);
+
+  //! Removes object<->vaddr mapping for this device
+  void RemoveDevMemObj(const void* k);
+
+  //! Finds a memory object by device virtual address for this device
+  amd::Memory* FindDevMemObj(const void* k, size_t* offset = nullptr) const;
 
   device::Info info_;           //!< Device info structure
   device::Settings* settings_;  //!< Device settings
@@ -2190,7 +2230,7 @@ class Device : public RuntimeObject {
   amd::Context* context_;         //!< Context
 
   static amd::Context* glb_ctx_;              //!< Global context with all devices
-  static amd::Monitor p2p_stage_ops_;         //!< Lock to serialise cache for the P2P resources
+  static std::recursive_mutex p2p_stage_ops_;  //!< Lock to serialise cache for the P2P resources
   static Memory* p2p_stage_;                  //!< Staging resources
   std::vector<Device*> enabled_p2p_devices_;  //!< List of user enabled P2P devices for this device
 
@@ -2215,10 +2255,13 @@ class Device : public RuntimeObject {
 #endif
 
   static std::vector<Device*>* devices_;  //!< All known devices
-  static amd::Monitor lockP2P_;
-  Monitor* vaCacheAccess_;                            //!< Lock to serialize VA caching access
+  static std::recursive_mutex lockP2P_;
+  std::recursive_mutex* vaCacheAccess_;               //!< Lock to serialize VA caching access
   std::map<uintptr_t, device::Memory*>* vaCacheMap_;  //!< VA cache map
   uint32_t index_;                                    //!< Unique device index
+
+  std::map<uintptr_t, amd::Memory*>
+      devMemObjMap_;  //!< Per-device VA map for interleaved device VAs (Windows)
   static constexpr int kDefaultNumaNode = -1;         //! Default NUMA node value for SVM operations
   // Tracks all amd::Memory objects allocated via hostcall for this device.
   std::vector<amd::Memory*> hostcall_allocated_memories_;

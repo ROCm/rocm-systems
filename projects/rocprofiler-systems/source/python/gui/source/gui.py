@@ -47,7 +47,6 @@ from .parser import parse_uploaded_file
 from .parser import find_causal_files
 import plotly.graph_objects as go
 
-
 file_timestamp = 0
 global_data = pd.DataFrame()
 global_samples = pd.DataFrame()

@@ -20,11 +20,20 @@ namespace {
     const int bid = ncclShmem.channelId - work->channelLo;
     int npKitCtxIdx = bid; // unused variable - compiler warning
 #endif
+#ifdef ENABLE_WARP_SPEED
+    int warp = threadIdx.x / WARP_SIZE;
+    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+#else
     ncclRing *ring = &ncclShmem.channel.ring;
+#endif
     const int *ringRanks = ring->userRanks;
     const int nranks = ncclShmem.comm.nRanks;
     ssize_t count, partOffset, partCount, chunkCount;
+#ifdef ENABLE_WARP_SPEED
+    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &count, &partOffset, &partCount, &chunkCount);
+#else
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &partOffset, &partCount, &chunkCount);
+#endif
     ssize_t offset;
     ssize_t dataOffset;
     int nelem;
@@ -69,8 +78,8 @@ namespace {
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, isNetOffload> prims
-        (tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work, NULL, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
+      Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0, isNetOffload> prims
+        (tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work, nullptr, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
 
 #if defined(ENABLE_NPKIT)
       if (tid == 0) {
@@ -142,7 +151,7 @@ namespace {
 #endif
         // Final wait/copy.
         prims.directRecv(offset, nelem);
-  
+
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_GATHER_RING_DIRECT_RECV_EXIT)
         if (tid == 0) {
           NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_GATHER_RING_DIRECT_RECV_EXIT, nelem*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
@@ -175,10 +184,17 @@ namespace {
   }
 }
 
-#if defined(__gfx942__) || defined(__gfx950__) // Use a single slice per simple primitive for a single node on some GFX9 devices.
+#if defined(__gfx942__)  // Use a single slice per simple primitive for a single node on some GFX9 devices.
 #define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work) \
   if(work->rcclUseOneSlice){ \
     runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS_SINGLE_NODE, ALLGATHER_SLICESTEPS_SINGLE_NODE>, false>(tid, nthreads, work); \
+  } else{ \
+    runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work); \
+  }
+#elif defined(__gfx950__)
+#define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work) \
+  if(work->rcclUseOneSlice){ \
+    runRing<T, RedOp, ProtoSimple<1,1>, false>(tid, nthreads, work); \
   } else{ \
     runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work); \
   }
@@ -264,7 +280,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
       int nGroups = nworkers / groupSize;
       int tidInGroup = tid - group*groupSize;
       // We don't use recvPeers/sendPeers so let's pass shmem structs instead
-      Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0> prims
+      Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0> prims
         (tidInGroup, groupSize, (int*)shmem->recvDims, (int*)shmem->sendDims, inputBuf, outputBuf, work->redOpArg, group, 0, 0, nullptr, nullptr, 0, primsModePatAg);
 
       int step = group;
@@ -376,7 +392,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
         if (tid < tidEndGather) {
           // Gather
           using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-          Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/0, Proto, 0>
+          Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/1, Proto, 0>
             prims(tid, nThreadsGather, nvls->up, NULL, NULL, work->recvbuff,
               work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
           for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {

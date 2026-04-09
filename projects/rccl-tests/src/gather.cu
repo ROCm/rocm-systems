@@ -7,7 +7,6 @@
 
 #include "cuda_runtime.h"
 #include "common.h"
-#include "rccl_compat.h"
 
 void GatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
   *sendcount = (count/nranks) & -(16/eltSize);
@@ -45,23 +44,35 @@ void GatherGetBw(size_t count, int typesize, double sec, double* algBw, double* 
   *busBw = baseBw * factor;
 }
 
-testResult_t GatherRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, void* bias = nullptr) {
-  int nRanks;
-  NCCLCHECK(ncclCommCount(comm, &nRanks));
-  int rank;
-  NCCLCHECK(ncclCommUserRank(comm, &rank));
-  size_t rankOffset = count * wordSize(type);
-  if (count == 0) return testSuccess;
+testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
+  if (deviceImpl == 0) {
+    int nRanks;
+    NCCLCHECK(ncclCommCount(comm, &nRanks));
+    int rank;
+    NCCLCHECK(ncclCommUserRank(comm, &rank));
+    size_t rankOffset = count * wordSize(type);
+    if (count == 0) return testSuccess;
 
-  NCCLCHECK(ncclGroupStart());
-  NCCLCHECK(ncclSend(sendbuff, count, type, root, comm, stream));
-  if (rank == root) {
-    for (int r=0; r<nRanks; r++) {
-      NCCLCHECK(ncclRecv(((char*)recvbuff)+r*rankOffset, count, type, r, comm, stream));
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+    NCCLCHECK(ncclGather(sptr, rptr, count, type, root, comm, stream));
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2,7,0)
+    NCCLCHECK(ncclGroupStart());
+    NCCLCHECK(ncclSend(sptr, count, type, root, comm, stream));
+    if (rank == root) {
+      for (int r=0; r<nRanks; r++) {
+        NCCLCHECK(ncclRecv(rptr + r * rankOffset, count, type, r, comm, stream));
+      }
     }
+    NCCLCHECK(ncclGroupEnd());
+#else
+    printf("NCCL 2.7 or later is needed for gather. This test was compiled with %d.%d.\n", NCCL_MAJOR, NCCL_MINOR);
+    return testNcclError;
+#endif
+  } else {
+    return testNotImplemented;
   }
-  NCCLCHECK(ncclGroupEnd());
-
   return testSuccess;
 }
 
@@ -112,6 +123,6 @@ testResult_t GatherRunTest(struct threadArgs* args, int root, ncclDataType_t typ
 }
 
 struct testEngine ncclTestEngine = {
-  GatherGetBuffSize,
-  GatherRunTest
+  .getBuffSize = GatherGetBuffSize,
+  .runTest = GatherRunTest
 };

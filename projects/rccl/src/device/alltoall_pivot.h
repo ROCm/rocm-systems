@@ -75,7 +75,7 @@ namespace {
 }
 
 template<typename T, typename RedOp>
-struct RunWorkColl<ncclFuncAllToAllPivot, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
+struct RunWorkColl<ncclFuncAlltoAllPivot, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nThreads, struct ncclDevWorkColl* work) {
     using Proto = ProtoSimple<ALLTOALL_PIVOT_CHUNKSTEPS/ALLTOALL_PIVOT_SLICESTEPS, ALLTOALL_PIVOT_SLICESTEPS>;
     runRing<T, RedOp, Proto>(tid, nThreads, work);

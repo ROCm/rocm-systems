@@ -72,12 +72,11 @@ __global__ void sum_neighbor_locations(char* a, unsigned int num_devices,
 *  - Fine grain access and atomics supported on devices
 *  - HIP_VERSION >= 5.7
 */
-TEST_CASE("test_svm_byte_granularity", "[multigpu]") {
+HIP_TEST_CASE(Unit_svm_byte_granularity) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    fprintf(stderr, "Device doesn't support pcie atomic, Skipped\n");
-    REQUIRE(true);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
     return;
   }
   const int num_elements = 2048;

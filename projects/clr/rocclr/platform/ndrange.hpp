@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef NDRANGE_HPP_
 #define NDRANGE_HPP_
@@ -129,7 +115,7 @@ struct LaunchParams {
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
   bool validConfig_;         //!< Flag will be set to false when config is not correct.
 
-  LaunchParams(uint32_t globalX, uint32_t globalY, uint32_t globalZ, uint32_t localX,
+  LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX,
                uint32_t localY, uint32_t localZ, uint32_t sharedMemBytes)
       : global_(globalX, globalY, globalZ),
         local_(localX, localY, localZ),
@@ -143,11 +129,12 @@ struct LaunchParams {
 struct HIPLaunchParams : public LaunchParams {
  public:
   HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX, uint32_t blockY,
-                  uint32_t blockZ, uint32_t sharedMemBytes,
-                  uint32_t globalX_remainder = 0, uint32_t globalY_remainder = 0, uint32_t globalZ_remainder = 0)
-      : LaunchParams(static_cast<uint32_t>(gridX) * blockX + globalX_remainder, static_cast<uint32_t>(gridY) * blockY +
-                     globalY_remainder, static_cast<uint32_t>(gridZ) * blockZ + globalZ_remainder, blockX, blockY, blockZ,
-                     sharedMemBytes) {
+                  uint32_t blockZ, uint32_t sharedMemBytes, uint32_t globalX_remainder = 0,
+                  uint32_t globalY_remainder = 0, uint32_t globalZ_remainder = 0)
+      : LaunchParams(static_cast<size_t>(gridX) * blockX + globalX_remainder,
+                     static_cast<size_t>(gridY) * blockY + globalY_remainder,
+                     static_cast<size_t>(gridZ) * blockZ + globalZ_remainder, blockX, blockY,
+                     blockZ, sharedMemBytes) {
     if (global_[0] > std::numeric_limits<uint32_t>::max() ||
         global_[1] > std::numeric_limits<uint32_t>::max() ||
         global_[2] > std::numeric_limits<uint32_t>::max()) {

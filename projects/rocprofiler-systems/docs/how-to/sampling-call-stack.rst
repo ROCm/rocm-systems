@@ -311,7 +311,6 @@ The following snippets show how ``rocprof-sys-sample`` runs with various environ
       ROCPROFSYS_USE_PROCESS_SAMPLING=true
       ROCPROFSYS_USE_RCCLP=true
       ROCPROFSYS_USE_AMD_SMI=true
-      ROCPROFSYS_USE_ROCM=true
       ROCPROFSYS_USE_SAMPLING=true
       ROCPROFSYS_PROFILE=true
       OMP_TOOL_LIBRARIES=/opt/rocprofiler-systems/lib/librocprof-sys-dl.so.1.7.1
@@ -341,7 +340,6 @@ The following snippets show how ``rocprof-sys-sample`` runs with various environ
       ROCPROFSYS_USE_PROCESS_SAMPLING=true
       ROCPROFSYS_USE_RCCLP=false
       ROCPROFSYS_USE_AMD_SMI=false
-      ROCPROFSYS_USE_ROCM=false
       ROCPROFSYS_USE_SAMPLING=true
       ROCPROFSYS_PROFILE=true
       ...
@@ -372,7 +370,6 @@ Here is the full output from the previous
    ROCPROFSYS_USE_PROCESS_SAMPLING=true
    ROCPROFSYS_USE_RCCLP=false
    ROCPROFSYS_USE_AMD_SMI=false
-   ROCPROFSYS_USE_ROCM=false
    ROCPROFSYS_USE_SAMPLING=true
    [rocprof-sys][dl][1785877] rocprofsys_main
    [rocprof-sys][1785877][rocprofsys_init_tooling] Instrumentation mode: Sampling

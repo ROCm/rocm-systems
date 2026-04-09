@@ -23,7 +23,6 @@
 #include "library/components/vaapi_gotcha.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
@@ -141,6 +140,22 @@ vaapi_gotcha::start()
 void
 vaapi_gotcha::stop()
 {}
+
+std::mutex vaapi_gotcha::s_mutex = {};
+
+void
+vaapi_gotcha::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    vaapi_gotcha_t::set_ready(false);
+}
+
+void
+vaapi_gotcha::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    vaapi_gotcha_t::set_ready(true);
+}
 
 // vaBeginPicture
 void

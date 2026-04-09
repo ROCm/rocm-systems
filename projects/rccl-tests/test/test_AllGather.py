@@ -60,7 +60,7 @@ def test_AllGatherSingleProcess(nthreads, ngpus_single, byte_range, op, step_fac
                 "-o", op,
                 "-f", step_factor,
                 "-d", datatype,
-                "-y", memory_type]
+                "-Y", memory_type]
         if memory_type == "fine":
             args.insert(0, "HSA_FORCE_FINE_GRAIN_PCIE=1")
         args_str = " ".join(args)
@@ -98,10 +98,7 @@ def test_AllGatherMPI(request, nthreads, nprocs, ngpus_mpi, byte_range, op, step
                     "-e", byte_range[1],
                     "-o", op,
                     "-f", step_factor,
-                    "-d", datatype,
-                    "-y", memory_type]
-        if memory_type == "fine":
-            args.insert(0, "HSA_FORCE_FINE_GRAIN_PCIE=1")
+                    "-d", datatype]
         args_str = " ".join(args)
         print(args_str)
         rccl_test = subprocess.run(args_str, universal_newlines=True, shell=True)

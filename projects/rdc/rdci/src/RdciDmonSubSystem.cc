@@ -316,8 +316,7 @@ void RdciDmonSubSystem::resolve_device_indexes() {
     throw RdcException(res, "Failed to get all devices");
   }
 
-  const bool has_group =
-      (options_.find(OPTIONS_GROUP_ID) != options_.end());
+  const bool has_group = (options_.find(OPTIONS_GROUP_ID) != options_.end());
 
   // Case 1: no group and no explicit GPU indexes -> default to all devices
   if (!has_group && raw_device_indexes_.empty()) {
@@ -630,7 +629,7 @@ void RdciDmonSubSystem::process() {
   std::vector<uint64_t> notif_ts(notif_fields.size());
   field_pq_t notif_pq;
 
-  // Call this once without printing out notfications to initialize
+  // Call this once without printing out notifications to initialize
   // timestamps. There may be very stale timestamps in cache.
   collect_new_notifs(rdc_handle_, group_info, notif_fields, &notif_ts, nullptr);
 

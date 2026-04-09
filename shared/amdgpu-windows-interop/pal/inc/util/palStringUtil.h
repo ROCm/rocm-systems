@@ -138,13 +138,8 @@ extern size_t BytesToStr(
 constexpr uint32 StringLength(
     const char* pString)
 {
-    // TODO: On C++23 we can replace this with consteval-if.
-    // TODO: When we upgrade PAL_CPLUSPLUS then we can rely that std::is_constant_evaluated() is always defined.
-#if defined(__cpp_lib_is_constant_evaluated)
+    // TODO: On C++23 we can make this consteval-if.
     if (std::is_constant_evaluated())
-#else
-    if (__builtin_is_constant_evaluated())
-#endif
     {
         uint32 length = 0;
         while (pString[length] != '\0')
@@ -158,19 +153,15 @@ constexpr uint32 StringLength(
         return uint32(std::strlen(pString));
     }
 }
+
 /// Returns the length of the string.
 ///
 /// @returns String length.
 constexpr uint32 StringLength(
     const wchar_t* pString)
 {
-    // TODO: On C++23 we can replace this with consteval-if.
-    // TODO: When we upgrade PAL_CPLUSPLUS then we can rely that std::is_constant_evaluated() is always defined.
-#if defined(__cpp_lib_is_constant_evaluated)
+    // TODO: On C++23 we can make this consteval-if.
     if (std::is_constant_evaluated())
-#else
-    if (__builtin_is_constant_evaluated())
-#endif
     {
         uint32 length = 0;
         while (pString[length] != L'\0')

@@ -1,33 +1,17 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "core/agent_manager.hpp"
+#include "core/demangler.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 
 #include <memory>
 #include <timemory/utility/types.hpp>
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -94,7 +78,9 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
     const auto* _kern_sym_data =
         tool_data->get_kernel_symbol_info(_dispatch_info.kernel_id);
 
-    auto _bundle = counter_bundle_t{ tim::demangle(_kern_sym_data->kernel_name), _scope };
+    auto _bundle =
+        counter_bundle_t{ rocprofsys::utility::demangle(_kern_sym_data->kernel_name),
+                          _scope };
 
     _bundle.push(_dispatch_info.queue_id.handle)
         .start()
@@ -125,8 +111,9 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
                 category_enum_id<category::rocm_counter_collection>::value),
             track_name.c_str(), _timing.start, event_metadata.c_str(), stack_id,
             parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
-            static_cast<uint32_t>(agent.device_id), static_cast<uint8_t>(agent.type),
-            track_name.c_str(), static_cast<double>(value) });
+            static_cast<uint32_t>(agent.device_type_index),
+            static_cast<uint8_t>(agent.type), track_name.c_str(),
+            static_cast<double>(value), std::nullopt });
     }
 }
 
@@ -141,7 +128,7 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
     auto _metric_name = std::string{ _name };
     _metric_name =
         std::regex_replace(_metric_name, std::regex{ "(.*)\\[([0-9]+)\\]" }, "$1_$2");
-    storage_name = JOIN('-', "rocprof", "device", device_id, _metric_name);
+    storage_name = fmt::format("rocprof-device-{}-{}", device_id, _metric_name);
     storage = std::make_unique<counter_storage_type>(tim::standalone_storage{}, index,
                                                      storage_name);
     tim::manager::instance()->add_cleanup(
@@ -153,8 +140,8 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
 
     {
         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
-        track_name = JOIN(" ", "GPU", _metric_name, JOIN("", '[', device_id, ']'));
-        track      = std::make_unique<counter_track_type>(
+        track_name           = fmt::format(" GPU {} [{}]", _metric_name, device_id);
+        track                = std::make_unique<counter_track_type>(
             ::perfetto::StaticString(track_name.c_str()));
 
         metadata_initialize_counter_category();
@@ -176,14 +163,30 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
 }
 
 void
+counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
+{
+    if(!track || timestamp == 0) return;
+
+    // Write zero to Perfetto trace (for legacy Perfetto)
+    TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
+                  timestamp, 0);
+
+    // Write zero to cache (for rocpd database)
+    trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
+        track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}",
+        static_cast<uint32_t>(device_id), static_cast<uint8_t>(agent_type::GPU),
+        track_name.c_str(), 0.0, std::nullopt });
+}
+
+void
 counter_storage::write(counter_storage_type* storage, const std::string& metric_name,
                        const std::string& metric_description)
 {
     if(!trait::runtime_enabled<counter_data_tracker>::get())
     {
-        ROCPROFSYS_WARNING_F(
-            1, "%s counter_data_tracker is disabled. Can't write storage.\n",
-            metric_name.c_str());
+        LOG_WARNING("{} counter_data_tracker is disabled. Can't write storage.",
+                    metric_name);
         return;
     }
 

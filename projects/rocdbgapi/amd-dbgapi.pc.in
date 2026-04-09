@@ -1,0 +1,11 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: amd-dbgapi
+Description: AMD Debugger API library
+Version: @PROJECT_VERSION@
+
+Libs: -L${libdir} -lrocm-dbgapi @PC_EXTRA_LIBS@
+Cflags: -I${includedir}

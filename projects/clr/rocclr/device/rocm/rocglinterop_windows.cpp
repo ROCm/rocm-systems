@@ -1,28 +1,15 @@
-/* Copyright (c) 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "os/os.hpp"
 #include "utils/debug.hpp"
 #include "utils/flags.hpp"
 #include "device/rocm/rocglinterop.hpp"
 #include "GL/gl_interop.h"
+#include "platform/interop_gl.hpp"
 
 namespace amd::roc {
 namespace GlInterop {
@@ -154,6 +141,48 @@ bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext
   if (!initGLInteropPrivateExt(GLdeviceContext)) return false;
 
   return wglEndCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
+}
+
+// ================================================================================================
+bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset) {
+  assert(mem->getInteropObj() != nullptr);
+  assert(mem->getInteropObj()->asGLObject() != nullptr);
+
+  const auto* obj = mem->getInteropObj()->asGLObject();
+  const auto GLContext = mem->getContext().info().hCtx_;
+  const auto name = static_cast<uint>(obj->getGLName());
+
+  GLenum type;
+  switch (obj->getCLGLObjectType()) {
+    case CL_GL_OBJECT_BUFFER:
+      type = GL_RESOURCE_ATTACH_VERTEXBUFFER_AMD;
+      break;
+    case CL_GL_OBJECT_RENDERBUFFER:
+      type = GL_RESOURCE_ATTACH_RENDERBUFFER_AMD;
+      break;
+    case CL_GL_OBJECT_TEXTURE_BUFFER:
+    case CL_GL_OBJECT_TEXTURE1D:
+    case CL_GL_OBJECT_TEXTURE1D_ARRAY:
+    case CL_GL_OBJECT_TEXTURE2D:
+    case CL_GL_OBJECT_TEXTURE2D_ARRAY:
+    case CL_GL_OBJECT_TEXTURE3D:
+      type = GL_RESOURCE_ATTACH_TEXTURE_AMD;
+      break;
+    default:
+      LogError("Unknown OpenGL interop type: 0x%x", obj->getCLGLObjectType());
+      return false;
+  }
+
+  const auto glRenderContext = reinterpret_cast<HGLRC>(GLContext);
+  GLResource glResource = {.type = type, .name = name};
+  GLResourceData glResourceData = {.version = GL_RESOURCE_DATA_VERSION};
+
+  if (!wglResourceAttachAMD(glRenderContext, static_cast<GLvoid*>(&glResource), &glResourceData))
+    return false;
+  *handle = reinterpret_cast<hsa_handle_t>(glResourceData.handle);
+  *offset = static_cast<int>(glResourceData.offset);
+
+  return true;
 }
 
 } // namespace GlInterop

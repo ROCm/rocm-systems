@@ -26,11 +26,11 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
+#include "library/thread_data_growth.hpp"
 #include "library/thread_deleter.hpp"
 
 #include <timemory/utility/macros.hpp>
@@ -54,15 +54,6 @@ using instrumentation_bundle_t =
 // allocator for instrumentation_bundle_t
 using bundle_allocator_t = tim::data::ring_buffer_allocator<instrumentation_bundle_t>;
 
-using grow_functor_t = int64_t (*)(int64_t);
-
-inline auto&
-grow_functors()
-{
-    static auto _v = container::stable_vector<grow_functor_t>{};
-    return _v;
-}
-
 template <typename Tp>
 struct base_thread_data
 {
@@ -77,7 +68,10 @@ struct base_thread_data
             }
             return (_v) ? _v->capacity() : 0;
         };
-        grow_functors().emplace_back(std::move(_func));
+        grow_functors().emplace_back(_func);
+
+        // NOTE: Do not call _func() here - causes recursive static initialization
+        // deadlock. Container resizing is handled via grow_functors() in thread_info.cpp.
     }
 };
 

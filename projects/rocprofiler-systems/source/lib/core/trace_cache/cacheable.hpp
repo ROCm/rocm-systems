@@ -78,13 +78,25 @@ __attribute__((always_inline)) inline constexpr size_t
 get_size(Type&& val)
 {
     using DecayedType = std::decay_t<Type>;
-    static_assert(type_traits::supported_types::is_supported<DecayedType>,
+    static_assert(type_traits::is_supported_type_v<DecayedType>,
                   "Unsupported type in get_size");
 
     if constexpr(type_traits::is_string_view_v<DecayedType> ||
-                 std::is_same_v<DecayedType, std::vector<uint8_t>>)
+                 type_traits::is_vector_v<DecayedType> ||
+                 type_traits::is_span_v<DecayedType>)
     {
-        return val.size() + sizeof(size_t);
+        using ContainerType     = std::decay_t<decltype(val)>;
+        const size_t item_size  = sizeof(typename ContainerType::value_type);
+        const size_t item_count = val.size();
+        const size_t total_size = item_count * item_size;
+
+        return total_size + sizeof(size_t);
+    }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
+        return sizeof(uint8_t) + (val.has_value() ? get_size(val.value()) : 0);
     }
     else
     {
@@ -104,18 +116,32 @@ __attribute__((always_inline)) inline void
 store_value(const Type& value, uint8_t* buffer, size_t& position)
 {
     using DecayedType = std::decay_t<Type>;
-    static_assert(type_traits::supported_types::is_supported<DecayedType>,
+    static_assert(type_traits::is_supported_type_v<DecayedType>,
                   "Unsupported type in store_value");
 
     auto* dest = buffer + position;
 
     if constexpr(type_traits::is_string_view_v<DecayedType> ||
-                 std::is_same_v<DecayedType, std::vector<uint8_t>>)
+                 type_traits::is_vector_v<DecayedType> ||
+                 type_traits::is_span_v<DecayedType>)
     {
-        const size_t elem_count          = value.size();
-        *reinterpret_cast<size_t*>(dest) = elem_count;
-        std::memcpy(dest + sizeof(size_t), value.data(), elem_count);
-        position += elem_count + sizeof(size_t);
+        const size_t total_size          = get_size(value);
+        const size_t header_size         = sizeof(size_t);
+        const size_t data_size           = total_size - header_size;
+        *reinterpret_cast<size_t*>(dest) = data_size;
+        std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        position += total_size;
+    }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
+        buffer[position++] = value.has_value() ? 1 : 0;
+
+        if(value.has_value())
+        {
+            store_value(*value, buffer, position);
+        }
     }
     else
     {
@@ -137,7 +163,7 @@ __attribute__((always_inline)) inline static void
 parse_value(uint8_t*& data_pos, Type& arg)
 {
     using DecayedType = std::decay_t<Type>;
-    static_assert(type_traits::supported_types::is_supported<DecayedType>,
+    static_assert(type_traits::is_supported_type_v<DecayedType>,
                   "Unsupported type in parse_value");
 
     if constexpr(type_traits::is_string_view_v<DecayedType>)
@@ -147,13 +173,32 @@ parse_value(uint8_t*& data_pos, Type& arg)
         arg = std::string_view{ reinterpret_cast<const char*>(data_pos), string_size };
         data_pos += string_size;
     }
-    else if constexpr(std::is_same_v<DecayedType, std::vector<uint8_t>>)
+    else if constexpr(type_traits::is_vector_v<DecayedType> ||
+                      type_traits::is_span_v<DecayedType>)
     {
-        const size_t vector_size = *reinterpret_cast<const size_t*>(data_pos);
+        using ContainerType     = std::decay_t<decltype(arg)>;
+        const size_t item_size  = sizeof(typename ContainerType::value_type);
+        const size_t total_size = *reinterpret_cast<const size_t*>(data_pos);
         data_pos += sizeof(size_t);
-        arg.reserve(vector_size);
-        std::copy_n(data_pos, vector_size, std::back_inserter(arg));
-        data_pos += vector_size;
+        arg.reserve(total_size / item_size);
+        std::copy_n(reinterpret_cast<const typename ContainerType::value_type*>(data_pos),
+                    total_size / item_size, std::back_inserter(arg));
+        data_pos += total_size;
+    }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
+        const bool has_value = *data_pos++;
+        if(has_value)
+        {
+            arg.emplace();
+            parse_value<typename DecayedType::value_type>(data_pos, *arg);
+        }
+        else
+        {
+            arg.reset();
+        }
     }
     else
     {

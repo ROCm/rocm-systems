@@ -1,0 +1,67 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for scratch memory allocations",
+            "min_rows": 12,
+            "name": "scratch_memory",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "operation",
+                "agent_name",
+                "size",
+                "start",
+                "end"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Check that all scratch memory allocations have non-NULL IDs",
+                    "error_message": "NULL entries found in the id column of scratch_memory for scratch memory",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM scratch_memory WHERE category = 'rocm_scratch_memory' AND id IS NULL;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check that all scratch memory allocations have valid sizes (non-NULL and > 0)",
+                    "error_message": "Found scratch memory allocations where size is NULL or 0",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM scratch_memory WHERE operation = 'ALLOC' AND (size IS NULL OR size = 0);"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check that all scratch memory allocations have valid start and end times",
+                    "error_message": "Found scratch memory allocations where start or end is NULL",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM scratch_memory WHERE start IS NULL OR end IS NULL OR start = 0 OR end = 0;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check that all scratch memory allocations have start timestamp strictly less than end timestamp",
+                    "error_message": "Found scratch memory allocations where start is greater than or equal to end",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM scratch_memory WHERE start >= end;"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for scratch memory string entries",
+            "name": "rocpd_string",
+            "required_columns": [
+                "id",
+                "guid",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_scratch_memory' string is present in the table",
+                    "error_message": "'rocm_scratch_memory' string not found in the table rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_scratch_memory%';"
+                }
+            ]
+        }
+    ]
+}

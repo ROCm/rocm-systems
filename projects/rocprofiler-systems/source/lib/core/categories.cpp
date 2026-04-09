@@ -24,9 +24,10 @@
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
-#include "core/debug.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
+
+#include "logger/debug.hpp"
 
 #include <set>
 #include <string>
@@ -44,8 +45,7 @@ configure_categories(bool _enable, const std::set<std::string>& _categories)
     auto _name = trait::name<Tp>::value;
     if(_categories.count(_name) > 0)
     {
-        ROCPROFSYS_VERBOSE_F(3, "%s category: %s\n", (_enable) ? "Enabling" : "Disabling",
-                             _name);
+        LOG_DEBUG("{} category: {}", _enable ? "Enabling" : "Disabling", _name);
         trait::runtime_enabled<Tp>::set(_enable);
     }
 }
@@ -61,7 +61,7 @@ configure_categories(bool _enable, const std::set<std::string>& _categories,
 void
 configure_categories(bool _enable, const std::set<std::string>& _categories)
 {
-    ROCPROFSYS_VERBOSE_F(1, "%s categories...\n", (_enable) ? "Enabling" : "Disabling");
+    LOG_DEBUG("{} categories...", (_enable) ? "Enabling" : "Disabling");
 
     configure_categories(
         _enable, _categories,

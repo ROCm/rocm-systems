@@ -26,7 +26,6 @@
 
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/utility/delimit.hpp>
-#include <timemory/utility/join.hpp>
 
 #include <algorithm>
 #include <array>
@@ -216,8 +215,13 @@ get_regex_or(const ContainerT<Tp, TailT...>& _container, const std::string& _fal
 
     if(_container.empty()) return _fallback;
 
-    namespace join = timemory::join;
-    return join::join(join::array_config{ "|", "(", ")" }, _container);
+    auto _ss  = std::stringstream{};
+    auto _idx = size_t{ 0 };
+    _ss << "(";
+    for(const auto& itr : _container)
+        _ss << (_idx++ > 0 ? "|" : "") << itr;
+    _ss << ")";
+    return _ss.str();
 }
 
 template <template <typename, typename...> class ContainerT, typename Tp,
@@ -261,5 +265,9 @@ parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::strin
 extern template std::unordered_set<int64_t>
 parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
                                                           long);
+
+void
+trim_str(std::string& str);
+
 }  // namespace utility
 }  // namespace rocprofsys

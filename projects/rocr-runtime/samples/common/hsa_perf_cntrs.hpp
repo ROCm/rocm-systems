@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef ROCR_PERF_CNTR_APP_H_
 #define ROCR_PERF_CNTR_APP_H_
 
@@ -20,7 +20,7 @@
 #include "tools/inc/hsa_ext_profiler.h"
 
 typedef enum CntrValCnfType {
-  
+
   ///< no counter value validation should be performed
   CntrValCnf_None,
 
@@ -29,7 +29,7 @@ typedef enum CntrValCnfType {
 
   ///< counter value should be greater than expectedResult
   CntrValCnf_GreaterThan,
-  
+
   ///< counter value should be less than expectedResult
   CntrValCnf_LessThan
 
@@ -37,28 +37,28 @@ typedef enum CntrValCnfType {
 
 /// Struct used to encapsulate Counter Info
 typedef struct CntrInfo {
-  
+
   ///< Id of counter in hardware block
   uint32_t cntrId;
-  
+
   ///< Name of counter
   char cntrName[72];
-  
+
   ///< Handle of perf counter
   hsa_ext_tools_counter_t cntrHndl;
-  
+
   ///< Id of hardware block containing the counter
   uint32_t blkId;
-  
+
   ///< Handle of counter block
   hsa_ext_tools_counter_block_t blkHndl;
-  
+
   ///< Expected value of perf counte
   uint64_t  expectedResult;
 
   ///< Value of perf counter expected
   uint64_t cntrResult;
-  
+
   ///< Type of validation upon completion of dispatch
   CntrValCnfType cnfType;
 
@@ -74,7 +74,7 @@ typedef struct CntrInfo {
     this->cnfType = cnfType;
     memcpy(this->cntrName, cntrName, strlen(cntrName));
   }
-  
+
 } CntrInfo;
 
 class RocrPerfCntrApp {
@@ -108,9 +108,9 @@ class RocrPerfCntrApp {
 
   // Validate perf counter values
   hsa_status_t Validate();
- 
+
  private:
- 
+
   // Number of queues to create
   std::vector<CntrInfo *> cntrList_;
 

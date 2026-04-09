@@ -57,9 +57,12 @@
 #include <memory>
 #include "core/util/utils.h"
 #include "core/inc/runtime.h"
+#include "core/inc/agent.h"
 #include "./amd_hsa_code_util.hpp"
 #include "core/inc/amd_core_dump.hpp"
 #include "hsakmt/hsakmt.h"
+#include "core/inc/amd_gpu_agent.h"
+#include "core/inc/amd_aql_queue.h"
 
 constexpr char SNAPSHOT_INFO_ALIGNMENT = 0x8;
 constexpr uint32_t LOAD_ALIGNMENT_SHIFT = 4;
@@ -255,6 +258,90 @@ class PackageBuilder {
   std::stringstream st_;
 };
 
+// Track memory regions that should be included in lightweight coredumps (Scratch + CWSR)
+class MemoryRegionFilter {
+public:
+  struct AddressRange {
+    uint64_t start;
+    uint64_t end;
+    
+    bool contains(uint64_t addr, uint64_t size) const {
+      uint64_t addr_end = addr + size;
+        // Check if the segment overlaps with this range
+        return !(addr_end <= start || addr >= end);
+    }
+  };
+
+  bool address_in_map(const std::map<uint64_t, AddressRange>& ranges,
+                     uint64_t addr, uint64_t size) const {
+    if (ranges.empty()) return false;
+    auto it = ranges.upper_bound(addr);
+    if (it != ranges.begin()) {
+      it--;
+      if (it->second.contains(addr, size)) {
+        return true;
+      }
+    }     
+    return false;
+  }
+
+  // Helper to check if address range overlaps with any scratch or CWSR memory ranges
+  bool should_include(const uint64_t& addr, const uint64_t& size) {
+    return address_in_map(scratch_ranges, addr, size) ||
+           address_in_map(code_object_ranges, addr, size);
+  }
+
+  void add_scratch_range(uint64_t start, size_t size) {
+    if (size > 0) {
+      scratch_ranges.emplace(start, AddressRange{start, start + size});
+    }
+  }
+
+  void add_code_object_range(uint64_t start, size_t size) {
+    if (size > 0) {
+      code_object_ranges.emplace(start, AddressRange{start, start + size});
+    }
+  }
+
+private:
+  std::map<uint64_t, AddressRange> scratch_ranges;
+  std::map<uint64_t, AddressRange> code_object_ranges;
+}; 
+
+// Build list of memory regions to be included in the lightweight coredump
+static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter) {
+  // Get all the GPU agents from runtime
+  const auto& gpu_agents = core::Runtime::runtime_singleton_->gpu_agents();
+
+  for(const core::Agent* agent : gpu_agents) {
+    const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
+
+    // Add scratch memory range for this agent by getting the 
+    // size and base_address from agent's scratch_pool_
+    void* scratch_base = nullptr;
+    size_t scratch_size = 0;
+    gpu_agent->GetScratchAperture(&scratch_base, &scratch_size);
+
+    if (scratch_base && scratch_size > 0) {
+      // Filter will hold all of the reserved address range, even if unused 
+      filter.add_scratch_range(reinterpret_cast<uint64_t>(scratch_base), scratch_size);
+      debug_print("Added scratch range: 0x%lx - 0x%lx (size: %zu)\n",
+                  reinterpret_cast<uint64_t>(scratch_base),
+                  reinterpret_cast<uint64_t>(scratch_base) + scratch_size,
+                  scratch_size);
+    }
+  }
+
+  // Add code object allocations from allocation_map_
+  core::Runtime::runtime_singleton_->IterateCodeObjectAllocations(
+    [&filter](uint64_t start, size_t size) {
+      filter.add_code_object_range(start, size);
+      debug_print("Added code object range: 0x%lx - 0x%lx (size: %zu)\n",
+                    start, start + size, size);
+  });
+  return HSA_STATUS_SUCCESS;
+}
+
 enum SegmentType { LOAD, NOTE };
 struct SegmentBuilder;
 
@@ -385,6 +472,18 @@ struct LoadSegmentBuilder : public SegmentBuilder {
     if (fd_ != -1) close(fd_);
   }
   hsa_status_t Collect(SegmentsInfo& segments) override {
+    const bool lightweight_dump = core::Runtime::runtime_singleton_->flag().lightweight_core_dump_enable();
+
+    impl::MemoryRegionFilter filter;
+    if (lightweight_dump) {
+      // build memory region filter to only include Scratch + Code object allocations
+      hsa_status_t status = impl::build_lightweight_coredump_ranges(filter);
+      if (status != HSA_STATUS_SUCCESS) {
+        fprintf(stderr, "Failed to build lightweight core dump filter\n");
+        return status;
+      }
+    }
+    
     const std::string maps_path = "/proc/self/maps";
     std::ifstream maps(maps_path);
     if (!maps.is_open()) {
@@ -403,29 +502,40 @@ struct LoadSegmentBuilder : public SegmentBuilder {
 
       std::getline(isl >> std::ws, path);
 
-      /* Look for the /dev/dri/renderD* files.  */
-      if (path.rfind("/dev/dri/renderD", 0) == 0) {
-        uint64_t start, end;
-        if (sscanf(address.c_str(), "%lx-%lx", &start, &end) != 2) {
-          fprintf(stderr, "Failed to parse '%s'", maps_path.c_str());
-          return HSA_STATUS_ERROR;
-        }
-        uint32_t flags = SHF_ALLOC;
-        flags |= (perms.find('w', 0) != std::string::npos) ? SHF_WRITE : 0;
-        flags |= (perms.find('x', 0) != std::string::npos) ? SHF_EXECINSTR : 0;
-        uint64_t size = end - start;
+      uint64_t start, end;
+      if (sscanf(address.c_str(), "%lx-%lx", &start, &end) != 2) {
+        fprintf(stderr, "Failed to parse '%s'", maps_path.c_str());
+        return HSA_STATUS_ERROR;
+      }
 
-        debug_print("LOAD 0x%lx size: %ld\n", start, size);
-        SegmentInfo s;
-        s.stype = LOAD;
-        s.vaddr = start;
-        s.size = size;
-        s.flags = flags;
-        s.builder = this;
-        segments.push_back(s);
-       }
-     }
-     return HSA_STATUS_SUCCESS;
+      uint64_t size = end - start;
+
+      bool is_gpu_mapping = (path.rfind("/dev/dri/renderD", 0) == 0);
+
+      // Skip non-GPU path mappings
+      if (!is_gpu_mapping) continue;
+
+      // For lightweight dumps, keep only scratch allocations
+      if (lightweight_dump && !filter.should_include(start, size)) {
+        debug_print("Skipping load 0x%lx size: %ld (Not Scratch or Code Object)\n", start, size);
+        continue;
+      }
+
+      // Add all gpu mappings to the full coredump
+      uint32_t flags = SHF_ALLOC;
+      flags |= (perms.find('w', 0) != std::string::npos) ? SHF_WRITE : 0;
+      flags |= (perms.find('x', 0) != std::string::npos) ? SHF_EXECINSTR : 0;
+
+      debug_print("LOAD 0x%lx size: %ld\n", start, size);
+      SegmentInfo s;
+      s.stype = LOAD;
+      s.vaddr = start;
+      s.size = size;
+      s.flags = flags;
+      s.builder = this;
+      segments.push_back(s);
+    }
+    return HSA_STATUS_SUCCESS;
   }
 
   hsa_status_t Read(void* buf, size_t buf_size, off_t offset) override {
@@ -548,22 +658,28 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
           return (uint32_t)0;
       }
     } (seg.stype);
-    if (size_limit != -1 && (offset + seg.size > size_limit)) {
-      if (show_progress) {
-        printf("Core limit file reached during pipe write\n");
-      }
-      return HSA_STATUS_SUCCESS;
-    }
     phdr.p_offset = alignUp(offset, (uint64_t)1 << phdr.p_align);
     phdrs.push_back(phdr);
     offset += phdr.p_filesz;
   }
 
   // Write all program headers
-  for (const auto& phdr : phdrs) {
-    if (write(fd, &phdr, sizeof(phdr)) != sizeof(phdr)) {
-      perror("Failed to write program header to pipe");
-      return HSA_STATUS_ERROR;
+  if (is_reg_file) {
+    // For regular files, use pwrite to write at specific offset
+    for (size_t i = 0; i < phdrs.size(); i++) {
+      off_t phdr_offset = sizeof(Elf64_Ehdr) + i * sizeof(Elf64_Phdr);
+      if (pwrite(fd, &phdrs[i], sizeof(Elf64_Phdr), phdr_offset) != sizeof(Elf64_Phdr)) {
+        perror("Failed to write program header");
+        return HSA_STATUS_ERROR;
+      }
+    }
+  } else {
+    // For pipes, use sequential write
+    for (const auto& phdr : phdrs) {
+      if (write(fd, &phdr, sizeof(phdr)) != sizeof(phdr)) {
+        perror("Failed to write program header to pipe");
+        return HSA_STATUS_ERROR;
+      }
     }
   }
 
@@ -571,6 +687,15 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
   for (size_t idx = 0; idx < segments.size(); idx++) {
     const SegmentInfo& seg = segments[idx];
     const Elf64_Phdr& phdr = phdrs[idx];
+
+    // Check if this segment would exceed size limit
+    if (size_limit != -1 && (phdr.p_offset + phdr.p_filesz > size_limit)) {
+      if (show_progress) {
+        fprintf(stderr, "Core file size limit reached, truncating at segment %zu\n", idx);
+      }
+      // Stop writing segments but return success - we wrote valid headers
+      return HSA_STATUS_SUCCESS;
+    }
 
     if (is_reg_file) {
       int error = posix_fallocate(fd, phdr.p_offset, phdr.p_filesz);
@@ -588,9 +713,21 @@ hsa_status_t write_core_dump_to_fd(int fd, const SegmentsInfo& segments,
       if (st != HSA_STATUS_SUCCESS) {
         return st;
       }
-      if (write(fd, copy_buffer.get(), curr_chunk) != (ssize_t)curr_chunk) {
-        perror("Failed to write segment data to pipe");
-        return HSA_STATUS_ERROR;
+
+      if (is_reg_file) {
+        // For regular files, use pwrite to write at specific offset
+        if (pwrite(fd, copy_buffer.get(), curr_chunk,
+            phdr.p_offset + phdr.p_filesz - remaining) !=
+                                                        (ssize_t)curr_chunk) {
+          perror("Failed to write segment data");
+          return HSA_STATUS_ERROR;
+        }
+      } else {
+        // For pipes, use sequential write
+        if (write(fd, copy_buffer.get(), curr_chunk) != (ssize_t)curr_chunk) {
+          perror("Failed to write segment data to pipe");
+          return HSA_STATUS_ERROR;
+        }
       }
       remaining -= curr_chunk;
     }

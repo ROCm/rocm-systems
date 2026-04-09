@@ -17,7 +17,7 @@ Panel Config:
           avg: AVG(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           min: MIN(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           max: MAX(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
         Address Stall:
           avg: AVG(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
@@ -25,7 +25,7 @@ Panel Config:
             * $cu_per_gpu)))
           max: MAX(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
         Data Stall:
           avg: AVG(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
@@ -33,7 +33,7 @@ Panel Config:
             * $cu_per_gpu)))
           max: MAX(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
         "Data-Processor \u2192 Address Stall":
           avg: AVG(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
@@ -41,7 +41,7 @@ Panel Config:
             * $cu_per_gpu)))
           max: MAX(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
   - metric_table:
       id: 1502
       title: Instruction counts
@@ -136,12 +136,12 @@ Panel Config:
           avg: AVG(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           min: MIN(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           max: MAX(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
         "Cache RAM \u2192 Data-Return Stall":
           avg: AVG(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           min: MIN(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           max: MAX(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: pct
+          unit: Percent
         Coalescable Instructions:
           avg: AVG((TD_COALESCABLE_WAVEFRONT_sum / $denom))
           min: MIN((TD_COALESCABLE_WAVEFRONT_sum / $denom))

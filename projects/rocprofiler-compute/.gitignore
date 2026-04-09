@@ -1,5 +1,6 @@
 # mongodb_connector files
 __pycache__
+.cline_storage
 
 # edit files
 *~
@@ -23,3 +24,6 @@ VERSION.sha
 # documentation artifacts
 /_build
 _toc.yml
+
+# Backup directories
+.backups/

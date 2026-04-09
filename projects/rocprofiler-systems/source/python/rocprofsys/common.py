@@ -37,7 +37,6 @@ from . import libpyrocprofsys
 from .libpyrocprofsys.profiler import profiler_init as _profiler_init
 from .libpyrocprofsys.profiler import profiler_finalize as _profiler_fini
 
-
 __all__ = ["exec_", "_file", "_get_argv", "_initialize", "_finalize"]
 
 

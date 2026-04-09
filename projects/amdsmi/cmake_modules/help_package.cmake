@@ -54,7 +54,7 @@ function(generic_package)
         set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS}" PARENT_SCOPE)
     else()
         ## Security breach mitigation flags
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DFORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align" PARENT_SCOPE)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align" PARENT_SCOPE)
         ## More security breach mitigation flags
         set(HARDENING_LDFLAGS "${HARDENING_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${HARDENING_LDFLAGS}" PARENT_SCOPE)
@@ -85,8 +85,14 @@ function(generic_package)
     set(CPACK_VERBATIM_VARIABLES ON CACHE BOOL "Escape strings passed to CPACK.")
     set(CPACK_DEB_COMPONENT_INSTALL ON PARENT_SCOPE)
     set(CPACK_RPM_COMPONENT_INSTALL ON PARENT_SCOPE)
-    mark_as_advanced(CPACK_PACKAGE_NAME CPACK_PACKAGE_VENDOR CPACK_PACKAGE_CONTACT CPACK_RESOURCE_FILE_LICENSE
-                     CPACK_RPM_PACKAGE_LICENSE CPACK_GENERATOR)
+    mark_as_advanced(
+        CPACK_PACKAGE_NAME
+        CPACK_PACKAGE_VENDOR
+        CPACK_PACKAGE_CONTACT
+        CPACK_RESOURCE_FILE_LICENSE
+        CPACK_RPM_PACKAGE_LICENSE
+        CPACK_GENERATOR
+    )
 
     # Debian package specific variables
     if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
@@ -108,14 +114,14 @@ function(generic_package)
     set(CPACK_RPM_PACKAGE_AUTOREQ 0 PARENT_SCOPE)
     set(CPACK_RPM_PACKAGE_AUTOPROV 1 PARENT_SCOPE)
     list(
-        APPEND
-        CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+        APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
         "/lib"
         "/usr/sbin"
         "/lib/systemd"
         "/lib/systemd/system"
         "/usr"
-        "/opt")
+        "/opt"
+    )
 
     # PACKAGE-tests need PACKAGE
     set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "${CPACK_PACKAGE_NAME}" PARENT_SCOPE)

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 
@@ -559,6 +543,7 @@ typedef enum hipDeviceAttribute_t {
                                                      ///< Ordered Memory Allocator
   hipDeviceAttributeHostNumaId,             ///< NUMA ID of the cpu node closest to the device,
                                             ///< or -1 when NUMA isn't supported
+  hipDeviceAttributeDmaBufSupported,  ///< Device supports DMABuf buffer sharing
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -598,6 +583,8 @@ typedef enum hipDeviceAttribute_t {
                                                  ///< indirectly addressable) VGPRs per thread in
                                                  ///< DWORDs.
   hipDeviceAttributePciChipId,                   ///< GPU Manufacturer device id
+  hipDeviceAttributeExpertSchedMode,             ///< '1' if Device supports expert scheduling mode,
+                                                 ///< '0' otherwise.
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,
@@ -915,7 +902,7 @@ enum hipLimit_t {
 #define hipHostRegisterMapped 0x2
 
 /** The passed memory pointer is treated as pointing to some memory-mapped I/O space, e.g.
- * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and 
+ * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and
  * contiguous.
  * */
 #define hipHostRegisterIoMemory 0x4
@@ -1224,6 +1211,7 @@ typedef enum hipMemAllocationType {
    * location while the application is actively using it
    */
   hipMemAllocationTypePinned = 0x1,
+  hipMemAllocationTypeManaged = 0x2,
   hipMemAllocationTypeUncached = 0x40000000,
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
@@ -1444,12 +1432,12 @@ void __hipGetPCH(const char** pch, unsigned int* size);
  */
 typedef enum hipGraphicsRegisterFlags {
   hipGraphicsRegisterFlagsNone = 0,
-  hipGraphicsRegisterFlagsReadOnly = 1,  ///< HIP will not write to this registered resource
+  hipGraphicsRegisterFlagsReadOnly = 1,  ///< HIP will not write to this registered resource, read only
   hipGraphicsRegisterFlagsWriteDiscard =
-      2,  ///< HIP will only write and will not read from this registered resource
-  hipGraphicsRegisterFlagsSurfaceLoadStore = 4,  ///< HIP will bind this resource to a surface
+      2,  ///< HIP will only write and will not read from this registered resource, write only
+  hipGraphicsRegisterFlagsSurfaceLoadStore = 4,  ///< HIP will bind this resource to a surface, read and write
   hipGraphicsRegisterFlagsTextureGather =
-      8  ///< HIP will perform texture gather operations on this registered resource
+      8  ///< HIP will perform texture gather operations on this registered resource, read and write or read only
 } hipGraphicsRegisterFlags;
 
 typedef struct _hipGraphicsResource hipGraphicsResource;
@@ -2013,6 +2001,14 @@ typedef struct HIP_LAUNCH_CONFIG_st {
   hipLaunchAttribute* attrs;    ///< Attribute list
   unsigned int numAttrs;        ///< Number of attributes
 } HIP_LAUNCH_CONFIG;
+
+/**
+ * Struct representing array memory requirements.
+ */
+typedef struct hipArrayMemoryRequirements {
+  size_t alignment;
+  size_t size;
+} hipArrayMemoryRequirements;
 
 /**
  * Requested handle type for address range.
@@ -2658,6 +2654,34 @@ hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle);
  *
  */
 hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value);
+
+/**
+ * @brief Set attribute for a specific kernel
+ *
+ * @param [in] attrib Attribute to set
+ * @param [in] value Value to set
+ * @param [in] kernel Kernel to set attribute for
+ * @param [in] dev Device kernel execute on
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle,
+ * #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorMissingConfiguration
+ * Note: AMD devices and some Nvidia GPUS do not support reconfigurable cache.  This hint is ignored
+ * on those architectures.
+ *
+ */
+
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
+
+/**
+ * @brief Function will be extracted for specific kernel
+ *
+ * @param [out] pFunc  Pointer to function handle for the kernel
+ * @param [in] kernel  kernel to get handle for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotFound
+ */
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
+
 /**
  * @brief Set Cache configuration for a specific function
  *
@@ -2669,6 +2693,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
  * on those architectures.
  *
  */
+
 hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t config);
 /**
  * @brief Set shared memory configuation for a specific function
@@ -3917,6 +3942,27 @@ hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device,
  */
 hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location,
                                   unsigned int flags, hipStream_t stream __dparm(0));
+
+/**
+ * @brief Prefetches a batch of memory ranges to the specified locations using HIP.
+ *
+ * @param [in] dev_ptrs      pointers to the memory ranges to prefetch
+ * @param [in] sizes      sizes in bytes of the memory ranges to prefetch
+ * @param [in] count      number of memory ranges to prefetch
+ * @param [in] prefetch_locs   locations to prefetch the memory ranges to
+ * @param [in] prefetch_loc_idxs  indices of the memory ranges to prefetch
+ * @param [in] num_prefetch_locs  number of locations to prefetch
+ * @param [in] flags      flags for future use, must be zero now.
+ * @param [in] stream    stream to enqueue the prefetch operation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * @note  This API is implemented on Linux and is under development on Microsoft Windows.
+ */
+hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                    size_t num_prefetch_locs, unsigned long long flags,
+                                    hipStream_t stream);
 /**
  * @brief Advise about the usage of a given memory range to HIP.
  *
@@ -4439,6 +4485,19 @@ hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* d
  */
 hipError_t hipMemPoolImportPointer(void** dev_ptr, hipMemPool_t mem_pool,
                                    hipMemPoolPtrExportData* export_data);
+/**
+ * @brief Sets memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
+/**
+ * @brief Retrieves memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type);
 // Doxygen end of ordered memory allocator
 /**
  * @}
@@ -5828,6 +5887,24 @@ hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
  * @returns #hipSuccess, #hipErrorInvalidValue, hipErrorInvalidDevice
  */
 hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dparm(0));
+
+/**
+ * @brief Returns the memory requirements of a HIP mipmapped array.
+ *
+ * @param[out] memoryRequirements Pointer to hipArrayMemoryRequirements
+ * @param[in] mipmap HIP mipmapped array to get the memory requirements of
+ * @param[in] device Device to get the memory requirements for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * Returns the memory requirements of a HIP mipmapped array in memoryRequirements.
+ *
+ * The returned value in hipArrayMemoryRequirements::size represents the total size of the HIP
+ mipmapped array. The returned value in hipArrayMemoryRequirements::alignment represents the
+ alignment necessary for mapping the HIP mipmapped array.
+ */
+hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                  hipMipmappedArray_t mipmap, hipDevice_t device);
 // doxygen end Memory
 /**
  * @}
@@ -6375,6 +6452,36 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
  * #hipErrorNotFound,
  */
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
+
+/**
+ * @brief Returns information about a kernel.
+ *
+ * @param[out] pi Returned attribute value
+ * @param[in] attrib Attribute requested
+ * @param[in] kernel Kernel to query attribute of
+ * @param[in] dev Device to query attribute of
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorMissingConfiguration
+ *
+ * Returns in *pi the integer value of the attribute attrib for the kernel kernel for the requested
+ device dev. The supported attributes are:
+ * - HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK The maximum number of threads per block. This number depends on both the kernel and the requested device.
+ * - HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES The size in bytes of statically-allocated shared memory per block required by this kernel. This does not include dynamically-allocated shared memory requested by the user at runtime.
+ * - HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES The size in bytes of user-allocated constant memory required by this kernel.
+ * - HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES The size in bytes of local memory used by each thread of this kernel.
+ * - HIP_FUNC_ATTRIBUTE_NUM_REGS The number of registers used by each thread of this kernel.
+ * - HIP_FUNC_ATTRIBUTE_PTX_VERSION The PTX virtual architecture version for which the kernel was compiled. This value is the major PTX version * 10 + the minor PTX version, so a PTX version 1.3 function would return the value 13.
+ * - HIP_FUNC_ATTRIBUTE_BINARY_VERSION The binary architecture version for which the kernel was compiled. This value is the major binary version * 10 + the minor binary version, so a binary version 1.3 function would return the value 13.
+ * - HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES The maximum size in bytes of dynamically-allocated shared memory.
+ * - HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA The attribute to indicate whether the kernel has been compiled with user specified option "-Xptxas --dlcm=ca" set.
+ * - HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT Preferred shared memory-L1 cache split ratio in percent of total shared memory.
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipKernelSetAttribute,
+ hipLibraryGetKernel, hipLaunchKernel, hipKernelGetFunction, hipLibraryGetModule,
+ hipModuleGetFunction, hipFuncGetAttribute
+ */
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev);
 
 /**
  * @brief Load hip Library from inmemory object
@@ -7914,7 +8021,7 @@ const char* hipKernelNameRef(const hipFunction_t f);
  * @param [in] hostFunction Pointer of host function.
  * @param [in] stream Stream the kernel is executed on.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns The name of the passed kernel function object, or nullptr.
  *
  */
 const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
@@ -7923,7 +8030,7 @@ const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
  *
  * @param [in] stream Stream of device executed on.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns The device ID on the stream.
  *
  */
 int hipGetStreamDeviceId(hipStream_t stream);
@@ -9325,13 +9432,20 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
                                 unsigned long long flags);
 
 /**
- * @brief Creates a memory allocation described by the properties and size
+ * @brief Creates a memory handle for the allocation described by the properties and given size
  *
  * @param [out] handle - value of the returned handle.
  * @param [in] size - size of the allocation.
  * @param [in] prop - properties of the allocation.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ * 
+ * This API creates a memory allocation on the target device specified through the prop structure.
+ * The prop allocation type must be specified as either #hipMemAllocationTypePinned or
+ * #hipMemAllocationTypeUncached.
+ * The prop location type must be specified as #hipMemLocationTypeDevice or #hipMemLocationTypeHost.
+ * Any other value results in #hipErrorInvalidValue.
+ *
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.
  *
@@ -9613,6 +9727,45 @@ hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject);
 /**
  * @}
  */
+
+/**
+ * @brief Enable HIP runtime logging.
+ *
+ * This function enables the HIP runtime logging mechanism, allowing diagnostic
+ * and trace information to be captured during HIP API execution.
+ *
+ * @returns #hipSuccess
+ *
+ * @see hipExtDisableLogging, hipExtSetLoggingParams
+ */
+hipError_t hipExtEnableLogging();
+/**
+ * @brief Disable HIP runtime logging.
+ *
+ * This function disables the HIP runtime logging mechanism, stopping the capture
+ * of diagnostic and trace information during HIP API execution.
+ *
+ * @returns #hipSuccess
+ *
+ * @see hipExtEnableLogging, hipExtSetLoggingParams
+ */
+hipError_t hipExtDisableLogging();
+/**
+ * @brief Set HIP runtime logging parameters.
+ *
+ * This function configures the logging behavior of the HIP runtime, including
+ * the verbosity level, buffer size, and which components to log.
+ *
+ * @param [in] log_level  The logging verbosity level. Higher values produce more detailed output.
+ * @param [in] log_size   Reserved for future use. Currently not implemented.
+ * @param [in] log_mask   A bitmask specifying which HIP runtime components to log.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * @see hipExtEnableLogging, hipExtDisableLogging
+ */
+hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
+
 #ifdef __cplusplus
 } /* extern "c" */
 #endif

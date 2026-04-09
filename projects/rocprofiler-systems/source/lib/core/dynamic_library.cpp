@@ -22,13 +22,13 @@
 
 #include "dynamic_library.hpp"
 #include "common.hpp"
-#include "debug.hpp"
-#include "defines.hpp"
 
 #include <timemory/environment.hpp>
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/procfs/maps.hpp>
+
+#include "logger/debug.hpp"
 
 #include <string>
 #include <utility>
@@ -66,11 +66,11 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
 
     for(auto& itr : _paths)
     {
-        auto _v = JOIN('/', itr, _name);
+        auto _v = fmt::format("{}/{}", itr, _name);
         if(filepath::exists(_v)) return _v;
         for(const auto& litr : _path_suffixes)
         {
-            _v = JOIN('/', itr, litr, _name);
+            _v = fmt::format("{}/{}/{}", itr, litr, _name);
             if(filepath::exists(_v)) return _v;
         }
     }
@@ -100,19 +100,15 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
             }
             else if(_env_val.find('/') == 0)
             {
-                ROCPROFSYS_VERBOSE_F(
-                    1,
-                    "Ignoring environment variable %s=\"%s\" because the "
-                    "filepath does not exist. Using \"%s\" instead...\n",
-                    envname.c_str(), _env_val.c_str(), filename.c_str())
+                LOG_WARNING("Ignoring environment variable {}=\"{}\" because the "
+                            "filepath does not exist. Using \"{}\" instead...",
+                            envname, _env_val, filename);
             }
             else if(_env_val.find('/') != 0 && filename.find('/') == 0)
             {
-                ROCPROFSYS_VERBOSE_F(
-                    1,
-                    "Ignoring environment variable %s=\"%s\" because the "
-                    "filepath is relative. Using absolute path \"%s\" instead...\n",
-                    envname.c_str(), _env_val.c_str(), filename.c_str())
+                LOG_WARNING("Ignoring environment variable {}=\"{}\" because the "
+                            "filepath is relative. Using absolute path \"{}\" instead...",
+                            envname, _env_val, filename);
             }
         }
     }
@@ -130,8 +126,8 @@ dynamic_library::open()
         handle = dlopen(filename.c_str(), flags);
         if(!handle)
         {
-            ROCPROFSYS_VERBOSE(2, "[dynamic_library] Error opening %s=\"%s\" :: %s.\n",
-                               envname.c_str(), filename.c_str(), dlerror());
+            LOG_WARNING("[dynamic_library] Error opening {}=\"{}\" :: {}.", envname,
+                        filename, dlerror());
         }
         dlerror();  // Clear any existing error
     }

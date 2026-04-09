@@ -196,7 +196,14 @@ int rdc_policy_callback(rdc_policy_callback_response_t* userData) {
   }
 
   std::cout << "A " << condition_type_to_str(userData->condition.type) << " exceeds the threshold "
-            << threshold << " with the value " << value << std::endl;
+            << threshold << " with the value " << value;
+
+  if (userData->reset_triggered) {
+    std::cout << " and triggered reset on GPU " << userData->gpu_index;
+  }
+
+  std::cout << std::endl;
+
   last_time = now;  // update the last time
   return 0;
 }

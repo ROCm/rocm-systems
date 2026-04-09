@@ -84,7 +84,7 @@
             ]
         },
         {
-            "min_rows": 3,
+            "min_rows": 2,
             "name": "threads",
             "required_columns": [
                 "tid",

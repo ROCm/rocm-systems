@@ -23,10 +23,11 @@
 #include "link_map.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/utility/filepath.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <dlfcn.h>
@@ -138,14 +139,12 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     auto _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
     for(const auto& itr : _fini_chain)
     {
-        ROCPROFSYS_BASIC_VERBOSE(2, "[linkmap][%s]: %s\n", filepath::basename(_name),
-                                 itr.real().c_str());
+        LOG_DEBUG("[linkmap][{}]: {}", filepath::basename(_name), itr.real());
     }
 
     for(const auto& itr : _excl_chain)
     {
-        ROCPROFSYS_BASIC_VERBOSE(3, "[linkmap][%s]: %s\n", _exclude_linked_by.c_str(),
-                                 link_file{ itr }.real().c_str());
+        LOG_DEBUG("[linkmap][{}]: {}", _exclude_linked_by, link_file{ itr }.real());
     }
 
     return _fini_chain;

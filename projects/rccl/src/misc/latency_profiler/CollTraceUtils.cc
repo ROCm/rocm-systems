@@ -39,7 +39,7 @@ void reportToFile(
   for (const auto& oneDumpStats : stats) {
     for (const auto& elem : oneDumpStats) {
       auto size_mb = getSizeMb(elem.dataType, elem.count);
-      INFO(NCCL_COLL, "coll_id %ld, percent %d, min_latency_us %f, max_latency_us %f, op_name %s, data_type %s, count %ld, message_size_MB %f, comm_hash %s", elem.collId, elem.percent, elem.minLatencyUs, elem.maxLatencyUs, elem.opName.c_str(), elem.dataType.c_str(), elem.count, size_mb, commHash.c_str());
+      INFO(NCCL_COLL, "coll_id %d, percent %d, min_latency_us %f, max_latency_us %f, op_name %s, data_type %s, count %ld, message_size_MB %f, comm_hash %s", elem.collId, elem.percent, elem.minLatencyUs, elem.maxLatencyUs, elem.opName.c_str(), elem.dataType.c_str(), elem.count, size_mb, commHash.c_str());
     }
   }
 }

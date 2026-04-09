@@ -16,7 +16,12 @@ namespace {
 #else
   __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #endif
+#ifdef ENABLE_WARP_SPEED
+    int warp = threadIdx.x / WARP_SIZE;
+    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+#else
     ncclRing *ring = &ncclShmem.channel.ring;
+#endif
     const int nranks = ncclShmem.comm.nRanks;
     const int rank = ncclShmem.comm.rank;
     const int prevRank = ring->userRanks[nranks-1];
@@ -24,7 +29,11 @@ namespace {
     size_t chunkCount;
     size_t channelCount;
     size_t gridOffset;
+#ifdef ENABLE_WARP_SPEED
+    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
+#else
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
+#endif
     size_t offset;
     int nelem;
 

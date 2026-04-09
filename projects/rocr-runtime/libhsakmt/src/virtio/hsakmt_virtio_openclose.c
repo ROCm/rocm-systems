@@ -128,12 +128,17 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtOpenKFD(void) {
 
 static void vhsakmt_device_destroy(struct vhsakmt_device* dev) {
   pthread_mutex_destroy(&dev->bo_handles_mutex);
+  pthread_mutex_destroy(&dev->vhsakmt_mutex);
   vhsakmt_dereserve_va(dev->vm_start, dev->vm_size);
 
   if (dev->sys_props) free(dev->sys_props);
   if (dev->vhsakmt_nodes) free(dev->vhsakmt_nodes);
 
   virtio_gpu_close(dev->vgdev);
+  if (dev == dev_list)
+    dev_list = NULL;
+
+  free(dev);
 }
 
 HSAKMT_STATUS HSAKMTAPI vhsaKmtCloseKFD(void) {

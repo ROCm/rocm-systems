@@ -29,11 +29,20 @@
 #include "OSWrapper.hpp"
 #include "GoogleTestExtension.hpp"
 #include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmtctx.h"
+#include "Assemble.hpp"
+#include "ShaderStore.hpp"
 
 class BaseQueue;
 #define ARRAY_SIZE(_x) (sizeof(_x)/sizeof(_x[0]))
 #define ALIGN_UP(x, align) (((uint64_t)(x) + (align) - 1) & ~(uint64_t)((align)-1))
 #define CounterToNanoSec(x) ((x) * 1000 / (hsakmt_is_dgpu() ? 27 : 100))
+
+#ifdef HSAKMT_CTX
+#define HSAKMT_CALL(func, ctx, ...) func##Ctx(ctx, ##__VA_ARGS__)
+#else
+#define HSAKMT_CALL(func, ctx, ...) func(__VA_ARGS__)
+#endif
 
 void WaitUntilInput();
 HSAKMT_STATUS fscanf_dec(const char *file, uint32_t *num);
@@ -64,6 +73,11 @@ void GetHwQueueInfo(const HsaNodeProperties *props,
                  unsigned int *p_num_sdma_queues_per_engine);
 
 HSAuint64 GetSystemTickCountInMicroSec();
+
+// Copy @size bytes from @src to @dst.
+bool GPUMemCopy(
+    void* dst, void* src, size_t size, unsigned int node,
+    bool useSdma);
 
 class HsaMemoryBuffer {
  public:

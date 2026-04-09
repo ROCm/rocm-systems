@@ -552,6 +552,9 @@ T* ncclIntruQueueMpscAbandon(ncclIntruQueueMpsc<T,next>* me) {
     return head;
   }
 }
+
+ncclResult_t ncclBitsToString(uint32_t bits, uint32_t mask, const char* (*toStr)(int), char *buf, size_t bufLen, const char *wildcard);
+
 /**
  * @brief function to get page size of the system
  */
@@ -573,4 +576,5 @@ size_t get_sc_page_size(void);
  * @param[out] aligned_size  Pointer to a variable that will be set to the aligned size.
  */
 void get_aligned_ptr_and_size(const void *ptr, const size_t bufsize, void **aligned_ptr, size_t *aligned_size);
+
 #endif

@@ -62,6 +62,7 @@
 #include "core/util/locks.h"
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
+#include "core/inc/counted_queue_manager.h"
 
 namespace rocr {
 namespace AMD {
@@ -315,6 +316,11 @@ class GpuAgent : public GpuAgentInt {
                                   uint32_t* recommended_ids_mask) override;
 
   // @brief Override from core::Agent.
+  hsa_status_t DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
+                            uint32_t num_ops,
+                            std::vector<core::Signal*>& dep_signals) override;
+
+  // @brief Override from core::Agent.
   hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
                            const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
                            const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
@@ -342,6 +348,16 @@ class GpuAgent : public GpuAgentInt {
   void AcquireQueueAltScratch(ScratchInfo& scratch) override;
   void ReleaseQueueAltScratch(ScratchInfo& scratch) override;
 
+  // @brief Create a pool of shared queues for multiple user applications within a max limit
+  hsa_status_t AcquireCountedQueue(hsa_queue_type_t type,
+                                   HSA::hsa_amd_queue_priority_internal_t priority,
+                                   void (*callback)(hsa_status_t, hsa_queue_t*, void*),
+                                   void* data, uint64_t flags,
+                                   hsa_queue_t** out_queue);
+
+  // @brief Release a queue earlier used by application
+  hsa_status_t ReleaseCountedQueue(hsa_queue_t* queue);
+
   // @brief Override from AMD::GpuAgentInt.
   void TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) override;
 
@@ -360,6 +376,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_coherency_type_t current_coherency_type() const override {
     return current_coherency_type_;
   }
+
+  hsa_status_t Preload(uint64_t flags);
 
   core::Agent* GetNearestCpuAgent(void) const;
 
@@ -394,7 +412,7 @@ class GpuAgent : public GpuAgentInt {
   }
 
   // @brief Override from core::Agent.
-  const std::vector<const core::MemoryRegion*>& regions() const override {
+  const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override {
     return regions_;
   }
 
@@ -423,6 +441,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
+  __forceinline HsaAMDGPUDeviceHandle libThunkDev() const { return libthunk_dev_; }
 
   __forceinline void CheckClockTicks() {
     // If we did not update t1 since agent initialization, force a SyncClock. Otherwise computing
@@ -502,6 +521,15 @@ class GpuAgent : public GpuAgentInt {
     return coarsegrain_deallocator_;
   }
 
+  /// @brief Get scratch memory base address and size for core dump filtering
+  void GetScratchAperture(void** base, size_t* size) const {
+    *base = scratch_pool_.base();
+    *size = scratch_pool_.size();
+  }
+
+  /// @brief Get list of AQL queues for core dump filtering
+  const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
@@ -536,7 +564,7 @@ class GpuAgent : public GpuAgentInt {
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
   hsa_status_t VisitRegion(
-      const std::vector<const core::MemoryRegion*>& regions,
+      const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions,
       hsa_status_t (*callback)(hsa_region_t region, void* data),
       void* data) const;
 
@@ -594,7 +622,7 @@ class GpuAgent : public GpuAgentInt {
   std::vector<const core::Agent*> xgmi_peer_list_;
 
   // Protects xgmi_peer_list_
-  KernelMutex xgmi_peer_list_lock_;
+  std::mutex xgmi_peer_list_lock_;
 
   // @brief AQL queues for cache management and blit compute usage.
   enum QueueEnum {
@@ -607,19 +635,19 @@ class GpuAgent : public GpuAgentInt {
   lazy_ptr<core::Queue> queues_[QueueCount];
 
   // @brief Mutex to protect the update to coherency type.
-  KernelMutex coherency_lock_;
+  std::mutex coherency_lock_;
 
   // @brief Mutex to protect access to scratch pool.
-  KernelMutex scratch_lock_;
+  std::mutex scratch_lock_;
 
   // @brief Mutex to protect access to ::t1_.
-  KernelMutex t1_lock_;
+  std::mutex t1_lock_;
 
   // @brief Mutex to protect access to blit objects.
-  KernelMutex blit_lock_;
+  std::mutex blit_lock_;
 
   // @brief Mutex to protect sdma gang submissions.
-  KernelMutex sdma_gang_lock_;
+  std::mutex sdma_gang_lock_;
 
   // @brief GPU tick on initialization.
   HsaClockCounters t0_;
@@ -638,12 +666,18 @@ class GpuAgent : public GpuAgentInt {
   std::vector<std::unique_ptr<core::Cache>> caches_;
 
   // @brief Array of regions owned by this agent.
-  std::vector<const core::MemoryRegion*> regions_;
+  std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
 
   core::Isa* isa_;
 
   // @brief HSA profile.
   hsa_profile_t profile_;
+
+  // @brief Pool of shared queues owned by this agent
+  rocr::core::CountedQueuePoolManager queue_pool_;
+
+  // @brief /// Cached derived CUID for this GPU agent (16 bytes, zeroed if unavailable).
+  uint8_t derived_cuid_[16] = {};
 
   void* trap_code_buf_;
 
@@ -688,6 +722,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Initialize scratch handler thresholds
   void InitAsyncScratchThresholds();
 
+  // @brief Initialize Secondary CUID for GPU device that 
+  // this agent is running on.
+  void InitDerivedCuid() override;
+
   // @brief Register signal for notification when scratch may become available.
   // @p signal is notified by OR'ing with @p value.
   bool AddScratchNotifier(hsa_signal_t signal, hsa_signal_value_t value) {
@@ -702,6 +740,43 @@ class GpuAgent : public GpuAgentInt {
   // @brief Releases scratch back to the driver.
   // caller must hold scratch_lock_.
   void ReleaseScratch(void* base, size_t size, bool large);
+
+  // Broadcast copy: copies op.src to each destination in op.dst_list.
+  // Uses HW broadcast for transfers < 1 MB when supported; otherwise falls
+  // back to prologue/body/epilogue fan-out across available SDMA engines.
+  hsa_status_t DmaCopyBroadcast(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Multi-linear copy: LINEAR op with num_entries > 0, independent copies
+  // (different src/dst/size per entry) sharing a single completion signal.
+  // Uses prologue/body/epilogue fan-out across available SDMA engines.
+  hsa_status_t DmaCopyMulti(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Linear swap: exchanges the contents of src and dst buffers.
+  // Only supported on gfx94X / gfx95X.  Uses DmaCopyFanOutOp with
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP.
+  hsa_status_t DmaCopySwap(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
+  // and swap operations.  Submits prologue, per-entry bodies (selected by
+  // @p op), and epilogue with one signal.
+  // @p op is the hsa_amd_memory_copy_op_type_t from the public API; only
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR and HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP are
+  // currently supported.
+  hsa_status_t DmaCopyFanOutOp(
+      hsa_amd_memory_copy_op_type_t op,
+      core::Signal& out_signal,
+      std::vector<core::Signal*>& dep_signals,
+      uint16_t num_entries,
+      const void* const* src_list,
+      void* const* dst_list,
+      const hsa_agent_t* dst_agent_list,
+      const size_t* size_list);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
@@ -729,7 +804,7 @@ class GpuAgent : public GpuAgentInt {
   struct {
     lazy_ptr<core::Queue> queue_;
     int ref_ct_;
-    KernelMutex lock_;
+    std::mutex lock_;
   } gws_queue_;
 
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer
@@ -803,6 +878,11 @@ class GpuAgent : public GpuAgentInt {
     // new signal on each call
     hsa_signal_t exec_pm4_signal;
 
+    // Host-side copies - cannot read these from device_data on non-large BAR systems
+    hsa_signal_t done_sig0;
+    hsa_signal_t done_sig1;
+    uint32_t buf_size;
+
     os::Thread thread;
     pcs::PcsRuntime::PcSamplingSession* session;
   } pcs_data_t;
@@ -817,6 +897,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief device handle
   amdgpu_device_handle ldrm_dev_;
+  HsaAMDGPUDeviceHandle libthunk_dev_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 
@@ -829,6 +910,9 @@ class GpuAgent : public GpuAgentInt {
 
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
+
+  // Round-robin index for spreading SDMA work across engines.
+  uint32_t sdma_rr_index_ = 0;
 
   // structure for host trap sampling
   pcs_data_t pcs_hosttrap_data_;

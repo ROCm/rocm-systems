@@ -503,6 +503,14 @@ memory_allocation_impl(Args... args)
         _data.correlation_id->add_ref_count();
     }
 
+    if(!_data.correlation_id)
+    {
+        // During finalization - execute without tracing
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
+    }
+
     auto thr_id = _data.correlation_id->thread_idx;
     tracing::populate_external_correlation_ids(
         tracing_data.external_correlation_ids,
@@ -627,6 +635,14 @@ memory_free_impl(Args... args)
         // increase the reference count to prevent this correlation ID from being retired by another
         // service
         _data.correlation_id->add_ref_count();
+    }
+
+    if(!_data.correlation_id)
+    {
+        // During finalization - execute without tracing
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     }
 
     auto thr_id = _data.correlation_id->thread_idx;

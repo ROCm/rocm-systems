@@ -98,5 +98,15 @@ add_string_entry(std::string_view name)
 
     return _hash_v;
 }
+
+// Clear string entry cache for attach/detach cycles
+void
+clear_string_entries()
+{
+    if(!get_string_array()) return;
+
+    auto _lk = std::unique_lock<std::shared_mutex>{get_sync()};
+    get_string_array()->clear();
+}
 }  // namespace common
 }  // namespace rocprofiler

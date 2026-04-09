@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "half_precision_common.hh"
 #include "casting_common.hh"
@@ -33,7 +17,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, Float16, float)                                                       \
   CAST_RND_REF_DEF(kern_name, Float16, float, round_dir)                                           \
                                                                                                    \
-  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Limited_Positive") {                              \
+  HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Limited_Positive) {                             \
     Float16 (*ref)(float) = kern_name##_ref;                                                       \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>(),   \
                                   std::numeric_limits<float>::lowest(), 0.f);                      \
@@ -45,7 +29,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, Float16, float)                                                       \
   CAST_REF_DEF(kern_name, Float16, float)                                                          \
                                                                                                    \
-  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive") {                                      \
+  HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive) {                                     \
     Float16 (*ref)(float) = kern_name##_ref;                                                       \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>(),   \
                                   std::numeric_limits<float>::lowest(),                            \
@@ -145,7 +129,7 @@ CAST_FLOAT2HALF_TEST_DEF(__float2half_rz, FE_TOWARDZERO)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float2half_rd_SmallVals_Sanity_Positive") {
+HIP_TEST_CASE(Unit_Device___float2half_rd_SmallVals_Sanity_Positive) {
   const float input[] = {0.8859e-06f, 1.5454e-07f, 6.5955e-08f, 2.7955e-08f,
                          3.7956e-09f, 4.8995e-10f, 5.7997e-15f, 6.2117e-20f,
                          7.4999e-25f, 8.9999e-30f, 9.0001e-35f};
@@ -175,7 +159,7 @@ TEST_CASE("Unit_Device___float2half_rd_SmallVals_Sanity_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float2half_ru_SmallVals_Sanity_Positive") {
+HIP_TEST_CASE(Unit_Device___float2half_ru_SmallVals_Sanity_Positive) {
   const float input[] = {0.8859e-06f, 1.5454e-07f, 6.5955e-08f, 2.7955e-08f,
                          3.7956e-09f, 4.8995e-10f, 5.7997e-15f, 6.2117e-20f,
                          7.4999e-25f, 8.9999e-30f, 9.0001e-35f};
@@ -207,7 +191,7 @@ TEST_CASE("Unit_Device___float2half_ru_SmallVals_Sanity_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float2half_rz_SmallVals_Sanity_Positive") {
+HIP_TEST_CASE(Unit_Device___float2half_rz_SmallVals_Sanity_Positive) {
   const float input[] = {0.8859e-06f, 1.5454e-07f, 6.5955e-08f, 2.7955e-08f,
                          3.7956e-09f, 4.8995e-10f, 5.7997e-15f, 6.2117e-20f,
                          7.4999e-25f, 8.9999e-30f, 9.0001e-35f};
@@ -241,7 +225,7 @@ CAST_REF_DEF(__half2float, float, Float16)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___half2float_Accuracy_Positive") {
+HIP_TEST_CASE(Unit_Device___half2float_Accuracy_Positive) {
   float (*ref)(Float16) = __half2float_ref;
   UnaryHalfPrecisionTest(__half2float_kernel, ref, EqValidatorBuilderFactory<float>());
 }

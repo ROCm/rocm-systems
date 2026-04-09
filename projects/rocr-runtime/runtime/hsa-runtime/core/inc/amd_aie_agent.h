@@ -74,6 +74,9 @@ public:
 
  hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
+ // @brief Override from core::Agent.
+ void InitDerivedCuid() override;
+
  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                           core::HsaEventCallback event_callback, void* data,
                           uint32_t private_segment_size, uint32_t group_segment_size,
@@ -82,7 +85,7 @@ public:
  /// @brief Override from core::Agent.
  const std::vector<const core::Isa*>& supported_isas() const override { return supported_isas_; }
 
- const std::vector<const core::MemoryRegion*>& regions() const override { return regions_; }
+ const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override { return regions_; }
 
  /// @brief Getter for the AIE system allocator.
  const std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>&
@@ -101,7 +104,7 @@ private:
   /// @brief Setup the memory allocators used by this agent.
   void InitAllocators();
 
-  std::vector<const core::MemoryRegion *> regions_;
+  std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
   std::function<void *(size_t size, size_t align,
                        core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;

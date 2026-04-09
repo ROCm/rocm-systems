@@ -60,6 +60,7 @@ class ImageManagerGfx12 : public ImageManagerKv {
   virtual hsa_status_t CalculateImageSizeAndAlignment(
       hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
       hsa_ext_image_data_layout_t image_data_layout,
+      uint32_t num_mipmap_levels,
       size_t image_data_row_pitch, size_t image_data_slice_pitch,
       hsa_ext_image_data_info_t& image_info) const;
 
@@ -80,9 +81,26 @@ class ImageManagerGfx12 : public ImageManagerKv {
   /// @brief Fill image backing storage using agent copy.
   virtual hsa_status_t FillImage(const Image& image, const void* pattern,
                                  const hsa_ext_image_region_t& region);
+
+  /// @brief Fill mipmap structure with device specific mipmapped array object.
+  virtual hsa_status_t PopulateMipmapSrd(MipmappedArray& mipmap_array) const;
+
+  /// @brief Fill mipmap structure with pre-computed AMD metadata descriptor.
+  virtual hsa_status_t PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const;
+
+  /// @brief Create mip level view using SRD BASE_LEVEL/LAST_LEVEL fields
+  virtual hsa_status_t PopulateMipLevelSrd(MipmappedArray& level_view,
+        const MipmappedArray& mipmap_array, uint32_t mip_level) const;
+
+  virtual void printSRDDetailed(const uint32_t* srd) const;
+  virtual void printChannelSelect(uint32_t sel) const;
+  virtual void printResourceType(uint32_t type) const;
+  virtual void printSwizzleMode(uint32_t sw_mode) const;
+
  protected:
   uint32_t GetAddrlibSurfaceInfoNv(hsa_agent_t component,
                              const hsa_ext_image_descriptor_t& desc,
+                             uint32_t num_mipmap_levels,
                              Image::TileMode tileMode,
                              size_t image_data_row_pitch,
                              size_t image_data_slice_pitch,

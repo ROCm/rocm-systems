@@ -14,7 +14,11 @@
 #include "core.h"
 #include "nvmlwrap.h"
 #include "xml.h"
+#ifdef USE_AMDSMI
+#include "amdsmi_wrap.h"
+#else
 #include "rocm_smi_wrap.h"
+#endif
 #include "archinfo.h"
 #if defined(__x86_64__)
 #include <cpuid.h>
@@ -819,6 +823,32 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
     const char* busId;
     NCCLCHECK(xmlGetAttr(pciNode, "busid", &busId));
     uint32_t deviceCnt;
+#ifdef USE_AMDSMI
+    NCCLCHECK(amd_smi_getNumDevice(&deviceCnt));
+    for (int i=0; i<deviceCnt; i++) {
+      if (i != dev) {
+        amdsmi_link_type_t amdsmi_type;
+        int hops, count;
+        if (amd_smi_getLinkInfo(dev, i, &amdsmi_type, &hops, &count) == ncclSuccess) {
+          if (amdsmi_type == AMDSMI_LINK_TYPE_XGMI && hops == 1) {
+            char busIdStr[] = "00000000:00:00.0";
+            NCCLCHECK(amd_smi_getDevicePciBusIdString(i, busIdStr, sizeof(busIdStr)));
+            char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+            for (int c=0; c<NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+              lowerId[c] = tolower(busIdStr[c]);
+              if (busIdStr[c] == 0) break;
+            }
+            NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
+            if (nvlNode == NULL) {
+              NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
+              NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
+              NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
+            }
+          }
+        }
+      }
+    }
+#else
     NCCLCHECK(rocm_smi_getNumDevice(&deviceCnt));
     for (int i=0; i<deviceCnt; i++) {
       if (i != dev) {
@@ -843,6 +873,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
         }
       }
     }
+#endif
 #else
     // NVML NVLink detection
     int maxNvLinks = (sm < 60) ? 0 : (sm < 70) ? 4 : (sm < 80) ? 6 : (sm < 90) ? 12 : 18;
@@ -972,11 +1003,19 @@ ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct nccl
   NCCLCHECK(ncclTopoGetXmlFromSys(node, xml));
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   uint32_t devIndex = 0;
+#ifdef USE_AMDSMI
+  static int amdsmiInit = 0;
+  if (amdsmiInit == 0) {
+    NCCLCHECK(amd_smi_init());
+  }
+  NCCLCHECK(amd_smi_getDeviceIndexByPciBusId(busId, &devIndex));
+#else
   static int rocmsmiInit = 0;
   if (rocmsmiInit == 0) {
     NCCLCHECK(rocm_smi_init());
   }
   NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, &devIndex));
+#endif
   NCCLCHECK(ncclTopoGetXmlFromGpu(node, devIndex, xml, gpuNode));
 #else
   nvmlDevice_t nvmlDev;
@@ -1008,31 +1047,33 @@ ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* pciPath, const cha
 
   if (*netNode != NULL) return ncclSuccess;
 
-  const char* pciSysPath = pciPath;
-  if (pciSysPath) {
-    char subSystem[PATH_MAX];
-    NCCLCHECK(ncclTopoGetSubsystem(pciSysPath, subSystem));
-    // This is not a PCI device (virtual, usb, ...).
-    if (strcmp(subSystem, "pci") != 0) {
-      INFO(NCCL_NET|NCCL_GRAPH, "Topology detection: network path %s is not a PCI device (%s). Attaching to first CPU", pciSysPath, subSystem);
-      pciSysPath = NULL;
-    }
-  }
-
   struct ncclXmlNode* parent = NULL;
   if (forceParent) {
     parent = forceParent;
-  } else if (pciSysPath) {
-    int offset;
-    for (offset=strlen(pciSysPath)-1; pciSysPath[offset] != '/'; offset--);
-    char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
-    strcpy(busId, pciSysPath+offset+1);
-    NCCLCHECK(ncclTopoGetPciNode(xml, busId, &parent));
-    NCCLCHECK(xmlSetAttrIfUnset(parent, "class", "0x02"));
-    NCCLCHECK(ncclTopoGetXmlFromSys(parent, xml));
   } else {
-    // Virtual NIC, no PCI device, attach to first CPU
-    NCCLCHECK(xmlFindTag(xml, "cpu", &parent));
+    const char* pciSysPath = pciPath;
+    if (pciSysPath) {
+      char subSystem[PATH_MAX];
+      NCCLCHECK(ncclTopoGetSubsystem(pciSysPath, subSystem));
+      // This is not a PCI device (virtual, usb, ...).
+      if (strcmp(subSystem, "pci") != 0 && !forceParent) {
+        INFO(NCCL_NET | NCCL_GRAPH, "Topology detection: network path (name = %s) %s is not a PCI device (%s). Attaching to first CPU", netName, pciSysPath, subSystem);
+        pciSysPath = NULL;
+      }
+    }
+
+    if (pciSysPath) {
+      int offset;
+      for (offset = strlen(pciSysPath) - 1; pciSysPath[offset] != '/'; offset--);
+      char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      strcpy(busId, pciSysPath + offset + 1);
+      NCCLCHECK(ncclTopoGetPciNode(xml, busId, &parent));
+      NCCLCHECK(xmlSetAttrIfUnset(parent, "class", "0x02"));
+      NCCLCHECK(ncclTopoGetXmlFromSys(parent, xml));
+    } else {
+      // Virtual NIC, no PCI device, attach to first CPU
+      NCCLCHECK(xmlFindTag(xml, "cpu", &parent));
+    }
   }
 
   struct ncclXmlNode* nicNode = NULL;

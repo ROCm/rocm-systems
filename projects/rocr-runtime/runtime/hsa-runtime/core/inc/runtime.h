@@ -51,6 +51,9 @@
 #include <tuple>
 #include <utility>
 #include <thread>
+#include <shared_mutex>
+#include <random>
+#include <cinttypes>
 #if defined(__linux__)
 #include <sys/un.h>
 #include <xf86drm.h>
@@ -346,11 +349,9 @@ class Runtime {
                                      hsa_signal_value_t value,
                                      hsa_amd_signal_handler handler, void* arg);
 
-  hsa_status_t InteropMap(uint32_t num_agents, Agent** agents,
-                          hsa_handle_t interop_handle,
-                          uint32_t flags, size_t* size,
-                          void** ptr, size_t* metadata_size,
-                          const void** metadata);
+  hsa_status_t InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
+                          hsa_interop_map_flag_t flags, size_t* size, void** ptr,
+                          size_t* metadata_size, const void** metadata);
 
   hsa_status_t InteropUnmap(void* ptr);
 
@@ -381,6 +382,10 @@ class Runtime {
 
   hsa_status_t SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent, uint32_t num_dep_signals,
                            const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
+
+  hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
+                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+                                        hsa_signal_t completion_signal);
 
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
                                             uint64_t* offset, uint64_t flags);
@@ -437,19 +442,31 @@ class Runtime {
 
   Agent* region_gpu() { return region_gpu_; }
 
-  const std::vector<const MemoryRegion*>& system_regions_fine() const {
+  const std::vector<std::shared_ptr<const MemoryRegion>>& system_regions_fine() const {
     return system_regions_fine_;
   }
 
-  const std::vector<const MemoryRegion*>& system_regions_coarse() const {
+  const std::vector<std::shared_ptr<const MemoryRegion>>& system_regions_coarse() const {
     return system_regions_coarse_;
   }
 
-  amd::hsa::loader::Loader* loader() { return loader_; }
+  amd::hsa::loader::Loader* loader() { return loader_.get(); }
 
   amd::LoaderContext* loader_context() { return &loader_context_; }
 
   amd::hsa::code::AmdHsaCodeManager* code_manager() { return &code_manager_; }
+
+  // Helper to iterate over allocation_map_ and add code object allocations 
+  // to lightweight coredump filter
+  void IterateCodeObjectAllocations(std::function<void(uint64_t start, size_t size)> cb) {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    for(auto& alloc: allocation_map_) {
+      if (alloc.second.alloc_flags & core::MemoryRegion::AllocateCodeObject) {
+        // add this address range to MemoryRegionFilter map
+        cb(reinterpret_cast<uint64_t>(alloc.first), alloc.second.size);
+      }
+    }
+  }
 
   std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags, int agent_node_id)>&
   system_allocator() {
@@ -502,6 +519,8 @@ class Runtime {
   bool VirtualMemApiSupported() const { return virtual_mem_api_supported_; }
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
+  bool AqlProfileAvailable() const { return (aqlprofile_lib_ != nullptr); }
+  os::LibHandle AqlProfileLib() const { return aqlprofile_lib_; }
 
   Driver &AgentDriver(DriverType drv_type) {
     auto is_drv_type = [&](const std::unique_ptr<Driver> &d) {
@@ -541,7 +560,7 @@ class Runtime {
           size_requested(0),
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
-          ldrm_bo(NULL) {}
+          thunk_bo(nullptr) {}
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags)
         : region(region_arg),
@@ -549,7 +568,7 @@ class Runtime {
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
-          ldrm_bo(NULL) {}
+          thunk_bo(nullptr) {}
 
     struct notifier_t {
       void* ptr;
@@ -563,18 +582,22 @@ class Runtime {
     MemoryRegion::AllocateFlags alloc_flags;
     void* user_ptr;
     std::unique_ptr<std::vector<notifier_t>> notifiers;
-    amdgpu_bo_handle ldrm_bo;
+    HsaMemoryObjectHandle thunk_bo;
   };
 
   struct AsyncEventsInfo;
   struct AsyncEventsControl {
     AsyncEventsControl(AsyncEventsInfo *asyncInfo);
+    void Start();
     void Shutdown();
 
     hsa_signal_t wake;
-    os::Thread thread_;
     bool exit;
-  };
+
+    private:
+    AsyncEventsInfo* info_;
+    os::Thread thread_;
+ };
 
   struct AsyncEvents {
     void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
@@ -682,13 +705,15 @@ class Runtime {
   };
 
   struct AsyncEventsInfo {
-    bool monitor_exceptions;
-    AsyncEventsControl control;
-    AsyncEvents events;
-    ConcurrentAsyncEvents new_events;
-
     AsyncEventsInfo(bool exceptions);
     ~AsyncEventsInfo();
+
+    bool monitor_exceptions;
+    AsyncEvents events;
+    ConcurrentAsyncEvents new_events;
+    // control must be declared last so that events is initialized before the
+    // thread starts accessing it in AsyncEventsControl constructor
+    AsyncEventsControl control;
   };
 
   struct PrefetchRange;
@@ -715,10 +740,10 @@ class Runtime {
 
   // Will be created before any user could call hsa_init but also could be
   // destroyed before incorrectly written programs call hsa_shutdown.
-  static __forceinline KernelMutex& bootstrap_lock() {
+  static __forceinline std::mutex& bootstrap_lock() {
     // This allocation is meant to last until the last thread has exited.
     // It is intentionally not freed.
-    static KernelMutex* bootstrap_lock_ = new KernelMutex;
+    static std::mutex* bootstrap_lock_ = new std::mutex;
     return *bootstrap_lock_;
   }
   Runtime();
@@ -776,7 +801,7 @@ class Runtime {
   // Also ensures atomicity of pointer info queries by interlocking
   // KFD map/unmap, register/unregister, and access to hsaKmtQueryPointerInfo
   // registered & mapped arrays.
-  KernelSharedMutex memory_lock_;
+  std::shared_mutex memory_lock_;
 
   // Array containing driver interfaces for compatible agent kernel-mode
   // drivers. Currently supports AIE agents.
@@ -807,16 +832,16 @@ class Runtime {
   std::vector<uint32_t> gpu_ids_;
 
   // List of all fine grain system memory region in the platform.
-  std::vector<const MemoryRegion*> system_regions_fine_;
+  std::vector<std::shared_ptr<const MemoryRegion>> system_regions_fine_;
 
   // List of all coarse grain system memory region in the platform.
-  std::vector<const MemoryRegion*> system_regions_coarse_;
+  std::vector<std::shared_ptr<const MemoryRegion>> system_regions_coarse_;
 
   // Matrix of IO link.
   std::vector<LinkInfo> link_matrix_;
 
   // Loader instance.
-  amd::hsa::loader::Loader* loader_;
+  std::unique_ptr<amd::hsa::loader::Loader> loader_;
 
   // Loader context.
   amd::LoaderContext loader_context_;
@@ -828,7 +853,7 @@ class Runtime {
   std::map<const void*, AllocationRegion> allocation_map_;
 
   // Pending prefetch containers.
-  KernelMutex prefetch_lock_;
+  std::mutex prefetch_lock_;
   prefetch_map_t prefetch_map_;
 
   // Allocator using ::system_region_
@@ -840,33 +865,35 @@ class Runtime {
   // Deprecated HSA Region API GPU (for legacy APU support only)
   Agent* region_gpu_;
 
-  lazy_ptr<AsyncEventsInfo> asyncSignals_;
-  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
-
   // System clock frequency.
   uint64_t sys_clock_freq_;
 
   // Number of Numa Nodes
   size_t num_nodes_;
 
+  struct HsaEventDeleter {
+    void operator()(HsaEvent* event) { InterruptSignal::DestroyEvent(event); }
+  };
+  using unique_hsa_event_ptr = std::unique_ptr<HsaEvent, HsaEventDeleter>;
+
   // @brief AMD HSA event to monitor for virtual memory access fault.
-  HsaEvent* vm_fault_event_;
+  unique_hsa_event_ptr vm_fault_event_;
 
   // @brief HSA signal to contain the VM fault event.
-  Signal* vm_fault_signal_;
+  unique_signal_ptr vm_fault_signal_;
 
   // @brief AMD HSA event to monitor for HW exceptions.
-  HsaEvent* hw_exception_event_;
+  unique_hsa_event_ptr hw_exception_event_;
 
   // @brief HSA signal to contain the HW exceptionevent.
-  Signal* hw_exception_signal_;
+  unique_signal_ptr hw_exception_signal_;
 
   // Custom system event handlers.
   std::vector<std::pair<AMD::callback_t<hsa_amd_system_event_callback_t>, void*>>
       system_event_handlers_;
 
   // System event handler lock
-  KernelMutex system_event_lock_;
+  std::mutex system_event_lock_;
 
   // Internal queue creation notifier
   AMD::callback_t<hsa_amd_runtime_queue_notifier> internal_queue_create_notifier_;
@@ -892,18 +919,21 @@ class Runtime {
 
   std::unique_ptr<AMD::SvmProfileControl> svm_profile_;
 
-  // IPC DMA buf unix domain socket server dmabuf FD passing
-  int ipc_sock_server_fd_;
+  // IPC DMA buf socket server for dmabuf FD passing
+  os::IPCSocket ipc_sock_server_fd_;
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
-  KernelMutex ipc_sock_server_lock_;
+  std::mutex ipc_sock_server_lock_;
+  os::Thread ipc_sock_server_thread_;
 
+  lazy_ptr<AsyncEventsInfo> asyncSignals_;
+  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
  private:
   void CheckVirtualMemApiSupport();
-  int GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle, int *drm_fd,
-                          uint64_t *cpu_addr);
 
   bool virtual_mem_api_supported_;
   bool xnack_enabled_;
+
+  os::LibHandle aqlprofile_lib_;
 
   typedef void* ThunkHandle;
 
@@ -972,8 +1002,6 @@ class Runtime {
                  uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
                  hsa_access_permission_t perm, ShareableHandle shareable_handle);
 
-    MappedHandle() {}
-
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 
     MemoryHandle* mem_handle;
@@ -1004,7 +1032,8 @@ class Runtime {
   bool ipc_dmabuf_supported_;
   int  IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
                        unsigned int numNodes, HSAuint32 *nodes,
-                       void **importAddress, HSAuint64 *importSize, bool isdmabufSysmem);
+                       void **importAddress, HSAuint64 *importSize,
+                       bool isdmabufSysmem, uint32_t shared_handle);
 };
 
 }  // namespace core

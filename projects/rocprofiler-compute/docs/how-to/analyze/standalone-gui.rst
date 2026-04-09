@@ -25,10 +25,12 @@ application that lets you view results from your preferred web browser.
    See the :doc:`/reference/faq` for more details on SSH tunneling.
 
 Launch the standalone GUI analyzer
-----------------------------------
+==================================
 
 To launch the ROCm Compute Profiler GUI analyzer, include the ``--gui`` flag with your
-desired analysis command. For example:
+desired analysis command.
+
+For example:
 
 .. code-block:: shell-session
 
@@ -74,8 +76,8 @@ application's profiling data:
 #. Memory Chart Analysis
 #. Empirical Roofline Analysis
 
-   Use ``--roofline-data-type`` option to specify which data type(s) you would like displayed on the roofline PDFs in the standalone analysis GUI.
-   Data types can be stacked- for example, "--roofline-data-type FP32 FP64 I32" would display one PDF with FP32 and FP64 stacked, and one PDF with INT32.
+   Use ``--roofline-data-type`` option to specify which data type(s) you would like displayed on the roofline HTMLs in the standalone analysis GUI.
+   Data types can be stacked- for example, "--roofline-data-type FP32 FP64 I32" would display one HTML with FP32 and FP64 stacked, and one HTML with INT32.
    Default roofline data type plotted is FP32.
 
 #. Top Stats (Top Kernel Statistics)

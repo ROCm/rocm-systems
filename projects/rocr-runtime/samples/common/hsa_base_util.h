@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef __HSA_BASE__
 #define __HSA_BASE__
 
@@ -31,7 +31,7 @@ class HSA_UTIL{
 	void* AllocateLocalMemory(size_t size) ;
 	void* AllocateSysMemory(size_t size);
 	bool TransferData(void *dest, void *src, uint length, bool host_to_dev) ;
-	
+
 	double Run(int dim, int group_x, int group_y, int group_z, int s_size, int grid_x, int grid_y, int grid_z, void* kernel_args, int kernel_args_size);
 
 	public:
@@ -58,7 +58,7 @@ class HSA_UTIL{
 		hsa_code_object_t code_object;
 		uint64_t codeHandle;
 		hsa_signal_t hsa_signal;
-		hsa_kernel_dispatch_packet_t dispatch_packet; 	
+		hsa_kernel_dispatch_packet_t dispatch_packet;
 		hsa_region_t hsa_kernarg_region;
 
 		PerfTimer base_timer;

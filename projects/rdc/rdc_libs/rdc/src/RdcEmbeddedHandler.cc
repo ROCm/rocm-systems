@@ -57,7 +57,7 @@ class smi_initializer {
     ret = amdsmi_init(init_flag);
 #ifdef ENABLE_ESMI_LIB
     if (ret != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "Failed to initalize amdsmi with CPUs enabled.. Disabling CPUs.");
+      RDC_LOG(RDC_INFO, "Failed to initialize amdsmi with CPUs enabled.. Disabling CPUs.");
       init_flag &= ~AMDSMI_INIT_AMD_CPUS;
       ret = amdsmi_init(init_flag);
     }
@@ -321,6 +321,20 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_field_create(uint32_t num_field_ids,
 
   return group_settings_->rdc_group_field_create(num_field_ids, field_ids, field_group_name,
                                                  rdc_field_group_id);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_group_field_add_field(rdc_field_grp_t rdc_field_group_id,
+                                                           rdc_field_t field_id) {
+  if (!group_settings_) {
+    return RDC_ST_NOT_SUPPORTED;
+  }
+
+  if (!is_field_valid(field_id)) {
+    RDC_LOG(RDC_INFO, "Fail to add field with unknown field id " << field_id);
+    return RDC_ST_NOT_SUPPORTED;
+  }
+
+  return group_settings_->rdc_group_field_add_field(rdc_field_group_id, field_id);
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_group_field_get_info(

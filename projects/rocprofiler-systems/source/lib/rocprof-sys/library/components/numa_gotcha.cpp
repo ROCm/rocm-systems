@@ -23,7 +23,6 @@
 #include "library/components/numa_gotcha.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
@@ -98,6 +97,22 @@ numa_gotcha::shutdown()
     numa_gotcha_t::disable();
 }
 
+std::mutex numa_gotcha::s_mutex = {};
+
+void
+numa_gotcha::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    numa_gotcha_t::set_ready(false);
+}
+
+void
+numa_gotcha::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    numa_gotcha_t::set_ready(true);
+}
+
 void
 numa_gotcha::start()
 {
@@ -149,8 +164,7 @@ numa_gotcha::audit(const gotcha_data& _data, audit::incoming, int pid,
                    struct bitmask* from, struct bitmask* to)
 {
     category_region<category::numa>::start(std::string_view{ _data.tool_id }, "pid", pid,
-                                           "from", JOIN("", from).c_str(), "to",
-                                           JOIN("", to).c_str());
+                                           "from", fmt::ptr(from), "to", fmt::ptr(to));
 }
 
 void

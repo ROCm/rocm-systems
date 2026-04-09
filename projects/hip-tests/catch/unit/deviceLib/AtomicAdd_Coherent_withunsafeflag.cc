@@ -1,23 +1,9 @@
 /*
-   Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
+
 /*
 AtomicAdd on FineGrainMemory
 1. The following test scenario verifies
@@ -26,6 +12,7 @@ This testcase works only on gfx90a, gfx942, gfx950.
 */
 
 #include <hip_test_checkers.hh>
+#include <string>
 #include <hip_test_common.hh>
 #include <hip_test_features.hh>
 
@@ -45,7 +32,7 @@ Output: atomicAdd API would return 0 and the 0/P is 5
         global_atomic_cmpswap instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE("Unit_AtomicAdd_CoherentwithUnsafeflag", "", float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_AtomicAdd_CoherentwithUnsafeflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -53,7 +40,7 @@ TEMPLATE_TEST_CASE("Unit_AtomicAdd_CoherentwithUnsafeflag", "", float, double) {
   std::string gfxName(prop.gcnArchName);
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
     if (prop.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h{nullptr}, *result{nullptr};
       TestType *A_d{nullptr}, *result_d{nullptr};
@@ -90,9 +77,6 @@ TEMPLATE_TEST_CASE("Unit_AtomicAdd_CoherentwithUnsafeflag", "", float, double) {
       HIP_CHECK(hipHostFree(result));
     }
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }

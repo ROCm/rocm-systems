@@ -220,6 +220,7 @@ void ImageManagerKv::GetImageInfoMaxDimension(hsa_agent_t component,
 hsa_status_t ImageManagerKv::CalculateImageSizeAndAlignment(
     hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
     hsa_ext_image_data_layout_t image_data_layout,
+    uint32_t num_mipmap_levels,
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
     hsa_ext_image_data_info_t& image_info) const {
@@ -719,6 +720,162 @@ hsa_status_t ImageManagerKv::FillImage(const Image& image, const void* pattern,
   return status;
 }
 
+hsa_status_t ImageManagerKv::PopulateMipmapSrd(MipmappedArray& mipmap) const {
+  // Kv (GFX8) architecture does not support mipmaps
+  return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
+}
+
+hsa_status_t ImageManagerKv::PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const {
+  // Kv (GFX8) architecture does not support mipmaps
+  return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
+}
+
+void ImageManagerKv::printSRDDetailed(const uint32_t* srd) const {
+  if (!srd) {
+    printf("\n========== Image SRD (KV) - Detailed ==========\n");
+    printf("ERROR: No SRD data provided.\n");
+    printf("===============================================\n\n");
+    return;
+  }
+
+  printf("\n========== Image SRD (KV) - Detailed ==========\n");
+
+  // Print all 12 words with bit field annotations
+  for (int i = 0; i < 12; i++) {
+    printf("WORD %d: 0x%08x  ", i, srd[i]);
+
+    // Binary representation
+    printf("(");
+    for (int bit = 31; bit >= 0; bit--) {
+      printf("%d", (srd[i] >> bit) & 1);
+      if (bit % 4 == 0 && bit != 0) printf("_");
+    }
+    printf(")\n");
+  }
+        
+  // WORD 0: BASE_ADDRESS (bits 39:8)
+  SQ_IMG_RSRC_WORD0 word0;
+  word0.u32_all = srd[0];
+  printf("\nWORD 0: BASE_ADDRESS (bits 39:8) = 0x%08x\n", word0.bits.base_address);
+  
+  // WORD 1: Contains BASE_ADDRESS_HI, MIN_LOD, DATA_FORMAT, NUM_FORMAT, MTYPE
+  SQ_IMG_RSRC_WORD1 word1;
+  word1.u32_all = srd[1];
+  printf("WORD 1: BASE_ADDRESS_HI        = 0x%02x\n", word1.bits.base_address_hi);
+  printf("        MIN_LOD                = %u\n", word1.bits.min_lod);
+  printf("        DATA_FORMAT            = %u\n", word1.bits.data_format);
+  printf("        NUM_FORMAT             = %u\n", word1.bits.num_format);
+  printf("        MTYPE                  = %u\n", word1.bits.mtype);
+  
+  // Calculate full address (KV uses 40-bit shifted by 8)
+  uint64_t base_addr = ((uint64_t)word1.bits.base_address_hi << 40) | ((uint64_t)word0.bits.base_address << 8);
+  printf("        → Full Base Address    = 0x%016lx\n", base_addr);
+  
+  // WORD 2: WIDTH, HEIGHT, PERF_MOD, INTERLACED
+  SQ_IMG_RSRC_WORD2 word2;
+  word2.u32_all = srd[2];
+  printf("WORD 2: WIDTH                  = %u (actual: %u)\n", word2.bits.width, word2.bits.width + 1);
+  printf("        HEIGHT                 = %u (actual: %u)\n", word2.bits.height, word2.bits.height + 1);
+  printf("        PERF_MOD               = %u\n", word2.bits.perf_mod);
+  printf("        INTERLACED             = %u\n", word2.bits.interlaced);
+  
+  // WORD 3: Channel selectors, TILING_INDEX, POW2_PAD, TYPE, ATC
+  SQ_IMG_RSRC_WORD3 word3;
+  word3.u32_all = srd[3];
+  printf("WORD 3: DST_SEL_X              = %u ", word3.bits.dst_sel_x);
+  printChannelSelect(word3.bits.dst_sel_x);
+  printf("        DST_SEL_Y              = %u ", word3.bits.dst_sel_y);
+  printChannelSelect(word3.bits.dst_sel_y);
+  printf("        DST_SEL_Z              = %u ", word3.bits.dst_sel_z);
+  printChannelSelect(word3.bits.dst_sel_z);
+  printf("        DST_SEL_W              = %u ", word3.bits.dst_sel_w);
+  printChannelSelect(word3.bits.dst_sel_w);
+  printf("        TILING_INDEX           = %u ◄──── Tile configuration index\n", word3.bits.tiling_index);
+  printf("        POW2_PAD               = %u ◄──── Power-of-2 padding\n", word3.bits.pow2_pad);
+  printf("        TYPE                   = %u ", word3.bits.type);
+  printResourceType(word3.bits.type);
+  printf("        ATC                    = %u ◄──── Address translation cache\n", word3.bits.atc);
+  
+  // WORD 4: DEPTH, PITCH
+  SQ_IMG_RSRC_WORD4 word4;
+  word4.u32_all = srd[4];
+  printf("WORD 4: DEPTH                  = %u\n", word4.bits.depth);
+  printf("        PITCH                  = %u (actual: %u)\n", word4.bits.pitch, word4.bits.pitch + 1);
+  
+  // Calculate effective depth/pitch based on geometry
+  uint32_t type = word3.bits.type;
+  if (type == 10) { // 3D
+    printf("        → 3D Depth             = %u (actual: %u)\n", word4.bits.depth, word4.bits.depth + 1);
+  } else if (type == 13 || type == 12) { // Arrays
+    printf("        → Array Size           = %u (actual: %u)\n", word4.bits.depth, word4.bits.depth + 1);
+  }
+  
+  // WORD 5: LAST_ARRAY
+  SQ_IMG_RSRC_WORD5 word5;
+  word5.u32_all = srd[5];
+  printf("WORD 5: LAST_ARRAY             = %u ◄──── Last array slice\n", word5.bits.last_array);
+  
+  // WORD 6-7: Usually zero for basic images
+  printf("WORD 6: Reserved               = 0x%08x\n", srd[6]);
+  printf("WORD 7: Reserved               = 0x%08x\n", srd[7]);
+  
+  // Additional information (HSA extension fields)
+  printf("WORD 8: CHANNEL_TYPE           = 0x%08x\n", srd[8]);
+  printf("WORD 9: CHANNEL_ORDER          = 0x%08x\n", srd[9]);
+  printf("WORD 10: WIDTH_ORIGINAL        = 0x%08x\n", srd[10]);
+  printf("WORD 11: NUM_LEVELS            = 0x%08x\n", srd[11]);
+  
+  // Mipmap analysis (KV architecture limitations)
+  printf("\nMIPMAP ANALYSIS:\n");
+  printf("        Total Levels           = %u\n", srd[11]);
+  printf("        Min LOD                = %u ◄──── Minimum detail level\n", word1.bits.min_lod);
+  printf("        KV Architecture        = LEGACY MIPMAP SUPPORT\n");
+  printf("        Note                   = KV lacks BASE_LEVEL/LAST_LEVEL fields\n");
+  printf("        Note                   = Mip level selection via shader only\n");
+  printf("===============================================\n\n");
+}
+
+void ImageManagerKv::printChannelSelect(uint32_t sel) const {
+    switch(sel) {
+        case 0: printf("(SEL_0)\n"); break;
+        case 1: printf("(SEL_1)\n"); break;
+        case 4: printf("(SEL_X/R)\n"); break;
+        case 5: printf("(SEL_Y/G)\n"); break;
+        case 6: printf("(SEL_Z/B)\n"); break;
+        case 7: printf("(SEL_W/A)\n"); break;
+        default: printf("(UNKNOWN)\n"); break;
+    }
+}
+
+void ImageManagerKv::printResourceType(uint32_t type) const {
+    switch(type) {
+        case 8:  printf("(1D)\n"); break;
+        case 9:  printf("(2D)\n"); break;
+        case 10: printf("(3D)\n"); break;
+        case 11: printf("(CUBE)\n"); break;
+        case 12: printf("(1D_ARRAY/1DB)\n"); break;
+        case 13: printf("(2D_ARRAY)\n"); break;
+        case 14: printf("(2D_MSAA)\n"); break;
+        case 15: printf("(2D_MSAA_ARRAY)\n"); break;
+        default: printf("(UNKNOWN=%u)\n", type); break;
+    }
+}
+
+void ImageManagerKv::printSwizzleMode(uint32_t sw_mode) const {
+    // KV architecture uses tiling modes instead of swizzle modes
+    // This function is not typically called for KV, but provided for completeness
+    printf("(TILING_MODE=%u)\n", sw_mode);
+}
+
+hsa_status_t ImageManagerKv::PopulateMipLevelSrd(
+    MipmappedArray& level_view,
+    const MipmappedArray& mipmap_array,
+    uint32_t mip_level) const {
+
+  // Mip level views not supported on GFX8 hardware
+  return HSA_STATUS_ERROR_NOT_INITIALIZED;
+}
+
 hsa_status_t ImageManagerKv::GetLocalMemoryRegion(hsa_region_t region,
                                                   void* data) {
   if (data == NULL) {
@@ -845,7 +1002,7 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
     in.width = width;
     in.height = height;
     in.numSlices = num_slice;
-    in.pitchInElement = image_data_row_pitch / image_prop.element_size;
+
     switch(desc.geometry) {
     case HSA_EXT_IMAGE_GEOMETRY_1D:
     case HSA_EXT_IMAGE_GEOMETRY_1DB:

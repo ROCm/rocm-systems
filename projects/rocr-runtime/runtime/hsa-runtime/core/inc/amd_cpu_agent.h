@@ -103,6 +103,9 @@ class CpuAgent : public core::Agent {
   hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
   // @brief Override from core::Agent.
+  void InitDerivedCuid() override;
+
+  // @brief Override from core::Agent.
   hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
                            uint32_t private_segment_size, uint32_t group_segment_size,
@@ -127,7 +130,7 @@ class CpuAgent : public core::Agent {
   }
 
   // @brief Override from core::Agent.
-  const std::vector<const core::MemoryRegion*>& regions() const override {
+  const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override {
     return regions_;
   }
 
@@ -151,7 +154,7 @@ class CpuAgent : public core::Agent {
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
   hsa_status_t VisitRegion(
-      const std::vector<const core::MemoryRegion*>& regions,
+      const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions,
       hsa_status_t (*callback)(hsa_region_t region, void* data),
       void* data) const;
 
@@ -166,7 +169,7 @@ class CpuAgent : public core::Agent {
   std::vector<std::unique_ptr<core::Cache>> caches_;
 
   // @brief Array of regions owned by this agent.
-  std::vector<const core::MemoryRegion*> regions_;
+  std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
 
   DISALLOW_COPY_AND_ASSIGN(CpuAgent);
 };

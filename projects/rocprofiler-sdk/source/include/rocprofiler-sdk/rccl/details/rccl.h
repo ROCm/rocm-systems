@@ -5,6 +5,7 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
+
 #ifndef NCCL_H_
 #define NCCL_H_
 
@@ -12,11 +13,11 @@
 #include <hip/hip_runtime.h>
 
 #define NCCL_MAJOR  2
-#define NCCL_MINOR  27
+#define NCCL_MINOR  28
 #define NCCL_PATCH  3
 #define NCCL_SUFFIX ""
 
-#define NCCL_VERSION_CODE 22703
+#define NCCL_VERSION_CODE 22803
 #define NCCL_VERSION(X, Y, Z)                                                                      \
     (((X) <= 2 && (Y) <= 8) ? (X) *1000 + (Y) *100 + (Z) : (X) *10000 + (Y) *100 + (Z))
 
@@ -35,8 +36,8 @@ extern "C" {
 /*! @brief      Opaque handle to communicator
     @details    A communicator contains information required to facilitate collective communications
    calls */
-typedef struct ncclComm*   ncclComm_t;
-typedef struct ncclWindow* ncclWindow_t;
+typedef struct ncclComm*          ncclComm_t;
+typedef struct ncclWindow_vidmem* ncclWindow_t;
 #define NCCL_COMM_NULL NULL
 
 #define NCCL_UNIQUE_ID_BYTES 128
@@ -76,9 +77,12 @@ typedef enum
 #define NCCL_WIN_DEFAULT        0x00
 #define NCCL_WIN_COLL_SYMMETRIC 0x01
 
+#define NCCL_WIN_REQUIRED_ALIGNMENT 4096
+
 /* NCCL performance policy */
 #define NCCL_CTA_POLICY_DEFAULT    0x00
 #define NCCL_CTA_POLICY_EFFICIENCY 0x01
+#define NCCL_CTA_POLICY_ZERO       0x02
 
 /* ncclCommShrink flags*/
 #define NCCL_SHRINK_DEFAULT 0x00 /* shrink the parent communicator */
@@ -92,25 +96,27 @@ typedef enum
 
 /*! @brief      Communicator configuration
     @details    Users can assign value to attributes to specify the behavior of a communicator */
-typedef struct ncclConfig_v22700
+typedef struct ncclConfig_v22800
 {
     /* attributes that users should never touch. */
     size_t       size;    /*!< Should not be touched */
     unsigned int magic;   /*!< Should not be touched */
     unsigned int version; /*!< Should not be touched */
     /* attributes that users are able to customize. */
-    int         blocking;       /*!< Whether or not calls should block or not */
-    int         cgaClusterSize; /*!< Cooperative group array cluster size */
-    int         minCTAs;        /*!< Minimum number of cooperative thread arrays (blocks) */
-    int         maxCTAs;        /*!< Maximum number of cooperative thread arrays (blocks) */
-    const char* netName;        /*!< Force NCCL to use a specfic network */
-    int         splitShare;     /*!< Allow communicators to share resources */
-    int         trafficClass;   /*!< Traffic class*/
-    const char* commName;       /*!< Name of the communicator*/
-    int         collnetEnable;  /*!< Check for collnet enablement*/
-    int         CTAPolicy;      /*!< CTA Policy*/
-    int         shrinkShare;    /*!< Shrink size*/
-    int         nvlsCTAs;       /*!< Number of NVLS cooperative thread arrays (blocks)*/
+    int         blocking;            /*!< Whether or not calls should block or not */
+    int         cgaClusterSize;      /*!< Cooperative group array cluster size */
+    int         minCTAs;             /*!< Minimum number of cooperative thread arrays (blocks) */
+    int         maxCTAs;             /*!< Maximum number of cooperative thread arrays (blocks) */
+    const char* netName;             /*!< Force NCCL to use a specfic network */
+    int         splitShare;          /*!< Allow communicators to share resources */
+    int         trafficClass;        /*!< Traffic class*/
+    const char* commName;            /*!< Name of the communicator*/
+    int         collnetEnable;       /*!< Check for collnet enablement*/
+    int         CTAPolicy;           /*!< CTA Policy*/
+    int         shrinkShare;         /*!< Shrink size*/
+    int         nvlsCTAs;            /*!< Number of NVLS cooperative thread arrays (blocks)*/
+    int         nChannelsPerNetPeer; /*!< Number of channels per NET peer*/
+    int         nvlinkCentricSched;  /*!< nvlinkCentricSched*/
 } ncclConfig_t;
 
 /* Config initializer must be assigned to initialize config structure when it is created.
@@ -132,6 +138,8 @@ typedef struct ncclConfig_v22700
             NCCL_CONFIG_UNDEF_INT,                            /* CTAPolicy */                      \
             NCCL_CONFIG_UNDEF_INT,                            /* shrinkShare */                    \
             NCCL_CONFIG_UNDEF_INT,                            /* nvlsCTAs */                       \
+            NCCL_CONFIG_UNDEF_INT,                            /* nChannelsPerNetPeer */            \
+            NCCL_CONFIG_UNDEF_INT,                            /* nvlinkCentricSched */             \
     }
 /*! @} */
 
@@ -424,7 +432,8 @@ pncclGetLastError(ncclComm_t comm);
 /*! @endcond */
 
 /* Reload environment variables that determine logging. */
-void
+__attribute__((deprecated("ncclResetDebugInit is not supported as part of the NCCL API and will be "
+                          "removed in the future"))) void
 ncclResetDebugInit();
 /*! @cond       include_hidden */
 void
@@ -888,6 +897,227 @@ pncclAllGather(const void*    sendbuff,
                hipStream_t    stream);
 /*! @endcond */
 
+/*! @brief      All-to-All
+    @details    Each device sends count values to all other devices and receives count values
+                from all other devices. Data to send to destination rank j is taken from
+                sendbuff+j*count and data received from source rank i is placed at
+                recvbuff+i*count.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
+    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in]  count         Number of elements to send between each pair of ranks
+    @param[in]  datatype      Data buffer element datatype
+    @param[in]  comm          Communicator group object to execute on
+    @param[in]  stream        HIP stream to execute collective on */
+ncclResult_t
+ncclAlltoAll(const void*    sendbuff,
+             void*          recvbuff,
+             size_t         count,
+             ncclDataType_t datatype,
+             ncclComm_t     comm,
+             hipStream_t    stream);
+/*! @cond       include_hidden */
+ncclResult_t
+pncclAlltoAll(const void*    sendbuff,
+              void*          recvbuff,
+              size_t         count,
+              ncclDataType_t datatype,
+              ncclComm_t     comm,
+              hipStream_t    stream);
+/*! @endcond */
+
+/*! @brief      All-To-Allv
+    @details    Device (i) sends sendcounts[j] of data from offset sdispls[j]
+                to device (j). At the same time, device (i) receives recvcounts[j] of data
+                from device (j) to be placed at rdispls[j].
+                sendcounts, sdispls, recvcounts and rdispls are all measured in the units
+                of datatype, not bytes.
+                In-place operation will happen if sendbuff == recvbuff.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
+    @param[in]  sendcounts    Array containing number of elements to send to each participating rank
+    @param[in]  sdispls       Array of offsets into *sendbuff* for each participating rank
+    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in]  recvcounts    Array containing number of elements to receive from each participating
+   rank
+    @param[in]  rdispls       Array of offsets into *recvbuff* for each participating rank
+    @param[in]  datatype      Data buffer element datatype
+    @param[in]  comm          Communicator group object to execute on
+    @param[in]  stream        HIP stream to execute collective on */
+ncclResult_t
+ncclAlltoAllv(const void*    sendbuff,
+              const size_t   sendcounts[],
+              const size_t   sdispls[],
+              void*          recvbuff,
+              const size_t   recvcounts[],
+              const size_t   rdispls[],
+              ncclDataType_t datatype,
+              ncclComm_t     comm,
+              hipStream_t    stream);
+/*! @cond       include_hidden */
+ncclResult_t
+pncclAlltoAllv(const void*    sendbuff,
+               const size_t   sendcounts[],
+               const size_t   sdispls[],
+               void*          recvbuff,
+               const size_t   recvcounts[],
+               const size_t   rdispls[],
+               ncclDataType_t datatype,
+               ncclComm_t     comm,
+               hipStream_t    stream);
+/*! @endcond */
+
+/*! @brief      Gather
+    @details    Each rank sends count elements from sendbuff to the root rank.
+                On the root rank, data from rank i is placed at recvbuff + i*count.
+                On non-root ranks, recvbuff is not used.
+                root is the rank where data will be gathered.
+
+                In-place operations will happen if sendbuff == recvbuff + root * count.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  sendbuff      Data array to send
+    @param[in]  recvbuff      Data array to recv
+    @param[in]  count         Number of elements
+    @param[in]  datatype      Data buffer element datatype
+    @param[in]  root          Rank of gather root
+    @param[in]  comm          Communicator group object to execute on
+    @param[in]  stream        HIP stream to execute collective on */
+ncclResult_t
+ncclGather(const void*    sendbuff,
+           void*          recvbuff,
+           size_t         count,
+           ncclDataType_t datatype,
+           int            root,
+           ncclComm_t     comm,
+           hipStream_t    stream);
+/*! @cond       include_hidden */
+ncclResult_t
+pncclGather(const void*    sendbuff,
+            void*          recvbuff,
+            size_t         count,
+            ncclDataType_t datatype,
+            int            root,
+            ncclComm_t     comm,
+            hipStream_t    stream);
+/*! @endcond */
+
+/*! @brief      Scatter
+    @details    On the root rank, count elements from sendbuff+i*count are sent to rank i.
+                On non-root ranks, sendbuff is not used.
+                Each rank receives count elements into recvbuff.
+                root is the rank that will distribute the data.
+
+                In-place operations will happen if recvbuff == sendbuff + root * count.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  sendbuff      Data array to send
+    @param[in]  recvbuff      Data array to recv
+    @param[in]  count         Number of elements
+    @param[in]  datatype      Data buffer element datatype
+    @param[in]  root          Rank of scatter root
+    @param[in]  comm          Communicator group object to execute on
+    @param[in]  stream        HIP stream to execute collective on */
+ncclResult_t
+ncclScatter(const void*    sendbuff,
+            void*          recvbuff,
+            size_t         count,
+            ncclDataType_t datatype,
+            int            root,
+            ncclComm_t     comm,
+            hipStream_t    stream);
+/*! @cond       include_hidden */
+ncclResult_t
+pncclScatter(const void*    sendbuff,
+             void*          recvbuff,
+             size_t         count,
+             ncclDataType_t datatype,
+             int            root,
+             ncclComm_t     comm,
+             hipStream_t    stream);
+/*! @endcond */
+
+/*! @brief      All-To-All
+    @details    Device (i) send (j)th block of data to device (j) and be placed as (i)th
+                block. Each block for sending/receiving has *count* elements, which means
+                that *recvbuff* and *sendbuff* should have a size of nranks*count elements.
+                In-place operation is NOT supported. It is the user's responsibility
+                to ensure that sendbuff and recvbuff are distinct.
+    @deprecated ncclAllToAll is replaced with ncclAlltoAll and will be removed in the future.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
+    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in]  count         Number of elements to send between each pair of ranks
+    @param[in]  datatype      Data buffer element datatype
+    @param[in]  comm          Communicator group object to execute on
+    @param[in]  stream        HIP stream to execute collective on */
+ncclResult_t
+ncclAllToAll(const void*    sendbuff,
+             void*          recvbuff,
+             size_t         count,
+             ncclDataType_t datatype,
+             ncclComm_t     comm,
+             hipStream_t    stream)
+    __attribute__((deprecated(
+        "ncclAllToAll is replaced with ncclAlltoAll and will be removed in the future")));
+/*! @cond       include_hidden */
+ncclResult_t
+pncclAllToAll(const void*    sendbuff,
+              void*          recvbuff,
+              size_t         count,
+              ncclDataType_t datatype,
+              ncclComm_t     comm,
+              hipStream_t    stream);
+/*! @endcond */
+
+/*! @brief      All-To-Allv
+    @details    Device (i) sends sendcounts[j] of data from offset sdispls[j]
+                to device (j). At the same time, device (i) receives recvcounts[j] of data
+                from device (j) to be placed at rdispls[j].
+                sendcounts, sdispls, recvcounts and rdispls are all measured in the units
+                of datatype, not bytes.
+                In-place operation will happen if sendbuff == recvbuff.
+    @deprecated ncclAllToAllv is replaced with ncclAlltoAllv and will be removed in the future.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
+    @param[in]  sendcounts    Array containing number of elements to send to each participating rank
+    @param[in]  sdispls       Array of offsets into *sendbuff* for each participating rank
+    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in]  recvcounts    Array containing number of elements to receive from each participating
+   rank
+    @param[in]  rdispls       Array of offsets into *recvbuff* for each participating rank
+    @param[in]  datatype      Data buffer element datatype
+    @param[in]  comm          Communicator group object to execute on
+    @param[in]  stream        HIP stream to execute collective on */
+ncclResult_t
+ncclAllToAllv(const void*    sendbuff,
+              const size_t   sendcounts[],
+              const size_t   sdispls[],
+              void*          recvbuff,
+              const size_t   recvcounts[],
+              const size_t   rdispls[],
+              ncclDataType_t datatype,
+              ncclComm_t     comm,
+              hipStream_t    stream)
+    __attribute__((deprecated(
+        "ncclAllToAllv is replaced with ncclAlltoAllv and will be removed in the future")));
+/*! @cond       include_hidden */
+ncclResult_t
+pncclAllToAllv(const void*    sendbuff,
+               const size_t   sendcounts[],
+               const size_t   sdispls[],
+               void*          recvbuff,
+               const size_t   recvcounts[],
+               const size_t   rdispls[],
+               ncclDataType_t datatype,
+               ncclComm_t     comm,
+               hipStream_t    stream);
+/*! @endcond */
+
 /*! @brief      Send
     @details    Send data from *sendbuff* to rank *peer*.
                 Rank *peer* needs to call ncclRecv with the same *datatype* and the same *count*
@@ -950,148 +1180,6 @@ pncclRecv(void*          recvbuff,
           int            peer,
           ncclComm_t     comm,
           hipStream_t    stream);
-/*! @endcond */
-
-/*! @brief      Gather
-    @details    Root device gathers *sendcount* values from other GPUs into *recvbuff*,
-                receiving data from rank i at offset i*sendcount.
-                Assumes recvcount is equal to nranks*sendcount, which means that *recvbuff*
-                should have a size of at least nranks*sendcount elements.
-                In-place operations will happen if sendbuff == recvbuff + rank * sendcount.
-                *recvbuff* may be NULL on ranks other than *root*.
-    @return     Result code. See @ref rccl_result_code for more details.
-
-    @param[in]  sendbuff      Data array to send
-    @param[out] recvbuff      Data array to receive into on *root*.
-    @param[in]  sendcount     Number of elements to send per rank
-    @param[in]  datatype      Data buffer element datatype
-    @param[in]  root          Rank that receives data from all other ranks
-    @param[in]  comm          Communicator group object to execute on
-    @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t
-ncclGather(const void*    sendbuff,
-           void*          recvbuff,
-           size_t         sendcount,
-           ncclDataType_t datatype,
-           int            root,
-           ncclComm_t     comm,
-           hipStream_t    stream);
-/*! @cond       include_hidden */
-ncclResult_t
-pncclGather(const void*    sendbuff,
-            void*          recvbuff,
-            size_t         sendcount,
-            ncclDataType_t datatype,
-            int            root,
-            ncclComm_t     comm,
-            hipStream_t    stream);
-/*! @endcond */
-
-/*! @brief      Scatter
-    @details    Scattered over the devices so that recvbuff on rank i will contain the i-th
-                block of the data on root.
-                Assumes sendcount is equal to nranks*recvcount, which means that *sendbuff*
-                should have a size of at least nranks*recvcount elements.
-                In-place operations will happen if recvbuff == sendbuff + rank * recvcount.
-    @return     Result code. See @ref rccl_result_code for more details.
-
-    @param[in]  sendbuff      Data array to send (on *root* rank).  May be NULL on other ranks.
-    @param[out] recvbuff      Data array to receive partial subarray into
-    @param[in]  recvcount     Number of elements to receive per rank
-    @param[in]  datatype      Data buffer element datatype
-    @param[in]  root          Rank that scatters data to all other ranks
-    @param[in]  comm          Communicator group object to execute on
-    @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t
-ncclScatter(const void*    sendbuff,
-            void*          recvbuff,
-            size_t         recvcount,
-            ncclDataType_t datatype,
-            int            root,
-            ncclComm_t     comm,
-            hipStream_t    stream);
-/*! @cond       include_hidden */
-ncclResult_t
-pncclScatter(const void*    sendbuff,
-             void*          recvbuff,
-             size_t         recvcount,
-             ncclDataType_t datatype,
-             int            root,
-             ncclComm_t     comm,
-             hipStream_t    stream);
-/*! @endcond */
-
-/*! @brief      All-To-All
-    @details    Device (i) send (j)th block of data to device (j) and be placed as (i)th
-                block. Each block for sending/receiving has *count* elements, which means
-                that *recvbuff* and *sendbuff* should have a size of nranks*count elements.
-                In-place operation is NOT supported. It is the user's responsibility
-                to ensure that sendbuff and recvbuff are distinct.
-    @return     Result code. See @ref rccl_result_code for more details.
-
-    @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
-    @param[in]  count         Number of elements to send between each pair of ranks
-    @param[in]  datatype      Data buffer element datatype
-    @param[in]  comm          Communicator group object to execute on
-    @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t
-ncclAllToAll(const void*    sendbuff,
-             void*          recvbuff,
-             size_t         count,
-             ncclDataType_t datatype,
-             ncclComm_t     comm,
-             hipStream_t    stream);
-/*! @cond       include_hidden */
-ncclResult_t
-pncclAllToAll(const void*    sendbuff,
-              void*          recvbuff,
-              size_t         count,
-              ncclDataType_t datatype,
-              ncclComm_t     comm,
-              hipStream_t    stream);
-/*! @endcond */
-
-/*! @brief      All-To-Allv
-    @details    Device (i) sends sendcounts[j] of data from offset sdispls[j]
-                to device (j). At the same time, device (i) receives recvcounts[j] of data
-                from device (j) to be placed at rdispls[j].
-                sendcounts, sdispls, recvcounts and rdispls are all measured in the units
-                of datatype, not bytes.
-                In-place operation will happen if sendbuff == recvbuff.
-    @return     Result code. See @ref rccl_result_code for more details.
-
-    @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
-    @param[in]  sendcounts    Array containing number of elements to send to each participating rank
-    @param[in]  sdispls       Array of offsets into *sendbuff* for each participating rank
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
-    @param[in]  recvcounts    Array containing number of elements to receive from each participating
-   rank
-    @param[in]  rdispls       Array of offsets into *recvbuff* for each participating rank
-    @param[in]  datatype      Data buffer element datatype
-    @param[in]  comm          Communicator group object to execute on
-    @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t
-ncclAllToAllv(const void*    sendbuff,
-              const size_t   sendcounts[],
-              const size_t   sdispls[],
-              void*          recvbuff,
-              const size_t   recvcounts[],
-              const size_t   rdispls[],
-              ncclDataType_t datatype,
-              ncclComm_t     comm,
-              hipStream_t    stream);
-/*! @cond       include_hidden */
-ncclResult_t
-pncclAllToAllv(const void*    sendbuff,
-               const size_t   sendcounts[],
-               const size_t   sdispls[],
-               void*          recvbuff,
-               const size_t   recvcounts[],
-               const size_t   rdispls[],
-               ncclDataType_t datatype,
-               ncclComm_t     comm,
-               hipStream_t    stream);
 /*! @endcond */
 
 /*! @} */
@@ -1250,6 +1338,20 @@ pncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
 
 #ifdef __cplusplus
 }  // end extern "C"
+#endif
+
+#ifdef __cplusplus
+#    define NCCL_COMM_DUMP
+
+#    include <string>
+#    include <unordered_map>
+/* Dump NCCL current internal state for a given communicator in a key-value store format.
+ * define outside extern "C"{} to pass C++ template */
+ncclResult_t
+ncclCommDump(ncclComm_t comm, std::unordered_map<std::string, std::string>& map);
+#else
+#    pragma message                                                                                \
+        "NCCL C++ API is disabled because C compiler is being used. Please use a C++ compiler to build NCCL."
 #endif
 
 #endif  // end include guard

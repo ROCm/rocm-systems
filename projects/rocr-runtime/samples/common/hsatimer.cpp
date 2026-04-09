@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "hsatimer.h"
 
 PerfTimer::PerfTimer()
@@ -29,7 +29,7 @@ int PerfTimer::CreateTimer()
 	newTimer->_clocks = 0;
 
 #ifdef _WIN32
-    QueryPerformanceFrequency((LARGE_INTEGER*)&newTimer->_freq);       
+    QueryPerformanceFrequency((LARGE_INTEGER*)&newTimer->_freq);
 #else
 	newTimer->_freq = (long long)1.0E3;
 #endif
@@ -46,7 +46,7 @@ int PerfTimer::StartTimer(int index)
 		Error("Cannot reset timer. Invalid handle.");
 		return HSA_FAILURE;
 	}
-	
+
 #ifdef _WIN32
         // General Windows timing method
        #ifndef _AMD
@@ -54,16 +54,16 @@ int PerfTimer::StartTimer(int index)
 	QueryPerformanceCounter((LARGE_INTEGER*)&(tmpStart));
 	_timers[index]->_start = (double)tmpStart;
        #else
-       // AMD Windows timing method      
+       // AMD Windows timing method
 
        #endif
-	   
+
 #else
        // General Linux timing method
       #ifndef _AMD
 	struct timeval s;
 	gettimeofday(&s, 0);
-	_timers[index]->_start = s.tv_sec * 1.0E3 + ((double)(s.tv_usec / 1.0E3)); 
+	_timers[index]->_start = s.tv_sec * 1.0E3 + ((double)(s.tv_usec / 1.0E3));
        #else
 
        // AMD timing method
@@ -72,7 +72,7 @@ int PerfTimer::StartTimer(int index)
 	_timers[index]->_start = __rdtscp(&unused);
 
        #endif
-	   
+
 #endif
 
 	return HSA_SUCCESS;
@@ -93,11 +93,11 @@ int PerfTimer::StopTimer(int index)
 	QueryPerformanceCounter((LARGE_INTEGER*)&(n1));
 	n = (double) n1;
 	#else
-	
+
         // AMD Window Timing
-        
+
 	#endif
-	
+
 #else
         // General Linux timing method
         #ifndef _AMD
@@ -110,7 +110,7 @@ int PerfTimer::StopTimer(int index)
 	unsigned int unused;
 	n = __rdtscp(&unused);
 	#endif
-	
+
 #endif
 
 	n -= _timers[index]->_start;
@@ -123,7 +123,7 @@ int PerfTimer::StopTimer(int index)
 	_timers[index]->_clocks += 1.0E-6 * 10  * n /freq_in_100mhz;  // convert to ms
 	cout << "_AMD is enabled!!!" << endl;
 	#endif
-	
+
 	return HSA_SUCCESS;
 }
 
@@ -141,16 +141,16 @@ double PerfTimer::ReadTimer(int index)
 		Error("Cannot read timer. Invalid handle.");
 		return HSA_FAILURE;
 	}
-	
+
 	double reading = double(_timers[index]->_clocks);
-	
+
 	reading = double(reading / _timers[index]->_freq);
-	
+
 	return reading;
 }
 
 
-uint64_t PerfTimer::CoarseTimestampUs() 
+uint64_t PerfTimer::CoarseTimestampUs()
 {
 #ifdef _WIN32
 	uint64_t freqHz, ticks;
@@ -166,12 +166,12 @@ uint64_t PerfTimer::CoarseTimestampUs()
 	return (ticks * 1000000) / freqHz;
 #else
 	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC_RAW, &ts); 
+	clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
 	return uint64_t(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
 #endif
 }
 
-uint64_t PerfTimer::MeasureTSCFreqHz() 
+uint64_t PerfTimer::MeasureTSCFreqHz()
 {
 	// Make a coarse interval measurement of TSC ticks for 1 gigacycles.
 	unsigned int unused;
@@ -179,12 +179,12 @@ uint64_t PerfTimer::MeasureTSCFreqHz()
 
 	uint64_t coarseBeginUs = CoarseTimestampUs();
 	uint64_t tscTicksBegin = __rdtscp(&unused);
-	do 
+	do
 	{
 		tscTicksEnd = __rdtscp(&unused);
-	} 
+	}
 	while (tscTicksEnd - tscTicksBegin < 1000000000);
-	
+
 	uint64_t coarseEndUs = CoarseTimestampUs();
 
 	// Compute the TSC frequency and round to nearest 100MHz.

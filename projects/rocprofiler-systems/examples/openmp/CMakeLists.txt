@@ -5,15 +5,9 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-openmp LANGUAGES CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 file(GLOB common_source ${CMAKE_CURRENT_SOURCE_DIR}/common/*.cpp)
@@ -89,38 +83,19 @@ endif()
 target_link_libraries(openmp-cg PRIVATE openmp-common)
 target_link_libraries(openmp-lu PRIVATE openmp-common)
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(
-        TARGETS openmp-cg openmp-lu
-        DESTINATION bin
-        COMPONENT rocprofiler-systems-examples
-    )
-endif()
+set(OPENMP_EXAMPLES openmp-cg openmp-lu)
 
-set(DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102"
-)
+foreach(OPENMP_EXAMPLE IN LISTS OPENMP_EXAMPLES)
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${OPENMP_EXAMPLE})
+        install(
+            TARGETS ${OPENMP_EXAMPLE}
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
+endforeach()
 
-set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "GPU targets to compile for")
-
-if(ROCPROFSYS_USE_ROCM)
-    add_subdirectory(external)
-else()
-    rocprofiler_systems_message(
-      WARNING
-      "ROCPROFSYS OMPVV CTests requires ROCm to be installed. Disabling OMPVV CTests..."
-    )
-endif()
+add_subdirectory(external)
 
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     if(NOT "openmp-target" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
