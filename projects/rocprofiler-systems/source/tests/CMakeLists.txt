@@ -8,6 +8,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
+    $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
 )
 
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)
@@ -27,4 +28,5 @@ target_link_libraries(
         rocprofiler-systems-object-library
         rocprofiler-systems-pmc-library
         rocprofiler-systems::rocprofiler-systems-binary
+        $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
 )

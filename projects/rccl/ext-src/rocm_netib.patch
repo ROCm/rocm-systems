@@ -59,25 +59,28 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
  
  static ncclResult_t ncclIbStatsInit(struct ncclIbStats* stat) {
    __atomic_store_n(&stat->fatalErrorCount, 0, __ATOMIC_RELAXED);
-@@ -751,6 +781,19 @@ ncclResult_t ncclIbMakeVDeviceInternal(i
+@@ -773,8 +804,22 @@ ncclResult_t ncclIbMakeVDeviceInternal(i
+           dev0->devName, root0, dev->devName, root_i);
+       break;
      }
    }
- 
++
 +  // CTS Offload and CTS Inline are not yet compatible with NIC Fusion
 +  // (NCCL_IB_MERGE_NICS). Disable them when a multi-NIC vNIC is created.
-+  if (props->ndevs > 1) {
++  if (tmp.vProps.ndevs > 1) {
 +    if (rcclCtsInlineData) {
-+      INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Inline Data (not yet supported with merge)", props->ndevs);
++      INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Inline Data (not yet supported with merge)", tmp.vProps.ndevs);
 +      rcclCtsInlineData = false;
 +    }
 +    if (rcclCtsOffloadEnabled) {
-+      INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Offload (not yet supported with merge)", props->ndevs);
++      INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Offload (not yet supported with merge)", tmp.vProps.ndevs);
 +      rcclCtsOffloadEnabled = false;
 +    }
 +  }
 +
+   ncclIbMergedDevs[ncclNMergedIbDevs] = tmp;
    *d = ncclNMergedIbDevs++;
-   INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, mDev->devName, mDev->speed, mDev->vProps.ndevs);
+   INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, tmp.devName, tmp.speed, tmp.vProps.ndevs);
    return ncclSuccess;
 @@ -779,6 +822,10 @@ ncclResult_t ncclIbInit(void** ctx, uint
    static int shownIbHcaEnv = 0;

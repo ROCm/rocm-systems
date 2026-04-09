@@ -98,21 +98,6 @@ protected:
     cdbgsys_and_user, /* Conditional Debug for System and User is 1.  */
   };
 
-#if defined(__linux__)
-  static constexpr agent_address_t local_address_aperture_base
-    = agent_address_t{ 1 } << 48;
-  static constexpr agent_address_t private_address_aperture_base
-    = agent_address_t{ 2 } << 48;
-#elif defined(_WIN32)
-  static constexpr agent_address_t local_address_aperture_base
-    = agent_address_t{ 2 } << 60;
-  static constexpr agent_address_t private_address_aperture_base
-    = agent_address_t{ 1 } << 60;
-#endif
-
-  static constexpr agent_address_t address_aperture_mask
-    = utils::bit_mask<agent_address_t> (0, 15) << 48;
-
   static constexpr uint32_t sq_wave_status_scc_mask = 1 << 0;
   static constexpr uint32_t sq_wave_status_priv_mask = 1 << 5;
   static constexpr uint32_t sq_wave_status_trap_en_mask = 1 << 6;
@@ -2575,13 +2560,7 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
   auto &private_lane = create<private_swizzled_address_space_t> (
     "private_lane", /* interleave_size  */ sizeof (uint32_t));
   create<private_unswizzled_address_space_t> ("private_wave");
-
-  auto &generic = create<generic_address_space_t> (
-    "generic",
-    std::vector<generic_address_space_t::aperture_t>{
-      { local_address_aperture_base, address_aperture_mask, local },
-      { private_address_aperture_base, address_aperture_mask, private_lane },
-      { 0, 0, address_space_t::global () } });
+  auto &generic = create<generic_address_space_t> ("generic");
 
   /* Create address classes.  */
 

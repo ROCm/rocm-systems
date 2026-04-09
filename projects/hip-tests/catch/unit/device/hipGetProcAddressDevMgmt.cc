@@ -393,7 +393,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_PeerDeviceAccessAPIs) {
     int canAccessPeer_ptr = 0, canAccessPeer = 0, devCount = 0;
     HIP_CHECK(hipGetDeviceCount(&devCount));
     if (devCount < 2) {
-      HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
       return;
     }
     // hipDeviceCanAccessPeer API
@@ -418,7 +418,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_PeerDeviceAccessAPIs) {
         HIP_CHECK(hipSetDevice(dev));
         HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, dev, peerDev));
         if (canAccessPeer == 0) {
-          HipTest::HIP_SKIP_TEST("Skipping because no P2P support");
+          HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
           return;
         }
         HIP_CHECK(hipDeviceEnablePeerAccess(peerDev, 0));
@@ -435,7 +435,7 @@ bool CheckMemPoolSupport(const int device) {
   HIP_CHECK(
       hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, device));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST("Device doest have memory pool support");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return false;
   }
   return true;
@@ -458,7 +458,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_SetGetMemPoolAPIs) {
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
   if (devCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   // hipDeviceSetMemPool API

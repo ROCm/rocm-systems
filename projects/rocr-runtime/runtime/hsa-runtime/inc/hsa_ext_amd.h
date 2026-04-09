@@ -70,9 +70,10 @@
  * - 1.17 - hsa_amd_memory_async_batch_copy
  * - 1.18 - hsa_amd_pointer_info: Added alloc_flags field to hsa_amd_pointer_info_t
  * - 1.19 - hsa_amd_agent_preload
+ * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 19
+#define HSA_AMD_INTERFACE_VERSION_MINOR 20
 
 #ifdef __cplusplus
 extern "C" {
@@ -464,6 +465,12 @@ enum {
    * Request is not supported by this system
    */
   HSA_STATUS_ERROR_NOT_SUPPORTED = 47,
+
+  /**
+   * Xnack is disabled on this system, but required 
+   * by the requested operation.
+   */
+  HSA_STATUS_ERROR_XNACK_DISABLED = 48,
 };
 
 /** @} */
@@ -1865,7 +1872,7 @@ hsa_status_t HSA_API
  * @brief Type of memory copy operation within a batch.
  */
 typedef enum {
-  HSA_AMD_MEMORY_COPY_OP_LINEAR               = 0,  /**< Linear copy (num_dsts==0: single; num_dsts>0: multi) */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR               = 0,  /**< Linear copy (num_entries==0: single; num_entries>0: multi) */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST     = 1,  /**< Linear broadcast: single src -> multiple dsts */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP          = 2,  /**< Linear swap: exchange contents of src and dst */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC     = 3,  /**< Source address resolved via indirection */
@@ -1946,33 +1953,41 @@ typedef enum {
  *
  * Field usage per operation type:
  *
- * LINEAR (default, single copy when num_dsts == 0):
+ * LINEAR (default, single copy when num_entries == 0):
  *   src, src_agent  -- source pointer and agent
  *   dst, dst_agent  -- destination pointer and agent
  *   size            -- copy size in bytes
- *   num_dsts        -- 0
+ *   num_entries        -- 0
  *
- * LINEAR (multi-copy when num_dsts > 0, one signal for all entries):
- *   src_list         -- caller-owned array of num_dsts source pointers
+ * LINEAR (multi-copy when num_entries > 0, one signal for all entries):
+ *   src_list         -- caller-owned array of num_entries source pointers
  *   src_agent        -- common source agent (must be GPU)
- *   dst_list         -- caller-owned array of num_dsts destination pointers
- *   dst_agent_list   -- caller-owned array of num_dsts destination agents
- *   size_list        -- caller-owned array of num_dsts copy sizes in bytes
- *   num_dsts         -- number of entries (>= 1, <= 1024)
+ *   dst_list         -- caller-owned array of num_entries destination pointers
+ *   dst_agent_list   -- caller-owned array of num_entries destination agents
+ *   size_list        -- caller-owned array of num_entries copy sizes in bytes
+ *   num_entries         -- number of entries (>= 1, <= 1024)
  *
  * LINEAR_BROADCAST (single source -> multiple destinations):
  *   src, src_agent    -- source pointer and agent (must be GPU)
- *   dst_list          -- caller-owned array of num_dsts destination pointers
- *   dst_agent_list    -- caller-owned array of num_dsts destination agents
+ *   dst_list          -- caller-owned array of num_entries destination pointers
+ *   dst_agent_list    -- caller-owned array of num_entries destination agents
  *   size              -- copy size in bytes (same for every destination)
- *   num_dsts          -- number of entries in dst_list / dst_agent_list (>= 1, <= 1024)
+ *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 1024)
  *
- * LINEAR_SWAP (exchange contents of two buffers):
+ * LINEAR_SWAP (exchange contents of two buffers, multi-entry when num_entries > 0):
+ *   src_list         -- caller-owned array of num_entries source pointers
+ *   src_agent        -- common agent for routing
+ *   dst_list         -- caller-owned array of num_entries destination pointers
+ *   dst_agent_list   -- caller-owned array of num_entries destination agents
+ *   size_list        -- caller-owned array of num_entries swap sizes in bytes
+ *   num_entries      -- number of entries (>= 1, <= 1024)
+ *
+ * LINEAR_SWAP (single, when num_entries == 0):
  *   src, src_agent  -- first buffer pointer and agent (modified in place)
  *   dst, dst_agent  -- second buffer pointer and agent (modified in place)
  *   src_size        -- size of the source region in bytes
  *   dst_size        -- size of the destination region in bytes
- *   num_dsts        -- must be 0
+ *   num_entries     -- 0
  *
  * LINEAR_INDIRECT_SRC (source address resolved via indirection):
  *   src             -- void** pointing to the actual source address
@@ -1992,7 +2007,7 @@ typedef enum {
  * For all INDIRECT_* types:
  *   src_agent, dst_agent -- source and destination agents
  *   size            -- copy size in bytes
- *   num_dsts        -- must be 0
+ *   num_entries        -- must be 0
  *
  * Future-proofing unions (reserved, must not be used):
  *   src_agent_list           -- reserved for future gather operations
@@ -2001,12 +2016,12 @@ typedef enum {
 typedef struct hsa_amd_memory_copy_op_s {
   uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
   uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
-  uint16_t num_dsts;                      /**< LINEAR multi / BROADCAST: number of entries; others: must be 0 */
+  uint16_t num_entries;                    /**< LINEAR multi / BROADCAST / SWAP: number of entries; others: must be 0 */
   uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
   hsa_signal_t completion_signal;         /**< Completion signal for this operation */
   union {
     void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
-    void** src_list;                      /**< LINEAR multi: caller-owned array of num_dsts source pointers */
+    void** src_list;                      /**< LINEAR multi: caller-owned array of num_entries source pointers */
   };
   union {
     hsa_agent_t src_agent;                /**< Source agent */
@@ -2014,11 +2029,11 @@ typedef struct hsa_amd_memory_copy_op_s {
   };
   union {
     hsa_agent_t dst_agent;                /**< Destination agent (single-dst types) */
-    hsa_agent_t* dst_agent_list;          /**< LINEAR multi / BROADCAST: caller-owned array of num_dsts destination agents */
+    hsa_agent_t* dst_agent_list;          /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination agents */
   };
   union {
     void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
-    void** dst_list;                      /**< LINEAR multi / BROADCAST: caller-owned array of num_dsts destination pointers */
+    void** dst_list;                      /**< LINEAR multi / BROADCAST: caller-owned array of num_entries destination pointers */
   };
   union {
     struct {
@@ -2030,7 +2045,7 @@ typedef struct hsa_amd_memory_copy_op_s {
       size_t dst_size;                    /**< SWAP: destination region size in bytes */
     };
     struct {
-      size_t* size_list;                  /**< LINEAR multi: caller-owned array of num_dsts copy sizes */
+      size_t* size_list;                  /**< LINEAR multi: caller-owned array of num_entries copy sizes */
       size_t reserved0;                   /**< Must be 0 for LINEAR multi */
     };
   };
@@ -2065,7 +2080,7 @@ typedef struct hsa_amd_memory_copy_op_s {
  *
  * Each operation is self-describing via its @c type field. A BROADCAST operation
  * is a single op that copies one source to multiple destinations via @c dst_list
- * and @c num_dsts. A SWAP operation exchanges two buffers using @c src_size and
+ * and @c num_entries. A SWAP operation exchanges two buffers using @c src_size and
  * @c dst_size.
  *
  * @param[in] copy_ops Array of copy operation descriptors.
@@ -3456,6 +3471,47 @@ hsa_status_t hsa_amd_svm_attributes_get(void* ptr, size_t size,
 hsa_status_t hsa_amd_svm_prefetch_async(void* ptr, size_t size, hsa_agent_t agent,
                                         uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                         hsa_signal_t completion_signal);
+
+/**
+ * @brief Discards a batch of SVM memory ranges asynchronously.
+ *
+ * Schedules the discard of multiple SVM ranges in a single batched operation.
+ * The physical pages backing the virtual address ranges may be released and reclaimed
+ * by the system under memory pressure. The discard will be scheduled when all @p dep_signals
+ * have been resolved.
+ *
+ * Only pointers allocated using ::hsa_amd_vmem_address_reserve can be discarded.
+ *
+ * 
+ * @param[in] ptrs Array of @p count pointers to SVM memory ranges to discard.
+ * Must not be NULL.
+ *
+ * @param[in] sizes Array of @p ptr sizes, specifying the length of each memory range
+ * to discard. Must not be NULL.
+ *
+ * @param[in] count Number of memory ranges in the @p ptrs and @p sizes arrays. Must not be 0.
+ *
+ * @param[in] num_dep_signals Number of dependent signals. Can be 0.
+ *
+ * @param[in] dep_signals List of dependency signals to wait for before the discard operation
+ * starts. Can be NULL.
+ *
+ * @param[in] completion_signal Signal used to indicate completion of the discard operation.
+ * May be a NULL signal if no completion signal is required.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Discard operation was successfully scheduled.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED HSA runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptrs is NULL, @p sizes is
+ * NULL, @p count is 0, @p dep_signals and @p num_dep_signals are inconsistent.
+ *
+ * @retval ::HSA_STATUS_ERROR_XNACK_DISABLED Cannot run this API on a system with XNACK disabled.
+ */
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
+                                                     uint32_t num_dep_signals,
+                                                     const hsa_signal_t* dep_signals,
+                                                     hsa_signal_t completion_signal);
 
 /** @} */
 
