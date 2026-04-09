@@ -100,7 +100,6 @@
         {"name": "GroupCall.MixedDataType", "description": "GroupCall mixed data type", "test_filter": "GroupCall.MixedDataType"},
         {"name": "GroupCall.MultiGroupCall", "description": "GroupCall multi group call", "test_filter": "GroupCall.MultiGroupCall"},
         {"name": "NonBlocking.SingleCalls", "description": "NonBlocking single calls", "test_filter": "NonBlocking.SingleCalls"},
-        {"name": "CommTests.Sorter", "description": "CommTests sorter", "test_filter": "CommTests.Sorter"},
         {"name": "Enqueue", "description": "Enqueue operation tests", "test_filter": "Enqueue.*"},
         {"name": "Alloc", "description": "Memory allocation tests", "test_filter": "Alloc.*"},
         {"name": "ParamTests", "description": "Parameter handling tests", "test_filter": "ParamTests.*"},
@@ -167,6 +166,17 @@
         {"name": "CollTraceUtilsTest.getSizeMbTest", "description": "CollTrace get size MB test", "test_filter": "CollTraceUtilsTest.getSizeMbTest"},
         {"name": "ROCTX", "description": "AllReduce out-of-place with ROCTX logging", "test_filter": "AllReduce.OutOfPlace", "env_variables": {"RCCL_LOG_ROCTX": "1", "UT_MAX_GPUS": "2", "UT_PROCESS_MASK": "2"}}
       ]
+    },
+    "unit_tests_fixtures": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 0,
+      "tests": [
+        {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"}
+      ]
     }
   },
   "test_suites": [
@@ -174,6 +184,12 @@
       "name": "RCCL Unit Tests - All Collectives",
       "description": "Standard RCCL unit tests for all collective operations",
       "config": "unit_tests",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Unit Tests - Fixtures",
+      "description": "rccl-UnitTestsFixtures (header-level tests including MiscTests.Sorter)",
+      "config": "unit_tests_fixtures",
       "enabled": true
     }
   ]
