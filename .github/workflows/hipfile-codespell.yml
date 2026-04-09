@@ -26,6 +26,6 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           sparse-checkout: |
-          projects/hipfile
-          .github/workflows
+            projects/hipfile
+            .github/workflows
       - uses: codespell-project/actions-codespell@8f01853be192eb0f849a5c7d721450e7a467c579 #v2.2
