@@ -32,6 +32,7 @@ ROCPD_PRESETS = ["workload-trace"]
 # Preset Tests (rocprof-sys-sample)
 # ============================================================================
 
+
 @pytest.mark.sampling
 class TestSamplePresets(RocprofsysTest):
 
@@ -70,6 +71,7 @@ class TestSamplePresets(RocprofsysTest):
 # Preset Tests (rocprof-sys-run)
 # ============================================================================
 
+
 @pytest.mark.timeout(60)
 @pytest.mark.sys_run
 class TestRunPresets(RocprofsysTest):
@@ -105,6 +107,7 @@ class TestRunPresets(RocprofsysTest):
 # ============================================================================
 # Domain Flag Tests (rocprof-sys-sample)
 # ============================================================================
+
 
 @pytest.mark.timeout(60)
 class TestSampleDomainFlags(RocprofsysTest):
@@ -184,6 +187,7 @@ class TestSampleDomainFlags(RocprofsysTest):
 # Domain Flag Tests (rocprof-sys-run)
 # ============================================================================
 
+
 @pytest.mark.timeout(60)
 class TestRunDomainFlags(RocprofsysTest):
 
@@ -262,6 +266,7 @@ class TestRunDomainFlags(RocprofsysTest):
 # Export Config Tests
 # ============================================================================
 
+
 @pytest.mark.timeout(30)
 class TestExportConfig(RocprofsysTest):
 
@@ -289,6 +294,7 @@ class TestExportConfig(RocprofsysTest):
 # ============================================================================
 # List Presets and Explain Tests
 # ============================================================================
+
 
 @pytest.mark.timeout(30)
 class TestPresetDiscovery(RocprofsysTest):

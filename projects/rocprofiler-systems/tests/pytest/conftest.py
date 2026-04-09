@@ -1714,8 +1714,9 @@ def record_subtest_failure(request):
     return _record
 
 
+# TODO: Will be default once TheRock switches to CTest based filtering
 def _print_subtest_output(request, subtest_name: str, output: str) -> None:
-    """Print subtest validation output when in CTest run mode."""
+    """Print subtest validation output for important subtests when in CTest run mode."""
     if request.config.getoption("--ctest-mode", default="off") == "run" and output:
         print(f"\n--- {subtest_name} ---\n{output}\n", flush=True)
 
@@ -2005,7 +2006,6 @@ def assert_regex(subtests, record_subtest_failure, request):
                 else:
                     record_subtest_failure(subtest_name)
                     pytest.fail(msg)
-            _print_subtest_output(request, subtest_name, validation.message)
 
     return _assert_regex
 
@@ -2042,7 +2042,6 @@ def assert_file_regex(subtests, record_subtest_failure, request):
                 else:
                     record_subtest_failure(subtest_name)
                     pytest.fail(msg)
-            _print_subtest_output(request, subtest_name, validation.message)
 
     return _assert_file_regex
 
@@ -2317,11 +2316,6 @@ def assert_file_exists(subtests, record_subtest_failure, request):
                     else:
                         record_subtest_failure(subtest_name)
                         pytest.fail(msg)
-            _print_subtest_output(
-                request,
-                subtest_name,
-                "\n".join(f"  {p}: exists" for p in paths),
-            )
 
     return _assert_file_exists
 

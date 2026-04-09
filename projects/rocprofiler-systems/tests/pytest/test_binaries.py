@@ -33,6 +33,7 @@ EXCLUDED_FROM_JSON_SCHEMA: frozenset[str] = frozenset(
         "ROCPROFSYS_OUTPUT_PREFIX",
         "ROCPROFSYS_SUPPRESS_CONFIG",
         "ROCPROFSYS_SUPPRESS_PARSING",
+        "ROCPROFSYS_TMPDIR",
     }
 )
 
