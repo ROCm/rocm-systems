@@ -3605,7 +3605,7 @@ inline static hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDes
   return hipCUDAErrorTohipError(cudaGreenCtxCreate(ctx, desc, device, flags));
 }
 
-inline static hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx) {
+inline static hipError_t hipExecutionCtxDestroy(hipGreenCtx_t ctx) {
   return hipCUDAErrorTohipError(cudaExecutionCtxDestroy(ctx));
 }
 

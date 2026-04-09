@@ -887,7 +887,7 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
 hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags);
-hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx);
+hipError_t hipExecutionCtxDestroy(hipGreenCtx_t ctx);
 hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
                                         unsigned int flags, int priority);
 hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
@@ -1472,7 +1472,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipKernelSetAttribute_fn = hip::hipKernelSetAttribute;
   ptrDispatchTable->hipKernelGetFunction_fn = hip::hipKernelGetFunction;
   ptrDispatchTable->hipGreenCtxCreate_fn = hip::hipGreenCtxCreate;
-  ptrDispatchTable->hipGreenCtxDestroy_fn = hip::hipGreenCtxDestroy;
+  ptrDispatchTable->hipExecutionCtxDestroy_fn = hip::hipExecutionCtxDestroy;
   ptrDispatchTable->hipExecutionCtxStreamCreate_fn = hip::hipExecutionCtxStreamCreate;
   ptrDispatchTable->hipDeviceGetDevResource_fn = hip::hipDeviceGetDevResource;
   ptrDispatchTable->hipDevSmResourceSplitByCount_fn = hip::hipDevSmResourceSplitByCount;
@@ -2186,7 +2186,7 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetFunction_fn, 516);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemPrefetchBatchAsync_fn, 517);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
 HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxCreate_fn, 518);
-HIP_ENFORCE_ABI(HipDispatchTable, hipGreenCtxDestroy_fn, 519);
+HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxDestroy_fn, 519);
 HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxStreamCreate_fn, 520);
 HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetDevResource_fn, 521);
 HIP_ENFORCE_ABI(HipDispatchTable, hipDevSmResourceSplitByCount_fn, 522);

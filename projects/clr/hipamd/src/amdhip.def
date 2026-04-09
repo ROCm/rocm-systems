@@ -534,7 +534,7 @@ hipKernelGetAttribute
 hipKernelSetAttribute
 hipKernelGetFunction
 hipGreenCtxCreate
-hipGreenCtxDestroy
+hipExecutionCtxDestroy
 hipExecutionCtxStreamCreate
 hipDeviceGetDevResource
 hipDevSmResourceSplitByCount

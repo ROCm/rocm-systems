@@ -6083,7 +6083,7 @@ hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResour
                                        unsigned int nbResources);
 hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags);
-hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx);
+hipError_t hipExecutionCtxDestroy(hipGreenCtx_t ctx);
 hipError_t hipDeviceGetExecutionCtx(hipGreenCtx_t* ctx, int device);
 hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
                                         unsigned int flags, int priority);

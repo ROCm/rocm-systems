@@ -484,7 +484,7 @@ enum hip_api_id_t {
   HIP_API_ID_hipKernelGetFunction = 459,
   HIP_API_ID_hipMemPrefetchBatchAsync = 460,
   HIP_API_ID_hipGreenCtxCreate = 461,
-  HIP_API_ID_hipGreenCtxDestroy = 462,
+  HIP_API_ID_hipExecutionCtxDestroy = 462,
   HIP_API_ID_hipExecutionCtxStreamCreate = 463,
   HIP_API_ID_hipDeviceGetDevResource = 464,
   HIP_API_ID_hipDevSmResourceSplitByCount = 465,
@@ -625,6 +625,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipEventRecord: return "hipEventRecord";
     case HIP_API_ID_hipEventRecordWithFlags: return "hipEventRecordWithFlags";
     case HIP_API_ID_hipEventSynchronize: return "hipEventSynchronize";
+    case HIP_API_ID_hipExecutionCtxDestroy: return "hipExecutionCtxDestroy";
     case HIP_API_ID_hipExecutionCtxGetDevResource: return "hipExecutionCtxGetDevResource";
     case HIP_API_ID_hipExecutionCtxGetDevice: return "hipExecutionCtxGetDevice";
     case HIP_API_ID_hipExecutionCtxGetId: return "hipExecutionCtxGetId";
@@ -762,7 +763,6 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGraphicsUnmapResources: return "hipGraphicsUnmapResources";
     case HIP_API_ID_hipGraphicsUnregisterResource: return "hipGraphicsUnregisterResource";
     case HIP_API_ID_hipGreenCtxCreate: return "hipGreenCtxCreate";
-    case HIP_API_ID_hipGreenCtxDestroy: return "hipGreenCtxDestroy";
     case HIP_API_ID_hipHccModuleLaunchKernel: return "hipHccModuleLaunchKernel";
     case HIP_API_ID_hipHostAlloc: return "hipHostAlloc";
     case HIP_API_ID_hipHostFree: return "hipHostFree";
@@ -1094,6 +1094,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipEventRecord", name) == 0) return HIP_API_ID_hipEventRecord;
   if (strcmp("hipEventRecordWithFlags", name) == 0) return HIP_API_ID_hipEventRecordWithFlags;
   if (strcmp("hipEventSynchronize", name) == 0) return HIP_API_ID_hipEventSynchronize;
+  if (strcmp("hipExecutionCtxDestroy", name) == 0) return HIP_API_ID_hipExecutionCtxDestroy;
   if (strcmp("hipExecutionCtxGetDevResource", name) == 0) return HIP_API_ID_hipExecutionCtxGetDevResource;
   if (strcmp("hipExecutionCtxGetDevice", name) == 0) return HIP_API_ID_hipExecutionCtxGetDevice;
   if (strcmp("hipExecutionCtxGetId", name) == 0) return HIP_API_ID_hipExecutionCtxGetId;
@@ -1231,7 +1232,6 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGraphicsUnmapResources", name) == 0) return HIP_API_ID_hipGraphicsUnmapResources;
   if (strcmp("hipGraphicsUnregisterResource", name) == 0) return HIP_API_ID_hipGraphicsUnregisterResource;
   if (strcmp("hipGreenCtxCreate", name) == 0) return HIP_API_ID_hipGreenCtxCreate;
-  if (strcmp("hipGreenCtxDestroy", name) == 0) return HIP_API_ID_hipGreenCtxDestroy;
   if (strcmp("hipHccModuleLaunchKernel", name) == 0) return HIP_API_ID_hipHccModuleLaunchKernel;
   if (strcmp("hipHostAlloc", name) == 0) return HIP_API_ID_hipHostAlloc;
   if (strcmp("hipHostFree", name) == 0) return HIP_API_ID_hipHostFree;
@@ -1923,6 +1923,9 @@ typedef struct hip_api_data_s {
     struct {
       hipEvent_t event;
     } hipEventSynchronize;
+    struct {
+      hipGreenCtx_t ctx;
+    } hipExecutionCtxDestroy;
     struct {
       hipGreenCtx_t ctx;
       hipDevResource* resource;
@@ -2765,9 +2768,6 @@ typedef struct hip_api_data_s {
       int device;
       unsigned int flags;
     } hipGreenCtxCreate;
-    struct {
-      hipGreenCtx_t ctx;
-    } hipGreenCtxDestroy;
     struct {
       hipFunction_t f;
       unsigned int globalWorkSizeX;
@@ -4747,6 +4747,10 @@ typedef struct hip_api_data_s {
 #define INIT_hipEventSynchronize_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipEventSynchronize.event = (hipEvent_t)event; \
 };
+// hipExecutionCtxDestroy[('hipGreenCtx_t', 'ctx')]
+#define INIT_hipExecutionCtxDestroy_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipExecutionCtxDestroy.ctx = (hipGreenCtx_t)ctx; \
+};
 // hipExecutionCtxGetDevResource[('hipGreenCtx_t', 'ctx'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
 #define INIT_hipExecutionCtxGetDevResource_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipExecutionCtxGetDevResource.ctx = (hipGreenCtx_t)ctx; \
@@ -5579,10 +5583,6 @@ typedef struct hip_api_data_s {
   cb_data.args.hipGreenCtxCreate.desc = (hipDevResourceDesc_t)desc; \
   cb_data.args.hipGreenCtxCreate.device = (int)device; \
   cb_data.args.hipGreenCtxCreate.flags = (unsigned int)flags; \
-};
-// hipGreenCtxDestroy[('hipGreenCtx_t', 'ctx')]
-#define INIT_hipGreenCtxDestroy_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipGreenCtxDestroy.ctx = (hipGreenCtx_t)ctx; \
 };
 // hipHccModuleLaunchKernel[('hipFunction_t', 'f'), ('unsigned int', 'globalWorkSizeX'), ('unsigned int', 'globalWorkSizeY'), ('unsigned int', 'globalWorkSizeZ'), ('unsigned int', 'blockDimX'), ('unsigned int', 'blockDimY'), ('unsigned int', 'blockDimZ'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'hStream'), ('void**', 'kernelParams'), ('void**', 'extra'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent')]
 #define INIT_hipHccModuleLaunchKernel_CB_ARGS_DATA(cb_data) { \
@@ -7529,6 +7529,9 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipEventSynchronize[('hipEvent_t', 'event')]
     case HIP_API_ID_hipEventSynchronize:
       break;
+// hipExecutionCtxDestroy[('hipGreenCtx_t', 'ctx')]
+    case HIP_API_ID_hipExecutionCtxDestroy:
+      break;
 // hipExecutionCtxGetDevResource[('hipGreenCtx_t', 'ctx'), ('hipDevResource*', 'resource'), ('hipDevResourceType', 'type')]
     case HIP_API_ID_hipExecutionCtxGetDevResource:
       if (data->args.hipExecutionCtxGetDevResource.resource) data->args.hipExecutionCtxGetDevResource.resource__val = *(data->args.hipExecutionCtxGetDevResource.resource);
@@ -8087,9 +8090,6 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipGreenCtxCreate[('hipGreenCtx_t*', 'ctx'), ('hipDevResourceDesc_t', 'desc'), ('int', 'device'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipGreenCtxCreate:
       if (data->args.hipGreenCtxCreate.ctx) data->args.hipGreenCtxCreate.ctx__val = *(data->args.hipGreenCtxCreate.ctx);
-      break;
-// hipGreenCtxDestroy[('hipGreenCtx_t', 'ctx')]
-    case HIP_API_ID_hipGreenCtxDestroy:
       break;
 // hipHccModuleLaunchKernel[('hipFunction_t', 'f'), ('unsigned int', 'globalWorkSizeX'), ('unsigned int', 'globalWorkSizeY'), ('unsigned int', 'globalWorkSizeZ'), ('unsigned int', 'blockDimX'), ('unsigned int', 'blockDimY'), ('unsigned int', 'blockDimZ'), ('size_t', 'sharedMemBytes'), ('hipStream_t', 'hStream'), ('void**', 'kernelParams'), ('void**', 'extra'), ('hipEvent_t', 'startEvent'), ('hipEvent_t', 'stopEvent')]
     case HIP_API_ID_hipHccModuleLaunchKernel:
@@ -9656,6 +9656,11 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "event="; roctracer::hip_support::detail::operator<<(oss, data->args.hipEventSynchronize.event);
       oss << ")";
     break;
+    case HIP_API_ID_hipExecutionCtxDestroy:
+      oss << "hipExecutionCtxDestroy(";
+      oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxDestroy.ctx);
+      oss << ")";
+    break;
     case HIP_API_ID_hipExecutionCtxGetDevResource:
       oss << "hipExecutionCtxGetDevResource(";
       oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipExecutionCtxGetDevResource.ctx);
@@ -10778,11 +10783,6 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", desc="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.desc);
       oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.device);
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxCreate.flags);
-      oss << ")";
-    break;
-    case HIP_API_ID_hipGreenCtxDestroy:
-      oss << "hipGreenCtxDestroy(";
-      oss << "ctx="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGreenCtxDestroy.ctx);
       oss << ")";
     break;
     case HIP_API_ID_hipHccModuleLaunchKernel:

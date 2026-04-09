@@ -662,7 +662,7 @@ local:
 hip_7.3 {
 global:
     hipGreenCtxCreate;
-    hipGreenCtxDestroy;
+    hipExecutionCtxDestroy;
     hipExecutionCtxStreamCreate;
     hipDeviceGetDevResource;
     hipDevSmResourceSplitByCount;

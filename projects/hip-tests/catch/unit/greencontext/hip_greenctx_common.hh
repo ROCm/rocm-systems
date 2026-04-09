@@ -83,5 +83,5 @@ inline void RunVectorAddOnResource(hipDevResource* resource, int device) {
   free(h_b);
   free(h_c);
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGreenCtxDestroy(ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(ctx));
 }

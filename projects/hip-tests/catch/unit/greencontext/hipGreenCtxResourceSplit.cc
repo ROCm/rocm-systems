@@ -388,7 +388,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxResourceSplit_Disjoint_Sets) {
 
   for (int i = 0; i < 3; i++) {
     HIP_CHECK(hipStreamDestroy(stream[i]));
-    HIP_CHECK(hipGreenCtxDestroy(ctx[i]));
+    HIP_CHECK(hipExecutionCtxDestroy(ctx[i]));
   }
 }
 #endif

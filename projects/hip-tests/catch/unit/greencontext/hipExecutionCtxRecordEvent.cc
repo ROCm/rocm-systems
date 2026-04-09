@@ -59,7 +59,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxRecordWaitEvent_Sanity) {
   HIP_CHECK(hipExecutionCtxWaitEvent(green_ctx, event));
 
   HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(green_ctx));
 }
 
 /**
@@ -139,7 +139,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxRecordEventFunctional) {
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(green_ctx));
 }
 
 /**
@@ -254,7 +254,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxRecordWait_Blocking) {
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipEventDestroy(event));
-  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(green_ctx));
 }
 
 /**

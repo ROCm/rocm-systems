@@ -3204,9 +3204,9 @@ hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int 
   return hip::GetHipDispatchTable()->hipGreenCtxCreate_fn(ctx, desc, device, flags);
   CATCH;
 }
-hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx) {
+hipError_t hipExecutionCtxDestroy(hipGreenCtx_t ctx) {
   TRY;
-  return hip::GetHipDispatchTable()->hipGreenCtxDestroy_fn(ctx);
+  return hip::GetHipDispatchTable()->hipExecutionCtxDestroy_fn(ctx);
   CATCH;
 }
 hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,

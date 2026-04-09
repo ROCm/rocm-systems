@@ -1123,7 +1123,7 @@ typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements)(
     hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device);
 typedef hipError_t (*t_hipGreenCtxCreate)(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                                          unsigned int flags);
-typedef hipError_t (*t_hipGreenCtxDestroy)(hipGreenCtx_t ctx);
+typedef hipError_t (*t_hipExecutionCtxDestroy)(hipGreenCtx_t ctx);
 typedef hipError_t (*t_hipExecutionCtxStreamCreate)(hipStream_t* stream, hipGreenCtx_t greenctx,
                                                      unsigned int flags, int priority);
 typedef hipError_t (*t_hipDeviceGetDevResource)(hipDevice_t device, hipDevResource* resource,
@@ -1766,7 +1766,7 @@ struct HipDispatchTable {
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
   t_hipGreenCtxCreate hipGreenCtxCreate_fn;
-  t_hipGreenCtxDestroy hipGreenCtxDestroy_fn;
+  t_hipExecutionCtxDestroy hipExecutionCtxDestroy_fn;
   t_hipExecutionCtxStreamCreate hipExecutionCtxStreamCreate_fn;
   t_hipDeviceGetDevResource hipDeviceGetDevResource_fn;
   t_hipDevSmResourceSplitByCount hipDevSmResourceSplitByCount_fn;

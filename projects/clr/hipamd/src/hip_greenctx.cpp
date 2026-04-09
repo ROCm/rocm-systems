@@ -571,8 +571,8 @@ hipError_t hipGreenCtxCreate(hipGreenCtx_t* phCtx, hipDevResourceDesc_t desc,
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx) {
-  HIP_INIT_API(hipGreenCtxDestroy, ctx);
+hipError_t hipExecutionCtxDestroy(hipGreenCtx_t ctx) {
+  HIP_INIT_API(hipExecutionCtxDestroy, ctx);
 
   if (ctx == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);

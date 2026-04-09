@@ -45,7 +45,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxCreateDestroy_Sanity) {
   hipGreenCtx_t green_ctx = nullptr;
   HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
   REQUIRE(green_ctx != nullptr);
-  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(green_ctx));
 }
 
 /**
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamCreate_Sanity) {
 
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(green_ctx));
 }
 
 /**
@@ -141,7 +141,7 @@ HIP_TEST_CASE(Unit_hipGreenCtxKernelLaunch_Basic) {
   free(h_b);
   free(h_c);
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(green_ctx));
 }
 
 /**
@@ -215,7 +215,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxStreamCreate_Negative) {
   }
 
   HIP_CHECK(hipStreamDestroy(valid_stream));
-  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  HIP_CHECK(hipExecutionCtxDestroy(green_ctx));
 }
 
 /**
