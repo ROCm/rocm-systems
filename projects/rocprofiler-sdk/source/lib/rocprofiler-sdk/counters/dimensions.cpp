@@ -65,7 +65,15 @@ getBlockDimensions(rocprofiler_agent_id_t agent_id, const Metric& metric)
     {
         auto dims   = std::map<int, uint64_t>{};
         auto status = aql::get_dim_info(agent_id, event, 0, dims);
-        CHECK_EQ(status, ROCPROFILER_STATUS_SUCCESS) << rocprofiler_get_status_string(status);
+        // Event-level error handling: Skip individual events with invalid dimension info.
+        // This allows the metric to succeed partially if some events are valid.
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "Failed to get dimension info for event in metric '" << metric.name()
+                         << "': " << rocprofiler_get_status_string(status)
+                         << ". Event will be skipped.";
+            continue;
+        }
 
         for(const auto& [id, extent] : dims)
         {
@@ -113,15 +121,12 @@ generate_dimensions(rocprofiler_agent_id_t agent_id)
         {
             // Generate dimensions for this specific agent
             dims.emplace(ast.out_id().handle, ast_copy.set_dimensions(agent_id));
-        } catch(const std::runtime_error& e)
+        }
+        // Metric-level error handling: Skip entire metric on validation failures
+        catch(const std::runtime_error& e)
         {
             ROCP_WARNING << "Invalid counter '" << metric << "' in YAML configuration - "
                          << e.what() << ". Counter will be skipped.";
-            continue;
-        } catch(const std::exception& e)
-        {
-            ROCP_ERROR << "Unexpected error processing counter '" << metric << "': " << e.what()
-                       << ". Counter will be skipped.";
             continue;
         }
     }

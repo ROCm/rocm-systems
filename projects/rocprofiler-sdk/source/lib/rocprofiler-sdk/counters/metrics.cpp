@@ -96,6 +96,10 @@ get_constants(uint64_t starting_id)
 void
 print_counter_yaml_schema_hint()
 {
+    static bool hint_printed = false;
+    if(hint_printed) return;
+    hint_printed = true;
+
     ROCP_ERROR << "Expected structure:\n"
                << "Each definition must be one of:\n"
                << "  (1) expression counter: architectures + expression\n"
@@ -401,14 +405,18 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
     uint64_t current_id = 0;
     if(!override.data.empty() && override.append)
     {
-        append_yaml        = safe_load_yaml(override.data, "extra counters YAML");
-        auto append_header = get_counters_node(append_yaml, "extra counters YAML", true);
+        append_yaml = safe_load_yaml(override.data, "extra counters YAML");
 
-        if(append_header)
+        if(append_yaml)
         {
-            for(const auto& counter : append_header)
+            auto append_header = get_counters_node(append_yaml, "extra counters YAML", true);
+
+            if(append_header)
             {
-                header.push_back(counter);
+                for(const auto& counter : append_header)
+                {
+                    header.push_back(counter);
+                }
             }
         }
         else

@@ -25,7 +25,8 @@ rocprofiler_configure_pytest_files(
          missing_top_key.yaml
          empty_architectures.yaml
          expression_plus_event.yaml
-         block_without_event.yaml)
+         block_without_event.yaml
+         mixed_valid_invalid.yaml)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -55,10 +56,37 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc1-extra-counters)
 
 #
+# YAML Validation Test - Mixed Valid/Invalid Counter Test - Validates graceful degradation
+#
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-yaml-validation-mixed-valid-invalid-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
+        -E ${CMAKE_CURRENT_BINARY_DIR}/mixed_valid_invalid.yaml -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_mixed_valid_invalid -o mixed_test --output-format
+        csv -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-yaml-validation-mixed-valid-invalid)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-yaml-validation-mixed-valid-invalid-validate
+    TEST_PATHS validate.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_mixed_valid_invalid_counters
+    ARGS --input
+         ${CMAKE_CURRENT_BINARY_DIR}/out_mixed_valid_invalid/pmc_1/mixed_test_counter_collection.csv
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-yaml-validation-mixed-valid-invalid)
+
+#
 # YAML Validation Tests - Invalid YAMLs should be handled gracefully without crashes
 #
 rocprofiler_add_integration_execute_test(
-    rocprofv3-test-yaml-validation-duplicate-counters
+    rocprofv3-test-yaml-validation-duplicate-counters-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
         -E ${CMAKE_CURRENT_BINARY_DIR}/duplicate_counters.yaml -d
@@ -67,7 +95,19 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}")
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-yaml-validation-duplicate-counters)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-yaml-validation-duplicate-counters-validate
+    TEST_PATHS validate.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_duplicate_counter_handling
+    ARGS --input
+         ${CMAKE_CURRENT_BINARY_DIR}/out_duplicate/pmc_1/duplicate_test_counter_collection.csv
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-yaml-validation-duplicate-counters)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-yaml-validation-invalid-block

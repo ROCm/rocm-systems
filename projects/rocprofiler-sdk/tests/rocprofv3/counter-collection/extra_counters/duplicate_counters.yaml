@@ -1,19 +1,27 @@
 rocprofiler-sdk:
   counters-schema-version: 1
   counters:
-  - name: SQC_LDS_BANK_CONFLICT
-    description: Number of cycles LDS is stalled by bank conflicts. (emulated, C1)
+  - name: TEST_YAML_LOAD
+    description: Test counter for duplicate handling - first definition
     properties: []
     definitions:
     - architectures:
+      - gfx940
       - gfx942
-      block: SQ
-      event: 256
-  - name: SQC_LDS_BANK_CONFLICT
-    description: Number of cycles LDS is stalled by bank conflicts. (emulated, C1)
+      - gfx90a
+      - gfx906
+      - gfx908
+      block: GRBM
+      event: 0
+  - name: TEST_YAML_LOAD
+    description: Test counter for duplicate handling - duplicate definition (should be ignored)
     properties: []
     definitions:
     - architectures:
+      - gfx940
       - gfx942
-      block: SQ
-      event: 256
+      - gfx90a
+      - gfx906
+      - gfx908
+      block: GRBM
+      event: 0

@@ -124,7 +124,7 @@ process_agent_counters(rocprofiler_agent_id_t    agent_id,
 
                 if(status != ROCPROFILER_STATUS_SUCCESS)
                 {
-                    ROCP_TRACE << fmt::format(
+                    ROCP_WARNING << fmt::format(
                         "[{}] skipping counter metadata for handle {} because "
                         "rocprofiler_query_counter_info(...) failed: {} :: {}",
                         __FUNCTION__,

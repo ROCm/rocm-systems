@@ -1,0 +1,22 @@
+rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+    - name: TEST_YAML_LOAD
+      description: Test counter for mixed valid/invalid handling - valid definition
+      properties: []
+      definitions:
+        - architectures:
+            - gfx940
+            - gfx942
+            - gfx90a
+            - gfx906
+            - gfx908
+          block: GRBM
+          event: 2
+
+    - name: INVALID_COUNTER_NO_PAYLOAD
+      description: Test counter for mixed valid/invalid handling - invalid definition (missing block/event/expression)
+      properties: []
+      definitions:
+        - architectures:
+            - gfx942
