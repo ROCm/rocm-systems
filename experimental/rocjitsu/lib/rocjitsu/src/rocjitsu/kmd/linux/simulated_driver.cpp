@@ -95,14 +95,33 @@ SimulatedDriver *SimulatedDriver::lookup(int fd) {
 
 int SimulatedDriver::kfd_fd() { return g_kfd_fd.load(std::memory_order_acquire); }
 
+static constexpr const char *const DRM_SYSFS_PREFIX = "/sys/class/drm";
+
+static constexpr const char *const KFD_SYSFS_PREFIX_ALT = "/sys/class/kfd/kfd/topology";
+
 std::string SimulatedDriver::redirect_sysfs_path(const char *path) {
   auto *inst = g_instance.load(std::memory_order_acquire);
   if (!inst)
     return {};
-  size_t prefix_len = std::strlen(KFD_SYSFS_PREFIX);
-  if (std::strncmp(path, KFD_SYSFS_PREFIX, prefix_len) != 0)
-    return {};
-  return inst->topology_path() + (path + prefix_len);
+
+  // KFD topology redirect. Match both the canonical path and the
+  // /sys/class/kfd/ symlink path (rsmi/amdsmi use the symlink).
+  size_t kfd_len = std::strlen(KFD_SYSFS_PREFIX);
+  if (std::strncmp(path, KFD_SYSFS_PREFIX, kfd_len) == 0)
+    return inst->topology_path() + (path + kfd_len);
+  size_t kfd_alt_len = std::strlen(KFD_SYSFS_PREFIX_ALT);
+  if (std::strncmp(path, KFD_SYSFS_PREFIX_ALT, kfd_alt_len) == 0)
+    return inst->topology_path() + (path + kfd_alt_len);
+
+  // DRM sysfs redirect for amdsmi/rocm_smi device discovery.
+  const auto &drm = inst->topology().drm_path();
+  if (!drm.empty()) {
+    size_t drm_len = std::strlen(DRM_SYSFS_PREFIX);
+    if (std::strncmp(path, DRM_SYSFS_PREFIX, drm_len) == 0)
+      return drm + (path + drm_len);
+  }
+
+  return {};
 }
 
 bool SimulatedDriver::in_construction() { return g_in_construction; }

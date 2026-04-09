@@ -91,18 +91,21 @@ public:
   /// @returns Path to the generated directory.
   std::string generate(const GpuInfo &gpu);
 
-  /// @brief Get the generated topology path (empty if not yet generated).
-  /// @returns Reference to the directory path.
+  /// @brief Get the generated KFD topology path (empty if not yet generated).
   const std::string &path() const { return topology_dir_; }
+
+  /// @brief Get the generated DRM sysfs path (empty if not yet generated).
+  const std::string &drm_path() const { return drm_dir_; }
 
   /// @brief Reserved for future environment setup (currently a no-op).
   void setup_environment();
 
-  /// @brief Remove the generated directory.
+  /// @brief Remove the generated directories.
   void cleanup();
 
 private:
   std::string topology_dir_;
+  std::string drm_dir_;
 
   void write_file(const std::string &path, const std::string &content);
   void make_dir(const std::string &path);
@@ -110,6 +113,7 @@ private:
   void write_system_properties();
   void write_cpu_node(const std::string &nodes_dir);
   void write_gpu_node(const std::string &nodes_dir, const GpuInfo &gpu);
+  void write_drm_tree(const GpuInfo &gpu);
 };
 
 } // namespace rocjitsu

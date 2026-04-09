@@ -15,6 +15,8 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <dirent.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <linux/memfd.h>
 #include <mutex>
@@ -72,6 +74,11 @@ int open(const char *path, int flags, ...) {
 
   // Intercept DRM render node opens — return a memfd stub that FMM can hold.
   // Track these fds so ioctl() can return 0 rather than ENOTTY.
+  // Lazily create the driver if needed — amdsmi opens renderD before /dev/kfd.
+  if (std::strncmp(path, "/dev/dri/renderD", 16) == 0) {
+    if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
+      SimulatedDriver::get_or_create();
+  }
   if (std::strncmp(path, "/dev/dri/renderD", 16) == 0 && SimulatedDriver::kfd_fd() >= 0) {
     int memfd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", 0));
     if (memfd >= 0) {
@@ -96,7 +103,15 @@ int open(const char *path, int flags, ...) {
     return SimulatedDriver::kfd_fd();
   }
 
-  // Redirect sysfs topology reads to the generated directory.
+  // Redirect sysfs topology and DRM reads to the generated directories.
+  // Lazily create the driver if needed — amdsmi scans /sys/class/drm/
+  // before opening /dev/kfd.
+  if (std::strncmp(path, "/sys/class/drm", 14) == 0 ||
+      std::strncmp(path, "/sys/devices/virtual/kfd", 23) == 0 ||
+      std::strncmp(path, "/sys/class/kfd", 14) == 0) {
+    if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
+      SimulatedDriver::get_or_create();
+  }
   std::string redirected = SimulatedDriver::redirect_sysfs_path(path);
   if (!redirected.empty()) {
     int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, redirected.c_str(), flags, mode));
@@ -110,6 +125,17 @@ int open(const char *path, int flags, ...) {
   return static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, flags, mode));
 }
 
+int open64(const char *path, int flags, ...) {
+  mode_t mode = 0;
+  if (flags & O_CREAT) {
+    va_list ap;
+    va_start(ap, flags);
+    mode = static_cast<mode_t>(va_arg(ap, int));
+    va_end(ap);
+  }
+  return open(path, flags, mode);
+}
+
 int openat(int dirfd, const char *path, int flags, ...) {
   mode_t mode = 0;
   if (flags & O_CREAT) {
@@ -120,7 +146,13 @@ int openat(int dirfd, const char *path, int flags, ...) {
   }
 
   if (path[0] == '/') {
-    // Absolute path: redirect directly if it matches the sysfs prefix.
+    // Lazily create the driver for sysfs/DRM paths.
+    if (std::strncmp(path, "/sys/class/drm", 14) == 0 ||
+        std::strncmp(path, "/sys/devices/virtual/kfd", 23) == 0 ||
+        std::strncmp(path, "/sys/class/kfd", 14) == 0) {
+      if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
+        SimulatedDriver::get_or_create();
+    }
     std::string redirected = SimulatedDriver::redirect_sysfs_path(path);
     if (!redirected.empty()) {
       int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, redirected.c_str(), flags, mode));
@@ -189,12 +221,40 @@ int ioctl(int fd, unsigned long request, ...) {
   void *arg = va_arg(ap, void *);
   va_end(ap);
 
-  // Return success for any ioctl on DRM render node stubs — the kernel would
-  // return ENOTTY on a memfd, which ROCR may treat as a fatal error.
+  // Handle ioctls on DRM render node stubs. The kernel would return ENOTTY
+  // on a memfd, which ROCR/amdsmi treat as a fatal error.
   {
     std::lock_guard<std::mutex> lock(g_drm_fd_mutex);
-    if (g_drm_fds.count(fd))
+    if (g_drm_fds.count(fd)) {
+      // DRM_IOCTL_VERSION (0xc0406400): amdsmi/rocm_smi call drmGetVersion()
+      // and check that the driver name is "amdgpu".
+      if (request == 0xc0406400 && arg) {
+        struct drm_version {
+          int version_major, version_minor, version_patchlevel;
+          size_t name_len;
+          char *name;
+          size_t date_len;
+          char *date;
+          size_t desc_len;
+          char *desc;
+        };
+        auto *ver = static_cast<drm_version *>(arg);
+        ver->version_major = 3;
+        ver->version_minor = 57;
+        ver->version_patchlevel = 0;
+        static constexpr const char drv_name[] = "amdgpu";
+        if (ver->name && ver->name_len >= sizeof(drv_name))
+          std::memcpy(ver->name, drv_name, sizeof(drv_name));
+        ver->name_len = sizeof(drv_name) - 1;
+        if (ver->date)
+          ver->date[0] = '\0';
+        ver->date_len = 0;
+        if (ver->desc)
+          ver->desc[0] = '\0';
+        ver->desc_len = 0;
+      }
       return 0;
+    }
   }
 
   auto *drv = SimulatedDriver::lookup(fd);
@@ -253,6 +313,13 @@ FILE *fopen(const char *path, const char *mode) {
   const char *actual = path;
   std::string redirected;
   if (!SimulatedDriver::in_construction()) {
+    // Lazily create the driver for sysfs/DRM paths.
+    if (std::strncmp(path, "/sys/class/drm", 14) == 0 ||
+        std::strncmp(path, "/sys/devices/virtual/kfd", 23) == 0 ||
+        std::strncmp(path, "/sys/class/kfd", 14) == 0) {
+      if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
+        SimulatedDriver::get_or_create();
+    }
     redirected = SimulatedDriver::redirect_sysfs_path(path);
     if (!redirected.empty())
       actual = redirected.c_str();
@@ -286,6 +353,30 @@ FILE *freopen(const char *path, const char *mode, FILE *stream) {
 
 FILE *freopen64(const char *path, const char *mode, FILE *stream) {
   return freopen(path, mode, stream);
+}
+
+// -- opendir interposition --
+// glibc's opendir uses internal __openat64 which bypasses LD_PRELOAD.
+// We must interpose opendir directly to redirect /sys/class/drm/ and
+// /sys/devices/virtual/kfd/ directory listings.
+
+DIR *opendir(const char *name) {
+  using real_opendir_t = DIR *(*)(const char *);
+  static real_opendir_t real_opendir =
+      reinterpret_cast<real_opendir_t>(dlsym(RTLD_NEXT, "opendir"));
+
+  if (!SimulatedDriver::in_construction()) {
+    if (std::strncmp(name, "/sys/class/drm", 14) == 0 ||
+        std::strncmp(name, "/sys/devices/virtual/kfd", 23) == 0 ||
+        std::strncmp(name, "/sys/class/kfd", 14) == 0) {
+      if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
+        SimulatedDriver::get_or_create();
+    }
+    std::string redirected = SimulatedDriver::redirect_sysfs_path(name);
+    if (!redirected.empty())
+      return real_opendir(redirected.c_str());
+  }
+  return real_opendir(name);
 }
 
 } // extern "C"
