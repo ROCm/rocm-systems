@@ -16,13 +16,13 @@ The RCCL test suite provides following frameworks along with the existing rccl-U
 
 Following is a new testing framework for running single node & single process test in isolation:
 
-### 1. Process Isolated Test Runner
+### 1. Process Isolated Test Framework
 Run tests in isolated processes with clean environment settings.
 
-📄 **[Full Documentation](common/ProcessIsolatedTestRunner.md)**
+📄 **[Full Documentation](common/ProcessIsolatedTestFramework.md)**
 
-### 2. MPI Test Runner
-Base class for multi-process distributed tests using MPI.
+### 2. MPI Test Framework
+Base class for multi-process distributed tests using MPI. Logging: environment-driven **per-rank log files** (`RCCL_MPI_LOG_ALL_RANKS`), **`TEST_*` macros** with `NCCL_DEBUG`, and scoped **`MPIHelpers::TestLogAssertionContext`** for asserting NCCL lines (see the summary tables in the doc).
 
-📄 **[Full Documentation](common/MPITestRunner.md)**
+📄 **[Full Documentation](common/MPITestFramework.md)**
 
