@@ -1288,7 +1288,8 @@ process_t::update_code_objects ()
           read_host_memory (link_map_address, &entry);
 
           std::string uri;
-          read_string (reinterpret_cast<uintptr_t> (entry.l_name), &uri, -1);
+          read_string (reinterpret_cast<uintptr_t> (entry.l_name), &uri,
+                       size_t (-1));
 
           code_object_t *code_object = nullptr;
           if (auto found = m_code_objects_index.find (entry.l_addr);
