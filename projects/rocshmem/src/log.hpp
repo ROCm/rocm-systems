@@ -90,7 +90,7 @@ namespace rocshmem {
   rocshmem::static_assert_host_only();                                        \
   if (rocshmem::envvar::log_flags.show_error)                                 \
     fprintf(stderr, rocshmem::envvar::log_flags.show_color                    \
-        ? "\033[31mE%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
+        ? "\033[1;91mE%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
         : "E%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                              \
         rocshmem::log_pe_number,                                              \
         __VA_OPT__(__VA_ARGS__,)                                              \
@@ -101,7 +101,7 @@ namespace rocshmem {
   rocshmem::static_assert_host_only();                                        \
   if (rocshmem::envvar::log_flags.show_error)                                 \
     fprintf(stderr, rocshmem::envvar::log_flags.show_color                    \
-        ? "\033[31mE%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
+        ? "\033[1;91mE%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
         : "E%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                              \
         rocshmem::log_pe_number,                                              \
         __VA_OPT__(__VA_ARGS__,)                                              \
@@ -113,7 +113,7 @@ namespace rocshmem {
   rocshmem::static_assert_host_only();                                        \
   if (rocshmem::envvar::log_flags.show_error)                                 \
     fprintf(stderr, rocshmem::envvar::log_flags.show_color                    \
-        ? "\033[31mE%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
+        ? "\033[1;91mE%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
         : "E%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                              \
         rocshmem::log_pe_number,                                              \
         __VA_OPT__(__VA_ARGS__,)                                              \
@@ -125,7 +125,7 @@ namespace rocshmem {
   rocshmem::static_assert_host_only();                                        \
   if (rocshmem::envvar::log_flags.show_warn)                                  \
     fprintf(stderr, rocshmem::envvar::log_flags.show_color                    \
-        ? "\033[33mW%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
+        ? "\033[1;93mW%04dh rocSHMEM\033[0m " fmt "\t\033[90m%s@%s:%d\033[0m\n" \
         : "W%04dh rocSHMEM " fmt "\t%s@%s:%d\n",                              \
         rocshmem::log_pe_number,                                              \
         __VA_OPT__(__VA_ARGS__,)                                              \
@@ -228,7 +228,7 @@ void dprintf(const char* fmt, const Args&... args) {
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_error)                                        \
   rocshmem::dprintf(rocshmem::log_device.show_color                           \
-      ? "\033[31mE%04dw%04ut%04u\033[0m " fmt                                 \
+      ? "\033[1;91mE%04dw%04ut%04u\033[0m " fmt                               \
         "\t\033[90m" __FILE__ ":%d\033[0m\n"                                  \
       : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                         \
       __VA_OPT__(__VA_ARGS__,) __LINE__);                                     \
@@ -238,7 +238,7 @@ void dprintf(const char* fmt, const Args&... args) {
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_error)                                        \
   rocshmem::dprintf(rocshmem::log_device.show_color                           \
-      ? "\033[31mE%04dw%04ut%04u\033[0m " fmt                                 \
+      ? "\033[1;91mE%04dw%04ut%04u\033[0m " fmt                               \
         "\t\033[90m" __FILE__ ":%d\033[0m\n"                                  \
       : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                         \
       __VA_OPT__(__VA_ARGS__,) __LINE__);                                     \
@@ -249,7 +249,7 @@ void dprintf(const char* fmt, const Args&... args) {
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_warn)                                         \
     rocshmem::dprintf(rocshmem::log_device.show_color                         \
-        ? "\033[33mW%04dw%04ut%04u\033[0m " fmt                               \
+        ? "\033[1;93mW%04dw%04ut%04u\033[0m " fmt                             \
           "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
         : "W%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
         __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
@@ -270,7 +270,7 @@ void dprintf(const char* fmt, const Args&... args) {
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_api)                                          \
     rocshmem::dprintf(rocshmem::log_device.show_color                         \
-        ? "\033[35mA%04dw%04ut%04u\033[0m " fmt                               \
+        ? "\033[95mA%04dw%04ut%04u\033[0m " fmt                               \
           "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
         : "A%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
         __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
@@ -280,7 +280,7 @@ void dprintf(const char* fmt, const Args&... args) {
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_trace)                                        \
     rocshmem::dprintf(rocshmem::log_device.show_color                         \
-        ? "\033[36mT%04dw%04ut%04u\033[0m " fmt                               \
+        ? "\033[94mT%04dw%04ut%04u\033[0m " fmt                               \
           "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
         : "T%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
         __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
