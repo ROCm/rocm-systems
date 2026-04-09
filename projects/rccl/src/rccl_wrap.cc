@@ -436,6 +436,11 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Only perform auto-selection if user didn't explicitly set the threshold and threshold is not -1
   if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
     if (comm->nNodes == 1) {
+      // Disable Direct AllGather on single-node when CE-based AllGather is enabled
+      if (comm->symmetricSupport && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO){
+        INFO(NCCL_INIT, "RCCL Direct AllGather disabled: CTA policy ZERO, using CE-based AllGather.");
+        return false;
+      }
       threshold = 8388608;
     } else if (comm->nNodes < 64) {
       threshold = comm->nNodes * 2097152;
