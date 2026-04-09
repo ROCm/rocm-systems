@@ -11,8 +11,8 @@
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
-#include "ipc_mem_handler.h"
 #include "ipc_gpu_barrier.h"
+#include "ipc_init_detail.h"
 
 #include <cuda_runtime.h>
 
@@ -23,50 +23,61 @@
 
 namespace {
 
-constexpr int kDdaNranks = 8;
+using nccl_dda_ipc_detail::DdaIpcBarrierState;
+using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
+using nccl_dda_ipc_detail::kDdaNranks;
+
 /** Flat below this size; tree above (see ddaAllReduceFlatIpc / ddaAllReduceTreeIpc). */
-constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 20;
+constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
 
-
-struct DdaIpcBarrierState {
-  std::unique_ptr<meta::comms::IpcGpuBarrierResources> resources;
-  meta::comms::IpcGpuBarrier barrierHost;
-};
-
-/** Max grid.x for any element count that fits in scratch (covers float / half / bf16). */
-static int ddaMaxNBlocksForScratch(size_t scratchBytes) {
-  constexpr unsigned threads = 512;
-  unsigned maxBlocks = 1;
-  {
-    size_t maxCount = scratchBytes / sizeof(float);
-    size_t denom = (size_t)threads * (sizeof(uint4) / sizeof(float));
-    unsigned nb = (unsigned)((maxCount + denom - 1) / denom);
-    if (nb > maxBlocks) {
-      maxBlocks = nb;
-    }
+inline uint32_t divRoundUp(size_t a, size_t b) {
+  uint32_t y = static_cast<uint32_t>((a + b - 1) / b);
+  if (y == 0) {
+    y = 1;
   }
-  {
-    size_t maxCount = scratchBytes / sizeof(half);
-    size_t denom = (size_t)threads * (sizeof(uint4) / sizeof(half));
-    unsigned nb = (unsigned)((maxCount + denom - 1) / denom);
-    if (nb > maxBlocks) {
-      maxBlocks = nb;
-    }
-  }
-  return static_cast<int>(maxBlocks);
+  return y;
 }
 
-static size_t ddaIpcScratchBytesFromEnv() {
-  const char* e = getenv("RCCL_DDA_IPC_BYTES");
-  if (e == nullptr || e[0] == '\0') {
-    return 64ULL * 1024 * 1024;
+constexpr uint32_t
+calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
+  const auto uNumThreads = static_cast<uint64_t>(numThreads);
+  const auto uThreadsPerBlock = static_cast<uint64_t>(threadsPerBlock);
+  // Overflow safe variant of (a + b - 1) / b
+  const uint64_t blocks =
+      uNumThreads / uThreadsPerBlock + (uNumThreads % uThreadsPerBlock != 0);
+  uint32_t y = static_cast<uint32_t>(std::min(blocks, maxBlocks));
+  if (y == 0) {
+    y = 1;
   }
-  char* end = nullptr;
-  unsigned long long v = strtoull(e, &end, 0);
-  if (end == e) {
-    return 64ULL * 1024 * 1024;
+  return y;
+}
+
+std::pair<dim3, dim3>
+getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
+  constexpr uint32_t kThreadsPerWarp = 64;
+  constexpr uint32_t kThreadsPerBlock = 512;
+
+  const uint32_t elementsPerThread =
+      16 / typeSize; // we do 16 Byte load in kernel
+
+  const uint32_t elementsPerWarp = elementsPerThread * kThreadsPerWarp;
+
+  dim3 threads(0, 1, 1);
+  dim3 blocks(0, 1, 1);
+  if (count < elementsPerThread * kThreadsPerBlock) {
+    threads.x = divRoundUp(count, elementsPerWarp) * kThreadsPerWarp;
+    blocks.x = 1;
+  } else {
+    auto warpsRequired = divRoundUp(count, elementsPerWarp);
+    blocks.x = calcBlockCount(
+        divRoundUp(count, elementsPerThread), kThreadsPerBlock, maxBlocks);
+    auto warpsPerBlock = divRoundUp(warpsRequired, blocks.x);
+    auto threadsPerBlock =
+        std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kThreadsPerWarp);
+    threads.x = threadsPerBlock;
   }
-  return static_cast<size_t>(v);
+
+  return std::make_pair(blocks, threads);
 }
 
 template <typename T>
@@ -97,7 +108,7 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   const bool wantTree = sizeBytes > kDdaFlatTreeThresholdBytes;
   const bool treeOk =
       wantTree && (count % static_cast<size_t>(kDdaNranks) == 0);
-  
+
   if (wantTree && !treeOk) {
     INFO(
         NCCL_ALL,
@@ -120,14 +131,19 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch(comm->ddaIpcScratchBytes);
-  if (static_cast<int>(nblocks) > nBlocksMax) {
+
+  auto gridBlock = getGridAndBlockDims(count, sizeof(T), nBlocksMax);
+  const auto& grid = gridBlock.first;
+  const auto& block = gridBlock.second;
+
+  /*if (static_cast<int>(nblocks) > nBlocksMax) {
     WARN(
         "DDA IPC allreduce: grid %u exceeds init max %d (scratch %zu bytes)",
         nblocks,
         nBlocksMax,
         comm->ddaIpcScratchBytes);
     return ncclInternalError;
-  }
+  }*/
 
   auto* barrierState =
       static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
@@ -136,8 +152,8 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  dim3 grid(nblocks);
-  dim3 block(threads);
+  /*dim3 grid(nblocks);
+  dim3 block(threads);*/
 
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(
@@ -145,7 +161,7 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
         sendbuff,
         count * sizeof(T),
         cudaMemcpyDeviceToDevice,
-        stream));	  
+        stream));
     meta::comms::ddaAllReduceTreeIpc<T, kDdaNranks, false>
         <<<grid, block, 0, stream>>>(
             d_ipcbuffs,
@@ -168,155 +184,12 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   }
 
   CUDACHECK(cudaGetLastError());
-  CUDACHECK(cudaStreamSynchronize(stream));
+  //CUDACHECK(cudaStreamSynchronize(stream));
 
   return ncclSuccess;
 }
 
 } // namespace
-
-ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
-  if (comm == nullptr) {
-    return ncclSuccess;
-  }
-  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 ||
-      comm->bootstrap == nullptr) {
-    return ncclSuccess;
-  }
-
-  size_t bytes = ddaIpcScratchBytesFromEnv();
-  if (bytes == 0) {
-    return ncclSuccess;
-  }
-
-  void* scratch = nullptr;
-  cudaError_t ce = cudaMalloc(&scratch, bytes);
-  if (ce != cudaSuccess) {
-    WARN(
-        "ncclDdaIpcCommInit: cudaMalloc(%zu) failed (%s)",
-        bytes,
-        cudaGetErrorString(ce));
-    return ncclSuccess;
-  }
-
-  auto* handler = new (std::nothrow) ncclIpcMemHandler(
-      comm->bootstrap, comm->rank, comm->nRanks);
-  if (handler == nullptr) {
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: OOM allocating ncclIpcMemHandler");
-    return ncclSuccess;
-  }
-
-  ncclResult_t res = handler->addSelfDeviceMemPtr(scratch);
-  if (res != ncclSuccess) {
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: addSelfDeviceMemPtr failed");
-    return ncclSuccess;
-  }
-  res = handler->exchangeMemPtrs();
-  if (res != ncclSuccess) {
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: exchangeMemPtrs failed");
-    return ncclSuccess;
-  }
-
-  void* peerDev = nullptr;
-  ce = cudaMalloc(&peerDev, kDdaNranks * sizeof(void*));
-  if (ce != cudaSuccess) {
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN(
-        "ncclDdaIpcCommInit: cudaMalloc(peer table) failed (%s)",
-        cudaGetErrorString(ce));
-    return ncclSuccess;
-  }
-
-  void* h_ptrs[kDdaNranks];
-  for (int i = 0; i < kDdaNranks; ++i) {
-    void* p = nullptr;
-    res = handler->getPeerDeviceMemPtr(i, &p);
-    if (res != ncclSuccess) {
-      CUDACHECKIGNORE(cudaFree(peerDev));
-      delete handler;
-      CUDACHECKIGNORE(cudaFree(scratch));
-      WARN("ncclDdaIpcCommInit: getPeerDeviceMemPtr failed");
-      return ncclSuccess;
-    }
-    h_ptrs[i] = p;
-  }
-
-  ce = cudaMemcpy(
-      peerDev,
-      h_ptrs,
-      kDdaNranks * sizeof(void*),
-      cudaMemcpyHostToDevice);
-  if (ce != cudaSuccess) {
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN(
-        "ncclDdaIpcCommInit: cudaMemcpy(peer table) failed (%s)",
-        cudaGetErrorString(ce));
-    return ncclSuccess;
-  }
-
-  const int nBlocksMax = ddaMaxNBlocksForScratch(bytes);
-  auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(
-      kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
-  if (!barrierPair.first) {
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: IpcGpuBarrier::mallocAndInit failed");
-    return ncclSuccess;
-  }
-
-  auto* barrierState = new (std::nothrow) DdaIpcBarrierState();
-  if (barrierState == nullptr) {
-    barrierPair.first.reset();
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: OOM allocating DdaIpcBarrierState");
-    return ncclSuccess;
-  }
-  barrierState->resources = std::move(barrierPair.first);
-  barrierState->barrierHost = barrierPair.second;
-
-  comm->ddaIpcMemHandler = handler;
-  comm->ddaIpcScratch = scratch;
-  comm->ddaIpcScratchBytes = bytes;
-  comm->ddaIpcPeerPtrsDev = peerDev;
-  comm->ddaIpcBarrierState = barrierState;
-  INFO(
-      NCCL_INIT,
-      "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device",
-      bytes,
-      nBlocksMax);
-  return ncclSuccess;
-}
-
-ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
-  if (comm == nullptr) {
-    return ncclSuccess;
-  }
-  if (comm->ddaIpcBarrierState != nullptr) {
-    delete static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
-    comm->ddaIpcBarrierState = nullptr;
-  }
-  CUDACHECKIGNORE(cudaFree(comm->ddaIpcPeerPtrsDev));
-  comm->ddaIpcPeerPtrsDev = nullptr;
-  if (comm->ddaIpcMemHandler != nullptr) {
-    delete comm->ddaIpcMemHandler;
-    comm->ddaIpcMemHandler = nullptr;
-  }
-  CUDACHECKIGNORE(cudaFree(comm->ddaIpcScratch));
-  comm->ddaIpcScratch = nullptr;
-  comm->ddaIpcScratchBytes = 0;
-  return ncclSuccess;
-}
 
 bool ncclAllReduceDdaIpcEligible(
     ncclComm* comm,
@@ -336,7 +209,7 @@ bool ncclAllReduceDdaIpcEligible(
   if (comm->nNodes != 1) {
     return false;
   }
-  if (comm->nRanks != kDdaNranks) {
+  if (comm->nRanks != nccl_dda_ipc_detail::kDdaNranks) {
     return false;
   }
   if (op != ncclSum) {

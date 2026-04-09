@@ -76,6 +76,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
 #include "dda_all_reduce_ipc.h"
+#include "ipc_init.h"
 #include  <cpuid.h>
 
 #ifndef STR2

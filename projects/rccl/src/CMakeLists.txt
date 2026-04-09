@@ -18,6 +18,7 @@ set(SRC_FILES
   src/dev_runtime.cc
   src/enqueue.cc
   src/group.cc
+  src/ipc_init.cu
   src/init.cc
   src/init_nvtx.cc
   src/ipc_mem_handler.cc
@@ -92,6 +93,8 @@ set(SRC_FILES
 # src/include/cudawrap.h
   src/include/debug.h
   src/include/dev_runtime.h
+  src/include/ipc_init.h
+  src/include/ipc_init_detail.cuh
   src/include/dda_all_reduce_ipc.h
   src/include/ipc_gpu_barrier.cuh
   src/include/algorithms/CollCommon.cuh
