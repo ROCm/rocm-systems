@@ -43,14 +43,17 @@ class SdmaOnImpl {
  public:
   // Configuration (set from environment variables during init)
   size_t sdmaThreshold{8192};  // Use SDMA for transfers >= 8KB
+  size_t minChunkPerChannel{4096};  // Minimum bytes per channel to avoid over-parallelization
   int numChannels{2};
 
-  // Device resources
+  // Device resources - 2D array: [shm_size * numChannels]
+  // Index as: deviceHandles_d[local_pe * numChannels + channel_idx]
   anvil::SdmaQueueDeviceHandle** deviceHandles_d{nullptr};
   uint64_t* signalPtrs{nullptr};
   uint64_t* expectedSignals{nullptr};
   int shm_size{0};
   int my_pe{0};
+  int local_rank{0};
 
   // Host initialization (called from IpcOnImpl::ipcHostInit)
   __host__ void sdmaHostInit(int pe, int num_pes, MPI_Comm comm);
@@ -67,44 +70,108 @@ class SdmaOnImpl {
   }
 
 #if defined(__HIPCC__) || defined(__CUDACC__)
-  // Device-side copy (routes to SDMA queue)
+  // Device-side copy using a single channel (for single-thread operations)
   __device__ void sdmaCopy(void* dst, void* src, size_t size, int pe) {
     int local_pe = pe % shm_size;
-    anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[local_pe];
+    // Use channel 0 for single-thread operations
+    int idx = local_pe * numChannels;
+    anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
-      anvil::putWithSignal(*handle, dst, src, size, &signalPtrs[local_pe]);
-      __hip_atomic_fetch_add(&expectedSignals[local_pe], 1,
+      anvil::putWithSignal(*handle, dst, src, size, &signalPtrs[idx]);
+      __hip_atomic_fetch_add(&expectedSignals[idx], 1,
                              __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
   }
 
+  // Wave-level copy: split transfer across multiple channels
+  // Each participating lane handles a different channel concurrently
   __device__ void sdmaCopy_wave(void* dst, void* src, size_t size, int pe) {
-    // For wave-level, only first thread in wave submits
-    if (is_thread_zero_in_wave()) {
-      sdmaCopy(dst, src, size, pe);
+    int local_pe = pe % shm_size;
+    int lane_id = get_flat_block_id() % WF_SIZE;
+    int num_lanes = wave_SZ();
+
+    // Determine how many channels to use based on transfer size
+    int channels_to_use = (size / minChunkPerChannel);
+    if (channels_to_use < 1) channels_to_use = 1;
+    if (channels_to_use > numChannels) channels_to_use = numChannels;
+    if (channels_to_use > num_lanes) channels_to_use = num_lanes;
+
+    if (lane_id < channels_to_use) {
+      int channel_idx = lane_id;
+      size_t chunk_size = size / channels_to_use;
+      size_t offset = lane_id * chunk_size;
+
+      // Last participating lane handles remainder
+      if (lane_id == channels_to_use - 1) {
+        chunk_size = size - offset;
+      }
+
+      int idx = local_pe * numChannels + channel_idx;
+      anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
+      if (handle != nullptr && chunk_size > 0) {
+        char* dst_chunk = static_cast<char*>(dst) + offset;
+        char* src_chunk = static_cast<char*>(src) + offset;
+        anvil::putWithSignal(*handle, dst_chunk, src_chunk, chunk_size, &signalPtrs[idx]);
+        __hip_atomic_fetch_add(&expectedSignals[idx], 1,
+                               __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      }
     }
   }
 
+  // Workgroup-level copy: split transfer across multiple channels
+  // Multiple threads prepare and submit packets concurrently
   __device__ void sdmaCopy_wg(void* dst, void* src, size_t size, int pe) {
-    // For workgroup-level, only first thread in block submits
-    if (is_thread_zero_in_block()) {
-      sdmaCopy(dst, src, size, pe);
+    int local_pe = pe % shm_size;
+    int thread_id = get_flat_block_id();
+
+    // Determine how many channels to use based on transfer size
+    int channels_to_use = (size / minChunkPerChannel);
+    if (channels_to_use < 1) channels_to_use = 1;
+    if (channels_to_use > numChannels) channels_to_use = numChannels;
+
+    if (thread_id < channels_to_use) {
+      int channel_idx = thread_id;
+      size_t chunk_size = size / channels_to_use;
+      size_t offset = thread_id * chunk_size;
+
+      // Last participating thread handles remainder
+      if (thread_id == channels_to_use - 1) {
+        chunk_size = size - offset;
+      }
+
+      int idx = local_pe * numChannels + channel_idx;
+      anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
+      if (handle != nullptr && chunk_size > 0) {
+        char* dst_chunk = static_cast<char*>(dst) + offset;
+        char* src_chunk = static_cast<char*>(src) + offset;
+        anvil::putWithSignal(*handle, dst_chunk, src_chunk, chunk_size, &signalPtrs[idx]);
+        __hip_atomic_fetch_add(&expectedSignals[idx], 1,
+                               __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      }
     }
     __syncthreads();
   }
 
-  // Wait for SDMA completions for a specific PE
+  // Wait for SDMA completions for a specific PE (all channels)
   __device__ void sdmaQuiet(int pe) {
     int local_pe = pe % shm_size;
-    uint64_t expected = __hip_atomic_load(&expectedSignals[local_pe],
-                                          __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-    anvil::waitForSignal(reinterpret_cast<HSAuint64*>(&signalPtrs[local_pe]), expected);
+    for (int ch = 0; ch < numChannels; ch++) {
+      int idx = local_pe * numChannels + ch;
+      uint64_t expected = __hip_atomic_load(&expectedSignals[idx],
+                                            __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      anvil::waitForSignal(reinterpret_cast<HSAuint64*>(&signalPtrs[idx]), expected);
+    }
   }
 
-  // Wait for all SDMA completions
+  // Wait for all SDMA completions (all PEs, all channels)
   __device__ void sdmaQuietAll() {
-    for (int i = 0; i < shm_size; i++) {
-      sdmaQuiet(i);
+    for (int pe = 0; pe < shm_size; pe++) {
+      for (int ch = 0; ch < numChannels; ch++) {
+        int idx = pe * numChannels + ch;
+        uint64_t expected = __hip_atomic_load(&expectedSignals[idx],
+                                              __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        anvil::waitForSignal(reinterpret_cast<HSAuint64*>(&signalPtrs[idx]), expected);
+      }
     }
   }
 #endif  // __HIPCC__ || __CUDACC__
@@ -115,12 +182,14 @@ NOWARN(-Wunused-parameter,
 class SdmaOffImpl {
  public:
   size_t sdmaThreshold{8192};
+  size_t minChunkPerChannel{4096};
   int numChannels{2};
   void** deviceHandles_d{nullptr};
   uint64_t* signalPtrs{nullptr};
   uint64_t* expectedSignals{nullptr};
   int shm_size{0};
   int my_pe{0};
+  int local_rank{0};
 
   __host__ void sdmaHostInit(int pe, int num_pes, MPI_Comm comm) {}
   __host__ void sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstrap) {}
