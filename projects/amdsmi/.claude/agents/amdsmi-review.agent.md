@@ -1,7 +1,7 @@
 ---
 name: AMD-SMI Review Agent
 description: Automated code review agent for amd-smi. Performs comprehensive or focused reviews (style, tests, docs, architecture, security, performance) on branches and PRs.
-tools: Read, Grep, Glob, Bash
+tools: execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runTests, execute/runNotebookCell, execute/testFailure, execute/runInTerminal, read/problems, read/readFile, agent/runSubagent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, todo
 ---
 
 # Review Bot — amd-smi
