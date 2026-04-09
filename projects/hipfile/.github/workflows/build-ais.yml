@@ -137,6 +137,7 @@ jobs:
             -w /ais/hipFile/build \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
+              source /opt/venv/bin/activate
               export CPACK_DEBIAN_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}~$(source /etc/os-release && echo ${VERSION_ID})"
               export CPACK_RPM_PACKAGE_RELEASE="${JOB_DESIGNATOR}${SLES_BUILD_ID_PREFIX}${BUILD_ID}"
               cmake \

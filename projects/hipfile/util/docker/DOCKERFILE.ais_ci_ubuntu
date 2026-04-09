@@ -51,7 +51,18 @@ RUN apt update && \
         libboost-program-options-dev \
         libmount-dev \
         llvm-dev \
+        python3 \
+        python3-pip \
+        python3-venv \
         rocm-llvm-dev
+
+# Install Python packages (don't source venv/bin/activate)
+RUN python3 -m venv /opt/venv
+RUN /opt/venv/bin/pip3 install \
+        sphinx \
+        breathe \
+        sphinx-rtd-theme \
+        rocm-docs-core
 
 # Configure system linker for ROCm
 RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf

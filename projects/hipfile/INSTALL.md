@@ -116,6 +116,9 @@ sudo systemctl reboot
     * `libmount-dev` (Debian/Ubuntu)
     * `libmount-devel` (RHEL/Fedora/openSUSE)
 
+Please the the README.md file in the docs directory for requirements
+for building the documentation.
+
 ### Configure
 
 You do not need to set the `HIP_PLATFORM` environment variable, as
@@ -126,7 +129,7 @@ that will be set by CMake.
 Options
 |Option|Default|Purpose|
 |------|-------|-------|
-|AIS\_BUILD\_DOCS|OFF|Build API documentation (requires Doxygen)|
+|AIS\_BUILD\_DOCS|OFF|Build API documentation (see `docs/README.md`)|
 |AIS\_INSTALL\_EXAMPLES|ON|Install example programs|
 |AIS\_USE\_CLANG\_TIDY|OFF|Run the `clang-tidy` tool (clang only)|
 |AIS\_USE\_CODE\_COVERAGE|OFF|Generate code coverage information when tests are run (clang only)|
@@ -191,18 +194,5 @@ The results will be wrote to `<path/to/repo>/build`, in the
 `coverage-report.txt` and `coverage-lines.txt` files.
 
 ### Documentation
-The API documentation is built using Doxygen. To build it, use the
-`AIS_BUILD_DOCS` option. This will build the documentation for any
-libraries that have been configured. As a special case, configuring
-the documentation without any library will build the documentation
-for BOTH libraries, allowing for a docs-only build.
 
-The documentation will be built with the libraries and appear in
-`docs/(hip|roc)file`. We build HTML, XML, and LaTeX docs. If you
-want a pdf, run `make pdf` in the `latex` directory, which will
-create a file named refman.pdf that you can rename.
-
-If you want to build the docs without compiling the libraries,
-you can just build the `doc` target (if you've set `AIS_BUILD_DOCS`):
-
-    `cmake --build . --target doc`
+See `docs/README.md`
