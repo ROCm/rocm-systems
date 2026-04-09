@@ -224,12 +224,12 @@ ExternalProject_Add(
         --with-components=${_ROCPROFSYS_PAPI_COMPONENTS}
         --libdir=${ROCPROFSYS_PAPI_INSTALL_DIR}/lib
     CONFIGURE_COMMAND
-        ${CMAKE_COMMAND} -E env
+        ${CMAKE_COMMAND} -E env CC=${PAPI_C_COMPILER}
         CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation\ -Wno-use-after-free
         ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s -j
         ${ROCPROFSYS_PAPI_CONFIGURE_JOBS}
     BUILD_COMMAND
-        ${CMAKE_COMMAND} -E env
+        ${CMAKE_COMMAND} -E env CC=${PAPI_C_COMPILER}
         CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation\ -Wno-use-after-free
         ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils -s
     INSTALL_COMMAND ""
@@ -240,11 +240,11 @@ ExternalProject_Add(
 add_custom_target(
     rocprofiler-systems-papi-install
     COMMAND
-        ${CMAKE_COMMAND} -E env
+        ${CMAKE_COMMAND} -E env CC=${PAPI_C_COMPILER}
         CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation\ -Wno-use-after-free
         ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s
     COMMAND
-        ${CMAKE_COMMAND} -E env
+        ${CMAKE_COMMAND} -E env CC=${PAPI_C_COMPILER}
         CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation\ -Wno-use-after-free
         ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils -s
     WORKING_DIRECTORY ${ROCPROFSYS_PAPI_SOURCE_DIR}/src

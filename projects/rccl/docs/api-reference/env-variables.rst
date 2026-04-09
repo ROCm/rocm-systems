@@ -213,3 +213,26 @@ intended for debugging and development purposes.
         | Enables multi-process mode in test applications.
       - | Any non-empty value enables multi-process mode
         | Used with test executables for distributed testing
+
+Multi-communicator ordering
+===========================
+
+When an application uses multiple RCCL communicators on the same device,
+collective operations may execute in an unpredictable order unless the
+application adds explicit synchronization between streams.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_LAUNCH_ORDER_IMPLICIT``
+        | Serializes RCCL operations across different communicators on the
+        | same device according to their host-side launch sequence. This
+        | provides deterministic execution order for multi-communicator
+        | workloads such as chained collectives where one operation's
+        | output feeds into the next.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled. Operations execute in host launch order.

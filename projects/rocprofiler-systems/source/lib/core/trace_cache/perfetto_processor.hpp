@@ -23,6 +23,7 @@
 #pragma once
 #include "agent_manager.hpp"
 #include "config.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
@@ -50,7 +51,7 @@ class perfetto_processor_t : public processor_t<perfetto_processor_t>
 public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
                          const std::shared_ptr<agent_manager>& agent_mngr, int pid,
-                         int ppid);
+                         int ppid, output_file_registry& output_registry);
 
     void prepare_for_processing();
     void finalize_processing();
@@ -66,6 +67,7 @@ public:
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_freq_sample& sample);
     void handle(const backtrace_region_sample& sample);
+    void handle(const kfd_sample& sample);
 
 private:
     void       initialize_perfetto();
@@ -85,6 +87,7 @@ private:
     bool                                        m_use_annotations{ false };
 
     std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
+    output_file_registry&                      m_output_registry;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

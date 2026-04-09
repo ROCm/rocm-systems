@@ -10,7 +10,7 @@ This example performs a tiled 2D matrix transpose on the GPU using HIP. Each thr
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - HIP runtime and `hipcc` compiler
 - (Optional) MPI for distributed transpose
 

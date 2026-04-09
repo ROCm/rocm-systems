@@ -515,6 +515,22 @@ main(int argc, char** argv)
         .max_count(1)
         .action(
             [&fmt_opts](parser_t& p) { fmt_opts.force_config = p.get<bool>("force"); });
+    parser
+        .add_argument({ "--preset-name" },
+                      "Set the preset name in metadata (used with -F json)")
+        .max_count(1)
+        .dtype("string")
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.preset_name = p.get<std::string>("preset-name");
+        });
+    parser
+        .add_argument({ "--preset-description" },
+                      "Set the preset description in metadata (used with -F json)")
+        .max_count(1)
+        .dtype("string")
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.preset_description = p.get<std::string>("preset-description");
+        });
 
     parser.end_group();
 
@@ -549,15 +565,6 @@ main(int argc, char** argv)
     _parser_set_if_exists(include_components, "components");
     _parser_set_if_exists(include_settings, "settings");
     _parser_set_if_exists(include_hw_counters, "hw-counters");
-
-    // Always register ROCm/SMI settings so they appear in settings queries
-    // (e.g., rocprof-sys-avail -bd -r ROCM). These functions query the
-    // rocprofiler-sdk and AMD SMI to discover available domains and metrics.
-    {
-        const auto& _config = tim::settings::shared_instance();
-        rocprofsys::rocprofiler_sdk::config_settings(_config);
-        rocprofsys::amd_smi::config_settings(_config);
-    }
 
     // Only query GPU devices and hardware counters when they are actually
     // requested. This avoids initializing the ROCm runtime for settings-only

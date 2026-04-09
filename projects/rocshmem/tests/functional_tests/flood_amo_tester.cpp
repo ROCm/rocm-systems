@@ -229,7 +229,7 @@ void FloodAmoTester::verifyResults([[maybe_unused]] size_t size) {
 
   if (*verification_error) {
     std::cerr << "Data validation error (found by device kernel)" << std::endl;
-    uint64_t expected = static_cast<uint64_t>(args.loop + args.skip) * num_pes * (args.wg_size * (args.wg_size+1)) / 2;
+    uint64_t expected = static_cast<uint64_t>(num_loops + args.skip) * num_pes * (args.wg_size * (args.wg_size+1)) / 2;
     for(unsigned int wg = 0; wg < static_cast<unsigned int>(args.num_wgs); wg++) {
       if (expected != s_buf[wg]) {
         std::cerr << "Data validation error for wg " << wg << std::endl;

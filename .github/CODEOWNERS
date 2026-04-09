@@ -2,13 +2,6 @@
 /.azuredevops/                                                        @ROCm/external-ci
 /.github/                                                             @ROCm/rocm-systems-reviewers
 
-# Global documentation ownership
-/**/*.md                                                              @ROCm/rocm-documentation
-/**/*.rst                                                             @ROCm/rocm-documentation
-**/.readthedocs.yaml                                                  @ROCm/rocm-documentation
-**/docs/                                                              @ROCm/rocm-documentation
-**/library/include/                                                   @ROCm/rocm-documentation
-
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
 /projects/clr/                                                        @ROCm/clr-reviewers
@@ -25,7 +18,7 @@
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
 /projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners 
-/projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
+/projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd @atgutier
 /projects/roctracer/                                                  @ammarwa @bgopesh
 /projects/rocshmem/                                                   @ROCm/rocshmem-reviewers
 /projects/rocdbgapi/                                                  @ROCm/rocm-devtools-debugger
@@ -57,7 +50,14 @@
 # rocprof-trace-decoder code owners
 /projects/rocprof-trace-decoder/                                      @ROCm/rocm-devtools-team
 
-# Documentation-specific ownership by project
+# Media Libs
+/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther
+/projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther
+
+# Experimental
+/experimental/rocjitsu                                                @atgutier
+
+# Documentation-specific ownership by project (last to take precedence)
 
 /projects/clr/**/*.md                                                 @ROCm/clr-reviewers @ROCm/lrt-docs-reviewers
 /projects/clr/**/*.rst                                                @ROCm/clr-reviewers @ROCm/lrt-docs-reviewers
@@ -103,7 +103,3 @@
 /projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation
-
-# Media Libs
-/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther
-/projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther

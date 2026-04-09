@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "core/output_file_registry.hpp"
 #include "core/trace_cache/buffer_storage.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -42,7 +43,7 @@ using storage_parser_t =
                    memory_allocate_sample, region_sample, in_time_sample,
                    pmc_event_with_sample, pmc::collectors::gpu::sample,
                    pmc::collectors::nic::sample, cpu_freq_sample, backtrace_region_sample,
-                   scratch_memory_sample>;
+                   scratch_memory_sample, kfd_sample>;
 
 using buffer_storage_t = buffer_storage<flush_worker_factory_t, type_identifier_t>;
 
@@ -53,7 +54,7 @@ public:
     buffer_storage_t&     get_buffer_storage() { return m_storage; }
     metadata_registry&    get_metadata_registry() { return *m_metadata; }
     void                  shutdown();
-    void                  post_process_bulk();
+    void                  post_process_bulk(output_file_registry& output_registry);
 
 private:
     cache_manager() = default;

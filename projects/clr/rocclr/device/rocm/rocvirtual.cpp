@@ -499,7 +499,10 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     // The signal was assigned to the global marker's event, hence runtime can't reuse it
     // and needs a new signal
     std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
-    if ((signal != nullptr) && CreateSignal(signal.get())) {
+
+    // Ensure that signals of the same type are created with the same interrupt flag,
+    // as the tracking list depends on this for reuse.
+    if ((signal != nullptr) && CreateSignal(signal.get(), signal_list_[current_id_]->flags_.interrupt_)) {
       signal_list_[current_id_]->release();
       signal_list_[current_id_] = signal.release();
     } else {
@@ -3441,6 +3444,9 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       amd::MemObjMap::AddMemObj(vcmd.ptr(), vaddr_sub_obj);
       vaddr_sub_obj->getUserData().phys_mem_obj = phys_mem_obj;
       phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
+      if (phys_mem_obj->getMemFlags() & ROCCLR_MEM_INTERPROCESS) {
+        vaddr_sub_obj->setVmmImported(true);
+      }
     } else {
       LogError("HSA Command: hsa_amd_vmem_map failed!");
     }
@@ -3796,7 +3802,11 @@ static inline void nontemporalMemcpy(void* __restrict dst, const void* __restric
 }
 #endif
 
-void VirtualGPU::HiddenHeapInit() { const_cast<Device&>(dev()).HiddenHeapInit(*this); }
+void VirtualGPU::HiddenHeapInit() {
+  // We don't really need its id, just want to ensure the queue is created.
+  (void)getQueueID();
+  const_cast<Device&>(dev()).HiddenHeapInit(*this);
+}
 
 // ================================================================================================
 bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const amd::Kernel& kernel,
