@@ -200,6 +200,7 @@ if(BUILD_TESTS)
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
       EnqueueCountTests.cpp
+      MiscTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -265,7 +266,7 @@ if(BUILD_TESTS)
       transport/ShmMPITests.cpp
       transport/NetIbMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
-      CommTests.cpp
+      CommMPITests.cpp
       RegistrationMPITests.cpp
     )
 

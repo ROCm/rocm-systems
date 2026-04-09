@@ -1,33 +1,18 @@
 /*************************************************************************
- * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-#include "gtest/gtest.h"
-#include "comm.h"
-
-namespace RcclUnitTesting
-{
-  TEST(CommTests, Sorter)
-  {
-	// Configuration
-	ncclTaskCollSorter* me_ptr = new ncclTaskCollSorter;
-	me_ptr->head = nullptr;
-
-	ASSERT_EQ(ncclTaskCollSorterEmpty(me_ptr), true);
-	delete me_ptr;
-  }
-}
 
 #ifdef MPI_TESTS_ENABLED
 
 #include "MPITestBase.hpp"
+#include "MPIHelpers.hpp"
 #include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
 
-#include <fstream>
-#include <sstream>
-#include <unistd.h>
+#include <cstdlib>
+#include <string>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
@@ -132,11 +117,14 @@ protected:
 
 /**
  * @test TrafficClassMPITest.ConfiguredTrafficClass
- * @brief Verify traffic class configuration is stored in communicator and logged
+ * @brief Verify traffic class in communicator and in NCCL debug output
  *
- * Sets trafficClass=46 via ncclConfig_t and verifies:
- * 1. comm->config.trafficClass stores the value
- * 2. NCCL logs "Traffic class set to 46" (requires NCCL_DEBUG=INFO)
+ * Uses MPIHelpers::TestLogAssertionContext with makeCombinedAssertionLogOptions():
+ * - Sets NCCL_DEBUG_FILE for this scope (before communicator init) for NCCL-native logs.
+ * - Optionally matches the same line in rccl_test_rank_<r>.log when
+ *   RCCL_MPI_LOG_ALL_RANKS=1 (stderr/tee). Either sink may contain the substring.
+ *
+ * Requires NCCL_DEBUG=INFO (or higher) for the log line to exist.
  */
 TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
 {
@@ -145,34 +133,29 @@ TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
     constexpr int kTestTrafficClass = 46;
     configured_traffic_class_ = kTestTrafficClass;
 
-    // Save and set NCCL_DEBUG_FILE to capture logs
-    std::string logfile = "/tmp/rccl_tc_" + std::to_string(getpid()) + ".log";
-    const char* prev_debug_file = getenv("NCCL_DEBUG_FILE");
-    std::string saved_debug_file = prev_debug_file ? prev_debug_file : "";
-    setenv("NCCL_DEBUG_FILE", logfile.c_str(), 1);
-
-    // RAII guard to restore env var
-    auto env_guard = makeScopeGuard([&]() {
-        if(saved_debug_file.empty())
-            unsetenv("NCCL_DEBUG_FILE");
-        else
-            setenv("NCCL_DEBUG_FILE", saved_debug_file.c_str(), 1);
-    });
+    MPIHelpers::TestLogAssertionContext log_ctx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
     // Verify trafficClass in communicator
     ASSERT_MPI_EQ(getActiveCommunicator()->config.trafficClass, kTestTrafficClass);
 
-    // Read the NCCL debug log file
-    std::ifstream log(logfile);
-    std::stringstream buf;
-    buf << log.rdbuf();
-    log.close();
-    unlink(logfile.c_str());
+    static constexpr const char* kTrafficClassLogNeedle = "Traffic class set to 46";
+    const std::string            from_nccl               = log_ctx.readNcclDebugLog();
+    const std::string            from_rank_log           = log_ctx.readPerRankStderrLog();
+    const bool hit_nccl   = from_nccl.find(kTrafficClassLogNeedle) != std::string::npos;
+    const bool hit_stderr = from_rank_log.find(kTrafficClassLogNeedle) != std::string::npos;
+    const bool found_line = hit_nccl || hit_stderr;
 
-    // Verify trafficClass appears in logs (requires NCCL_DEBUG=INFO)
-    ASSERT_MPI_NE(buf.str().find("Traffic class set to 46"), std::string::npos);
+    if(getTestMpiRank() == 0)
+    {
+        TEST_INFO("Expected NCCL log line \"%s\": %s",
+                  kTrafficClassLogNeedle,
+                  found_line ? "passed" : "failed");
+    }
+
+    ASSERT_MPI_TRUE(found_line);
 }
 
 #endif // MPI_TESTS_ENABLED
