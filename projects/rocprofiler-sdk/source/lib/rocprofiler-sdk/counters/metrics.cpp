@@ -229,20 +229,6 @@ get_optional_scalar(const YAML::Node& parent, const char* key)
 }
 
 bool
-validate_definitions_node(const YAML::Node& counter, const std::string& counter_name)
-{
-    auto definitions = counter["definitions"];
-    if(!definitions || !definitions.IsSequence())
-    {
-        ROCP_WARNING << "Skipping counter '" << counter_name
-                     << "': missing or invalid 'definitions'";
-        return false;
-    }
-
-    return true;
-}
-
-bool
 validate_definition_node(const YAML::Node& definition, const std::string& counter_name)
 {
     if(!definition || !definition.IsMap())
@@ -260,6 +246,7 @@ validate_definition_node(const YAML::Node& definition, const std::string& counte
         return false;
     }
 
+    // Validate types of optional fields
     if(definition["block"] && !definition["block"].IsScalar())
     {
         ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
@@ -278,42 +265,6 @@ validate_definition_node(const YAML::Node& definition, const std::string& counte
     {
         ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
                      << "': 'expression' must be a scalar";
-        return false;
-    }
-
-    // Validate mutually exclusive counter types:
-    // Allowed forms:
-    //   1) expression counter: architectures + expression
-    //   2) hardware counter: architectures + block + event
-    const bool has_block      = static_cast<bool>(definition["block"]);
-    const bool has_event      = static_cast<bool>(definition["event"]);
-    const bool has_expression = static_cast<bool>(definition["expression"]);
-
-    if(!has_expression && !has_event)
-    {
-        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
-                     << "': missing both 'event' and 'expression'";
-        return false;
-    }
-
-    if(has_event && !has_block)
-    {
-        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
-                     << "': 'event' requires 'block'";
-        return false;
-    }
-
-    if(has_block && !has_event)
-    {
-        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
-                     << "': 'block' requires 'event'";
-        return false;
-    }
-
-    if(has_expression && (has_block || has_event))
-    {
-        ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
-                     << "': definition must be either 'expression' or 'block' + 'event', not both";
         return false;
     }
 
@@ -447,15 +398,61 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         if(!description_opt) continue;
         const auto& description = *description_opt;
 
-        if(!validate_definitions_node(counter, counter_name)) continue;
+        auto definitions = counter["definitions"];
+        if(!definitions || !definitions.IsSequence())
+        {
+            ROCP_WARNING << "Skipping counter '" << counter_name
+                         << "': missing or invalid 'definitions'";
+            continue;
+        }
 
-        for(const auto& definition : counter["definitions"])
+        for(const auto& definition : definitions)
         {
             if(!validate_definition_node(definition, counter_name)) continue;
 
             auto block      = get_optional_scalar(definition, "block");
             auto event      = get_optional_scalar(definition, "event");
             auto expression = get_optional_scalar(definition, "expression");
+
+            // Validate mutually exclusive counter types based on extracted values
+            // Allowed forms:
+            //   1) expression counter: architectures + expression
+            //   2) hardware counter: architectures + block + event
+            // Note: get_optional_scalar() returns empty string for missing, wrong type,
+            // or empty fields, so we validate the actual extracted strings here.
+            const bool has_block      = !block.empty();
+            const bool has_event      = !event.empty();
+            const bool has_expression = !expression.empty();
+
+            if(!has_expression && !has_event)
+            {
+                ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                             << "': definition must provide either non-empty 'expression' or both "
+                                "non-empty 'block' and 'event'";
+                continue;
+            }
+
+            if(has_event && !has_block)
+            {
+                ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                             << "': 'event' requires 'block'";
+                continue;
+            }
+
+            if(has_block && !has_event)
+            {
+                ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                             << "': 'block' requires 'event'";
+                continue;
+            }
+
+            if(has_expression && (has_block || has_event))
+            {
+                ROCP_WARNING << "Skipping invalid definition for counter '" << counter_name
+                             << "': definition must be either 'expression' or 'block' + 'event', "
+                                "not both";
+                continue;
+            }
 
             for(const auto& arch : definition["architectures"])
             {
