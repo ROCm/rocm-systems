@@ -782,7 +782,7 @@ class OmniSoC_Base:
         Sort and bucket all related performance counters to minimize required
         application passes
         """
-        workload_perfmon_dir = Path(self.get_args().path) / "perfmon"
+        workload_perfmon_dir = Path(self.get_args().output_directory) / "perfmon"
         workload_perfmon_dir.mkdir(parents=True, exist_ok=True)
 
         rocprof_counters = self.get_rocprof_supported_counters()
@@ -947,13 +947,16 @@ class OmniSoC_Base:
             from roofline.run_benchmark import load_bench
 
             console_log(
-                "roofline", f"Checking for roofline.csv in {self.get_args().path}"
+                "roofline",
+                f"Checking for roofline.csv in {self.get_args().output_directory}",
             )
-            if not (Path(self.get_args().path) / "roofline.csv").is_file():
+            if not (Path(self.get_args().output_directory) / "roofline.csv").is_file():
                 try:
                     bench = load_bench([self.get_args().device])
                     result = bench.run_on_devices([self.get_args().device])
-                    bench.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                    bench.dump_csv(
+                        result, f"{self.get_args().output_directory}/roofline.csv"
+                    )
                 except Exception as e:
                     console_error(
                         "roofline",
@@ -962,7 +965,9 @@ class OmniSoC_Base:
                     )
                     return
 
-            is_valid, error_msg = validate_roofline_csv(self.get_args().path)
+            is_valid, error_msg = validate_roofline_csv(
+                self.get_args().output_directory
+            )
             if not is_valid:
                 console_error(
                     "roofline",
@@ -973,9 +978,11 @@ class OmniSoC_Base:
 
             console_log(
                 "roofline",
-                f"Roofline data saved to {self.get_args().path}/roofline.csv\n"
-                f"  Run 'rocprof-compute analyze -p {self.get_args().path}' "
-                f"for charts",
+                "Roofline data saved to "
+                f"{self.get_args().output_directory}/roofline.csv\n"
+                "  Run 'rocprof-compute analyze -p "
+                f"{self.get_args().output_directory}' "
+                "for charts",
             )
 
 
