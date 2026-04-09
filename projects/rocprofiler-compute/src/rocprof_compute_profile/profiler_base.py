@@ -149,12 +149,6 @@ class RocProfCompute_Base:
                 "Please use only one of them."
             )
 
-        # verify not accessing parent directories
-        if ".." in str(args.output_directory):
-            console_error(
-                "Access denied. Cannot access parent directories in --output-directory (i.e. ../)"
-            )
-
         if args.no_native_tool and args.iteration_multiplexing is not None:
             console_error(
                 "--no-native-tool cannot be used with --iteration-multiplexing. "
@@ -323,7 +317,8 @@ class RocProfCompute_Base:
         console_log(f"{str(prog).title()} version: {version}")
         console_log(f"Profiler choice: {self.__profiler}")
         console_log(
-            f"Output directory: {Path(self.__args.output_directory).absolute().resolve()}"
+            f"Output directory: "
+            f"{Path(self.__args.output_directory).absolute().resolve()}"
         )
         console_log(f"Target: {self._soc._mspec.gpu_model}")
         console_log(f"Command: {args.remaining}")
