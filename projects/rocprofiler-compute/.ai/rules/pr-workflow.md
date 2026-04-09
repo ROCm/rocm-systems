@@ -32,6 +32,7 @@ Before drafting, ask the user:
 - "Do you have a JIRA ID for this PR?"
 - If yes, include it in the JIRA ID section.
 - If no, leave the JIRA ID section empty (keep the heading, leave body blank).
+- JIRA ID should never be specified using url, it should always be just the ticket id without the hyperlink part
 
 ### 4. Draft the PR title and body, then confirm with user
 
@@ -84,7 +85,7 @@ approval. Do NOT create the PR without confirmation.
 
 ### 7. Return the PR URL
 
-Always return the PR URL (e.g., `ROCm/rocm-systems#4722`) so the user can
+Always return the PR URL so the user can
 review it.
 
 ## Tone guidelines (learned from user)

@@ -10,14 +10,14 @@ reviewable commits.
 Run these commands in parallel to understand the current state:
 
 - `git status` (never use `-uall` flag)
-- `git diff` to see staged and unstaged changes
+- `git diff` and `git diff --staged` to see staged and unstaged changes
 - `git log --oneline -10` to understand the repo's commit message style
 
 ### 2. Identify the correct files to stage
 
 - Only stage files relevant to the logical change. Prefer `git add <file1> <file2>`
   over `git add -A` or `git add .`.
-- Never stage files that may contain secrets (`.env`, credentials, tokens, etc.).
+- Never stage files that contain secrets (`.env`, credentials, tokens, etc.).
 - Never stage unrelated modifications (e.g., dirty submodules, editor configs).
 
 ### 3. Draft the commit message and confirm with user
@@ -27,7 +27,6 @@ and wait for approval before proceeding. Do NOT commit without confirmation.
 
 **Commit message rules for this repo:**
 
-- Prefix with the project name in brackets: `[rocprofiler-compute]`
 - First line: concise summary under 72 characters
 - Body: explain the "why", not the "what" — the diff shows the what
 - Separate logical points as bullet list items
@@ -35,7 +34,7 @@ and wait for approval before proceeding. Do NOT commit without confirmation.
 - Keep descriptions concise — one to two lines per point, no verbose paragraphs
 - Do not include refactoring commentary that is obvious from the diff
 - If referencing another project's code as inspiration, keep it to a one-liner
-- End with: `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
+- End with: `Co-Authored-By: <AI model name or IDE name>`
 
 **Tone guidelines (learned from user):**
 
@@ -56,7 +55,7 @@ git commit -m "$(cat <<'EOF'
 - Bullet point one
 - Bullet point two
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Co-Authored-By: <AI model name or IDE name>
 EOF
 )"
 ```
@@ -77,8 +76,8 @@ EOF
 
 ## Branch safety
 
-- Never commit directly to `main` or `develop` unless the user explicitly
-  instructs you to do so. If the user doesn't specify a branch, ask.
+- Never commit directly to `develop`
+- Always check current branch and apply commit over there, unless user specifies another branch
 - If a commit was accidentally made on the wrong branch, move it:
   1. `git branch <correct-branch>` (create branch at current HEAD)
   2. `git reset --hard HEAD~1` (reset the wrong branch back)
@@ -86,8 +85,8 @@ EOF
 
 ## What NOT to do
 
-- Do not push to remote unless explicitly asked.
+- Do not use `--no-verify` to bypass hooks.
+- Do not use `--no-gpg-sign` to disable commit signing to remote unless explicitly asked.
 - Do not use `--no-verify` or `--no-gpg-sign` to bypass hooks.
-- Do not use interactive flags (`-i`) with git commands.
 - Do not create empty commits.
 - Do not batch multiple unrelated changes into one commit.
