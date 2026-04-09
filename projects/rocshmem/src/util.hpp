@@ -515,8 +515,8 @@ template <typename... Args>
       buffer_resource br_dst = make_buffer_resource(dst_def, block_bytes);
 
       // if (get_flat_id() == 0) {
-      //   printf("memcpy_wg: grid_size = %d, block_size = %d, " 
-      //     "flat_id = %d, size = %3ld, cpy_size = %3d\n", 
+      //   printf("memcpy_wg: grid_size = %d, block_size = %d, "
+      //     "flat_id = %d, size = %3ld, cpy_size = %3d\n",
       //     get_grid_num_blocks(), get_flat_block_size(), get_flat_id(), size, cpy_size);
       // }
 
@@ -529,6 +529,10 @@ template <typename... Args>
       size -= cpy_size * block_bytes;
       dst_def += cpy_size * block_bytes;
       src_def += cpy_size * block_bytes;
+
+      if (size == 0) {
+        return;
+      }
     }
   }
 
@@ -550,7 +554,7 @@ template <typename... Args>
 
   if (size == 1) {
     if (is_thread_zero_in_block()) {
-      *dst_bytes = *src_bytes;
+      *dst_def = *src_def;
     }
   }
 }
@@ -591,8 +595,8 @@ template <typename... Args>
       buffer_resource br_dst = make_buffer_resource(dst_def, block_bytes);
 
       // if (get_flat_id() == 0) {
-      //   printf("memcpy_wave: grid_size = %d, block_size = %d, " 
-      //     "flat_id = %d, size = %3ld, cpy_size = %3d\n", 
+      //   printf("memcpy_wave: grid_size = %d, block_size = %d, "
+      //     "flat_id = %d, size = %3ld, cpy_size = %3d\n",
       //     get_grid_num_blocks(), get_flat_block_size(), get_flat_id(), size, cpy_size);
       // }
 
@@ -605,6 +609,10 @@ template <typename... Args>
       size -= cpy_size * block_bytes;
       dst_def += cpy_size * block_bytes;
       src_def += cpy_size * block_bytes;
+      
+      if (size == 0) {
+        return;
+      }
     }
   }
 
@@ -626,7 +634,7 @@ template <typename... Args>
 
   if (size == 1) {
     if (is_thread_zero_in_wave()) {
-      *dst_bytes = *src_bytes;
+      *dst_def = *src_def;
     }
   }
 }
