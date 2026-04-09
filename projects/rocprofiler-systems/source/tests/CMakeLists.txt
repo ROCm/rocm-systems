@@ -17,7 +17,7 @@ if(ROCPROFSYS_BUILD_AINIC)
     list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 endif()
 
-add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS})
+add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS} test_stubs.cpp)
 
 target_link_libraries(
     rocprof-sys-unit-tests
@@ -25,8 +25,28 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-common-library
         rocprofiler-systems-core-library
-        rocprofiler-systems-object-library
         rocprofiler-systems-pmc-library
         rocprofiler-systems::rocprofiler-systems-binary
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
+        rocprofiler-systems::rocprofiler-systems-interface-library
 )
+
+target_include_directories(
+    rocprof-sys-unit-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys ${PROJECT_SOURCE_DIR}/source/lib
+)
+
+# Do NOT link rocprofiler-systems-object-library into unit tests.
+# It contains library.cpp whose static initializers instantiate thread_data /
+# thread_deleter, causing a TSan deadlock during atexit.
+# test_stubs.cpp is a temporary workaround that provides stub implementations
+# of symbols needed by pmc-library and core-library. The long-term fix is to
+# decouple those libraries so they no longer depend on object-library symbols.
+get_target_property(_ut_libs rocprof-sys-unit-tests LINK_LIBRARIES)
+if(_ut_libs MATCHES "rocprofiler-systems-object-library")
+    message(
+        FATAL_ERROR
+        "rocprof-sys-unit-tests must NOT link rocprofiler-systems-object-library. "
+        "Use test_stubs.cpp instead — see comment above."
+    )
+endif()
