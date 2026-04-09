@@ -9,8 +9,10 @@
 #include "impl/core__types.h"
 #include "core_tmp.h"
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #undef __CUDACC__
 #define __CUDACC__ 0
+#endif
 
 struct ncclLsaBarrierHandle;
 

@@ -10,8 +10,10 @@
 #include "coop.h"
 #include "utility.h"
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #undef __CUDACC__
 #define __CUDACC__ 0
+#endif
 
 struct ncclDevComm;
 typedef struct ncclDevComm ncclDevComm_t;

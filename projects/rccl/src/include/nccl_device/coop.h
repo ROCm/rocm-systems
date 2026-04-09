@@ -8,8 +8,10 @@
 #define _NCCL_DEVICE_COOP_H_
 #include "utility.h"
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #undef __CUDACC__
 #define __CUDACC__ 0
+#endif
 
 // ncclCoop[Foo]: NCCL's versions of CUDA's Cooperative Groups. They conform
 // to just this subset of the CUDA API:
@@ -29,8 +31,8 @@ struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
   NCCL_DEVICE_INLINE constexpr int size() const { return nThreadsPow2; }
   NCCL_DEVICE_INLINE constexpr int num_threads() const { return nThreadsPow2; }
 
-  NCCL_DEVICE_INLINE uint32_t laneMask() const {
-    return (-1u>>(32-nThreadsPow2))<<(nccl::utility::lane() & -nThreadsPow2);
+  NCCL_DEVICE_INLINE uint64_t laneMask() const {
+    return (-1ull>>(32-nThreadsPow2))<<(nccl::utility::lane() & -nThreadsPow2);
   }
   NCCL_DEVICE_INLINE void sync() {
     __syncwarp(laneMask());
@@ -45,18 +47,18 @@ typedef ncclCoopTile<32> ncclCoopWarp;
 
 #if __CUDACC__
 struct ncclCoopLanes { // Some lanes of this warp.
-  uint32_t lmask;
+  uint64_t lmask;
   
-  NCCL_DEVICE_INLINE constexpr ncclCoopLanes(uint32_t lmask=-1u): lmask(lmask) {}
+  NCCL_DEVICE_INLINE constexpr ncclCoopLanes(uint64_t lmask=-1ull): lmask(lmask) {}
 
   NCCL_DEVICE_INLINE int thread_rank() const {
-    return __popc(lmask & nccl::utility::lanemask_lt());
+    return __popcll(lmask & nccl::utility::lanemask_lt());
   }
   NCCL_DEVICE_INLINE int size() const {
-    return __popc(lmask);
+    return __popcll(lmask);
   }
   NCCL_DEVICE_INLINE int num_threads() const {
-    return __popc(lmask);
+    return __popcll(lmask);
   }
   NCCL_DEVICE_INLINE void sync() {
     __syncwarp(lmask);
@@ -87,7 +89,11 @@ struct ncclCoopWarpSpan {
 
   NCCL_DEVICE_INLINE void sync() {
     //asm volatile("barrier.sync %0, %1;" :: "r"(1+id), "r"(32*nWarps) : "memory");
+#if defined(__HIP_PLATFORM_AMD__)
+    __syncthreads();
+#else
     __barrier_sync_count(1+id, 32*nWarps);
+#endif
   }
 };
 #endif
@@ -103,17 +109,17 @@ struct ncclCoopCta {
 
 #if __CUDACC__
 template<int nThreadsPow2>
-NCCL_DEVICE_INLINE uint32_t ncclCoopLaneMask(ncclCoopTile<nThreadsPow2> coop) {
+NCCL_DEVICE_INLINE uint64_t ncclCoopLaneMask(ncclCoopTile<nThreadsPow2> coop) {
   return coop.laneMask();
 }
-NCCL_DEVICE_INLINE uint32_t ncclCoopLaneMask(ncclCoopLanes coop) {
+NCCL_DEVICE_INLINE uint64_t ncclCoopLaneMask(ncclCoopLanes coop) {
   return coop.lmask;
 }
-NCCL_DEVICE_INLINE uint32_t ncclCoopLaneMask(ncclCoopWarpSpan coop) {
-  return -1u;
+NCCL_DEVICE_INLINE uint64_t ncclCoopLaneMask(ncclCoopWarpSpan coop) {
+  return -1ull;
 }
-NCCL_DEVICE_INLINE uint32_t ncclCoopLaneMask(ncclCoopCta coop) {
-  return -1u;
+NCCL_DEVICE_INLINE uint64_t ncclCoopLaneMask(ncclCoopCta coop) {
+  return -1ull;
 }
 #endif
 
@@ -132,7 +138,7 @@ NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopCta) { return false; 
 #if __CUDACC__
 // Pick threads of our warp that are safe to use collectively.
 NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced() {
-  return ncclCoopLanes{__activemask()};
+  return ncclCoopLanes{static_cast<uint64_t>(__activemask())};
 }
 #endif
 

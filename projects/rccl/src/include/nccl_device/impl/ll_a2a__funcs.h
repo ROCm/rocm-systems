@@ -10,7 +10,9 @@
 #include "comm__types.h"
 #include "../utility.h"
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #define __CUDACC__ 0
+#endif
 
 #if __CUDACC__
 template<typename Coop>

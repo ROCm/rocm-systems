@@ -9,7 +9,9 @@
 #include "../ll_a2a.h"
 #include "core__types.h"
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #define __CUDACC__ 0
+#endif
 
 struct ncclLLA2AHandle {
   ncclDevResourceHandle_t bufHandle;

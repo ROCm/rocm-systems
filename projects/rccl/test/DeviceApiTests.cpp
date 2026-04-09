@@ -18,7 +18,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "common/DeviceApiLocal.hpp"
+#define NCCL_ENABLE_DEVICE_HELPERS 1
+#include "nccl_device/impl/core__funcs.h"
+#include "nccl_device/impl/mem_barrier__funcs.h"
+#undef NCCL_ENABLE_DEVICE_HELPERS
 
 namespace RcclUnitTesting
 {

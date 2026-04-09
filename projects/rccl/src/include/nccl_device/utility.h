@@ -7,8 +7,10 @@
 #ifndef _NCCL_DEVICE_UTILITY_H_
 #define _NCCL_DEVICE_UTILITY_H_
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #undef __CUDACC__
 #define __CUDACC__ 0
+#endif
 
 #if __CUDACC__
   #define NCCL_DEVICE_INLINE __device__ __forceinline__
@@ -31,7 +33,7 @@
 #include <stdbool.h>
 
 #if __CUDACC__
-// #include <cuda/atomic>
+#include <cuda/atomic>
 #endif
 
 #if __cplusplus
@@ -217,13 +219,21 @@ NCCL_DEVICE_INLINE uint32_t idivRcp32_upto64(int x) {
 
 #if __CUDACC__
 NCCL_DEVICE_INLINE void fenceAcquireGpu() {
+#if defined(__HIP_PLATFORM_AMD__)
+  __threadfence();
+#else
   static __device__ int dummy;
   int tmp;
   asm volatile("ld.acquire.gpu.s32 %0,[%1];" : "=r"(tmp) : "l"(&dummy) : "memory");
   dummy = tmp;
+#endif
 }
 NCCL_DEVICE_INLINE void fenceReleaseGpu() {
+#if defined(__HIP_PLATFORM_AMD__)
+  __threadfence();
+#else
   cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_device);
+#endif
 }
 #endif
 
@@ -242,14 +252,23 @@ NCCL_DEVICE_INLINE cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
 
 #if __CUDACC__
 NCCL_DEVICE_INLINE int lane() {
+#if defined(__HIP_PLATFORM_AMD__)
+  return threadIdx.x % warpSize;
+#else
   int ret;
   asm("mov.u32 %0, %%laneid;" : "=r"(ret));
   return ret;
+#endif
 }
-NCCL_DEVICE_INLINE unsigned int lanemask_lt() {
-  unsigned int ret;
+NCCL_DEVICE_INLINE unsigned long long lanemask_lt() {
+#if defined(__HIP_PLATFORM_AMD__)
+  unsigned int lane_id = threadIdx.x % warpSize;
+  return lane_id == 0 ? 0ull : ((1ull << lane_id) - 1ull);
+#else
+  unsigned long long ret;
   asm("mov.u32 %0, %%lanemask_lt;" : "=r"(ret));
   return ret;
+#endif
 }
 #endif
 

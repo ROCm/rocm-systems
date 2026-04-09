@@ -9,7 +9,9 @@
 #include "core.h"
 #include <stdint.h>
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #define __CUDACC__ 0
+#endif
 
 #if __cplusplus
 template<typename T>

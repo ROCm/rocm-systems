@@ -8,7 +8,9 @@
 #define _NCCL_DEVICE_LL_A2A_H_
 #include "impl/core__types.h"
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #define __CUDACC__ 0
+#endif
 
 struct ncclLLA2AHandle;
 

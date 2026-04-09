@@ -10,7 +10,9 @@
 #include "core__funcs.h"
 #include "comm__types.h"
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #define __CUDACC__ 0
+#endif
 
 #if __cplusplus
 

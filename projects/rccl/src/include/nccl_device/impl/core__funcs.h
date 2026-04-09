@@ -10,7 +10,9 @@
 #include "comm__types.h"
 #include "ptr__types.h"
 
+#if !defined(NCCL_ENABLE_DEVICE_HELPERS)
 #define __CUDACC__ 0
+#endif
 
 #if __cplusplus
 NCCL_HOST_DEVICE_INLINE ncclTeam ncclTeamWorld(ncclDevComm const &comm) {
