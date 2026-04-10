@@ -22,13 +22,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND $<TARGET_FILE:opencl-vector-add>
     DEPENDS opencl-vector-add
     TIMEOUT 45
-    LABELS "integration-tests"
-    ENVIRONMENT "${OPENCL_TEST_ENVIRONMENT}"
-    PASS_REGULAR_EXPRESSION
-        "Backtrace analysis excludes queue=\\{[0-9A-Fa-f]+\\} from queue interception."
-    FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Backtrace analysis includes queue=\\{[0-9A-Fa-f]+\\} for queue interception."
-    )
+    LABELS "integration-tests")
 
 # this verifies that OpenCL queues are not intercepted. The PASS_REGULAR_EXPRESSION can
 # cause the return code of the application to be ignored, which is why we have test-opencl
@@ -41,7 +35,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     ENVIRONMENT "${OPENCL_TEST_ENVIRONMENT}"
     PASS_REGULAR_EXPRESSION
-        "Backtrace analysis excludes queue=\\{[0-9A-Fa-f]+\\} from queue interception."
+        "Backtrace analysis excludes queue=\\{0x[0-9A-Fa-f]+\\} from queue interception."
     FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Backtrace analysis includes queue=\\{[0-9A-Fa-f]+\\} for queue interception."
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Backtrace analysis includes queue=\\{0x[0-9A-Fa-f]+\\} for queue interception."
     )
