@@ -24,6 +24,49 @@ typedef enum {
 } HipGpuOpExt;
 
 /**
+ * @brief Memory copy direction stored in HipGpuActivityExt::copy_kind.
+ * Valid only when op == HIP_OP_COPY_EXT.
+ *
+ * Each value corresponds to one OpenCL CL_COMMAND_* copy command so callers
+ * can distinguish rectangular copies, image copies, and format-conversion copies
+ * without consulting any internal OpenCL headers.
+ *
+ * The 4-bit copy_kind bitfield supports values 0–15; this enum uses 0–12.
+ */
+typedef enum {
+  HIP_COPY_KIND_UNKNOWN_EXT         =  0, /**< Direction not determined */
+  /* Buffer ↔ host (SDMA / PCIe) */
+  HIP_COPY_KIND_H2D_EXT             =  1, /**< Host buffer → device buffer */
+  HIP_COPY_KIND_H2D_RECT_EXT        =  2, /**< Host buffer → device buffer, rectangular region */
+  HIP_COPY_KIND_H2D_IMAGE_EXT       =  3, /**< Host buffer → device image */
+  HIP_COPY_KIND_D2H_EXT             =  4, /**< Device buffer → host buffer */
+  HIP_COPY_KIND_D2H_RECT_EXT        =  5, /**< Device buffer → host buffer, rectangular region */
+  HIP_COPY_KIND_D2H_IMAGE_EXT       =  6, /**< Device image → host buffer */
+  /* Device ↔ device (GPU blit / compute engine) */
+  HIP_COPY_KIND_D2D_EXT             =  7, /**< Device buffer → device buffer */
+  HIP_COPY_KIND_D2D_RECT_EXT        =  8, /**< Device buffer → device buffer, rectangular region */
+  HIP_COPY_KIND_D2D_IMAGE_EXT       =  9, /**< Device image → device image */
+  HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT = 10, /**< Device buffer → device image (format conversion) */
+  HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT = 11, /**< Device image → device buffer (format conversion) */
+  HIP_COPY_KIND_FILL_EXT            = 12, /**< Device buffer fill (pattern written by compute engine) */
+} HipCopyKindExt;
+
+/**
+ * @brief Returns non-zero if the copy kind crosses PCIe and uses the SDMA engine.
+ *
+ * Convenience predicate for callers that want to separate SDMA transfers from
+ * device-side blit/compute copies without enumerating every kind individually.
+ */
+static inline int hipCopyKindIsSDMAExt(HipCopyKindExt kind) {
+  return kind == HIP_COPY_KIND_H2D_EXT       ||
+         kind == HIP_COPY_KIND_H2D_RECT_EXT  ||
+         kind == HIP_COPY_KIND_H2D_IMAGE_EXT ||
+         kind == HIP_COPY_KIND_D2H_EXT       ||
+         kind == HIP_COPY_KIND_D2H_RECT_EXT  ||
+         kind == HIP_COPY_KIND_D2H_IMAGE_EXT;
+}
+
+/**
  * @brief GPU activity record returned by hipProfilerGetRecordsExt().
  *
  * Fixed size: 128 bytes.  Fields beyond the active payload are reserved for
@@ -39,7 +82,8 @@ typedef struct HipGpuActivityExt {
     struct {
       uint64_t op        : 3;   /**< HipGpuOpExt value */
       uint64_t is_graph  : 1;   /**< Set when the op was launched from a HIP graph */
-      uint64_t           : 12;  /**< Unnamed reserved bits — must be zero */
+      uint64_t copy_kind : 4;   /**< HipCopyKindExt; valid when op==HIP_OP_COPY_EXT */
+      uint64_t           : 8;   /**< Unnamed reserved bits — must be zero */
       uint64_t device_id : 16;  /**< Device index (up to 65535 devices) */
       uint64_t queue_id  : 16;  /**< Queue/stream index (up to 65535 queues) */
       uint64_t           : 16;  /**< Unnamed reserved bits — must be zero */
@@ -112,16 +156,43 @@ hipError_t hipProfilerEnableExt(void);
 hipError_t hipProfilerDisableExt(void);
 
 /**
- * @brief Return a pointer to all records collected since init or last Reset.
+ * @brief Return the raw profiler chunk array without copying.
  *
- * The returned pointer and the gpu.gpu_ops buffer it references are owned by
- * the profiler and remain valid until the next call to hipProfilerGetRecordsExt()
- * or hipProfilerResetExt().
+ * Records are stored internally as an array of fixed-size chunks.  This call
+ * exposes those chunks directly — no allocation, no copy.
  *
- * @param[out] records  Set to the base of the flat record array.
- * @param[out] count    Set to the number of valid records.
+ * Iteration pattern:
+ * @code
+ *   const HipApiRecordExt* const* chunks;
+ *   size_t chunk_count, chunk_size, total;
+ *   hipProfilerGetRecordsExt(&chunks, &chunk_count, &chunk_size, &total);
+ *   for (size_t c = 0; c < chunk_count; ++c) {
+ *     size_t n = (total - c * chunk_size < chunk_size)
+ *                ? total - c * chunk_size : chunk_size;
+ *     for (size_t i = 0; i < n; ++i) {
+ *       const HipApiRecordExt* r = &chunks[c][i];
+ *       // use r->api_name, r->start_ns, r->end_ns, r->gpu, ...
+ *     }
+ *   }
+ * @endcode
+ *
+ * Lifetime: the returned pointers are owned by the profiler and remain valid
+ * until the next call to hipProfilerResetExt().  Do NOT call
+ * hipProfilerResetExt() while iterating.
+ *
+ * Note: HipApiRecordExt::_pad1 is used internally to store a spill vector for
+ * multi-op graph launches.  Treat it as opaque; do not read or write it.
+ * Use gpu.gpu_ops[0..gpu_op_count-1] to access all GPU operations.
+ *
+ * @param[out] chunks       Set to the profiler's internal chunk pointer array.
+ * @param[out] chunk_count  Number of chunks (length of the chunks array).
+ * @param[out] chunk_size   Capacity of each chunk in records.
+ * @param[out] total_count  Total number of valid records across all chunks.
  */
-hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt** records, size_t* count);
+hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
+                                     size_t* chunk_count,
+                                     size_t* chunk_size,
+                                     size_t* total_count);
 
 /**
  * @brief Clear all accumulated records and free internal storage.

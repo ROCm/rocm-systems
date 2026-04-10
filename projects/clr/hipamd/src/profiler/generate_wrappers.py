@@ -79,10 +79,10 @@ print(f"Parsed {len(field_order)} field assignments from {TRACE_CPP}")
 #   Returns list of bare parameter names (stripping types).
 #   Handles void, pointers, arrays, const, etc.
 # ---------------------------------------------------------------------------
-def find_stream_param(params_str):
-    """Return the name of the first hipStream_t (non-pointer) parameter, or None."""
+def _split_params(params_str):
+    """Split a parameter string into individual parameter strings."""
     if not params_str or params_str.strip() in ('', 'void'):
-        return None
+        return []
     parts = []
     depth = 0
     current = []
@@ -97,15 +97,26 @@ def find_stream_param(params_str):
             current.append(ch)
     if current:
         parts.append(''.join(current).strip())
-    for p in parts:
+    return parts
+
+def _find_param_of_type(params_str, type_name):
+    """Return the name of the first value (non-pointer) parameter of type_name, or None."""
+    for p in _split_params(params_str):
         toks = p.split()
         for j, tok in enumerate(toks):
-            if tok == 'hipStream_t':
-                # Skip if next token starts with '*' (pointer-to-stream, not a stream)
+            if tok == type_name:
                 if j + 1 < len(toks) and toks[j + 1].startswith('*'):
                     continue
                 return toks[-1].lstrip('*').strip()
     return None
+
+def find_stream_param(params_str):
+    """Return the name of the first hipStream_t (non-pointer) parameter, or None."""
+    return _find_param_of_type(params_str, 'hipStream_t')
+
+def find_copy_kind_param(params_str):
+    """Return the name of the first hipMemcpyKind parameter, or None."""
+    return _find_param_of_type(params_str, 'hipMemcpyKind')
 
 def parse_param_names(params_str):
     if not params_str or params_str.strip() in ('', 'void'):

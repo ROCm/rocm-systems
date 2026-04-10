@@ -94,7 +94,7 @@ void init(bool* status) {
   PlatformState::Instance().Init();
 
   // Initialize built-in CLR profiler (no-op unless GPU_CLR_PROFILE=1)
-  HipClrProfilerInit();
+  HipProfilerInitExt();
 
   *status = true;
 }

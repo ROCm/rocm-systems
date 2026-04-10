@@ -13,7 +13,7 @@ namespace hip {
 hipError_t hipProfilerStart() {
   HIP_INIT_API(hipProfilerStart);
 
-  HipClrProfilerEnable();
+  HipProfilerEnableExt();
 
   HIP_RETURN(hipSuccess);
 }
@@ -22,7 +22,7 @@ hipError_t hipProfilerStart() {
 hipError_t hipProfilerStop() {
   HIP_INIT_API(hipProfilerStop);
 
-  HipClrProfilerDisable();
+  HipProfilerDisableExt();
 
   HIP_RETURN(hipSuccess);
 }

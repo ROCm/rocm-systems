@@ -22,7 +22,8 @@
  *   No map, no TLS sentinel, no pending table.
  *
  * Chunk storage: g_records holds HipApiRecordExt arrays.
- *   _pad1[96] is repurposed to hold a std::vector<HipGpuRecord> (placement new).
+ *   _pad1[80] is repurposed to hold a std::vector<HipGpuActivityExt> (placement new).
+ *   Op-1 lives in rec.gpu; ops 2..N spill into this vector (graph launches only).
  *   Accessed via GpuOps() helpers in hip_clr_profiler.hpp.
  */
 
@@ -78,7 +79,7 @@ using activity_callback_t = int(*)(activity_domain_t, uint32_t, void*);
 std::atomic<activity_callback_t> g_prev_callback{nullptr};
 
 // Chunks of HipApiRecordExt.  _pad1[96] in each slot holds a
-// std::vector<HipGpuRecord> (placement-new'd by AllocChunk).
+// std::vector<HipGpuActivityExt> (placement-new'd by AllocChunk).
 // Pre-reserved so push_back never reallocates — required for the
 // lock-free fast path in HipGetActiveRecordExt (double-checked locking).
 std::vector<HipApiRecordExt*> g_records;
@@ -86,9 +87,6 @@ constexpr size_t kMaxChunks = 1024;  // 1024 * 10000 = 10M records max
 std::atomic<size_t>           g_rec_counter{0};
 std::mutex                    g_alloc_mtx;
 
-std::vector<HipApiRecordExt>   g_export_buf;
-std::vector<HipGpuActivityExt> g_export_gpu_buf;  // flat pool; gpu.gpu_ops pointers index into this
-std::mutex                     g_export_mtx;
 
 std::unordered_map<const char*, std::string> g_kernel_names;
 std::mutex                                   g_kernel_names_mtx;
@@ -105,8 +103,31 @@ HipApiRecordExt* AllocChunk() {
 
 void FreeChunk(HipApiRecordExt* chunk) {
   for (size_t i = 0; i < kChunkSize; ++i)
-    GpuOps(chunk[i]).~vector<HipGpuRecord>();
+    GpuOps(chunk[i]).~vector<HipGpuActivityExt>();
   ::operator delete[](static_cast<void*>(chunk));
+}
+
+// ============================================================
+// Convert internal CL_COMMAND_* kind to the public HipCopyKindExt enum.
+// Called once per copy activity record; result stored in record at capture time
+// so the public API and JSON writer never see raw OpenCL constants.
+// ============================================================
+static HipCopyKindExt ToCopyKindExt(uint32_t cl_kind) {
+  switch (cl_kind) {
+    case CL_COMMAND_WRITE_BUFFER:           return HIP_COPY_KIND_H2D_EXT;
+    case CL_COMMAND_WRITE_BUFFER_RECT:      return HIP_COPY_KIND_H2D_RECT_EXT;
+    case CL_COMMAND_WRITE_IMAGE:            return HIP_COPY_KIND_H2D_IMAGE_EXT;
+    case CL_COMMAND_READ_BUFFER:            return HIP_COPY_KIND_D2H_EXT;
+    case CL_COMMAND_READ_BUFFER_RECT:       return HIP_COPY_KIND_D2H_RECT_EXT;
+    case CL_COMMAND_READ_IMAGE:             return HIP_COPY_KIND_D2H_IMAGE_EXT;
+    case CL_COMMAND_COPY_BUFFER:            return HIP_COPY_KIND_D2D_EXT;
+    case CL_COMMAND_COPY_BUFFER_RECT:       return HIP_COPY_KIND_D2D_RECT_EXT;
+    case CL_COMMAND_COPY_IMAGE:             return HIP_COPY_KIND_D2D_IMAGE_EXT;
+    case CL_COMMAND_COPY_BUFFER_TO_IMAGE:   return HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT;
+    case CL_COMMAND_COPY_IMAGE_TO_BUFFER:   return HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT;
+    case CL_COMMAND_FILL_BUFFER:            return HIP_COPY_KIND_FILL_EXT;
+    default:                                return HIP_COPY_KIND_UNKNOWN_EXT;
+  }
 }
 
 // ============================================================
@@ -148,13 +169,10 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
 
   HipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
 
-  // Barriers from hipGraphLaunch are artefacts of the internal Marker command.
-  // They carry no useful timing; skip them.
-  if (ar->op == OP_ID_BARRIER) {
-    auto* prev = g_prev_callback.load(std::memory_order_acquire);
-    if (prev) prev(domain, op_id, data);
-    return 0;
-  }
+  // OP_ID_BARRIER maps exclusively to CL_COMMAND_MARKER, which is used for all
+  // GPU-side synchronization (graph node barriers, hipStreamWaitEvent, hipEventRecord
+  // waits). Markers execute on the queue and carry real begin/end timestamps — record
+  // them all so the trace shows where barriers land on the GPU timeline.
 
   if (ar->op == OP_ID_DISPATCH && ar->kernel_name) {
     std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
@@ -170,12 +188,15 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     rec->gpu.queue_id  = ar->queue_id;
     if (ar->op == OP_ID_DISPATCH)
       rec->gpu.kernel_name = ar->kernel_name;
-    else
-      rec->gpu.bytes = ar->bytes;
+    else if (ar->op == OP_ID_COPY) {
+      rec->gpu.bytes     = ar->bytes;
+      rec->gpu.copy_kind = ToCopyKindExt(ar->kind);
+    }
+    // OP_ID_BARRIER: no payload fields — begin/end timestamps already written above.
     rec->gpu.gpu_op_count = 1;
   } else {
-    // Subsequent op (graph launch): accumulate in the vector.
-    HipGpuRecord entry{};
+    // Subsequent op (graph launch): spill into the overflow vector in _pad1.
+    HipGpuActivityExt entry{};  // gpu_op_count=0, gpu_ops=nullptr, _pad1={0}
     entry.op        = ar->op;
     entry.begin_ns  = ar->begin_ns;
     entry.end_ns    = ar->end_ns;
@@ -183,9 +204,11 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     entry.queue_id  = ar->queue_id;
     if (ar->op == OP_ID_DISPATCH)
       entry.kernel_name = ar->kernel_name;
-    else
-      entry.bytes = ar->bytes;
-    GpuOps(*rec).push_back(std::move(entry));
+    else if (ar->op == OP_ID_COPY) {
+      entry.bytes     = ar->bytes;
+      entry.copy_kind = ToCopyKindExt(ar->kind);
+    }
+    GpuOps(*rec).push_back(entry);
     rec->gpu.gpu_op_count++;
   }
 
@@ -198,6 +221,24 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
 // ============================================================
 // JSON output — Chrome Trace Event format (matches reference GoogleTrace())
 // ============================================================
+static const char* CopyKindName(uint32_t kind) {
+  switch (static_cast<HipCopyKindExt>(kind)) {
+    case HIP_COPY_KIND_H2D_EXT:             return "H2D";
+    case HIP_COPY_KIND_H2D_RECT_EXT:        return "H2D_Rect";
+    case HIP_COPY_KIND_H2D_IMAGE_EXT:       return "H2D_Image";
+    case HIP_COPY_KIND_D2H_EXT:             return "D2H";
+    case HIP_COPY_KIND_D2H_RECT_EXT:        return "D2H_Rect";
+    case HIP_COPY_KIND_D2H_IMAGE_EXT:       return "D2H_Image";
+    case HIP_COPY_KIND_D2D_EXT:             return "D2D";
+    case HIP_COPY_KIND_D2D_RECT_EXT:        return "D2D_Rect";
+    case HIP_COPY_KIND_D2D_IMAGE_EXT:       return "D2D_Image";
+    case HIP_COPY_KIND_BUFFER_TO_IMAGE_EXT: return "BufferToImage";
+    case HIP_COPY_KIND_IMAGE_TO_BUFFER_EXT: return "ImageToBuffer";
+    case HIP_COPY_KIND_FILL_EXT:            return "Fill";
+    default:                                return "Unknown";
+  }
+}
+
 void WriteJsonTraceImpl(const char* filepath) {
   const char* path = (filepath && filepath[0]) ? filepath : "hip_clr_trace.json";
   std::ofstream trace(path, std::fstream::out);
@@ -244,15 +285,22 @@ void WriteJsonTraceImpl(const char* filepath) {
       uint32_t ctid = compact_tid(rec.thread_id);
       trace << "\n{\"name\":\"" << rec.api_name
             << "\",\"ph\":\"X\",\"pid\":1024,\"tid\":" << ctid
-            << ",\"ts\":" << s_time << ",\"dur\":" << dur_us << "}";
+            << ",\"ts\":" << s_time << ",\"dur\":" << dur_us;
+      if (rec.stream)
+        trace << ",\"args\":{\"stream\":\"0x" << std::hex << reinterpret_cast<uintptr_t>(rec.stream) << std::dec << "\"}";
+      trace << "}";
 
       // Emit one GPU op event (flow arrow + X event + flow finish).
       // Called for op-1 (from rec.gpu) and ops 2..N (from GpuOps vector).
       auto emit_gpu_op = [&](uint32_t op, uint64_t begin_ns, uint64_t end_ns,
                               int device_id, uint64_t queue_id,
-                              const char* kernel_name, size_t bytes) {
+                              const char* kernel_name, size_t bytes,
+                              uint32_t copy_kind) {
         uint32_t op_idx  = op < 3 ? op : 3;
-        int      sdma    = (op_idx == OP_ID_COPY) ? 1 : 0;
+        // H2D / D2H transfers cross PCIe → SDMA engine.
+        // D2D, buffer↔image copies use the GPU blit/compute engine.
+        int sdma = (op_idx == OP_ID_COPY) &&
+                   hipCopyKindIsSDMAExt(static_cast<HipCopyKindExt>(copy_kind)) ? 1 : 0;
         uint64_t gpu_dur = (end_ns > begin_ns) ? (end_ns - begin_ns) / 1000 : 1;
         uint64_t gpu_ts  = begin_ns / 1000;
 
@@ -260,8 +308,10 @@ void WriteJsonTraceImpl(const char* filepath) {
               << ",\"ph\":\"s\",\"id\":" << event_id
               << ",\"pid\":1024,\"tid\":" << ctid << ",\"name\":\"dep\"}";
 
-        std::string gpu_name = kGpuEvents[op_idx];
-        if (!sdma && kernel_name) {
+        const char* gpu_name_cstr = (op_idx == OP_ID_COPY) ? CopyKindName(copy_kind)
+                                                            : kGpuEvents[op_idx];
+        std::string gpu_name = gpu_name_cstr;
+        if (op_idx == OP_ID_DISPATCH && kernel_name) {
           std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
           auto it = g_kernel_names.find(kernel_name);
           if (it != g_kernel_names.end()) gpu_name = it->second;
@@ -271,7 +321,9 @@ void WriteJsonTraceImpl(const char* filepath) {
               << "\",\"ph\":\"X\",\"pid\":" << device_id
               << ",\"tid\":" << (queue_id * 2 + sdma)
               << ",\"ts\":" << gpu_ts << ",\"dur\":" << gpu_dur;
-        if (sdma) trace << ",\"args\":{\"Copy size\":" << bytes << "}";
+        if (op_idx == OP_ID_COPY)
+          trace << ",\"args\":{\"copy_kind\":\"" << CopyKindName(copy_kind)
+                << "\",\"bytes\":" << bytes << "}";
         trace << "}";
 
         trace << ",\n{\"ts\":" << gpu_ts
@@ -288,11 +340,11 @@ void WriteJsonTraceImpl(const char* filepath) {
       if (rec.gpu.gpu_op_count > 0)
         emit_gpu_op(rec.gpu.op, rec.gpu.begin_ns, rec.gpu.end_ns,
                     rec.gpu.device_id, rec.gpu.queue_id,
-                    rec.gpu.kernel_name, rec.gpu.bytes);
+                    rec.gpu.kernel_name, rec.gpu.bytes, rec.gpu.copy_kind);
       for (const auto& gop : GpuOps(rec))
         emit_gpu_op(gop.op, gop.begin_ns, gop.end_ns,
                     gop.device_id, gop.queue_id,
-                    gop.kernel_name, gop.bytes);
+                    gop.kernel_name, gop.bytes, gop.copy_kind);
     }
   }
 
@@ -460,9 +512,6 @@ void HipProfilerResetExt() {
   for (auto* chunk : g_records) FreeChunk(chunk);
   g_records.clear();
   g_rec_counter.store(0, std::memory_order_relaxed);
-  std::lock_guard<std::mutex> elk(g_export_mtx);
-  g_export_buf.clear();
-  g_export_gpu_buf.clear();
 }
 
 void HipProfilerWriteJsonExt(const char* filepath) {
@@ -483,73 +532,25 @@ hipError_t hipProfilerWriteJsonExt(const char* filepath) {
   return hipSuccess;
 }
 
-hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt** records, size_t* count) {
-  if (!records || !count) return hipErrorInvalidValue;
+hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt* const** chunks,
+                                     size_t* chunk_count,
+                                     size_t* chunk_size,
+                                     size_t* total_count) {
+  if (!chunks || !chunk_count || !chunk_size || !total_count)
+    return hipErrorInvalidValue;
 
-  size_t total = g_rec_counter.load(std::memory_order_acquire);
-  std::lock_guard<std::mutex> lk(g_export_mtx);
-  g_export_buf.clear();
-  g_export_gpu_buf.clear();
-  g_export_buf.reserve(total);
-
-  for (size_t c = 0; c < g_records.size(); ++c) {
-    size_t base  = c * kChunkSize;
-    size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
-    if (valid == 0) continue;
-
-    for (size_t i = 0; i < valid; ++i) {
-      const HipApiRecordExt& src = g_records[c][i];
-
-      // Copy the record; zero _pad1 so the exported copy has no dangling vector.
-      // dst.gpu already holds op-1 (written directly by HipActivityCallbackExt).
-      HipApiRecordExt dst = src;
-      std::memset(dst._pad1, 0, sizeof(dst._pad1));
-      dst.has_gpu_activity = dst.gpu.gpu_op_count > 0 ? 1 : 0;
-      dst.gpu.gpu_ops      = nullptr;  // fixed up below
-
-      if (dst.gpu.gpu_op_count > 1) {
-        // Graph launch: build flat pool from op-1 (dst.gpu) + ops 2..N (vector).
-        HipGpuActivityExt first = dst.gpu;
-        first.gpu_op_count  = 0;
-        first._reserved_u32 = 0;
-        first.gpu_ops       = nullptr;
-        std::memset(first._pad1, 0, sizeof(first._pad1));
-        g_export_gpu_buf.push_back(first);
-
-        for (const auto& gop : GpuOps(src)) {
-          HipGpuActivityExt act{};
-          act.op        = gop.op;
-          act.begin_ns  = gop.begin_ns;
-          act.end_ns    = gop.end_ns;
-          act.device_id = gop.device_id;
-          act.queue_id  = gop.queue_id;
-          if (gop.op == OP_ID_DISPATCH)
-            act.kernel_name = gop.kernel_name;
-          else
-            act.bytes = gop.bytes;
-          g_export_gpu_buf.push_back(act);
-        }
-      }
-      // Single-op: gpu_ops points to embedded dst.gpu — fixed up below.
-      g_export_buf.push_back(dst);
-    }
-  }
-
-  // Fix up gpu_ops pointers now that g_export_buf and g_export_gpu_buf are stable.
+  // Snapshot under alloc lock so chunk_count and total_count are consistent.
+  size_t nchunks, total;
   {
-    size_t off = 0;
-    for (auto& rec : g_export_buf) {
-      if (rec.gpu.gpu_op_count == 1)
-        rec.gpu.gpu_ops = &rec.gpu;          // points to itself — no flat pool needed
-      else if (rec.gpu.gpu_op_count > 1) {
-        rec.gpu.gpu_ops = g_export_gpu_buf.data() + off;
-        off += rec.gpu.gpu_op_count;
-      }
-    }
+    std::lock_guard<std::mutex> lk(g_alloc_mtx);
+    nchunks = g_records.size();
+    total   = g_rec_counter.load(std::memory_order_relaxed);
   }
 
-  *records = g_export_buf.data();
-  *count   = g_export_buf.size();
+  *chunks      = reinterpret_cast<const HipApiRecordExt* const*>(g_records.data());
+  *chunk_count = nchunks;
+  *chunk_size  = kChunkSize;
+  *total_count = total;
   return hipSuccess;
 }
 
