@@ -193,6 +193,7 @@ private:
   /// in parallel (matching real L2 arbitration behavior).
   std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
   std::vector<simdojo::Port *> cpl_ports_;
+  uint64_t write_count_ = 0; ///< Debug: total L2 writes (for trace).
 };
 
 } // namespace amdgpu

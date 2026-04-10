@@ -1040,10 +1040,10 @@ uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   int ev = encoding_value_;
   if (is_vgpr_only_type(opr_type_))
     return wf.cu().read_vgpr(wf.vgpr_alloc().base + vgpr_index(opr_type_, ev), lane);
-  if (ev >= 256 && ev <= 511)
-    return wf.cu().read_vgpr(wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256), lane);
   if (is_immediate_type(opr_type_))
     return static_cast<uint32_t>(ev);
+  if (ev >= 256 && ev <= 511)
+    return wf.cu().read_vgpr(wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256), lane);
   return resolve_src_scalar(wf, ev);
 }
 

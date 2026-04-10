@@ -20,6 +20,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
+#include "util/debug_print.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -177,12 +178,21 @@ public:
   /// Note: prefer flush_l1() + per-XCD L2 flush to avoid redundant L2 flushes
   /// when multiple CUs share the same L2.
   void flush_all() {
+    if (util::trace::enabled() && l1_vector_.store_count() > 0)
+      util::trace::print("CU ", this->name(), "@", reinterpret_cast<uintptr_t>(this),
+                         " L1 stores: total=", l1_vector_.store_count(),
+                         " active=", l1_vector_.store_active_count(),
+                         " l2_writes=", l1_vector_.store_l2_writes());
+    l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
     l2_->flush_all();
   }
 
   /// @brief Flush only the per-CU L1 caches (invalidate, since L1 is write-through).
-  void flush_l1() { l1_vector_.flush_all(); }
+  void flush_l1() {
+    l1_scalar_.invalidate_all();
+    l1_vector_.flush_all();
+  }
 
   /// @brief Set (or replace) the shared GPU memory pointer.
   ///
@@ -428,8 +438,22 @@ public:
     return true;
   }
 
-  /// @brief Schedule an engine event that calls advance().
+  /// @brief Run wavefronts on this CU.
+  ///
+  /// In unbounded functional mode (quantum == 0), advance directly — the CU
+  /// will drain all wavefronts before returning. This avoids scheduling an
+  /// engine event and waiting for the LBTS to advance, which can deadlock
+  /// when the engine is in await_primaries mode (KFD driver).
+  ///
+  /// In bounded mode (quantum > 0), schedule a work event to yield between
+  /// quanta, ensuring fair interleaving across CUs.
   void activate() override {
+    if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
+      if (this->config_.functional_quantum == 0) {
+        advance();
+        return;
+      }
+    }
     this->schedule_event(&work_event_, this->engine()->global_time() + 1);
   }
 

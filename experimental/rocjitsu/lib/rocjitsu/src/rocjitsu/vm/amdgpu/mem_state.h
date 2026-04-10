@@ -77,6 +77,7 @@ struct VectorMemState : DynamicInstState {
   bool non_temporal = false;
   bool sign_extend = false;
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
+  uint64_t issue_pc = 0;               ///< PC at which the instruction was issued (debug).
   std::vector<uint8_t> response_data;
   std::vector<uint8_t> store_data;
 };

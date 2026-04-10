@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "util/debug_print.h"
 
 #include <bit>
 #include <cassert>
@@ -35,6 +36,13 @@ void L2Cache::ensure_line(uint64_t addr) {
     static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
     uint64_t evicted_addr = (evicted.tag << (LINE_SIZE_BITS + SET_INDEX_BITS)) |
                             (static_cast<uint64_t>(CacheStore::set_index(addr)) << LINE_SIZE_BITS);
+    if (util::trace::enabled()) {
+      static thread_local uint64_t evict_count = 0;
+      if (++evict_count <= 5 || (evict_count % 10000) == 0) {
+        util::trace::print("L2 evict #", evict_count, " addr=0x", std::hex, evicted_addr, " new=0x",
+                           addr, std::dec);
+      }
+    }
     send_backing(evicted_addr, evicted_data, LINE_SIZE, simdojo::MessageOp::WRITE);
   }
 
@@ -84,6 +92,9 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
     tag->dirty = true;
     tag->coherence = simdojo::CoherenceState::MODIFIED;
   }
+
+  // empty trace placeholder
+  ++write_count_;
 }
 
 void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf) {
@@ -140,10 +151,20 @@ void L2Cache::flush_line(uint64_t addr) {
 }
 
 void L2Cache::flush_all() {
-  cache_.for_each_dirty([this](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
+  uint32_t dirty_count = 0;
+  uint64_t min_addr = UINT64_MAX, max_addr = 0;
+  cache_.for_each_dirty([this, &dirty_count, &min_addr,
+                         &max_addr](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
     send_backing(line_addr, data, LINE_SIZE, simdojo::MessageOp::WRITE);
     tag.dirty = false;
+    ++dirty_count;
+    if (line_addr < min_addr)
+      min_addr = line_addr;
+    if (line_addr > max_addr)
+      max_addr = line_addr;
   });
+  util::trace::print("L2 flush: ", dirty_count, " dirty lines [0x", std::hex, min_addr, "-0x",
+                     max_addr, "]", std::dec, " total_writes=", write_count_);
   cache_.invalidate_all();
 }
 

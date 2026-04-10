@@ -51,7 +51,7 @@
             { "name": "l2", "type": "l2_cache" },
             { "name": "cp", "type": "command_processor" },
             {
-              "name": "se[0:1]", "type": "shader_engine",
+              "name": "se[0:7]", "type": "shader_engine",
               "children": [{
                 "name": "cu[0:4]", "type": "compute_unit",
                 "config": [

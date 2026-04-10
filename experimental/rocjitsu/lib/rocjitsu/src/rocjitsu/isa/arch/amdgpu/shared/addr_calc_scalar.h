@@ -14,6 +14,7 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/debug_print.h"
 
 #include <array>
 #include <cassert>
@@ -36,7 +37,17 @@ uint64_t smem_calculate_address(const SmemInst &inst, amdgpu::Wavefront &wf) {
     off += cu.read_sgpr(wf.sgpr_alloc().base + inst.soffset);
   if (inst.imm)
     off += static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
-  return (base + off) & ~0x3ULL;
+  uint64_t addr = (base + off) & ~0x3ULL;
+  // Trace: log SMEM address calculations for kernarg loads.
+  if (util::trace::enabled()) {
+    static thread_local uint64_t smem_count = 0;
+    ++smem_count;
+    if (smem_count <= 12 || (smem_count % 240) == 0)
+      util::trace::print("SMEM #", smem_count, " base=0x", std::hex, base, " off=", std::dec,
+                         static_cast<int64_t>(off), " imm=", inst.imm, " soff_en=", inst.soffset_en,
+                         " addr=0x", std::hex, addr, std::dec, " raw_off=", inst.offset);
+  }
+  return addr;
 }
 
 /// @brief Compute per-lane addresses for MUBUF encoding.

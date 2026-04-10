@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "util/debug_print.h"
 
 #include <algorithm>
 #include <bit>
@@ -69,6 +70,18 @@ void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
   auto &cu = wf.cu();
   for (uint32_t i = 0; i < d.num_dwords; ++i) {
     cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
+  }
+  // Trace: log SMEM load values for debugging.
+  if (util::trace::enabled() && wf.wg_id() == 0) {
+    static thread_local uint32_t slw_count = 0;
+    if (++slw_count <= 20)
+      util::trace::print("SMEM complete: addr=0x", std::hex, d.addr, std::dec,
+                         " dst_s=", d.dst_reg_base, " ndw=", d.num_dwords, " data=[0x", std::hex,
+                         d.response_data[0], d.num_dwords > 1 ? ",0x" : "",
+                         d.num_dwords > 1 ? d.response_data[1] : 0, d.num_dwords > 2 ? ",0x" : "",
+                         d.num_dwords > 2 ? d.response_data[2] : 0, d.num_dwords > 3 ? ",0x" : "",
+                         d.num_dwords > 3 ? d.response_data[3] : 0, "]", std::dec,
+                         " wg=", wf.wg_id());
   }
 }
 
@@ -250,7 +263,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
 
 } // namespace
 
-void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {
+void GlobalMemPipeline::initiate_access(Instruction &inst, [[maybe_unused]] Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
 
   if (d.atomic_op != AtomicOp::NONE) {
@@ -263,6 +276,39 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
               d.mtype, d.non_temporal);
   } else {
+    // Trace: dump per-lane values for stores to tensor address range.
+    if (util::trace::enabled() && d.lane_mask != 0) {
+      // Check if ANY active lane targets the tensor range
+      bool hits_tensor = false;
+      uint64_t rm = d.lane_mask;
+      while (rm) {
+        uint32_t ln = __builtin_ctzll(rm);
+        rm &= rm - 1;
+        if (d.per_lane_addr[ln] >= 0x4d00c00000ULL && d.per_lane_addr[ln] < 0x4d00c00100ULL) {
+          hits_tensor = true;
+          break;
+        }
+      }
+      if (hits_tensor) {
+        uint32_t stride = d.num_elems * d.elem_size;
+        rm = d.lane_mask;
+        int cnt = 0;
+        while (rm && cnt < 6) {
+          uint32_t ln = __builtin_ctzll(rm);
+          rm &= rm - 1;
+          uint64_t a = d.per_lane_addr[ln];
+          if (a < 0x4d00c00000ULL || a >= 0x4d00c00100ULL)
+            continue;
+          uint32_t v = 0;
+          if (stride > 0 && d.store_data.size() >= ln * stride + 4)
+            std::memcpy(&v, &d.store_data[ln * stride], 4);
+          util::trace::print("SLANE L", ln, " @+", std::hex, a - 0x4d00c00000ULL, " =0x", v,
+                             " ipc=0x", d.issue_pc, std::dec, " exec=0x", std::hex, d.lane_mask,
+                             std::dec, " wf=", wf.wf_id(), " wg=", wf.wg_id());
+          ++cnt;
+        }
+      }
+    }
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
                d.mtype, d.non_temporal);
   }

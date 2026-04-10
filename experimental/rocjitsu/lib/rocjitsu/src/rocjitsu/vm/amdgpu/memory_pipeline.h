@@ -59,6 +59,10 @@ public:
       entry.wf->wait_counters().decrement(counter_type_);
       if (entry.wf->state() == WfState::WAITCNT && entry.wf->wait_satisfied())
         entry.wf->set_state(WfState::RUNNING);
+      // If the wavefront is in ENDING state (s_endpgm executed but draining),
+      // halt it once all outstanding memory ops are complete.
+      if (entry.wf->state() == WfState::ENDING && entry.wf->wait_counters().empty())
+        entry.wf->halt();
       complete_access(*entry.inst, *entry.wf);
       delete entry.inst;
     }

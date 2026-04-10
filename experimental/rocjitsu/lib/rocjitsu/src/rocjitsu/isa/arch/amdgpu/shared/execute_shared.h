@@ -10673,26 +10673,9 @@ inline void execute_v_cndmask_b16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    float val = (cond & (1ULL << lane)) ? s1 : s0;
-    if (inst.inst_.omod == 1)
-      val *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      val *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      val *= 0.5f;
-    if (inst.inst_.clamp)
-      val = std::clamp(val, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(val));
+    uint32_t val =
+        (cond & (1ULL << lane)) ? inst.src1.read_lane(wf, lane) : inst.src0.read_lane(wf, lane);
+    inst.vdst.write_lane(wf, lane, val);
   }
 }
 
@@ -10720,26 +10703,9 @@ inline void execute_v_cndmask_b32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    if (inst.inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst.inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst.inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst.inst_.neg & (1u << 1))
-      s1 = -s1;
-    float val = (cond & (1ULL << lane)) ? s1 : s0;
-    if (inst.inst_.omod == 1)
-      val *= 2.0f;
-    else if (inst.inst_.omod == 2)
-      val *= 4.0f;
-    else if (inst.inst_.omod == 3)
-      val *= 0.5f;
-    if (inst.inst_.clamp)
-      val = std::clamp(val, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(val));
+    uint32_t val =
+        (cond & (1ULL << lane)) ? inst.src1.read_lane(wf, lane) : inst.src0.read_lane(wf, lane);
+    inst.vdst.write_lane(wf, lane, val);
   }
 }
 
