@@ -17,7 +17,7 @@ This example benchmarks various MPI communication patterns including point-to-po
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - MPI implementation (OpenMPI, MPICH, etc.)
 - C and C++ compilers
 

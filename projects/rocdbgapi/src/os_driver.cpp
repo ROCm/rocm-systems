@@ -173,13 +173,14 @@ to_string (os_agent_info_t os_agent_info)
     ".gfxip=[%d,%d,%d], .simd_count=%zd, .max_waves_per_simd=%zd, "
     ".shader_engine_count=%zd, .vendor_id=%#x, .device_id=%#x, "
     ".revision_id=%#x, .subsystem_vendor_id=%#x, .subsystem_device_id=%#x, "
-    ".fw_version=%d, .local_address_aperture_base=%s, "
-    ".local_address_aperture_limit=%s, .private_address_aperture_base=%s, "
-    ".private_address_aperture_limit=%s, .debugging_supported=%d, "
-    ".address_watch_supported=%d, .address_watch_register_count=%zd, "
-    ".address_watch_mask_bits=%#" PRIx64 ", .watchpoint_exclusive=%d, "
-    ".precise_memory_supported=%d, .precise_alu_exceptions_supported=%d,"
-    ".firmware_supported=%d, ttmps_always_initialized=%d }",
+    ".fw_version=%d, .agent_address_base=%s, .agent_address_limit=%s, "
+    ".local_address_aperture_base=%s, .local_address_aperture_limit=%s, "
+    ".private_address_aperture_base=%s, .private_address_aperture_limit=%s, "
+    ".debugging_supported=%d, .address_watch_supported=%d, "
+    ".address_watch_register_count=%zd, .address_watch_mask_bits=%#" PRIx64
+    ", .watchpoint_exclusive=%d, .precise_memory_supported=%d, "
+    ".precise_alu_exceptions_supported=%d, .firmware_supported=%d, "
+    "ttmps_always_initialized=%d }",
     os_agent_info.os_agent_id, os_agent_info.name.c_str (),
     os_agent_info.domain, os_agent_info.location_id, os_agent_info.gfxip[0],
     os_agent_info.gfxip[1], os_agent_info.gfxip[2], os_agent_info.simd_count,
@@ -187,6 +188,8 @@ to_string (os_agent_info_t os_agent_info)
     os_agent_info.vendor_id, os_agent_info.device_id,
     os_agent_info.revision_id, os_agent_info.subsystem_vendor_id,
     os_agent_info.subsystem_device_id, os_agent_info.fw_version,
+    to_cstring (os_agent_info.agent_address_base),
+    to_cstring (os_agent_info.agent_address_limit),
     to_cstring (os_agent_info.local_address_aperture_base),
     to_cstring (os_agent_info.local_address_aperture_limit),
     to_cstring (os_agent_info.private_address_aperture_base),
