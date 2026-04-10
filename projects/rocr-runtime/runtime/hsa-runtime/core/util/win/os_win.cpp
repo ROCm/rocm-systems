@@ -76,7 +76,15 @@ static_assert(sizeof(EventHandle) == sizeof(::HANDLE),
               "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
+  // Pin the library to prevent unloading, equivalent to RTLD_NODELETE on Linux.
+  // This prevents crashes when the library has circular dependencies back to ROCR.
   HMODULE ret = LoadLibrary(filename.c_str());
+  if (ret != NULL) {
+    HMODULE pinned;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_PIN, filename.c_str(), &pinned)) {
+      // Pinning failed, but library is still loaded - continue anyway
+    }
+  }
   return *(LibHandle*)&ret;
 }
 
