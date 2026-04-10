@@ -87,4 +87,4 @@ Related
 
 * :doc:`../performance-model` — top-level overview (CDNA and RDNA).
 
-* :doc:`../cdna/cdna-performance-model` — CDNA/2/3/4 block-by-block sections.
+* :doc:`../cdna/cdna-performance-model` — CDNA 2/3/4 block-by-block sections.

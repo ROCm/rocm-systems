@@ -13,7 +13,7 @@ analysis configuration is shipped in the tool.
 Use the pages below for architecture-specific naming, panel layout, and conceptual
 material:
 
-* **Instinct (CDNA)** — :doc:`CDNA/2/3/4 <cdna/cdna-performance-model>`:
+* **Instinct (CDNA)** — :doc:`CDNA 2/3/4 <cdna/cdna-performance-model>`:
   architecture and data-type tables, top-level CDNA block diagrams, MI2XX terminology,
   and chapters for compute units, L2, shader engine, command processor, system
   speed-of-light, and references.

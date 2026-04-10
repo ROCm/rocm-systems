@@ -1,11 +1,11 @@
 .. meta::
-   :description: ROCm Compute Profiler CDNA/2/3/4 (Instinct) performance model — architecture tables and conceptual sections
+   :description: ROCm Compute Profiler CDNA 2/3/4 (Instinct) performance model — architecture tables and conceptual sections
    :keywords: ROCm Compute Profiler, CDNA, Instinct, performance model, MI-series
 
 .. _cdna-performance-model:
 
 ************
-CDNA/2/3/4
+CDNA 2/3/4
 ************
 
 ROCm Compute Profiler makes available an extensive list of metrics to better understand
