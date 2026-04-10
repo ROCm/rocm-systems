@@ -544,9 +544,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                             SELECT
                                 CASE A.type
                                     WHEN 'GPU' THEN PMC_I.name || ' [' || A.type_index || ']'
-                                    ELSE  PMC_I.name
-                                END
-                                AS name,
+                                    ELSE PMC_I.name
+                                END AS name,
+                                PMC_I.name AS name_plain,
                                 PMC_I.symbol,
                                 CASE PMC_I.units
                                     WHEN 'W' THEN 'watts'
@@ -574,6 +574,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                     ELSE PMC_I.description
                                 END AS short_description,
                                 A.absolute_index AS agent_abs_index,
+                                A.type_index AS agent_type_index,
                                 PMC_I.guid
                             FROM
                                 `rocpd_info_pmc` PMC_I
@@ -602,6 +603,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 PMC_I.description,
                                 PMC_I.short_description,
                                 PMC_I.agent_abs_index AS agent_abs_index,
+                                PMC_I.agent_type_index AS agent_type_index,
                                 E.stack_id AS stack_id,
                                 E.parent_stack_id AS parent_stack_id,
                                 E.correlation_id AS corr_id,
@@ -620,8 +622,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 AND SN.guid = T.guid
                                 INNER JOIN `rocpd_string` CN ON CN.id = E.category_id
                                 AND CN.guid = T.guid
-                                LEFT OUTER JOIN `info_pmc_schema_3_0` PMC_I ON SN.string = PMC_I.name
-                                AND PMC_I.guid = T.guid
+                                LEFT OUTER JOIN `info_pmc_schema_3_0` PMC_I
+                                ON PMC_I.guid = T.guid
+                                AND (SN.string = PMC_I.name OR SN.string = PMC_I.name_plain)
                                 LEFT OUTER JOIN `rocpd_info_thread` TH ON TH.id = T.tid
                                 AND TH.guid = T.guid;
                         )";
@@ -640,20 +643,15 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 PMC_E.event_id,
                                 PMC_I.name,
                                 PMC_I.symbol,
-                                CASE PMC_I.units
-                                    WHEN 'MB' THEN
-                                    CASE symbol
-                                        WHEN 'thread_peak_memory' THEN PMC_E.value
-                                        ELSE PMC_E.value / (1000 * 1000)
-                                    END
-                                    WHEN 'sec' THEN PMC_E.value / (1000 * 1000 * 1000)
-                                    ELSE PMC_E.value
-                                END AS value,
+                                A.absolute_index AS agent_abs_index,
+                                PMC_E.value AS value,
                                 PMC_E.extdata AS extdata
                             FROM
                                 `rocpd_pmc_event` PMC_E
                                 INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
-                                AND PMC_I.guid = PMC_E.guid;
+                                AND PMC_I.guid = PMC_E.guid
+                                INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
+                                AND A.guid = PMC_I.guid;
                         )";
 
                 execute_raw_sql_statements(conn, create_pmc_event_view);

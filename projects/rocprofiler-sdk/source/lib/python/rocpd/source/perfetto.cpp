@@ -462,12 +462,12 @@ write_perfetto(
             counter_id_name[record.counter_id] = std::string{record.counter_name};
         }
 
-    auto pmc_event_values = std::map<std::string, std::map<uint64_t, double>>{};
+    auto pmc_event_values = std::map<std::string, std::map<uint64_t, std::map<uint64_t, double>>>{};
     for(auto ditr : pmc_event_gen)
     {
         for(const auto& itr : pmc_event_gen.get(ditr))
         {
-            pmc_event_values[itr.symbol][itr.event_id] = itr.value;
+            pmc_event_values[itr.symbol][itr.event_id][itr.agent_abs_index] = itr.value;
         }
     }
 
@@ -606,17 +606,21 @@ write_perfetto(
                 if(!itr.symbol.empty())
                 {
                     // For CPU tracks, use (thread_index, 0) as the track index
-                    // For GPU tracks, use (0, agent_abs_index) as the track index
+                    // For GPU tracks, use (0, agent_type_index) as the track index
                     std::pair<uint64_t, uint64_t> track_index = {itr.thread_index,
-                                                                 itr.agent_abs_index};
+                                                                 itr.agent_type_index};
                     auto& track_data = sample_counter_tracks[itr.symbol][track_index];
 
                     const auto _agent      = agent_data.at(itr.agent_abs_index).first;
                     track_data.agent_type  = _agent.type;
                     track_data.unit_name   = itr.units;
                     track_data.description = itr.short_description;
-                    track_data.samples.emplace(itr.timestamp,
-                                               pmc_event_values[itr.symbol][itr.event_id]);
+
+                    // Instead of emplacing, we are accumulating the value to the existing value.
+                    // There are multiple rows in sample_gen with same symbol, event_id, and
+                    // agent_abs_index, most are 0.
+                    auto value = pmc_event_values[itr.symbol][itr.event_id][itr.agent_abs_index];
+                    track_data.samples[itr.timestamp] += value;
                     continue;
                 }
 
@@ -994,7 +998,7 @@ write_perfetto(
                     if(data.agent_type == "CPU")
                         track_name << " [" << track_index.first - 1 << "]";
                     else if(data.agent_type == "GPU")
-                        track_name << " [" << track_index.second - 1 << "]";
+                        track_name << " [" << track_index.second << "]";
                 }
 
                 track_name << " (S)";

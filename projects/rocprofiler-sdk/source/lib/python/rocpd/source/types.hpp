@@ -242,6 +242,7 @@ struct sample
     std::string             units             = {};
     std::string             short_description = {};
     uint64_t                agent_abs_index   = 0;
+    uint64_t                agent_type_index  = 0;
     uint64_t                thread_index      = 0;
     uint64_t                event_id          = 0;
     uint64_t                stack_id          = 0;
@@ -457,14 +458,15 @@ struct stats_node
 
 struct pmc_event
 {
-    uint64_t    id       = 0;
-    guid_t      guid     = {};
-    uint64_t    event_id = 0;
-    uint64_t    pmc_id   = 0;
-    std::string name     = {};
-    std::string symbol   = {};
-    double      value    = 0;
-    std::string extdata  = {};
+    uint64_t    id              = 0;
+    guid_t      guid            = {};
+    uint64_t    event_id        = 0;
+    uint64_t    pmc_id          = 0;
+    std::string name            = {};
+    std::string symbol          = {};
+    uint64_t    agent_abs_index = 0;
+    double      value           = 0;
+    std::string extdata         = {};
 
     bool has_extdata() const { return (extdata.length() > 2); }
     void load_extdata();
@@ -722,6 +724,7 @@ load(ArchiveT& ar, rocpd::types::sample& data)
     LOAD_DATA_FIELD(units);
     LOAD_DATA_FIELD(short_description);
     LOAD_DATA_FIELD(agent_abs_index);
+    LOAD_DATA_FIELD(agent_type_index);
     LOAD_DATA_FIELD(thread_index);
     LOAD_DATA_FIELD(event_id);
     LOAD_DATA_FIELD(stack_id);
@@ -974,6 +977,7 @@ load(ArchiveT& ar, rocpd::types::pmc_event& data)
     LOAD_DATA_FIELD(pmc_id);
     LOAD_DATA_FIELD(name);
     LOAD_DATA_FIELD(symbol);
+    LOAD_DATA_FIELD(agent_abs_index);
     LOAD_DATA_FIELD(value);
     LOAD_DATA_FIELD(extdata);
 }
