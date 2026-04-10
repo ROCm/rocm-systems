@@ -21,16 +21,23 @@ control the behavior of rocSHMEM.
 
     * - | ``ROCSHMEM_DEBUG_LEVEL``
         | Debug output level
-      - ``NONE``
-      - | ``NONE``: Print error messages only. No debug output.
-        | ``ERROR``: Print error messages only. No debug output. Synonym for NONE.
-        | ``WARN``: Print warnings and above.
-        | ``VERSION``: Print version information.
-        | ``ENV:MODIFIED``: Print modified environment variables.
-        | ``ENV:ALL``: Print all environment variables.
-        | ``ENV:FULL``: Print full environment variable documentation.
+      - ``WARN``
+      - | Levels (from least to most verbose):
+        | ``NONE``: Suppress all output.
+        | ``ERROR``: Print error messages only.
+        | ``WARN``: Print warnings and errors (default).
+        | ``ENV``: Print modified environment variables at startup.
+        | ``VERSION``: Print build/version information at startup.
         | ``INFO``: Print informational messages and above.
-        | ``TRACE``: Print all messages (requires ``BUILD_DEBUG_LEVEL_TRACE_HOST`` and/or ``BUILD_DEBUG_LEVEL_TRACE_DEVICE`` at build time).
+        | ``API``: Print API call tracing (requires ``BUILD_DEBUG_LEVEL_TRACE_HOST``/``BUILD_DEBUG_LEVEL_TRACE_DEVICE``).
+        | ``TRACE``: Print all messages including internal traces (requires ``BUILD_DEBUG_LEVEL_TRACE_HOST``/``BUILD_DEBUG_LEVEL_TRACE_DEVICE``).
+        |
+        | Modifiers can be appended with ``:`` to suppress specific categories:
+        | ``:noerror``, ``:nowarn``, ``:noenv``, ``:noversion``, ``:noinfo``, ``:noapi``, ``:notrace``
+        | ``:full`` or ``:all`` after ``env`` or ``:env`` modifier controls env print detail.
+        | ``:color`` (default) or ``:nocolor`` enables/disables ANSI color output.
+        |
+        | Examples: ``trace:noversion``, ``env:full``, ``api:noenv``, ``trace:nocolor``
 
     * - | ``ROCSHMEM_HEAP_SIZE``
         | Defines the size of the rocSHMEM symmetric heap in bytes (per PE).

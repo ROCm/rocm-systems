@@ -111,9 +111,9 @@ cmake --install .
 - `USE_ALLOC_POW2BINS`: Use legacy Pow2Bins allocator (default: OFF)
 
 **Debug/Profile:**
-- `BUILD_DEBUG_LEVEL_TRACE_HOST`: Compile in host-side trace logging (LOG_TRACE) (default: OFF)
-- `BUILD_DEBUG_LEVEL_TRACE_DEVICE`: Compile in device-side trace logging (LOGD_TRACE) (default: OFF)
-- `BUILD_DEBUG_LEVEL_DEVICE`: Compile in device-side logging — ROCSHMEM_*_DEVICE printf and legacy GPU_DPRINTF (default: OFF). Note: abort() in ROCSHMEM_ABORT_DEVICE/ROCSHMEM_ERROR_DEVICE is always compiled regardless.
+- `BUILD_DEBUG_LEVEL_TRACE_HOST`: Compile in host-side LOG_API and LOG_TRACE (default: OFF)
+- `BUILD_DEBUG_LEVEL_TRACE_DEVICE`: Compile in device-side LOGD_API and LOGD_TRACE (default: OFF)
+- `BUILD_DEBUG_LEVEL_DEVICE`: Compile in device-side LOGD_WARN and LOGD_INFO (default: OFF). LOGD_ERROR/LOGD_ERROR_ABORT are always compiled regardless.
 - `PROFILE`: Enable statistics and timing (default: OFF)
 - `BUILD_CODE_COVERAGE`: Enable code coverage flags (gcc only) (default: OFF)
 
@@ -188,7 +188,7 @@ rocSHMEM behavior is controlled via environment variables defined in `src/envvar
 ### Key Variables
 
 **Core (`ROCSHMEM_*`):**
-- `ROCSHMEM_DEBUG_LEVEL`: Debug/verbosity level. Values: `NONE` (default), `ERROR`, `VERSION`, `WARN`, `ENV` or `ENV:MODIFIED`, `ENV:ALL`, `ENV:FULL`, `INFO`, `TRACE`. The `ENV*` levels print environment variable state at startup. Levels are ordered by increasing verbosity; each level includes all messages from less verbose levels.
+- `ROCSHMEM_DEBUG_LEVEL`: Debug/verbosity level (default: `WARN`). Levels ordered by increasing verbosity: `NONE`, `ERROR`, `WARN`, `ENV`, `VERSION`, `INFO`, `API`, `TRACE`. Append modifiers with `:` to suppress categories (e.g., `trace:noversion:noenv`). Use `:full`/`:all` after `env` for env print detail. Use `:color`/`:nocolor` for ANSI colors (default: color).
 - `ROCSHMEM_HEAP_SIZE`: Symmetric heap size in bytes per PE (default: 1 GiB)
 - `ROCSHMEM_BACKEND`: Backend selection (`ipc`, `ro`, `gda`); empty = auto-detect
 - `ROCSHMEM_MAX_NUM_CONTEXTS`: Max contexts an application can use (default: 32)

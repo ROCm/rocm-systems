@@ -205,20 +205,25 @@ void dprintf(const char* fmt, const Args&... args) {
 /*****************************************************************************
  * Device-side logging macros
  *
- * The printf portion is gated by BUILD_DEBUG_LEVEL_DEVICE.
- * abort() in ABORT_DEVICE and ERROR_DEVICE is unconditional.
- * Device printf uses rocshmem::dprintf() (defined above) which prepends
- * as the first 6 printf arguments, so the format string must start with
- * 6 %u specifiers to consume them.
+ * LOGD_ERROR / LOGD_ERROR_ABORT are always compiled in so that error
+ * paths are never silently compiled away.
+ * LOGD_WARN / LOGD_INFO are gated by BUILD_DEBUG_LEVEL_DEVICE.
+ * LOGD_API / LOGD_TRACE are gated by BUILD_DEBUG_LEVEL_TRACE_DEVICE
+ * (and additionally require BUILD_DEBUG_LEVEL_DEVICE for WARN/INFO).
+ *
+ * All device macros call rocshmem::dprintf() (defined above), which is
+ * marked __attribute__((noinline)).  This confines printf's register and
+ * scratch memory pressure to dprintf's own stack frame, so the calling
+ * kernel's occupancy is not reduced by logging code — even when the
+ * show_* branch is never taken at runtime.  The first 3 printf arguments
+ * are PE number, flat workgroup id, and flat thread id.
+ *
+ * Each macro uses a ternary to select between a colored and plain format
+ * string (same args for both) — one branch + two .rodata string constants
+ * per call site, no extra registers.
  *
  * Callers should NOT include a trailing newline — the macros append one.
- *
- * LOGD_TRACE additionally requires BUILD_DEBUG_LEVEL_TRACE_DEVICE;
- * when BUILD_DEBUG_LEVEL_DEVICE is ON but BUILD_DEBUG_LEVEL_TRACE_DEVICE is OFF,
- * device trace is compiled away.
  *****************************************************************************/
-
-#ifdef BUILD_DEBUG_LEVEL_DEVICE
 
 /* LOGD_ERROR and LOGD_ERROR_ABORT are always compiled in (not gated by
  * BUILD_DEBUG_LEVEL_DEVICE) so that error paths are never silently
