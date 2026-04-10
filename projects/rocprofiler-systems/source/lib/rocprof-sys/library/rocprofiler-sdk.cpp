@@ -2192,7 +2192,7 @@ flush_counter_storage_outputs()
             counter_storage::write(storage->storage.get(), storage->metric_name,
                                    storage->metric_description);
         }
-            storage->manager->cleanup(cleanup_key);
+        storage->manager->cleanup(cleanup_key);
     }
 }
 

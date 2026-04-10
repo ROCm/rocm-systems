@@ -134,13 +134,13 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
                                                      storage_name);
     if(manager)
     {
-        manager->add_cleanup(
-            storage_name + "cleanup",
-            [storage_ptr = storage.get(), metric_name = metric_name,
-             metric_description = metric_description]() {
-                if(storage_ptr)
-                    counter_storage::write(storage_ptr, metric_name, metric_description);
-            });
+        manager->add_cleanup(storage_name + "cleanup",
+                             [storage_ptr = storage.get(), metric_name = metric_name,
+                              metric_description = metric_description]() {
+                                 if(storage_ptr)
+                                     counter_storage::write(storage_ptr, metric_name,
+                                                            metric_description);
+                             });
     }
     else
     {
