@@ -41,8 +41,10 @@ parse_bool(std::string_view val)
 {
     if(val.empty()) throw std::runtime_error(fmt::format("No boolean value provided"));
 
-    const std::array<const char*, 6> falsy  = { "off", "false", "no", "n", "f", "0" };
-    const std::array<const char*, 6> truthy = { "on", "true", "yes", "y", "t", "1" };
+    static constexpr std::array<const char*, 6> falsy  = { "off", "false", "no",
+                                                           "n",   "f",     "0" };
+    static constexpr std::array<const char*, 6> truthy = { "on", "true", "yes",
+                                                           "y",  "t",    "1" };
 
     std::string lower(val);
     std::transform(lower.begin(), lower.end(), lower.begin(),
