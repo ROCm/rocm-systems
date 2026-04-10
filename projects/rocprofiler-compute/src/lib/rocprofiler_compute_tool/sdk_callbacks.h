@@ -84,22 +84,27 @@ struct tool_data_t
     std::vector<std::pair<uint64_t, uint64_t>> kernel_filter_ranges{};
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
-    iteration_multiplexing_mode_t              iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
+    iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
 };
 
-bool is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration);
+class SdkCallbacks
+{
+public:
+    void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                           rocprofiler_counter_config_id_t*             config,
+                           void*                                        callback_data_args);
 
-void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                       rocprofiler_counter_config_id_t*             config,
-                       rocprofiler_user_data_t* /*user_data*/,
-                       void* callback_data_args);
+    void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                         rocprofiler_counter_record_t*                record_data,
+                         size_t                                       record_count,
+                         void*                                        callback_data_args);
 
-void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                     rocprofiler_counter_record_t*                record_data,
-                     size_t                                       record_count,
-                     rocprofiler_user_data_t /* user_data */,
-                     void* callback_data_args);
+    void tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data);
 
-void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                           rocprofiler_user_data_t* /*user_data*/,
-                           void* callback_data);
+private:
+    bool is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration);
+    void create_counter_collection_profile(
+        tool_data_t*                                                                tool,
+        rocprofiler_agent_id_t                                                      agent_id,
+        std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache);
+};

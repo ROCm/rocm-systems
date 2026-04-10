@@ -4,7 +4,6 @@
 #include "rocprofiler_compute_tool.h"
 
 #include "input_parameters.h"
-#include "sdk_callbacks.h"
 #include "sdk_common.h"
 #include "sdk_wrapper.h"
 
@@ -16,10 +15,16 @@
 using namespace rocprof_compute_tool;
 
 std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
+std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacks>();
 
-void test_knobs::set_input_parameters(std::shared_ptr<InputParameters> input_parameters)
+void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters> & input_parameters)
 {
     g_input_parameters = input_parameters;
+}
+
+void test_knobs::set_sdk_callbacks(const std::shared_ptr<SdkCallbacks>& sdk_callbacks)
+{
+    g_sdk_callbacks = sdk_callbacks;
 }
 
 namespace
@@ -39,6 +44,30 @@ iteration_multiplexing_mode_t iteration_multiplexing_mode(const std::string& mod
         return iteration_multiplexing_mode_t::LAUNCH;
     else
         return iteration_multiplexing_mode_t::DISABLED;
+}
+
+void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                       rocprofiler_counter_config_id_t*             config,
+                       rocprofiler_user_data_t* /*user_data*/,
+                       void* callback_data_args)
+{
+    g_sdk_callbacks->dispatch_callback(dispatch_data, config, callback_data_args);
+}
+
+void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                     rocprofiler_counter_record_t*                record_data,
+                     size_t                                       record_count,
+                     rocprofiler_user_data_t /* user_data */,
+                     void* callback_data_args)
+{
+    g_sdk_callbacks->record_callback(dispatch_data, record_data, record_count, callback_data_args);
+}
+
+void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                           rocprofiler_user_data_t* /*user_data*/,
+                           void* callback_data)
+{
+    g_sdk_callbacks->tool_tracing_callback(record, callback_data);
 }
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)

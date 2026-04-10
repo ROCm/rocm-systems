@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #include "sdk_callbacks.h"
+
 #include "sdk_common.h"
 
 #include <algorithm>
@@ -9,7 +10,7 @@
 
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
-bool is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
+bool SdkCallbacks::is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
 {
     if (!tool->target_kernel_ids.empty() && !tool->target_kernel_ids.count(kernel_id))
         return false;
@@ -17,14 +18,15 @@ bool is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t
     if (!tool->kernel_filter_ranges.empty())
         return std::any_of(tool->kernel_filter_ranges.begin(),
                            tool->kernel_filter_ranges.end(),
-                           [kernel_iteration](const auto& range) {
+                           [kernel_iteration](const auto& range)
+                           {
                                return kernel_iteration >= range.first && kernel_iteration <= range.second;
                            });
 
     return true;
 }
 
-void create_counter_collection_profile(
+void SdkCallbacks::create_counter_collection_profile(
     tool_data_t*                                                                tool,
     rocprofiler_agent_id_t                                                      agent_id,
     std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache)
@@ -135,10 +137,9 @@ void create_counter_collection_profile(
     }
 }
 
-void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                       rocprofiler_counter_config_id_t*             config,
-                       rocprofiler_user_data_t* /*user_data*/,
-                       void* callback_data_args)
+void SdkCallbacks::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                     rocprofiler_counter_config_id_t*             config,
+                                     void* callback_data_args)
 {
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id.handle;
@@ -269,11 +270,10 @@ void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_dat
     set_config_from_cache();
 }
 
-void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                     rocprofiler_counter_record_t*                record_data,
-                     size_t                                       record_count,
-                     rocprofiler_user_data_t /* user_data */,
-                     void* callback_data_args)
+void SdkCallbacks::record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                   rocprofiler_counter_record_t*                record_data,
+                                   size_t                                       record_count,
+                                   void*                                        callback_data_args)
 {
     auto*        tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data_args);
     tool_data_t* tool;
@@ -305,9 +305,7 @@ void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     }
 }
 
-void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                           rocprofiler_user_data_t* /*user_data*/,
-                           void* callback_data)
+void SdkCallbacks::tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data)
 {
     if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
         record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
