@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #include "sdk_callbacks.h"
+#include "sdk_common.h"
 
 #include <algorithm>
 #include <iostream>
