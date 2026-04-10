@@ -250,7 +250,13 @@ binaries. With the ``--offloading`` flag, it can list and extract information
 from the contents of ROCm binaries, including code object metadata, kernel
 symbols, target architectures (for example, ``gfx90a``, ``gfx1100``), and
 linkage details. It supports both standalone ``.hsaco`` files and "fat
-binaries" stored as embedded objects within host executables. In current releases, the tool additionally extracts HIP fat‑binary bundle entries into standalone code object files. With the ``--triple=amdgcn`` option, it can disassemble GPU kernels into readable AMDGPU ISA, allowing detailed examination of instruction streams, register usage, and control‑flow structure. Such capabilities are critical for performance tuning, correctness verification, and low‑level kernel analysis, including tasks such as optimizing :ref:`MFMA <mfma_units>` instructions or assessing compiler‑generated transformations.
+binaries" stored as embedded objects within host executables. In current releases, the tool
+additionally extracts HIP fat‑binary bundle entries into standalone code object files. With the
+``--triple=amdgcn`` option, it can disassemble GPU kernels into readable AMDGPU ISA, allowing
+detailed examination of instruction streams, register usage, and control‑flow structure. Such
+capabilities are critical for performance tuning, correctness verification, and low‑level kernel
+analysis, including tasks such as optimizing :ref:`MFMA <mfma_units>` instructions or assessing
+compiler‑generated transformations.
 
 The ``llvm-readobj`` tool, used with the ``--offloading`` flag, provides a complete listing of HIP fat‑binary offload bundle entries, superseding the earlier ``roc-obj-ls`` utility.
  
