@@ -62,10 +62,32 @@ jobs:
 
       - name: AINIC multinode test
         run: |
-          sbatch -N4  --reservation=rccl_dbg_2491 --exclusive  --wrap 'sleep infinity' \
-            bash -c '
-              cd /it-share/rccl-ci
-              CVS_CONFIG_FILE=/it-share/rccl-ci/configs/rccl_config_TheRock-all.json \
-              CVS_CLUSTER_FILE=/it-share/rccl-ci/configs/cluster.json \
-              ./sp.sh
-            '
+          set -euo pipefail
+
+          cd /it-share/rccl-ci
+
+          echo "Submitting RCCL heatmap job..."
+
+          JOB_ID=$(sbatch sp.sh | awk '{print $4}')
+          echo "Submitted job $JOB_ID"
+
+          echo "Waiting for job to complete..."
+
+          # Wait until job leaves queue
+          while squeue -j "$JOB_ID" 2>/dev/null | grep -q "$JOB_ID"; do
+            sleep 10
+          done
+
+          echo "Job finished. Checking status..."
+
+          # Get final state (ignore batch/extern lines)
+          STATUS=$(sacct -j "$JOB_ID" --format=State --noheader | head -n 1 | xargs)
+
+          echo "Final job state: $STATUS"
+
+          if [[ "$STATUS" != "COMPLETED" ]]; then
+            echo "AINIC job failed"
+            exit 1
+          fi
+
+          echo "AINIC job succeeded"
