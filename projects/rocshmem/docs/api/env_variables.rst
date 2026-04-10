@@ -29,8 +29,8 @@ control the behavior of rocSHMEM.
         | ``ENV``: Print modified environment variables at startup.
         | ``VERSION``: Print build/version information at startup.
         | ``INFO``: Print informational messages and above.
-        | ``API``: Print API call tracing (requires ``BUILD_DEBUG_LEVEL_TRACE_HOST``/``BUILD_DEBUG_LEVEL_TRACE_DEVICE``).
-        | ``TRACE``: Print all messages including internal traces (requires ``BUILD_DEBUG_LEVEL_TRACE_HOST``/``BUILD_DEBUG_LEVEL_TRACE_DEVICE``).
+        | ``API``: Print API call tracing (requires ``BUILD_DEBUG_TRACE_HOST``/``BUILD_DEBUG_TRACE_DEVICE``).
+        | ``TRACE``: Print all messages including internal traces (requires ``BUILD_DEBUG_TRACE_HOST``/``BUILD_DEBUG_TRACE_DEVICE``).
         |
         | Modifiers can be appended with ``:`` to suppress specific categories:
         | ``:noerror``, ``:nowarn``, ``:noenv``, ``:noversion``, ``:noinfo``, ``:noapi``, ``:notrace``

@@ -55,14 +55,14 @@
  *   LOG_ERROR_ABORT — prints error, calls abort()
  *   LOG_WARN        — prints if debug_level >= WARN
  *   LOG_INFO        — prints if debug_level >= INFO
- *   LOG_TRACE       — compiled with BUILD_DEBUG_LEVEL_TRACE_HOST
+ *   LOG_TRACE       — compiled with BUILD_DEBUG_TRACE_HOST
  *
  * Device macros:
- *   LOGD_ERROR       — prints error (gated by BUILD_DEBUG_LEVEL_DEVICE)
+ *   LOGD_ERROR       — prints error (gated by BUILD_DEBUG_DEVICE)
  *   LOGD_ERROR_ABORT — prints + abort() (abort unconditional)
- *   LOGD_WARN        — gated by BUILD_DEBUG_LEVEL_DEVICE
- *   LOGD_INFO        — gated by BUILD_DEBUG_LEVEL_DEVICE
- *   LOGD_TRACE       — gated by BUILD_DEBUG_LEVEL_DEVICE + BUILD_DEBUG_LEVEL_TRACE_DEVICE
+ *   LOGD_WARN        — gated by BUILD_DEBUG_DEVICE
+ *   LOGD_INFO        — gated by BUILD_DEBUG_DEVICE
+ *   LOGD_TRACE       — gated by BUILD_DEBUG_DEVICE + BUILD_DEBUG_TRACE_DEVICE
  */
 
 namespace rocshmem {
@@ -143,7 +143,7 @@ namespace rocshmem {
         __func__, __FILE__, __LINE__);                                        \
 } while (0)
 
-#ifdef BUILD_DEBUG_LEVEL_TRACE_HOST
+#ifdef BUILD_DEBUG_TRACE_HOST
 #define LOG_API(fmt, ...) do {                                                \
   rocshmem::static_assert_host_only();                                        \
   if (rocshmem::envvar::log_flags.show_api)                                   \
@@ -207,9 +207,9 @@ void dprintf(const char* fmt, const Args&... args) {
  *
  * LOGD_ERROR / LOGD_ERROR_ABORT are always compiled in so that error
  * paths are never silently compiled away.
- * LOGD_WARN / LOGD_INFO are gated by BUILD_DEBUG_LEVEL_DEVICE.
- * LOGD_API / LOGD_TRACE are gated by BUILD_DEBUG_LEVEL_TRACE_DEVICE
- * (and additionally require BUILD_DEBUG_LEVEL_DEVICE for WARN/INFO).
+ * LOGD_WARN / LOGD_INFO are gated by BUILD_DEBUG_DEVICE.
+ * LOGD_API / LOGD_TRACE are gated by BUILD_DEBUG_TRACE_DEVICE
+ * (and additionally require BUILD_DEBUG_DEVICE for WARN/INFO).
  *
  * All device macros call rocshmem::dprintf() (defined above), which is
  * marked __attribute__((noinline)).  This confines printf's register and
@@ -226,7 +226,7 @@ void dprintf(const char* fmt, const Args&... args) {
  *****************************************************************************/
 
 /* LOGD_ERROR and LOGD_ERROR_ABORT are always compiled in (not gated by
- * BUILD_DEBUG_LEVEL_DEVICE) so that error paths are never silently
+ * BUILD_DEBUG_DEVICE) so that error paths are never silently
  * compiled away.  Single dprintf call; ternary selects format string. */
 
 #define LOGD_ERROR(fmt, ...) do {                                             \
@@ -250,7 +250,7 @@ void dprintf(const char* fmt, const Args&... args) {
   abort();                                                                    \
 } while (0)
 
-#ifdef BUILD_DEBUG_LEVEL_DEVICE
+#ifdef BUILD_DEBUG_DEVICE
 
 #define LOGD_WARN(fmt, ...) do {                                              \
   rocshmem::static_assert_device_only();                                      \
@@ -272,7 +272,7 @@ void dprintf(const char* fmt, const Args&... args) {
         __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
 } while (0)
 
-#if defined(BUILD_DEBUG_LEVEL_TRACE_DEVICE)
+#if defined(BUILD_DEBUG_TRACE_DEVICE)
 #define LOGD_API(fmt, ...) do {                                               \
   rocshmem::static_assert_device_only();                                      \
   if (rocshmem::log_device.show_api)                                          \
@@ -297,13 +297,13 @@ void dprintf(const char* fmt, const Args&... args) {
 #define LOGD_TRACE(...) do { rocshmem::static_assert_device_only(); } while (0)
 #endif
 
-#else  /* !BUILD_DEBUG_LEVEL_DEVICE */
+#else  /* !BUILD_DEBUG_DEVICE */
 
 #define LOGD_WARN(...)        do { rocshmem::static_assert_device_only(); } while (0)
 #define LOGD_INFO(...)        do { rocshmem::static_assert_device_only(); } while (0)
 #define LOGD_API(...)         do { rocshmem::static_assert_device_only(); } while (0)
 #define LOGD_TRACE(...)       do { rocshmem::static_assert_device_only(); } while (0)
 
-#endif  /* BUILD_DEBUG_LEVEL_DEVICE */
+#endif  /* BUILD_DEBUG_DEVICE */
 
 #endif  // LIBRARY_SRC_LOG_HPP_

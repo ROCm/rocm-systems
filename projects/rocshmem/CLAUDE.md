@@ -111,9 +111,9 @@ cmake --install .
 - `USE_ALLOC_POW2BINS`: Use legacy Pow2Bins allocator (default: OFF)
 
 **Debug/Profile:**
-- `BUILD_DEBUG_LEVEL_TRACE_HOST`: Compile in host-side LOG_API and LOG_TRACE (default: OFF)
-- `BUILD_DEBUG_LEVEL_TRACE_DEVICE`: Compile in device-side LOGD_API and LOGD_TRACE (default: OFF)
-- `BUILD_DEBUG_LEVEL_DEVICE`: Compile in device-side LOGD_WARN and LOGD_INFO (default: OFF). LOGD_ERROR/LOGD_ERROR_ABORT are always compiled regardless.
+- `BUILD_DEBUG_TRACE_HOST`: Compile in host-side LOG_API and LOG_TRACE (default: OFF)
+- `BUILD_DEBUG_TRACE_DEVICE`: Compile in device-side LOGD_API and LOGD_TRACE (default: OFF)
+- `BUILD_DEBUG_DEVICE`: Compile in device-side LOGD_WARN and LOGD_INFO (default: OFF). LOGD_ERROR/LOGD_ERROR_ABORT are always compiled regardless.
 - `PROFILE`: Enable statistics and timing (default: OFF)
 - `BUILD_CODE_COVERAGE`: Enable code coverage flags (gcc only) (default: OFF)
 

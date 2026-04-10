@@ -179,7 +179,7 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
   do {
     cqe = (struct bnxt_re_req_cqe *) bnxt_cq.buf;
 
-#ifdef BUILD_DEBUG_LEVEL_DEVICE
+#ifdef BUILD_DEBUG_DEVICE
     bnxt_check_cqe_error(cqe);
 #endif
 

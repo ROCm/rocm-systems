@@ -70,18 +70,18 @@ rocSHMEM provides leveled logging macros defined in `src/log.hpp`. Use the appro
 | `LOG_ERROR_ABORT(fmt, ...)` | Fatal errors, calls `abort()` (always compiled) |
 | `LOG_WARN(fmt, ...)` | Warnings (always compiled, runtime-gated) |
 | `LOG_INFO(fmt, ...)` | Informational messages (always compiled, runtime-gated) |
-| `LOG_API(fmt, ...)` | API call tracing (compile-gated by `BUILD_DEBUG_LEVEL_TRACE_HOST`) |
-| `LOG_TRACE(fmt, ...)` | Internal traces (compile-gated by `BUILD_DEBUG_LEVEL_TRACE_HOST`) |
+| `LOG_API(fmt, ...)` | API call tracing (compile-gated by `BUILD_DEBUG_TRACE_HOST`) |
+| `LOG_TRACE(fmt, ...)` | Internal traces (compile-gated by `BUILD_DEBUG_TRACE_HOST`) |
 
 **Device macros** (for `__device__`/`__global__` code):
 | Macro | Use for |
 |---|---|
 | `LOGD_ERROR(fmt, ...)` | Non-fatal errors (always compiled) |
 | `LOGD_ERROR_ABORT(fmt, ...)` | Fatal errors, calls `abort()` (always compiled) |
-| `LOGD_WARN(fmt, ...)` | Warnings (compile-gated by `BUILD_DEBUG_LEVEL_DEVICE`) |
-| `LOGD_INFO(fmt, ...)` | Informational messages (compile-gated by `BUILD_DEBUG_LEVEL_DEVICE`) |
-| `LOGD_API(fmt, ...)` | API call tracing (compile-gated by `BUILD_DEBUG_LEVEL_TRACE_DEVICE`) |
-| `LOGD_TRACE(fmt, ...)` | Internal traces (compile-gated by `BUILD_DEBUG_LEVEL_TRACE_DEVICE`) |
+| `LOGD_WARN(fmt, ...)` | Warnings (compile-gated by `BUILD_DEBUG_DEVICE`) |
+| `LOGD_INFO(fmt, ...)` | Informational messages (compile-gated by `BUILD_DEBUG_DEVICE`) |
+| `LOGD_API(fmt, ...)` | API call tracing (compile-gated by `BUILD_DEBUG_TRACE_DEVICE`) |
+| `LOGD_TRACE(fmt, ...)` | Internal traces (compile-gated by `BUILD_DEBUG_TRACE_DEVICE`) |
 
 **Guidelines:**
 - Do not include trailing `\n` in format strings — the macros append it.

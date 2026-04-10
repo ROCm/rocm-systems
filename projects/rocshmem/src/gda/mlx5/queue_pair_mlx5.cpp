@@ -212,7 +212,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
       continue;
     }
 
-#if defined(BUILD_DEBUG_LEVEL_DEVICE)
+#if defined(BUILD_DEBUG_DEVICE)
     mlx5_check_cqe_error(cqe);
 #endif
 

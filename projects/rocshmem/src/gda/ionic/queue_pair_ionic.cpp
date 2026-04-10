@@ -116,7 +116,7 @@ __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
 
   /* Report if the completion indicates an error. */
   if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
-#if defined(BUILD_DEBUG_LEVEL_DEVICE)
+#if defined(BUILD_DEBUG_DEVICE)
     uint32_t qtf = byteswap<uint32_t>(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
@@ -173,7 +173,7 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info,
   }
 
   if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
-#if defined(BUILD_DEBUG_LEVEL_DEVICE)
+#if defined(BUILD_DEBUG_DEVICE)
     uint32_t qtf = byteswap<uint32_t>(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
@@ -203,7 +203,7 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe_single(uint32_t cons) {
   }
 
   if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
-#if defined(BUILD_DEBUG_LEVEL_DEVICE)
+#if defined(BUILD_DEBUG_DEVICE)
     uint32_t qtf = byteswap<uint32_t>(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
