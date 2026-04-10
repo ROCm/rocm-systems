@@ -94,7 +94,15 @@ get_env(std::string_view env_id, Tp&& _default) noexcept
     if(env_id.empty())
     {
         if constexpr(std::is_convertible_v<T, std::string>)
-            return std::string{ _default };
+        {
+            try
+            {
+                return std::string{ _default };
+            } catch(...)
+            {
+                return std::string{};
+            }
+        }
         else
             return static_cast<T>(_default);
     }
@@ -105,8 +113,13 @@ get_env(std::string_view env_id, Tp&& _default) noexcept
         return static_cast<T>(get_env(env_id, static_cast<Up>(_default)));
     }
 
-    const auto  env_id_str = std::string{ env_id };
-    const char* env_var    = ::std::getenv(env_id_str.c_str());
+    const char* env_var = nullptr;
+    try
+    {
+        const auto env_id_str = std::string{ env_id };
+        env_var               = ::std::getenv(env_id_str.c_str());
+    } catch(...)
+    {}
 
     if constexpr(std::is_same_v<T, bool>)
     {
@@ -122,7 +135,13 @@ get_env(std::string_view env_id, Tp&& _default) noexcept
 
     if constexpr(std::is_convertible_v<T, std::string>)
     {
-        return env_var ? std::string{ env_var } : std::string{ _default };
+        try
+        {
+            return env_var ? std::string{ env_var } : std::string{ _default };
+        } catch(...)
+        {
+            return std::string{};
+        }
     }
 }
 
