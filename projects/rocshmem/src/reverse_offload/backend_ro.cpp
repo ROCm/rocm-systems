@@ -364,18 +364,18 @@ void ROBackend::ro_net_free_runtime() {
   /*
    * Tear down team_shared (only allocated when IPC is enabled)
    */
-  auto *team_shared{team_tracker.get_team_shared()};
+  auto *team_shared{static_cast<ROTeam*>(team_tracker.get_team_shared())};
   if (team_shared) {
     team_shared->pe_world_map_ = nullptr;
-    team_shared->~Team();
+    team_shared->~ROTeam();
     CHECK_HIP(hipFree(team_shared));
   }
 
   /*
    * Tear down team_world
    */
-  auto *team_world{team_tracker.get_team_world()};
-  team_world->~Team();
+  auto *team_world{static_cast<ROTeam*>(team_tracker.get_team_world())};
+  team_world->~ROTeam();
   // CHECK_HIP(hipFree(team_world));
 
   /*

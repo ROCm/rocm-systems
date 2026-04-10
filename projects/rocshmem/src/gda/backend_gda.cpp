@@ -143,15 +143,15 @@ GDABackend::~GDABackend() {
 
   cleanup_teams();
 
-  auto *team_shared{team_tracker.get_team_shared()};
+  auto *team_shared{static_cast<GDATeam*>(team_tracker.get_team_shared())};
   if (team_shared) {
     team_shared->pe_world_map_ = nullptr;
-    team_shared->~Team();
+    team_shared->~GDATeam();
     CHECK_HIP(hipFree(team_shared));
   }
 
-  auto *team_world{team_tracker.get_team_world()};
-  team_world->~Team();
+  auto *team_world{static_cast<GDATeam*>(team_tracker.get_team_world())};
+  team_world->~GDATeam();
   CHECK_HIP(hipFree(team_world));
 
   cleanup_wrk_sync_buffer();

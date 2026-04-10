@@ -141,12 +141,12 @@ IPCBackend::~IPCBackend() {
   // Close IPC handles for remote heap bases
   ipcImpl.ipcHostStop();
 
-  auto *team_shared{team_tracker.get_team_shared()};
-  team_shared->~Team();
+  auto *team_shared{static_cast<IPCTeam*>(team_tracker.get_team_shared())};
+  team_shared->~IPCTeam();
   CHECK_HIP(hipFree(team_shared));
 
-  auto *team_world{team_tracker.get_team_world()};
-  team_world->~Team();
+  auto *team_world{static_cast<IPCTeam*>(team_tracker.get_team_world())};
+  team_world->~IPCTeam();
   CHECK_HIP(hipFree(team_world));
 
   CHECK_HIP(hipFree(ctx_array));
