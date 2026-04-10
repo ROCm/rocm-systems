@@ -139,7 +139,7 @@ jobs:
       contents: read
       id-token: write
     needs: [therock-build-linux]
-    uses: ./.github/workflows/therock-rccl-test-packages-multi-node.yml
+    uses: ./.github/workflows/therock-rccl-test-packages-multi-node-ainic.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}

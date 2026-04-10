@@ -1,0 +1,71 @@
+name: TheRock Test Packages multi-node ainic for rccl
+
+on:
+  workflow_call:
+    inputs:
+      amdgpu_families:
+        type: string
+      artifact_group:
+        type: string
+      test_runs_on:
+        type: string
+      artifact_run_id:
+        type: string
+  workflow_dispatch:
+    inputs:
+      amdgpu_families:
+        type: string
+      artifact_group:
+        type: string
+      test_runs_on:
+        type: string
+      artifact_run_id:
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test_rccl_multi_node_ainic:
+    name: 'Test multi-node (AINIC)'
+    runs-on: ${{ inputs.test_runs_on }}
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
+      OUTPUT_ARTIFACTS_DIR: /it-share/rccl-ci/dist_new
+      THEROCK_BIN_DIR: "./build/bin"
+      AWS_SHARED_CREDENTIALS_FILE: /it-share/rccl-ci/credentials.ini
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: be15507d79669171fcd1da71b924356e2ad03874 # 2026-04-07 commit
+
+      - name: Run setup test environment workflow
+        uses: './.github/actions/setup_test_environment'
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: "--rccl --tests"
+          IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+
+      - name: AINIC multinode test
+        run: |
+          sbatch -N4  --reservation=rccl_dbg_2491 --exclusive  --wrap 'sleep infinity' \
+            bash -c '
+              cd /it-share/rccl-ci
+              CVS_CONFIG_FILE=/it-share/rccl-ci/configs/rccl_config_TheRock-all.json \
+              CVS_CLUSTER_FILE=/it-share/rccl-ci/configs/cluster.json \
+              ./sp.sh
+            '
