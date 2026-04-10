@@ -8,21 +8,17 @@
 Workgroup processor (WGP)
 =========================
 
-On **RDNA3**-class GPUs (including discrete **Navi 3x** and **RDNA3.5 / gfx1151**
-integrations), shader work is organized into **Workgroup Processors (WGPs)**. A WGP
-pairs two **Compute Units (CUs)** that share resources; compute kernels are typically
-tracked with **wave32**-oriented waves in the ``gfx1151`` panel set. The profiler’s
-**WGP** YAML (for example ``0700_WGP.yaml``) is the analogue of the Instinct **compute
-unit** chapter: occupancy, dispatch, instruction mix, and local caches at that
-granularity.
+On RDNA3-class GPUs (including discrete Navi 3x and RDNA3.5 / gfx1151
+integrations), shader work is organized into Workgroup Processors (WGPs). A WGP
+pairs two Compute Units (CUs) that share resources; compute kernels are typically
+tracked with wave32-oriented waves in the gfx1151 panel set. The profiler's
+WGP panel is the analogue of the Instinct compute unit chapter: occupancy,
+dispatch, instruction mix, and local caches at that granularity.
 
 For VALU / VMEM / MFMA-style pipeline tables and MI-series diagrams, see
 :doc:`../cdna/compute-unit`.
 
-The sections below list **RDNA3.5 (gfx1151)** metric descriptions for this chapter,
-using the same analysis YAML sources as the profiler panels under
-``src/rocprof_compute_soc/analysis_configs/gfx1151/`` (see :doc:`rdna-performance-model`
-for the full RDNA block layout).
+The sections below list RDNA3.5 (gfx1151) metric descriptions for this chapter.
 
 Roofline
 ========
@@ -30,14 +26,24 @@ Roofline
 Roofline Performance Rates
 --------------------------
 
-.. jinja:: rdna1151-roofline-performance-rates-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-roofline-performance-rates-gfx1151
+         :file: _templates/metrics_table.j2
 
 Roofline Plot Points
 --------------------
 
-.. jinja:: rdna1151-roofline-plot-points-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-roofline-plot-points-gfx1151
+         :file: _templates/metrics_table.j2
 
 WGP block metrics
 =================
@@ -45,61 +51,109 @@ WGP block metrics
 WGP Utilization
 ---------------
 
-.. jinja:: rdna1151-wgp-utilization-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-wgp-utilization-gfx1151
+         :file: _templates/metrics_table.j2
 
 Wavefront Launch Stats
 ----------------------
 
-.. jinja:: rdna1151-wavefront-launch-stats-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-wavefront-launch-stats-gfx1151
+         :file: _templates/metrics_table.j2
 
 Wave Dispatch
 -------------
 
-.. jinja:: rdna1151-wave-dispatch-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-wave-dispatch-gfx1151
+         :file: _templates/metrics_table.j2
 
 Wave Life
 ---------
 
-.. jinja:: rdna1151-wave-life-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-wave-life-gfx1151
+         :file: _templates/metrics_table.j2
 
 Wave Instruction Mix
 --------------------
 
-.. jinja:: rdna1151-wave-instruction-mix-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-wave-instruction-mix-gfx1151
+         :file: _templates/metrics_table.j2
 
 VMEM Instruction Mix
 --------------------
 
-.. jinja:: rdna1151-vmem-instruction-mix-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-vmem-instruction-mix-gfx1151
+         :file: _templates/metrics_table.j2
 
 LDS Instruction Mix
 -------------------
 
-.. jinja:: rdna1151-lds-instruction-mix-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-lds-instruction-mix-gfx1151
+         :file: _templates/metrics_table.j2
 
 Wait State Analysis
 -------------------
 
-.. jinja:: rdna1151-wait-state-analysis-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-wait-state-analysis-gfx1151
+         :file: _templates/metrics_table.j2
 
 WGP Instruction Cache
 ---------------------
 
-.. jinja:: rdna1151-wgp-instruction-cache-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-wgp-instruction-cache-gfx1151
+         :file: _templates/metrics_table.j2
 
 WGP Scalar Data Cache
 ---------------------
 
-.. jinja:: rdna1151-wgp-scalar-data-cache-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
 
-Return to :doc:`rdna-performance-model` or the top-level :doc:`../performance-model`.
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-wgp-scalar-data-cache-gfx1151
+         :file: _templates/metrics_table.j2

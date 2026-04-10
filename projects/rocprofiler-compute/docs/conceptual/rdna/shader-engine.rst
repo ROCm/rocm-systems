@@ -8,12 +8,12 @@
 Shader engine
 ===============
 
-**Shader engines (SEs)** still partition the GPU on RDNA parts; **gfx1151** reports
-chip- and SE-level utilization through **GRBM**-derived counters and **SPI** (Shader
-Processor Input) dispatch statistics. This complements the **WGP** chapter, which
+Shader engines (SEs) still partition the GPU on RDNA parts; gfx1151 reports
+chip- and SE-level utilization through GRBM-derived counters and SPI (Shader
+Processor Input) dispatch statistics. This complements the WGP chapter, which
 focuses on per-WGP execution metrics.
 
-For Instinct-centric **SE**, **sL1D**, and **L1I** metric tabs, see
+For Instinct-centric SE, sL1D, and L1I metric tabs, see
 :doc:`../cdna/shader-engine`.
 
 Graphics Register Bus Manager (GRBM)
@@ -22,14 +22,24 @@ Graphics Register Bus Manager (GRBM)
 GPU Utilization
 ---------------
 
-.. jinja:: rdna1151-gpu-utilization-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-gpu-utilization-gfx1151
+         :file: _templates/metrics_table.j2
 
 Shader Engine Utilization
 -------------------------
 
-.. jinja:: rdna1151-shader-engine-utilization-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-shader-engine-utilization-gfx1151
+         :file: _templates/metrics_table.j2
 
 Shader Processor Input (SPI)
 ============================
@@ -37,13 +47,21 @@ Shader Processor Input (SPI)
 SPI Utilization
 ---------------
 
-.. jinja:: rdna1151-spi-utilization-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-spi-utilization-gfx1151
+         :file: _templates/metrics_table.j2
 
 Wave Dispatch Statistics
 ------------------------
 
-.. jinja:: rdna1151-wave-dispatch-statistics-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
 
-Return to :doc:`rdna-performance-model` or the top-level :doc:`../performance-model`.
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-wave-dispatch-statistics-gfx1151
+         :file: _templates/metrics_table.j2

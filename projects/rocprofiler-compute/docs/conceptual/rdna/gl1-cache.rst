@@ -8,45 +8,67 @@
 GL1 (GL1C)
 ==========
 
-**GL1C** is the shared L1 cache layer on **gfx1151**, fed by **TCP** (vector L0).
-For **TCP** panels and Memory Chart rows through the TCP–GL1 boundary, see
-:doc:`tcp-cache`. The GL1C→GL2 path is under :doc:`gl2-cache`.
+GL1C is the shared L1 cache layer on gfx1151, fed by TCP (vector L0).
+For TCP panels and Memory Chart rows through the TCP-GL1 boundary, see
+:doc:`tcp-cache`. The GL1C to GL2 path is under :doc:`gl2-cache`.
 
 GL1C (panel)
 ============
 
 GL1C Utilization
-................
+----------------
 
-.. jinja:: rdna1151-gl1c-utilization-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-gl1c-utilization-gfx1151
+         :file: _templates/metrics_table.j2
 
 GL1C Request Statistics
-.......................
+-----------------------
 
-.. jinja:: rdna1151-gl1c-request-statistics-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-gl1c-request-statistics-gfx1151
+         :file: _templates/metrics_table.j2
 
 GL1C Cache Performance
-......................
+----------------------
 
-.. jinja:: rdna1151-gl1c-cache-performance-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-gl1c-cache-performance-gfx1151
+         :file: _templates/metrics_table.j2
 
 GL1C Stalls
-...........
+-----------
 
-.. jinja:: rdna1151-gl1c-stalls-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-gl1c-stalls-gfx1151
+         :file: _templates/metrics_table.j2
 
 Memory Chart: GL1C (L1)
 =======================
 
-Memory chart: GL1C Cache (L1)
-.............................
+Memory chart - GL1C Cache (L1)
+-------------------------------
 
-.. jinja:: rdna1151-memory-chart-gl1c-cache-l1-gfx1151
-   :file: _templates/metrics_table.j2
+.. tab-set::
 
-Return to :doc:`rdna-performance-model` or the top-level :doc:`../performance-model`.
-Previous: :doc:`tcp-cache`. Next: :doc:`gl2-cache`.
+   .. tab-item:: RDNA 3.5 (gfx1151)
+      :selected:
+
+      .. jinja:: rdna1151-memory-chart-gl1c-cache-l1-gfx1151
+         :file: _templates/metrics_table.j2
