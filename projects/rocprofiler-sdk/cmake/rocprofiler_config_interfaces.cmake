@@ -13,6 +13,7 @@ target_include_directories(
     rocprofiler-sdk-headers
     INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/include>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/include>
+              $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source>
               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
@@ -216,20 +217,6 @@ endif()
 
 find_package(libdw REQUIRED)
 target_link_libraries(rocprofiler-sdk-dw INTERFACE libdw::libdw)
-
-# ----------------------------------------------------------------------------------------#
-#
-# amd aql
-#
-# ----------------------------------------------------------------------------------------#
-
-find_library(
-    hsa-amd-aqlprofile64_library
-    NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
-    HINTS ${rocm_version_DIR} ${ROCM_PATH}
-    PATHS ${rocm_version_DIR} ${ROCM_PATH})
-
-target_link_libraries(rocprofiler-sdk-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_library})
 
 # ----------------------------------------------------------------------------------------#
 #
