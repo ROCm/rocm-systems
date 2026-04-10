@@ -6,6 +6,7 @@
 
 #include "comm.h"
 #include "register_inline.h"
+#include <algorithm>
 #include <cuda.h>
 #include "rocmwrap.h"
 #include "ce_coll.h"
@@ -51,11 +52,13 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   {
     int multiStreams = rcclParamCeMultiStreams();
     if (multiStreams > 0) {
-      comm->ceColl.nCopyStreams = min(multiStreams, RCCL_CE_NUM_COPY_STREAMS);
-      INFO(NCCL_INIT, "CE multi-stream enabled: rank %d using %d streams (requested=%d)", comm->rank, comm->ceColl.nCopyStreams, multiStreams);
-      for (int i = 0; i < comm->ceColl.nCopyStreams; i++) {
+      int targetStreams = std::min(multiStreams, (int)RCCL_CE_NUM_COPY_STREAMS);
+      INFO(NCCL_INIT, "CE multi-stream enabled: rank %d using %d streams (requested=%d)", comm->rank, targetStreams, multiStreams);
+      for (int i = 0; i < targetStreams; i++) {
         CUDACHECKGOTO(cudaStreamCreateWithFlags(&comm->ceColl.copyStreams[i], cudaStreamNonBlocking), ret, fail);
         CUDACHECKGOTO(cudaEventCreateWithFlags(&comm->ceColl.copyEvents[i], cudaEventDisableTiming), ret, fail);
+        // Track successfully created pairs so ncclCeFinalize only cleans up what exists
+        comm->ceColl.nCopyStreams++;
       }
     } 
   }
@@ -336,7 +339,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         int batchSize = comm->ceColl.intraBatchSyncFreq;
         for (int i = 0; i < params->numOps; i += batchSize) {
           int currentBatchSize = (i + batchSize <= params->numOps) ? batchSize : params->numOps - i;
-          INFO(NCCL_COLL, "CE: rank %d -> Batch path with intraBatchSync (cudaMemcpyBatchAsync, intraBatchSync), numOps=%lu, batchSize=%d", comm->rank, params->numOps, currentBatchSize);      
+          INFO(NCCL_COLL, "CE: rank %d -> Batch path with intraBatchSync (cudaMemcpyBatchAsync, intraBatchSync), numOps=%zu, batchSize=%d", comm->rank, params->numOps, currentBatchSize);      
           CUDACHECKGOTO(cudaMemcpyBatchAsync(
             (void**)&params->dsts[i], (void**)&params->srcs[i], &params->sizes[i], currentBatchSize,
             params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream), ret, fail);
@@ -348,7 +351,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         }
       } else {
         // Use single batch for all operations
-        INFO(NCCL_COLL, "CE: rank %d -> Batch path without intraBatchSync (cudaMemcpyBatchAsync), numOps=%lu", comm->rank, params->numOps);      
+        INFO(NCCL_COLL, "CE: rank %d -> Batch path without intraBatchSync (cudaMemcpyBatchAsync), numOps=%zu", comm->rank, params->numOps);      
         CUDACHECKGOTO(cudaMemcpyBatchAsync(
           (void**)params->dsts, (void**)params->srcs, params->sizes, params->numOps,
           params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream), ret, fail);
@@ -358,7 +361,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
 
       int nStreams = comm->ceColl.nCopyStreams;
       int activeStreams = ((int)params->numOps < nStreams) ? (int)params->numOps : nStreams;
-      INFO(NCCL_COLL, "CE: rank %d -> No-Batch Multi-Stream path (%d streams), numOps=%lu", comm->rank, activeStreams, params->numOps);
+      INFO(NCCL_COLL, "CE: rank %d -> No-Batch Multi-Stream path (%d streams), numOps=%zu", comm->rank, activeStreams, params->numOps);
 
       // Make copy streams wait on the main stream
       for (int s = 0; s < activeStreams; s++) {
@@ -385,7 +388,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
     } else {
       // For older ROCm versions, fall back to individual transfers
       for (int i = 0; i < params->numOps; i++) {
-        INFO(NCCL_COLL, "CE: rank %d -> No-Batch Single-Stream path (cudaMemcpyAsync), numOps=%lu", comm->rank, params->numOps);      
+        INFO(NCCL_COLL, "CE: rank %d -> No-Batch Single-Stream path (cudaMemcpyAsync), numOps=%zu", comm->rank, params->numOps);      
         CUDACHECKGOTO(cudaMemcpyAsync(
           (void*)params->dsts[i],
           (void*)params->srcs[i],
