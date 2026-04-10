@@ -8,18 +8,18 @@
 Using the rocSHMEM Docker container
 ------------------------------------------
 
-rocSHMEM provides a Dockerfile in ``scripts/build_configs/Dockerfile`` that builds a
+rocSHMEM provides a Dockerfile in ``docker/Dockerfile.ubuntu`` that builds a
 development container with all backends, MPI support, and optional PR testing.
 
 Building the container image
 ----------------------------
 
-Build the default image from the ``scripts/build_configs/`` directory:
+Build the default image from the ``docker/`` directory:
 
 .. code-block:: bash
 
-   cd scripts/build_configs
-   docker build --tag $USER/rocshmem .
+   cd docker
+   docker build --tag $USER/rocshmem -f Dockerfile.ubuntu .
 
 Build arguments
 ^^^^^^^^^^^^^^^
@@ -29,7 +29,7 @@ Build arguments
 
    .. code-block:: bash
 
-      docker build --build-arg PR_NUM=4574 --tag $USER/rocshmem-pr4574 .
+      docker build --build-arg PR_NUM=4574 --tag $USER/rocshmem-pr4574 -f Dockerfile.ubuntu .
 
    When set, the container includes two build directories:
 
