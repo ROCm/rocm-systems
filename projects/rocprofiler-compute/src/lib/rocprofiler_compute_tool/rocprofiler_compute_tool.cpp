@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "dispatch_callback.h"
+#include "sdk_callbacks.h"
 #include "input_parameters.h"
 #include "rocprofiler_compute_tool.h"
 #include "sdk_wrapper.h"
