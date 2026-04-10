@@ -2,6 +2,25 @@
 // SPDX-License-Identifier:  MIT
 #include "dispatch_callback.h"
 
+#include <algorithm>
+#include <iostream>
+#include <map>
+
+bool is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
+{
+    if (!tool->target_kernel_ids.empty() && !tool->target_kernel_ids.count(kernel_id))
+        return false;
+
+    if (!tool->kernel_filter_ranges.empty())
+        return std::any_of(tool->kernel_filter_ranges.begin(),
+                           tool->kernel_filter_ranges.end(),
+                           [kernel_iteration](const auto& range) {
+                               return kernel_iteration >= range.first && kernel_iteration <= range.second;
+                           });
+
+    return true;
+}
+
 void create_counter_collection_profile(
     tool_data_t*                                                                tool,
     rocprofiler_agent_id_t                                                      agent_id,

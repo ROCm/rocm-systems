@@ -2,23 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 #include "dispatch_callback.h"
-#include "helper.hpp"
 #include "input_parameters.h"
 #include "rocprofiler_compute_tool.h"
-
 #include "sdk_wrapper.h"
 
 #include <unistd.h>
 
 #include <fstream>
 #include <iostream>
-#include <mutex>
-#include <set>
-#include <shared_mutex>
-#include <sstream>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 using namespace rocprof_compute_tool;
 
@@ -29,100 +20,8 @@ void test_knobs::set_input_parameters(std::shared_ptr<InputParameters> input_par
     g_input_parameters = input_parameters;
 }
 
-
-#define ROCPROFILER_CALL(result, msg)                                                                  \
-    {                                                                                                  \
-        rocprofiler_status_t CHECKSTATUS = result;                                                     \
-        if (CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                                 \
-        {                                                                                              \
-            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                       \
-            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg                \
-                      << " failed with error code " << CHECKSTATUS << ": " << status_msg << std::endl; \
-            std::stringstream errmsg{};                                                                \
-            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("      \
-                   << status_msg << ")";                                                               \
-            throw std::runtime_error(errmsg.str());                                                    \
-        }                                                                                              \
-    }
-
 namespace
 {
-
-enum class iteration_multiplexing_mode_t
-{
-    DISABLED,
-    SIMPLE,
-    KERNEL,
-    LAUNCH
-};
-
-// Kernel dispatch info struct for iteration multiplexing
-struct kernel_dispatch_info_t
-{
-    uint64_t           kernel_id;
-    uint64_t           queue_id;
-    rocprofiler_dim3_t workgroup_size;
-    rocprofiler_dim3_t grid_size;
-    uint32_t           LDS_memory_size;
-
-    // Overload operator< for strict weak ordering
-    bool operator<(const kernel_dispatch_info_t other) const
-    {
-        // Compare based on kernel_id first, then queue_id, then workgroup_size,
-        // then grid_size, and finally LDS_memory_size
-        return std::tie(kernel_id,
-                        queue_id,
-                        workgroup_size.x,
-                        workgroup_size.y,
-                        workgroup_size.z,
-                        grid_size.x,
-                        grid_size.y,
-                        grid_size.z,
-                        LDS_memory_size) < std::tie(other.kernel_id,
-                                                    other.queue_id,
-                                                    other.workgroup_size.x,
-                                                    other.workgroup_size.y,
-                                                    other.workgroup_size.z,
-                                                    other.grid_size.x,
-                                                    other.grid_size.y,
-                                                    other.grid_size.z,
-                                                    other.LDS_memory_size);
-    }
-};
-
-// Iteration multiplexing data struct
-struct iteration_multiplexing_dispatch_record_t
-{
-    std::size_t                                   config;
-    std::map<uint64_t, std::size_t>               kernel_config;
-    std::map<kernel_dispatch_info_t, std::size_t> dispatch_config;
-};
-
-// Struct to store a single counter info record
-struct counter_info_record_t
-{
-    uint64_t    dispatch_id;
-    uint64_t    agent_id;
-    uint64_t    kernel_id;
-    uint32_t    LDS_memory_size;
-    uint64_t    counter_id;
-    std::string counter_name;
-    double      counter_value;
-};
-
-// Tool data struct, now includes a vector of counter_info_record_t
-struct tool_data_t
-{
-    std::mutex                                 mut{};
-    std::string                                output_filename{};
-    std::unordered_map<uint64_t, std::string>  counter_id_name_map{};
-    std::string                                requested_counters{};
-    std::string                                kernel_filter_include_regex{};
-    std::vector<std::pair<uint64_t, uint64_t>> kernel_filter_ranges{};
-    std::vector<counter_info_record_t>         counter_records;
-    std::set<uint64_t>                         target_kernel_ids{};
-    iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
-};
 
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
@@ -226,38 +125,6 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
-/**
- * Checks if the given kernel dispatch should be targeted for profiling.
- * Returns true if the kernel_id is in the set of target_kernel_ids (if
- * non-empty), and if the kernel_iteration (1-based index) matches the
- * kernel_filter_range (if specified).
- *
- * @param tool Pointer to the tool_data_t structure containing profiling
- * configuration.
- * @param kernel_id The kernel ID of the dispatch.
- * @param kernel_iteration The 1-based index of this kernel_id's dispatch (first
- * dispatch is 1).
- * @return true if the dispatch should be profiled, false otherwise.
- */
-bool is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
-{
-    // If target_kernel_ids is non-empty, only allow those kernel_ids
-    if (!tool->target_kernel_ids.empty() && !tool->target_kernel_ids.count(kernel_id))
-        return false;
-
-    // If kernel_filter_ranges is set, check if kernel_iteration is in any of the
-    // specified ranges
-    if (!tool->kernel_filter_ranges.empty())
-        return std::any_of(tool->kernel_filter_ranges.begin(),
-                           tool->kernel_filter_ranges.end(),
-                           [kernel_iteration](const auto& range) {
-                               return kernel_iteration >= range.first && kernel_iteration <= range.second;
-                           });
-
-    // If no filter ranges are specified, or all checks passed, profile this
-    // dispatch
-    return true;
-}
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
