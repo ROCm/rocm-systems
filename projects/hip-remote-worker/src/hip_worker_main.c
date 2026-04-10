@@ -77,8 +77,17 @@ extern hipError_t hipExtModuleLaunchKernel(hipFunction_t, unsigned int, unsigned
     void**, void**, hipEvent_t, hipEvent_t, unsigned int);
 #endif
 
-/* Include protocol from client */
+/* Include protocol and SHM from client */
 #include "hip_remote/hip_remote_protocol.h"
+#include "hip_remote/hip_remote_shm.h"
+
+#ifndef ATOMIC_LOAD32
+#ifdef _WIN32
+#define ATOMIC_LOAD32(p) (*(volatile uint32_t*)(p))
+#else
+#define ATOMIC_LOAD32(p) __atomic_load_n((volatile uint32_t*)(p), __ATOMIC_ACQUIRE)
+#endif
+#endif
 
 /* SMI handlers (conditionally compiled) */
 #ifdef HIP_WORKER_SMI_ENABLED
@@ -1095,10 +1104,28 @@ static int recv_all(int fd, void* data, size_t len) {
  * ============================================================================ */
 
 static int g_suppress_response = 0;
+HipShmHandle* g_worker_shm = NULL;
 
 static int send_response(int fd, HipRemoteOpCode op_code, uint32_t request_id,
                          const void* payload, size_t payload_size) {
     if (g_suppress_response) return 0;
+
+    /* SHM path: write response to the sync response slot */
+    if (g_worker_shm) {
+        HipRemoteHeader header;
+        hip_remote_init_header(&header, op_code, request_id, (uint32_t)payload_size);
+        header.flags |= HIP_REMOTE_FLAG_RESPONSE;
+
+        size_t total = sizeof(header) + payload_size;
+        uint8_t stack_buf[4096];
+        uint8_t* buf = (total <= sizeof(stack_buf)) ? stack_buf : (uint8_t*)malloc(total);
+        memcpy(buf, &header, sizeof(header));
+        if (payload && payload_size > 0)
+            memcpy(buf + sizeof(header), payload, payload_size);
+        int rc = hip_shm_sync_respond(g_worker_shm, buf, total);
+        if (buf != stack_buf) free(buf);
+        return rc;
+    }
 
     HipRemoteHeader header;
     hip_remote_init_header(&header, op_code, request_id, (uint32_t)payload_size);
@@ -4599,6 +4626,184 @@ static void reset_session_state(void) {
     g_kernel_arg_cache_count = 0;
 }
 
+/* SHM-based client handler: reads from shared memory ring buffer */
+static void handle_client_shm(int tcp_fd, HipShmHandle* shm) {
+    LOG_INFO("SHM client connected (worker pid %d)", (int)getpid());
+
+    /* For sync responses, we write to the SHM response slot.
+     * We need to redirect send_response to write there instead of TCP.
+     * We do this by setting a global SHM pointer that send_response checks. */
+    extern HipShmHandle* g_worker_shm;
+    g_worker_shm = shm;
+
+    size_t msg_buf_size = HIP_SHM_SYNC_SIZE;
+    uint8_t* msg_buf = (uint8_t*)malloc(msg_buf_size);
+    if (!msg_buf) {
+        LOG_ERROR("SHM: failed to allocate sync buffer");
+        g_worker_shm = NULL;
+        return;
+    }
+
+    while (g_running) {
+        /* Drain all pending FnF data FIRST, then check sync.
+         * This ensures FnF side-effects (module loads, mallocs) are
+         * processed before any sync request that depends on them. */
+        while (hip_shm_fnf_readable(shm) >= sizeof(HipRemoteHeader)) {
+            HipRemoteHeader fnf_hdr;
+            if (hip_shm_fnf_read(shm, &fnf_hdr, sizeof(fnf_hdr)) != 0) goto shm_done;
+            if (hip_remote_validate_header(&fnf_hdr) != 0) {
+                LOG_ERROR("SHM: invalid FnF header");
+                goto shm_done;
+            }
+            void* fnf_payload = NULL;
+            if (fnf_hdr.payload_length > 0) {
+                fnf_payload = malloc(fnf_hdr.payload_length);
+                if (!fnf_payload) goto shm_done;
+                if (hip_shm_fnf_read(shm, fnf_payload, fnf_hdr.payload_length) != 0) {
+                    free(fnf_payload);
+                    goto shm_done;
+                }
+            }
+            bool fnf_inline = (fnf_hdr.flags & HIP_REMOTE_FLAG_HAS_INLINE_DATA) != 0;
+            g_suppress_response = (fnf_hdr.flags & HIP_REMOTE_FLAG_NO_REPLY) != 0;
+
+            /* Dispatch FnF request using the same handler switch */
+            switch ((HipRemoteOpCode)fnf_hdr.op_code) {
+                case HIP_OP_LAUNCH_KERNEL:
+                    handle_launch_kernel(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_MALLOC_VADDR:
+                    handle_malloc_vaddr(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length, 0); break;
+                case HIP_OP_MALLOC_ASYNC_VADDR:
+                    handle_malloc_vaddr(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length, 1); break;
+                case HIP_OP_FREE:
+                    handle_free(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_FREE_ASYNC:
+                    handle_free_async(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_MEMCPY: case HIP_OP_MEMCPY_ASYNC:
+                    handle_memcpy(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length, fnf_inline); break;
+                case HIP_OP_MEMCPY_HTOD_CACHED:
+                    handle_memcpy_htod_cached(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length, fnf_inline); break;
+                case HIP_OP_MEMSET: case HIP_OP_MEMSET_ASYNC:
+                    handle_memset(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_STREAM_CREATE: case HIP_OP_STREAM_CREATE_WITH_FLAGS: case HIP_OP_STREAM_CREATE_WITH_PRIORITY:
+                    handle_stream_create(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_STREAM_DESTROY:
+                    handle_stream_destroy(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_STREAM_WAIT_EVENT:
+                    handle_stream_wait_event(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_EVENT_CREATE: case HIP_OP_EVENT_CREATE_WITH_FLAGS:
+                    handle_event_create(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_EVENT_DESTROY:
+                    handle_event_destroy(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_EVENT_RECORD:
+                    handle_event_record(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_MODULE_LOAD_DATA:
+                    handle_module_load_data(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_MODULE_UNLOAD:
+                    handle_module_unload(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_FUNC_SET_ATTRIBUTE:
+                    handle_func_set_attribute(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_FUNC_SET_CACHE_CONFIG:
+                    handle_func_set_cache_config(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                default: break;
+            }
+            g_suppress_response = 0;
+            free(fnf_payload);
+        }
+
+        /* Now check sync slot (after FnF is drained) */
+        int sync_size = hip_shm_sync_recv(shm, msg_buf, msg_buf_size);
+        if (sync_size > 0) {
+            /* Process sync request */
+            if ((size_t)sync_size < sizeof(HipRemoteHeader)) continue;
+            HipRemoteHeader* hdr = (HipRemoteHeader*)msg_buf;
+            if (hip_remote_validate_header(hdr) != 0) {
+                LOG_ERROR("SHM: invalid sync header");
+                break;
+            }
+
+            void* payload = (sync_size > (int)sizeof(HipRemoteHeader))
+                ? msg_buf + sizeof(HipRemoteHeader) : NULL;
+            size_t plen = sync_size - sizeof(HipRemoteHeader);
+
+            bool has_inline_data = (hdr->flags & HIP_REMOTE_FLAG_HAS_INLINE_DATA) != 0;
+            g_suppress_response = 0;
+
+            LOG_DEBUG("SHM sync: %s (id=%u)",
+                      hip_remote_op_name((HipRemoteOpCode)hdr->op_code),
+                      hdr->request_id);
+
+            if (hdr->op_code == HIP_OP_SHUTDOWN) {
+                handle_shutdown(-1, hdr->request_id);
+                break;
+            }
+
+            /* Dispatch sync request using the same handler functions.
+             * Responses go through send_response which checks g_worker_shm. */
+            switch ((HipRemoteOpCode)hdr->op_code) {
+                case HIP_OP_GET_DEVICE_COUNT:
+                    handle_get_device_count(-1, hdr->request_id); break;
+                case HIP_OP_GET_DEVICE:
+                    handle_get_device(-1, hdr->request_id); break;
+                case HIP_OP_SET_DEVICE:
+                    handle_set_device(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_DEVICE_SYNCHRONIZE:
+                    handle_device_synchronize(-1, hdr->request_id); break;
+                case HIP_OP_DEVICE_GET_ATTRIBUTE:
+                    handle_device_get_attribute(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_GET_DEVICE_PROPERTIES:
+                    handle_get_device_properties(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_MODULE_GET_FUNCTION:
+                    handle_module_get_function(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_MODULE_LOAD_AND_GET_FUNCTION:
+                    handle_module_load_and_get_function(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_RUNTIME_GET_VERSION:
+                    handle_runtime_get_version(-1, hdr->request_id); break;
+                case HIP_OP_DRIVER_GET_VERSION:
+                    handle_driver_get_version(-1, hdr->request_id); break;
+                case HIP_OP_MEM_GET_INFO:
+                    handle_mem_get_info(-1, hdr->request_id); break;
+                case HIP_OP_POINTER_GET_ATTRIBUTES:
+                    handle_pointer_get_attributes(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_STREAM_SYNCHRONIZE:
+                    handle_stream_synchronize(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_EVENT_SYNCHRONIZE:
+                    handle_event_synchronize(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_EVENT_ELAPSED_TIME:
+                    handle_event_elapsed_time(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_FUNC_GET_ATTRIBUTES:
+                    handle_func_get_attributes(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_OCCUPANCY_MAX_POTENTIAL_BLOCK_SIZE:
+                    handle_occupancy_max_potential_block_size(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_OCCUPANCY_MAX_ACTIVE_BLOCKS_PER_SM:
+                    handle_occupancy_max_active_blocks_per_sm(-1, hdr->request_id, payload, plen); break;
+                default:
+                    LOG_ERROR("SHM: unhandled sync opcode 0x%04x", hdr->op_code);
+                    send_simple_response(-1, (HipRemoteOpCode)hdr->op_code,
+                                         hdr->request_id, hipErrorNotSupported);
+                    break;
+            }
+            continue;
+        }
+        if (sync_size < 0) break;
+
+        /* No FnF data and no sync data -- yield and retry */
+        if (!ATOMIC_LOAD32(&shm->header->client_alive)) break;
+#ifdef _WIN32
+        SwitchToThread();
+#else
+        sched_yield();
+#endif
+    }
+
+shm_done:
+    free(msg_buf);
+    g_worker_shm = NULL;
+    cleanup_gpu_resources();
+    hip_shm_close(shm);
+    LOG_INFO("SHM client disconnected (GPU resources cleaned up)");
+}
+
 static void handle_client(int client_fd) {
     LOG_INFO("Client connected (worker pid %d)", (int)getpid());
 
@@ -5281,8 +5486,39 @@ int main(int argc, char** argv) {
         setsockopt(client_fd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
 #endif
 
-#ifdef _WIN32
-        /* Windows: always sequential mode (no fork) */
+        /* Read init header to check for SHM transport */
+        HipRemoteHeader init_hdr;
+        if (recv_all(client_fd, &init_hdr, sizeof(init_hdr)) != 0 ||
+            hip_remote_validate_header(&init_hdr) != 0 ||
+            init_hdr.op_code != HIP_OP_INIT) {
+            LOG_ERROR("Bad init from client");
+            close_socket(client_fd);
+            continue;
+        }
+
+        /* Read init payload (may contain SHM name) */
+        char shm_name[HIP_SHM_NAME_MAX] = {0};
+        int use_shm = 0;
+        if (init_hdr.payload_length > 0) {
+            size_t plen = init_hdr.payload_length;
+            if (plen < sizeof(shm_name)) {
+                if (recv_all(client_fd, shm_name, plen) == 0 && shm_name[0]) {
+                    shm_name[plen] = '\0';
+                    use_shm = 1;
+                    LOG_INFO("SHM transport requested: %s", shm_name);
+                }
+            } else {
+                uint8_t drain[256];
+                size_t remaining = plen;
+                while (remaining > 0) {
+                    size_t chunk = remaining < sizeof(drain) ? remaining : sizeof(drain);
+                    if (recv_all(client_fd, drain, chunk) != 0) break;
+                    remaining -= chunk;
+                }
+            }
+        }
+
+        /* Initialize HIP if needed */
         if (!g_hip_initialized) {
             hipError_t herr = hipSetDevice(g_default_device);
             if (herr != hipSuccess) {
@@ -5293,21 +5529,26 @@ int main(int argc, char** argv) {
             g_hip_initialized = 1;
             if (g_gpu_cache_enabled) gpu_cache_size_from_vram();
         }
+
+        /* Send init response via TCP */
+        handle_init(client_fd, init_hdr.request_id);
+
         reset_session_state();
+
+        if (use_shm) {
+            HipShmHandle shm;
+            if (hip_shm_open(&shm, shm_name) == 0) {
+                handle_client_shm(client_fd, &shm);
+                close_socket(client_fd);
+                continue;
+            }
+            LOG_ERROR("Failed to open SHM %s, falling back to TCP", shm_name);
+        }
+
+#ifdef _WIN32
         handle_client(client_fd);
 #else
         if (g_gpu_cache_enabled) {
-            if (!g_hip_initialized) {
-                hipError_t herr = hipSetDevice(g_default_device);
-                if (herr != hipSuccess) {
-                    LOG_ERROR("HIP init failed: %s", hipGetErrorString(herr));
-                    close(client_fd);
-                    continue;
-                }
-                g_hip_initialized = 1;
-                gpu_cache_size_from_vram();
-            }
-            reset_session_state();
             handle_client(client_fd);
             continue;
         }
@@ -5321,12 +5562,6 @@ int main(int argc, char** argv) {
 
         if (pid == 0) {
             close(g_server_fd);
-            hipError_t herr = hipSetDevice(g_default_device);
-            if (herr != hipSuccess) {
-                LOG_ERROR("Child HIP init failed: %s", hipGetErrorString(herr));
-                _exit(1);
-            }
-
             handle_client(client_fd);
             _exit(0);
         }

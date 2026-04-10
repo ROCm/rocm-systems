@@ -23,6 +23,7 @@
 #include "hip_remote/hip_remote_internal.h"
 #include "hip_remote/hip_remote_protocol.h"
 #include "hip_remote/hip_remote_platform.h"
+#include "hip_remote/hip_remote_shm.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -60,6 +61,11 @@ static size_t  g_write_buffer_used = 0;
  * Disabled (0) for high-latency links where fewer larger sends are better. */
 static int g_eager_flush_interval = 0;
 static int g_fnf_since_flush = 0;
+
+/* Shared memory IPC transport (for localhost) */
+static int g_use_shm = 0;
+static HipShmHandle g_shm;
+static int g_shm_initialized = 0;
 
 /* ============================================================================
  * Profiling Counters
@@ -291,7 +297,12 @@ static int flush_write_buffer_locked(void) {
     if (g_write_buffer_used == 0) return 0;
     if (!g_client_state.connected) return -1;
 
-    int rc = send_all(g_client_state.socket_fd, g_write_buffer, g_write_buffer_used);
+    int rc;
+    if (g_use_shm && g_shm_initialized) {
+        rc = hip_shm_fnf_write(&g_shm, g_write_buffer, g_write_buffer_used);
+    } else {
+        rc = send_all(g_client_state.socket_fd, g_write_buffer, g_write_buffer_used);
+    }
     if (rc != 0) {
         mark_disconnected_locked("flush write buffer");
         g_write_buffer_used = 0;
@@ -387,18 +398,32 @@ static void init_from_environment(void) {
     const char* eager = getenv("HIP_REMOTE_EAGER_FLUSH");
     if (eager) {
         g_eager_flush_interval = atoi(eager);
-    } else {
-        /* Auto-detect: enable eager flush for localhost, disable for remote */
+    }
+
+    /* Auto-detect transport: SHM for localhost, TCP for remote */
+    const char* transport = getenv("HIP_REMOTE_TRANSPORT");
+    {
         const char* host = getenv("TF_WORKER_HOST");
-        if (host && (strcmp(host, "localhost") == 0 ||
-                     strcmp(host, "127.0.0.1") == 0 ||
-                     strcmp(host, "::1") == 0)) {
+        int is_local = host && (strcmp(host, "localhost") == 0 ||
+                                strcmp(host, "127.0.0.1") == 0 ||
+                                strcmp(host, "::1") == 0);
+
+        if (transport && strcmp(transport, "shm") == 0) {
+            g_use_shm = 1;
+        } else if (transport && strcmp(transport, "tcp") == 0) {
+            g_use_shm = 0;
+        } else {
+            g_use_shm = is_local;
+        }
+
+        if (!eager && is_local && !g_use_shm) {
             g_eager_flush_interval = 64;
         }
     }
 
-    hip_remote_log_debug("Client initialized: host=%s port=%d",
-                         g_client_state.worker_host, g_client_state.worker_port);
+    hip_remote_log_debug("Client initialized: host=%s port=%d transport=%s",
+                         g_client_state.worker_host, g_client_state.worker_port,
+                         g_use_shm ? "shm" : "tcp");
 }
 
 /**
@@ -474,14 +499,42 @@ static int connect_to_worker_locked(void) {
     g_client_state.connected = true;
     hip_remote_log_debug("Connected successfully");
 
-    /* Send init message */
+    /* Create SHM region if using shared memory transport */
+    char shm_name[HIP_SHM_NAME_MAX] = {0};
+    if (g_use_shm) {
+#ifdef _WIN32
+        snprintf(shm_name, sizeof(shm_name), "hip_shm_%lu",
+                 (unsigned long)GetCurrentProcessId());
+#else
+        snprintf(shm_name, sizeof(shm_name), "/hip_shm_%d",
+                 (int)getpid());
+#endif
+        if (hip_shm_create(&g_shm, shm_name) != 0) {
+            hip_remote_log_error("Failed to create SHM, falling back to TCP");
+            g_use_shm = 0;
+            shm_name[0] = '\0';
+        } else {
+            hip_remote_log_debug("SHM created: %s (%zu bytes)",
+                                 shm_name, g_shm.total_size);
+        }
+    }
+
+    /* Send init message (with SHM name if applicable) */
+    uint32_t init_payload_size = shm_name[0] ? (uint32_t)strlen(shm_name) + 1 : 0;
     HipRemoteHeader header;
     hip_remote_init_header(&header, HIP_OP_INIT,
-                           g_client_state.next_request_id++, 0);
+                           g_client_state.next_request_id++,
+                           init_payload_size);
 
     if (send_all(g_client_state.socket_fd, &header, sizeof(header)) != 0) {
         mark_disconnected_locked("send init");
         return -1;
+    }
+    if (init_payload_size > 0) {
+        if (send_all(g_client_state.socket_fd, shm_name, init_payload_size) != 0) {
+            mark_disconnected_locked("send init shm name");
+            return -1;
+        }
     }
 
     /* Receive init response */
@@ -536,9 +589,30 @@ static int connect_to_worker_locked(void) {
         free(buf);
     }
 
-    hip_remote_log_debug("Init handshake complete");
+    if (g_use_shm && shm_name[0]) {
+        /* Wait for the worker to open the SHM and set worker_alive */
+        int wait_ms = 0;
+        while (!g_shm.header->worker_alive && wait_ms < 5000) {
+#ifdef _WIN32
+            Sleep(1);
+#else
+            usleep(1000);
+#endif
+            wait_ms++;
+        }
+        if (g_shm.header->worker_alive) {
+            g_shm_initialized = 1;
+            hip_remote_log_debug("SHM transport active: %s (waited %dms)", shm_name, wait_ms);
+        } else {
+            hip_remote_log_error("SHM: worker did not open SHM within 5s, falling back to TCP");
+            hip_shm_close(&g_shm);
+            g_use_shm = 0;
+        }
+    }
 
-    /* Clear any stale errors from failed connection attempts during DLL loading */
+    hip_remote_log_debug("Init handshake complete (transport=%s)",
+                         g_shm_initialized ? "shm" : "tcp");
+
     g_client_state.last_error = hipSuccess;
     return 0;
 }
@@ -591,6 +665,11 @@ void hip_remote_disconnect(void) {
         g_client_state.socket_fd = HIP_INVALID_SOCKET;
         g_client_state.connected = false;
         g_permanently_disconnected = 1;
+
+        if (g_shm_initialized) {
+            hip_shm_close(&g_shm);
+            g_shm_initialized = 0;
+        }
     }
 
     hip_mutex_unlock(&g_client_state.lock);
@@ -634,7 +713,57 @@ hipError_t hip_remote_request(
         return hipErrorNotInitialized;
     }
 
-    /* Send request */
+    /* SHM sync path: pack header + payload into sync slot, get response */
+    if (g_use_shm && g_shm_initialized) {
+        HipRemoteHeader header;
+        hip_remote_init_header(&header, op_code,
+                               g_client_state.next_request_id++,
+                               (uint32_t)request_size);
+
+        /* Build sync request: header + payload */
+        size_t total_req = sizeof(header) + (request ? request_size : 0);
+        uint8_t sync_buf[4096];
+        uint8_t* req_buf = (total_req <= sizeof(sync_buf))
+            ? sync_buf : (uint8_t*)malloc(total_req);
+        memcpy(req_buf, &header, sizeof(header));
+        if (request && request_size > 0)
+            memcpy(req_buf + sizeof(header), request, request_size);
+
+        /* Send sync request and wait for response via SHM */
+        uint8_t resp_buf[4096];
+        size_t resp_total = sizeof(HipRemoteHeader) + response_size;
+        uint8_t* rbuf = (resp_total <= sizeof(resp_buf))
+            ? resp_buf : (uint8_t*)malloc(resp_total);
+
+        int rsize = hip_shm_sync_request(&g_shm, req_buf, total_req,
+                                         rbuf, resp_total);
+        if (req_buf != sync_buf) free(req_buf);
+
+        if (rsize < 0) {
+            if (rbuf != resp_buf) free(rbuf);
+            mark_disconnected_locked("shm sync");
+            hip_mutex_unlock(&g_client_state.lock);
+            return hipErrorNotInitialized;
+        }
+
+        /* Parse response: skip response header, copy payload */
+        hipError_t result = hipSuccess;
+        if (rsize >= (int)sizeof(HipRemoteHeader) && response && response_size > 0) {
+            size_t payload_size = rsize - sizeof(HipRemoteHeader);
+            size_t copy = payload_size < response_size ? payload_size : response_size;
+            memcpy(response, rbuf + sizeof(HipRemoteHeader), copy);
+            HipRemoteResponseHeader* resp = (HipRemoteResponseHeader*)response;
+            result = (hipError_t)resp->error_code;
+        }
+
+        if (rbuf != resp_buf) free(rbuf);
+        if (result != 500 && result != 600 && result != 801)
+            g_client_state.last_error = result;
+        hip_mutex_unlock(&g_client_state.lock);
+        return result;
+    }
+
+    /* TCP sync path */
     HipRemoteHeader header;
     hip_remote_init_header(&header, op_code,
                            g_client_state.next_request_id++,
@@ -761,15 +890,25 @@ hipError_t hip_remote_request_fire_and_forget(
             hip_mutex_unlock(&g_client_state.lock);
             return hipErrorNotInitialized;
         }
-        hip_iovec_t iov[2] = {
-            { &header, sizeof(header) },
-            { request, request_size }
-        };
-        int nv = (request && request_size > 0) ? 2 : 1;
-        if (send_all_v(g_client_state.socket_fd, iov, nv) != 0) {
-            mark_disconnected_locked("send (fnf)");
-            hip_mutex_unlock(&g_client_state.lock);
-            return hipErrorNotInitialized;
+        if (g_use_shm && g_shm_initialized) {
+            if (hip_shm_fnf_write(&g_shm, &header, sizeof(header)) != 0 ||
+                (request && request_size > 0 &&
+                 hip_shm_fnf_write(&g_shm, request, request_size) != 0)) {
+                mark_disconnected_locked("send (fnf shm)");
+                hip_mutex_unlock(&g_client_state.lock);
+                return hipErrorNotInitialized;
+            }
+        } else {
+            hip_iovec_t iov[2] = {
+                { &header, sizeof(header) },
+                { request, request_size }
+            };
+            int nv = (request && request_size > 0) ? 2 : 1;
+            if (send_all_v(g_client_state.socket_fd, iov, nv) != 0) {
+                mark_disconnected_locked("send (fnf)");
+                hip_mutex_unlock(&g_client_state.lock);
+                return hipErrorNotInitialized;
+            }
         }
         g_fnf_since_flush = 0;
     }
@@ -824,18 +963,30 @@ hipError_t hip_remote_request_with_data_fire_and_forget(
             hip_mutex_unlock(&g_client_state.lock);
             return hipErrorNotInitialized;
         }
-        hip_iovec_t iov[3] = {
-            { &header, sizeof(header) },
-            { request, request_size },
-            { data, data_size }
-        };
-        int nv = 1;
-        if (request && request_size > 0) nv = 2;
-        if (data && data_size > 0) nv = 3;
-        if (send_all_v(g_client_state.socket_fd, iov, nv) != 0) {
-            mark_disconnected_locked("send (fnf+data)");
-            hip_mutex_unlock(&g_client_state.lock);
-            return hipErrorNotInitialized;
+        if (g_use_shm && g_shm_initialized) {
+            if (hip_shm_fnf_write(&g_shm, &header, sizeof(header)) != 0 ||
+                (request && request_size > 0 &&
+                 hip_shm_fnf_write(&g_shm, request, request_size) != 0) ||
+                (data && data_size > 0 &&
+                 hip_shm_fnf_write(&g_shm, data, data_size) != 0)) {
+                mark_disconnected_locked("send (fnf+data shm)");
+                hip_mutex_unlock(&g_client_state.lock);
+                return hipErrorNotInitialized;
+            }
+        } else {
+            hip_iovec_t iov[3] = {
+                { &header, sizeof(header) },
+                { request, request_size },
+                { data, data_size }
+            };
+            int nv = 1;
+            if (request && request_size > 0) nv = 2;
+            if (data && data_size > 0) nv = 3;
+            if (send_all_v(g_client_state.socket_fd, iov, nv) != 0) {
+                mark_disconnected_locked("send (fnf+data)");
+                hip_mutex_unlock(&g_client_state.lock);
+                return hipErrorNotInitialized;
+            }
         }
         g_fnf_since_flush = 0;
     }
@@ -875,7 +1026,7 @@ hipError_t hip_remote_request_with_data(
         return hipErrorNotInitialized;
     }
 
-    /* Send request with inline data */
+    /* Build request with inline data */
     HipRemoteHeader header;
     hip_remote_init_header(&header, op_code,
                            g_client_state.next_request_id++,
@@ -886,6 +1037,51 @@ hipError_t hip_remote_request_with_data(
                          hip_remote_op_name(op_code),
                          header.request_id, request_size, data_size);
 
+    /* SHM sync-with-data path */
+    if (g_use_shm && g_shm_initialized) {
+        size_t total_req = sizeof(header) + request_size + data_size;
+        uint8_t* req_buf = (uint8_t*)malloc(total_req);
+        if (!req_buf) {
+            hip_mutex_unlock(&g_client_state.lock);
+            return hipErrorOutOfMemory;
+        }
+        size_t off = 0;
+        memcpy(req_buf + off, &header, sizeof(header)); off += sizeof(header);
+        if (request && request_size > 0) {
+            memcpy(req_buf + off, request, request_size); off += request_size;
+        }
+        if (data && data_size > 0) {
+            memcpy(req_buf + off, data, data_size); off += data_size;
+        }
+
+        uint8_t resp_buf[4096];
+        size_t resp_total = sizeof(HipRemoteHeader) + response_size;
+        uint8_t* rbuf = (resp_total <= sizeof(resp_buf))
+            ? resp_buf : (uint8_t*)malloc(resp_total);
+
+        int rsize = hip_shm_sync_request(&g_shm, req_buf, total_req,
+                                         rbuf, resp_total);
+        free(req_buf);
+
+        hipError_t result = hipSuccess;
+        if (rsize >= (int)sizeof(HipRemoteHeader) && response && response_size > 0) {
+            size_t payload_size = rsize - sizeof(HipRemoteHeader);
+            size_t copy = payload_size < response_size ? payload_size : response_size;
+            memcpy(response, rbuf + sizeof(HipRemoteHeader), copy);
+            HipRemoteResponseHeader* resp = (HipRemoteResponseHeader*)response;
+            result = (hipError_t)resp->error_code;
+        } else if (rsize < 0) {
+            result = hipErrorNotInitialized;
+        }
+
+        if (rbuf != resp_buf) free(rbuf);
+        if (result != 500 && result != 600 && result != 801)
+            g_client_state.last_error = result;
+        hip_mutex_unlock(&g_client_state.lock);
+        return result;
+    }
+
+    /* TCP path */
     hip_iovec_t iov[3] = {
         { &header, sizeof(header) },
         { request, request_size },

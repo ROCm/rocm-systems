@@ -49,6 +49,7 @@ set(HIP_REMOTE_SOURCES
   src/hip_api_graph.c
   src/hip_api_fatbin.c
   src/hip_api_stubs_gen.c
+  src/hip_remote_shm.c
 )
 
 set(HIP_REMOTE_HEADERS
@@ -101,7 +102,7 @@ elseif(WIN32)
     WINDOWS_EXPORT_ALL_SYMBOLS ON
   )
 else()
-  target_link_libraries(amdhip64 PRIVATE pthread)
+  target_link_libraries(amdhip64 PRIVATE pthread rt)
 endif()
 
 ################################################################################

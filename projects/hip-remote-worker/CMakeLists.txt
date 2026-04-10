@@ -66,8 +66,11 @@ endif()
 # Executable target
 ################################################################################
 
+set(HIP_REMOTE_SHM_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../hip-remote-client/src/hip_remote_shm.c")
+
 add_executable(hip-worker
   src/hip_worker_main.c
+  ${HIP_REMOTE_SHM_SRC}
 )
 
 target_include_directories(hip-worker PRIVATE
@@ -88,7 +91,7 @@ if(WIN32)
     target_link_libraries(hip-worker PRIVATE hip::host)
   endif()
 else()
-  target_link_libraries(hip-worker PRIVATE hip::host pthread)
+  target_link_libraries(hip-worker PRIVATE hip::host pthread rt)
 endif()
 
 ################################################################################
