@@ -200,7 +200,7 @@ instructions.
 .. _matrix-instruction-mix:
 
 Matrix instruction mix
---------------------
+----------------------
 
 .. warning::
 
