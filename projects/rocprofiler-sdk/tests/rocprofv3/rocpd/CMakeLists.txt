@@ -284,10 +284,17 @@ rocprofiler_add_integration_execute_test(
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-rocpd
-    TEST_PATHS validate.py
-    COPY conftest.py
+    TEST_PATHS
+    COPY conftest.py validate.py
     CONFIG pytest.ini
-    ARGS --json-input
+    BUNDLE_TESTS
+    ARGS validate.py::test_perfetto_data
+         validate.py::test_otf2_data
+         validate.py::test_otf2_system_tree_node_data
+         validate.py::test_csv_data
+         validate.py::test_arg_annotations_exist
+         validate.py::test_event_id_annotations
+         --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
          --otf2-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2
@@ -308,10 +315,15 @@ rocprofiler_add_integration_validate_test(
 # Validate region category filtering
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-rocpd-region-category-validation
-    TEST_PATHS validate_summary.py
-    COPY conftest.py
+    TEST_PATHS
+    COPY conftest.py validate.py
     CONFIG pytest.ini
-    ARGS --summary-kernel-dir
+    BUNDLE_TESTS
+    ARGS validate.py::test_summary_region_category_kernel
+         validate.py::test_summary_region_category_hip
+         validate.py::test_summary_region_category_multiple
+         validate.py::test_summary_region_category_none
+         --summary-kernel-dir
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel
          --summary-hip-dir
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-hip
