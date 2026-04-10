@@ -1,7 +1,10 @@
 
 set(target rocprofiler-compute-tool)
 add_library(${target} SHARED
+    rocprofiler_compute_tool.h
     rocprofiler_compute_tool.cpp
+    dispatch_callback.h
+    dispatch_callback.cpp
     helper.hpp
     helper.cpp
     input_parameters.h
