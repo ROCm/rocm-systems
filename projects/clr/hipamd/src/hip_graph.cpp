@@ -2673,6 +2673,12 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  if (HIP_GRAPH_USE_MEMPOOL &&
+      reinterpret_cast<hip::GraphExec*>(hGraphExec)->AreMemNodesPreAllocated()) {
+    *updateResult_out = hipGraphExecUpdateErrorNotSupported;
+    HIP_RETURN(hipErrorGraphExecUpdateFailure);
+  }
+
   std::vector<hip::GraphNode*> newGraphNodes;
   reinterpret_cast<hip::Graph*>(hGraph)->TopologicalOrder(newGraphNodes);
   std::vector<hip::GraphNode*>& oldGraphExecNodes =

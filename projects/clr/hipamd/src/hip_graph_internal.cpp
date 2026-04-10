@@ -728,6 +728,30 @@ bool Graph::TopologicalOrder(std::vector<Node>& TopoOrder) {
 }
 
 // ================================================================================================
+bool Graph::PreAllocateMemNodes(hip::Stream* stream) {
+  if (mem_nodes_pre_allocated_) return true;
+  for (auto node : topoOrder_) {
+    if (node->GetType() == hipGraphNodeTypeMemAlloc) {
+      if (!static_cast<GraphMemAllocNode*>(node)->PreAllocate(stream)) {
+        return false;
+      }
+    }
+  }
+  mem_nodes_pre_allocated_ = true;
+  return true;
+}
+
+void Graph::FreePreAllocatedMemNodes(hip::Stream* stream) {
+  if (!mem_nodes_pre_allocated_) return;
+  for (auto node : topoOrder_) {
+    if (node->GetType() == hipGraphNodeTypeMemFree) {
+      static_cast<GraphMemFreeNode*>(node)->PreFree(stream);
+    }
+  }
+  mem_nodes_pre_allocated_ = false;
+}
+
+// ================================================================================================
 void Graph::clone(Graph* newGraph, bool cloneNodes) const {
   newGraph->pOriginalGraph_ = this;
   for (hip::GraphNode* entry : vertices_) {
@@ -1962,7 +1986,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   }
 
   if (flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) {
-    if (firstNode != nullptr) {
+    if (firstNode != nullptr && !(HIP_GRAPH_USE_MEMPOOL && AreMemNodesPreAllocated())) {
       firstNode->GetParentGraph()->FreeAllMemory(launch_stream);
       firstNode->GetParentGraph()->memalloc_nodes_ = 0;
       if (!AMD_DIRECT_DISPATCH) {
@@ -1976,11 +2000,16 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
 
   // If this is a repeat launch, make sure corresponding MemFreeNode exists for a MemAlloc node
   if (repeatLaunch_ == true) {
-    if (firstNode != nullptr && firstNode->GetParentGraph()->GetMemAllocNodeCount() > 0) {
+    if (firstNode != nullptr && firstNode->GetParentGraph()->GetMemAllocNodeCount() > 0
+        && !(HIP_GRAPH_USE_MEMPOOL && AreMemNodesPreAllocated())) {
       return hipErrorInvalidValue;
     }
   } else {
     repeatLaunch_ = true;
+  }
+
+  if (HIP_GRAPH_USE_MEMPOOL && HIP_MEM_POOL_USE_VM && !AreMemNodesPreAllocated()) {
+    PreAllocateMemNodes(launch_stream);
   }
 
   ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "GraphExec::Run max_streams: %d, on device: %d",

@@ -851,6 +851,11 @@ class Graph {
   void IncrementMemAllocNodeCount() { memalloc_nodes_++; }
   //! Decrements the graph memory alloc node count
   void DecrementMemAllocNodeCount() { memalloc_nodes_--; }
+
+  bool AreMemNodesPreAllocated() const { return mem_nodes_pre_allocated_; }
+  bool PreAllocateMemNodes(hip::Stream* stream);
+  void FreePreAllocatedMemNodes(hip::Stream* stream);
+
   //! returns device object
   hip::Device* Device() { return device_; }
   bool IsLeafNodeSyncRequired() const {
@@ -910,6 +915,7 @@ class Graph {
   unsigned int id_;
   static int nextID;
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
+  bool mem_nodes_pre_allocated_ = false;
   std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
   std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream
   //!< Used as a temporary storage for the waiting nodes
@@ -958,6 +964,9 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExec() {
+    if (HIP_GRAPH_USE_MEMPOOL && AreMemNodesPreAllocated()) {
+      FreePreAllocatedMemNodes(g_devices[instantiateDeviceId_]->NullStream());
+    }
     for (auto streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
@@ -2607,6 +2616,7 @@ class GraphEmptyNode : public GraphNode {
 class GraphMemAllocNode final : public GraphNode {
   hipMemAllocNodeParams node_params_;  // Node parameters for memory allocation
   amd::Memory* va_ = nullptr;          // Memory object, which holds a virtual address
+  bool pre_allocated_ = false;
 
   // Derive the new class for VirtualMapCommand,
   // so runtime can allocate memory during the execution of command
@@ -2656,6 +2666,7 @@ class GraphMemAllocNode final : public GraphNode {
       queue()->device().SetMemAccess(vaddr_sub_obj->getSvmPtr(), aligned_size,
                                      amd::Device::VmmAccess::kReadWrite);
       graph_->IncrementMemAllocNodeCount();  // Increment count of unreleased mem alloc nodes
+      setStatus(CL_SUCCESS);
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc execute [%p-%p], %p",
               vaddr_sub_obj->getSvmPtr(),
               reinterpret_cast<char*>(vaddr_sub_obj->getSvmPtr()) + aligned_size, memory());
@@ -2700,6 +2711,9 @@ class GraphMemAllocNode final : public GraphNode {
     auto error = GraphNode::CreateCommand(stream);
     if (!HIP_MEM_POOL_USE_VM) {
       auto ptr = Execute(stream_);
+    } else if (HIP_GRAPH_USE_MEMPOOL && pre_allocated_) {
+      amd::Command* marker = new amd::Marker(*stream, !kMarkerDisableFlush, {});
+      commands_.push_back(marker);
     } else {
       auto graph = GetParentGraph();
       if (graph != nullptr) {
@@ -2739,6 +2753,20 @@ class GraphMemAllocNode final : public GraphNode {
     return node_params_.dptr;
   }
 
+  bool PreAllocate(hip::Stream* stream) {
+    auto graph = GetParentGraph();
+    if (graph == nullptr || va_ == nullptr) return false;
+    auto cmd = new VirtualMemAllocNode(*stream, amd::Event::EventWaitList{}, va_,
+                                       node_params_.bytesize, nullptr, graph);
+    cmd->enqueue();
+    cmd->release();
+    if (cmd->status() >= CL_COMPLETE) {
+      pre_allocated_ = true;
+      return true;
+    }
+    return false;
+  }
+
   void* Execute(hip::Stream* stream = nullptr) {
     auto graph = GetParentGraph();
     if (graph != nullptr) {
@@ -2764,6 +2792,7 @@ class GraphMemAllocNode final : public GraphNode {
 // ================================================================================================
 class GraphMemFreeNode : public GraphNode {
   void* device_ptr_;  // Device pointer of the freed memory
+  bool pre_freed_ = false;
 
   // Derive the new class for VirtualMap command, since runtime has to free
   // real allocation after unmap is complete
@@ -2817,6 +2846,11 @@ class GraphMemFreeNode : public GraphNode {
     auto error = GraphNode::CreateCommand(stream);
     if (!HIP_MEM_POOL_USE_VM) {
       Execute(stream_);
+    } else if (HIP_GRAPH_USE_MEMPOOL &&
+               GetParentGraph() != nullptr &&
+               GetParentGraph()->AreMemNodesPreAllocated()) {
+      amd::Command* marker = new amd::Marker(*stream, !kMarkerDisableFlush, {});
+      commands_.push_back(marker);
     } else {
       auto graph = GetParentGraph();
       if (graph != nullptr) {
@@ -2831,6 +2865,21 @@ class GraphMemFreeNode : public GraphNode {
       }
     }
     return error;
+  }
+
+  void PreFree(hip::Stream* stream) {
+    if (pre_freed_) return;
+    auto graph = GetParentGraph();
+    if (graph == nullptr) return;
+    const auto& dev_info = stream->device().info();
+    auto va = amd::MemObjMap::FindVirtualMemObj(device_ptr_);
+    if (va == nullptr) return;
+    auto cmd = new VirtualMemFreeNode(
+        graph, stream->DeviceId(), *stream, amd::Command::EventWaitList{}, device_ptr_,
+        amd::alignUp(va->getSize(), dev_info.virtualMemAllocGranularityRecommended_), nullptr);
+    cmd->enqueue();
+    cmd->release();
+    pre_freed_ = true;
   }
 
   void Execute(hip::Stream* stream) {

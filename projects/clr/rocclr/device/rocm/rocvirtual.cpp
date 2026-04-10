@@ -3474,7 +3474,6 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       LogError("HSA Command: hsa_amd_vmem_unmap failed");
     }
   }
-
   // Since this is a memory operation, the HW event set for barrier packet
   // may not encapsulate what the command wants to do. Hence clear the hw_event
   constexpr bool kClearHwEvent = true;
