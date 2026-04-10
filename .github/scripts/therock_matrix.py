@@ -69,7 +69,7 @@ project_map = {
     },
     "runtimes": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst",
+        "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk",
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],

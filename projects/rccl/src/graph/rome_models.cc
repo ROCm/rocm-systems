@@ -2457,6 +2457,35 @@ int checkAlltoallWidth(struct rcclRomeModel *romeTopo) {
 }
 
 RCCL_PARAM(DisableRailTrees, "DISABLE_RAIL_TREES", 0);
+RCCL_PARAM(DisableNetOverride, "DISABLE_NET_OVERRIDE", 0);
+
+static void applyNetOverride(struct ncclTopoSystem* system, const char* options) {
+  if (rcclParamDisableNetOverride()) return;
+  if (!checkOption(options, "netOverride")) return;
+  // This override assumes a fixed layout: each NIC hangs off a PCIe switch that
+  // also connects a single GPU, and the non-paired GPUs (usually >= PATH_PHB)
+  // are paired by gpu.dev/2. On systems with different switch fan-out, mixed
+  // placement, or numbering, this can mis-classify paths. Use
+  // RCCL_DISABLE_NET_OVERRIDE to opt out.
+  // Kernel patch https://lkml.org/lkml/2024/6/12/551 is recommended to avoid having to
+  // pair GPUs with NICs (check xml.cc:getBcmLinks)
+  // Applying kernel patch should pick up rome_model_88 in the 8-GPU/4-NIC that does not
+  // apply this override, but we keep this override for other systems that may benefit from it.
+  for (int i = 0; i < system->nodes[NET].count; i++) {
+    for (int j = 0; j < system->nodes[GPU].count; j++) {
+      if (system->nodes[GPU].nodes[j].paths[NET][i].type == PATH_PXB) {
+        int k;
+        for (k = 0; k < system->nodes[GPU].count; k++) {
+          if (k != j &&
+            system->nodes[GPU].nodes[k].gpu.dev/2 == system->nodes[GPU].nodes[j].gpu.dev/2)
+            break;
+        }
+        if (k < system->nodes[GPU].count)
+          system->nodes[GPU].nodes[k].paths[NET][i].type = PATH_PXB;
+      }
+    }
+  }
+}
 
 ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, const char *ringBase) {
   constexpr int NUMA_CPUS = 2;
@@ -2621,35 +2650,21 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
       NCCLCHECK(parseGraph(romeTopoModels[i].treeRail, system, graph, g8, nnets > 1 ? n : NULL, 0));
       if (graph->nChannels) {
         system->useRailOptimizedTrees = true;
-        return ncclSuccess;
       }
     }
 
-    // Fall back to looking for tree configuration from treeBase
-    if (romeTopoModels[i].treeBase != nullptr) {
-      NCCLCHECK(parseGraphLight(romeTopoModels[i].treeBase, system, graph, rdm.data()));
-      if (graph->nChannels) return ncclSuccess;
-    }
-
-    // Fall back to tree from ringBase
-    NCCLCHECK(parseGraph(ringBase != nullptr ? ringBase : romeTopoModels[i].ringBase, system, graph, rdm.data(), nnets > 1 ? n : NULL, 0));
-    // Override GDR distance if requested
-    if (checkOption(romeTopoModels[i].options, "netOverride")) {
-      for (int i = 0; i < system->nodes[NET].count; i++) {
-        for (int j = 0; j < system->nodes[GPU].count; j++) {
-          if (system->nodes[GPU].nodes[j].paths[NET][i].type == PATH_PXB) {
-            int k;
-            for (k = 0; k < system->nodes[GPU].count; k++) {
-              if (k != j &&
-                system->nodes[GPU].nodes[k].gpu.dev/2 == system->nodes[GPU].nodes[j].gpu.dev/2)
-                break;
-            }
-            if (k < system->nodes[GPU].count)
-              system->nodes[GPU].nodes[k].paths[NET][i].type = PATH_PXB;
-          }
-        }
+    if (!graph->nChannels) {
+      // Fall back to looking for tree configuration from treeBase
+      if (romeTopoModels[i].treeBase != nullptr) {
+        NCCLCHECK(parseGraphLight(romeTopoModels[i].treeBase, system, graph, rdm.data()));
       }
     }
+
+    if (!graph->nChannels) {
+      // Fall back to tree from ringBase
+      NCCLCHECK(parseGraph(ringBase != nullptr ? ringBase : romeTopoModels[i].ringBase, system, graph, rdm.data(), nnets > 1 ? n : NULL, 0));
+    }
+    applyNetOverride(system, romeTopoModels[i].options);
     break;
   }
 
@@ -2811,28 +2826,13 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   case NCCL_TOPO_PATTERN_BALANCED_TREE:
     if (romeTopoModels[i].treeBase != nullptr) {
       NCCLCHECK(parseGraphLight(romeTopoModels[i].treeBase, system, graph, g));
-      if (graph->nChannels) return ncclSuccess;
     }
 
-    // Fall back to tree from ringBase
-    NCCLCHECK(parseGraph(ringBase != nullptr ? ringBase : romeTopoModels[i].ringBase, system, graph, rdm, nnets > 1 ? n : NULL, 0));
-    // Override GDR distance if requested
-    if (checkOption(romeTopoModels[i].options, "netOverride")) {
-      for (int i = 0; i < system->nodes[NET].count; i++) {
-        for (int j = 0; j < system->nodes[GPU].count; j++) {
-          if (system->nodes[GPU].nodes[j].paths[NET][i].type == PATH_PXB) {
-            int k;
-            for (k = 0; k < system->nodes[GPU].count; k++) {
-              if (k != j &&
-                system->nodes[GPU].nodes[k].gpu.dev/2 == system->nodes[GPU].nodes[j].gpu.dev/2)
-                break;
-            }
-            if (k < system->nodes[GPU].count)
-              system->nodes[GPU].nodes[k].paths[NET][i].type = PATH_PXB;
-          }
-        }
-      }
+    if (!graph->nChannels) {
+      // Fall back to tree from ringBase
+      NCCLCHECK(parseGraph(ringBase != nullptr ? ringBase : romeTopoModels[i].ringBase, system, graph, rdm, nnets > 1 ? n : NULL, 0));
     }
+    applyNetOverride(system, romeTopoModels[i].options);
     break;
   }
   return ncclSuccess;
