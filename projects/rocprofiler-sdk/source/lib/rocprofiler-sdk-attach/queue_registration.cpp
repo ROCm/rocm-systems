@@ -24,9 +24,22 @@
 #include "queue_registration.hpp"
 #include "table.hpp"
 
+#include "lib/common/environment.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
+
+#include <dlfcn.h>
+#include <execinfo.h>
+
+#include <array>
 #include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace
 {
@@ -43,17 +56,27 @@ using queue_collection_t = std::unordered_map<hsa_queue_t*, queue_entry_t>;
 
 struct queue_registration_t
 {
-    // guards access to both queues collection
-    std::mutex         queues_mutex;
-    queue_collection_t queues;
+    using queue_create_fn_t  = decltype(CoreApiTable::hsa_queue_create_fn);
+    using queue_destroy_fn_t = decltype(CoreApiTable::hsa_queue_destroy_fn);
+    using amd_queue_intercept_create_fn_t =
+        decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn);
+    using amd_profiling_set_profiler_enabled_fn_t =
+        decltype(AmdExtTable::hsa_amd_profiling_set_profiler_enabled_fn);
+    using amd_queue_intercept_register_fn_t =
+        decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn);
+    using status_string_fn_t = decltype(CoreApiTable::hsa_status_string_fn);
 
-    decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn) hsa_amd_queue_intercept_create_fn =
-        nullptr;
-    decltype(AmdExtTable::hsa_amd_profiling_set_profiler_enabled_fn)
-        hsa_amd_profiling_set_profiler_enabled_fn = nullptr;
-    decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn) hsa_amd_queue_intercept_register_fn =
-        nullptr;
-    decltype(CoreApiTable::hsa_status_string_fn) hsa_status_string_fn = nullptr;
+    // guards access to both queues collection
+    std::mutex                       queues_mutex          = {};
+    queue_collection_t               queues                = {};
+    std::unordered_set<hsa_queue_t*> nonintercepted_queues = {};
+
+    queue_create_fn_t                       hsa_queue_create_fn                       = nullptr;
+    queue_destroy_fn_t                      hsa_queue_destroy_fn                      = nullptr;
+    status_string_fn_t                      hsa_status_string_fn                      = nullptr;
+    amd_queue_intercept_create_fn_t         hsa_amd_queue_intercept_create_fn         = nullptr;
+    amd_profiling_set_profiler_enabled_fn_t hsa_amd_profiling_set_profiler_enabled_fn = nullptr;
+    amd_queue_intercept_register_fn_t       hsa_amd_queue_intercept_register_fn       = nullptr;
 };
 
 queue_registration_t*
@@ -93,7 +116,7 @@ get_hsa_status_string(hsa_status_t _status)
 void
 write_interceptor(const void*                             packets,
                   uint64_t                                pkt_count,
-                  uint64_t                                unused,
+                  uint64_t                                user_pkt_index,
                   void*                                   data,
                   hsa_amd_queue_intercept_packet_writer_t writer)
 {
@@ -103,12 +126,111 @@ write_interceptor(const void*                             packets,
     if(entry->user_write_interceptor_func)
     {
         entry->user_write_interceptor_func(
-            packets, pkt_count, unused, entry->user_write_interceptor_data, writer);
+            packets, pkt_count, user_pkt_index, entry->user_write_interceptor_data, writer);
     }
     else
     {
         writer(packets, pkt_count);
     }
+}
+
+struct dl_info
+{
+    std::string_view file_name         = {};
+    std::string_view symbol_name       = {};
+    void*            file_load_address = nullptr;
+    void*            symbol_address    = nullptr;
+
+    std::string as_string() const
+    {
+        return fmt::format(
+            "file_name='{}', symbol_name='{}', file_load_address={}, symbol_address={}",
+            file_name.empty() ? "(null)" : file_name.data(),
+            symbol_name.empty() ? "(null)" : symbol_name.data(),
+            file_load_address,
+            symbol_address);
+    }
+};
+
+template <size_t N = 64>
+auto
+get_frame_info()
+{
+    auto frames = std::array<void*, N>{};
+    auto data   = std::array<std::optional<dl_info>, N>{};
+    frames.fill(nullptr);
+    data.fill(std::nullopt);
+
+    int    n   = ::backtrace(frames.data(), frames.size());
+    size_t idx = 0;
+    for(int i = 0; i < n; ++i)
+    {
+        auto info = Dl_info{
+            .dli_fname = nullptr, .dli_fbase = nullptr, .dli_sname = nullptr, .dli_saddr = nullptr};
+        if(auto ec = dladdr(frames[i], &info); ec != 0)
+        {
+            auto _val = dl_info{};
+            if(info.dli_fname) _val.file_name = info.dli_fname;
+            if(info.dli_sname) _val.symbol_name = info.dli_sname;
+            if(info.dli_saddr) _val.symbol_address = info.dli_saddr;
+            if(info.dli_fbase) _val.file_load_address = info.dli_fbase;
+
+            ROCP_TRACE << fmt::format(
+                "[rocprofiler-sdk-attach] frame {:2} info: {}", i, _val.as_string());
+
+            data.at(idx++) = _val;
+        }
+        else
+        {
+            ROCP_TRACE << fmt::format("[rocprofiler-sdk-attach] frame {:2} info: dladdr on {} "
+                                      "failed (ec={}) with error {}",
+                                      i,
+                                      frames[i],
+                                      ec,
+                                      dlerror());
+        }
+    }
+
+    return data;
+}
+
+constexpr auto default_intercept_libs =
+    std::string_view{"libamdhip64.so,libomp.so,libomptarget.so"};
+
+template <typename Tp>
+bool
+check_frame_info_for_intercept_libraries(Tp&& frame_info)
+{
+    namespace common = ::rocprofiler::common;
+    namespace sdk    = ::rocprofiler::sdk;
+
+    auto intercept_libs_env = common::get_env("ROCP_TOOL_ATTACH_LIBRARIES", default_intercept_libs);
+
+    ROCP_INFO << fmt::format(
+        "[rocprofiler-sdk-attach] Checking backtrace frames for intercept library substrings "
+        "(env var ROCP_TOOL_ATTACH_LIBRARIES='{}')",
+        intercept_libs_env);
+
+    auto intercept_libs = sdk::parse::tokenize(intercept_libs_env);
+
+    for(const auto& fitr : frame_info)
+    {
+        if(!fitr) continue;
+        for(const auto& iitr : intercept_libs)
+        {
+            if(fitr->file_name.find(iitr) != std::string_view::npos)
+            {
+                ROCP_INFO << fmt::format(
+                    "[rocprofiler-sdk-attach] Found frame from library '{}' which matches "
+                    "intercept library substring '{}'. This queue will be intercepted by default.",
+                    fitr->file_name,
+                    iitr);
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 // HSA Intercept Functions (create_queue/destroy_queue)
@@ -123,6 +245,39 @@ create_queue(hsa_agent_t        agent,
              hsa_queue_t**      queue)
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
+
+    if(!check_frame_info_for_intercept_libraries(get_frame_info()))
+    {
+        ROCP_INFO << fmt::format(
+            "[rocprofiler-sdk-attach] Backtrace analysis excludes queue={{{}}} from "
+            "queue interception.\n\tTo include this queue in interception, set "
+            "ROCP_TOOL_ATTACH_LIBRARIES to include a substring of the library in the backtrace "
+            "frames that should be intercepted (default '{}')",
+            static_cast<void*>(*queue),
+            default_intercept_libs);
+
+        // create a queue without interception, and add to nonintercepted_queues so that it is not
+        // accidentally used in interception logic
+        registration->hsa_queue_create_fn(
+            agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
+
+        {
+            std::lock_guard lg(registration->queues_mutex);
+            registration->nonintercepted_queues.insert(*queue);
+        }
+
+        return HSA_STATUS_SUCCESS;
+    }
+    else
+    {
+        ROCP_INFO << fmt::format(
+            "[rocprofiler-sdk-attach] Backtrace analysis includes queue={{{}}} for queue "
+            "interception.\n\tTo exclude this queue from interception, set "
+            "ROCP_TOOL_ATTACH_LIBRARIES to not include the substring of the library responsible "
+            "for creating this queue (default '{}')",
+            static_cast<void*>(*queue),
+            default_intercept_libs);
+    }
 
     // Create new queue in HSA
     hsa_queue_t* new_queue = nullptr;
@@ -186,9 +341,20 @@ destroy_queue(hsa_queue_t* hsa_queue)
     if(registration)
     {
         std::lock_guard lg(registration->queues_mutex);
-        size_t          erase_count = registration->queues.erase(hsa_queue);
-        ROCP_WARNING_IF(erase_count == 0)
-            << "Destroy queue was called for a handle that was not in queues: " << hsa_queue;
+        if(registration->nonintercepted_queues.count(hsa_queue) > 0)
+        {
+            ROCP_INFO << fmt::format(
+                "Destroying non-intercepted queue {{{}}} which was created without interception.",
+                static_cast<void*>(hsa_queue));
+            registration->nonintercepted_queues.erase(hsa_queue);
+            return registration->hsa_queue_destroy_fn(hsa_queue);
+        }
+        else
+        {
+            size_t erase_count = registration->queues.erase(hsa_queue);
+            ROCP_WARNING_IF(erase_count == 0)
+                << "Destroy queue was called for a handle that was not in queues: " << hsa_queue;
+        }
     }
     return HSA_STATUS_SUCCESS;
 }
@@ -234,18 +400,22 @@ queue_registration_init(HsaApiTable* table)
     ROCP_TRACE << "Initializing Queue Registration";
     auto* registration = CHECK_NOTNULL(get_queue_registration());
 
-    CoreApiTable& core_table = *table->core_;
+    auto& core_table    = *table->core_;
+    auto& amd_ext_table = *table->amd_ext_;
+
+    registration->hsa_queue_create_fn  = core_table.hsa_queue_create_fn;
+    registration->hsa_queue_destroy_fn = core_table.hsa_queue_destroy_fn;
+    registration->hsa_status_string_fn = core_table.hsa_status_string_fn;
+
+    registration->hsa_amd_queue_intercept_create_fn =
+        amd_ext_table.hsa_amd_queue_intercept_create_fn;
+    registration->hsa_amd_profiling_set_profiler_enabled_fn =
+        amd_ext_table.hsa_amd_profiling_set_profiler_enabled_fn;
+    registration->hsa_amd_queue_intercept_register_fn =
+        amd_ext_table.hsa_amd_queue_intercept_register_fn;
 
     core_table.hsa_queue_create_fn  = create_queue;
     core_table.hsa_queue_destroy_fn = destroy_queue;
-
-    registration->hsa_amd_queue_intercept_create_fn =
-        *table->amd_ext_->hsa_amd_queue_intercept_create_fn;
-    registration->hsa_amd_profiling_set_profiler_enabled_fn =
-        *table->amd_ext_->hsa_amd_profiling_set_profiler_enabled_fn;
-    registration->hsa_amd_queue_intercept_register_fn =
-        *table->amd_ext_->hsa_amd_queue_intercept_register_fn;
-    registration->hsa_status_string_fn = *table->core_->hsa_status_string_fn;
 }
 
 }  // namespace attach
