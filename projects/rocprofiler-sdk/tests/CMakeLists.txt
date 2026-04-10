@@ -104,3 +104,6 @@ add_subdirectory(late-start-tracing)
 # python bindings
 add_subdirectory(python-bindings)
 add_subdirectory(rocprofv3-avail)
+
+# opencl
+add_subdirectory(opencl)
