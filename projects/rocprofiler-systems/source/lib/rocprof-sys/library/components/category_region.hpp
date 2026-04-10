@@ -59,7 +59,7 @@ cache_region(uint64_t thread_id, const std::string& name, uint64_t start_ts,
              uint64_t end_ts, const std::string& category)
 {
     constexpr size_t      NO_CORRELATION_ID = 0;
-    constexpr const char* CALLSTACK         = "";
+    constexpr const char* CALLSTACK         = "{}";
     constexpr const char* ARGUMENTS         = "";
     rocprofsys::trace_cache::get_buffer_storage().store(
         rocprofsys::trace_cache::region_sample{
