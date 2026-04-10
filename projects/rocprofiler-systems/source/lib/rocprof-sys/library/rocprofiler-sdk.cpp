@@ -2180,7 +2180,18 @@ flush_counter_storage_outputs()
 
     for(const auto& [cleanup_key, storage] : _cleanup_keys)
     {
-        if(storage && storage->storage && storage->manager)
+        if(!storage || !storage->storage) continue;
+        if(storage->manager)
+        {
+            storage->manager->cleanup(cleanup_key);
+        }
+        else
+        {
+            // No tim::manager at construction (add_cleanup was skipped); still flush
+            // timemory storage once at shutdown.
+            counter_storage::write(storage->storage.get(), storage->metric_name,
+                                   storage->metric_description);
+        }
             storage->manager->cleanup(cleanup_key);
     }
 }

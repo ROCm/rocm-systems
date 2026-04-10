@@ -142,6 +142,11 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
                     counter_storage::write(storage_ptr, metric_name, metric_description);
             });
     }
+    else
+    {
+        LOG_WARNING("{} counter_data_tracker is disabled. Can't add cleanup.",
+                    metric_name);
+    }
 
     {
         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
