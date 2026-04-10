@@ -17,12 +17,12 @@ __pycache__
 saved_analysis
 pmc_kernel_top.csv
 VERSION.sha
+**/_build
 
 # temp files
 /tests/Testing
 
 # documentation artifacts
-/_build
 _toc.yml
 
 # Backup directories
