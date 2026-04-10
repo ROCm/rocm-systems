@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
 #include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
@@ -567,6 +568,7 @@ hsa_shut_down_refcnt_impl()
 {
     if(hsa_reference_count_value > 0)
     {
+        if(hsa_reference_count_value == 1) async_copy_fini();
         --hsa_reference_count_value;
         if(hsa_reference_count_value == 0)
         {
