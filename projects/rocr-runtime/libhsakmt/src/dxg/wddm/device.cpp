@@ -192,11 +192,21 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
   if (!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
 
-  if (IsDgpu()) {
-    // local cpu-visible memory
-    if (!FindSegmentId(SegmentKind::kLocalMemory, &segmentId))
-      return HSA_STATUS_ERROR;
+  // local cpu-visible memory
+  if (!GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_MEMORY, segmentId))
+    return HSA_STATUS_ERROR;
 
+  memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
+  stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+  stats.AdapterLuid = adapter_luid_;
+  stats.QuerySegment.SegmentId = segmentId;
+  ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
+  if (ret == 0)
+    usedVis = stats.QueryResult.SegmentInformation.BytesResident;
+
+  // local invisible memory
+  if (device_info_.local_invisible_heap_size) {
+    segmentId++;
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
     stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
     stats.AdapterLuid = adapter_luid_;
