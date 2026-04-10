@@ -105,3 +105,6 @@
 [submodule "projects/rocprofiler-compute/src/vendored/pyyaml"]
 	path = projects/rocprofiler-compute/src/vendored/pyyaml
 	url = https://github.com/yaml/pyyaml.git
+[submodule "projects/rocprofiler-compute/src/lib/external/gtest"]
+	path = projects/rocprofiler-compute/src/lib/external/gtest
+	url = https://github.com/google/googletest.git
