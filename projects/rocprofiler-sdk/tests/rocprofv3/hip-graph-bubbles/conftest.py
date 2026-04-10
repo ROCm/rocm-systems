@@ -70,14 +70,23 @@ def kernel_input_data(request):
 
 @pytest.fixture
 def expected_dispatch_count(request):
-    return request.config.getoption("--expected-dispatch-count")
+    value = request.config.getoption("--expected-dispatch-count")
+    if value is None:
+        pytest.fail("--expected-dispatch-count argument is required but was not provided")
+    return value
 
 
 @pytest.fixture
 def expected_kernels(request):
-    return request.config.getoption("--expected-kernels")
+    value = request.config.getoption("--expected-kernels")
+    if value is None:
+        pytest.fail("--expected-kernels argument is required but was not provided")
+    return value
 
 
 @pytest.fixture
 def expected_iterations(request):
-    return request.config.getoption("--expected-iterations")
+    value = request.config.getoption("--expected-iterations")
+    if value is None:
+        pytest.fail("--expected-iterations argument is required but was not provided")
+    return value
