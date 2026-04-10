@@ -157,9 +157,7 @@ In this syntax:
 * Specialized matrix instructions (``v_mfma_*``) invoke the :ref:`Matrix Core
   (MFMA) hardware units <mfma_units>`.
 
-Although AMDGPU assembly can be written by hand, this is uncommon. Developers
-typically inspect compiler‑generated assembly when optimizing kernels, diagnosing
-register pressure, or tuning memory‑access patterns
+While it is possible to write AMDGPU assembly by hand, this practice is rare. In most cases, developers review compiler‑generated assembly to optimize kernels, analyze register pressure, or refine memory‑access behavior.
 
 The ROCm disassembler (``llvm-objdump``) and ROCm profiler (``rocprofv3``)
 allow inspection of generated GFX ISA alongside high-level HIP or OpenMP source
