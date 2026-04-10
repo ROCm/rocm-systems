@@ -6,10 +6,7 @@
 
 # HIP documentation
 
-HIP is a C++ runtime API and kernel language for AMD GPUs. It allows developers
-to create portable applications by providing a programming interface that is
-similar to NVIDIA CUDA, making it straightforward to port existing NVIDIA CUDA
-code to run on AMD hardware. For more information, see [What is HIP?](./what_is_hip)
+HIP is a C++ runtime API and kernel programming language designed for AMD GPUs. By providing an interface closely aligned with NVIDIA CUDA, HIP allows developers to write portable applications and efficiently migrate existing CUDA code to AMD platforms. Additional information is available in [What is HIP?](./what_is_hip)
 
 Developers looking for a consolidated, book-style version of the ROCm and HIP
 documentation can refer to the AMD ROCm Programming Guide. This guide
