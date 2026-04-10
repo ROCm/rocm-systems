@@ -265,7 +265,13 @@ static_assert(sizeof(SharedMutex) == sizeof(pthread_rwlock_t*), "OS abstraction 
 static_assert(sizeof(Thread) == sizeof(os_thread*), "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
-  void* ret = dlopen(filename.c_str(), RTLD_LAZY);
+  // RTLD_NODELETE keeps the library mapped even after dlclose.
+  // This prevents crashes when the library has circular dependencies:
+  // if libA loads libB, and libB links against libA, then dlclose(libB)
+  // could unmap libA while libA's code is still executing.
+  // With RTLD_NODELETE, dlclose still decrements refcount and runs
+  // destructors, but the code pages remain mapped until process exit.
+  void* ret = dlopen(filename.c_str(), RTLD_LAZY | RTLD_NODELETE);
   if (ret == nullptr) debug_print("LoadLib(%s) failed: %s\n", filename.c_str(), dlerror());
   return *(LibHandle*)&ret;
 }
