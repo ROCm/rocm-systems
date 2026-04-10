@@ -3044,7 +3044,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     returncode_baseline = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_baseline,
-        [],  # No torch-trace flag
+        ["--iteration-multiplexing"],  # No torch-trace flag
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -3067,7 +3067,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     returncode_with_flag = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_with_flag,
-        ["--experimental", "--torch-trace"],
+        ["--experimental", "--torch-trace", "--iteration-multiplexing"],
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -3358,7 +3358,7 @@ def test_profile_invalid_workloads_torch_trace(
     returncode, stdout, stderr = binary_handler_profile_rocprof_compute(
         test_config,
         workload_dir,
-        options=["--experimental", "--torch-trace"],
+        options=["--experimental", "--torch-trace", "--iteration-multiplexing"],
         check_success=False,
         app_name=app_name,
         capture_output=True,

@@ -710,7 +710,7 @@ def test_random_operator_kernel_coverage(
             ],
         },
         workload_dir,
-        ["--experimental", "--torch-trace"],
+        ["--experimental", "--torch-trace", "--iteration-multiplexing"],
         check_success=False,
         app_name="coverage_workload",
     )
