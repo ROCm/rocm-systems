@@ -365,7 +365,6 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
     const bool _prepend  = (_mode == update_mode::PREPEND);
     const bool _append   = (_mode == update_mode::APPEND);
     const bool _weak_upd = (_mode == update_mode::WEAK);
-    const bool _replace  = (_mode == update_mode::REPLACE);
 
     auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
     auto _new_entry   = fmt::format("{}={}", _env_var, _env_val_str);
@@ -415,7 +414,8 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
                 return;
             }
 
-            if(_replace && _found_match)
+            // Only REPLACE reaches here (_weak_upd returned above)
+            if(_found_match)
             {
                 std::free(itr);
                 it = _environ.erase(it);
