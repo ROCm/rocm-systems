@@ -32,7 +32,8 @@
 
 namespace rocshmem {
 
-QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
+QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider)
+    : gda_provider_(gda_provider) {
   int access = IBV_ACCESS_LOCAL_WRITE
              | IBV_ACCESS_REMOTE_WRITE
              | IBV_ACCESS_REMOTE_READ
@@ -99,8 +100,6 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   default:
     assert(false /* invalid nic provider */);
   }
-  gda_provider_ = gda_provider;
-
   /* Setup User Buffer Registration Mechanism */
   pd_ = pd;
   num_user_buffers = envvar::gda::num_user_buffers;
@@ -161,6 +160,7 @@ __device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, u
 #endif
   default:
     assert(false /* invalid nic provider */);
+    __builtin_unreachable();
   }
 }
 
@@ -184,6 +184,7 @@ __device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, ui
 #endif
   default:
     assert(false /* invalid nic provider */);
+    __builtin_unreachable();
   }
 }
 
@@ -208,7 +209,7 @@ __device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintp
 #endif
   default:
     assert(false /* invalid nic provider */);
-    return 0;
+    __builtin_unreachable();
   }
 }
 
@@ -230,7 +231,7 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
 #endif
   default:
     assert(false /* invalid nic provider */);
-    return 0;
+    __builtin_unreachable();
   }
 }
 
@@ -254,6 +255,7 @@ __device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
     #endif
       default:
         assert(false /* invalid nic provider */);
+        __builtin_unreachable();
       }
   }
 }
@@ -277,6 +279,7 @@ __device__ void QueuePair::quiet_single() {
 #endif
   default:
     assert(false /* invalid nic provider */);
+    __builtin_unreachable();
   }
 }
 

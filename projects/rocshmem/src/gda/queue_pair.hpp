@@ -361,7 +361,7 @@ class QueuePair {
   __device__ void ionic_ring_doorbell_single(uint32_t pos);
 #endif
 
-  int gda_provider_{0};
+  const int gda_provider_{0};
 
   /* GDAProvider::BNXT START */
   uint64_t *bnxt_dbr;
