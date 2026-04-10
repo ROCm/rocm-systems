@@ -5,12 +5,8 @@
       - Description
       - Unit
 
-    {% for metric, metric_info in (data or {}).items() %}
+    {% for metric, metric_info in data.items() %}
     * - {{ metric }}
-      - {{ (metric_info.rst | default('')) | replace('\n', ' ') | replace(' * ', ' × ') | replace('**', '««DBLSTAR»»') | replace('*_', '\\*_') | replace('««DBLSTAR»»', '**') | trim }}
-      - {{ metric_info.unit | default('') }}
-    {% else %}
-    * - —
-      - —
-      - —
+      - {{ metric_info.rst }}
+      - {{ metric_info.unit }}
     {% endfor %}

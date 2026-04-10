@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 # Configuration file for the Sphinx documentation builder.
 #
@@ -30,8 +8,6 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import re
-import warnings
-from pathlib import Path
 
 import yaml
 
@@ -62,118 +38,138 @@ exclude_patterns = ["archive", "*/includes"]
 html_static_path = ["sphinx/static/css"]
 html_css_files = ["o_custom.css"]
 
-_docs_root = Path(__file__).resolve().parent
-_metrics_description = _docs_root / "data" / "metrics_description.yaml"
-_per_arch_fallback = (
-    _docs_root.parent
-    / "tools"
-    / "per_arch_metric_definitions"
-    / "gfx942_metrics_description.yaml"
-)
-if _metrics_description.is_file():
-    with _metrics_description.open(encoding="utf-8") as f:
-        metrics_data = yaml.safe_load(f)
-elif _per_arch_fallback.is_file():
-    warnings.warn(
-        f"{_metrics_description} not found; using {_per_arch_fallback.name} for "
-        "jinja metric tables. Run "
-        "`python tools/config_management/metric_description_manager.py --generate-docs` "
-        "or restore docs/data/metrics_description.yaml for the canonical bundle.",
-        stacklevel=1,
-    )
-    with _per_arch_fallback.open(encoding="utf-8") as f:
-        metrics_data = yaml.safe_load(f)
-else:
-    raise FileNotFoundError(
-        f"Neither {_metrics_description} nor {_per_arch_fallback} exists; "
-        "cannot build metric description contexts."
-    )
+# Load per-arch CDNA metrics YAMLs
+arch_metrics = {}
+for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
+    with open(f"data/metrics/{arch}_metrics.yaml") as f:
+        arch_metrics[arch] = yaml.safe_load(f)
 
-# Sphinx ``.. jinja::`` context id -> YAML section title (same keys in bundled
-# ``metrics_description.yaml``, per-arch ``docs/data/metrics/<arch>_metrics.yaml``,
-# and ``tools/per_arch_metric_definitions/gfx*_metrics_description.yaml``).
-_METRIC_JINJA_BINDINGS: tuple[tuple[str, str], ...] = (
-    ("wavefront-launch-stats", "Wavefront launch stats"),
-    ("wavefront-runtime-stats", "Wavefront runtime stats"),
-    ("instruction-mix", "Overall instruction mix"),
-    ("valu-arith-instruction-mix", "VALU arithmetic instruction mix"),
-    ("mfma-instruction-mix", "Matrix instruction mix"),
-    ("compute-speed-of-light", "Compute Speed-of-Light"),
-    ("pipeline-stats", "Pipeline statistics"),
-    ("arithmetic-operations", "Arithmetic operations"),
-    ("lds-sol", "LDS Speed-of-Light"),
-    ("lds-stats", "LDS Statistics"),
-    ("vl1d-sol", "vL1D Speed-of-Light"),
-    ("ta-busy-stall", "Busy / stall metrics"),
-    ("ta-instruction-counts", "Instruction counts"),
-    ("ta-spill-stack", "Spill / stack metrics"),
-    ("desc-utcl1", "L1 Unified Translation Cache (UTCL1)"),
-    ("vl1d-cache-stall-metrics", "vL1D cache stall metrics"),
-    ("vl1d-cache-access-metrics", "vL1D cache access metrics"),
-    ("desc-td", "Vector L1 data-return path or Texture Data (TD)"),
-    ("l2-sol", "L2 Speed-of-Light"),
-    ("l2-cache-accesses", "L2 cache accesses"),
-    ("l2-fabric-metrics", "L2-Fabric interface metrics"),
-    ("l2-detailed-metrics", "L2 - Fabric interface detailed metrics"),
-    ("l2-fabric-stalls", "L2 - Fabric Interface stalls"),
-    ("desc-sl1d-sol", "Scalar L1D Speed-of-Light"),
-    ("desc-sl1d-stats", "Scalar L1D cache accesses"),
-    ("desc-sl1d-l2-interface", "Scalar L1D Cache - L2 Interface"),
-    ("desc-l1i-sol", "L1I Speed-of-Light"),
-    ("desc-l1i-stats", "L1I cache accesses"),
-    ("desc-l1i-l2-interface", "L1I <-> L2 interface"),
-    ("spi-util", "Workgroup manager utilizations"),
-    ("spi-resc-util", "Workgroup Manager - Resource Allocation"),
-    ("cpf-metrics", "Command processor fetcher (CPF)"),
-    ("cpc-metrics", "Command processor packet processor (CPC)"),
-    ("sys-sol", "System Speed-of-Light"),
-)
-
-if not isinstance(metrics_data, dict):
-    raise TypeError("metrics bundle must deserialize to a dict")
-
-jinja_contexts = {
-    ctx: {"data": metrics_data.get(sec) or {}}
-    for ctx, sec in _METRIC_JINJA_BINDINGS
+# CDNA section name mapping: jinja context id -> YAML section name
+cdna_section_map = {
+    "wavefront-launch-stats": "Wavefront launch stats",
+    "wavefront-runtime-stats": "Wavefront runtime stats",
+    "instruction-mix": "Overall instruction mix",
+    "valu-arith-instruction-mix": "VALU arithmetic instruction mix",
+    "matrix-instruction-mix": "Matrix instruction mix",
+    "compute-speed-of-light": "Compute Speed-of-Light",
+    "pipeline-stats": "Pipeline statistics",
+    "arithmetic-operations": "Arithmetic operations",
+    "lds-sol": "LDS Speed-of-Light",
+    "lds-stats": "LDS Statistics",
+    "vl1d-sol": "vL1D Speed-of-Light",
+    "ta-busy-stall": "Busy / stall metrics",
+    "ta-instruction-counts": "Instruction counts",
+    "ta-spill-stack": "Spill / stack metrics",
+    "desc-utcl1": "L1 Unified Translation Cache (UTCL1)",
+    "vl1d-cache-stall-metrics": "vL1D cache stall metrics",
+    "vl1d-cache-access-metrics": "vL1D cache access metrics",
+    "desc-td": "Vector L1 data-return path or Texture Data (TD)",
+    "l2-sol": "L2 Speed-of-Light",
+    "l2-cache-accesses": "L2 cache accesses",
+    "l2-fabric-metrics": "L2-Fabric interface metrics",
+    "l2-detailed-metrics": "L2 - Fabric interface detailed metrics",
+    "l2-fabric-stalls": "L2 - Fabric Interface stalls",
+    "desc-sl1d-sol": "Scalar L1D Speed-of-Light",
+    "desc-sl1d-stats": "Scalar L1D cache accesses",
+    "desc-sl1d-l2-interface": "Scalar L1D Cache - L2 Interface",
+    "desc-l1i-sol": "L1I Speed-of-Light",
+    "desc-l1i-stats": "L1I cache accesses",
+    "desc-l1i-l2-interface": "L1I <-> L2 interface",
+    "spi-util": "Workgroup manager utilizations",
+    "spi-resc-util": "Workgroup Manager - Resource Allocation",
+    "cpf-metrics": "Command processor fetcher (CPF)",
+    "cpc-metrics": "Command processor packet processor (CPC)",
+    "sys-sol": "System Speed-of-Light",
 }
 
-_metrics_docs_dir = _docs_root / "data" / "metrics"
-for _arch in ("gfx908", "gfx90a", "gfx942", "gfx950"):
-    _per_arch_metrics_path = _metrics_docs_dir / f"{_arch}_metrics.yaml"
-    if not _per_arch_metrics_path.is_file():
-        continue
-    with _per_arch_metrics_path.open(encoding="utf-8") as _f:
-        _arch_bundle = yaml.safe_load(_f)
-    if not isinstance(_arch_bundle, dict):
-        continue
-    for _ctx, _sec in _METRIC_JINJA_BINDINGS:
-        jinja_contexts[f"{_ctx}-{_arch}"] = {
-            "data": _arch_bundle.get(_sec) or {},
-        }
+# Generate per-arch CDNA jinja contexts
+jinja_contexts = {}
+for context_name, section_name in cdna_section_map.items():
+    for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
+        if section_name in arch_metrics[arch]:
+            jinja_contexts[f"{context_name}-{arch}"] = {
+                "data": arch_metrics[arch][section_name],
+            }
 
+# Load gfx1151 (RDNA) metrics YAML
+with open("data/metrics/gfx1151_metrics.yaml") as f:
+    gfx1151_metrics = yaml.safe_load(f)
 
-def _merge_gfx1151_jinja_contexts(target: dict) -> None:
-    """Populate RDNA gfx1151 ``.. jinja::`` contexts from panel analysis YAMLs."""
-    import sys
+# RDNA gfx1151 section mapping: jinja context id -> YAML section name
+rdna_gfx1151_section_map = {
+    "sys-sol-gfx1151": "System Speed-of-Light",
+    "rdna1151-roofline-performance-rates-gfx1151": "Roofline Performance Rates",
+    "rdna1151-roofline-plot-points-gfx1151": "Roofline Plot Points",
+    "rdna1151-wgp-utilization-gfx1151": "WGP Utilization",
+    "rdna1151-wavefront-launch-stats-gfx1151": "Wavefront Launch Stats",
+    "rdna1151-wave-dispatch-gfx1151": "Wave Dispatch",
+    "rdna1151-wave-life-gfx1151": "Wave Life",
+    "rdna1151-wave-instruction-mix-gfx1151": "Wave Instruction Mix",
+    "rdna1151-vmem-instruction-mix-gfx1151": "VMEM Instruction Mix",
+    "rdna1151-lds-instruction-mix-gfx1151": "LDS Instruction Mix",
+    "rdna1151-wait-state-analysis-gfx1151": "Wait State Analysis",
+    "rdna1151-wgp-instruction-cache-gfx1151": "WGP Instruction Cache",
+    "rdna1151-wgp-scalar-data-cache-gfx1151": "WGP Scalar Data Cache",
+    "rdna1151-gpu-utilization-gfx1151": "GPU Utilization",
+    "rdna1151-shader-engine-utilization-gfx1151": "Shader Engine Utilization",
+    "rdna1151-spi-utilization-gfx1151": "SPI Utilization",
+    "rdna1151-wave-dispatch-statistics-gfx1151": "Wave Dispatch Statistics",
+    "rdna1151-cpc-utilization-gfx1151": "CPC Utilization",
+    "rdna1151-cpc-interface-utilization-gfx1151": "CPC Interface Utilization",
+    "rdna1151-mec-stall-cycles-gfx1151": "MEC Stall Cycles",
+    "rdna1151-cpc-memory-requests-gfx1151": "CPC Memory Requests",
+    "rdna1151-mec-instruction-cache-gfx1151": "MEC Instruction Cache",
+    "rdna1151-tcp-utilization-gfx1151": "TCP Utilization",
+    "rdna1151-tcp-request-statistics-gfx1151": "TCP Request Statistics",
+    "rdna1151-tcp-cache-performance-gfx1151": "TCP Cache Performance",
+    "rdna1151-tcp-tcp-gl1-interface-gfx1151": "TCP TCP-GL1 Interface",
+    "rdna1151-tcp-stalls-gfx1151": "TCP Stalls",
+    "rdna1151-gl1c-utilization-gfx1151": "GL1C Utilization",
+    "rdna1151-gl1c-request-statistics-gfx1151": "GL1C Request Statistics",
+    "rdna1151-gl1c-cache-performance-gfx1151": "GL1C Cache Performance",
+    "rdna1151-gl1c-stalls-gfx1151": "GL1C Stalls",
+    "rdna1151-gl1c-gl1c-gl2-interface-gfx1151": "GL1C GL1C-GL2 Interface",
+    "rdna1151-gl2c-cache-performance-gfx1151": "GL2C Cache Performance",
+    "rdna1151-gl2c-request-statistics-gfx1151": "GL2C Request Statistics",
+    "rdna1151-gl2c-bandwidth-gfx1151": "GL2C Bandwidth",
+    "rdna1151-dram-read-interface-gfx1151": "DRAM Read Interface",
+    "rdna1151-dram-write-interface-gfx1151": "DRAM Write Interface",
+    "rdna1151-system-arbiter-sarb-gfx1151": "System Arbiter (SARB)",
+    "rdna1151-return-interface-gfx1151": "Return Interface",
+    "rdna1151-memory-chart-instruction-cache-gfx1151": (
+        "Memory chart \u2014 Instruction Cache"
+    ),
+    "rdna1151-memory-chart-scalar-data-cache-gfx1151": (
+        "Memory chart \u2014 Scalar Data Cache"
+    ),
+    "rdna1151-memory-chart-tcp-cache-vector-l0-gfx1151": (
+        "Memory chart \u2014 TCP Cache (Vector L0)"
+    ),
+    "rdna1151-memory-chart-lds-local-data-share-gfx1151": (
+        "Memory chart \u2014 LDS (Local Data Share)"
+    ),
+    "rdna1151-memory-chart-tcp-gl1-interface-gfx1151": (
+        "Memory chart \u2014 TCP-GL1 Interface"
+    ),
+    "rdna1151-memory-chart-gl1c-cache-l1-gfx1151": (
+        "Memory chart \u2014 GL1C Cache (L1)"
+    ),
+    "rdna1151-memory-chart-gl1c-gl2-interface-gfx1151": (
+        "Memory chart \u2014 GL1C-GL2 Interface"
+    ),
+    "rdna1151-memory-chart-gl2c-cache-l2-gfx1151": (
+        "Memory chart \u2014 GL2C Cache (L2)"
+    ),
+    "rdna1151-memory-chart-gcea-to-system-memory-gfx1151": (
+        "Memory chart \u2014 GCEA to System Memory"
+    ),
+}
 
-    _sphinx_py = _docs_root / "sphinx"
-    if str(_sphinx_py) not in sys.path:
-        sys.path.insert(0, str(_sphinx_py))
-    from gfx1151_jinja_metrics import GFX1151_JINJA_CONTEXT_IDS, build_gfx1151_jinja_contexts
-
-    _gfx1151_cfg = (
-        _docs_root.parent / "src" / "rocprof_compute_soc" / "analysis_configs" / "gfx1151"
-    )
-    if _gfx1151_cfg.is_dir():
-        _payload = build_gfx1151_jinja_contexts(_gfx1151_cfg)
-        for _ctx in GFX1151_JINJA_CONTEXT_IDS:
-            target[_ctx] = _payload.get(_ctx, {"data": {}})
-    else:
-        for _ctx in GFX1151_JINJA_CONTEXT_IDS:
-            target[_ctx] = {"data": {}}
-
-
-_merge_gfx1151_jinja_contexts(jinja_contexts)
+# Generate gfx1151 jinja contexts
+for context_name, section_name in rdna_gfx1151_section_map.items():
+    jinja_contexts[context_name] = {
+        "data": gfx1151_metrics.get(section_name, {}),
+    }
 
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocprofiler-compute"
@@ -221,4 +217,4 @@ extlinks = {
 }
 
 # Uncomment if facing rate limit exceed issue with local build
-# external_projects_remote_repository = ""
+external_projects_remote_repository = ""

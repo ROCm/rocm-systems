@@ -74,6 +74,22 @@ in practice.
 
         * :doc:`conceptual/rdna/rdna-performance-model`
 
+          * :doc:`conceptual/rdna/system-speed-of-light`
+
+          * :doc:`conceptual/rdna/wgp`
+
+          * :doc:`conceptual/rdna/tcp-cache`
+
+          * :doc:`conceptual/rdna/gl1-cache`
+
+          * :doc:`conceptual/rdna/gl2-cache`
+
+          * :doc:`conceptual/rdna/shader-engine`
+
+          * :doc:`conceptual/rdna/command-processor`
+
+          * :doc:`conceptual/rdna/references`
+
       * :doc:`conceptual/definitions`
 
         * :ref:`normalization-units`
