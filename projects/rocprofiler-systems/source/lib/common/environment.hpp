@@ -39,7 +39,7 @@ namespace
 inline bool
 parse_bool(std::string_view val)
 {
-    if(val.empty()) throw std::runtime_error(fmt::format("No boolean value provided"));
+    if(val.empty()) throw std::runtime_error("No boolean value provided");
 
     static constexpr std::array<const char*, 6> falsy  = { "off", "false", "no",
                                                            "n",   "f",     "0" };
