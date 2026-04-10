@@ -68,7 +68,8 @@ jobs:
 
           echo "Submitting RCCL heatmap job..."
 
-          JOB_ID=$(sbatch sp.sh | awk '{print $4}')
+          JOB_ID=$(CVS_CONFIG_FILE=/it-share/rccl-ci/configs/rccl_config_TheRock-sp.json CVS_CLUSTER_FILE=/it-share/rccl-ci/configs/cluster.json sbatch ./sp.sh | awk '{print $4}')
+          sbatch  ./sp.sh
           echo "Submitted job $JOB_ID"
 
           echo "Waiting for job to complete..."
