@@ -1,4 +1,8 @@
-/* Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -78,4 +82,3 @@ public:
 
 } // namespace thunk
 } // namespace wsl
-
