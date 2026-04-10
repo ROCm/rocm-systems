@@ -39,27 +39,3 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo) {
 
   return HSAKMT_STATUS_SUCCESS;
 }
-
-HSAKMT_STATUS HSAKMTAPI DxgAbiCheck(HsaStructureSizes *actual)
-{
-  if (actual == nullptr)
-  {
-    fprintf(stderr, "[ROCr/DXG] DxgAbiCheck: received nullptr.\n");
-    return HSAKMT_STATUS_INVALID_PARAMETER;
-  }
-
-  if (actual->StructureSizes != sizeof(HsaStructureSizes)) {
-    bool is_larger = actual->StructureSizes > sizeof(HsaStructureSizes);
-    fprintf(stderr,
-            "[ROCr/DXG] DxgAbiCheck: StructureSizes=%u is too %s (expected %zu). Please update your "
-            "%s version.\n",
-            actual->StructureSizes, is_larger ? "large" : "small", sizeof(HsaStructureSizes),
-            is_larger ? "librocdxg" : "ROCr");
-
-    return HSAKMT_STATUS_INVALID_PARAMETER;
-  }
-
-  dxg_runtime->detected_abi_ = *actual;
-
-  return HSAKMT_STATUS_SUCCESS;
-}
