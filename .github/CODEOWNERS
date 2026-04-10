@@ -105,5 +105,9 @@
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation
 
 # Media Libs
-/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther @spolifroni-amd
-/projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther @spolifroni-amd
+/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther
+/projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther
+/projects/rocdecode/**/*.md                                           @spolifroni-amd
+/projects/rocdecode/**/*.rst                                          @spolifroni-amd
+/projects/rocjpeg/**/*.md                                             @spolifroni-amd
+/projects/rocjpeg/**/*.rst                                            @spolifroni-amd
