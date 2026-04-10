@@ -51,17 +51,17 @@ std::vector<char> compile_prog(const char* src) {
   options.push_back("--offload-arch=amdgcnspirv");
   
   hiprtcResult compileResult{hiprtcCompileProgram(prog, options.size(), options.data())};
- 
-  REQUIRE(compileResult == HIPRTC_SUCCESS);
   
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
   if (logSize) {
     std::string log(logSize, '\0');
     HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
-    std::cout << log << std::endl;
+    INFO("Compilation log: " << log);
   }
+
   REQUIRE(compileResult == HIPRTC_SUCCESS);
+
   size_t codeSize;
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
   
@@ -99,7 +99,7 @@ void* link_prog(std::vector<char> global_obj, std::vector<char> device_obj) {
   return bin;
 }
 
-TEST_CASE("Unit_hiprtc_spirv_compilation") {
+HIP_TEST_CASE(Unit_hiprtc_spirv_compilation) {
   std::vector<char> code = compile_prog(testfunc);
   hipModule_t module;
   hipFunction_t function;
@@ -112,7 +112,7 @@ TEST_CASE("Unit_hiprtc_spirv_compilation") {
   HIP_CHECK(hipModuleUnload(module));
 }
 
-TEST_CASE("Unit_hiprtc_spirv_linker") {
+HIP_TEST_CASE(Unit_hiprtc_spirv_linker) {
   std::vector<char> globalcode = compile_prog(globalfunc);
   std::vector<char> devicecode = compile_prog(devicefunc);
 

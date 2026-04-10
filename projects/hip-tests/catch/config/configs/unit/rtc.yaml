@@ -218,6 +218,8 @@ rtc:
   Unit_hiprtc_spirv_compilation:
     <<: *level_2
     tags: [compile]
+    disabled: [nvidia_linux]
   Unit_hiprtc_spirv_linker:
     <<: *level_2
     tags: [link]
+    disabled: [nvidia_linux]
