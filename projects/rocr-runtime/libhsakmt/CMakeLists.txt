@@ -295,18 +295,25 @@ else()
       ## Fall back to pre-built wkmi.lib
       set(WKMI_SRC_BUILD OFF CACHE INTERNAL "wkmi is built from source")
       message(STATUS "Using pre-built wkmi.lib (set WKMI_SRC_DIR to build from source)")
+      set(WKMI_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
       if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/dbg/wkmi.lib)
+        set(WKMI_LIB_PATH ${WKMI_INCLUDE_DIR}/win/dbg/wkmi.lib)
       else()
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
+        set(WKMI_LIB_PATH ${WKMI_INCLUDE_DIR}/win/rel/wkmi.lib)
       endif()
-      target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
+      target_include_directories(${HSAKMT_TARGET} PUBLIC
+        $<BUILD_INTERFACE:${WKMI_INCLUDE_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi>)
       
       # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)
-      target_link_libraries(${HSAKMT_TARGET} PUBLIC ${WKMI_LIB_PATH})
+      target_link_libraries(${HSAKMT_TARGET} PUBLIC
+        $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
+        $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
       
       # Export wkmi.lib path for downstream static linking
-      set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
+      set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        $<BUILD_INTERFACE:${WKMI_LIB_PATH}>
+        $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/wkmi.lib>)
     endif()
   endif()
 
@@ -317,7 +324,18 @@ else()
   set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
 
   # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-  if (NOT WIN32)
+  if (WIN32)
+    install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
+      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev )
+    if(NOT WKMI_SRC_BUILD)
+      install ( FILES ${WKMI_LIB_PATH}
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT dev )
+      install ( FILES ${WKMI_INCLUDE_DIR}/wkmi.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hsakmt/wkmi
+        COMPONENT dev )
+    endif()
+  else()
     install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
       ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
@@ -331,13 +349,11 @@ else()
     COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
 
   # Record our usage data for clients find_package calls.
-  if (NOT WIN32)
-    install ( EXPORT ${HSAKMT_TARGET}Targets
-      FILE ${HSAKMT_TARGET}Targets.cmake
-      NAMESPACE ${HSAKMT_TARGET}::
-      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-      COMPONENT dev)
-  endif()
+  install ( EXPORT ${HSAKMT_TARGET}Targets
+    FILE ${HSAKMT_TARGET}Targets.cmake
+    NAMESPACE ${HSAKMT_TARGET}::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+    COMPONENT dev)
   # Adds the target alias hsakmt::hsakmt to the local cmake cache.
   # This isn't necessary today.  It's harmless preparation for some
   # hypothetical future in which the we might be included by add_subdirectory()
@@ -358,14 +374,12 @@ else()
                    VERSION ${BUILD_VERSION_STRING}
                    COMPATIBILITY
                    AnyNewerVersion)
-  if (NOT WIN32)
-    install(FILES
-            ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
-            ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
-            DESTINATION
-            ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-            COMPONENT dev)
-  endif()
+  install(FILES
+          ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
+          ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
+          DESTINATION
+          ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+          COMPONENT dev)
 
   # Optionally record the package's find module in the user's package cache.
   if ( NOT DEFINED EXPORT_TO_USER_PACKAGE_REGISTRY )
