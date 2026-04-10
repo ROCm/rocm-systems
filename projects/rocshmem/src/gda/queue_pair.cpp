@@ -27,13 +27,13 @@
 #include <hip/hip_runtime.h>
 
 #include "backend_gda.hpp"
+#include "constmem.hpp"
 #include "constants.hpp"
 #include "util.hpp"
 
 namespace rocshmem {
 
-QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider)
-    : gda_provider_(gda_provider) {
+QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   int access = IBV_ACCESS_LOCAL_WRITE
              | IBV_ACCESS_REMOTE_WRITE
              | IBV_ACCESS_REMOTE_READ
@@ -56,7 +56,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider)
   mr_fetching_atomic = ibv.reg_mr(pd, fetching_atomic, 8 * FETCHING_ATOMIC_CNT, access, &allocator);
   CHECK_NNULL(mr_fetching_atomic, "ibv_reg_mr");
 
-  if (gda_provider == GDAProvider::MLX5) {
+  if (gda_provider == gda::provider::MLX5) {
     nonfetching_atomic_lkey = htobe32(mr_nonfetching_atomic->lkey);
     fetching_atomic_lkey = htobe32(mr_fetching_atomic->lkey);
   } else {
@@ -74,7 +74,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider)
   /* Set Correct opcodes for each NIC */
   switch (gda_provider) {
 #if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
+  case gda::provider::IONIC:
     gda_op_rdma_write = IONIC_V2_OP_RDMA_WRITE;
     gda_op_rdma_read  = IONIC_V2_OP_RDMA_READ;
     gda_op_atomic_fa  = IONIC_V2_OP_ATOMIC_FA;
@@ -82,7 +82,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider)
     break;
 #endif //defined(GDA_IONIC)
 #if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
+  case gda::provider::BNXT:
     gda_op_rdma_write = BNXT_RE_WR_OPCD_RDMA_WRITE;
     gda_op_rdma_read  = BNXT_RE_WR_OPCD_RDMA_READ;
     gda_op_atomic_fa  = BNXT_RE_WR_OPCD_ATOMIC_FA;
@@ -90,7 +90,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider)
     break;
 #endif //defined(GDA_BNXT)
 #if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
+  case gda::provider::MLX5:
     gda_op_rdma_write = MLX5_OPCODE_RDMA_WRITE;
     gda_op_rdma_read  = MLX5_OPCODE_RDMA_READ;
     gda_op_atomic_fa  = MLX5_OPCODE_ATOMIC_FA;
@@ -142,19 +142,19 @@ __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
  *****************************************************************************/
 __device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, uintptr_t laddr,
     uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
-  switch (gda_provider_) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
+  case gda::provider::IONIC:
     ionic_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
 #if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
+  case gda::provider::BNXT:
     bnxt_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
 #if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
+  case gda::provider::MLX5:
     mlx5_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
@@ -165,20 +165,20 @@ __device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, u
 }
 
 __device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode, [[maybe_unused]] bool ring_db) {
-  switch (gda_provider_) {
+    uintptr_t raddr, uint8_t opcode, bool ring_db) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
+  case gda::provider::IONIC:
     ionic_post_wqe_rma_single(size, laddr, raddr, opcode);
     return;
 #endif
 #if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
+  case gda::provider::BNXT:
     bnxt_post_wqe_rma_single(size, laddr, raddr, opcode, ring_db);
     return;
 #endif
 #if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
+  case gda::provider::MLX5:
     mlx5_post_wqe_rma_single(size, laddr, raddr, opcode, ring_db);
     return;
 #endif
@@ -191,19 +191,19 @@ __device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, ui
 __device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
-  switch (gda_provider_) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
+  case gda::provider::IONIC:
     return ionic_post_wqe_amo(size, raddr, opcode, atomic_data, atomic_cmp,
            fetching, wf_info);
 #endif
 #if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
+  case gda::provider::BNXT:
     return bnxt_post_wqe_amo(raddr, opcode, atomic_data, atomic_cmp, fetching,
            wf_info);
 #endif
 #if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
+  case gda::provider::MLX5:
     return mlx5_post_wqe_amo(size, raddr, opcode, atomic_data, atomic_cmp,
            fetching, wf_info);
 #endif
@@ -215,18 +215,18 @@ __device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintp
 
 __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
-  switch (gda_provider_) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
+  case gda::provider::IONIC:
     return ionic_post_wqe_amo_single(8 /*size_bytes (only 8-byte atomics implemented)*/, raddr, opcode, atomic_data, atomic_cmp, fetching);
 #endif
 #if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
+  case gda::provider::BNXT:
     return bnxt_post_wqe_amo_single(raddr, opcode, atomic_data, atomic_cmp,
            fetching);
 #endif
 #if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
+  case gda::provider::MLX5:
     return mlx5_post_wqe_amo_single(8 /* 8-byte atomics */, raddr, opcode, atomic_data, atomic_cmp, fetching);
 #endif
   default:
@@ -235,22 +235,22 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
   }
 }
 
-__device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
-  if(wf_info.is_pe_group_first) {
-      switch (gda_provider_) {
+__device__ void QueuePair::quiet(ActiveWFInfo &wf_info) {
+  if(wf_info.is_pe_group_leader) {
+      switch (constmem.gda_provider) {
     #if defined(GDA_IONIC)
-      case GDAProvider::IONIC:
+      case gda::provider::IONIC:
         ionic_quiet(wf_info);
         return;
     #endif
     #if defined(GDA_BNXT)
-      case GDAProvider::BNXT:
-          bnxt_quiet();
+      case gda::provider::BNXT:
+          bnxt_quiet(wf_info);
         return;
     #endif
     #if defined(GDA_MLX5)
-      case GDAProvider::MLX5:
-          mlx5_quiet();
+      case gda::provider::MLX5:
+          mlx5_quiet(wf_info);
         return;
     #endif
       default:
@@ -261,19 +261,19 @@ __device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
 }
 
 __device__ void QueuePair::quiet_single() {
-  switch (gda_provider_) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
+  case gda::provider::IONIC:
     ionic_quiet_single();
     return;
 #endif
 #if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
+  case gda::provider::BNXT:
     bnxt_quiet_single();
     return;
 #endif
 #if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
+  case gda::provider::MLX5:
     mlx5_quiet_single();
     return;
 #endif
@@ -376,7 +376,7 @@ int QueuePair::buffer_register(uintptr_t addr, size_t length) {
       user_buf_info[i].addr   = addr;
       user_buf_info[i].length = length;
 
-      if (gda_provider_ == GDAProvider::MLX5) {
+      if (gda_provider_ == gda::provider::MLX5) {
         user_buf_info[i].lkey = htobe32(mr->lkey);
       } else {
         user_buf_info[i].lkey = mr->lkey;

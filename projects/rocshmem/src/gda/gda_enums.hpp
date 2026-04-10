@@ -27,6 +27,13 @@
 
 namespace rocshmem {
 namespace gda {
+  enum provider {
+    UNSET,
+    IONIC,
+    BNXT,
+    MLX5
+  };
+
   enum alltoallv_wg_algos {
     ALLTOALLV_WG_ALGO_GET = 0,
     ALLTOALLV_WG_ALGO_COPY,
