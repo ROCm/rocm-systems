@@ -7,7 +7,7 @@
 /*************************************************************************
  * Network Counter Collector
  *
- * Self-contained library for collecting Thor2 NIC counters before/after
+ * Self-contained library for collecting Thor2 / AINIC NIC counters before/after
  * an operation and printing a summary table.  No dependency on NCCL,
  * RCCL, or any GPU runtime -- can be integrated into any application.
  *
@@ -40,6 +40,8 @@ enum CounterSource {
   COUNTER_SRC_DEBUGFS
 };
 
+typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC } NicType;
+
 struct CounterDescriptor {
   std::string name;
   CounterSource source;
@@ -50,6 +52,7 @@ struct NetworkCounterSnapshot {
   std::map<std::string, uint64_t> counters;
   char nic_name[256];
   char ib_device[256];
+  NicType nic_type;
   long timestamp;
 };
 
@@ -65,6 +68,9 @@ struct NetworkCounterContext {
 };
 
 // ---- public API ---------------------------------------------------------
+
+// Detect NIC type from IB device driver symlink
+NicType NetCounterDetectNicType(const std::string& ib_device);
 
 // Check RCCL_TESTS_NET_COUNTER_ENABLE=1
 bool NetCounterIsEnabled();

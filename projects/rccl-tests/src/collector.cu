@@ -23,28 +23,37 @@
 // =====================================================================
 
 struct CounterRegistryEntry {
-  const char*   name;
-  CounterSource source;
-  bool          is_prefix;
+  const char*   name;           // canonical counter name
+  // bnxt_re (Thor2)
+  CounterSource source;         // collection source on bnxt_re
+  bool          is_prefix;      // prefix match on bnxt_re (name0..name7)
+  bool          bnxt_valid;     // display on bnxt_re nodes?
+  // ionic (AINIC) -- ionic_key == NULL means unavailable on ionic
+  const char*   ionic_key;      // sysfs/ethtool key on ionic
+  CounterSource ionic_source;   // collection source on ionic
+  bool          ionic_is_prefix;
+  bool          ionic_valid;    // display on ionic nodes?
 };
 
 static const CounterRegistryEntry counter_registry[] = {
-  // ethtool – PFC frame counters (prefix → expands to name0..name7)
-  {"rx_pfc_ena_frames_pri",   COUNTER_SRC_ETHTOOL,  true},
-  {"tx_pfc_ena_frames_pri",   COUNTER_SRC_ETHTOOL,  true},
-  // ethtool – PFC transition counters (exact)
-  {"pfc_pri3_rx_transitions", COUNTER_SRC_ETHTOOL,  false},
-  {"pfc_pri3_tx_transitions", COUNTER_SRC_ETHTOOL,  false},
-  // IB hw_counters
-  {"rx_cnp_pkts",             COUNTER_SRC_IB_HW,    false},
-  {"tx_cnp_pkts",             COUNTER_SRC_IB_HW,    false},
-  {"rx_roce_discards",        COUNTER_SRC_IB_HW,    false},
-  // debugfs (bnxt_re info)
-  {"rx_stat_discards",        COUNTER_SRC_DEBUGFS,   false},
-  {"to_retransmits",          COUNTER_SRC_DEBUGFS,   false},
-  {"max_retry_exceeded",      COUNTER_SRC_DEBUGFS,   false},
-  {"oos_drop_count",          COUNTER_SRC_DEBUGFS,   false},
-  {"seq_err_naks_rcvd",       COUNTER_SRC_DEBUGFS,   false},
+  //                                     ---- bnxt_re ----          ------------ ionic -----------
+  // name                       source             pfx    valid   key                          source             pfx    valid
+  {"rx_pfc_ena_frames_pri",   COUNTER_SRC_ETHTOOL, true,  true,  "frames_rx_pripause",       COUNTER_SRC_ETHTOOL, false, true },
+  {"tx_pfc_ena_frames_pri",   COUNTER_SRC_ETHTOOL, true,  true,  "frames_tx_pripause",       COUNTER_SRC_ETHTOOL, false, true },
+  {"pfc_pri3_rx_transitions", COUNTER_SRC_ETHTOOL, false, true,  "frames_rx_pri_3",          COUNTER_SRC_ETHTOOL, false, false},
+  {"pfc_pri3_tx_transitions", COUNTER_SRC_ETHTOOL, false, true,  "frames_tx_pri_3",          COUNTER_SRC_ETHTOOL, false, false},
+  {"rx_cnp_pkts",             COUNTER_SRC_IB_HW,   false, true,  "rx_rdma_cnp_pkts",         COUNTER_SRC_IB_HW,   false, true },
+  {"tx_cnp_pkts",             COUNTER_SRC_IB_HW,   false, true,  "tx_rdma_cnp_pkts",         COUNTER_SRC_IB_HW,   false, true },
+  {"rx_roce_discards",        COUNTER_SRC_IB_HW,   false, true,  "rx_rdma_mtu_discard_pkts", COUNTER_SRC_IB_HW,   false, true },
+  {"rx_stat_discards",        COUNTER_SRC_DEBUGFS,  false, true,  "hw_rx_dropped",            COUNTER_SRC_ETHTOOL, false, true },
+  {"to_retransmits",          COUNTER_SRC_DEBUGFS,  false, true,  "tx_rdma_ack_timeout",      COUNTER_SRC_IB_HW,   false, true },
+  {"max_retry_exceeded",      COUNTER_SRC_DEBUGFS,  false, true,  "req_tx_retry_excd_err",    COUNTER_SRC_IB_HW,   false, true },
+  {"oos_drop_count",          COUNTER_SRC_DEBUGFS,  false, true,  "resp_rx_outouf_seq",       COUNTER_SRC_IB_HW,   false, true },
+  {"seq_err_naks_rcvd",       COUNTER_SRC_DEBUGFS,  false, true,  "req_rx_pkt_seq_err",       COUNTER_SRC_IB_HW,   false, true },
+  {"tx_rdma_ucast_bytes",     COUNTER_SRC_IB_HW,   false, false, "tx_rdma_ucast_bytes",      COUNTER_SRC_IB_HW,   false, true },
+  {"rx_rdma_ucast_bytes",     COUNTER_SRC_IB_HW,   false, false, "rx_rdma_ucast_bytes",      COUNTER_SRC_IB_HW,   false, true },
+  {"tx_rdma_ucast_pkts",      COUNTER_SRC_IB_HW,   false, false, "tx_rdma_ucast_pkts",       COUNTER_SRC_IB_HW,   false, true },
+  {"rx_rdma_ucast_pkts",      COUNTER_SRC_IB_HW,   false, false, "rx_rdma_ucast_pkts",       COUNTER_SRC_IB_HW,   false, true },
 };
 
 static const int counter_registry_size =
@@ -166,6 +175,12 @@ std::vector<std::string> NetCounterParseIbHcaList() {
 // Device lookup
 // =====================================================================
 
+static std::string StripIbPort(const std::string& ib_device) {
+  size_t colon = ib_device.find(':');
+  if (colon != std::string::npos) return ib_device.substr(0, colon);
+  return ib_device;
+}
+
 static std::string RunShellOneLiner(const char* cmd) {
   FILE* fp = popen(cmd, "r");
   if (!fp) { return ""; }
@@ -189,10 +204,11 @@ std::string NetCounterFindIbDeviceForNic(const std::string& nic) {
 }
 
 std::string NetCounterFindNicForIbDevice(const std::string& ib_device) {
+  std::string base = StripIbPort(ib_device);
   char cmd[512] = {0};
   snprintf(cmd, sizeof(cmd),
            "ls /sys/class/infiniband/%s/device/net 2>/dev/null | head -1",
-           ib_device.c_str());
+           base.c_str());
   return RunShellOneLiner(cmd);
 }
 
@@ -223,30 +239,84 @@ void NetCounterGetNetworkInterfaces(std::vector<std::string>& interfaces) {
 }
 
 // =====================================================================
+// NIC type detection
+// =====================================================================
+
+NicType NetCounterDetectNicType(const std::string& ib_device) {
+  if (ib_device.empty()) return NIC_UNKNOWN;
+
+  std::string ib_base = StripIbPort(ib_device);
+  char link[4096] = {0};
+  std::string driver_path =
+      "/sys/class/infiniband/" + ib_base + "/device/driver";
+  ssize_t len = readlink(driver_path.c_str(), link, sizeof(link) - 1);
+  if (len <= 0) return NIC_UNKNOWN;
+  link[len] = '\0';
+
+  const char* drv = strrchr(link, '/');
+  drv = drv ? drv + 1 : link;
+
+  if (strcmp(drv, "bnxt_re") == 0 || strcmp(drv, "bnxt_en") == 0)
+    return NIC_BNXT_RE;
+  if (strcmp(drv, "ionic") == 0)
+    return NIC_IONIC;
+  return NIC_UNKNOWN;
+}
+
+static const char* NicTypeStr(NicType t) {
+  switch (t) {
+    case NIC_BNXT_RE: return "BNXT_RE";
+    case NIC_IONIC:   return "IONIC";
+    default:          return "UNKNOWN";
+  }
+}
+
+// =====================================================================
 // Per-source collection
 // =====================================================================
 
 static void CollectEthtoolCounters(const std::string& nic,
                                    const std::vector<CounterDescriptor>& selected,
+                                   NicType nic_type,
                                    std::map<std::string, uint64_t>& out) {
-  std::set<std::string> exact;
-  std::vector<std::string> prefixes;
-  for (const auto& d : selected) {
-    if (d.source != COUNTER_SRC_ETHTOOL) { continue; }
+  std::set<std::string> exact_keys;
+  std::map<std::string, std::string> key_to_canon;
+  std::vector<std::string> prefix_keys;
+  std::map<std::string, std::string> pfx_to_canon;
 
-    if (d.is_prefix) {
-      prefixes.push_back(d.name);
+  for (const auto& d : selected) {
+    const CounterRegistryEntry* entry = FindInRegistry(d.name);
+    const char* key = d.name.c_str();
+    CounterSource src = d.source;
+    bool pfx = d.is_prefix;
+
+    if (entry && nic_type == NIC_IONIC && entry->ionic_key) {
+      key = entry->ionic_key;
+      src = entry->ionic_source;
+      pfx = entry->ionic_is_prefix;
+    } else if (entry) {
+      key = entry->name;
+      src = entry->source;
+      pfx = entry->is_prefix;
+    }
+
+    if (src != COUNTER_SRC_ETHTOOL) continue;
+
+    if (pfx) {
+      prefix_keys.push_back(key);
+      pfx_to_canon[key] = d.name;
     } else {
-      exact.insert(d.name);
+      exact_keys.insert(key);
+      key_to_canon[key] = d.name;
     }
   }
-  if (exact.empty() && prefixes.empty()) { return; }
+  if (exact_keys.empty() && prefix_keys.empty()) return;
 
   char command[512] = {0};
   snprintf(command, sizeof(command), "ethtool -S %s 2>/dev/null", nic.c_str());
 
   FILE* fp = popen(command, "r");
-  if (!fp) { return; }
+  if (!fp) return;
 
   char line[256] = {0};
   while (fgets(line, sizeof(line), fp)) {
@@ -254,11 +324,18 @@ static void CollectEthtoolCounters(const std::string& nic,
     uint64_t value = 0;
     if (sscanf(line, "%255[^:]: %lu", key, &value) == 2) {
       char* start = key;
-      while (*start == ' ' || *start == '\t') { start++; }
+      while (*start == ' ' || *start == '\t') start++;
       std::string k(start);
-      if (exact.count(k)) { out[k] = value; continue; }
-      for (const auto& pfx : prefixes) {
-        if (k.compare(0, pfx.size(), pfx) == 0) { out[k] = value; break; }
+      if (exact_keys.count(k)) {
+        out[key_to_canon[k]] = value;
+        continue;
+      }
+      for (const auto& pfx : prefix_keys) {
+        if (k.compare(0, pfx.size(), pfx) == 0) {
+          std::string suffix = k.substr(pfx.size());
+          out[pfx_to_canon[pfx] + suffix] = value;
+          break;
+        }
       }
     }
   }
@@ -267,16 +344,39 @@ static void CollectEthtoolCounters(const std::string& nic,
 
 static void CollectIbHwCounters(const std::string& ib_device,
                                 const std::vector<CounterDescriptor>& selected,
+                                NicType nic_type,
                                 std::map<std::string, uint64_t>& out) {
-  if (ib_device.empty()) { return; }
+  if (ib_device.empty()) return;
 
-  std::string base =
-      "/sys/class/infiniband/" + ib_device + "/ports/1/hw_counters/";
+  std::string ib_base = StripIbPort(ib_device);
+  std::string base_port =
+      "/sys/class/infiniband/" + ib_base + "/ports/1/hw_counters/";
+  std::string base_dev =
+      "/sys/class/infiniband/" + ib_base + "/hw_counters/";
 
   for (const auto& d : selected) {
-    if (d.source != COUNTER_SRC_IB_HW) { continue; }
-    std::string path = base + d.name;
-    FILE* fp = fopen(path.c_str(), "r");
+    const CounterRegistryEntry* entry = FindInRegistry(d.name);
+    const char* key = d.name.c_str();
+    CounterSource src = d.source;
+
+    if (entry && nic_type == NIC_IONIC && entry->ionic_key) {
+      key = entry->ionic_key;
+      src = entry->ionic_source;
+    } else if (entry) {
+      key = entry->name;
+      src = entry->source;
+    }
+
+    if (src != COUNTER_SRC_IB_HW) continue;
+
+    FILE* fp = NULL;
+    if (nic_type == NIC_IONIC) {
+      fp = fopen((base_dev + key).c_str(), "r");
+      if (!fp) fp = fopen((base_port + key).c_str(), "r");
+    } else {
+      fp = fopen((base_port + key).c_str(), "r");
+    }
+
     if (fp) {
       uint64_t value = 0;
       if (fscanf(fp, "%lu", &value) == 1) {
@@ -299,7 +399,7 @@ static void CollectDebugCounters(const std::string& ib_device,
   if (wanted.empty()) { return; }
 
   std::string info_path =
-      "/sys/kernel/debug/bnxt_re/" + ib_device + "/info";
+      "/sys/kernel/debug/bnxt_re/" + StripIbPort(ib_device) + "/info";
   FILE* fp = fopen(info_path.c_str(), "r");
   if (!fp) { return; }
 
@@ -338,6 +438,7 @@ NetworkCounterSnapshot NetCounterCollectSnapshot(
 
   memset(snap.nic_name, 0, sizeof(snap.nic_name));
   memset(snap.ib_device, 0, sizeof(snap.ib_device));
+  snap.nic_type = NIC_UNKNOWN;
 
   if (!nic.empty()) {
     strncpy(snap.nic_name, nic.c_str(), sizeof(snap.nic_name) - 1);
@@ -348,10 +449,13 @@ NetworkCounterSnapshot NetCounterCollectSnapshot(
   }
 
   snap.timestamp = time(NULL);
+  snap.nic_type = NetCounterDetectNicType(ib_dev);
 
-  CollectEthtoolCounters(nic, selected, snap.counters);
-  CollectIbHwCounters(ib_dev, selected, snap.counters);
-  CollectDebugCounters(ib_dev, selected, snap.counters);
+  CollectEthtoolCounters(nic, selected, snap.nic_type, snap.counters);
+  CollectIbHwCounters(ib_dev, selected, snap.nic_type, snap.counters);
+  if (snap.nic_type != NIC_IONIC) {
+    CollectDebugCounters(ib_dev, selected, snap.counters);
+  }
 
   return snap;
 }
@@ -393,6 +497,8 @@ uint64_t NetCounterComputeDelta(
   return delta;
 }
 
+
+
 // =====================================================================
 // Table printer
 // =====================================================================
@@ -419,6 +525,12 @@ void NetCounterPrintTable(
            hostname, rank);
     fflush(stdout);
     return;
+  }
+
+  bool mixed_nic_types = false;
+  NicType first_nic_type = before[0].nic_type;
+  for (size_t n = 1; n < num_nics; n++) {
+    if (before[n].nic_type != first_nic_type) { mixed_nic_types = true; break; }
   }
 
   // Pre-compute deltas, rates, durations
@@ -451,6 +563,11 @@ void NetCounterPrintTable(
       labels[n] = before[n].ib_device;
     } else {
       labels[n] = before[n].nic_name;
+    }
+    if (mixed_nic_types) {
+      labels[n] += "[";
+      labels[n] += NicTypeStr(before[n].nic_type);
+      labels[n] += "]";
     }
   }
 
@@ -490,8 +607,9 @@ void NetCounterPrintTable(
   }
 
   // Print
-  printf("\nNET_COUNTER_TABLE: node=%s  rank=%d  duration_sec=%ld\n",
-         hostname, rank, durations[0]);
+  printf("\nNET_COUNTER_TABLE: node=%s  rank=%d  duration_sec=%ld  nic_type=%s\n",
+         hostname, rank, durations[0],
+         mixed_nic_types ? "MIXED" : NicTypeStr(first_nic_type));
   printf("%s\n", sep.c_str());
 
   printf("%-*s", nic_w, "Device");
