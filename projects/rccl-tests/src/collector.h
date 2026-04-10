@@ -53,7 +53,7 @@ struct NetworkCounterSnapshot {
   char nic_name[256];
   char ib_device[256];
   NicType nic_type;
-  long timestamp;
+  int64_t timestamp_us;
 };
 
 struct NetworkCounterContext {

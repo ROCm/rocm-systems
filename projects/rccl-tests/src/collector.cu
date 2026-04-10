@@ -448,7 +448,9 @@ NetworkCounterSnapshot NetCounterCollectSnapshot(
     strncpy(snap.ib_device, ib_dev.c_str(), sizeof(snap.ib_device) - 1);
   }
 
-  snap.timestamp = time(NULL);
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  snap.timestamp_us = (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
   snap.nic_type = NetCounterDetectNicType(ib_dev);
 
   CollectEthtoolCounters(nic, selected, snap.nic_type, snap.counters);
@@ -540,14 +542,14 @@ void NetCounterPrintTable(
   std::vector<std::vector<double>> rates(
       num_nics, std::vector<double>(num_counters, 0.0));
 
-  std::vector<long> durations(num_nics);
+  std::vector<double> dur_sec(num_nics);
 
   for (size_t n = 0; n < num_nics; n++) {
-    durations[n] = after[n].timestamp - before[n].timestamp;
+    dur_sec[n] = (after[n].timestamp_us - before[n].timestamp_us) / 1e6;
     for (size_t c = 0; c < num_counters; c++) {
       deltas[n][c] = NetCounterComputeDelta(before[n], after[n], selected[c]);
-      rates[n][c] = (durations[n] > 0)
-                        ? (double)deltas[n][c] / durations[n]
+      rates[n][c] = (dur_sec[n] > 0.001)
+                        ? (double)deltas[n][c] / dur_sec[n]
                         : 0.0;
     }
   }
@@ -607,8 +609,8 @@ void NetCounterPrintTable(
   }
 
   // Print
-  printf("\nNET_COUNTER_TABLE: node=%s  rank=%d  duration_sec=%ld  nic_type=%s\n",
-         hostname, rank, durations[0],
+  printf("\nNET_COUNTER_TABLE: node=%s  rank=%d  duration_sec=%.3f  nic_type=%s\n",
+         hostname, rank, dur_sec[0],
          mixed_nic_types ? "MIXED" : NicTypeStr(first_nic_type));
   printf("%s\n", sep.c_str());
 
