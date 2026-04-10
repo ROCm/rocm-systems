@@ -150,7 +150,10 @@ src/utils/.config_hashes.json
 > It is used to safely modify YAML files while preserving comments, ordering,
 > and formatting. The workflow scripts will not function correctly without it.
 >
-> See [Development dependencies](../../README.md#development-dependencies) for install instructions.
+> Install it via:
+> ```bash
+> pip install ruamel.yaml
+> ```
 
 ### 1. Validate the current state
 
@@ -283,13 +286,11 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,942,950,1151}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,942,950}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
-  └── gfx{908,90a,942,950,1151}_metrics.yaml               # rst + unit (generated)
+  └── gfx{908,90a,942,950}_metrics.yaml               # rst + unit (generated)
 ```
-
-**Dependencies:** `metric_description_manager.py` requires **ruamel.yaml** (see [Development dependencies](../../README.md#development-dependencies)).
 
 **After editing panel `metrics_description` sections:**
 ```bash

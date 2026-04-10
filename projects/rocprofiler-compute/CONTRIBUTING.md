@@ -141,9 +141,8 @@ Pre-commit hooks automatically check your code for formatting issues before each
 
 **Setup:**
 
-First, install [development dependencies](README.md#development-dependencies), then enable the hooks:
-
 ```bash
+python3 -m pip install pre-commit
 cd rocprofiler-compute
 pre-commit install
 ```
