@@ -1,63 +1,34 @@
-// Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
-
-/*
-This is a native tool for rocprofiler-compute to collect counters data for GPU
-kernel dispatches using the rocprofiler-sdk public API. This C++ tool is
-compiled into a shared object with hipcc/amdclang++ and dynamically links to the
-rocprofiler-sdk library. The shared object is injected using the LD_PRELOAD
-environment variable so that rocprofiler-sdk services can be configured before
-the GPU workload starts executing.
-
-An experimental feature for attach/detach scenarios is also provided.
-
-Code Flow:
-
-1. Entry point - rocprofiler_configure():
-    - Parses ROCPROF environment variables to configure profiling.
-    - Sets up tool metadata and logging.
-    - Returns pointers to tool_init() and tool_fini() functions.
-
-2. Tool Initialization - tool_init():
-    - Creates a profiling context.
-    - Subscribes to dispatch tracing and counting services by providing function
-callbacks.
-    - Starts the profiling context.
-
-3. Kernel registration callback - tool_tracing_callback():
-    - Invoked when a kernel is registered.
-    - Stores the kernel name to kernel id mapping.
-    - Determines which kernel names/ids to target for profiling based on ROCPROF
-environment variables.
-
-4. Kernel dispatch callback - dispatch_callback():
-    - Invoked before a kernel dispatch is enqueued.
-    - Decides whether to profile this dispatch.
-    - If profiling is required, creates or fetches from cache a counter profile
-for the agent and returns a pointer to it.
-    - The counter profile dictates which counters to collect for this dispatch.
-
-5. Kernel dispatch record callback - record_callback():
-    - Invoked after a kernel dispatch is completed.
-    - Receives the collected counter records.
-    - Stores the counter records in tool data for later processing.
-
-6. Tool Finalization - tool_fini():
-    - Called when the application is terminating.
-    - Stops the profiling context.
-    - Processes and writes the collected counter records to the output file.
-    - Cleans up resources.
-*/
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #include "helper.hpp"
+#include "input_parameters.h"
+#include "rocprofiler_compute_tool.h"
+#include "sdk_wrapper.h"
 
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 #include <unistd.h>
 
 #include <fstream>
 #include <iostream>
-#include <memory>
 #include <mutex>
 #include <set>
 #include <shared_mutex>
@@ -65,6 +36,16 @@ for the agent and returns a pointer to it.
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+using namespace rocprof_compute_tool;
+
+std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
+
+void test_knobs::set_input_parameters(std::shared_ptr<InputParameters> input_parameters)
+{
+    g_input_parameters = input_parameters;
+}
+
 
 #define ROCPROFILER_CALL(result, msg)                                                                  \
     {                                                                                                  \
@@ -84,7 +65,6 @@ for the agent and returns a pointer to it.
 namespace
 {
 
-// Multiplexing modes enum
 enum class iteration_multiplexing_mode_t
 {
     DISABLED,
@@ -171,9 +151,6 @@ rocprofiler_context_id_t& get_client_ctx()
 
 iteration_multiplexing_mode_t iteration_multiplexing_mode(const std::string& mode)
 {
-    // if (mode == "simple")
-    //   return iteration_multiplexing_mode_t::SIMPLE;
-    // else
     if (mode == "kernel")
         return iteration_multiplexing_mode_t::KERNEL;
     else if (mode == "kernel_launch_params")
@@ -290,8 +267,7 @@ bool is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t
     if (!tool->kernel_filter_ranges.empty())
         return std::any_of(tool->kernel_filter_ranges.begin(),
                            tool->kernel_filter_ranges.end(),
-                           [kernel_iteration](const auto& range)
-                           {
+                           [kernel_iteration](const auto& range) {
                                return kernel_iteration >= range.first && kernel_iteration <= range.second;
                            });
 
@@ -300,39 +276,6 @@ bool is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t
     return true;
 }
 
-/**
- * @brief Creates a counter collection profile for performance monitoring on a
- * specific GPU agent.
- *
- * This function parses the requested counters from the tool configuration,
- * validates them against the counters supported by the target GPU agent, and
- * creates a rocprofiler counter configuration for collecting the available
- * requested counters during dispatch profiling.
- *
- * @param tool Pointer to tool data containing the requested counters string and
- * counter mappings
- * @param dispatch_data Dispatch counting service data containing agent
- * information for the target GPU
- *
- * @return rocprofiler_counter_config_id_t A valid counter configuration profile
- * ID that can be used for counter collection, or an invalid profile (handle =
- * 0) if creation fails
- *
- * @details
- * The function performs the following operations:
- * 1. Parses the requested counters from tool->requested_counters string
- * (format: "prefix:counter1 counter2 ...")
- * 2. Queries all counters supported by the specified GPU agent
- * 3. Filters the supported counters to match only those requested
- * 4. Logs warnings for any requested counters that are not supported by the
- * agent
- * 5. Creates rocprofiler counter configurations for the valid
- * counters
- *
- * @note If no counters are requested or none of the requested counters are
- * supported, an empty profile may be created. Unsupported counters are logged
- * as warnings but do not cause the function to fail.
- */
 void create_counter_collection_profile(
     tool_data_t*                                                                tool,
     rocprofiler_agent_id_t                                                      agent_id,
@@ -676,7 +619,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 
     // Require ROCPROF_OUTPUT_PATH to be set, otherwise error out
     std::string filename;
-    const char* output_path = getenv("ROCPROF_OUTPUT_PATH");
+    const char* output_path = g_input_parameters->get_output_path();
     if (!output_path || !*output_path)
     {
         throw std::runtime_error("ROCPROF_OUTPUT_PATH environment variable must be set");
@@ -692,20 +635,20 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     // Store ROCPROF env. vars. in tool_data
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
-    if (const char* v = getenv("ROCPROF_COUNTERS"))
+    if (const char* v = g_input_parameters->get_requested_counters())
         tool_data->requested_counters = v;
 
-    if (const char* v = getenv("ROCPROF_ITERATION_MULTIPLEXING"))
+    if (const char* v = g_input_parameters->get_iteration_multiplexing_mode())
         tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode(v);
 
     // ROCPROF_KERNEL_FILTER_INCLUDE_REGEX env. var. is a regex string like
     // kernel_name_1|kernel_name_2|... Used to collect counters only for kernels
     // with names matching the regex
-    if (const char* v = getenv("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"))
+    if (const char* v = g_input_parameters->get_kernel_filter_include_regex())
         tool_data->kernel_filter_include_regex = v;
 
     // ROCPROF_KERNEL_FILTER_RANGE env. var. is a string like "[4,7-9,...]"
-    if (const char* v = getenv("ROCPROF_KERNEL_FILTER_RANGE"))
+    if (const char* v = g_input_parameters->get_kernel_filter_range())
     {
         // Remove square brackets at the ends if present
         std::string v_str = v;
