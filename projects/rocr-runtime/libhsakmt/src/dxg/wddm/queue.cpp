@@ -468,29 +468,43 @@ void ComputeQueue::InitScratchSRD() {
 bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
   const uint32_t wavefront = wave32 ? 32 : 64;
   const uint32_t alignment = 1024 / wavefront;
-  private_segment_size = AlignUp(private_segment_size, alignment);
+  private_segment_size = rocr::AlignUp(private_segment_size, alignment);
 
   uint32_t scratch_size_per_wave = private_segment_size * wavefront;
   uint32_t scratch_size = scratch_size_per_wave * scratch_waves_;
 
-  const uint32_t symmetric_cus = rocr::AlignDown(cu_count, engines);
-  const uint32_t asymmetryPerRound = cu_count - symmetric_cus;
-  const uint64_t rounds = groups / cu_count;
-  const uint64_t asymmetricGroups = rounds * asymmetryPerRound;
-  const uint64_t symmetricGroups = groups - asymmetricGroups;
-
-  uint64_t maxGroupsPerEngine =
-      ((symmetricGroups + engines - 1) / engines) + (asymmetryPerRound ? rounds : 0);
-
-  // For gfx10+ devices we must attempt to assign the smaller of 256 lanes or 16 groups to each
-  // engine.
-  if (device->Major() >= 10 && maxGroupsPerEngine < 16 &&
-      lanes_per_group * maxGroupsPerEngine < 256) {
-    uint64_t groups_per_interleave = (256 + lanes_per_group - 1) / lanes_per_group;
-    maxGroupsPerEngine = std::min(groups_per_interleave, uint64_t(16ul));
+  uint64_t tmp_scratch_size = (uint64_t)scratch_size_per_wave * scratch_waves_;
+  if (tmp_scratch_size > UINT32_MAX) {
+    pr_err("scratch_size overflow!\n");
+    HandleError(HSA_STATUS_ERROR_INVALID_ARGUMENT);
   }
 
-  return maxGroupsPerEngine * engines;
+  if (scratch_size_ >= scratch_size)
+    return true;
+
+  pr_debug("need realloc scratch buffer, size %x -> %x\n",
+           scratch_size_, scratch_size);
+
+  GpuMemoryCreateInfo create_info{};
+  create_info.size = scratch_size;
+  create_info.domain = Wkmi::kLocal;
+  GpuMemory *gpu_mem = nullptr;
+  auto code = device->CreateGpuMemory(create_info, &gpu_mem);
+  if (code != ErrorCode::Success)
+    return false;
+
+  if (scratch_base_) {
+    auto scratch_gpu_mem = GpuMemory::Convert(scratch_mem_);
+    delete scratch_gpu_mem;
+  }
+
+  scratch_size_per_wave_ = scratch_size_per_wave;
+  scratch_size_ = scratch_size;
+  scratch_base_ = reinterpret_cast<void *>(gpu_mem->GpuAddress());
+  scratch_mem_ = gpu_mem->GetGpuMemoryHandle();
+
+  InitScratchSRD();
+  return true;
 }
 
 
