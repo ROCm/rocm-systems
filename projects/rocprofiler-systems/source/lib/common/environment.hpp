@@ -105,7 +105,8 @@ get_env(std::string_view env_id, Tp&& _default) noexcept
         return static_cast<T>(get_env(env_id, static_cast<Up>(_default)));
     }
 
-    const char* env_var = ::std::getenv(env_id.data());
+    const auto  env_id_str = std::string{ env_id };
+    const char* env_var    = ::std::getenv(env_id_str.c_str());
 
     if constexpr(std::is_same_v<T, bool>)
     {
