@@ -137,31 +137,27 @@ rdna_gfx1151_section_map = {
     "rdna1151-system-arbiter-sarb-gfx1151": "System Arbiter (SARB)",
     "rdna1151-return-interface-gfx1151": "Return Interface",
     "rdna1151-memory-chart-instruction-cache-gfx1151": (
-        "Memory chart \u2014 Instruction Cache"
+        "Memory chart - Instruction Cache"
     ),
     "rdna1151-memory-chart-scalar-data-cache-gfx1151": (
-        "Memory chart \u2014 Scalar Data Cache"
+        "Memory chart - Scalar Data Cache"
     ),
     "rdna1151-memory-chart-tcp-cache-vector-l0-gfx1151": (
-        "Memory chart \u2014 TCP Cache (Vector L0)"
+        "Memory chart - TCP Cache (Vector L0)"
     ),
     "rdna1151-memory-chart-lds-local-data-share-gfx1151": (
-        "Memory chart \u2014 LDS (Local Data Share)"
+        "Memory chart - LDS (Local Data Share)"
     ),
     "rdna1151-memory-chart-tcp-gl1-interface-gfx1151": (
-        "Memory chart \u2014 TCP-GL1 Interface"
+        "Memory chart - TCP-GL1 Interface"
     ),
-    "rdna1151-memory-chart-gl1c-cache-l1-gfx1151": (
-        "Memory chart \u2014 GL1C Cache (L1)"
-    ),
+    "rdna1151-memory-chart-gl1c-cache-l1-gfx1151": ("Memory chart - GL1C Cache (L1)"),
     "rdna1151-memory-chart-gl1c-gl2-interface-gfx1151": (
-        "Memory chart \u2014 GL1C-GL2 Interface"
+        "Memory chart - GL1C-GL2 Interface"
     ),
-    "rdna1151-memory-chart-gl2c-cache-l2-gfx1151": (
-        "Memory chart \u2014 GL2C Cache (L2)"
-    ),
+    "rdna1151-memory-chart-gl2c-cache-l2-gfx1151": ("Memory chart - GL2C Cache (L2)"),
     "rdna1151-memory-chart-gcea-to-system-memory-gfx1151": (
-        "Memory chart \u2014 GCEA to System Memory"
+        "Memory chart - GCEA to System Memory"
     ),
 }
 

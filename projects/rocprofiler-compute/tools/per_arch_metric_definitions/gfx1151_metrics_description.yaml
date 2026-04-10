@@ -75,7 +75,7 @@ System Speed-of-Light:
     plain: "Same as Memory Chart table 301 “ICache-GL1 Read Bandwidth”: SQC_TC_INST_REQ_sum × 128 B / kernel time.\nPeak / % of peak are N/A."
     rst: "Same as Memory Chart table 301 “ICache-GL1 Read Bandwidth”: SQC_TC_INST_REQ_sum × 128 B / kernel time.\nPeak / % of peak are N/A."
     unit: Bytes/s
-Memory chart — Instruction Cache:
+Memory chart - Instruction Cache:
   ICache Utilization:
     plain: "Definition: Percentage of cycles the instruction cache is busy.\nFormula: 100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum"
     rst: "Definition: Percentage of cycles the instruction cache is busy.\nFormula: 100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum"
@@ -100,7 +100,7 @@ Memory chart — Instruction Cache:
     plain: "Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path\ninstruction requests), using 128 B per SQC_TC_INST_REQ event."
     rst: "Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path\ninstruction requests), using 128 B per SQC_TC_INST_REQ event."
     unit: Bytes/s
-Memory chart — Scalar Data Cache:
+Memory chart - Scalar Data Cache:
   Dcache Utilization:
     plain: "Definition: Percentage of cycles the scalar data cache is busy.\nFormula: 100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum"
     rst: "Definition: Percentage of cycles the scalar data cache is busy.\nFormula: 100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum"
@@ -121,7 +121,7 @@ Memory chart — Scalar Data Cache:
     plain: "Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B\nper request)."
     rst: "Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B\nper request)."
     unit: Bytes/s
-Memory chart — TCP Cache (Vector L0):
+Memory chart - TCP Cache (Vector L0):
   TCP Hit Rate:
     plain: "Definition: Percentage of TCP (L0 vector cache) requests that hit in cache.\nFormula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum"
     rst: "Definition: Percentage of TCP (L0 vector cache) requests that hit in cache.\nFormula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum"
@@ -146,7 +146,7 @@ Memory chart — TCP Cache (Vector L0):
     plain: Heuristic TCP request throughput using 64 B per TCP_REQ event over the kernel window.
     rst: Heuristic TCP request throughput using 64 B per TCP_REQ event over the kernel window.
     unit: Bytes/s
-Memory chart — LDS (Local Data Share):
+Memory chart - LDS (Local Data Share):
   LDS Atomic Instructions:
     plain: "Definition: Number of LDS atomic instructions executed.\nDescription: Atomic operations on Local Data Share memory with return values.\nFormula: SQ_LDS_ATOMIC_RETURN_sum / $denom"
     rst: "Definition: Number of LDS atomic instructions executed.\nDescription: Atomic operations on Local Data Share memory with return values.\nFormula: SQ_LDS_ATOMIC_RETURN_sum / $denom"
@@ -171,7 +171,7 @@ Memory chart — LDS (Local Data Share):
     plain: "Cycles waves spent waiting on LDS (wait-state attribution), per normalization unit\n(SQ_WAIT_INST_LDS_sum)."
     rst: "Cycles waves spent waiting on LDS (wait-state attribution), per normalization unit\n(SQ_WAIT_INST_LDS_sum)."
     unit: Cycles per Normalization Unit
-Memory chart — GL1C Cache (L1):
+Memory chart - GL1C Cache (L1):
   GL1C Utilization:
     plain: "Definition: Percentage of cycles the GL1C (L1 cache) is busy.\nFormula: 100 * GL1C_BUSY_sum / GL1C_CYCLE_sum"
     rst: "Definition: Percentage of cycles the GL1C (L1 cache) is busy.\nFormula: 100 * GL1C_BUSY_sum / GL1C_CYCLE_sum"
@@ -204,7 +204,7 @@ Memory chart — GL1C Cache (L1):
     plain: "Percent of GL1C busy cycles spent stalled on GL2 backpressure. Formula:\n100 * GL1C_STALL_GL2_GL1_sum / GL1C_BUSY_sum."
     rst: "Percent of GL1C busy cycles spent stalled on GL2 backpressure. Formula:\n100 * GL1C_STALL_GL2_GL1_sum / GL1C_BUSY_sum."
     unit: Percent
-Memory chart — GL2C Cache (L2):
+Memory chart - GL2C Cache (L2):
   GL2C Hit Rate:
     plain: "Definition: Percentage of GL2C (L2 cache) requests that hit.\nFormula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)"
     rst: "Definition: Percentage of GL2C (L2 cache) requests that hit.\nFormula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)"
@@ -237,7 +237,7 @@ Memory chart — GL2C Cache (L2):
     plain: Bytes per second for L2 write traffic (64 B per write request in this panel).
     rst: Bytes per second for L2 write traffic (64 B per write request in this panel).
     unit: Bytes/s
-Memory chart — GCEA to System Memory:
+Memory chart - GCEA to System Memory:
   SARB Utilization:
     plain: "Definition: Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy.\nDescription: SARB handles arbitration between the GPU and the system memory interface.\nFormula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum"
     rst: "Definition: Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy.\nDescription: SARB handles arbitration between the GPU and the system memory interface.\nFormula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum"
@@ -725,7 +725,7 @@ Shader Engine Utilization:
     plain: "Percentage of GUI-active cycles the Texture Addresser was busy.\nPer sample: 100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0)."
     rst: "Percentage of GUI-active cycles the Texture Addresser was busy.\nPer sample: 100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0)."
     unit: Percent
-Memory chart — TCP-GL1 Interface:
+Memory chart - TCP-GL1 Interface:
   TCP-GL1 Read Requests:
     plain: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
     rst: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
@@ -742,7 +742,7 @@ Memory chart — TCP-GL1 Interface:
     plain: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
     rst: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
     unit: Bytes/s
-Memory chart — GL1C-GL2 Interface:
+Memory chart - GL1C-GL2 Interface:
   GL1-GL2 Read Requests:
     plain: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
     rst: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).

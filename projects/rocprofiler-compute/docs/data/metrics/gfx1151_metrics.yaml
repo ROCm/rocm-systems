@@ -56,7 +56,7 @@ System Speed-of-Light:
   Instruction Cache BW:
     rst: "Same as Memory Chart table 301 “ICache-GL1 Read Bandwidth”: SQC_TC_INST_REQ_sum × 128 B / kernel time.\nPeak / % of peak are N/A."
     unit: Bytes/s
-Memory chart — Instruction Cache:
+Memory chart - Instruction Cache:
   ICache Utilization:
     rst: "Definition: Percentage of cycles the instruction cache is busy.\nFormula: 100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum"
     unit: Percent
@@ -75,7 +75,7 @@ Memory chart — Instruction Cache:
   ICache-GL1 Read Bandwidth:
     rst: "Bytes per second of read traffic from the instruction path toward GL1 (texture-cache path\ninstruction requests), using 128 B per SQC_TC_INST_REQ event."
     unit: Bytes/s
-Memory chart — Scalar Data Cache:
+Memory chart - Scalar Data Cache:
   Dcache Utilization:
     rst: "Definition: Percentage of cycles the scalar data cache is busy.\nFormula: 100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum"
     unit: Percent
@@ -91,7 +91,7 @@ Memory chart — Scalar Data Cache:
   Dcache-GL1 Read Bandwidth:
     rst: "Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B\nper request)."
     unit: Bytes/s
-Memory chart — TCP Cache (Vector L0):
+Memory chart - TCP Cache (Vector L0):
   TCP Hit Rate:
     rst: "Definition: Percentage of TCP (L0 vector cache) requests that hit in cache.\nFormula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum"
     unit: Percent
@@ -110,7 +110,7 @@ Memory chart — TCP Cache (Vector L0):
   TCP Request Bandwidth:
     rst: Heuristic TCP request throughput using 64 B per TCP_REQ event over the kernel window.
     unit: Bytes/s
-Memory chart — LDS (Local Data Share):
+Memory chart - LDS (Local Data Share):
   LDS Atomic Instructions:
     rst: "Definition: Number of LDS atomic instructions executed.\nDescription: Atomic operations on Local Data Share memory with return values.\nFormula: SQ_LDS_ATOMIC_RETURN_sum / $denom"
     unit: Instructions per Normalization Unit
@@ -129,7 +129,7 @@ Memory chart — LDS (Local Data Share):
   LDS Wait Cycles:
     rst: "Cycles waves spent waiting on LDS (wait-state attribution), per normalization unit\n(SQ_WAIT_INST_LDS_sum)."
     unit: Cycles per Normalization Unit
-Memory chart — GL1C Cache (L1):
+Memory chart - GL1C Cache (L1):
   GL1C Utilization:
     rst: "Definition: Percentage of cycles the GL1C (L1 cache) is busy.\nFormula: 100 * GL1C_BUSY_sum / GL1C_CYCLE_sum"
     unit: Percent
@@ -154,7 +154,7 @@ Memory chart — GL1C Cache (L1):
   GL1C Stall GL2 Backpressure:
     rst: "Percent of GL1C busy cycles spent stalled on GL2 backpressure. Formula:\n100 * GL1C_STALL_GL2_GL1_sum / GL1C_BUSY_sum."
     unit: Percent
-Memory chart — GL2C Cache (L2):
+Memory chart - GL2C Cache (L2):
   GL2C Hit Rate:
     rst: "Definition: Percentage of GL2C (L2 cache) requests that hit.\nFormula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)"
     unit: Percent
@@ -179,7 +179,7 @@ Memory chart — GL2C Cache (L2):
   GL2C Write Bandwidth:
     rst: Bytes per second for L2 write traffic (64 B per write request in this panel).
     unit: Bytes/s
-Memory chart — GCEA to System Memory:
+Memory chart - GCEA to System Memory:
   SARB Utilization:
     rst: "Definition: Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy.\nDescription: SARB handles arbitration between the GPU and the system memory interface.\nFormula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum"
     unit: Percent
@@ -554,7 +554,7 @@ Shader Engine Utilization:
   TA Busy:
     rst: "Percentage of GUI-active cycles the Texture Addresser was busy.\nPer sample: 100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE (when GRBM_GUI_ACTIVE != 0)."
     unit: Percent
-Memory chart — TCP-GL1 Interface:
+Memory chart - TCP-GL1 Interface:
   TCP-GL1 Read Requests:
     rst: Read requests from TCP to GL1C (miss/refill path), per normalization unit.
     unit: Requests per Normalization Unit
@@ -567,7 +567,7 @@ Memory chart — TCP-GL1 Interface:
   TCP-GL1 Write Bandwidth:
     rst: Bytes per second for TCP→GL1 write traffic (64 B per TCP_GL1_REQ_WRITE event).
     unit: Bytes/s
-Memory chart — GL1C-GL2 Interface:
+Memory chart - GL1C-GL2 Interface:
   GL1-GL2 Read Requests:
     rst: Read requests from GL1C to GL2C per normalization unit (GL1C_GL2_REQ_READ_sum).
     unit: Requests per Normalization Unit
