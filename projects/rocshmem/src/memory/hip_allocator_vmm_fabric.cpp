@@ -22,7 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "hip_allocator_vmm_fabric.hpp"
+#include "hip_allocator.hpp"
 #include "hip_allocator_vmm_common.hpp"
 
 #if HIP_VERSION >= 70000000

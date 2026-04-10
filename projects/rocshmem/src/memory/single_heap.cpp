@@ -30,10 +30,6 @@
 #include "dlmalloc.hpp"
 #include "default_allocator.hpp"
 
-#if defined USE_HEAP_DEVICE_VMM_FABRIC
-#include "hip_allocator_vmm_fabric.hpp"
-#endif
-
 namespace rocshmem {
 
 HIPAllocator *default_allocator_{nullptr};

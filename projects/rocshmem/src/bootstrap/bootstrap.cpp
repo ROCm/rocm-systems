@@ -587,14 +587,16 @@ std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
 
   // Detect local pod IDs using the shared utility function
   PodIds localPodIds = detectLocalPodIds();
-  if (localPodIds.physicalPodId == 0 && localPodIds.virtualPodId == 0) {
+  if (IS_PODIDS_ZERO(localPodIds)) {
     // Detection failed, return empty (will fallback to localRanks_)
     DPRINTF("Rank %d: Pod detection failed, returning empty\n", rank_);
     return ipcCapableRanks;
   }
 
-  DPRINTF("Rank %d: ppod_id=%u, vpod_id=%u\n",
-          rank_, localPodIds.physicalPodId, localPodIds.virtualPodId);
+  DPRINTF("Rank %d: ppod_id[0-3]=%02x%02x%02x%02x, vpod_id=%u\n",
+          rank_, localPodIds.physicalPodId[0], localPodIds.physicalPodId[1],
+          localPodIds.physicalPodId[2], localPodIds.physicalPodId[3],
+          localPodIds.virtualPodId);
 
   // AllGather pod IDs across all ranks using Bootstrap's allGather
   std::vector<PodIds> allPodIds(nRanks_);

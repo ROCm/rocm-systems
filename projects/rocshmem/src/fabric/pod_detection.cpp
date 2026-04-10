@@ -31,7 +31,7 @@
 namespace rocshmem {
 
 PodIds detectLocalPodIds() {
-  PodIds podIds = {0, 0};
+  PodIds podIds = {};  // Zero-initialize the structure
 
   // Get the current HIP device
   int device;
@@ -68,7 +68,7 @@ PodIds detectLocalPodIds() {
   }
 
   // Get fabric information for the GPU
-  amdsmi_gpu_fabric_info_t fabricInfo;
+  amdsmi_fabric_info_t fabricInfo;
   status = amdsmi.get_gpu_fabric_info(gpuHandle, &fabricInfo);
   if (status != AMDSMI_STATUS_SUCCESS) {
     amdsmi.shut_down();
@@ -76,7 +76,7 @@ PodIds detectLocalPodIds() {
   }
 
   // Extract pod IDs from fabric info
-  podIds.physicalPodId = fabricInfo.info.v1.ppod_id;
+  memcpy(podIds.physicalPodId, fabricInfo.info.v1.ppod_id, 16);
   podIds.virtualPodId = fabricInfo.info.v1.vpod_id;
 
   // Cleanup AMD SMI
@@ -96,7 +96,7 @@ std::vector<int> matchIpcCapableRanks(int rank, const std::vector<PodIds>& allPo
 
   // Find all ranks with matching pod IDs
   for (int i = 0; i < static_cast<int>(allPodIds.size()); i++) {
-    if (allPodIds[i].physicalPodId == myPodIds.physicalPodId &&
+    if (memcmp(allPodIds[i].physicalPodId, myPodIds.physicalPodId, 16) == 0 &&
         allPodIds[i].virtualPodId == myPodIds.virtualPodId) {
       ipcCapableRanks.push_back(i);
     }

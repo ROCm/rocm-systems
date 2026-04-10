@@ -135,6 +135,10 @@ typedef union {
     uint64_t as_uint;
 } amdsmi_bdf_t;
 
+// Constants for fabric info arrays
+#define AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE 32
+#define AMDSMI_FABRIC_MAX_LOCAL_GPUS 8
+
 /**
  * @brief Fabric device configuration information (version 1)
  */
@@ -190,7 +194,7 @@ struct AmdsmiLoader {
   amdsmi_status_t (*init)(uint64_t init_flags);
   amdsmi_status_t (*shut_down)();
   amdsmi_status_t (*get_processor_handle_from_bdf)(const char* bdf, amdsmi_processor_handle* processor_handle);
-  amdsmi_status_t (*get_gpu_fabric_info)(amdsmi_processor_handle processor_handle, amdsmi_gpu_fabric_info_t* fabric_info);
+  amdsmi_status_t (*get_gpu_fabric_info)(amdsmi_processor_handle processor_handle, amdsmi_fabric_info_t* fabric_info);
 
   AmdsmiLoader();
   ~AmdsmiLoader();

@@ -26,6 +26,7 @@
 #define ROCSHMEM_POD_DETECTION_HPP_
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace rocshmem {
@@ -35,9 +36,16 @@ namespace rocshmem {
  * Used to determine fabric topology and IPC capability.
  */
 struct PodIds {
-  uint32_t physicalPodId;  ///< Physical pod ID (ppod_id from AMD SMI)
-  uint32_t virtualPodId;   ///< Virtual pod ID (vpod_id from AMD SMI)
+  uint8_t physicalPodId[16];  ///< Physical pod ID - 128-bit UUID (ppod_id from AMD SMI)
+  uint32_t virtualPodId;      ///< Virtual pod ID (vpod_id from AMD SMI)
 };
+
+/**
+ * Macro to check if PodIds structure contains all zeros (detection failed)
+ */
+#define IS_PODIDS_ZERO(podIds) \
+  (memcmp((podIds).physicalPodId, (const uint8_t[16]){0}, 16) == 0 && \
+   (podIds).virtualPodId == 0)
 
 /**
  * Detect the pod IDs for the current rank's GPU.
@@ -49,7 +57,7 @@ struct PodIds {
  * - Queries fabric information to get ppod_id and vpod_id
  *
  * @return PodIds structure with physical and virtual pod IDs.
- *         Returns {0, 0} if detection fails at any step.
+ *         Returns zero-initialized structure if detection fails at any step.
  */
 PodIds detectLocalPodIds();
 
