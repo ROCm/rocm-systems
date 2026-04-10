@@ -105,6 +105,11 @@ uint64_t NetCounterComputeDelta(
     const NetworkCounterSnapshot& after,
     const CounterDescriptor& desc);
 
+// Filter counter list to only those valid for the NIC types in snapshots
+std::vector<CounterDescriptor> NetCounterFilterByNicType(
+    const std::vector<CounterDescriptor>& selected,
+    const std::vector<NetworkCounterSnapshot>& snapshots);
+
 // Print one table per node to stdout
 void NetCounterPrintTable(
     const std::vector<std::string>& nic_names,

@@ -1169,6 +1169,9 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
                                   ctx.selected_counters);
   }
 
+  ctx.selected_counters =
+      NetCounterFilterByNicType(ctx.selected_counters, ctx.snapshots_before);
+
   char hostname[256] = {0};
   gethostname(hostname, sizeof(hostname));
   printf("# Network counter collection enabled (RCCL_TESTS_NET_COUNTER_ENABLE=1)\n");

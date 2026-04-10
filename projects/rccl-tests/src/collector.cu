@@ -499,7 +499,43 @@ uint64_t NetCounterComputeDelta(
   return delta;
 }
 
+// =====================================================================
+// NIC-type-aware column filter for the table printer
+// =====================================================================
 
+static bool HasValidMapping(const std::string& name, NicType nic_type) {
+  const CounterRegistryEntry* entry = FindInRegistry(name);
+  if (!entry) return true;
+  if (nic_type == NIC_IONIC)   return entry->ionic_valid;
+  if (nic_type == NIC_BNXT_RE) return entry->bnxt_valid;
+  return true;
+}
+
+std::vector<CounterDescriptor> NetCounterFilterByNicType(
+    const std::vector<CounterDescriptor>& selected,
+    const std::vector<NetworkCounterSnapshot>& snapshots) {
+  if (snapshots.empty()) return selected;
+
+  bool mixed = false;
+  NicType first = snapshots[0].nic_type;
+  for (size_t i = 1; i < snapshots.size(); i++) {
+    if (snapshots[i].nic_type != first) { mixed = true; break; }
+  }
+
+  std::vector<CounterDescriptor> result;
+  for (const auto& d : selected) {
+    if (mixed) {
+      bool keep = false;
+      for (size_t i = 0; i < snapshots.size() && !keep; i++) {
+        if (HasValidMapping(d.name, snapshots[i].nic_type)) keep = true;
+      }
+      if (keep) result.push_back(d);
+    } else {
+      if (HasValidMapping(d.name, first)) result.push_back(d);
+    }
+  }
+  return result;
+}
 
 // =====================================================================
 // Table printer
@@ -529,6 +565,10 @@ void NetCounterPrintTable(
     return;
   }
 
+  std::vector<CounterDescriptor> active_counters =
+      NetCounterFilterByNicType(selected, before);
+  num_counters = active_counters.size();
+
   bool mixed_nic_types = false;
   NicType first_nic_type = before[0].nic_type;
   for (size_t n = 1; n < num_nics; n++) {
@@ -547,7 +587,7 @@ void NetCounterPrintTable(
   for (size_t n = 0; n < num_nics; n++) {
     dur_sec[n] = (after[n].timestamp_us - before[n].timestamp_us) / 1e6;
     for (size_t c = 0; c < num_counters; c++) {
-      deltas[n][c] = NetCounterComputeDelta(before[n], after[n], selected[c]);
+      deltas[n][c] = NetCounterComputeDelta(before[n], after[n], active_counters[c]);
       rates[n][c] = (dur_sec[n] > 0.001)
                         ? (double)deltas[n][c] / dur_sec[n]
                         : 0.0;
@@ -592,7 +632,7 @@ void NetCounterPrintTable(
       snprintf(buf, sizeof(buf), "%.2f", rates[n][c]);
       rt_w[c] = std::max(rt_w[c], (int)strlen(buf));
     }
-    int name_len = (int)selected[c].name.size();
+    int name_len = (int)active_counters[c].name.size();
     int pair_w   = cnt_w[c] + 2 + rt_w[c];
     if (name_len > pair_w) {
       rt_w[c] += (name_len - pair_w);
@@ -617,7 +657,7 @@ void NetCounterPrintTable(
   printf("%-*s", nic_w, "Device");
   for (size_t c = 0; c < num_counters; c++) {
     int pair_w = cnt_w[c] + 2 + rt_w[c];
-    printf("  %-*s", pair_w, selected[c].name.c_str());
+    printf("  %-*s", pair_w, active_counters[c].name.c_str());
   }
   printf("\n");
 
