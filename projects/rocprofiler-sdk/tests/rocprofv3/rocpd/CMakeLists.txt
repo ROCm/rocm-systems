@@ -28,7 +28,7 @@ else()
 endif()
 
 if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
-    set(MULTIPROC_IS_DISABLED ON) # fails on mi300 SLES for some unknown reason
+    set(MULTIPROC_IS_DISABLED OFF) # fails on mi300 SLES for some unknown reason
 endif()
 
 #########################################################################################
