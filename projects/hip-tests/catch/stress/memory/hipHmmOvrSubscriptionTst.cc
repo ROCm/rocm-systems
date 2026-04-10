@@ -18,7 +18,7 @@ __global__ void floatx2(float* ptr, size_t size) {
   }
 }
 
-TEST_CASE(Stress_HMM_OverSubscriptionTst) {
+HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
   int hmm = 0;
   HIP_CHECK(hipDeviceGetAttribute(&hmm, hipDeviceAttributeManagedMemory, 0));
 
@@ -93,6 +93,6 @@ TEST_CASE(Stress_HMM_OverSubscriptionTst) {
     HIP_CHECK_THREAD_FINALIZE();
     REQUIRE(proc.wait() == 0);
   } else {
-    HipTest::HIP_SKIP_TEST("Tests only supposed to run on xnack+ devices");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 }

@@ -45,6 +45,7 @@ set(SRC_FILES
   src/device/rccl_metadata.h
   src/device/rccl_ptr.h
   src/device/sendrecv.h
+  src/device/hierarchical_ag_shuffle.h
   src/device/common.cu
   src/device/onerank.cu
   src/device/network/unpack/unpack_defs.h
@@ -372,7 +373,7 @@ foreach(SRC_FILE ${SRC_FILES})
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${hipify-perl_executable} -experimental -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_faults.sh ${HIP_FILE}
       MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
@@ -382,7 +383,7 @@ foreach(SRC_FILE ${SRC_FILES})
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${hipify-perl_executable} -experimental -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
       MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
       COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
@@ -787,7 +788,9 @@ if(ENABLE_CODE_COVERAGE)
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
   target_compile_options(rccl PRIVATE
-    -fvisibility=default -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping)
+    -fvisibility=default
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping")
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate

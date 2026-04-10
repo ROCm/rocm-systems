@@ -85,7 +85,7 @@ template <typename T> __global__ void vectorADD(T __restrict__* A_d, T* B_d, T* 
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE(Unit_hipLanguageExtensions) { REQUIRE(true); }
+HIP_TEST_CASE(Unit_hipLanguageExtensions) { REQUIRE(true); }
 
 /**
  * End doxygen group KernelTest.

@@ -12,6 +12,7 @@ This testcase works only on gfx90a, gfx942, gfx950.
 */
 
 #include <hip_test_checkers.hh>
+#include <string>
 #include <hip_test_common.hh>
 #include <hip_test_features.hh>
 
@@ -30,7 +31,7 @@ Output: atomicAdd API would work and the 0/P is INITIAL_VAL + INC_VAL
         global_atomic_cmpswap instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE(Unit_AtomicAdd_Coherentwithoutflag, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_AtomicAdd_Coherentwithoutflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -38,7 +39,7 @@ TEMPLATE_TEST_CASE(Unit_AtomicAdd_Coherentwithoutflag, float, double) {
   std::string gfxName(prop.gcnArchName);
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
     if (prop.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       TestType *A_h{nullptr}, *result{nullptr};
       TestType *A_d{nullptr}, *result_d{nullptr};
@@ -63,9 +64,6 @@ TEMPLATE_TEST_CASE(Unit_AtomicAdd_Coherentwithoutflag, float, double) {
       HIP_CHECK(hipHostFree(result));
     }
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }

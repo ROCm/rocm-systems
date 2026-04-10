@@ -26,8 +26,6 @@ __host__ __device__ constexpr __half makeHalfFromBits(unsigned short bits) {
 
 constexpr __half kConstTwo = makeHalfFromBits(kHalfTwo);
 constexpr __half kConstPi = makeHalfFromBits(kHalfPi);
-constexpr __half kConstInf = makeHalfFromBits(kHalfInf);
-
 
 /**
  * Device kernel that uses constexpr __half values.
@@ -50,7 +48,7 @@ __global__ void testConstexprHalfDevice(float* results) {
  * - This is the pattern used by libhipcxx for mathematical constants
  * - Verifies fix for union active member issue in constexpr evaluation
  */
-TEST_CASE("Unit_hipTestHalfConstexpr_HostConstexpr") {
+HIP_TEST_CASE(Unit_hipTestHalfConstexpr_HostConstexpr) {
   // Test that constexpr __half values have correct bit patterns on host
 
   SECTION("Two") {
@@ -86,7 +84,7 @@ TEST_CASE("Unit_hipTestHalfConstexpr_HostConstexpr") {
  * - Tests that constexpr __half values can be used in device kernels
  * - Verifies both file-scope and kernel-local constexpr values work
  */
-TEST_CASE("Unit_hipTestHalfConstexpr_DeviceConstexpr") {
+HIP_TEST_CASE(Unit_hipTestHalfConstexpr_DeviceConstexpr) {
   constexpr size_t numResults = 3;
   float* results_d = nullptr;
   std::vector<float> results_h(numResults, 0.0f);
@@ -106,5 +104,3 @@ TEST_CASE("Unit_hipTestHalfConstexpr_DeviceConstexpr") {
 
   HIP_CHECK(hipFree(results_d));
 }
-
-

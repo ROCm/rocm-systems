@@ -35,11 +35,11 @@ __global__ void print_things() {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_Printf_ManyDevicesTest) {
+HIP_TEST_CASE(Unit_Printf_ManyDevicesTest) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
     return;
   }
   uint num_blocks = 14;

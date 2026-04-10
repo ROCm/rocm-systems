@@ -10,9 +10,9 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE(Unit_hipMemcpy_Positive_Basic) { MemcpyWithDirectionCommonTests<false>(hipMemcpy); }
+HIP_TEST_CASE(Unit_hipMemcpy_Positive_Basic) { MemcpyWithDirectionCommonTests<false>(hipMemcpy); }
 
-TEST_CASE(Unit_hipMemcpy_Positive_Synchronization_Behavior) {
+HIP_TEST_CASE(Unit_hipMemcpy_Positive_Synchronization_Behavior) {
   using namespace std::placeholders;
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -39,7 +39,7 @@ TEST_CASE(Unit_hipMemcpy_Positive_Synchronization_Behavior) {
     // This behavior differs on NVIDIA and AMD, on AMD the hipMemcpy calls is synchronous with
     // respect to the host
 #if HT_AMD
-    HipTest::HIP_SKIP_TEST(
+    WARN(
         "EXSWCPHIPT-127 - Memcpy from device to device memory behavior differs on AMD and Nvidia");
     return;
 #endif
@@ -53,7 +53,7 @@ TEST_CASE(Unit_hipMemcpy_Positive_Synchronization_Behavior) {
   }
 }
 
-TEST_CASE(Unit_hipMemcpy_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemcpy_Negative_Parameters) {
   using namespace std::placeholders;
 
   SECTION("Host to device") {
@@ -85,7 +85,7 @@ TEST_CASE(Unit_hipMemcpy_Negative_Parameters) {
   }
 }
 
-TEST_CASE(Unit_hipMemcpyWithStream_Capture) {
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_Capture) {
   constexpr size_t kNumElements = 1024;
 
   LinearAllocGuard<int> host_data(LinearAllocs::malloc, kNumElements * sizeof(int));

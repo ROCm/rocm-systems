@@ -34,6 +34,7 @@
 #include "rocshmem/rocshmem.hpp"
 
 #include "backend_bc.hpp"
+#include "build_info.hpp"
 #include "context_incl.hpp"
 #include "envvar.hpp"
 #if defined(USE_GDA)
@@ -88,7 +89,6 @@ BackendType get_backend_type() { return backend->get_backend_type(); }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
-  BackendType type;
 
   /* Check whether the user explicitely requests a particular backend type */
   std::string envstr = envvar::backend;
@@ -185,7 +185,32 @@ static void setFilesLimit() {
             "rocSHMEM requires MPI library to be loaded at runtime. Aborting.\n");
     exit(1);
   }
+
   mpi_instance = new MPIInstance(comm);
+
+  // Print build info and/or environment variables based on DEBUG_LEVEL.
+  // Only PE 0 prints to avoid duplicated output.
+  if (mpi_instance->get_rank() == 0) {
+    using rocshmem::envvar::types::debug_level;
+    auto debug_val = envvar::debug_level.get_value();
+    if (debug_val >= debug_level::INFO) {
+      print_build_info(std::cout);
+    }
+    if (debug_val == debug_level::ENV ||
+        debug_val == debug_level::ENV_ALL ||
+        debug_val == debug_level::ENV_FULL ||
+        debug_val >= debug_level::INFO) {
+      envvar::print_mode mode;
+      if (debug_val == debug_level::ENV_ALL) {
+        mode = envvar::print_mode::ALL_VALUES;
+      } else if (debug_val == debug_level::ENV_FULL) {
+        mode = envvar::print_mode::FULL_DOCUMENTATION;
+      } else {
+        mode = envvar::print_mode::MODIFIED;
+      }
+      envvar::print_envvars(mode, std::cout);
+    }
+  }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
   BackendType type = select_backend_type(comm, nullptr);
@@ -225,7 +250,7 @@ static void setFilesLimit() {
   init_constant_memory();
 }
 
-[[maybe_unused]] __host__ static void inline library_init_subcomm(TcpBootstrap *bootstrap, int nranks, int rank) {
+[[maybe_unused]] __host__ static void inline library_init_subcomm([[maybe_unused]] TcpBootstrap *bootstrap, int nranks, int rank) {
   int initialized;
   int world_size = -1;
 
@@ -297,6 +322,30 @@ static void setFilesLimit() {
 
   setFilesLimit();
   rocm_init();
+
+  // Print build info and/or environment variables based on DEBUG_LEVEL.
+  // Only PE 0 prints to avoid duplicated output.
+  if (bootstrap->getRank() == 0) {
+    using rocshmem::envvar::types::debug_level;
+    auto debug_val = envvar::debug_level.get_value();
+    if (debug_val >= debug_level::INFO) {
+      print_build_info(std::cout);
+    }
+    if (debug_val == debug_level::ENV ||
+        debug_val == debug_level::ENV_ALL ||
+        debug_val == debug_level::ENV_FULL ||
+        debug_val >= debug_level::INFO) {
+      envvar::print_mode mode;
+      if (debug_val == debug_level::ENV_ALL) {
+        mode = envvar::print_mode::ALL_VALUES;
+      } else if (debug_val == debug_level::ENV_FULL) {
+        mode = envvar::print_mode::FULL_DOCUMENTATION;
+      } else {
+        mode = envvar::print_mode::MODIFIED;
+      }
+      envvar::print_envvars(mode, std::cout);
+    }
+  }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
   BackendType type = select_backend_type(MPI_COMM_NULL, bootstrap);

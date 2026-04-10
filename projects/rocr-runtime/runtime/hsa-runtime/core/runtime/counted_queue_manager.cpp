@@ -45,7 +45,7 @@ hsa_status_t CountedQueuePoolManager::AcquireQueue(
 
   // Increment use count
   core_queue->use_count++;
-  
+
   // Mark as a counted queue, if not already set
   if (!core_queue->is_counted_queue) {
     core_queue->is_counted_queue = true;
@@ -100,17 +100,14 @@ hsa_status_t CountedQueuePoolManager::ReleaseQueue(hsa_queue_t* queue) {
   // Decrement internal ref count inside core::Queue object
   if (counted_q->hw_queue->use_count > 0) {
     counted_q->hw_queue->use_count--;
-    
-    // Remove unique handle from map when it is no longer in use by an application
-    if (counted_q->hw_queue->use_count == 0) {
-      counted_queues_.erase(queue);
-
-      // free the associated shared_queue when removing the counted_queue
-      SharedQueue* shared = reinterpret_cast<SharedQueue*>(
-        reinterpret_cast<char*>(queue) - offsetof(SharedQueue, amd_queue.hsa_queue));
-      delete shared;
-    }
   }
+
+  // Delete the SharedQueue immediately
+  SharedQueue* shared = reinterpret_cast<SharedQueue*>(reinterpret_cast<char*>(queue) -
+                                                       offsetof(SharedQueue, amd_queue.hsa_queue));
+  delete shared;
+
+  counted_queues_.erase(it);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -129,9 +126,7 @@ void CountedQueuePoolManager::Cleanup() {
   }
   hw_queue_pools_.clear();
 
-  // Clean up counted and shared queues
   for (auto& cq : counted_queues_) {
-    // Recover SharedQueue from unique handle and free memory
     hsa_queue_t* queue_handle = cq.first;
     SharedQueue* shared = reinterpret_cast<SharedQueue*>(
         reinterpret_cast<char*>(queue_handle) - offsetof(SharedQueue, amd_queue.hsa_queue));

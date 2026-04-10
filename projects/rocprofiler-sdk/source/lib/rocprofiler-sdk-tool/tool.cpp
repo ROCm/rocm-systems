@@ -2189,7 +2189,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              callbacks.callback_tracing,
                              nullptr),
                          "callback tracing service failed to configure");
+    }
 
+    // Register pause/resume control callbacks when using selected_regions or marker tracing
+    if(tool::get_config().marker_api_trace || tool::get_config().selected_regions ||
+       tool::get_config().selected_regions_ref_count)
+    {
         auto pause_resume_ctx = null_context_id;
         ROCPROFILER_CALL(rocprofiler_create_context(&pause_resume_ctx), "failed to create context");
 
@@ -3104,10 +3109,14 @@ tool_detach(void* /*tool_data*/)
 {
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
 
-    // Flush all buffers (same as tool_fini)
+    // Flush all buffers, stop context to ensure in-flight GPU operations complete,
+    // then flush again to capture any final events (same pattern as tool_fini)
+    flush();
+    rocprofiler_stop_context(get_client_ctx());
     flush();
 
-    // Set process end timestamp for this detachment cycle
+    // Capture the fallback end timestamp after shutdown flushes complete so it
+    // reflects when profiling actually stopped.
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
@@ -3126,12 +3135,14 @@ tool_fini(void* /*tool_data*/)
 
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 
-    if(tool_metadata->process_end_ns == 0)
-        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
-
     flush();
     rocprofiler_stop_context(get_client_ctx());
     flush();
+
+    // Capture the fallback end timestamp after shutdown flushes complete so it
+    // reflects when profiling actually stopped.
+    if(tool_metadata->process_end_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
     generate_output(cleanup_mode::destroy);
 

@@ -84,7 +84,8 @@ static void runTest(const int width, const float offsetX = 0) {
   if (ret == hipErrorInvalidValue && resType == hipResourceTypeLinear) {
     free(hData);
     HIP_CHECK(hipFree(hipBuff));
-    HipTest::HIP_SKIP_TEST("sRGB is not supported for hipResourceTypeLinear type on AMD devices");
+    HipTest::HIP_SKIP_TEST(
+        "sRGB is not supported for hipResourceTypeLinear on AMD devices.");
     return;
   }
 #endif
@@ -158,7 +159,7 @@ line1:
   REQUIRE(result);
 }
 
-TEST_CASE(Unit_hipTextureObj1DCheckRGBAModes_array) {
+HIP_TEST_CASE(Unit_hipTextureObj1DCheckRGBAModes_array) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("RGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, regularCoords") {
@@ -214,7 +215,7 @@ TEST_CASE(Unit_hipTextureObj1DCheckRGBAModes_array) {
 }
 
 
-TEST_CASE(Unit_hipTextureObj1DCheckSRGBAModes_array) {
+HIP_TEST_CASE(Unit_hipTextureObj1DCheckSRGBAModes_array) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("SRGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, regularCoords") {
@@ -273,7 +274,7 @@ TEST_CASE(Unit_hipTextureObj1DCheckSRGBAModes_array) {
 #endif
 }
 
-TEST_CASE(Unit_hipTextureObj1DCheckRGBAModes_buffer) {
+HIP_TEST_CASE(Unit_hipTextureObj1DCheckRGBAModes_buffer) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("RGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeLinear, regularCoords") {
@@ -286,7 +287,7 @@ TEST_CASE(Unit_hipTextureObj1DCheckRGBAModes_buffer) {
   }
 }
 
-TEST_CASE(Unit_hipTextureObj1DCheckSRGBAModes_buffer) {
+HIP_TEST_CASE(Unit_hipTextureObj1DCheckSRGBAModes_buffer) {
   CHECK_IMAGE_SUPPORT
 
   SECTION(

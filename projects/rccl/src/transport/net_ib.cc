@@ -485,7 +485,7 @@ NCCL_PARAM(IbDisable, "IB_DISABLE", 0);
 NCCL_PARAM(IbMergeVfs, "IB_MERGE_VFS", 1);
 NCCL_PARAM(IbMergeNics, "IB_MERGE_NICS", 1);
 
-// Returns 0 if this is the path of two VFs of the same physical device
+// Returns 1 if this is the path of two VFs of the same physical device
 static int ncclIbMatchVfPath(char* path1, char* path2) {
   // Merge multi-port NICs into the same PCI device
   if (ncclParamIbMergeVfs()) {
@@ -495,24 +495,46 @@ static int ncclIbMatchVfPath(char* path1, char* path2) {
   }
 }
 
+/**
+ * Assumes PCIe path ends with xxxx:xx:xx.x 
+ */
+static void ncclIbNormalizePciPath(const char* in, char* out, size_t out_size) {
+  if (!in || !out || out_size == 0) return;
+  // Safe copy with truncation
+  size_t len = strnlen(in, out_size - 1);
+  memmove(out, in, len);
+  out[len] = '\0';
+  if (len < 4) return;
+  // Merge multi-port NICs (.1/.2/.3 -> .0)
+  out[len - 1] = '0';
+  // Merge VFs if enabled
+  if (ncclParamIbMergeVfs()) {
+    out[len - 3] = '0';
+    out[len - 4] = '0';
+  }
+}
+
 static ncclResult_t ncclIbGetPciPath(char* devName, char** path, int* realPort) {
   char devicePath[PATH_MAX];
   snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
   char* p = realpath(devicePath, NULL);
+  // Keep real path unchanged
+  *path = p;
   if (p == NULL) {
     WARN("Could not find real path of %s (%s)", devName, devicePath);
   } else {
-    // Merge multi-port NICs into the same PCI device
-    p[strlen(p)-1] = '0';
-    // Also merge virtual functions (VF) into the same device
-    if (ncclParamIbMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
+    char normalized[PATH_MAX];
+    ncclIbNormalizePciPath(p, normalized, PATH_MAX);
     // Keep the real port aside (the ibv port is always 1 on recent cards)
     *realPort = 0;
-    for (int d=0; d<ncclNIbDevs; d++) {
-      if (ncclIbMatchVfPath(p, ncclIbDevs[d].pciPath)) (*realPort)++;
+    for (int d = 0; d < ncclNIbDevs; d++) {
+      char otherNorm[PATH_MAX];
+      ncclIbNormalizePciPath(ncclIbDevs[d].pciPath, otherNorm, PATH_MAX);
+      if (ncclIbMatchVfPath(normalized, otherNorm)) {
+        (*realPort)++;
+      }
     }
   }
-  *path = p;
   return ncclSuccess;
 }
 
@@ -693,35 +715,38 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   }
 
   // Always count up number of merged devices
-  ncclIbMergedDev* mDev = ncclIbMergedDevs + ncclNMergedIbDevs;
-  mDev->vProps.ndevs = 0;
-  mDev->speed = 0;
-
+  ncclIbMergedDev tmp;
+  memset(&tmp,0,sizeof(tmp));
+  bool used[MAX_IB_DEVS] = {0};
   for (int i = 0; i < props->ndevs; i++) {
-    ncclIbDev* dev = ncclIbDevs + props->devs[i];
-    if (mDev->vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
-    mDev->vProps.devs[mDev->vProps.ndevs++] = props->devs[i];
-    mDev->speed += dev->speed;
-    // Each successive time, copy the name '+' new name
-    if (mDev->vProps.ndevs > 1) {
-      snprintf(mDev->devName + strlen(mDev->devName), sizeof(mDev->devName) - strlen(mDev->devName), "+%s", dev->devName);
-    // First time, copy the plain name
-    } else {
-      strncpy(mDev->devName, dev->devName, MAXNAMESIZE);
-    }
-  }
-
-  // Check link layers
-  ncclIbDev* dev0 = ncclIbDevs + props->devs[0];
-  for (int i = 1; i < props->ndevs; i++) {
-    if (props->devs[i] >= ncclNIbDevs) {
+    if( props->devs[i]  < 0 || props->devs[i] >= ncclNIbDevs ) {
       WARN("NET/IB : Cannot use physical device %d, max %d", props->devs[i], ncclNIbDevs);
       return ncclInvalidUsage;
     }
-    ncclIbDev* dev = ncclIbDevs + props->devs[i];
+    if(used[props->devs[i]]) continue;
+    const ncclIbDev* dev = ncclIbDevs + props->devs[i];
+    if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
+    tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
+    tmp.speed += dev->speed;
+    // Each successive time, copy the name '+' new name
+    if (tmp.vProps.ndevs > 1) {
+      size_t off = strlen(tmp.devName);
+      snprintf(tmp.devName + off, sizeof(tmp.devName) - off, "+%s", dev->devName);
+    // First time, copy the plain name
+    } else {
+      strncpy(tmp.devName, dev->devName, MAXNAMESIZE-1);
+      tmp.devName[MAXNAMESIZE-1] = '\0';
+    }
+    used[props->devs[i]] = true;
+  }
+
+  // Check link layers
+  const ncclIbDev* dev0 = ncclIbDevs + tmp.vProps.devs[0];
+  for (int i = 1; i < tmp.vProps.ndevs; i++) {
+    const ncclIbDev* dev = ncclIbDevs + tmp.vProps.devs[i];
     if (dev->link != dev0->link) {
       WARN("NET/IB : Attempted to merge incompatible devices: [%d]%s:%d/%s and [%d]%s:%d/%s. Try selecting NICs of only one link type using NCCL_IB_HCA",
-        props->devs[0], dev0->devName, dev0->portNum, NCCL_IB_LLSTR(dev0->link), props->devs[i], dev->devName, dev->portNum, NCCL_IB_LLSTR(dev->link));
+        tmp.vProps.devs[0], dev0->devName, dev0->portNum, NCCL_IB_LLSTR(dev0->link),tmp.vProps.devs[i], dev->devName, dev->portNum, NCCL_IB_LLSTR(dev->link));
       return ncclInvalidUsage;
     }
   }
@@ -730,8 +755,8 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   //format -> 0000:00 
   char root0[8]; 
   ncclIbGetPciRootFromPath(dev0->pciPath, root0, sizeof(root0));
-  for (int i = 1; i < props->ndevs; i++) {
-    ncclIbDev* dev = ncclIbDevs + props->devs[i];
+  for (int i = 1; i < tmp.vProps.ndevs; i++) {
+    const ncclIbDev* dev = ncclIbDevs + tmp.vProps.devs[i];
     int numa_i = ncclIbGetNumaNodeFromPath(dev->pciPath);
     if (numa0 >= 0 && numa_i >= 0 && numa_i != numa0) {
       WARN("NET/IB : Merging NICs across NUMA nodes (%s numa=%d, %s numa=%d). "
@@ -739,7 +764,6 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
            dev0->devName, numa0, dev->devName, numa_i);
       break;
     }
-
     char root_i[8];
     ncclIbGetPciRootFromPath(dev->pciPath, root_i, sizeof(root_i));
     if (strcmp(root_i, root0) != 0) {
@@ -750,9 +774,9 @@ ncclResult_t ncclIbMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
       break;
     }
   }
-
+  ncclIbMergedDevs[ncclNMergedIbDevs] = tmp;
   *d = ncclNMergedIbDevs++;
-  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, mDev->devName, mDev->speed, mDev->vProps.ndevs);
+  INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, tmp.devName, tmp.speed, tmp.vProps.ndevs);
   return ncclSuccess;
 }
 
@@ -910,14 +934,6 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
               PTHREADCHECKGOTO(pthread_create(&ncclIbAsyncThread, NULL, ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs), "pthread_create", ret, fail);
               ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
               PTHREADCHECKGOTO(pthread_detach(ncclIbAsyncThread), "pthread_detach", ret, fail); // will not be pthread_join()'d
-
-              // Add this plain physical device to the list of virtual devices
-              int vDev;
-              ncclNetVDeviceProps_t vProps = {0};
-              vProps.ndevs = 1;
-              vProps.devs[0] = ncclNIbDevs;
-              NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps));
-
               ncclNIbDevs++;
               nPorts++;
             }
@@ -937,8 +953,14 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
     // Determine whether RELAXED_ORDERING is enabled and possible
     ncclIbRelaxedOrderingEnabled = ncclIbRelaxedOrderingCapable();
     for (int d = 0; d < ncclNIbDevs; d++) {
-        snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
-          ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
+      snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
+        ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
+      // Add this plain physical device to the list of virtual devices
+      int vDev;
+      ncclNetVDeviceProps_t vProps = {0};
+      vProps.ndevs = 1;
+      vProps.devs[0] = d;
+      NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps)); 
     }
     char addrline[SOCKET_NAME_MAXLEN+1];
     INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
@@ -2048,7 +2070,31 @@ ib_recv:
 
     // Allocate Flush dummy buffer for GPU Direct RDMA
     if (rComm->flushEnabled) {
+      bool gpuFlushRegistered = false;
+      rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
+      rCommDev->gpuFlush.gpuMr = nullptr;
+      rCommDev->gpuFlush.dmabuf_fd = -1;
+
       if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        if (ncclCuMemEnable()) {
+          NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, fail);
+          CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&rCommDev->gpuFlush.dmabuf_fd,
+                      (CUdeviceptr)rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int),
+                      CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0), ret, cumem_flush_hsa);
+          NCCLCHECKGOTO(wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd,
+                        0, sizeof(int), (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem,
+                        rCommDev->gpuFlush.dmabuf_fd,
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, cumem_flush_hsa);
+          gpuFlushRegistered = true;
+          goto flush_reg_done;
+cumem_flush_hsa:
+          if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
+            close(rCommDev->gpuFlush.dmabuf_fd);
+            rCommDev->gpuFlush.dmabuf_fd = -1;
+          }
+        }
+#else
 #if defined(HIP_UNCACHED_MEMORY)
         NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), hipDeviceMallocUncached), ret, fail);
 #else
@@ -2059,24 +2105,29 @@ ib_recv:
           uint64_t export_offset = 0;
           void *aligned_ptr = NULL;
           size_t aligned_size = 0;
-          get_aligned_ptr_and_size(rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int) /*devicebuffersize*/, &aligned_ptr, &aligned_size);
-          hsa_status_t export_status = pfn_hsa_amd_portable_export_dmabuf(aligned_ptr, aligned_size, &rCommDev->gpuFlush.dmabuf_fd, &export_offset);
-          if (rCommDev->gpuFlush.dmabuf_fd < 0 || export_status != HSA_STATUS_SUCCESS)
-          {
-            WARN("Failed to export DMA BUF");
-            goto fail;
+          get_aligned_ptr_and_size(rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), &aligned_ptr, &aligned_size);
+          HSACHECKGOTO(hsa_amd_portable_export_dmabuf(aligned_ptr, aligned_size, &rCommDev->gpuFlush.dmabuf_fd, &export_offset), ret, peermem_flush);
+          if (wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int),
+                        (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem, rCommDev->gpuFlush.dmabuf_fd,
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) != ncclSuccess) goto peermem_flush;
+          gpuFlushRegistered = true;
+          goto flush_reg_done;
+peermem_flush:
+          if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
+            close(rCommDev->gpuFlush.dmabuf_fd);
+            rCommDev->gpuFlush.dmabuf_fd = -1;
           }
-          NCCLCHECKGOTO(wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int), (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem /*iova*/, rCommDev->gpuFlush.dmabuf_fd, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, fail);
         }
-        else
-        {
+#endif
+flush_reg_done:
+        if (!gpuFlushRegistered) {
+          if (rCommDev->gpuFlush.gpuFlushGpuMem) {
+            ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem);
+            rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
+          }
+          rCommDev->gpuFlush.gpuMr = nullptr;
           rCommDev->gpuFlush.dmabuf_fd = -1;
-          NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, fail);
         }
-      } else {
-        rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
-        rCommDev->gpuFlush.gpuMr = nullptr;
-        rCommDev->gpuFlush.dmabuf_fd = -1;
       }
       NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->gpuFlush.hostMr, rCommDev->base.pd, &rComm->gpuFlushHostMem, sizeof(int), IBV_ACCESS_LOCAL_WRITE), ret, fail);
       rCommDev->gpuFlush.sge.addr = (uint64_t)&rComm->gpuFlushHostMem;
@@ -2303,6 +2354,7 @@ ncclResult_t ncclIbDeregMr(void* comm, void* mhandle) {
 }
 
 NCCL_PARAM(IbSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
+RCCL_PARAM(IbSplitDataThreshold, "IB_SPLIT_DATA_THRESHOLD", 128);
 
 ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
@@ -2363,6 +2415,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   // Multi-QP: make sure IB writes are multiples of 128B so that LL and LL128 protocols still work
   const int align = 128;
   int nqps = ncclParamIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps;
+
+  // For small messages (< splitDataThreshold) with multiple QPs, avoid splitting:
+  // send the entire payload through one QP selected via round-robin, post zero-length WRs on the rest.
+  int smallMsgActiveQp = comm->fifoHead % nqps;
+  int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
+
   for (int i = 0; i < nqps; i++) {
     int qpIndex = comm->base.qpIndex;
     ncclIbQp* qp = comm->base.qps + qpIndex;
@@ -2374,7 +2432,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // Select proper rkey (needed even for 0-size send)
       comm->wrs[r].wr.rdma.rkey = slots[r].rkeys[qp->remDevIdx];
 
-      int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      int chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == smallMsgActiveQp) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      }
       int length = std::min(reqs[r]->send.size-reqs[r]->send.offset, chunkSize);
       if (length <= 0) {
         comm->wrs[r].sg_list = NULL;
@@ -2425,7 +2488,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
     }
 
     for (int r=0; r<nreqs; r++) {
-      int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      int chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == smallMsgActiveQp) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      }
       reqs[r]->send.offset += chunkSize;
       comm->sges[r].addr += chunkSize;
       comm->wrs[r].wr.rdma.remote_addr += chunkSize;
@@ -2760,9 +2828,14 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
   // We don't know which devIndex the recv was on, so we flush on all devices
   for (int i = 0; i < comm->base.vProps.ndevs; i++) {
     struct ibv_send_wr wr;
+    // Check if GPU flush buffer was successfully registered
+    // If not, fall back to using user data buffer for flush
+    bool useGpuFlushMem = rcclParamIbGdrFlushGpuMemNoRelaxedOrdering() &&
+                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr &&
+                          comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = req - comm->base.reqs;
-    if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+    if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
       wr.sg_list = &comm->devs[i].gpuFlush.sge;
@@ -2774,7 +2847,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     }
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = req - comm->base.reqs;
-    if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+    if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {

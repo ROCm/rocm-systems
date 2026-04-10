@@ -105,7 +105,7 @@ void run(size_t size, hipStream_t stream1, hipStream_t stream2) {
   HIPCHECK(hipFree(Cdd));
   HIPCHECK(hipFree(Ddd));
 }
-TEST_CASE(Unit_hipMultiThreadStreams2) {
+HIP_TEST_CASE(Unit_hipMultiThreadStreams2) {
   int iterations = 100;
 
   hipStream_t stream[3];

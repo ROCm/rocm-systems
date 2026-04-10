@@ -177,13 +177,13 @@ ${HIPIFY_DIR}/%.h: %.h
 
 .PRECIOUS: ${DST_DIR}/%.o
 
-${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"
 	$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<
 
-${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"
@@ -195,13 +195,13 @@ ${DST_DIR}/timer.o: timer.cc timer.h
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
 
 ifeq ($(DSO), 1)
-${DST_DIR}/%_perf$(NAME_SUFFIX): ${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_LIBS) $(DST_DIR)/src/git_version.cpp
+${DST_DIR}/%_perf$(NAME_SUFFIX): ${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/collector.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_LIBS) $(DST_DIR)/src/git_version.cpp
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) -o $@ $^ $(HIPLDFLAGS)"
 	$(HIPCC) -o $@ $^ $(HIPLDFLAGS) -L$(TEST_VERIFIABLE_BUILDDIR) -lverifiable -Xlinker "--enable-new-dtags" -Xlinker "-rpath,\$$ORIGIN:\$$ORIGIN/verifiable"
 else
-${DST_DIR}/%_perf$(NAME_SUFFIX):${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS) $(DST_DIR)/src/git_version.cpp
+${DST_DIR}/%_perf$(NAME_SUFFIX):${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/collector.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS) $(DST_DIR)/src/git_version.cpp
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) -o $@ $^ $(HIPLDFLAGS)"

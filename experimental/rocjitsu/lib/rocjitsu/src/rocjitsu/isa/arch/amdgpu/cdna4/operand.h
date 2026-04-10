@@ -1,0 +1,34 @@
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// This file was automatically generated. Do not modify.
+
+#ifndef ROCJITSU_ISA_ARCH_AMDGPU_CDNA4_OPERAND_H_
+#define ROCJITSU_ISA_ARCH_AMDGPU_CDNA4_OPERAND_H_
+
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/operand_types.h"
+#include "rocjitsu/isa/operand.h"
+#include <string>
+
+namespace rocjitsu {
+namespace cdna4 {
+
+class Operand : public IsaOperand<Isa> {
+public:
+  Operand(int size_bits, OperandType opr_type, int encoding_value);
+  std::string name() const override;
+  uint32_t read_scalar(const amdgpu::Wavefront &wf) const override;
+  uint32_t read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const override;
+  void write_scalar(amdgpu::Wavefront &wf, uint32_t val) const override;
+  void write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const override;
+  uint64_t read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const override;
+  void write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const override;
+  uint64_t read_scalar64(const amdgpu::Wavefront &wf) const override;
+  void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const override;
+};
+
+} // namespace cdna4
+} // namespace rocjitsu
+
+#endif // ROCJITSU_ISA_ARCH_AMDGPU_CDNA4_OPERAND_H_

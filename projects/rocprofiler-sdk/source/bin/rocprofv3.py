@@ -484,7 +484,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         basic_tracing_options,
         "--kfd-trace",
-        help="For collecting --kfd-page-migration-trace, --kfd-page-mapping-trace, and --kfd-queue-trace. KFD (Kernel Fusion Driver) traces capture low level driver routines involved in mapping, unmapping, and migration of data between GPU and system memories, as well as eviction/restoration of GPU queues to facilitate such routines.",
+        help="For collecting --kfd-page-migration-trace, --kfd-page-mapping-trace, --kfd-queue-trace, and --kfd-dropped-events-trace. KFD (Kernel Fusion Driver) traces capture low level driver routines involved in mapping, unmapping, and migration of data between GPU and system memories, as well as eviction/restoration of GPU queues to facilitate such routines.",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -750,7 +750,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         filter_options,
         "--selected-regions",
-        help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0)",
+        help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0).",
     )
     add_parser_bool_argument(
         filter_options,

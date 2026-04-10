@@ -25,7 +25,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventCreate_Positive) {
+HIP_TEST_CASE(Unit_hipEventCreate_Positive) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(id));
 
@@ -47,7 +47,7 @@ TEST_CASE(Unit_hipEventCreate_Positive) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventCreate_Verify_Capture) {
+HIP_TEST_CASE(Unit_hipEventCreate_Verify_Capture) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 

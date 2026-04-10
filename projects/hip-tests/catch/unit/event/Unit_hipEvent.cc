@@ -187,7 +187,7 @@ void runTests(int64_t numElements) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEvent) { runTests(10000000); }
+HIP_TEST_CASE(Unit_hipEvent) { runTests(10000000); }
 
 /**
  * End doxygen group EventTest.

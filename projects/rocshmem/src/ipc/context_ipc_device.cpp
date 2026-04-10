@@ -302,7 +302,7 @@ __device__ uint64_t IPCContext::signal_fetch_wg(const uint64_t *sig_addr) {
 }
 
 __device__ uint64_t IPCContext::signal_fetch_wave(const uint64_t *sig_addr) {
-  uint64_t value;
+  uint64_t value{0};
   if (is_thread_zero_in_wave()) {
     uint64_t *dst = const_cast<uint64_t*>(sig_addr);
     value = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe);

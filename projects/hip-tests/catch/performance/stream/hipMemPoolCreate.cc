@@ -46,11 +46,9 @@ static void RunBenchmark() {
  *  - Device supports memory pools
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemPoolCreate) {
+HIP_TEST_CASE(Performance_hipMemPoolCreate) {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST(
-        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
   RunBenchmark();

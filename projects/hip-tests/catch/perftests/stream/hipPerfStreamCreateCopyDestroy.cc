@@ -44,7 +44,7 @@ bool hipPerfStreamCreateCopyDestroy::open(int deviceId) {
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return false;
   }
   HIP_CHECK(hipSetDevice(deviceId));
@@ -126,7 +126,7 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfStreamCreateCopyDestroy) {
+HIP_TEST_CASE(Perf_hipPerfStreamCreateCopyDestroy) {
   hipPerfStreamCreateCopyDestroy streamCCD;
   int deviceId = 0;
   REQUIRE(true == streamCCD.open(deviceId));

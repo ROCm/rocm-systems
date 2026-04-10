@@ -27,7 +27,6 @@ concurrency:
 
 env:
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.2.0"
   PYTHON_VENV_PATH: "aqlprofile"
   PYTHON_VENV_ACTIVATE: "aqlprofile/bin/activate"
   navi3_EXCLUDE_TESTS_REGEX: ""
@@ -55,7 +54,7 @@ jobs:
         system:
           - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx120X' }
           - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx110X' }
-          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
 
     runs-on: ${{ matrix.system.runner }}
     container:
@@ -77,13 +76,20 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - name: Install Latest Nightly ROCm
+    - &install_latest_nightly_rocm
+      name: Install Latest Nightly ROCm
       shell: bash
       working-directory: /tmp
       run: |
-        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+        mv "${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz" .
+        rm -rf ${{ env.ROCM_PATH }}*
+        mkdir -p "${{ env.ROCM_PATH }}"
+        tar -xf "rocm-${{ matrix.system.gpu-target }}.tar.gz" -C "${{ env.ROCM_PATH }}"
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+
+    - name: Git Symlink
+      shell: bash
+      run: |
         ln -s -f /usr/bin/git /usr/local/bin/git
 
     - uses: actions/checkout@v5
@@ -133,9 +139,9 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
-          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
-          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'sles-15.6', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'sles-15.6', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
 
     runs-on: ${{ matrix.system.runner }}
     container:
@@ -160,13 +166,7 @@ jobs:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true
 
-    - name: Install Latest Nightly ROCm using TheRock Tarballs
-      shell: bash
-      working-directory: /tmp
-      run: |
-        tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
-        ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
-        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+    - *install_latest_nightly_rocm
 
     - name: Install requirements
       timeout-minutes: 10
