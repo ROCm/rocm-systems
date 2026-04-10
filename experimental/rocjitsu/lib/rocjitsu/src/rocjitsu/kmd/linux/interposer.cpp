@@ -21,6 +21,7 @@
 #include <linux/memfd.h>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -75,11 +76,11 @@ int open(const char *path, int flags, ...) {
   // Intercept DRM render node opens — return a memfd stub that FMM can hold.
   // Track these fds so ioctl() can return 0 rather than ENOTTY.
   // Lazily create the driver if needed — amdsmi opens renderD before /dev/kfd.
-  if (std::strncmp(path, "/dev/dri/renderD", 16) == 0) {
+  if (std::string_view(path).starts_with("/dev/dri/renderD")) {
     if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
       SimulatedDriver::get_or_create();
   }
-  if (std::strncmp(path, "/dev/dri/renderD", 16) == 0 && SimulatedDriver::kfd_fd() >= 0) {
+  if (std::string_view(path).starts_with("/dev/dri/renderD") && SimulatedDriver::kfd_fd() >= 0) {
     int memfd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", 0));
     if (memfd >= 0) {
       std::lock_guard<std::mutex> lock(g_drm_fd_mutex);
@@ -106,9 +107,9 @@ int open(const char *path, int flags, ...) {
   // Redirect sysfs topology and DRM reads to the generated directories.
   // Lazily create the driver if needed — amdsmi scans /sys/class/drm/
   // before opening /dev/kfd.
-  if (std::strncmp(path, "/sys/class/drm", 14) == 0 ||
-      std::strncmp(path, "/sys/devices/virtual/kfd", 23) == 0 ||
-      std::strncmp(path, "/sys/class/kfd", 14) == 0) {
+  if (std::string_view(path).starts_with("/sys/class/drm") ||
+      std::string_view(path).starts_with("/sys/devices/virtual/kfd") ||
+      std::string_view(path).starts_with("/sys/class/kfd")) {
     if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
       SimulatedDriver::get_or_create();
   }
@@ -147,9 +148,9 @@ int openat(int dirfd, const char *path, int flags, ...) {
 
   if (path[0] == '/') {
     // Lazily create the driver for sysfs/DRM paths.
-    if (std::strncmp(path, "/sys/class/drm", 14) == 0 ||
-        std::strncmp(path, "/sys/devices/virtual/kfd", 23) == 0 ||
-        std::strncmp(path, "/sys/class/kfd", 14) == 0) {
+    if (std::string_view(path).starts_with("/sys/class/drm") ||
+        std::string_view(path).starts_with("/sys/devices/virtual/kfd") ||
+        std::string_view(path).starts_with("/sys/class/kfd")) {
       if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
         SimulatedDriver::get_or_create();
     }
@@ -314,9 +315,9 @@ FILE *fopen(const char *path, const char *mode) {
   std::string redirected;
   if (!SimulatedDriver::in_construction()) {
     // Lazily create the driver for sysfs/DRM paths.
-    if (std::strncmp(path, "/sys/class/drm", 14) == 0 ||
-        std::strncmp(path, "/sys/devices/virtual/kfd", 23) == 0 ||
-        std::strncmp(path, "/sys/class/kfd", 14) == 0) {
+    if (std::string_view(path).starts_with("/sys/class/drm") ||
+        std::string_view(path).starts_with("/sys/devices/virtual/kfd") ||
+        std::string_view(path).starts_with("/sys/class/kfd")) {
       if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
         SimulatedDriver::get_or_create();
     }
@@ -366,9 +367,9 @@ DIR *opendir(const char *name) {
       reinterpret_cast<real_opendir_t>(dlsym(RTLD_NEXT, "opendir"));
 
   if (!SimulatedDriver::in_construction()) {
-    if (std::strncmp(name, "/sys/class/drm", 14) == 0 ||
-        std::strncmp(name, "/sys/devices/virtual/kfd", 23) == 0 ||
-        std::strncmp(name, "/sys/class/kfd", 14) == 0) {
+    if (std::string_view(name).starts_with("/sys/class/drm") ||
+        std::string_view(name).starts_with("/sys/devices/virtual/kfd") ||
+        std::string_view(name).starts_with("/sys/class/kfd")) {
       if (!SimulatedDriver::lookup(SimulatedDriver::kfd_fd()))
         SimulatedDriver::get_or_create();
     }

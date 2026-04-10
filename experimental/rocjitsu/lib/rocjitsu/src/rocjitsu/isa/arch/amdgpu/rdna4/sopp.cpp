@@ -272,7 +272,7 @@ SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) { wf.halt(); }
+void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
 SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
     : Sopp("s_endpgm_saved", reinterpret_cast<const OpEncoding *>(inst),
@@ -281,7 +281,7 @@ SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) { wf.halt(); }
+void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
 SWakeupSopp::SWakeupSopp(const MachineInst *inst)
     : Sopp("s_wakeup", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWakeupSopp>()) {

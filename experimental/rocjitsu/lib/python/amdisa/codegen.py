@@ -725,7 +725,11 @@ class CodeGenerator:
             return '  (void)wf;'
 
         if cls == 'endpgm':
-            L.append('  wf.halt();')
+            # Use end() instead of halt() to drain outstanding memory ops.
+            # If all wait counters are zero, end() halts immediately.
+            # Otherwise, it transitions to ENDING state and the memory
+            # pipeline drain handles the final halt.
+            L.append('  wf.end();')
             return '\n'.join(L)
 
         if cls == 'waitcnt':
@@ -918,22 +922,21 @@ class CodeGenerator:
             return self._gen_vector_cmpx(src_ops, op, dtype, is_vop3)
 
         if cls == 'vector_cndmask':
+            # v_cndmask_b32 is a pure bitwise select — no input/output
+            # modifiers on any GFX version.  The VOP3 encoding's abs/neg/
+            # omod bits overlap with src2 and must be ignored.
             L.append('  uint64_t exec = wf.exec();')
             if is_vop3:
-                # VOP3: condition mask from src2 (any SGPR pair), not VCC.
                 L.append(f'  uint64_t cond = {src_ops[2]}.read_scalar64(wf);')
             else:
                 L.append('  uint64_t cond = wf.vcc();')
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             L.append('    if (!(exec & (1ULL << lane))) continue;')
             if is_vop3:
-                L.append(f'    float s0 = std::bit_cast<float>({src_ops[0]}.read_lane(wf, lane));')
-                L.append(f'    float s1 = std::bit_cast<float>({src_ops[1]}.read_lane(wf, lane));')
-                L.extend(self._vop3_src_mod('s0', 0))
-                L.extend(self._vop3_src_mod('s1', 1))
-                L.append('    float val = (cond & (1ULL << lane)) ? s1 : s0;')
-                L.extend(self._vop3_dst_mod('val'))
-                L.append(f'    {dst_ops[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(val));')
+                L.append(f'    uint32_t val = (cond & (1ULL << lane))')
+                L.append(f'        ? {src_ops[1]}.read_lane(wf, lane)')
+                L.append(f'        : {src_ops[0]}.read_lane(wf, lane);')
+                L.append(f'    {dst_ops[0]}.write_lane(wf, lane, val);')
             else:
                 L.append(f'    uint32_t val = (cond & (1ULL << lane))')
                 L.append(f'        ? {src_ops[1]}.read_lane(wf, lane)')
@@ -4359,6 +4362,29 @@ class CodeGenerator:
                 is_smem = enc.enc_name.upper() == 'ENC_SMEM'
                 has_sem = self._enc_has_semantics(enc)
                 for inst in enc.insts:
+                    # Resolve the instruction's own encoding field names.
+                    # Instructions from alternate sub-encodings (e.g.,
+                    # VOP3_SDST_ENC under ENC_VOP3) carry their original
+                    # enc_name and inherit from the sub-encoding's C++
+                    # class whose OpEncoding typedef matches the sub-
+                    # encoding's MachineInst struct.  Look up the
+                    # instruction's own encoding to get the correct field
+                    # set rather than relying solely on the parent
+                    # encoding's ucode_fields.
+                    inst_enc_obj = self.isa_spec.encoding_map.get(
+                        inst.enc_name
+                    )
+                    if (
+                        inst_enc_obj is not None
+                        and inst_enc_obj is not enc
+                        and not inst.is_implied_literal_enc
+                    ):
+                        inst_field_names = (
+                            enc_field_names
+                            | {f.name for f in inst_enc_obj.ucode_fields}
+                        )
+                    else:
+                        inst_field_names = enc_field_names
                     class_members = []
                     public_members = [cgen.Line('public:')]
                     private_members = []
@@ -4397,7 +4423,7 @@ class CodeGenerator:
                                 f'{opnd.name}(make_smem_offset('
                                 f'reinterpret_cast<const OpEncoding*>(inst)))'
                             )
-                        elif opnd.name in enc_field_names:
+                        elif opnd.name in inst_field_names:
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd.size}, '
                                 f'OperandType::{opnd.operand_type}, '
@@ -5285,10 +5311,10 @@ class CodeGenerator:
             '  int ev = encoding_value_;\n'
             '  if (is_vgpr_only_type(opr_type_))\n'
             '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + vgpr_index(opr_type_, ev), lane);\n'
-            '  if (ev >= 256 && ev <= 511)\n'
-            '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256), lane);\n'
             '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(ev);\n'
+            '  if (ev >= 256 && ev <= 511)\n'
+            '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256), lane);\n'
             '  return resolve_src_scalar(wf, ev);\n'
             '}\n'
             '\n'

@@ -10,12 +10,15 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <fcntl.h>
 #include <linux/types.h>
+#include <string_view>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -106,19 +109,20 @@ std::string SimulatedDriver::redirect_sysfs_path(const char *path) {
 
   // KFD topology redirect. Match both the canonical path and the
   // /sys/class/kfd/ symlink path (rsmi/amdsmi use the symlink).
-  size_t kfd_len = std::strlen(KFD_SYSFS_PREFIX);
-  if (std::strncmp(path, KFD_SYSFS_PREFIX, kfd_len) == 0)
-    return inst->topology_path() + (path + kfd_len);
-  size_t kfd_alt_len = std::strlen(KFD_SYSFS_PREFIX_ALT);
-  if (std::strncmp(path, KFD_SYSFS_PREFIX_ALT, kfd_alt_len) == 0)
-    return inst->topology_path() + (path + kfd_alt_len);
+  std::string_view sv(path);
+  std::string_view kfd_prefix(KFD_SYSFS_PREFIX);
+  if (sv.starts_with(kfd_prefix))
+    return inst->topology_path() + std::string(sv.substr(kfd_prefix.size()));
+  std::string_view kfd_alt_prefix(KFD_SYSFS_PREFIX_ALT);
+  if (sv.starts_with(kfd_alt_prefix))
+    return inst->topology_path() + std::string(sv.substr(kfd_alt_prefix.size()));
 
   // DRM sysfs redirect for amdsmi/rocm_smi device discovery.
   const auto &drm = inst->topology().drm_path();
   if (!drm.empty()) {
-    size_t drm_len = std::strlen(DRM_SYSFS_PREFIX);
-    if (std::strncmp(path, DRM_SYSFS_PREFIX, drm_len) == 0)
-      return drm + (path + drm_len);
+    std::string_view drm_prefix(DRM_SYSFS_PREFIX);
+    if (sv.starts_with(drm_prefix))
+      return drm + std::string(sv.substr(drm_prefix.size()));
   }
 
   return {};
@@ -290,6 +294,9 @@ int SimulatedDriver::close() {
 }
 
 int SimulatedDriver::ioctl(unsigned long request, void *arg) {
+  if (util::trace::enabled()) {
+    util::trace::print("ioctl: request=0x", std::hex, request, std::dec);
+  }
   switch (request) {
   case AMDKFD_IOC_GET_VERSION:
     return get_version_ioctl(arg);
@@ -434,18 +441,43 @@ void *SimulatedDriver::mmap(void *addr, size_t length, int prot, int flags, off_
 
   auto &alloc = it->second;
 
-  // Map anonymous memory at the GPU VA. Preserve MAP_FIXED and MAP_SHARED from
-  // the caller: ROCR's FMM expects GPU VA == host VA (coarse unified memory).
-  int mflags = MAP_ANONYMOUS;
-  mflags |= (flags & MAP_SHARED) ? MAP_SHARED : MAP_PRIVATE;
-  if (flags & MAP_FIXED)
-    mflags |= MAP_FIXED;
-  long raw = syscall(SYS_mmap, addr, length, prot, mflags, -1, 0);
-  void *host_ptr = (raw < 0) ? MAP_FAILED : reinterpret_cast<void *>(static_cast<uintptr_t>(raw));
-  if (host_ptr == MAP_FAILED)
-    return MAP_FAILED;
+  // ROCR's FMM pre-maps GPU VAs with MAP_ANONYMOUS|MAP_PRIVATE and may write
+  // data (code objects) before calling this KFD mmap. In real KFD, the mmap
+  // binds the VA to VRAM (preserving data). We must NOT re-mmap with MAP_FIXED
+  // when pages already exist, as that destroys the data ROCR wrote.
+  //
+  // For user-provided VAs (ROCR FMM path): skip the re-mmap entirely. The
+  // existing FMM reservation pages already contain any data ROCR wrote. Just
+  // register them in GpuMemory and set mprotect to ensure they're accessible.
+  //
+  // For simulator-assigned VAs (internal tests): create fresh anonymous pages.
+  void *host_ptr;
+  bool reuse_pages = false;
+  if (alloc.user_va && (flags & MAP_FIXED) && addr != nullptr) {
+    // Try to keep existing pages (ROCR's FMM may have written code data).
+    // mprotect succeeds only if the mapping exists; if ROCR unmapped the
+    // reservation before calling this KFD mmap, fall through to fresh alloc.
+    long rc = syscall(SYS_mprotect, addr, length, PROT_READ | PROT_WRITE);
+    reuse_pages = (rc == 0);
+  }
+  if (reuse_pages) {
+    host_ptr = addr;
+  } else {
+    int mflags = MAP_ANONYMOUS;
+    mflags |= (flags & MAP_SHARED) ? MAP_SHARED : MAP_PRIVATE;
+    if (flags & MAP_FIXED)
+      mflags |= MAP_FIXED;
+    long raw = syscall(SYS_mmap, addr, length, prot, mflags, -1, 0);
+    host_ptr = (raw < 0) ? MAP_FAILED : reinterpret_cast<void *>(static_cast<uintptr_t>(raw));
+    if (host_ptr == MAP_FAILED)
+      return MAP_FAILED;
+  }
 
   alloc.host_ptr = host_ptr;
+
+  util::trace::print("mmap: gpu_va=0x", std::hex, alloc.gpu_va, " host_ptr=0x",
+                     reinterpret_cast<uintptr_t>(host_ptr), std::dec, " size=", length, " flags=0x",
+                     std::hex, alloc.flags, std::dec, " MAP_FIXED=", bool(flags & MAP_FIXED));
 
   if (auto *mem = soc_.memory())
     mem->map_host_pages(alloc.gpu_va, host_ptr, length);
@@ -524,6 +556,7 @@ int SimulatedDriver::alloc_memory_ioctl(void *arg) {
   auto *args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
   std::lock_guard<std::mutex> lock(alloc_mutex_);
 
+  bool user_provided_va = (args->va_addr != 0);
   uint64_t va = args->va_addr;
   if (va == 0) {
     va = next_gpu_va_;
@@ -536,6 +569,7 @@ int SimulatedDriver::alloc_memory_ioctl(void *arg) {
   alloc.flags = args->flags;
   alloc.handle = next_handle_++;
   alloc.host_ptr = nullptr;
+  alloc.user_va = user_provided_va;
 
   // USERPTR: the va_addr IS the host pointer — no mmap follows.
   // Register the mapping immediately so the GPU can access host memory.
@@ -553,6 +587,9 @@ int SimulatedDriver::alloc_memory_ioctl(void *arg) {
     args->mmap_offset = KFD_MMAP_TYPE_DOORBELL | kfd_mmap_gpu_id(gpu_id_);
   else
     args->mmap_offset = alloc.handle << 12;
+
+  util::trace::print("alloc: handle=", alloc.handle, " gpu_va=0x", std::hex, va, " size=", std::dec,
+                     args->size, " flags=0x", std::hex, args->flags, std::dec);
 
   return 0;
 }

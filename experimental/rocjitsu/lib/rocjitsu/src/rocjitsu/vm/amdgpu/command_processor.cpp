@@ -37,6 +37,16 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   // System SGPR: workgroup_id_x after user SGPRs.
   cu->write_sgpr(sbase + pkt.num_user_sgprs, global_wg_id);
 
+  if (util::trace::enabled()) {
+    static thread_local uint64_t init_count = 0;
+    ++init_count;
+    if (init_count <= 5 || (init_count % 40) == 0) {
+      util::trace::print("CP: init_wf #", init_count, " cu=", cu->name(), " wf=", wf->wf_id(),
+                         " global_wg=", global_wg_id, " s[", sbase + pkt.num_user_sgprs,
+                         "]=", global_wg_id, " kernarg=0x", std::hex, pkt.kernarg_addr, std::dec);
+    }
+  }
+
   // Workitem ID: v0 = workitem_id_x within the workgroup.
   // For multi-wavefront workgroups, each wavefront covers a different range:
   // wf0: 0..wf_size-1, wf1: wf_size..2*wf_size-1, etc.
@@ -179,6 +189,16 @@ bool CommandProcessor::step() {
     return false;
 
   assert(!cus_.empty() && "command processor has no compute units");
+  if (util::trace::enabled()) {
+    static bool first = true;
+    if (first) {
+      first = false;
+      util::trace::print("CP: ", cus_.size(), " CUs registered:");
+      for (size_t i = 0; i < cus_.size(); ++i)
+        util::trace::print("  cu[", i, "] = ", cus_[i]->name(),
+                           " wf_slots=", cus_[i]->num_wf_slots());
+    }
+  }
 
   const InternalDispatch &pkt = dispatch_queue_[dispatched_++];
 
@@ -214,8 +234,8 @@ bool CommandProcessor::step() {
         init_wavefront_regs(chosen_cu, wf, pkt, global_wg_id, w);
       } else {
         // ALL CUs are full. Re-enqueue remaining workgroups for retry.
-        util::debug::print(__func__, ": all CUs full at wg=", wg, " w=", w, " - re-enqueueing ",
-                           pkt.workgroup_count - wg, " remaining workgroups");
+        util::trace::print("CP step: all CUs full at wg=", wg, " global_wg=", global_wg_id,
+                           " total=", pkt.workgroup_count, " offset=", pkt.workgroup_id_offset);
         InternalDispatch retry_pkt = pkt;
         retry_pkt.workgroup_count = pkt.workgroup_count - wg;
         retry_pkt.workgroup_id_offset = pkt.workgroup_id_offset + wg;
@@ -240,9 +260,42 @@ void CommandProcessor::check_all_idle() {
     if (!cu->is_idle())
       return;
 
-  // If retry queue has pending workgroups, schedule another doorbell to retry.
+  // If retry queue has pending workgroups, move them to the dispatch queue and
+  // process immediately. This avoids scheduling a future event which requires the
+  // engine event loop to advance — in direct-activate mode (functional, quantum=0)
+  // the engine may not process future events between doorbell callbacks.
   if (!retry_queue_.empty()) {
-    schedule_event(&doorbell_event_, engine()->context(partition_id()).current_tick() + 1);
+    util::trace::print("CP: retry ", retry_queue_.size(),
+                       " entries, total_wgs=", retry_queue_[0].workgroup_count,
+                       " offset=", retry_queue_[0].workgroup_id_offset);
+    for (auto &rpkt : retry_queue_)
+      dispatch_queue_.push_back(std::move(rpkt));
+    retry_queue_.clear();
+    // Dispatch and activate CUs for the retry workgroups.
+    while (dispatched_ < dispatch_queue_.size()) {
+      step();
+      uint32_t activated = 0;
+      for (auto *cu : cus_) {
+        if (cu->has_active_wfs()) {
+          cu->activate();
+          ++activated;
+        }
+      }
+      // Wait for CUs to finish (in direct mode, activate() calls advance() synchronously).
+      bool any_active = false;
+      for (auto *cu : cus_)
+        if (!cu->is_idle()) {
+          any_active = true;
+          break;
+        }
+      util::trace::print("CP: retry inner: activated=", activated, " any_active=", any_active,
+                         " retry_q=", retry_queue_.size());
+      if (!any_active)
+        continue; // All idle, try next dispatch.
+      break;      // CUs still running (shouldn't happen in sync mode).
+    }
+    // Recurse to handle further retries or signal completion.
+    check_all_idle();
     return;
   }
 
@@ -252,6 +305,27 @@ void CommandProcessor::check_all_idle() {
   for (auto *cu : cus_)
     cu->flush_all();
 
+  // Trace: verify data at blit kernel source/destination after flush.
+  if (util::trace::enabled() && dispatched_ > 0) {
+    auto &dp0 = dispatch_queue_[0];
+    if (dp0.kernarg_addr != 0 && memory_) {
+      auto *ka = reinterpret_cast<const uint64_t *>(dp0.kernarg_addr);
+      uint64_t src_addr = ka[0]; // phase1_src_start
+      uint64_t dst_addr = ka[1]; // phase1_dst_start
+      if (src_addr != 0 && dst_addr != 0) {
+        // Check offset 0x0 and 0x6F200 at both source and destination.
+        auto *src_ptr0 = reinterpret_cast<const uint32_t *>(src_addr);
+        auto *dst_ptr0 = reinterpret_cast<const uint32_t *>(dst_addr);
+        util::trace::print("CP: post-flush src@0=0x", std::hex, *src_ptr0, " dst@0=0x", *dst_ptr0,
+                           " gpu_dst@0=0x", memory_->read32(dst_addr), std::dec);
+        util::trace::print("CP: post-flush src@6F200=0x", std::hex,
+                           *reinterpret_cast<const uint32_t *>(src_addr + 0x6F200), " dst@6F200=0x",
+                           *reinterpret_cast<const uint32_t *>(dst_addr + 0x6F200),
+                           " gpu_dst@6F200=0x", memory_->read32(dst_addr + 0x6F200), std::dec);
+      }
+    }
+  }
+
   // Signal completion for all dispatched kernel packets whose wavefronts have
   // finished. In real hardware, the CP microcode does this automatically.
   for (size_t i = 0; i < dispatched_; ++i) {
@@ -259,9 +333,22 @@ void CommandProcessor::check_all_idle() {
     if (dp.completion_signal == 0)
       continue;
     constexpr uint32_t SIG_VAL_OFF = 8;
-    auto *val = reinterpret_cast<int64_t *>(dp.completion_signal + SIG_VAL_OFF);
+    constexpr uint32_t MAILBOX_PTR_OFF = 16;
+    constexpr uint32_t EVENT_ID_OFF = 24;
     if (dp.host_signal) {
-      std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
+      auto *val = reinterpret_cast<int64_t *>(dp.completion_signal + SIG_VAL_OFF);
+      auto old_val = std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
+      util::trace::print("CP: signal 0x", std::hex, dp.completion_signal, std::dec, " val ",
+                         old_val, " -> ", old_val - 1);
+      // Write event mailbox and fire interrupt so ROCR's signal wait wakes up.
+      auto mailbox_ptr = *reinterpret_cast<uint64_t *>(dp.completion_signal + MAILBOX_PTR_OFF);
+      if (mailbox_ptr != 0) {
+        auto event_id = *reinterpret_cast<uint32_t *>(dp.completion_signal + EVENT_ID_OFF);
+        std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(mailbox_ptr))
+            .store(uint64_t(event_id), std::memory_order_release);
+        if (interrupt_cb_)
+          interrupt_cb_();
+      }
     } else if (memory_) {
       auto old = static_cast<int64_t>(memory_->read64(dp.completion_signal + SIG_VAL_OFF));
       memory_->write64(dp.completion_signal + SIG_VAL_OFF, static_cast<uint64_t>(old - 1));
@@ -378,15 +465,56 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   // host memory. Register them in GpuMemory so the CU's instruction fetch
   // and SMEM loads can access them.
   if (host_accessible && memory_) {
-    // Register the code region (kernel object + some margin for the code body).
+    // Register the code region (kernel object + margin for the code body).
+    // Use the VRAM allocation size if available; fallback to 2MB for large code objects.
     uint64_t code_base = pkt.kernel_object & ~0xFFFULL; // Page-align down.
-    constexpr size_t CODE_MAP_SIZE = 1 << 20;           // 1MB should cover any kernel.
+    constexpr size_t CODE_MAP_SIZE = 2 << 20;           // 2MB to cover large code objects.
     memory_->map_host_pages(code_base, reinterpret_cast<void *>(code_base), CODE_MAP_SIZE);
+
+    // Trace: verify code at entry_pc and kernel_object.
+    if (util::trace::enabled()) {
+      auto *host_ptr = reinterpret_cast<const uint32_t *>(entry_pc);
+      uint32_t gpu_w0 = memory_->fetch32(entry_pc);
+      util::trace::print("CP: entry_pc code: host=[0x", std::hex, host_ptr[0], ",0x", host_ptr[1],
+                         ",0x", host_ptr[2], ",0x", host_ptr[3], "] gpu=[0x", gpu_w0, "]",
+                         std::dec);
+      // Also check at kernel_object (the kernel descriptor).
+      auto *ko_ptr = reinterpret_cast<const uint32_t *>(pkt.kernel_object);
+      util::trace::print("CP: kernel_obj data: [0x", std::hex, ko_ptr[0], ",0x", ko_ptr[1], ",0x",
+                         ko_ptr[2], ",0x", ko_ptr[3], "]", std::dec,
+                         " code_off=", kd.kernel_code_entry_byte_offset);
+      auto karg_ptr = reinterpret_cast<const uint64_t *>(pkt.kernarg_address);
+      if (karg_ptr) {
+        util::trace::print("CP: kernarg q[0:5]=0x", std::hex, karg_ptr[0], " 0x", karg_ptr[1],
+                           " 0x", karg_ptr[2], " 0x", karg_ptr[3], " 0x", karg_ptr[4], " 0x",
+                           karg_ptr[5], std::dec);
+        // Also dump DW 16-20 (phase4 addrs + num_workitems).
+        auto karg_dw = reinterpret_cast<const uint32_t *>(pkt.kernarg_address);
+        util::trace::print("CP: kernarg dw[16:20]=", karg_dw[16], " ", karg_dw[17], " ",
+                           karg_dw[18], " ", karg_dw[19], " ", karg_dw[20]);
+      }
+    }
     // Register the kernarg region.
     uint64_t karg = reinterpret_cast<uint64_t>(pkt.kernarg_address);
     if (karg != 0) {
       uint64_t karg_base = karg & ~0xFFFULL;
       memory_->map_host_pages(karg_base, reinterpret_cast<void *>(karg_base), 4096);
+      // Verify: read back from GpuMemory and compare to host.
+      if (util::trace::enabled()) {
+        uint32_t host_val = *reinterpret_cast<const uint32_t *>(karg + 0x50);
+        uint32_t gpu_val = 0;
+        for (int b = 0; b < 4; ++b)
+          reinterpret_cast<uint8_t *>(&gpu_val)[b] = memory_->read8(karg + 0x50 + b);
+        util::trace::print("CP: kernarg verify @0x50: host=0x", std::hex, host_val, " gpu=0x",
+                           gpu_val, std::dec, host_val == gpu_val ? " MATCH" : " MISMATCH!");
+        // Also check dword at offset 0x14 (s9 value)
+        uint32_t host14 = *reinterpret_cast<const uint32_t *>(karg + 0x14);
+        uint32_t gpu14 = 0;
+        for (int b = 0; b < 4; ++b)
+          reinterpret_cast<uint8_t *>(&gpu14)[b] = memory_->read8(karg + 0x14 + b);
+        util::trace::print("CP: kernarg verify @0x14: host=0x", std::hex, host14, " gpu=0x", gpu14,
+                           std::dec, host14 == gpu14 ? " MATCH" : " MISMATCH!");
+      }
     }
   }
 
@@ -423,6 +551,29 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.completion_signal = pkt.completion_signal.handle;
   dp.host_signal = host_accessible;
   dp.ordered = host_accessible;
+
+  util::trace::print("CP: dispatch kernel_object=0x", std::hex, pkt.kernel_object, " entry_pc=0x",
+                     entry_pc, " kernarg=0x", reinterpret_cast<uint64_t>(pkt.kernarg_address),
+                     std::dec, " wgs=", total_wgs, " wfs/wg=", wfs_per_wg, " grid=[",
+                     pkt.grid_size_x, ",", pkt.grid_size_y, ",", pkt.grid_size_z, "]", " wg=[",
+                     pkt.workgroup_size_x, ",", pkt.workgroup_size_y, ",", pkt.workgroup_size_z,
+                     "]", " sgprs=", dp.sgprs_per_wf, " vgprs=", dp.vgprs_per_wf, " signal=0x",
+                     std::hex, dp.completion_signal, std::dec, " host=", host_accessible);
+
+  // Dump code for fill kernel AFTER blit has copied (check_all_idle context).
+  // At dispatch time the code region may not yet be populated.
+  if (false && util::trace::enabled() && memory_ && total_wgs <= 2 &&
+      kd.kernel_code_entry_byte_offset > 0x100) {
+    util::trace::print("CP: FILL_CODE at entry_pc=0x", std::hex, entry_pc, std::dec,
+                       " code_off=", kd.kernel_code_entry_byte_offset);
+    for (int i = 0; i < 128; i += 4) {
+      uint32_t w0 = memory_->fetch32(entry_pc + i * 4);
+      uint32_t w1 = memory_->fetch32(entry_pc + i * 4 + 4);
+      uint32_t w2 = memory_->fetch32(entry_pc + i * 4 + 8);
+      uint32_t w3 = memory_->fetch32(entry_pc + i * 4 + 12);
+      util::trace::print("  +", std::hex, i * 4, ": ", w0, " ", w1, " ", w2, " ", w3, std::dec);
+    }
+  }
 
   dispatch_queue_.push_back(std::move(dp));
 }
@@ -497,11 +648,22 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue) {
       // have no data dependencies and complete immediately.
       if (queue.host_accessible) {
         constexpr uint32_t SIG_OFF = 56, SIG_VAL_OFF = 8;
+        constexpr uint32_t MAILBOX_PTR_OFF = 16, EVENT_ID_OFF = 24;
         uint64_t sig = 0;
         std::memcpy(&sig, reinterpret_cast<const void *>(pkt_addr + SIG_OFF), sizeof(sig));
         if (sig != 0) {
           auto *val = reinterpret_cast<int64_t *>(sig + SIG_VAL_OFF);
           std::atomic_ref<int64_t>(*val).fetch_sub(1, std::memory_order_release);
+          // Write event mailbox and fire interrupt for blocked-wait signals.
+          auto mailbox_ptr = *reinterpret_cast<uint64_t *>(sig + MAILBOX_PTR_OFF);
+          if (mailbox_ptr != 0) {
+            auto event_id = *reinterpret_cast<uint32_t *>(sig + EVENT_ID_OFF);
+            std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(mailbox_ptr))
+                .store(uint64_t(event_id), std::memory_order_release);
+            if (interrupt_cb_)
+              interrupt_cb_();
+          }
+          util::trace::print("CP: vendor pkt signal 0x", std::hex, sig, std::dec, " fired");
         }
       } else {
         signal_aql_completion(pkt_addr);

@@ -28,6 +28,7 @@ enum class WfState : uint8_t {
   RUNNING, ///< In a running state and can be considered for scheduling.
   WAITCNT, ///< Stalled at a waitcnt.
   BARRIER, ///< Stalled at a barrier.
+  ENDING,  ///< s_endpgm executed but outstanding memory ops are draining.
 };
 
 /// @brief Allocation slice within a register file.
@@ -281,8 +282,21 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
-  /// @brief Halt this wavefront.
+  /// @brief Halt this wavefront (immediate — all memory ops must be drained).
   void halt() { state_ = WfState::HALTED; }
+
+  /// @brief End program execution. If all memory ops are drained, halts
+  /// immediately. Otherwise, transitions to ENDING and lets the memory
+  /// pipeline drain remaining ops before halting.
+  void end() {
+    if (wait_counters_.empty())
+      halt();
+    else
+      state_ = WfState::ENDING;
+  }
+
+  /// @brief Log instruction count at end for trace/debug.
+  void trace_end_summary() const;
 
   /// @brief Reset dynamic dispatch state so this slot can be reused.
   ///
@@ -336,7 +350,11 @@ private:
   uint64_t scratch_base_ = 0;       ///< Per-wavefront scratch (private segment) base address.
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
-  WaitTarget wait_target_;          ///< Current s_waitcnt thresholds.
+
+public:
+  uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.
+private:
+  WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
 };

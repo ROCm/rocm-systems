@@ -116,6 +116,7 @@ private:
     void *host_ptr = nullptr;
     uint32_t flags = 0;
     uint64_t handle = 0;
+    bool user_va = false; ///< True if va_addr was provided by the caller (ROCR FMM path).
   };
 
   std::mutex alloc_mutex_;
