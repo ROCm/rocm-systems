@@ -320,8 +320,34 @@ hsa_status_t Runtime::IterateAgent(hsa_status_t (*callback)(hsa_agent_t agent,
 hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
                                      MemoryRegion::AllocateFlags alloc_flags,
                                      void** address, int agent_node_id) {
+  const auto* amd_region = dynamic_cast<const AMD::MemoryRegion*>(region);
+  const uint32_t vram_limit_mb = flag().vram_alloc_limit_mb();
+  const bool vram_limit_active =
+      vram_limit_mb != 0 && amd_region != nullptr && amd_region->IsLocalMemory();
+  const uint64_t vram_limit_bytes =
+      vram_limit_active ? (static_cast<uint64_t>(vram_limit_mb) * 1024u * 1024u) : 0u;
+
   size_t size_requested = size;  // region->Allocate(...) may align-up size to granularity
+
+  if (vram_limit_active) {
+    std::lock_guard<std::mutex> lock(vram_limit_mutex_);
+    if (vram_alloc_accounted_bytes_ + static_cast<uint64_t>(size_requested) > vram_limit_bytes)
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
   hsa_status_t status = region->Allocate(size, alloc_flags, address, agent_node_id);
+
+  if (status == HSA_STATUS_SUCCESS && vram_limit_active) {
+    std::lock_guard<std::mutex> lock(vram_limit_mutex_);
+    if (vram_alloc_accounted_bytes_ + static_cast<uint64_t>(size) > vram_limit_bytes) {
+      region->Free(*address, size);
+      *address = nullptr;
+      status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    } else {
+      vram_alloc_accounted_bytes_ += static_cast<uint64_t>(size);
+    }
+  }
+
   // Track the allocation result so that it could be freed properly.
   if (status == HSA_STATUS_SUCCESS) {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
@@ -436,6 +462,15 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
       std::abort();
     }
     return HSA_STATUS_ERROR;
+  }
+
+  if (flag().vram_alloc_limit_mb() != 0) {
+    const auto* amd_region = dynamic_cast<const AMD::MemoryRegion*>(region);
+    if (amd_region != nullptr && amd_region->IsLocalMemory()) {
+      std::lock_guard<std::mutex> lock(vram_limit_mutex_);
+      assert(vram_alloc_accounted_bytes_ >= static_cast<uint64_t>(size));
+      vram_alloc_accounted_bytes_ -= static_cast<uint64_t>(size);
+    }
   }
 
   return HSA_STATUS_SUCCESS;

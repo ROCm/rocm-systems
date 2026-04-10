@@ -52,6 +52,7 @@
 #include <utility>
 #include <thread>
 #include <shared_mutex>
+#include <mutex>
 #include <random>
 #include <cinttypes>
 #if defined(__linux__)
@@ -802,6 +803,10 @@ class Runtime {
   // KFD map/unmap, register/unregister, and access to hsaKmtQueryPointerInfo
   // registered & mapped arrays.
   std::shared_mutex memory_lock_;
+
+  // Serialize HSA_VRAM_ALLOC_LIMIT_MB accounting (local VRAM only).
+  std::mutex vram_limit_mutex_;
+  uint64_t vram_alloc_accounted_bytes_ = 0;
 
   // Array containing driver interfaces for compatible agent kernel-mode
   // drivers. Currently supports AIE agents.

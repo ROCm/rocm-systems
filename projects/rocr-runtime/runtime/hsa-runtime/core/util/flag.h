@@ -45,6 +45,8 @@
 
 #include <stdint.h>
 
+#include <cstdlib>
+
 #include <vector>
 #include <map>
 #include <string>
@@ -323,6 +325,17 @@ class Flag {
     // hsa_amd_counted_queue_acquire API. If not set, default queue size is set to 16384.
     var = os::GetEnvVar("HSA_COUNTED_QUEUE_SIZE");
     counted_queue_size_ = var.empty() ? DEFAULT_COUNTED_QUEUE_SIZE : atoi(var.c_str());
+
+    // Hard cap on total VRAM (framebuffer heap) allocated via HSA for this process (MiB).
+    // 0 = disabled. Excess requests fail with HSA_STATUS_ERROR_OUT_OF_RESOURCES.
+    var = os::GetEnvVar("HSA_VRAM_ALLOC_LIMIT_MB");
+    vram_alloc_limit_mb_ = 0;
+    if (!var.empty()) {
+      char* end = nullptr;
+      unsigned long ul = std::strtoul(var.c_str(), &end, 10);
+      if (end != var.c_str() && *end == '\0' && ul <= 4194303UL)
+        vram_alloc_limit_mb_ = static_cast<uint32_t>(ul);
+    }
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -446,6 +459,9 @@ class Flag {
   uint32_t cp_queues_limit() const { return cp_queues_limit_; }
 
   size_t counted_queue_size() const { return counted_queue_size_; }
+
+  /// 0 = no limit. Otherwise max MiB of VRAM (local framebuffer heap) tracked via Runtime alloc path.
+  uint32_t vram_alloc_limit_mb() const { return vram_alloc_limit_mb_; }
 
   bool dev_mem_queue_buf() const { return dev_mem_queue_buf_; }
 
@@ -576,6 +592,7 @@ class Flag {
 
   uint32_t cp_queues_limit_;
   size_t counted_queue_size_;
+  uint32_t vram_alloc_limit_mb_ = 0;
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
