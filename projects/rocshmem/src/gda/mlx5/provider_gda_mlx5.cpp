@@ -296,6 +296,7 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
   int err = 0;
 
   qp.ctx = ctx;
+  qp.pd  = pd;
 
   // calculate buffer size needed for WQ + CQ + QP dbrec + CQ dbrec
   mlx5_qp_umem_alloc_info umem_alloc_info{sq_depth};
@@ -393,6 +394,9 @@ int mlx5dv_funcs_t::destroy_qp(mlx5_devx_qp& qp) {
   CHECK_ZERO(err, "mlx5dv_devx_umem_dereg");
 
   QPAllocator::free(qp.sq);
+
+  err = ibv.destroy_ah(qp.ah);
+  CHECK_ZERO(err, "ibv_destroy_ah");
 
   // clear the object's fields
   qp.ctx         = nullptr;
@@ -595,14 +599,23 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& q
   if (gid_type == IBV_GID_TYPE_ROCE_V1 ||
       gid_type == IBV_GID_TYPE_ROCE_V2) {
     assert(ah_attr->is_global && "ibv_qp_attr::ah_attr::is_global not set, but gid_type is RoCE");
-    // get remote MAC address
-    uint8_t remote_mac[ETHERNET_LL_SIZE];
-    int err = ibv.resolve_eth_l2_from_gid(qp.ctx, ah_attr, remote_mac, /* VLAN id */ nullptr);
-    CHECK_ZERO(err, "ibv_resolve_eth_l2_from_gid");
 
     DEVX_SET(ads, primary_addr, eth_prio, ah_attr->sl);
+
+    qp.ah = ibv.create_ah(qp.pd, ah_attr);
+    CHECK_NNULL(qp.ah, "ibv_create_ah");
+
+    struct mlx5dv_obj  dv;
+    struct mlx5dv_ah   dah;
+
+    dv.ah.in = qp.ah;
+    dv.ah.out = &dah;
+
+    int err = mlx5dv.init_obj(&dv, MLX5DV_OBJ_AH);
+    CHECK_ZERO(err, "mlx5dv_init_obj (AH)");
+
     // remote MAC address gets copied directly
-    memcpy(rmac, &remote_mac, sizeof(remote_mac));
+    memcpy(rmac, &dah.av->rmac, sizeof(dah.av->rmac));
   }
 
   // RoCE v2
