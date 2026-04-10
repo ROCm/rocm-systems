@@ -106,7 +106,7 @@ LDFLAGS    += -L$(ROCM_PATH)/lib -lhsa-runtime64 -lrt
 ifneq ($(CUSTOM_RCCL_LIB), "")
 HIPLDFLAGS += -L$(CUSTOM_RCCL_LIB)
 endif
-HIPLDFLAGS += -L$(ROCM_PATH)/lib -lhsa-runtime64 -lamdhip64 -lstdc++ -lrt -pthread
+HIPLDFLAGS += -L$(ROCM_PATH)/lib -lhsa-runtime64 -lamdhip64 -lstdc++ -lrt -pthread -lrocprofiler-register -lroctx64
 
 ifeq ($(DEBUG), 0)
 HIPCUFLAGS += -O3
@@ -194,20 +194,35 @@ ${DST_DIR}/timer.o: timer.cc timer.h
 	@mkdir -p ${DST_DIR}
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
 
+# librccl.a was built with -fgpu-rdc. The HIP offload driver only processes device code
+# from objects listed explicitly (not from archives). Extract all .o files from librccl.a
+# into a staging dir, then device-link them to produce a relocatable wrapper that defines
+# all __hip_fatbin_* and __hip_gpubin_handle_* symbols needed by the final host link.
+NCCL_STATIC_LIB := $(NCCL_HOME)/librccl.a
+RCCL_OBJS_DIR   := $(DST_DIR)/rccl_objs
+
+${DST_DIR}/rccl_dlink.o: $(NCCL_STATIC_LIB)
+	@printf "DevLink librccl.a -> %s\n" $@
+	@mkdir -p $(RCCL_OBJS_DIR)
+	cd $(RCCL_OBJS_DIR) && ar x $(abspath $(NCCL_STATIC_LIB))
+	rm -f $(RCCL_OBJS_DIR)/client.cc.o
+	$(HIPCC) $(GPU_TARGETS_FLAGS) -fgpu-rdc --hip-link --rtlib=compiler-rt -unwindlib=libgcc -r -nostdlib -o $@ $(RCCL_OBJS_DIR)/*.o
+
 ifeq ($(DSO), 1)
-${DST_DIR}/%_perf$(NAME_SUFFIX): ${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/collector.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_LIBS) $(DST_DIR)/src/git_version.cpp
+${DST_DIR}/%_perf$(NAME_SUFFIX): ${DST_DIR}/%.o ${DST_DIR}/rccl_dlink.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/collector.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_LIBS) $(DST_DIR)/src/git_version.cpp
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
-	echo "$(HIPCC) -o $@ $^ $(HIPLDFLAGS)"
-	$(HIPCC) -o $@ $^ $(HIPLDFLAGS) -L$(TEST_VERIFIABLE_BUILDDIR) -lverifiable -Xlinker "--enable-new-dtags" -Xlinker "-rpath,\$$ORIGIN:\$$ORIGIN/verifiable"
+	echo "$(HIPCC) --hip-link --rtlib=compiler-rt -unwindlib=libgcc -o $@ $^ $(HIPLDFLAGS)"
+	$(HIPCC) --hip-link --rtlib=compiler-rt -unwindlib=libgcc -o $@ $^ $(HIPLDFLAGS) -L$(TEST_VERIFIABLE_BUILDDIR) -lverifiable -Xlinker "--enable-new-dtags" -Xlinker "-rpath,\$$ORIGIN:\$$ORIGIN/verifiable"
 else
-${DST_DIR}/%_perf$(NAME_SUFFIX):${DST_DIR}/%.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/collector.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS) $(DST_DIR)/src/git_version.cpp
+${DST_DIR}/%_perf$(NAME_SUFFIX):${DST_DIR}/%.o ${DST_DIR}/rccl_dlink.o ${DST_DIR}/common$(NAME_SUFFIX).o ${DST_DIR}/util$(NAME_SUFFIX).o ${DST_DIR}/collector.o ${DST_DIR}/timer.o $(TEST_VERIFIABLE_OBJS) $(DST_DIR)/src/git_version.cpp
 	@printf "Linking  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
-	echo "$(HIPCC) -o $@ $^ $(HIPLDFLAGS)"
-	$(HIPCC) -o $@ $^ $(HIPLDFLAGS)
+	echo "$(HIPCC) --hip-link --rtlib=compiler-rt -unwindlib=libgcc -o $@ $^ $(HIPLDFLAGS)"
+	$(HIPCC) --hip-link --rtlib=compiler-rt -unwindlib=libgcc -o $@ $^ $(HIPLDFLAGS)
 endif
 
 clean_intermediates:
 	rm -f ${DST_DIR}/*.o $(TEST_VERIFIABLE_OBJS)
+	rm -rf $(RCCL_OBJS_DIR)
 
