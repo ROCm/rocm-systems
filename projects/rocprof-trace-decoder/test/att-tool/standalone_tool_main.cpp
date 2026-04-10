@@ -22,11 +22,11 @@
 
 #include "att_lib_wrapper.hpp"
 #include "outputfile.hpp"
+#include "rocprof_trace_decoder/rocprof_trace_decoder.h"
 
 #include <iostream>
 #include <mutex>
 #include <nlohmann/json.hpp>
-#include <future>
 
 using rocprofiler::att_wrapper::ATTDecoder;
 using Fspath = rocprofiler::att_wrapper::Fspath;
@@ -88,17 +88,11 @@ main(int argc, char** argv)
         all_runs[n].push_back(file);
     }
 
+    rocprof_trace_decoder_handle_t handle;
+    CHECK_DECODER(rocprof_trace_decoder_create_handle(&handle));
+
     auto codemap = std::make_shared<ATTDecoder::AddressTable>();
     {
-        using Decoder = rocprofiler::sdk::codeobj::disassembly::LoadedCodeobjDecoder;
-
-        auto launch_decoder = [&](std::shared_ptr<std::string> filename, uint64_t addr, uint64_t size) -> auto
-        {
-            return std::make_shared<Decoder>(filename->c_str(), addr, size);
-        };
-
-        auto threads = std::unordered_map<uint64_t, std::future<std::shared_ptr<Decoder>>>{};
-
         std::vector<std::string> snapshot_files{};
         for(auto elem : sdk_json["strings"]["code_object_snapshot_filenames"])
             snapshot_files.push_back(elem);
@@ -123,33 +117,34 @@ main(int argc, char** argv)
                     WARNING(filename << " was not loaded");
                     continue;
                 }
-                
+
                 if(filename.empty()) continue;
 
-                auto str = std::make_shared<std::string>((input_path.parent_path() / filename).c_str());
+                auto filepath = (input_path.parent_path() / filename).string();
 
                 try
                 {
-                    //auto shared = std::make_shared<Decoder>(str->c_str(), uint64_t(codeobj["load_delta"]), uint64_t(codeobj["load_size"]));
-                    //codemap->addDecoder(id, shared);
-                    threads[id] = std::async(std::launch::async, launch_decoder, str, uint64_t(codeobj["load_delta"]), uint64_t(codeobj["load_size"]));
+                    std::ifstream file(filepath, std::ios::in | std::ios::binary);
+                    if(!file.is_open()) { WARNING("Could not open " << filename); continue; }
+
+                    file.seekg(0, std::ios::end);
+                    std::vector<char> data(file.tellg());
+                    file.seekg(0);
+                    file.read(data.data(), data.size());
+
+                    uint64_t load_addr = uint64_t(codeobj["load_delta"]);
+                    uint64_t load_size = uint64_t(codeobj["load_size"]);
+
+                    codemap->addDecoder(data.data(), data.size(), id, load_addr, load_size);
+                    rocprof_trace_decoder_codeobj_load(handle, id, load_addr, load_size, data.data(), data.size());
                 } catch(std::exception& e)
                 {
                     WARNING("Could not load " << filename << ": " << e.what());
-                } catch(std::string& r)
-                {
-                    WARNING("Could not load " << filename << ": " << r);
                 } catch(...)
                 {
                     WARNING("Could not load " << filename);
                 }
             }
-
-        for (auto& [id, result] : threads)
-        {
-            auto shared = result.get();
-            codemap->addDecoder(id, shared);
-        }
     }
 
     for(auto& [run_number, att_filenames] : all_runs)
@@ -160,8 +155,10 @@ main(int argc, char** argv)
         std::string ui_name  = run_name.substr(0, run_name.find(".json"));
         auto output_dir      = output_path / ("ui_output_" + ui_name + std::to_string(run_number));
 
-        decoder.parse(input_path.parent_path(), output_dir, att_filenames, codemap, {}, formats);
+        decoder.parse(input_path.parent_path(), output_dir, att_filenames, codemap, handle, {}, formats);
     }
+
+    rocprof_trace_decoder_destroy_handle(handle);
 
     return 0;
 }

@@ -29,8 +29,6 @@
 #include <iostream>
 #include <sstream>
 
-#define OCCUPANCY_RES 8
-
 namespace rocprofiler
 {
 namespace att_wrapper

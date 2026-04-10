@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include "trace_decoder_types.h"
+#include "rocprof_trace_decoder/trace_decoder_types.h"
 
 inline uint64_t get_sa_wgp(uint64_t sa, uint64_t wgp)
 {

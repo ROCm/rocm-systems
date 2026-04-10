@@ -20,7 +20,9 @@ set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "rocattach")
 add_subdirectory(rocprofiler-sdk-rocattach)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tools")
-add_subdirectory(att-tool)
+if(NOT ROCPROFILER_DISABLE_TRACE_DECODER)
+    add_subdirectory(att-tool)
+endif()
 add_subdirectory(rocprofiler-sdk-tool)
 
 add_subdirectory(python)

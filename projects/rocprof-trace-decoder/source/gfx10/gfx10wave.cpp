@@ -278,7 +278,7 @@ void wave_t::new_pc(int64_t time, int64_t pc, CodeobjTableTranslator& table)
 
     auto& back = pc_infos.at(info_idx).second;
 
-    back = table.ToPcV2(pc << 2);
+    back = ToPcV2(table, pc << 2);
     if (back.code_object_id == 0) unattrib_pcs.push_back(pc_infos.size() - 1);
 }
 

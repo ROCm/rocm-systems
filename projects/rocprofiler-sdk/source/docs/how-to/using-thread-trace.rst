@@ -49,8 +49,6 @@ Prerequisites
 
   * Default install location is ``/opt/rocm/lib``
 
-  * For custom location, use parameter ``--att-library-path``
-
 
 .. _thread-trace-parameters:
 

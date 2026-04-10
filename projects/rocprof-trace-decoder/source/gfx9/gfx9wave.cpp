@@ -568,7 +568,7 @@ void wave_t::apply_pc(Token& token, CodeobjTableTranslator& table)
 
     auto& back = pc_infos.at(info_idx).second;
 
-    back = table.ToPcV2(token.fields.inst_pc.pc << 2);
+    back = ToPcV2(table, token.fields.inst_pc.pc << 2);
     if (back.code_object_id == 0) unattrib_pcs.push_back(info_idx);
 }
 

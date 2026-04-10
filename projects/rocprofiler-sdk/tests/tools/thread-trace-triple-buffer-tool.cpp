@@ -28,6 +28,8 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <rocprof_trace_decoder/rocprof_trace_decoder.h>
+
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
@@ -69,7 +71,7 @@ struct agent_output_buffer_t
     static constexpr size_t BUFFER_SIZE = 256ul << 20;
 };
 
-rocprofiler_thread_trace_decoder_id_t decoder{};
+rocprof_trace_decoder_handle_t        decoder{};
 rocprofiler_context_id_t              agent_ctx{};
 rocprofiler_context_id_t              tracing_ctx{};
 std::vector<agent_output_buffer_t>*   agent_buffers{};
@@ -88,13 +90,12 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     if(data->storage_type != ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
     {
-        rocprofiler_thread_trace_decoder_codeobj_load(
-            decoder,
-            data->code_object_id,
-            data->load_delta,
-            data->load_size,
-            reinterpret_cast<const void*>(data->memory_base),
-            data->memory_size);
+        rocprof_trace_decoder_codeobj_load(decoder,
+                                           data->code_object_id,
+                                           data->load_delta,
+                                           data->load_size,
+                                           reinterpret_cast<const void*>(data->memory_base),
+                                           data->memory_size);
     }
 }
 
@@ -205,13 +206,12 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
         auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                         void*                                          events,
                         uint64_t                                       num_events,
-                        void*                                          userdata) {
+                        void* userdata) -> rocprofiler_thread_trace_decoder_status_t {
             if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO)
             {
                 auto* infos = (rocprofiler_thread_trace_decoder_info_t*) events;
                 for(size_t i = 0; i < num_events; i++)
-                    std::cerr << rocprofiler_thread_trace_decoder_info_string(decoder, infos[i])
-                              << std::endl;
+                    std::cerr << rocprof_trace_decoder_get_info_string(infos[i]) << std::endl;
             }
             else if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
             {
@@ -228,6 +228,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     current_sdata = sdata[i].value;
                 }
             }
+            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
         };
 
         size_t total_size = 0;
@@ -236,7 +237,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             uint32_t current_sdata = 0;
             auto&    buffer        = output_buffer.output_buffer;
             size_t   output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());
-            rocprofiler_trace_decode(decoder, parse, buffer.data(), output_size, &current_sdata);
+            rocprof_trace_decoder_parse(decoder, buffer.data(), output_size, parse, &current_sdata);
             total_size += output_size;
         }
 
@@ -256,7 +257,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 {
     agent_buffers = new std::vector<agent_output_buffer_t>{};
 
-    rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib");
+    rocprof_trace_decoder_create_handle(&decoder);
 
     ROCPROFILER_CALL(rocprofiler_create_context(&agent_ctx), "context creation");
     ROCPROFILER_CALL(rocprofiler_create_context(&tracing_ctx), "context creation");
@@ -298,7 +299,10 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 }
 
 void
-tool_fini(void*){};
+tool_fini(void*)
+{
+    rocprof_trace_decoder_destroy_handle(decoder);
+};
 
 }  // namespace TripleBuffer
 }  // namespace ATTTest

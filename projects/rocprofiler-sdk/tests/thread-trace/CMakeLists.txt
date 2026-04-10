@@ -9,6 +9,7 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(rocprof-trace-decoder REQUIRED)
 
 # Single dispatch test
 rocprofiler_add_integration_execute_test(

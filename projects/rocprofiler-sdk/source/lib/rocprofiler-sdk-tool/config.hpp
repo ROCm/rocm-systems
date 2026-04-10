@@ -23,7 +23,6 @@
 
 #pragma once
 
-#include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/mpl.hpp"
@@ -166,7 +165,6 @@ struct config : output_config
     std::string pc_sampling_method      = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
     std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
-    std::string att_library_path        = get_env("ROCPROF_ATT_LIBRARY_PATH", "");
     std::string att_gpu_index           = get_env("ROCPROF_ATT_PARAM_GPU_INDEX", "");
 
     std::unordered_set<size_t>         kernel_filter_range    = {};
@@ -218,7 +216,6 @@ config::get_attach_invariants() const
                            att_param_buffer_size,
                            att_param_simd_select,
                            att_param_target_cu,
-                           att_library_path,
                            att_param_perfcounters,
                            att_param_perf_ctrl,
                            pc_sampling_method,
@@ -316,7 +313,6 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(att_param_buffer_size);
     CFG_SERIALIZE_MEMBER(att_param_simd_select);
     CFG_SERIALIZE_MEMBER(att_param_target_cu);
-    CFG_SERIALIZE_MEMBER(att_library_path);
     CFG_SERIALIZE_MEMBER(att_param_perfcounters);
     CFG_SERIALIZE_MEMBER(att_param_perf_ctrl);
     CFG_SERIALIZE_MEMBER(att_consecutive_kernels);

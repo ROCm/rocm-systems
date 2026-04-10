@@ -22,8 +22,6 @@
 
 #include "trie.h"
 
-Trie Trie::root_trie;
-
 static const std::unordered_map<std::string, InstCategory> type_dict = {
     {"s_waitcnt",        InstCategory::IMMED},
     {"s_wait_idle",      InstCategory::IMMED},
@@ -148,23 +146,29 @@ static const std::unordered_map<std::string, InstCategory> type_dict = {
     {"image_g",          InstCategory::VMEM },
 };
 
+Trie& Trie::get_root_trie()
+{
+    static Trie root = []()
+    {
+        Trie t;
+        for (auto& p : type_dict) t.add_type(p.first, p.second);
+        return t;
+    }();
+    return root;
+}
+
 InstCategory Trie::type_from_trie(const std::string_view inst)
 {
     if (inst.find("v_") == 0) return InstCategory::VALU;
 
-    if (!bInit)
-    {
-        bInit = true;
-        for (auto& p : type_dict) add_type(p.first, p.second);
-    }
-
     Trie* trie = this;
     for (char c : inst)
     {
-        if (trie->paths.find(c) != trie->paths.end())
+        auto it = trie->paths.find(c);
+        if (it != trie->paths.end())
         {
             assert(trie != nullptr);
-            trie = trie->paths[c];
+            trie = it->second.get();
         }
         if (trie->type != InstCategory::LAST) return trie->type;
     }
@@ -180,22 +184,13 @@ void Trie::add_type(const std::string& inst_header, InstCategory type)
     for (char c : inst_header)
     {
         assert(trie != nullptr);
-        if (trie->paths.find(c) == trie->paths.end())
+        auto it = trie->paths.find(c);
+        if (it == trie->paths.end())
         {
-            Trie* new_trie = new Trie();
-            trie->paths[c] = new_trie;
-            trie = new_trie;
+            auto [inserted, _] = trie->paths.emplace(c, std::make_unique<Trie>());
+            trie = inserted->second.get();
         }
-        else { trie = trie->paths[c]; }
+        else { trie = it->second.get(); }
     }
     trie->type = type;
-}
-
-Trie::~Trie()
-{
-    for (auto& p : paths)
-    {
-        if (p.second != nullptr) delete p.second;
-        p.second = nullptr;
-    }
 }

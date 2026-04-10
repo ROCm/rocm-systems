@@ -34,9 +34,9 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "common.hpp"
+#include "rocprof_trace_decoder/cxx/common.hpp"
+#include "rocprof_trace_decoder/trace_decoder_instrument.h"
 #include "segment.hpp"
-#include "trace_decoder_instrument.h"
 
 inline bool bValid(pcinfo_t pc) { return pc.code_object_id != 0 || pc.address != 0; }
 
@@ -371,10 +371,10 @@ public:
     template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
     {
         constexpr uint64_t BITMASK = (1ul << 48) - 1;
-        return table.ToPcV2((wave_start_addr.at_reg(token) << 8) & BITMASK);
+        return ToPcV2(table, (wave_start_addr.at_reg(token) << 8) & BITMASK);
     }
 
-    pcinfo_t get_wave_start_delayed(uint64_t addr) { return table_from_start.ToPcV2(addr); }
+    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start, addr); }
 };
 
 template <typename WaveArray> struct AnalysisReturnData

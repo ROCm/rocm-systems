@@ -161,6 +161,8 @@ std::unique_ptr<SQTTParser> AnalyseBinary_internal(
 {
     if (gfx9_target_cu < 0)
     {
+        if (BUFFER_SIZE < sizeof(rocprof_trace_decoder_gfx9_header_t)) return nullptr;
+
         auto gfx9_header = *reinterpret_cast<const rocprof_trace_decoder_gfx9_header_t*>(buffer);
         if ((gfx9_header.legacy_version == 0 || gfx9_header.legacy_version == 0x11) &&
             (gfx9_header.gfx9_version2 >= 4 && gfx9_header.gfx9_version2 <= 6))
@@ -192,16 +194,16 @@ std::unique_ptr<SQTTParser> AnalyseBinary_internal(
     return nullptr;
 }
 
-pcinfo_t CodeobjTableTranslator::ToPcV2(uint64_t pc)
+pcinfo_t ToPcV2(CodeobjTableTranslator& table, uint64_t pc)
 {
     pcinfo_t pcinfo{.address = pc, .code_object_id = 0};
     try
     {
         address_range_t codeobj;
-        if (this->find_codeobj_in_range(pc, codeobj))
+        if (table.find_codeobj_in_range(pc, codeobj))
         {
             pcinfo.code_object_id = codeobj.id;
-            pcinfo.address = pc - codeobj.vbegin;
+            pcinfo.address = pc - codeobj.addr;
         }
     }
     catch (const std::exception&)

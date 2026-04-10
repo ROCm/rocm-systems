@@ -29,6 +29,8 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <rocprof_trace_decoder/rocprof_trace_decoder.h>
+
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
@@ -47,7 +49,7 @@
     }
 
 #define DECODER_CALL(result)                                                                       \
-    if((result) != ROCPROFILER_STATUS_SUCCESS)                                                     \
+    if((result) != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)                                \
     {                                                                                              \
         std::cerr << "Error: Generic decoder error" << std::endl;                                  \
     }

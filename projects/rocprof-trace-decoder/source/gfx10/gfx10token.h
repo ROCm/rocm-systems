@@ -26,7 +26,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "common.hpp"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 #include "token_types.h"
 #include "trace_parser.hpp"
 

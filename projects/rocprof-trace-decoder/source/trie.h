@@ -28,13 +28,15 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <regex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "common.hpp"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 
 enum class InstCategory
 {
@@ -63,17 +65,16 @@ class Trie
 {
 public:
     Trie() = default;
-    ~Trie();
 
     InstCategory type_from_trie(const std::string_view inst);
 
-    static Trie root_trie;
+    static Trie& get_root_trie();
 
     static InstCategory inst_type(const std::string_view line, int gfxip)
     {
         if (line.find("branch") != std::string::npos) return InstCategory::BRANCH;
 
-        InstCategory type = root_trie.type_from_trie(line);
+        InstCategory type = get_root_trie().type_from_trie(line);
 
         if (type == InstCategory::VALU)
         {
@@ -98,7 +99,6 @@ public:
 private:
     void add_type(const std::string& inst_header, InstCategory type);
 
-    bool bInit = false;
     InstCategory type = InstCategory::LAST;
-    std::unordered_map<char, Trie*> paths; //  Change to smart pointer
+    std::unordered_map<char, std::unique_ptr<Trie>> paths;
 };

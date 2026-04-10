@@ -94,14 +94,14 @@ class _WaveT(ctypes.Structure):
     ]
 
 
-# ── Callback signatures (CFUNCTYPE) ─────────────────────────────────────────
+# ── Handle struct ───────────────────────────────────────────────────────────
 
-_SE_DATA_CB = ctypes.CFUNCTYPE(
-    ctypes.c_uint64,
-    ctypes.POINTER(ctypes.c_void_p),     # uint8_t** buffer
-    ctypes.POINTER(ctypes.c_uint64),     # uint64_t* buffer_size
-    ctypes.c_void_p,                     # void*     userdata
-)
+class _HandleT(ctypes.Structure):
+    """rocprof_trace_decoder_handle_t"""
+    _fields_ = [("handle", ctypes.c_uint64)]
+
+
+# ── Callback signatures (CFUNCTYPE) ─────────────────────────────────────────
 
 _TRACE_CB = ctypes.CFUNCTYPE(
     ctypes.c_int,
@@ -132,10 +132,19 @@ _INST_SIZE = struct.calcsize(_INST_FMT)  # 32 bytes
 def _load_library(libpath):
     lib = ctypes.CDLL(libpath)
 
-    lib.rocprof_trace_decoder_parse_data.argtypes = [
-        _SE_DATA_CB, _TRACE_CB, _ISA_CB, ctypes.c_void_p
+    lib.rocprof_trace_decoder_create_handle.argtypes = [ctypes.POINTER(_HandleT)]
+    lib.rocprof_trace_decoder_create_handle.restype = ctypes.c_int
+
+    lib.rocprof_trace_decoder_destroy_handle.argtypes = [_HandleT]
+    lib.rocprof_trace_decoder_destroy_handle.restype = ctypes.c_int
+
+    lib.rocprof_trace_decoder_set_isa_callback.argtypes = [_HandleT, _ISA_CB, ctypes.c_void_p]
+    lib.rocprof_trace_decoder_set_isa_callback.restype = ctypes.c_int
+
+    lib.rocprof_trace_decoder_parse.argtypes = [
+        _HandleT, ctypes.c_void_p, ctypes.c_uint64, _TRACE_CB, ctypes.c_void_p
     ]
-    lib.rocprof_trace_decoder_parse_data.restype = ctypes.c_int
+    lib.rocprof_trace_decoder_parse.restype = ctypes.c_int
 
     lib.rocprof_trace_decoder_get_info_string.argtypes = [ctypes.c_int]
     lib.rocprof_trace_decoder_get_info_string.restype  = ctypes.c_char_p
@@ -192,7 +201,7 @@ def _build_next_addr(sorted_keys):
 
 # ── Core decode loop ─────────────────────────────────────────────────────────
 
-def _process_shader(lib, file_path, instructions, next_addr, suppress, isa_cache):
+def _process_shader(lib, handle, file_path, instructions, next_addr, suppress, isa_cache):
     """Read one .att file and decode it through the library."""
     with open(file_path, "rb") as fh:
         raw = fh.read()
@@ -201,15 +210,6 @@ def _process_shader(lib, file_path, instructions, next_addr, suppress, isa_cache
         return
 
     data_buf = (ctypes.c_uint8 * len(raw)).from_buffer_copy(raw)
-    consumed = [False]
-
-    def _se_data(buf_pp, size_p, _ud):
-        if consumed[0]:
-            return 0
-        consumed[0] = True
-        buf_pp[0] = ctypes.addressof(data_buf)
-        size_p[0] = len(data_buf)
-        return len(data_buf)
 
     _unpack_from = struct.unpack_from  # local for speed
     _inst_fmt = _INST_FMT
@@ -263,32 +263,12 @@ def _process_shader(lib, file_path, instructions, next_addr, suppress, isa_cache
 
         return _STATUS_SUCCESS
 
-    def _isa(instr_buf, mem_p, size_p, pc, _ud):
-        key = (pc.code_object_id, pc.address)
-        cached = isa_cache.get(key)
-        if cached is None:
-            entry = _instructions.get(key)
-            if entry is None:
-                return _STATUS_ERROR_INVALID_ARGUMENT
-            cached = entry["inst"].encode()
-            isa_cache[key] = cached
-
-        avail = size_p[0]
-        size_p[0] = len(cached)
-        if len(cached) > avail:
-            return _STATUS_ERROR_OUT_OF_RESOURCES
-        ctypes.memmove(instr_buf, cached, len(cached))
-        mem_p[0] = next_addr.get(key, 32)
-        return _STATUS_SUCCESS
-
     # prevent GC of callback wrappers during the C call
-    cb_se  = _SE_DATA_CB(_se_data)
     cb_tr  = _TRACE_CB(_trace)
-    cb_isa = _ISA_CB(_isa)
 
-    status = lib.rocprof_trace_decoder_parse_data(cb_se, cb_tr, cb_isa, None)
+    status = lib.rocprof_trace_decoder_parse(handle, data_buf, len(data_buf), cb_tr, None)
     if status != _STATUS_SUCCESS:
-        print(f"parse_data returned error {status}", file=sys.stderr)
+        print(f"parse returned error {status}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -333,8 +313,42 @@ def main():
     next_addr   = _build_next_addr(sorted_keys)
     isa_cache   = {}
 
+    # Create a handle and set up the ISA callback
+    handle = _HandleT()
+    status = lib.rocprof_trace_decoder_create_handle(ctypes.byref(handle))
+    if status != _STATUS_SUCCESS:
+        print(f"create_handle returned error {status}", file=sys.stderr)
+        sys.exit(1)
+
+    def _isa(instr_buf, mem_p, size_p, pc, _ud):
+        key = (pc.code_object_id, pc.address)
+        cached = isa_cache.get(key)
+        if cached is None:
+            entry = instructions.get(key)
+            if entry is None:
+                return _STATUS_ERROR_INVALID_ARGUMENT
+            cached = entry["inst"].encode()
+            isa_cache[key] = cached
+
+        avail = size_p[0]
+        size_p[0] = len(cached)
+        if len(cached) > avail:
+            return _STATUS_ERROR_OUT_OF_RESOURCES
+        ctypes.memmove(instr_buf, cached, len(cached))
+        mem_p[0] = next_addr.get(key, 32)
+        return _STATUS_SUCCESS
+
+    # prevent GC of callback wrapper
+    cb_isa = _ISA_CB(_isa)
+    status = lib.rocprof_trace_decoder_set_isa_callback(handle, cb_isa, None)
+    if status != _STATUS_SUCCESS:
+        print(f"set_isa_callback returned error {status}", file=sys.stderr)
+        sys.exit(1)
+
     for af in att_files:
-        _process_shader(lib, af, instructions, next_addr, suppress, isa_cache)
+        _process_shader(lib, handle, af, instructions, next_addr, suppress, isa_cache)
+
+    lib.rocprof_trace_decoder_destroy_handle(handle)
 
     # Validate: accumulated stats must match CSV expected values
     for key, inst in instructions.items():
