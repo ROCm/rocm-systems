@@ -23,8 +23,6 @@ void test_knobs::set_input_parameters(std::shared_ptr<InputParameters> input_par
 namespace
 {
 
-using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
-
 rocprofiler_context_id_t& get_client_ctx()
 {
     static rocprofiler_context_id_t ctx{0};
@@ -40,91 +38,6 @@ iteration_multiplexing_mode_t iteration_multiplexing_mode(const std::string& mod
     else
         return iteration_multiplexing_mode_t::DISABLED;
 }
-
-void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                     rocprofiler_counter_record_t*                record_data,
-                     size_t                                       record_count,
-                     rocprofiler_user_data_t /* user_data */,
-                     void* callback_data_args)
-{
-    auto*        tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data_args);
-    tool_data_t* tool;
-    {
-        std::lock_guard<std::mutex> lock(tool_data_ptr->get()->mut);
-        tool = tool_data_ptr->get();
-    }
-
-    // For each counter, write: dispatch_id, counter_id, counter_name,
-    // counter_value
-    for (size_t i = 0; i < record_count; ++i)
-    {
-        rocprofiler_counter_id_t counter_id{};
-        ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_data[i].id, &counter_id),
-                         "query record counter id");
-
-        // Store the counter info record in tool_data
-        counter_info_record_t record{dispatch_data.dispatch_info.dispatch_id,
-                                     dispatch_data.dispatch_info.agent_id.handle,
-                                     dispatch_data.dispatch_info.kernel_id,
-                                     dispatch_data.dispatch_info.group_segment_size,
-                                     counter_id.handle,
-                                     tool->counter_id_name_map[counter_id.handle],
-                                     record_data[i].counter_value};
-        {
-            std::lock_guard<std::mutex> lock(tool->mut);
-            tool->counter_records.push_back(std::move(record));
-        }
-    }
-}
-
-/**
- * Callback from rocprofiler when a code object is loaded.
- * We use this to get record kernel names as they are registered.
- */
-void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                           rocprofiler_user_data_t* /*user_data*/,
-                           void* callback_data)
-{
-    if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
-        record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-        record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
-    {
-        auto* data            = static_cast<kernel_symbol_data_t*>(record.payload);
-        int   demangle_status = 0;
-        auto  kernel_name     = helper_utils::cxa_demangle(data->kernel_name, &demangle_status);
-        kernel_name           = helper_utils::truncate_name(kernel_name);
-
-        // check if regex can be found in kernel name matches regex from tool data,
-        // if matches store kernel id
-        auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data);
-        auto* tool          = tool_data_ptr->get();
-        // Lock before modifying target_kernel_ids
-        std::lock_guard<std::mutex> lock(tool->mut);
-        if (!tool->kernel_filter_include_regex.empty())
-        {
-            try
-            {
-                std::regex re(tool->kernel_filter_include_regex);
-                if (!kernel_name.empty() && std::regex_search(kernel_name, re))
-                {
-                    tool->target_kernel_ids.insert(data->kernel_id);
-                }
-            }
-            catch (const std::regex_error& e)
-            {
-                std::cerr << "[rocprofiler-compute] [" << __FUNCTION__
-                          << "] ERROR: Invalid regex in ROCPROF_KERNEL_FILTER_INCLUDE_REGEX: "
-                          << tool->kernel_filter_include_regex << " : " << e.what() << std::endl;
-            }
-        }
-        // If no regex specified, collect for all kernels
-        else
-        {
-            tool->target_kernel_ids.insert(data->kernel_id);
-        }
-    }
-}
-
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
