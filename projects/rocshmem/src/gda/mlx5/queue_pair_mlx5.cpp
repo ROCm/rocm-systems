@@ -27,6 +27,7 @@
 #include "util.hpp"
 
 #include "gda/endian.hpp"
+#include "gda/microtiming.hpp"
 #include "gda/queue_pair.hpp"
 
 namespace rocshmem {
@@ -259,7 +260,10 @@ __device__ void QueuePair::mlx5_quiet_single() {
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr,
-                                             uint8_t opcode, ActiveWFInfo &wf_info) {
+                                             uint8_t opcode, ActiveWFInfo &wf_info,
+                                             microtiming_t *mt) {
+  microtiming_record(mt, 4);  // T4: post_wqe_rma entry
+
   if (wf_info.is_pe_group_last) {
     // get SQ lock
     acquire_lock(&mlx5_sq.lock);
@@ -283,11 +287,14 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, ui
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
 
+  microtiming_record(mt, 5);  // T5: WQE written to SQ
+
   if (wf_info.is_pe_group_last) {
     // increment post counter
     mlx5_sq.post += wf_info.num_pe_group_lanes;
     // we are the last thread in the wavefront, so we have the last WQE posted
     mlx5_ring_doorbell(mlx5_sq.post, wqe);
+    microtiming_record(mt, 6);  // T6: doorbell rung
     // release SQ lock
     release_lock(&mlx5_sq.lock);
   }

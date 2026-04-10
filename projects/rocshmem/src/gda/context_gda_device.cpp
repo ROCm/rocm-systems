@@ -31,8 +31,12 @@
 #include "log.hpp"
 #include "context_gda_device.hpp"
 #include "context_gda_tmpl_device.hpp"
+#include "microtiming.hpp"
 
 namespace rocshmem {
+
+__device__ microtiming_t g_microtiming = {};
+__device__ microtiming_t* g_microtiming_ptr = &g_microtiming;
 
 __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id)
     : Context(b) {
@@ -110,16 +114,26 @@ __device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems
 
 __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
                                        size_t nelems, int pe) {
+  putmem_nbi(dest, source, nelems, pe, nullptr);
+}
+
+__device__ void GDAContext::putmem_nbi(void *dest, const void *source,
+                                       size_t nelems, int pe,
+                                       microtiming_t *mt) {
+  microtiming_record(mt, 1);  // T1: before IPC check
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
     return;
   }
+  microtiming_record(mt, 2);  // T2: before ActiveWFInfo
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
-  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
+  microtiming_record(mt, 3);  // T3: before put_nbi
+  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info, mt);
+  microtiming_record(mt, 7);  // T7: after put_nbi
 }
 
 __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
@@ -195,8 +209,10 @@ __device__ void GDAContext::fence(int pe) {
 }
 
 __device__ void GDAContext::quiet() {
+  if (g_microtiming_ptr) g_microtiming_ptr->quiet_start = microtiming_clock();
   ActiveWFInfo wf_info(ctx_id_);
   internal_quiet(wf_info);
+  if (g_microtiming_ptr) g_microtiming_ptr->quiet_end = microtiming_clock();
 }
 
 __device__ void GDAContext::internal_quiet(ActiveWFInfo &wf_info) {

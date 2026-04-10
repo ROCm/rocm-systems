@@ -48,6 +48,9 @@ class GDAContext : public Context {
   __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
                              int pe);
 
+  __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
+                             int pe, struct microtiming_t *mt);
+
   __device__ void getmem_nbi(void *dest, const void *source, size_t size,
                              int pe);
 

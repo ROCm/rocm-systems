@@ -25,6 +25,8 @@
 #include "primitive_tester.hpp"
 
 #include <rocshmem/rocshmem.hpp>
+#include "gda/microtiming.hpp"
+#include "gda/context_gda_device.hpp"
 
 using namespace rocshmem;
 
@@ -36,9 +38,17 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
                               char *dest, size_t size, TestType type,
                               ShmemContextType ctx_type, int wf_size) {
   __shared__ rocshmem_ctx_t ctx;
+  __shared__ microtiming_t shared_microtiming;
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
   int wf_id = t_id / wf_size;
+
+  if (is_thread_zero_in_block()) {
+    microtiming_init_shared(&shared_microtiming);
+  }
+  __syncthreads();
+  microtiming_t *mt = &shared_microtiming;  // LDS pointer, kept in VGPR
+
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   /**
@@ -65,7 +75,14 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
         rocshmem_ctx_quiet(ctx);
       }
       __syncthreads();
+      // Enable microtiming for the measured iterations
+      if (is_thread_zero_in_block()) {
+        mt->iter = 0;
+        mt->enabled = 1;
+      }
+      __syncthreads();
       // Capture the start time of each wavefront to identify the earliest one
+      mt->e2e_start = microtiming_clock();
       wf_start_time[wf_id] = wall_clock64();
     }
 
@@ -80,7 +97,12 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
         rocshmem_ctx_putmem(ctx, dest, source, size, 1);
         break;
       case PutNBITestType:
-        rocshmem_ctx_putmem_nbi(ctx, dest, source, size, 1);
+        microtiming_record(mt, 0);  // T0: before putmem_nbi
+        static_cast<GDAContext*>(
+            static_cast<Context*>(ctx.ctx_opaque))->putmem_nbi(
+            dest, source, size, 1, mt);
+        microtiming_record(mt, 8);  // T8: after putmem_nbi returns
+        microtiming_next_iter(mt);
         break;
       case PTestType:
         {
@@ -106,7 +128,12 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
    * End time of the last wavefront is recorded by overwriting
    * the value previously set by earlier wavefronts.
    */
+  mt->e2e_end = microtiming_clock();
   end_time[wg_id] = wall_clock64();
+
+  if (is_thread_zero_in_block()) {
+    microtiming_flush_to_global();
+  }
 
   // Find the earliest start time
   int num_wfs = (get_flat_block_size() - 1 ) / wf_size + 1;
@@ -189,6 +216,9 @@ void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   hipLaunchKernelGGL(PrimitiveTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, source, dest,
                      size, _type, _shmem_context, wf_size);
+
+  CHECK_HIP(hipStreamSynchronize(stream));
+  microtiming_print();
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;

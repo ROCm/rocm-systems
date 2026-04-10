@@ -170,7 +170,8 @@ class QueuePair {
    * @param[in] wf_info Wavefront information.
    */
   __device__ void put_nbi(void *dest, const void *source, size_t nelems,
-      int pe, ActiveWFInfo &wf_info);
+      int pe, ActiveWFInfo &wf_info,
+      struct microtiming_t *mt = nullptr);
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
       bool ring_db);
@@ -289,7 +290,8 @@ class QueuePair {
    */
   __device__ __attribute__((noinline)) void
   post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
-      uint8_t opcode, ActiveWFInfo &wf_info);
+      uint8_t opcode, ActiveWFInfo &wf_info,
+      struct microtiming_t *mt = nullptr);
 
   __device__ __attribute__((noinline)) void
   post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr,
@@ -303,7 +305,8 @@ class QueuePair {
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch);
   __device__ void mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
+      uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
+      struct microtiming_t *mt = nullptr);
   __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void mlx5_quiet();
