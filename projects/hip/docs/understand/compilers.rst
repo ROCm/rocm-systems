@@ -250,17 +250,9 @@ binaries. With the ``--offloading`` flag, it can list and extract information
 from the contents of ROCm binaries, including code object metadata, kernel
 symbols, target architectures (for example, ``gfx90a``, ``gfx1100``), and
 linkage details. It supports both standalone ``.hsaco`` files and "fat
-binaries" embedded within host executables. In latest releases it also extracts
-HIP fat binary bundle entries into separate code object files.  With the
-``--triple=amdgcn`` flag, it can disassemble GPU kernels into human-readable
-AMDGPU ISA, allowing inspection of instruction sequences, register allocation,
-and control flow.  These capabilities are essential for performance debugging,
-code verification, and low-level kernel analysis, for example, when tuning
-:ref:`MFMA <mfma_units>` instructions or checking compiler optimizations.
- 
-The ``llvm-readobj`` utility with the ``--offloading`` flag will provide a
-listing of all available HIP fat binary offload bundle entries.  This replaces
-the functionality previously provided by ``roc-obj-ls``.
+binaries" stored as embedded objects within host executables. In current releases, the tool additionally extracts HIP fat‑binary bundle entries into standalone code object files. With the ``--triple=amdgcn`` option, it can disassemble GPU kernels into readable AMDGPU ISA, allowing detailed examination of instruction streams, register usage, and control‑flow structure. Such capabilities are critical for performance tuning, correctness verification, and low‑level kernel analysis, including tasks such as optimizing :ref:`MFMA <mfma_units>` instructions or assessing compiler‑generated transformations.
+
+The ``llvm-readobj`` tool, used with the ``--offloading`` flag, provides a complete listing of HIP fat‑binary offload bundle entries, superseding the earlier ``roc-obj-ls`` utility.
  
 Together, these utilities provide developers with insight into how HIP C++ code
 is compiled, optimized, and mapped to GPU hardware. They complement profiling
