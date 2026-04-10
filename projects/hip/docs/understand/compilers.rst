@@ -243,7 +243,11 @@ The ROCm binary utilities are a collection of command-line tools for examining
 and manipulating GPU binaries produced by ``amdclang++`` or other ROCm build
 tools. These utilities allow developers to inspect, disassemble, and analyze
 AMDGPU code objects, the compiled GPU kernels embedded in host executables or
-distributed as standalone ``.hsaco`` files. Previous ROCm versions shipped with the ``roc-obj-ls``, ``roc-obj-extract``, and ``roc-obj utilities``. These have been deprecated in favor of enhanced capabilities now available in standard LLVM object tools, such as ``llvm-objdump`` and ``llvm-readobj``. For more information, see `llvm-objdump — LLVM’s object file dumper at <https://llvm.org/docs/CommandGuide/llvm-objdump.html>`__.
+distributed as standalone ``.hsaco`` files. Previous ROCm versions shipped with the ``roc-obj-ls``,
+``roc-obj-extract``, and ``roc-obj utilities``. These have been deprecated in favor of enhanced
+capabilities now available in standard LLVM object tools, such as ``llvm-objdump`` and
+``llvm-readobj``. For more information, see `llvm-objdump — LLVM’s object file dumper at
+<https://llvm.org/docs/CommandGuide/llvm-objdump.html>`__.
  
 The ``llvm-objdump`` utility provides multiple capabilities for analyzing GPU
 binaries. With the ``--offloading`` flag, it can list and extract information
