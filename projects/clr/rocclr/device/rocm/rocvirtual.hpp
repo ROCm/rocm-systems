@@ -61,8 +61,8 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
       }
     }
 
-    const long max_wait_ms = HIP_HANG_RECOVERY_ENABLE
-        ? static_cast<long>(HIP_MAX_SIGNAL_WAIT) * 1000L : 0;
+    const long max_wait_ms = (HIP_MAX_SIGNAL_WAIT > 0)
+        ? static_cast<long>(HIP_MAX_SIGNAL_WAIT) * 1000L : 0L;
 
     while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
                                      kTimeout4Secs, wait_state) != 0) {
@@ -74,11 +74,11 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
         return true;
       }
 
-      if (HIP_HANG_RECOVERY_ENABLE) {
+      if (max_wait_ms > 0) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - wait_start).count();
 
-        if (max_wait_ms > 0 && elapsed >= max_wait_ms) {
+        if (elapsed >= max_wait_ms) {
           Hsa::signal_silent_store_relaxed(signal, 0);
           return true;
         }
