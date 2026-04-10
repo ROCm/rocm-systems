@@ -30,8 +30,8 @@ from utils.specs import (
 from utils.utils_common import (
     build_metric_list,
     detect_rocprof,
+    get_job_rank_and_size,
     get_panel_alias,
-    get_rank,
     get_version,
     get_version_display,
     load_panel_configs,
@@ -210,19 +210,7 @@ class RocProfCompute:
             if self.__args.name is None and self.__args.output_directory == str(
                 Path.cwd() / "workloads"
             ):
-                # Remove if statement and the else code block in a future release.
-                if self.__args.path == str(Path.cwd() / "workloads"):
-                    console_error("Either --output-directory or --name is required")
-                else:
-                    console_warning(
-                        "--path is deprecated and will be removed in future releases."
-                    )
-
-                if self.__args.subpath != "gpu_model":
-                    console_warning(
-                        "--subpath is deprecated and will be "
-                        "removed in future releases."
-                    )
+                console_error("Either --output-directory or --name is required")
 
             if self.__args.name is not None and "/" in self.__args.name:
                 console_error('"/" is not permitted in profile name')
@@ -236,9 +224,10 @@ class RocProfCompute:
             )
 
             # Add MPI rank to workload path if available
-            if get_rank() is not None:
+            mpi_rank, _ = get_job_rank_and_size()
+            if mpi_rank is not None:
                 self.__args.output_directory = str(
-                    Path(self.__args.output_directory) / f"{get_rank()}"
+                    Path(self.__args.output_directory) / f"{mpi_rank}"
                 )
             # OR, Add gpu model name to workload path
             else:
@@ -253,9 +242,10 @@ class RocProfCompute:
 
         # Add MPI rank to workload path if %rank% is not present in output directory
         # and rank is available
-        if "%rank%" not in self.__args.output_directory and get_rank() is not None:
+        mpi_rank, _ = get_job_rank_and_size()
+        if "%rank%" not in self.__args.output_directory and mpi_rank is not None:
             self.__args.output_directory = str(
-                Path(self.__args.output_directory) / f"{get_rank()}"
+                Path(self.__args.output_directory) / f"{mpi_rank}"
             )
 
         # Replace parameters with actual values in workload path
@@ -267,7 +257,7 @@ class RocProfCompute:
         self.__args.output_directory = replace_env(self.__args.output_directory)
 
         # Replace %rank% with actual rank value in workload path
-        if "%rank%" in self.__args.output_directory and get_rank() is None:
+        if "%rank%" in self.__args.output_directory and mpi_rank is None:
             console_warning(
                 "Ignoring %%rank%% placeholder in output directory"
                 " since no MPI rank was detected."
@@ -484,18 +474,7 @@ class RocProfCompute:
     def run_profiler(self) -> None:
         self.print_graphic()
 
-        # Replace parameters in output directory when either:
-        # 1. --output-directory is explicitly given by user
-        # 2. --path and --output-directory are set to default workload directory.
-        # NOTE: --output-directory is given higher priority than --path
-        # as --path is deprecated and will be removed in future releases.
-        if self.__args.output_directory != str(
-            Path.cwd() / "workloads"
-        ) or self.__args.path == str(Path.cwd() / "workloads"):
-            self.replace_parameters_in_output_directory()
-            # Set path to output_directory for roofline
-            # Remove this while removing roofline from profiling mode
-            self.__args.path = self.__args.output_directory
+        self.replace_parameters_in_output_directory()
 
         self.load_soc_specs()
 
@@ -507,7 +486,7 @@ class RocProfCompute:
             console_error(str(e))
 
         # Create workload directory if it does not exist
-        p = Path(self.__args.path)
+        p = Path(self.__args.output_directory)
         if not p.exists():
             try:
                 p.mkdir(parents=True, exist_ok=False)
@@ -515,7 +494,7 @@ class RocProfCompute:
                 console_error("Directory already exists.")
 
         # enable file-based logging
-        setup_file_handler(self.__args.loglevel, self.__args.path)
+        setup_file_handler(self.__args.loglevel, self.__args.output_directory)
 
         profiler.pre_processing()
 

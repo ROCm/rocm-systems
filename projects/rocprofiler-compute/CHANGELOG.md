@@ -2,7 +2,7 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-## Unreleased
+## ROCm Compute Profiler 3.7.0 for ROCm 7.14.0
 
 ### Added
 
@@ -11,6 +11,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Changed ratio metric aggregation from `AVG(A/B)` (arithmetic mean of per-dispatch ratios) to `SUM(A)/SUM(B)` (ratio of totals) across all analysis YAML configurations and all GPU architectures. `SUM(A)/SUM(B)` is a weighted average where each dispatch contributes proportionally to its denominator magnitude (duration, access count, cycle count). Single-dispatch workloads are unaffected (mathematically identical). Multi-dispatch workloads with different kernels or varying durations will see corrected values.
 
 ### Removed
+
+* ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
 
 ### Optimized
 
@@ -61,6 +63,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 * Fixed roofline benchmark MFMA FP16/BF16/INT8 peaks for MI 350
+
+* Fixed issue where pc sampling profiling fails with multi-argument commands and live process attachment
 
 ### Upcoming changes
 
@@ -160,10 +164,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed redundant warnings for compute/memory partition not found for AMD Instinct MI300 series and later GPUs by skipping the partition checks.
 
 * Corrected the formula for metrics related to reads from L2 cache to HBM for AMD Instinct MI350 Series GPUs.
-
-### Upcoming changes
-
-* ``--path`` and ``--subpath`` options have been deprecated in favor of ``--output-directory`` and will be removed in a future release.
 
 ### Upcoming changes
 

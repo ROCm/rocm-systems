@@ -3431,6 +3431,9 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
                                       uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                       hsa_signal_t completion_signal) {
 
+#if !defined (__linux__)
+  return HSA_STATUS_ERROR;
+#else
   const size_t kPageSize = os::PageSize();
   
   // Get a CPU agent for migration target
@@ -3578,6 +3581,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
 
   OpGuard.Dismiss();
   return HSA_STATUS_SUCCESS;  
+#endif
 }
 
 hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
