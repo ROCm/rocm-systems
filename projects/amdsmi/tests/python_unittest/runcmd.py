@@ -37,6 +37,19 @@ class Util:
         # Set local encoding for output
         self.use_encoding = locale.getpreferredencoding()
         self.debug_level_index = verbose_choices.index(debug_level)
+
+        # Build the subprocess environment once and cache it. Prepends the ROCm
+        # bin directory so amd-smi is found even when invoked via sudo, which
+        # strips non-standard PATH entries. Honors ROCM_HOME/ROCM_PATH when not
+        # running under sudo; defaults to /opt/rocm otherwise (sudo strips those
+        # vars so the fallback is what actually takes effect in that case).
+        rocm_root = os.getenv("ROCM_HOME") or os.getenv("ROCM_PATH") or "/opt/rocm"
+        rocm_bin = os.path.join(rocm_root, "bin")
+        self._subprocess_env = os.environ.copy()
+        existing_path = self._subprocess_env.get("PATH", "")
+        self._subprocess_env["PATH"] = (
+            os.pathsep.join([rocm_bin, existing_path]) if existing_path else rocm_bin
+        )
         return
 
     def ConvertStr(self, data_in):
@@ -108,15 +121,6 @@ class Util:
             if msg_in:
                 std_in = subprocess.PIPE
 
-            # Ensure the ROCm bin directory is in PATH so amd-smi is found
-            # even when invoked via sudo, which strips non-standard PATH entries.
-            # Respects ROCM_HOME/ROCM_PATH env vars, falling back to /opt/rocm.
-            rocm_root = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH", "/opt/rocm"))
-            rocm_bin = os.path.join(rocm_root, "bin")
-            env = os.environ.copy()
-            existing_path = env.get("PATH", "")
-            env["PATH"] = os.pathsep.join([rocm_bin, existing_path]) if existing_path else rocm_bin
-
             proc = subprocess.Popen(
                 cmd,
                 encoding=self.use_encoding,
@@ -124,7 +128,7 @@ class Util:
                 stdin=std_in,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                env=env,
+                env=self._subprocess_env,
             )
 
             if msg_in:

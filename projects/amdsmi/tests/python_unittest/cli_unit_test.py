@@ -48,14 +48,17 @@ verbose = 1
 
 
 class TestAmdSmiCli(unittest.TestCase):
+    TMP_FILENAME = "_tmp.log"
+    TMP_FOLDER = "_tmp"
+
     @classmethod
     def setUpClass(cls):
         cls.common = common.Common(verbose)
         cls.util = runcmd.Util("WARNING")
 
         # Record starting values; running here (once per class) rather than in
-        # __init__ (once per test method) avoids running amd-smi during test
-        # discovery, which crashes when the binary is not yet on PATH.
+        # __init__ (once per test method) reduces setup overhead from O(N) to
+        # O(1) — N being the number of test methods in this class.
         cmds = [
             ("metric", "amd-smi metric --json"),
             ("static", "amd-smi static --json"),
@@ -71,15 +74,16 @@ class TestAmdSmiCli(unittest.TestCase):
             try:
                 setattr(cls, f"{name}_data", json.loads(data))
             except (json.JSONDecodeError, TypeError) as e:
-                # TODO(amdsmi_team): We need a bug reported for malformed JSON AI NIC details.
-                # amd-smi list, process, static, topology, xgmi, partition, etc. (not sure why all of these need --nic?)...
-                # See --nic for all commands listed above, only a few of these commands have output (eg. list & static).
+                # TODO(amdsmi_team): Known issue — several AI NIC and CPU commands can produce
+                # malformed JSON/CSV/error output, causing parsing & other failures.
+                # We need to log tickets on these issues.
 
                 # Log warning but continue — malformed JSON output is a CLI bug,
                 # not a test infrastructure failure; tests that depend on this
-                # data will fail individually with clear messages.
+                # data will fail individually with a KeyError pointing to the
+                # missing key, making the root cause clear.
                 cls.common.print(f'\n\tERROR: Could not parse JSON from "{cmd}": {e}')
-                setattr(cls, f"{name}_data", [])
+                setattr(cls, f"{name}_data", {})
 
         cls.gpus = ["all"]
         for entry in cls.list_data:
@@ -95,9 +99,13 @@ class TestAmdSmiCli(unittest.TestCase):
             "PID": [123],
             "NAME": ["AMD"],
             "GPU": cls.gpus,
-            "FILE": ["_tmp.log", "_tmp.log --overwrite", "_tmp.log --append"],
+            "FILE": [
+                cls.TMP_FILENAME,
+                f"{cls.TMP_FILENAME} --overwrite",
+                f"{cls.TMP_FILENAME} --append",
+            ],
             "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
-            "FOLDER": ["_tmp"],
+            "FOLDER": [cls.TMP_FOLDER],
             "FILE_LIMIT": [10],
             #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
         }
@@ -116,8 +124,8 @@ class TestAmdSmiCli(unittest.TestCase):
         self.PASS = 0
         self.FAIL = 1
         self.tab = "    "
-        self.tmp_filename = "_tmp.log"
-        self.tmp_folder = "_tmp"
+        self.tmp_filename = self.TMP_FILENAME
+        self.tmp_folder = self.TMP_FOLDER
 
         self.openBracket = "["
         self.closeBracket = "]"
@@ -153,7 +161,7 @@ class TestAmdSmiCli(unittest.TestCase):
         self.clk_levels = ["SCLK", "MCLK", "FCLK", "SOCCLK", "PCIE"]
 
         # When parsing, ignore these entries as they are abnormal
-        self.cmd_arg_exceptions = ["--voltage", "--brcm_nic", "--brcm_switch"]
+        self.cmd_arg_exceptions = ["--voltage"]
 
         # When parsing, change these args into something else or add to arg
         self.cmd_arg_changes = [
