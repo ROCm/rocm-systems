@@ -693,7 +693,7 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 
 .. note::
 
-  ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
+  ``--roof-only`` cannot be used with ``--block``, ``--set``, or ``--bench-only`` options.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on the profiling output directory
@@ -771,6 +771,43 @@ successfully.
    -rw-r--r-- 1 auser agroup   399 Mar 21 23:49 timestamps.csv
 
 To generate roofline HTML plots from this data, see :doc:`../analyze/mode`.
+
+
+Benchmark only
+--------------
+
+If you only want to run the roofline microbenchmark without profiling an application
+or collecting any performance counters, use the ``--bench-only`` option. This is useful
+for pre-generating ``roofline.csv`` benchmark data independently of a workload run.
+
+No workload command is required with ``--bench-only``.
+
+.. note::
+
+  ``--bench-only`` cannot be used with ``--block``, ``--set``, ``--roof-only``, or ``--no-roof`` options.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name my_bench --bench-only
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   INFO [roofline] Running roofline microbenchmark on device 0
+   Empirical Roofline Calculation
+   Copyright © 2026  Advanced Micro Devices, Inc. All rights reserved.
+   ...
+   INFO [roofline] Roofline data saved to workloads/my_bench/MI325X/roofline.csv
+     Run 'rocprof-compute analyze -p workloads/my_bench/MI325X' for charts
+
+To target a specific GPU device, use ``--device``:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name my_bench --bench-only --device 2
 
 .. _torch-operator-mapping:
 

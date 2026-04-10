@@ -85,7 +85,8 @@ class RocProfCompute:
         self.handle_list_args()
 
         if self.__mode == "profile":
-            self.detect_profiler()
+            if not getattr(self.__args, "bench_only", False):
+                self.detect_profiler()
         elif self.__mode == "analyze":
             self.detect_analyze()
 
@@ -181,6 +182,22 @@ class RocProfCompute:
                         f'To use "-b {block_input}", you must also specify: '
                         f"--membw-analysis --experimental"
                     )
+
+        # Validate --bench-only mutual exclusion
+        if self.__mode == "profile" and getattr(self.__args, "bench_only", False):
+            conflicts = []
+            if getattr(self.__args, "filter_blocks", None):
+                conflicts.append("--block")
+            if getattr(self.__args, "set_selected", None):
+                conflicts.append("--set")
+            if getattr(self.__args, "roof_only", False):
+                conflicts.append("--roof-only")
+            if getattr(self.__args, "no_roof", False):
+                conflicts.append("--no-roof")
+            if conflicts:
+                console_error(
+                    f"--bench-only cannot be used with {', '.join(conflicts)}."
+                )
 
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
@@ -476,6 +493,10 @@ class RocProfCompute:
 
         self.replace_parameters_in_output_directory()
 
+        if self.__args.bench_only:
+            self._run_bench_only()
+            return
+
         self.load_soc_specs()
 
         # instantiate desired profiler
@@ -515,6 +536,44 @@ class RocProfCompute:
 
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
+
+    @demarcate
+    def _run_bench_only(self) -> None:
+        """Run roofline microbenchmark only, without application profiling."""
+        from roofline.run_benchmark import load_bench
+        from utils.utils_common import validate_roofline_csv
+
+        device = self.__args.device
+        output_path = self.__args.path
+
+        p = Path(output_path)
+        if not p.exists():
+            p.mkdir(parents=True, exist_ok=True)
+
+        setup_file_handler(self.__args.loglevel, output_path)
+
+        console_log("roofline", f"Running roofline microbenchmark on device {device}")
+
+        try:
+            bench = load_bench([device])
+            result = bench.run_on_devices([device])
+            bench.dump_csv(result, f"{output_path}/roofline.csv")
+        except Exception as e:
+            console_error(f"Benchmark execution failed: {e}")
+
+        is_valid, error_msg = validate_roofline_csv(output_path)
+        if not is_valid:
+            console_error(
+                f"Invalid roofline.csv: {error_msg}",
+                exit=False,
+            )
+            return
+
+        console_log(
+            "roofline",
+            f"Roofline data saved to {output_path}/roofline.csv\n"
+            f"  Run 'rocprof-compute analyze -p {output_path}' for charts",
+        )
 
     @demarcate
     def run_analysis(self) -> None:
