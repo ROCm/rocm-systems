@@ -140,6 +140,8 @@ if(BUILD_TESTS)
     hip::host hip::device hsa-runtime64::hsa-runtime64
     Threads::Threads
     dl
+    rt
+    numa
     fmt::fmt-header-only
   )
   if(OPENMP_TESTS_ENABLED)
@@ -181,7 +183,6 @@ if(BUILD_TESTS)
     SendRecvTests.cpp
     StandaloneTests.cpp
     TeardownStressTests.cpp
-    _RecorderTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
     common/CollectiveArgs.cpp
@@ -197,6 +198,14 @@ if(BUILD_TESTS)
     latency_profiler/LatencyProfilerUnitTest.cpp
     ../src/misc/latency_profiler/CollTraceUtils.cc
     )
+
+  # _RecorderTests.cpp uses RcclMockFuncs.hpp which defines ncclDebugLog and getHostName as
+  # non-weak stubs. With a shared library these override the library symbols at runtime, but
+  # with a static library the linker sees duplicate definitions and errors out. Exclude from
+  # static builds.
+  if(BUILD_SHARED_LIBS)
+    list(APPEND TEST_SOURCE_FILES _RecorderTests.cpp)
+  endif()
 
   # Due to default hidden symbol visibility, append source file if build type is not Debug.
   # It requires explicit addition of the following source file(s)
@@ -366,16 +375,17 @@ if(BUILD_TESTS)
         set_target_properties(${test_executable} PROPERTIES LINK_FLAGS "${MPI_CXX_LINK_FLAGS}")
       endif()
     endif()
+    # For shared builds: CMake links librccl.so and its PRIVATE deps are baked in.
+    # For static builds: CMake links librccl.a and propagates all PUBLIC deps from the
+    # rccl target automatically (set via _dep_vis=PUBLIC in the root CMakeLists.txt).
+    # No manual dep listing needed in either case.
+    target_link_libraries(${test_executable} PRIVATE rccl)
     if(BUILD_SHARED_LIBS)
-      target_link_libraries(${test_executable} PRIVATE rccl)
       if(${HOST_OS_ID} STREQUAL "debian")
         set_property(TARGET ${test_executable} PROPERTY INSTALL_RPATH "${CMAKE_BINARY_DIR}")
       elseif(DEFINED HOST_OS_FAMILY AND "${HOST_OS_FAMILY}" STREQUAL "debian")
         set_property(TARGET ${test_executable} PROPERTY INSTALL_RPATH "${CMAKE_BINARY_DIR}")
       endif()
-    else()
-      add_dependencies(${test_executable} rccl)
-      target_link_libraries(${test_executable} PRIVATE dl rt numa -lrccl -L${CMAKE_BINARY_DIR} -lrocm_smi64 -L${ROCM_PATH}/lib -L${ROCM_PATH}/rocm_smi/lib)
     endif()
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
