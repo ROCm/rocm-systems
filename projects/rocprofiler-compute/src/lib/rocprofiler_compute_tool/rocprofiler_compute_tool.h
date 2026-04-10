@@ -1,3 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 #pragma once
 #include "input_parameters.h"
 #include "sdk_wrapper.h"
