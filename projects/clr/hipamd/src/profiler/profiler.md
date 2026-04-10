@@ -15,12 +15,17 @@ cp C:/profiler/install/bin/amdhip64_7.dll C:/profiler/test/amdhip64_7.dll
 
 ## Test
 ```bash
-cd C:/profiler/test && GPU_CLR_PROFILE=1 GPU_ENABLE_PAL=0 ./vectoradd.exe
+# Compile (must specify --offload-arch=gfx1100 for W7900; default is gfx906 which fails at runtime)
+cd C:/profiler/test && "C:/profiler/install/bin/hipcc.exe" vectoradd.cpp -o vectoradd.exe -std=c++17 --offload-arch=gfx1100
+
+# Run with profiler
+GPU_CLR_PROFILE=1 GPU_ENABLE_PAL=0 ./vectoradd.exe
 # Produces: C:/profiler/test/hip_clr_trace.json
 ```
 - Do NOT set AMD_LOG_LEVEL when running tests.
 - `GPU_CLR_PROFILE=1` → writes to `hip_clr_trace.json` (value treated as flag if no `/`, `\`, or `.`).
 - `GPU_CLR_PROFILE=/path/to/out.json` → writes to that path.
+- **ALWAYS pass `--offload-arch=gfx1100`** — missing this causes silent `hipMemcpy` failures and kernel launch error "device kernel image is invalid".
 
 ## Key files
 - `projects/clr/hipamd/src/hip_intercept.cpp:38` — `hipRegisterTracerCallback`
@@ -61,7 +66,7 @@ then `rocvirtual` multiplied by `ticksToTime_ = 100` (ns/QPC-tick) → 100× too
 - `projects/clr/hipamd/src/profiler/hip_clr_profiler.cpp` — core implementation
 - `projects/clr/hipamd/src/profiler/hip_clr_dispatch_wrappers.cpp` — generated; 511 *Layer wrappers
 - `projects/clr/hipamd/include/hip/amd_detail/hip_clr_profiler_ext.h` — public C API
-- `projects/clr/hipamd/generate_wrappers.py` — wrapper generator (run manually when HIP API changes)
+- `projects/clr/hipamd/src/profiler/generate_wrappers.py` — wrapper generator (run manually when HIP API changes)
 
 ### Files modified
 - `hip_context.cpp` — `HipClrProfilerInit()` at end of `hip::init()`
@@ -70,7 +75,7 @@ then `rocvirtual` multiplied by `ticksToTime_ = 100` (ns/QPC-tick) → 100× too
 
 ### Wrapper regeneration
 Only needed when `hip_api_trace.hpp` or `hip_api_trace.cpp` change (new HIP APIs).
-Not part of the cmake build — run manually from `projects/clr/hipamd/`:
+Not part of the cmake build — run manually from `projects/clr/hipamd/src/profiler/`:
 ```bash
 "C:/Users/gandryey/AppData/Local/Programs/Python/Python312/python.exe" generate_wrappers.py
 ```

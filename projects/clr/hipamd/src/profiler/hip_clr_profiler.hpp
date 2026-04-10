@@ -53,7 +53,12 @@ void HipClrProfilerEnable();
 void HipClrProfilerDisable();
 void HipClrProfilerReset();
 void HipClrProfilerWriteJson(const char* filepath);
-void HipClrProfilerGetRecords(const HipClrProfRecord** out_records, size_t* out_count);
+// out_records: pointer to first chunk (caller walks chunks of out_chunk_size)
+// out_count:      total number of valid records across all chunks
+// out_chunk_size: capacity of each chunk (last chunk may be partially filled)
+void HipClrProfilerGetRecords(const HipClrProfRecord** out_records,
+                               size_t* out_count,
+                               size_t* out_chunk_size);
 
 // Called from each *Layer wrapper — mirrors reference GetActiveRecord().
 // Returns nullptr when profiling is disabled (wrapper skips end_ stamp).

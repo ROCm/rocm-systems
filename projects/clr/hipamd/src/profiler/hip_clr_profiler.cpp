@@ -36,6 +36,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace hip { const HipDispatchTable* GetHipDispatchTable(); }
@@ -157,7 +158,9 @@ void WriteJsonTraceImpl(const char* filepath) {
 
   size_t total      = g_rec_counter.load(std::memory_order_acquire);
   size_t event_id   = 0;
-  std::unordered_map<int, uint64_t> device_queue_max;  // device_id -> max queue_id seen
+  // Track only the (device_id, gpu_tid) pairs that actually received events.
+  // Key = device_id, Value = set of gpu tids (queue_id*2+sdma) with events.
+  std::unordered_map<int, std::unordered_set<uint64_t>> device_gpu_tids;
   // Map raw hash thread ids to compact sequential ints (JS safe-integer limit)
   std::unordered_map<uint64_t, uint32_t> tid_map;
   uint32_t next_tid = 0;
@@ -229,8 +232,7 @@ void WriteJsonTraceImpl(const char* filepath) {
               << ",\"tid\":" << (rec.gpu.queue_id * 2 + sdma)
               << ",\"name\":\"dep\"}";
 
-        auto& qmax = device_queue_max[rec.gpu.device_id];
-        qmax = std::max(qmax, rec.gpu.queue_id);
+        device_gpu_tids[rec.gpu.device_id].insert(rec.gpu.queue_id * 2 + sdma);
         ++event_id;
       }
     }
@@ -245,21 +247,13 @@ void WriteJsonTraceImpl(const char* filepath) {
   // Build device_id -> gfxip name map.
   // Try device_id directly as HIP index; also try device_id-1 (some backends
   // use 1-based device ids in activity records).
-  std::unordered_map<int, std::string> dev_to_name;  // device_id -> label
   auto get_gfxip = [&](int idx) -> std::string {
     if (idx < 0 || idx >= static_cast<int>(hip::g_devices.size())) return "";
     auto* hdev = hip::g_devices[idx];
     if (!hdev || hdev->devices().empty()) return "";
-    const char* tid = hdev->devices()[0]->isa().targetId();
-    return (tid && tid[0]) ? std::string(tid) : "";
+    const char* tgt = hdev->devices()[0]->isa().targetId();
+    return (tgt && tgt[0]) ? std::string(tgt) : "";
   };
-  for (auto& kv : device_queue_max) {
-    int dev_id = kv.first;
-    std::string name = get_gfxip(dev_id);
-    if (name.empty()) name = get_gfxip(dev_id - 1);  // try 1-based offset
-    if (name.empty()) name = "GPU " + std::to_string(dev_id);
-    dev_to_name[dev_id] = name;
-  }
 
   // CPU process metadata (sort_index 0 so it appears first)
   trace << ",\n{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":1024,"
@@ -267,25 +261,35 @@ void WriteJsonTraceImpl(const char* filepath) {
   trace << ",\n{\"name\":\"process_sort_index\",\"ph\":\"M\",\"pid\":1024,"
            "\"args\":{\"sort_index\":0}}";
 
-  // Per-device GPU process metadata — use device_id as pid (already in events)
+  // Per-device GPU process metadata — only name tids that actually received events.
   int gpu_sort = 1;
-  for (auto& kv : device_queue_max) {
-    int      dev_id = kv.first;
-    uint64_t q_max  = kv.second;
-    const std::string& label = dev_to_name.count(dev_id) ? dev_to_name[dev_id]
-                                                          : ("GPU " + std::to_string(dev_id));
+  for (auto& kv : device_gpu_tids) {
+    int dev_id = kv.first;
+    const auto& active_tids = kv.second;
+
+    std::string label = get_gfxip(dev_id);
+    if (label.empty()) label = get_gfxip(dev_id - 1);  // try 1-based offset
+    if (label.empty()) label = "GPU " + std::to_string(dev_id);
 
     trace << ",\n{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":" << dev_id
           << ",\"args\":{\"name\":\"" << label << "\"}}";
     trace << ",\n{\"name\":\"process_sort_index\",\"ph\":\"M\",\"pid\":" << dev_id
           << ",\"args\":{\"sort_index\":" << gpu_sort++ << "}}";
-    for (uint64_t q = 0; q <= q_max; ++q) {
+
+    // Emit a thread_name only for tids that actually have events.
+    // Even tid = Compute (queue_id*2), odd tid = SDMA (queue_id*2+1).
+    // queue_id==0 is the default/null HIP stream on the compute engine.
+    for (uint64_t gpu_tid : active_tids) {
+      bool is_sdma = (gpu_tid & 1) != 0;
+      uint64_t q   = gpu_tid / 2;
+      std::string lane_name;
+      if (!is_sdma && q == 0)
+        lane_name = "Default Stream";
+      else
+        lane_name = std::string(is_sdma ? "SDMA " : "Compute ") + std::to_string(q);
       trace << ",\n{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":" << dev_id
-            << ",\"tid\":" << (q * 2)
-            << ",\"args\":{\"name\":\"Compute " << q << "\"}}";
-      trace << ",\n{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":" << dev_id
-            << ",\"tid\":" << (q * 2 + 1)
-            << ",\"args\":{\"name\":\"SDMA " << q << "\"}}";
+            << ",\"tid\":" << gpu_tid
+            << ",\"args\":{\"name\":\"" << lane_name << "\"}}";
     }
   }
 
@@ -413,9 +417,12 @@ void HipClrProfilerWriteJson(const char* filepath) {
   WriteJsonTraceImpl(filepath);
 }
 
-void HipClrProfilerGetRecords(const HipClrProfRecord** out_records, size_t* out_count) {
-  *out_records = g_records.empty() ? nullptr : g_records[0];
-  *out_count   = g_rec_counter.load(std::memory_order_acquire);
+void HipClrProfilerGetRecords(const HipClrProfRecord** out_records,
+                               size_t* out_count,
+                               size_t* out_chunk_size) {
+  *out_records    = g_records.empty() ? nullptr : g_records[0];
+  *out_count      = g_rec_counter.load(std::memory_order_acquire);
+  *out_chunk_size = kChunkSize;
 }
 
 // ============================================================
@@ -455,18 +462,15 @@ hipError_t hipClrProfilerGetRecords(const HipClrApiRecord** records, size_t* cou
       dst.end_ns    = static_cast<uint64_t>(src.end_.time_since_epoch().count());
       dst.has_gpu_activity = src.has_gpu ? 1 : 0;
       if (src.has_gpu) {
-        dst.gpu.op          = src.gpu.op;
-        dst.gpu.begin_ns    = src.gpu.begin_ns;
-        dst.gpu.end_ns      = src.gpu.end_ns;
-        dst.gpu.device_id   = src.gpu.device_id;
-        dst.gpu.queue_id    = src.gpu.queue_id;
-        if (src.gpu.op == OP_ID_DISPATCH) {
+        dst.gpu.op        = src.gpu.op;
+        dst.gpu.begin_ns  = src.gpu.begin_ns;
+        dst.gpu.end_ns    = src.gpu.end_ns;
+        dst.gpu.device_id = src.gpu.device_id;
+        dst.gpu.queue_id  = src.gpu.queue_id;
+        if (src.gpu.op == OP_ID_DISPATCH)
           dst.gpu.kernel_name = src.gpu.kernel_name;
-          dst.gpu.bytes       = 0;
-        } else {
-          dst.gpu.bytes       = src.gpu.bytes;
-          dst.gpu.kernel_name = nullptr;
-        }
+        else
+          dst.gpu.bytes = src.gpu.bytes;
       }
       g_export_buf.push_back(dst);
     }
