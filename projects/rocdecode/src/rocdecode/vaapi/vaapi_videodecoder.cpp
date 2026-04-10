@@ -662,7 +662,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = InitHIP(device_id, hip_dev_prop);
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(g_rocdec_logger, "Failed to initilize the HIP.");
+        CriticalLog(g_rocdec_logger, "Failed to initialize the HIP.");
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
@@ -705,7 +705,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         drm_node += std::to_string(render_node_id + offset);
         rocdec_status = InitVAAPI(va_ctx_idx, drm_node);
         if (rocdec_status != ROCDEC_SUCCESS) {
-            CriticalLog(g_rocdec_logger, "Failed to initilize the VAAPI.");
+            CriticalLog(g_rocdec_logger, "Failed to initialize the VAAPI.");
             FunctionExitLog(g_rocdec_logger);
             return rocdec_status;
         }

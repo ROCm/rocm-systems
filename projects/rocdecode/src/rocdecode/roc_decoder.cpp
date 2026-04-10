@@ -58,7 +58,7 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
     }
     rocdec_status = va_video_decoder_.InitializeDecoder();
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(g_rocdec_logger, "Failed to initilize the VAAPI Video decoder.");
+        CriticalLog(g_rocdec_logger, "Failed to initialize the VAAPI Video decoder.");
         FunctionExitLog(g_rocdec_logger);
         return rocdec_status;
     }
