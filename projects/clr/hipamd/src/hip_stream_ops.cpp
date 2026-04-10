@@ -87,6 +87,7 @@ hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void
     switch (flags) {
       case hipStreamWriteValueDefault:
         outFlags = ROCCLR_STREAM_WRITE_VALUE_DEFAULT;
+        break;
       case hipExtStreamWriteValueIncrement:
         outFlags = ROCCLR_STREAM_WRITE_VALUE_INCREMENT;
         break;
