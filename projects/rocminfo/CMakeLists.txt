@@ -181,9 +181,7 @@ endif()
 # rocm_agent_enumerator
 ###########################
 
-if(NOT WIN32)
-  configure_file(rocm_agent_enumerator rocm_agent_enumerator COPYONLY)
-endif()
+configure_file(rocm_agent_enumerator rocm_agent_enumerator COPYONLY)
 
 
 ###########################
@@ -204,11 +202,9 @@ target_compile_options(${ROCMINFO_EXE} PRIVATE ${ROCMINFO_CXX_FLAGS})
 install (
    TARGETS ${ROCMINFO_EXE}
    DESTINATION ${CMAKE_INSTALL_BINDIR} )
-if(NOT WIN32)
-  install (
-     PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocm_agent_enumerator
-     DESTINATION ${CMAKE_INSTALL_BINDIR} )
-endif()
+install (
+   PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocm_agent_enumerator
+   DESTINATION ${CMAKE_INSTALL_BINDIR} )
 
 ###########################
 # Packaging directives
