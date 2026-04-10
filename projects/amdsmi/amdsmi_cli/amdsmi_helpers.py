@@ -45,7 +45,6 @@ from functools import lru_cache
 from amdsmi_init import *
 from BDF import BDF
 
-# TODO(amdsmi_team): add to changelog
 import amdsmi_cli_exceptions
 
 
@@ -1363,7 +1362,6 @@ class AMDSMIHelpers:
         clock_types_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiClkType))
         return clock_types_str, clock_types_int
 
-    # TODO(amdsmi_team): add to changelog
     def get_power_profiles(self):
         return list(self.get_power_profile_name_mapping().keys())
 
@@ -3110,7 +3108,7 @@ class AMDSMIHelpers:
             ):
                 # setting power cap to 0 will return the current power cap so the technical minimum value is 1
                 min_cap_display = 1 if min_power_cap == 0 else min_power_cap
-                # TODO(amdsmi_team): add to changelog
+
                 # Raise so the caller exits with a non-zero return code
                 raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                     sys.argv[1] if len(sys.argv) > 1 else "unknown",

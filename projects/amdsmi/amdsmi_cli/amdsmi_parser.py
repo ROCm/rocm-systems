@@ -3054,7 +3054,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument(
             "-q", "--process", action="store_true", required=False, help=process_help
         )
-        # TODO(amdsmi_team): add to changelog
+
         if self.helpers.is_brcm_nic_initialized():
             monitor_parser.add_argument(
                 "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help

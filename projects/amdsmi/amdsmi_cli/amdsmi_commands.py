@@ -10256,7 +10256,6 @@ class AMDSMICommands:
             args.pcie = pcie
         if process:
             args.process = process
-        # TODO(amdsmi_team): add to changelog
         if self.helpers.is_brcm_nic_initialized() and (
             brcm_nic or getattr(args, "brcm_nic", False)
         ):
@@ -10271,7 +10270,6 @@ class AMDSMICommands:
                 nic_temperature=args.temperature,
             )
             return
-        # TODO(amdsmi_team): add to changelog
         if self.helpers.is_brcm_switch_initialized() and (
             brcm_switch or getattr(args, "brcm_switch", False)
         ):

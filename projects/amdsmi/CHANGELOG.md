@@ -111,6 +111,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `cu_occupancy` displaying `0%` instead of `N/A` when file is unavailable**.  
   - Process `cu_occupancy` is now initialized to `INVALID` instead of zero, so `amd-smi process` displays `N/A` rather than a misleading `0%` when the sysfs file is not accessible.
 
+- **Fixed CLI set commands silently succeeding on invalid input values**.  
+  - `amd-smi set --profile <INVALID>` now returns a non-zero exit code and lists available profiles in the error message; invalid profile names are rejected at parse time.
+  - `amd-smi set --clk-level <CLK_TYPE>` (missing performance level indices) now returns a non-zero exit code with a usage hint instead of silently succeeding.
+  - `amd-smi set --power-cap <OUT_OF_RANGE>` now returns a non-zero exit code.
+  - `amd-smi set --fan <INVALID>%` no longer prompts the out-of-spec warning before validating the percentage range; invalid values are rejected immediately.
+
+- **Fixed `amd-smi monitor --brcm_nic` and `--brcm_switch` flags being registered on non-BRCM systems**.  
+  - These flags are now only registered when BRCM hardware is present, preventing spurious failures on AMD GPU-only systems.
+
 ### Changed
 
 - **Package install no longer modifies the system-wide logrotate timer or cron schedule**.
