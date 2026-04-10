@@ -51,6 +51,11 @@ struct WaitCounters {
   uint8_t dscnt = 0; ///< DS (LDS/GDS) count (GFX11+).
   uint8_t kmcnt = 0; ///< Scalar/constant memory count (GFX11+).
 
+  /// @brief Check whether all counters are zero (no outstanding memory ops).
+  bool empty() const {
+    return vmcnt == 0 && lgkmcnt == 0 && expcnt == 0 && vscnt == 0 && dscnt == 0 && kmcnt == 0;
+  }
+
   /// Hardware saturation limits for each counter type.
   static constexpr uint8_t VMCNT_MAX = 63;
   static constexpr uint8_t LGKMCNT_MAX = 63;

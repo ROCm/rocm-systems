@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "util/debug_print.h"
 
 #include <cassert>
 
@@ -46,6 +47,20 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
 
 void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
                                 bool non_temporal) {
+  // Trace: catch writes to tensor address range (fill kernel debug)
+  if (util::trace::enabled() && addr >= 0x4d00c00000ULL && addr < 0x4d00c00100ULL) {
+    uint32_t val = 0;
+    if (size >= 4)
+      std::memcpy(&val, src, 4);
+    else if (size >= 2)
+      std::memcpy(&val, src, size);
+    else
+      val = src[0];
+    static thread_local uint32_t tw = 0;
+    if (++tw <= 20)
+      util::trace::print("L1_WRITE @0x", std::hex, addr, " size=", std::dec, size, " val=0x",
+                         std::hex, val, std::dec, " mtype=", static_cast<int>(mtype));
+  }
   if (mtype == Mtype::UC || non_temporal) {
     l2_->write(addr, src, size, mtype);
     return;
@@ -89,6 +104,11 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
 void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                           uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal) {
   uint32_t stride = num_elems * elem_size;
+  uint32_t active_lanes = __builtin_popcountll(lane_mask);
+  ++store_count_;
+  if (active_lanes > 0)
+    ++store_active_count_;
+  store_l2_writes_ += active_lanes * num_elems;
   // Iterate only over lanes that are active according to lane_mask.
   uint64_t remaining = lane_mask;
   while (remaining) {
