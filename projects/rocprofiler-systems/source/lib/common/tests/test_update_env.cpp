@@ -75,19 +75,19 @@ TEST_F(UpdateEnvTest, ReplaceMode_ExistingVariable)
 
 TEST_F(UpdateEnvTest, ReplaceMode_RemovesDuplicateEntries)
 {
+    // Layout: [ROCPROFSYS_TRACE=OFF, OTHER_VAR=keep, ROCPROFSYS_TRACE=OFF]
+    // After update: first occurrence is updated in-place, second is erased.
     m_env_vars.push_back(strdup("ROCPROFSYS_TRACE=OFF"));
     m_env_vars.push_back(strdup("OTHER_VAR=keep"));
     m_env_vars.push_back(strdup("ROCPROFSYS_TRACE=OFF"));
-    m_original_envs.insert("ROCPROFSYS_TRACE=OFF");
-    m_original_envs.insert("OTHER_VAR=keep");
 
     update_env(m_env_vars, "ROCPROFSYS_TRACE", false, update_mode::REPLACE, ":",
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 2);
-    EXPECT_STREQ(find_env_var(m_env_vars, "ROCPROFSYS_TRACE").c_str(),
-                 "ROCPROFSYS_TRACE=false");
-    EXPECT_STREQ(find_env_var(m_env_vars, "OTHER_VAR").c_str(), "OTHER_VAR=keep");
+    // First entry should be the updated ROCPROFSYS_TRACE, OTHER_VAR should be preserved.
+    EXPECT_STREQ(m_env_vars[0], "ROCPROFSYS_TRACE=false");
+    EXPECT_STREQ(m_env_vars[1], "OTHER_VAR=keep");
 }
 
 TEST_F(UpdateEnvTest, AppendMode_NewVariable)
@@ -167,6 +167,17 @@ TEST_F(UpdateEnvTest, BooleanValue_False)
 
     ASSERT_EQ(m_env_vars.size(), 1);
     EXPECT_STREQ(m_env_vars[0], "BOOL_VAR=false");
+}
+
+TEST_F(UpdateEnvTest, GetEnv_BooleanValue_MultiDigitNumeric)
+{
+    // Regression test: the old get_env_impl(bool) accepted any all-digit string
+    // via stoi() — "2" → true. parse_bool() must preserve this for backwards
+    // compatibility with config files that use ROCPROFSYS_*=2.
+    setenv("ROCPROFSYS_TEST_BOOL_NUMERIC", "2", 1);
+    const bool result = get_env("ROCPROFSYS_TEST_BOOL_NUMERIC", false);
+    unsetenv("ROCPROFSYS_TEST_BOOL_NUMERIC");
+    EXPECT_TRUE(result) << "Non-zero numeric string should be treated as true";
 }
 
 TEST_F(UpdateEnvTest, NumericValue)
@@ -253,11 +264,15 @@ TEST_F(UpdateEnvTest, RealWorld_Timing_DoubleValues)
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 2);
-    std::string delay_var = find_env_var(m_env_vars, "ROCPROFSYS_TRACE_DELAY");
-    std::string freq_var  = find_env_var(m_env_vars, "ROCPROFSYS_SAMPLING_FREQ");
+    const std::string delay_var = find_env_var(m_env_vars, "ROCPROFSYS_TRACE_DELAY");
+    const std::string freq_var  = find_env_var(m_env_vars, "ROCPROFSYS_SAMPLING_FREQ");
 
-    EXPECT_TRUE(delay_var.find("ROCPROFSYS_TRACE_DELAY=") == 0);
-    EXPECT_TRUE(freq_var.find("ROCPROFSYS_SAMPLING_FREQ=") == 0);
+    ASSERT_FALSE(delay_var.empty()) << "ROCPROFSYS_TRACE_DELAY not found";
+    ASSERT_FALSE(freq_var.empty()) << "ROCPROFSYS_SAMPLING_FREQ not found";
+    EXPECT_NE(delay_var.find("1.5"), std::string::npos)
+        << "Expected \"1.5\" in: " << delay_var;
+    EXPECT_NE(freq_var.find("100"), std::string::npos)
+        << "Expected \"100\" in: " << freq_var;
 }
 
 TEST_F(UpdateEnvTest, StringTypes_StdString)
