@@ -48,6 +48,13 @@
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <linux/mman.h>
+#else
+#include <setupapi.h>
+#include <cfgmgr32.h>
+#include <devpkey.h>
+#include <devguid.h>
+#pragma comment(lib, "setupapi.lib")
+#pragma comment(lib, "cfgmgr32.lib")
 #endif
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -60,6 +67,58 @@
 
 namespace wsl {
 namespace thunk {
+
+#if !defined(__linux__)
+// This property reflects whether the platform truly supports PCIe atomic operations,
+// not just hardware capability.
+static const DEVPROPKEY k_AtomicsSupported = {
+  {0x3ab22e31, 0x8264, 0x4b4e, {0x9a, 0xf5, 0xa8, 0xd2, 0xd8, 0xe3, 0x3e, 0x62}},
+  35
+};
+
+static bool QueryPciAtomicsSupported(uint32_t pci_device_id) {
+  HDEVINFO device = SetupDiGetClassDevsW(
+      &GUID_DEVCLASS_DISPLAY, nullptr, nullptr, DIGCF_PRESENT);
+  if (device == INVALID_HANDLE_VALUE)
+    return true;
+
+  wchar_t pattern[32];
+  swprintf_s(pattern, L"DEV_%04X", pci_device_id);
+
+  bool result = true;
+  SP_DEVINFO_DATA info;
+  info.cbSize = sizeof(info);
+
+  for (DWORD i = 0; SetupDiEnumDeviceInfo(device, i, &info); i++) {
+    wchar_t hwid[512] = {};
+    if (!SetupDiGetDeviceRegistryPropertyW(
+            device, &info, SPDRP_HARDWAREID, nullptr,
+            reinterpret_cast<BYTE*>(hwid), sizeof(hwid), nullptr)) {
+        continue;
+    }
+
+    if (!wcsstr(hwid, L"VEN_1002") || !wcsstr(hwid, pattern)) {
+      continue;
+    }
+
+    DEVPROP_BOOLEAN value = DEVPROP_FALSE;
+    DEVPROPTYPE type = 0;
+    ULONG size = sizeof(value);
+    CONFIGRET status = CM_Get_DevNode_PropertyW(
+        info.DevInst, &k_AtomicsSupported, &type,
+        reinterpret_cast<BYTE*>(&value), &size, 0);
+
+    if (status == CR_SUCCESS && type == DEVPROP_TYPE_BOOLEAN) {
+      result = (value != DEVPROP_FALSE);
+    }
+
+    break;
+  }
+
+  SetupDiDestroyDeviceInfoList(device);
+  return result;
+}
+#endif
 
 const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
 
@@ -635,7 +694,23 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 }
 
 NTSTATUS WDDMDevice::ParseDeviceInfo() {
-  return Wkmi::ParseAdapterInfo(adapter_, &device_info_);
+  NTSTATUS ret = Wkmi::ParseAdapterInfo(adapter_, &device_info_);
+  if (ret != STATUS_SUCCESS)
+    return ret;
+
+#if !defined(__linux__)
+  if (device_info_.platform_atomic_support) {
+    // WKMI reports hardware atomic capability, but we need to check against the
+    // Windows PCI bus driver's property.
+    if (!QueryPciAtomicsSupported(device_info_.device_id)) {
+      pr_info("Platform has not enabled PCIe atomics support for device 0x%04x; "
+              "setting platform_atomic_support to false\n", device_info_.device_id);
+      device_info_.platform_atomic_support = false;
+    }
+  }
+#endif
+
+  return ret;
 }
 
 void WDDMDevice::DestroyDeviceInfo() {
